@@ -14411,6 +14411,16 @@ def _rec_run(where, *args):
     return done.stdout.strip()
 
 
+def _rec_run_at(when, where, *args):
+    """_rec_run with the author and committer dates fixed at `when` (unix seconds)."""
+    env = dict(os.environ, GIT_AUTHOR_DATE="@%d +0000" % when, GIT_COMMITTER_DATE="@%d +0000" % when)
+    done = subprocess.run([VCS, *IDENT, *args], cwd=where, env=env, capture_output=True, text=True)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the records-page fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
 def _rec_need(ok, what):
     if not ok:
         sys.exit("fixture setup failed in the records-page fixtures: " + what)
@@ -14520,18 +14530,35 @@ REC_ANC_LANE = os.path.join(RECMORE, "ancestor-lane")
 # off origin/main's history. Each lane is cut from it, the base moves on, and the lane merges it again.
 REC_STACK = os.path.join(RECMORE, "stacked")
 REC_STACK_LANES = {name: os.path.join(RECMORE, "stacked-" + name) for name in ("merge", "rebuilt", "quit")}
+# A criss-cross stacked base: the base is cut from main at R, merges origin/main at M1 and moves on to S2. Each lane is
+# cut from the base's first commit S1 and merges origin/main at M2, a later main commit. The lane's merge with the base
+# then has two best merge bases, S1 (off origin/main) and M1 (on it). Commits carry fixed dates, REC_T0 plus an offset,
+# so the order of the bases does not depend on the clock.
+REC_T0 = 1700000000
+REC_MAIN_LATER = "# Records index\nrecords page on main, after the stacked base merged it\n"
+REC_CRISS_HAND = "# Records index\nrecords page written by hand on the criss-cross lane\n"
+REC_CRISS = os.path.join(RECMORE, "criss")
+REC_CRISS_LANES = {name: os.path.join(RECMORE, "criss-" + name) for name in ("merge", "hand")}
+# A lane cut from main that merges an unrelated unmerged branch B. B is cut from a commit X1 that main has merged, and
+# B merged origin/main at an older commit A1, so the lane's two best merge bases are A1 and X1, both on origin/main.
+REC_UNREL_PAGE = "# Records index\nrecords page on an unrelated unmerged branch\n"
+REC_UNREL = os.path.join(RECMORE, "unrelated")
+REC_UNREL_LANE = os.path.join(RECMORE, "unrelated-lane")
 
 
 def _build_records_more():
     run, need, page = _rec_run, _rec_need, _rec_page
 
-    def advance(where, files, origin_head, start="HEAD"):
+    def advance(where, files, origin_head, start="HEAD", when=None):
         # origin/main moves on after the lane's cut; local main stays at the cut
         run(where, "checkout", "-q", "-b", "advance", start)
         for rel, text in files.items():
             write(os.path.join(where, rel), text)
         run(where, "add", "-A")
-        run(where, "commit", "-q", "-m", "main moves the page")
+        if when is None:
+            run(where, "commit", "-q", "-m", "main moves the page")
+        else:
+            _rec_run_at(when, where, "commit", "-q", "-m", "main moves the page")
         run(where, "update-ref", "refs/remotes/origin/main", "advance")
         run(where, "symbolic-ref", "refs/remotes/origin/HEAD", origin_head)
         run(where, "checkout", "-q", "main")
@@ -14731,10 +14758,100 @@ def _build_records_more():
     need(run(REC_STACK_LANES["quit"], "show", ":docs/records.md") == REC_STACK_MOVED.strip(),
          "the stacked fixture: the quit lane's staged page is not the base's moved page")
 
+    # The criss-cross stacked base. Plain `git merge-base` must print M1 here, or the criss-cross case proves nothing,
+    # so the fixture stops when it does not.
+    make_repo(REC_CRISS, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    advance(REC_CRISS, {"docs/records.md": REC_V1}, "refs/remotes/origin/main", when=REC_T0 + 2000)   # origin/main: M1
+    m1 = run(REC_CRISS, "rev-parse", "origin/main")
+    run(REC_CRISS, "checkout", "-q", "-b", "criss-base", "main")                                       # cut from R
+    write(page(REC_CRISS), REC_STACK_CUT)
+    run(REC_CRISS, "add", "-A")
+    _rec_run_at(REC_T0 + 1000, REC_CRISS, "commit", "-q", "-m", "stacked base page")                    # S1
+    s1 = run(REC_CRISS, "rev-parse", "criss-base")
+    for name, lane in REC_CRISS_LANES.items():
+        run(REC_CRISS, "worktree", "add", "-q", "-b", "lane-criss-" + name, lane, "criss-base")
+        write(os.path.join(lane, "src", "app.py"), "x = 2\n")
+        run(lane, "add", "-A")
+        _rec_run_at(REC_T0 + 1100, lane, "commit", "-q", "-m", "lane change, " + name)
+    run(REC_CRISS, "checkout", "-q", "criss-base")
+    run_vcs(REC_CRISS, *IDENT, "merge", "--no-commit", "--no-ff", m1)                                  # the base merges M1
+    _require_conflict(REC_CRISS, "docs/records.md")
+    write(page(REC_CRISS), REC_STACK_MOVED)
+    run(REC_CRISS, "add", "docs/records.md")
+    _rec_run_at(REC_T0 + 2100, REC_CRISS, "commit", "-q", "--no-edit")                                # S2
+    s2 = run(REC_CRISS, "rev-parse", "criss-base")
+    run(REC_CRISS, "checkout", "-q", "main")
+    advance(REC_CRISS, {"docs/records.md": REC_MAIN_LATER}, "refs/remotes/origin/main",
+            start="refs/remotes/origin/main", when=REC_T0 + 2200)                                      # origin/main: M2
+    m2 = run(REC_CRISS, "rev-parse", "origin/main")
+    for name, text in (("merge", REC_STACK_MOVED), ("hand", REC_CRISS_HAND)):
+        lane = REC_CRISS_LANES[name]
+        _rec_run_at(REC_T0 + 2300, lane, "merge", "--no-edit", "-X", "ours", m2)                     # keeps its own page
+        run_vcs(lane, *IDENT, "merge", "--no-commit", "--no-ff", s2)                                # then the base's tip
+        need(run(lane, "rev-parse", "--verify", "-q", "MERGE_HEAD") == s2,
+             "the criss-cross fixture: MERGE_HEAD is not the base's tip in the lane %r" % name)
+        write(page(lane), text)
+        run(lane, "add", "docs/records.md")
+    lane = REC_CRISS_LANES["merge"]
+    need(set(run(lane, "merge-base", "--all", "HEAD", "MERGE_HEAD").split()) == {m1, s1},
+         "the criss-cross fixture: the lane's merge bases are not M1 and S1 (merge-base --all)")
+    need(run(lane, "merge-base", "HEAD", "MERGE_HEAD") == m1,
+         "the criss-cross fixture: plain merge-base does not print the main commit M1")
+    need(run_vcs(REC_CRISS, "merge-base", "--is-ancestor", m1, "origin/main").returncode == 0
+         and run_vcs(REC_CRISS, "merge-base", "--is-ancestor", s1, "origin/main").returncode == 1,
+         "the criss-cross fixture: M1 is not on origin/main, or S1 is")
+    need(run(lane, "show", ":docs/records.md") == REC_STACK_MOVED.strip()
+         and run(lane, "show", "HEAD:docs/records.md") == REC_STACK_CUT.strip(),
+         "the criss-cross fixture: the merge lane's staged page is not the base's moved page")
+    need(run(REC_CRISS_LANES["hand"], "show", ":docs/records.md") == REC_CRISS_HAND.strip(),
+         "the criss-cross fixture: the hand lane's staged page is not the hand-written page")
+
+    # A lane cut from main merges an unrelated unmerged branch B. X1 is a branch commit that main has merged; B is cut
+    # from X1 and merges origin/main at A1. The lane merges origin/main at M, the merge commit that holds X1.
+    make_repo(REC_UNREL, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(REC_UNREL, "checkout", "-q", "-b", "feat-x")
+    write(os.path.join(REC_UNREL, "src", "x.py"), "y = 1\n")
+    run(REC_UNREL, "add", "-A")
+    _rec_run_at(REC_T0 + 1000, REC_UNREL, "commit", "-q", "-m", "feature x")                          # X1
+    x1 = run(REC_UNREL, "rev-parse", "HEAD")
+    run(REC_UNREL, "checkout", "-q", "main")
+    write(page(REC_UNREL), REC_V1)
+    run(REC_UNREL, "add", "-A")
+    _rec_run_at(REC_T0 + 1100, REC_UNREL, "commit", "-q", "-m", "main moves the page")                # A1
+    a1 = run(REC_UNREL, "rev-parse", "HEAD")
+    run(REC_UNREL, "update-ref", "refs/remotes/origin/main", a1)
+    run(REC_UNREL, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run(REC_UNREL, "checkout", "-q", "-b", "unrelated", x1)
+    write(page(REC_UNREL), REC_UNREL_PAGE)
+    run(REC_UNREL, "add", "-A")
+    _rec_run_at(REC_T0 + 1200, REC_UNREL, "commit", "-q", "-m", "unrelated page")                     # B1
+    _rec_run_at(REC_T0 + 1300, REC_UNREL, "merge", "--no-edit", "-X", "ours", a1)                     # B2: origin/main at A1
+    b2 = run(REC_UNREL, "rev-parse", "HEAD")
+    run(REC_UNREL, "checkout", "-q", "main")
+    _rec_run_at(REC_T0 + 1400, REC_UNREL, "merge", "--no-edit", "--no-ff", "feat-x")                  # main takes X1: M
+    run(REC_UNREL, "update-ref", "refs/remotes/origin/main", "main")
+    run(REC_UNREL, "worktree", "add", "-q", "-b", "lane-unrelated", REC_UNREL_LANE, a1)               # cut from main at A1
+    write(os.path.join(REC_UNREL_LANE, "src", "app.py"), "x = 2\n")
+    run(REC_UNREL_LANE, "add", "-A")
+    _rec_run_at(REC_T0 + 1500, REC_UNREL_LANE, "commit", "-q", "-m", "lane change")
+    _rec_run_at(REC_T0 + 1600, REC_UNREL_LANE, "merge", "--no-edit", "origin/main")                    # origin/main at M
+    run_vcs(REC_UNREL_LANE, *IDENT, "merge", "--no-commit", "--no-ff", b2)
+    need(run(REC_UNREL_LANE, "rev-parse", "--verify", "-q", "MERGE_HEAD") == b2,
+         "the unrelated fixture: MERGE_HEAD is not the unrelated branch's tip")
+    write(page(REC_UNREL_LANE), REC_UNREL_PAGE)
+    run(REC_UNREL_LANE, "add", "docs/records.md")
+    bases = set(run(REC_UNREL_LANE, "merge-base", "--all", "HEAD", "MERGE_HEAD").split())
+    need(bases == {a1, x1}, "the unrelated fixture: the lane's merge bases are not A1 and X1 (merge-base --all)")
+    need(all(run_vcs(REC_UNREL, "merge-base", "--is-ancestor", base, "origin/main").returncode == 0 for base in bases),
+         "the unrelated fixture: a merge base is not on origin/main")
+    need(run(REC_UNREL_LANE, "show", ":docs/records.md") == REC_UNREL_PAGE.strip(),
+         "the unrelated fixture: the lane's staged page is not the unrelated branch's page")
+
 
 lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
               REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values(),
-              REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values()], _build_records_more)
+              REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values(),
+              REC_CRISS, *REC_CRISS_LANES.values(), REC_UNREL, REC_UNREL_LANE], _build_records_more)
 
 
 def records_refuse(name, command, lane, **kw):
@@ -14986,6 +15103,18 @@ records_refuse("a lane's merge of its unmerged stacked base, with a page rebuilt
                VCS + " commit -m x", REC_STACK_LANES["rebuilt"])
 records_refuse("a lane's commit of the stacked base's page after merge --quit, no merge in progress",
                VCS + " commit -m x", REC_STACK_LANES["quit"])
+
+# A criss-cross stacked base: the lane and its base each merged origin/main at a different commit, so the lane's merge
+# has two best merge bases, S1 (off origin/main) and M1 (on it). Plain merge-base prints M1, which is on origin/main, so
+# the check must read every best base, not that one. The base's own page passes. A page written by hand is refused.
+records_allow("a lane's merge of a criss-cross stacked base, with the base's page staged", VCS + " commit -m x",
+              REC_CRISS_LANES["merge"])
+records_refuse("a lane's merge of a criss-cross stacked base, with a page written by hand", VCS + " commit -m x",
+               REC_CRISS_LANES["hand"])
+# A lane cut from main that merges an unrelated unmerged branch. Both best merge bases are on origin/main, so no base is
+# off main and the branch's page is refused.
+records_refuse("a lane's merge of an unrelated unmerged branch, whose merge bases are both on origin/main",
+               VCS + " commit -m x", REC_UNREL_LANE)
 
 # =========================================================================== 5d. conflict markers
 #
