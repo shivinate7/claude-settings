@@ -1635,21 +1635,24 @@ def success_route_flags(hook, after):
 ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
 MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
 MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
+def _forms_re(forms):
+    return r"\b(?:%s)\b" % "|".join(_clause.form_pattern(form) for form in forms)
+
+
+# The capability words both readers share: the three _clause.CANT_FORMS (the start of _clause.CANNOT_FORMS), refused,
+# denied, forbidden, no access, not allowed or permitted, unavailable, the 403 token, and blocked or not available.
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
-# The hand-off cite reads the three _clause.CANT_FORMS, the start of the cannot-claim phrases (_clause.CANNOT_FORMS), and
-# the two past forms of _clause.COULD_NOT_FORMS, as well as the words refused, rejected, denied and the status 401 or 403.
-def _capability_re(forms):
-    return re.compile(
-        r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\breject(?:s|ed|ing)?\b|\bforbidden\b|\bno access\b"
-        % "|".join(_clause.form_pattern(form) for form in forms)
-        + r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b40[13]\b"
-        r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
-
-
-CAPABILITY_RE = _capability_re(_clause.CANT_FORMS + _clause.COULD_NOT_FORMS)
-# cannot_lines skips a Why yours line the hand-off guard holds. The could-not forms are read by the cannot-claim check on
-# main (the hand-off cite did not hold them), so the skip reads the set without them.
-CAPABILITY_SKIP_RE = _capability_re(_clause.CANT_FORMS)
+_CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS) + (
+    r"|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b"
+    r"|\bunavailable\b|\b403\b|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)")
+# The words only the hand-off cite reads: the two _clause.COULD_NOT_FORMS, the reject forms, and the 401 token.
+_CAPABILITY_CITE_ONLY = _forms_re(_clause.COULD_NOT_FORMS) + r"|\breject(?:s|ed|ing)?\b|\b401\b"
+# The hand-off cite reads the five forms (CANT_FORMS and COULD_NOT_FORMS), the reject forms, and the 401 or 403 token.
+CAPABILITY_RE = re.compile(_CAPABILITY_CORE + "|" + _CAPABILITY_CITE_ONLY, re.I)
+# cannot_lines leaves a Why yours line to the hand-off guard when it reads one of the core words. A line whose only
+# capability word is a could-not form, a reject form or 401 stays in the cannot-claim check, which asks for the check that
+# failed.
+CAPABILITY_SKIP_RE = re.compile(_CAPABILITY_CORE, re.I)
 CHOICE_RE = re.compile(
     r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"
     r"|\bthe safety rules keep\b", re.I)

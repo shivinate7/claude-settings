@@ -40,7 +40,8 @@ VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", 
 # The generated tail holds the permission forms: "do not have the permission to", with or without "the", does for do, and
 # the nouns of _PERMISSION_NOUNS.
 _PERMISSION_NOUNS = ("permission", "authorization", "authorisation", "authority", "ability")
-# The three forms the hand-off cite reads as a capability (report_guard.CAPABILITY_RE). CANNOT_FORMS starts with them.
+# The three present forms the hand-off cite reads as a capability (report_guard.CAPABILITY_RE reads CANT_FORMS and
+# COULD_NOT_FORMS). CANNOT_FORMS starts with them.
 CANT_FORMS = ("can't", "cannot", "unable to")
 # The two past forms the hand-off cite also reads as a capability. They sit in CANNOT_FORMS after "can not", and a form
 # added to CANT_FORMS would widen CANNOT_FORMS, so the cite takes them from this list.
