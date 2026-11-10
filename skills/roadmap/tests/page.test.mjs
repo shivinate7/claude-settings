@@ -114,7 +114,28 @@ test("a live file with no threads list shows its open pull request, and the thre
   assert.match(text, /Step a pull/, "the live panel does not show the title of open pull request #7: " + text);
   assert.match(text, /1 open pull request/, "the live panel does not count the open pull request: " + text);
   assert.doesNotMatch(text, /No thread is open/, "the live panel reads no threads, a made-up zero: " + text);
-  assert.match(text, /unknown/, "the live panel does not read the thread count as unknown: " + text);
+  assert.match(text, /Thread count: unknown \(the live file has no threads list\)/, "the live panel does not read the thread count as unknown, with the build's reason: " + text);
+});
+
+// The live panel is folded at first load, so its summary is what a reader sees: the thread count must read unknown there too.
+const summaryText = async (page) => (await page.locator("#live summary").textContent()).replace(/\s+/g, " ");
+test("a live file with no threads list: the folded summary itself reads the thread count unknown", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  const live = { readAt: new Date().toISOString(), pulls: [{ number: 7, title: "Step a pull", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  assert.equal(await page.locator("#live").getAttribute("open"), null, "the live panel is open at first load, so this case does not test the folded summary");
+  const summary = await summaryText(page);
+  assert.match(summary, /1 open pull request/, "the folded summary does not show the open pull request count, so it is not the live summary: " + summary);
+  assert.match(summary, /thread[^]*unknown|unknown[^]*thread/i, "the folded summary carries no unknown thread token: " + summary);
+});
+
+test("a live file with an empty threads list: the folded summary shows no unknown thread token", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a pull", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  const summary = await summaryText(page);
+  assert.match(summary, /1 open pull request/, "the folded summary does not show the open pull request count, so it is not the live summary: " + summary);
+  assert.doesNotMatch(summary, /unknown/i, "an empty threads list reads unknown in the folded summary: " + summary);
 });
 
 test("with no threads list, a doing step with an open pull request reads In progress, and one with none reads Stalled", async (t) => {
