@@ -13065,6 +13065,30 @@ for _cmd in (_PIN_TYPE_NOT_D, _PIN_TYPE_D_LAST, _PIN_TYPE_D_OR_F_GREP_R, _PIN_TY
     sh("env: find -type d pin, the top folder holds the env file, refused: " + _cmd, _cmd, "deny", "env-file",
        cwd=ENVWALK_HELD)
 
+# A -type d term in a find hands grep the folders it prints, and grep -r reads every file below each one. The rows
+# below print one folder, or start below the top, so the env file at the top is not handed to grep. Each ALLOW row is
+# refused today, so it is red on f534ea8bb. Each control names a folder that holds an env file, and stays refused.
+_TYPE_D_NAME_SRC = "find . -type d -name src -exec grep -r K {} +"
+_TYPE_D_NAME_DOTENV = r"find . -type d -name '.env*' -exec grep -r K {} +"
+_TYPE_D_NAME_BIG = "find . -type d -name big -exec grep -r K {} +"
+sh("env: find -type d -name src, the top folder holds the env file and src is clean, allowed: " + _TYPE_D_NAME_SRC,
+   _TYPE_D_NAME_SRC, "allow", cwd=ENVWALK_HELD)
+sh("env: find -type d -name '.env*' control, the name is an env name, refused: " + _TYPE_D_NAME_DOTENV,
+   _TYPE_D_NAME_DOTENV, "deny", "env-file", cwd=ENVWALK_HELD)
+sh("env: find -type d -name big control, big holds the env file, refused: " + _TYPE_D_NAME_BIG, _TYPE_D_NAME_BIG,
+   "deny", "env-file", cwd=ENVBIG_ROOT)
+_TYPE_D_MINDEPTH = "find . -mindepth 1 -type d -exec grep -r K {} +"
+sh("env: find -mindepth 1 -type d, the top folder holds the env file and every subfolder is clean, allowed: "
+   + _TYPE_D_MINDEPTH, _TYPE_D_MINDEPTH, "allow", cwd=ENVWALK_HELD)
+sh("env: find -mindepth 1 -type d control, big holds the env file below the top, refused: " + _TYPE_D_MINDEPTH,
+   _TYPE_D_MINDEPTH, "deny", "env-file", cwd=ENVBIG_ROOT)
+_TYPE_D_START_HELD = "find ../envwalk-held -type d | xargs grep -r K"
+_TYPE_D_START_CLEAN = "find ../envwalk-clean -type d | xargs grep -r K"
+sh("env: find -type d starts in the held folder one level up, refused: " + _TYPE_D_START_HELD, _TYPE_D_START_HELD,
+   "deny", "env-file", cwd=ENVWALK_CLEAN)
+sh("env: find -type d control, the start folder is clean, allowed: " + _TYPE_D_START_CLEAN, _TYPE_D_START_CLEAN,
+   "allow", cwd=ENVWALK_CLEAN)
+
 # A relative cd and an env -C reach the env file's folder through two steps the guard follows: cd src moves into
 # clean/src, and env -C ../../held reaches held, which holds the env file. ENVCD_ROOT is built with ENVPROJ_ROOT above.
 _CD_REL_ENV_CHDIR = "cd src && env -C ../../held grep -r K"
