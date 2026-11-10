@@ -4004,7 +4004,7 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
                          "a merged pull into main with an unreadable head did not land its lane: %r" % (entries,))
 
-    def test_a_pull_merged_into_a_batch_branch_lands_its_lane_when_its_head_is_in_main(self):
+    def test_a_pull_merged_into_an_integration_branch_lands_its_lane_when_its_head_is_in_main(self):
         # The integration branch's merge brought the lane's own commit into main, so the head is an ancestor of main.
         # session_b is the listed control.
         self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
@@ -4012,7 +4012,7 @@ class IdleLanes(UpkeepFixture):
                      closed_pulls=[self.closed(82, "lane/c1", self.main_sha(), base="batch-64m", merged=True)])
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (2, ["session_a", "session_b"]),
-                         "a pull merged into a batch branch with its head in main did not land its lane: %r" % (entries,))
+                         "a pull merged into an integration branch with its head in main did not land its lane: %r" % (entries,))
 
     def test_a_closed_unmerged_pull_whose_head_is_in_main_lands_its_lane(self):
         # The head is already in main through another route, so the closed pull is landed by its head alone. session_b is the control.
@@ -4138,7 +4138,7 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_b"]))
 
-    def test_a_pull_merged_into_a_batch_branch_with_its_head_off_main_does_not_release_its_lane(self):
+    def test_a_pull_merged_into_an_integration_branch_with_its_head_off_main_does_not_release_its_lane(self):
         # Green on the old code. Its base is not the default branch, and its head is not in main. session_b is the control.
         self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2}})
         self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")],

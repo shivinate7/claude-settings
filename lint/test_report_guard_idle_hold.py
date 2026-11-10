@@ -439,8 +439,8 @@ class IdleLaneHoldTests(trs.StalledFixture, unittest.TestCase):
                              "the Stop opened its transcript %d times; a plain Stop opens it %d times, and a runner "
                              "Stop with no merge line may add none" % (opens, trs.BASE_OPENS))
 
-    # Round 1 review findings. Each case pins one: a merged line that another command prints, a sweep that never swept
-    # or was refused, the order of calls in one message, and a held Stop with no correction tail on a report with its own defect.
+    # Each case pins one edge: a merged line that another command prints, a sweep that never swept or was refused,
+    # the order of calls in one message, and a held Stop with no correction tail on a report with its own defect.
 
     def test_idle_r1_merged_line_quoted_by_a_grep_holds_nothing(self):
         # Catches: a merged line that another command prints (a grep of a log) holds the runner as a merge of its own.
