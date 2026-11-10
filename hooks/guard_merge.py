@@ -324,11 +324,15 @@ def undrafted_pr_create(segment: str) -> bool:
 # the base's page, so it passes. The base is `resolve_default_base`, read at its TIP. A merge that brought
 # a page the base has since moved past also passes: the page equals MERGE_HEAD's page by exact blob id, and
 # one of two holds. MERGE_HEAD is on origin/<base>'s first-parent line (`rev-list --first-parent`), so a
-# branch merged into the base is no pass. Or the merge base of HEAD and MERGE_HEAD is no ancestor of
-# origin/<base> (`merge-base --is-ancestor` exits 1): the lane is stacked on a branch main has not merged,
-# and MERGE_HEAD is that branch moved on. A lane cut from main has its merge base on main, so it gets no
-# pass from the second. Those reads run only on the path that would refuse, and a failed read is refused,
-# an is-ancestor exit other than 0 or 1 included.
+# branch merged into the base is no pass. Or some best merge base of HEAD and MERGE_HEAD (`merge-base --all`,
+# more than one after a criss-cross merge) is no ancestor of origin/<base> (`merge-base --is-ancestor` exits
+# 1): the lane is stacked on a branch main has not merged, and MERGE_HEAD is that branch moved on. A lane cut
+# from main has every best base on main, so it gets no pass from the second. Those reads run only on the path
+# that would refuse. A failed merge-base read, or an is-ancestor exit other than 0 or 1, gives no stacked
+# pass for that base and falls through to the first-parent test, which refuses unless MERGE_HEAD is on the
+# base's first-parent line. A failed rev-parse or rev-list read refuses. The stacked clause cannot tell the
+# lane's base from a sibling lane that shares its unmerged history: a sibling's page passes the same way,
+# and the merge tool rebuilds the page before ready.
 # A rebuilt page, a page of a merge of any other commit, and a page taken after the merge state is gone
 # are refused.
 # The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
@@ -458,19 +462,20 @@ def _runs_generator(segment):
 
 def _merge_head_page(top, base):
     """The blob id of the page at MERGE_HEAD when a merge is in progress and one of two holds, else ''.
-    (1) The merge base of HEAD and MERGE_HEAD is no ancestor of origin/<base>: the lane is stacked on a
-    branch that main has not merged, and MERGE_HEAD is that branch moved on. (2) MERGE_HEAD is a commit on
-    origin/<base>'s first-parent line (a past base tip). A failed or short read gives '', and so does a
-    merge-base read with no answer or an is-ancestor exit other than 0 or 1."""
+    (1) Some best merge base of HEAD and MERGE_HEAD is no ancestor of origin/<base>: the lane is stacked on
+    a branch that main has not merged, and MERGE_HEAD is that branch moved on. (2) MERGE_HEAD is a commit on
+    origin/<base>'s first-parent line (a past base tip). A merge-base read with no answer, or an
+    is-ancestor exit other than 0 or 1, gives no stacked pass for that base and falls through to (2). A
+    failed rev-parse or rev-list read gives ''."""
     # One read gives MERGE_HEAD's commit and its page: it fails when no merge is in progress.
     done = _git(top, "rev-parse", "MERGE_HEAD", "MERGE_HEAD:" + RECORDS_PAGE)
     ids = done.stdout.split() if done is not None and done.returncode == 0 else []
     if len(ids) != 2:
         return ""
     origin = base if base.startswith("origin/") else "origin/" + base
-    meet = _git(top, "merge-base", "HEAD", "MERGE_HEAD")
-    if meet is not None and meet.returncode == 0 and meet.stdout.strip():
-        seen = _git(top, "merge-base", "--is-ancestor", meet.stdout.split()[0], origin)
+    meet = _git(top, "merge-base", "--all", "HEAD", "MERGE_HEAD")
+    for best in meet.stdout.split() if meet is not None and meet.returncode == 0 else []:
+        seen = _git(top, "merge-base", "--is-ancestor", best, origin)
         if seen is not None and seen.returncode == 1:   # 1 is "not an ancestor"; 0 is one, other is a failure
             return ids[1]
     line = _git(top, "rev-list", "--first-parent", origin)   # one id per base tip, newest first
