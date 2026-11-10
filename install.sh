@@ -1028,11 +1028,37 @@ else
   fi
 fi
 
-# ~/.claude/bin on PATH, once, in the rc file of the login shell.
+# ~/.claude/bin on PATH, once, in the rc file of the login shell. Cloud too: a cloud container
+# does not have ~/.claude/bin on PATH, so a printed remedy naming wait-pid or verdict fails with rc 127.
+# In cloud the block goes at the TOP of the rc: a Debian ~/.bashrc opens with `[ -z "$PS1" ] && return`,
+# so a non-interactive `source ~/.bashrc` returns before an appended block. The new rc is built beside the
+# old one (cp -p keeps its mode) and moved over it, so a failed step leaves the rc as it was. A symlinked
+# rc is written through to its target, so the link stays. Off cloud the block is appended at the end.
 case "${SHELL:-}" in *zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashrc" ;; esac
-if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
-  printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' >> "$RC"
-  log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+PATH_MARK='# claude-settings: ~/.claude/bin on PATH'
+PATH_BLOCK=$(printf '%s\n%s' "$PATH_MARK" 'export PATH="$HOME/.claude/bin:$PATH"')
+if ! grep -qsF "$PATH_MARK" "$RC"; then
+  if [ "$CLOUD" = 1 ]; then
+    rc_file=$RC
+    [ ! -L "$RC" ] || rc_file=$(readlink -f "$RC" 2>/dev/null) || rc_file=
+    rc_new="$rc_file.cs-new"
+    if [ -n "$rc_file" ] && rm -f "$rc_new" \
+      && { [ ! -e "$rc_file" ] || cp -p "$rc_file" "$rc_new"; } \
+      && { printf '%s\n\n' "$PATH_BLOCK" && { [ ! -e "$rc_file" ] || cat "$rc_file"; }; } > "$rc_new" \
+      && mv_retry "$rc_new" "$rc_file"; then
+      rc_written=1
+    else
+      [ -z "$rc_file" ] || rm -f "$rc_new" 2>/dev/null; rc_written=0
+    fi
+  else
+    rc_written=0
+    printf '\n%s\n' "$PATH_BLOCK" >> "$RC" 2>/dev/null && rc_written=1
+  fi
+  if [ "$rc_written" = 1 ]; then
+    log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+  else
+    log "could not write $RC; ~/.claude/bin is not on PATH"
+  fi
 fi
 
 # Runs one startup entry bounded to $1 seconds where there is no `timeout` binary (macOS). The entry and a
