@@ -5,7 +5,7 @@ from `roster.md`.
 
 ## Session tiers
 
-Every session that starts agents spawns its own agents. A session's roles are the hats it wears.
+A spawner is a session that starts its own agents. Each session role is a set of jobs, worn as a hat.
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state
@@ -64,8 +64,8 @@ Every session that starts agents spawns its own agents. A session's roles are th
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
 
-When the owner names the wrong tier, or brings work that belongs to another tier, the session
-says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
+When the owner names the wrong session, or brings work that belongs to another session, the session
+says in one line whose job it is, then routes it.
 
 A coordinator's work in another repo is compliance only, by handoff or by its own lane PR in that repo
 (claude-settings decision `session-tiers`, bullet "A coordinator in another repo"). Before it acts,
