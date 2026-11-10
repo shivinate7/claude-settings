@@ -179,17 +179,16 @@ Design:
 - Risks: how `janitor/sweep.py` treats a `mail` branch that never merges is unknown. The
   UserPromptSubmit time budget is shared with `local_time`.
 
-## Reach across GitHub accounts (plan, not built)
+## Reach across GitHub accounts
 
 - The store is the private repo shivinate7/session-mailbox. A cloud session under the owner's second
   account, ssemwal-cdc, reaches it only if that account can read and write it.
-- The owner's one act, as shivinate7: open https://github.com/shivinate7/session-mailbox/settings/access,
-  press "Add people", pick ssemwal-cdc, role Write, send the invite. Accepting is a second press: the same
-  person accepts at https://github.com/shivinate7/session-mailbox/invitations, signed in as ssemwal-cdc.
+- Done by the owner: ssemwal-cdc was invited as Write and has accepted (owner's words, 2026-11-10 10:19 CST;
+  the invite date is unknown).
 - Unmeasured: whether a cloud session under ssemwal-cdc reaches the store through the git proxy.
   The proxy served the store only after `add_repo` for the measuring session; such a session needs the
-  repo attached by that account's Claude GitHub connection. Measure with one `mail read` after the invite.
-- Nothing is changed until the owner presses, and this lane changed no access. No code change is expected.
+  repo attached by that account's Claude GitHub connection. Measure with one `mail read`.
+- No code change is expected.
 
 ## Build in work order
 
