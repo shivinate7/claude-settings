@@ -3,8 +3,8 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: draft. Q1 to Q3, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
-Q4 (a timed check-in) is open with the owner. The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
+Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
+The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
 Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
 (step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
 Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
@@ -193,10 +193,10 @@ Design:
   cannot: the desktop count reads a fixed constant, and both flag-override hooks in the public build return nothing
   (binary 2.1.319, read 2026-11-06 13:14 CST: `getEnvironmentOverrides(){return null}`, `readConfigOverrides(){return}`).
 - Q2, how a lost message is noticed: a session that waits on a reply checks for it. Coordinator pick,
-  2026-11-06 12:48 CST; it can be undone. How it checks waits on Q4. Until then it checks at its next
-  turn start.
-- Q4, open with the owner (sent through triage 2026-11-06 13:22 CST): may a cloud session that waits on a
-  reply set one `send_later` check-in? Rule `outcomes-mechanize-rules` bars tracking on a timer, and rule
-  `git-ci-wait-checks-in` allows a timed check-in. Cost: one one-shot scheduled task per waiting request;
-  it starts no process and writes no file. Recommended: allow it.
+  2026-11-06 12:48 CST; it can be undone. It checks at its next turn start, and may also set that one
+  check-in.
+- Q4, answered: a cloud session that waits on a reply may set one `send_later` check-in for that one
+  reply. Under rule `outcomes-mechanize-rules`, a one-time check-in for one named outside event is not
+  tracking. It sets the next one only when a new named event arrives. Never use it to reset the
+  peer-guard chain. Cost: one one-shot scheduled task per waiting request; no process, no file.
 - Q3, scope: the debt fix (done, commit 7059961a) and the git-mailbox build steps 1 to 5. The parser for the message format was dropped 2026-11-06 13:15 CST and stays dropped (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
