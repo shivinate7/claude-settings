@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 14:57 CST.
+Last rewrite: 2026-11-10 14:59 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -22,6 +22,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
       refused at merge.
    3. A review record survives a clean main merge (ruling R1).
    4. A batch closes on a limit (step batch-freeze-lane-set-enforce, already doing).
+   5. Lane lint runs once per lane; batch CI fails fast (ruling R4).
 4. **Make the roadmap and triage mechanical** (direction D1, D2; not yet settled).
 5. **Express pass for prose** (direction D3; open).
 6. **Resume lanes** under the new flow. Then the rest of the queue.
@@ -66,6 +67,13 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
     CST: "b is probably fine for now, with some sorta flag that if it quickly fails that it was
     misjudged and it goes to largest current job x1.5"; 14:37 CST: "if it was just made and it then fails
     in its first run or two that's a sign it was misjudged". Replaces the stored 60 min in ci-job-caps.
+
+- **R4. Lane lint runs once per lane; batch CI fails fast.** Owner 14:54 CST Nov 10: "is there no truly
+  fast way that retains accuracy?"; 14:56 CST: "yes D is approved". Keep the lane lint run at hand-off
+  (inside each lane, in parallel). Drop the runs at join and on the batch head. Batch CI runs lint first
+  and cancels the rest of the run at once when lint goes red; the red files name the lane to drop.
+  A builder first confirms that CI cancels on first failure and that each red lint maps to one lane.
+  Home: decision lanes-run-no-full-ci-job, rewritten in place.
 
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
@@ -150,11 +158,6 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 
 - How many lanes start: the owner said in the same answer "the limit isn't the problem, it's how the limit
   batches that's the problem". Covered by stage 3.4 for now.
-- Lane lint runs three times per lane (hand-off, join, batch head) against
-  roles-each-layer-proves-once. In discussion (owner 14:54 CST: "is there no truly fast way that retains
-  accuracy?"). Proposed option d: keep the hand-off run; drop the join and batch-head runs; batch CI
-  starts with lint and cancels the run at once when it goes red; the red files name the lane to drop.
-  Unmeasured: whether CI cancels on first failure; whether every red lint maps to one lane.
 - Guards with recorded false alarms: report guard 15, frozen-path 6, ask-alone 4, question-form 4,
   builder-test-edit 4 (counts of notes, not firings).
 - About 89% of 746 open steps work on this repo's own merge, review and lint machinery (title
