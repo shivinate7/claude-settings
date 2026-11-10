@@ -17,7 +17,7 @@ Every session that starts agents spawns its own agents. A session's roles are th
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
-  merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a solo run the lane wears triage's hat and writes it.
+  merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a run with one lane the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
   `waiting-page`, "Make a repo's page").
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
@@ -76,9 +76,9 @@ If none is active, it proceeds. It does not wait for a reply.
 
 ## Rotation of standing sessions
 
-Read the use of each standing session: triage, the batch runner and the arbiter. Never wait for the owner to notice.
+Standing sessions compact in routine use, and none is replaced routinely: triage, the batch runner and the arbiter compact. Never wait for the owner to notice a stale one.
 
-The coordinator does not rotate. It writes its own handoffs and compacts in place. The coordinator
+The coordinator itself does not rotate. It writes its own handoffs and compacts in place. The coordinator
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 

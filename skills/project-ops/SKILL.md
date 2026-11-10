@@ -14,7 +14,7 @@ Without a project, each session holds one or more roles, and the owner acts as t
 
 - **Session roles.** The coordinator, triage, the batch runner and lanes.
   `templates/operating-model.md` says what each role owns, and how triage and the batch runner
-  compact, and are not replaced. The coordinator compacts in place and has no successor.
+  compact in routine use, and the coordinator rotates one only when it goes stale or breaks. The coordinator compacts in place and has no successor.
 - **The roster.** One list of who holds each standing session now. `templates/roster.md`.
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.

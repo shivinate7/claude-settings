@@ -16,11 +16,10 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `outcomes-tests-are-statements` | A failing test is a claim, not law. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-grant-covers-named-act` | My grant covers the act it names, never a variant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-mechanize-rules` | Once ready, turn each rule below into a hook or check. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-pick-mode-from-request` | Pick the session's shape from my request: solo, one lane, or coordinator (`session-tiers`, the session shapes). | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-solo-builds-short-edit-list` | Solo: the request is a short list of edits with nothing to run in parallel. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-solo-reviews-logic-diffs-only` | In solo, a fresh reviewer reads the diff before merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic, or a record that files an owner ruling (round 1 checks two things only, decision `docs-only-prs-skip-review`). | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-solo-grows-switch-to-orchestrate` | A shape can grow: solo to one lane, one lane to coordinator. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-orchestrator-never-builds` | Every session that spawns agents is an orchestrator. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-pick-mode-from-request` | Pick the session's role from my request: coordinator for a standing build, else lane (`session-tiers`, the session roles). | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-solo-reviews-logic-diffs-only` | In a run with one lane, a fresh reviewer reads the diff before merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-solo-grows-switch-to-orchestrate` | A lane may grow to a coordinator. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-orchestrator-never-builds` | A lane builds a short list of edits itself when nothing can run in parallel, whoever started it. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-one-role-per-agent` | Each agent is one role: builder, reviewer, designer, design reviewer, refuter, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-model-per-role-table` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, the refuter, and a builder's third try (`roles-third-round-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -105,7 +104,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `reports-done-format` | Done: one line per item, BUILT, RECORDED, or OTHER. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-done-names-models` | A Done item that agents built or reviewed names each one's role and model, such as "(builder sonnet, reviewer sonnet)". | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-drop-unused-label` | Drop a label that does not apply. | [`CLAUDE.md`](../CLAUDE.md) |
-| `reports-name-unstarted-items` | An orchestrator's report holds an `Unstarted:` line under Next: each queued item with every question answered that it left unstarted, with its reason, or `none`. | [`CLAUDE.md`](../CLAUDE.md) |
+| `reports-name-unstarted-items` | A report from a session that spawns agents holds an `Unstarted:` line under Next: each queued item with every question answered that it left unstarted, with its reason, or `none`. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-no-report-when-nothing-landed` | No report when nothing landed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-batch-pace-numbers` | At each batch merge, the report also gives four pace numbers, as OTHER items under Done. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-offer-sweep-after-merge` | When a session's last PR has merged and no lane is open, its final report offers one command under Next: `python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast`, preview first, then with `--confirm`. | [`CLAUDE.md`](../CLAUDE.md) |

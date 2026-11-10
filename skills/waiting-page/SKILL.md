@@ -209,7 +209,7 @@ carries the badge "Answered, filing pending" or "Answered, filed in <home>". It 
 
 ## The writer
 
-Each page has one writer: triage (owner, 2026-11-10 14:30-14:32 CST). In a solo run the lane
+Each page has one writer: triage (owner, 2026-11-10 14:30-14:32 CST). In a run with one lane, the lane
 wears triage's hat and writes it (owner, 2026-11-10 14:33 CST). The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers").
