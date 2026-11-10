@@ -74,6 +74,18 @@ unless the same line cites a source: a URL, `#<n>`, a commit hash, a repo path, 
 refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too. Risk
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
+The closed-item check (rule `input-needed-closed-item`, roadmap step input-needed-reads-page-status; incident: a
+coordinator listed items 214, 381, 383 and 222 to the owner as open, and all four were closed): on any turn, landed or
+not, it refuses an Input Needed item that cites a waiting-page item whose status is closed. A cite is "item N", "page
+item N", "Cockpit item N", "items N, M and K" or "item N a", outside backticks and quotes; a PR number, a bare
+number and Done or Next text are no cite. The status comes from the waiting copy on
+origin/<record branch>, read through hooks/feedback_guard.py (Homes.item_statuses, the one reader, one `git grep`
+per Stop). An ArtifactData read of collection `items` in the same turn (feedback_guard.read_back_statuses) wins for its
+item: open skips the copy for that item, closed refuses. The refusal names each closed item and the page status read
+it asks for. A repo with no waiting page runs no check. An unreadable copy (no record branch ref, no items folder, an
+item file that is not a JSON object, a git error) never blocks: a systemMessage says the check was not checked. Cost:
+a regex over the Input Needed text; only on a cite, the feedback_guard import and its one git grep. No file written.
+
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
 precompact-handoff, item 'Recovered line after compaction'). A label counts only where it starts an item: at line start, after a
@@ -3021,6 +3033,62 @@ def triage_hold(hook, records, active):
         return ""
 
 
+# The closed-item check's cite matcher: "item N", "page item N", "Cockpit item N", "items N, M and K", "item N a". A
+# second matcher beside skills/roadmap/build.py's is justified only by lists: that one cites a number right after "item"
+# and cannot read "items 214, 381 and 383".
+ITEM_CITE_RE = re.compile(r"(?<![\w-])items?\s+#?(\d+(?:\s*,\s*(?:and\s+)?#?\d+|\s+(?:and|&)\s+#?\d+|\s*&\s*#?\d+)*)(?!\d)", re.I)
+CLOSED_ITEM_CHECK = "Closed-item guard (rule input-needed-closed-item)"
+
+
+def cited_items(text):
+    """The page item numbers (digit strings, first cite first, each once) that the Input Needed item cites, with
+    backtick and quote spans left out. Done, Next and the prose above the report are not read."""
+    seen = []
+    for m in ITEM_CITE_RE.finditer(QUOTED_RE.sub(" ", input_needed_section(text))):
+        for n in re.findall(r"\d+", m.group(1)):
+            if str(int(n)) not in seen:
+                seen.append(str(int(n)))
+    return seen
+
+
+def closed_item_problem(hook, turn, text):
+    """(refusal, note) for an Input Needed item that cites a page item the waiting page or its copy shows closed
+    (rule `input-needed-closed-item`). A read of collection `items` in `turn` decides its item; the copy decides the
+    rest, read once through feedback_guard (Homes.item_statuses). A repo with no waiting page gives ('', ''); an
+    unreadable copy gives no refusal and a note that says not checked."""
+    cites = cited_items(text)
+    if not cites:
+        return "", ""
+    _hooks_on_path()
+    import feedback_guard
+    homes = feedback_guard.Homes(hook.get("cwd"))
+    read = {n: s for n, s in feedback_guard.read_back_statuses(turn, homes).items() if n in cites}
+    closed = {n: "the page read this turn" for n, s in read.items() if s == "closed"}
+    rest = [n for n in cites if n not in read]
+    note = ""
+    if rest:
+        statuses, branch, _folder = homes.item_statuses()
+        if statuses is None:
+            if homes.skip_filing:
+                note = "Closed-item guard: not checked (%s)." % homes.skip_filing
+        else:
+            where = "the waiting copy at origin/%s, as of the last fetch" % branch
+            closed.update({n: where for n in rest if statuses.get(n) == "closed"})
+    if not closed:
+        return "", note
+    nums = sorted(closed, key=int)
+    by_source = {}
+    for n in nums:
+        by_source.setdefault(closed[n], []).append(n)
+    shows = "; ".join("%s shows %s closed" % (src, ("item " if len(ns) == 1 else "items ") + ", ".join(ns))
+                      for src, ns in by_source.items())
+    return owner_line(
+        CLOSED_ITEM_CHECK,
+        "Input Needed cites %s, and %s; the page item status (an ArtifactData get or query of collection `items`) "
+        "is read before an item is listed as open" % (("item " if len(nums) == 1 else "items ") + ", ".join(nums),
+                                                       shows)), note
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -3124,12 +3192,17 @@ def main():
         pick_reason, note = question_problem(records, turn, text, hook)
     except Exception:
         pass
+    closed_item, closed_note = "", ""
+    try:
+        closed_item, closed_note = closed_item_problem(hook, turn, text)
+    except Exception as err:  # a check that could not run is not checked, never silence and never a block
+        closed_note = "Closed-item guard: not checked (%s)." % type(err).__name__
     review, review_note = "", ""
     try:
         review, review_note = review_record_problem(hook, text)
     except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
         review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
-    note = " ".join(filter(None, [note, hand_note, review_note]))
+    note = " ".join(filter(None, [note, hand_note, review_note, closed_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
@@ -3161,6 +3234,7 @@ def main():
         pick.append(hand_off)
         pick.append(cannot)
         pick.append(review)
+        pick.append(closed_item)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -3214,6 +3288,8 @@ def main():
         reasons.append(cannot)
     if review:
         reasons.append(review)
+    if closed_item:
+        reasons.append(closed_item)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:

@@ -171,6 +171,15 @@ Text: inline, in the main check.
 
 - A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is, like "D12, short titles for records".
 
+### Closed-item guard (any reply whose Input Needed cites a page item)
+
+Text: `closed_item_problem`, rule `input-needed-closed-item` (roadmap step `input-needed-reads-page-status`).
+
+- Read each listed item's status from the waiting page first: an ArtifactData get or query of collection `items`.
+- Then list only the items the page shows open. A closed item is not asked of the owner again.
+- A read of the page in the same turn that shows the item open clears it. A read in an earlier turn does not.
+- A copy that cannot be read passes with a "not checked" note and no refusal.
+
 ## Shared tails
 
 - Every refusal opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
