@@ -1019,8 +1019,8 @@ class WaitingPageBranding(Tree):
                     self.layout.waiting_page_icon(self.tree)
 
 
-class WaitingPageWriter(Tree):
-    """A repo's extras file names the session id of its waiting page's writer ("waiting-page-writer"). The Stop
+class PageWriterKey(Tree):
+    """A repo's extras file names the session id of its waiting page's writer ("page-writer"). The Stop
     check reads it when the transcript holds no meta/page read (report_guard.py question_problem)."""
     SESSION = "session_013NEJL1nAsHBKJTpeHV1sJN"
 
@@ -1029,55 +1029,55 @@ class WaitingPageWriter(Tree):
         self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
 
     def test_the_key_reads_its_session_id(self):
-        # Catches: the "waiting-page-writer" key not read, or read as another value.
-        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-writer": self.SESSION}))
+        # Catches: the "page-writer" key not read, or read as another value.
+        self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": self.SESSION}))
         self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
-        self.assertEqual(self.layout.waiting_page_writer(self.tree), self.SESSION)
+        self.assertEqual(self.layout.page_writer_key(self.tree), self.SESSION)
 
     def test_no_extras_file_or_no_key_is_none(self):
         # Catches: a repo with no writer key read as having a writer, with or without an extras file.
-        self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a repo with no extras file has a writer")
+        self.assertIsNone(self.layout.page_writer_key(self.tree), "a repo with no extras file has a writer")
         self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": "https://claude.ai/artifact/abc123"}))
         self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
-        self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a repo with no writer key has a writer")
+        self.assertIsNone(self.layout.page_writer_key(self.tree), "a repo with no writer key has a writer")
 
     def test_null_empty_or_not_a_string_is_none(self):
         # Catches: a key holding no session id read as a writer id, so a send to any id would pass the Stop check.
         for bad in (None, "", 5, ["session_013NEJL1nAsHBKJTpeHV1sJN"], {"id": "session_013NEJL1nAsHBKJTpeHV1sJN"}):
             with self.subTest(bad=bad):
-                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-writer": bad}))
-                self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a key that holds no session id has a writer")
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": bad}))
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "a key that holds no session id has a writer")
 
     def test_whitespace_only_key_is_none(self):
         # Catches: a key of spaces, tabs or newlines read as a writer id, so a send that names no session passes the Stop check.
         for blank in ("   ", "\t", " \n "):
             with self.subTest(blank=blank):
-                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-writer": blank}))
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": blank}))
                 self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
-                self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a whitespace-only key has a writer")
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "a whitespace-only key has a writer")
 
     def test_padded_key_is_none(self):
         # Catches: a session id with spaces or a newline around it read untrimmed, so no send to the real id matches it.
         for padded in (" " + self.SESSION + " ", self.SESSION + "\n", "\t" + self.SESSION):
             with self.subTest(padded=padded):
-                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-writer": padded}))
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": padded}))
                 self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
-                self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a padded key has a writer")
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "a padded key has a writer")
 
     def test_send_alias_key_is_none(self):
         # Catches: "parent" and "@parent", the send aliases, read as a session id, so a send to the alias names a writer.
         for alias in ("parent", "@parent"):
             with self.subTest(alias=alias):
-                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-writer": alias}))
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": alias}))
                 self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
-                self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a send alias has a writer")
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "a send alias has a writer")
 
     def test_a_normal_session_id_still_reads(self):
         # Catches: the blank, padded and alias rules refusing a normal session id, so a real writer is lost.
         for sid in ("session_01ABC", self.SESSION):
             with self.subTest(sid=sid):
-                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-writer": sid}))
-                self.assertEqual(self.layout.waiting_page_writer(self.tree), sid)
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": sid}))
+                self.assertEqual(self.layout.page_writer_key(self.tree), sid)
 
 
 class RolledOutMark(Tree):

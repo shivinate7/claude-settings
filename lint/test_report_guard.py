@@ -2283,7 +2283,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                "A (my pick): fold the guard", "B: add a second hook", DEPARTS]
     LINKED = PICK + [PAGE]
     QUESTION = ["Close q_max #969 as replaced by #1010?"]
-    NO_KEY = object()  # make_repo's writer default: the extras file holds no "waiting-page-writer" key
+    NO_KEY = object()  # make_repo's writer default: the extras file holds no "page-writer" key
 
     def setUp(self):
         self.run_dir = tempfile.mkdtemp(dir=_ISOLATION["dir"])
@@ -2296,23 +2296,23 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
 
     def make_repo(self, name, page=True, writer=NO_KEY):
         """A repo whose extras file names the waiting page (when page is true). `writer` sets its
-        "waiting-page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out."""
+        "page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out."""
         repo = os.path.join(self.run_dir, name)
         os.makedirs(os.path.join(repo, ".git"))
         if page:
             os.makedirs(os.path.join(repo, ".claude"))
             keys = {"kinds": {}, "waiting-page": self.PAGE}
             if writer is not self.NO_KEY:
-                keys["waiting-page-writer"] = writer
+                keys["page-writer"] = writer
             with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
                 json.dump(keys, f)
         return repo
 
     def extras_key(self, repo):
-        """The "waiting-page-writer" value on disk in `repo`, or NO_KEY when the file holds no such key."""
+        """The "page-writer" value on disk in `repo`, or NO_KEY when the file holds no such key."""
         with open(os.path.join(repo, ".claude", "layout-extras.json")) as f:
             keys = json.load(f)
-        return keys["waiting-page-writer"] if "waiting-page-writer" in keys else self.NO_KEY
+        return keys["page-writer"] if "page-writer" in keys else self.NO_KEY
 
     def reply(self, body):
         """A report whose Input Needed item holds the lines of `body`. Its Done line names a commit, so a
@@ -2581,7 +2581,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
                 self.assert_blocked(out, "Pick guard")
 
-    # Owner-facing turn with no meta/page read: the layout's "waiting-page-writer" key is the writer.
+    # Owner-facing turn with no meta/page read: the layout's "page-writer" key is the writer.
 
     def test_qm_layout_writer_green_send_to_the_key_id_passes(self):
         # Catches: a send to the layout key's writer refused when the transcript holds no meta/page read, so a
