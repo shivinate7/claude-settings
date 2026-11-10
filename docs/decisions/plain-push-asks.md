@@ -7,11 +7,11 @@ A third kind is refused, with its remedy. The owner's typed override lets each t
 
 | Push | Outcome | Rule id |
 |---|---|---|
-| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all` and `--branches` outside an agent checkout), on a network remote | ask | `push-main` |
+| A destination named `main` or `master` (`main`, `HEAD:main`, `x:refs/heads/main`, a bare push that resolves there, `--all` and `--branches` outside an agent checkout, builder's reading, see the combined-push bullet), on a network remote | ask | `push-main` |
 | An implied destination (bare push, `HEAD`, `@`, or the current branch's own name) that differs from the branch's upstream, on the upstream's remote, and does not yet exist there | ask | `push-stray-branch` |
 | A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | A push that names `main` and an agent-worktree branch together (`git push origin main HEAD:agent-<hex>`, `git push origin main agent-<hex>`) | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
-| `--all` or `--branches` from a checkout on an agent-worktree branch, to a network remote | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
+| `--all` or `--branches` from a checkout on an agent-worktree branch, to a network remote (builder's reading, see the combined-push bullet) | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | Any other plain push | allow | |
 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
@@ -32,7 +32,7 @@ A third kind is refused, with its remedy. The owner's typed override lets each t
   drop the ask for a push that makes a new branch. The ask's remedy names `HEAD:<branch>`.
 - `push-agent-branch`: a push that writes an agent-worktree name puts a stray branch on the remote. Bare
   and `-u` count, and so does a bare push under `push.autoSetupRemote`. It refuses and names its
-  remedy, `git push origin HEAD:<lane-branch>`, so the owner never sees a prompt. The refusal text
+  remedy, `git push origin HEAD:<lane-branch>`. The refusal text
   goes to the session, not the owner (the principle of `guard-remedy-not-to-owner`, which records it
   for Stop refusals). Source, kind process: owner ruling, 2026-11-02, that a `worktree-agent-*`
   branch never reaches origin (32 sat on origin that day, pushed because the agent files said to
@@ -42,10 +42,11 @@ A third kind is refused, with its remedy. The owner's typed override lets each t
   unasked is not read here; roadmap step `push-ask-reads-brief` holds it.
 - Combined push, owner ruling, chat, 2026-11-10 14:59 CST, question "Combined push", answer "Refuse it".
   A push that names `main` and an agent-worktree branch is refused as `push-agent-branch`, not asked as
-  `push-main`, so no owner click can carry a stray agent branch to origin. `--all` and `--branches`, to a
-  network remote, are refused from an agent checkout only; from any other checkout they still ask `push-main`.
-  Controls unchanged: `main` alone asks `push-main`; `main` with a lane-named branch asks `push-main`; a lane
-  branch, `HEAD:<lane-branch>`, `archive/*` and deletes are allowed.
+  `push-main`. Controls unchanged: `main` alone asks `push-main`; `main` with a lane-named branch asks
+  `push-main`; a lane branch, `HEAD:<lane-branch>`, `archive/*` and deletes are allowed.
+- `--all` and `--branches`, to a network remote: refused from an agent checkout, and ask `push-main` from any
+  other checkout. This scope is the builder's reading, recorded 2026-11-10 15:39 CST, not the owner's words.
+  Pending the owner's word on whether "Refuse it" covers them from any checkout.
 - Silent:
   - a push to the branch's own upstream, unless that name is an agent-worktree name;
   - a first push with no upstream, unless its destination is an agent-worktree name;
