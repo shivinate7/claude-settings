@@ -298,8 +298,9 @@ repo's waiting page from a file behind main is refused, and its reason repeats s
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read. With `--asks` it adds one `ArtifactData list asks` read, and no process. It writes `<out>` only, and no file without
+one short read-only git process, with no fetch, and one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
+With `--asks`, it adds one `ArtifactData list asks` read, and no process.
 
 ## Keep a copy in the repo
 
