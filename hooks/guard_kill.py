@@ -1013,7 +1013,7 @@ PLAYWRIGHT_PATH_REASON = (
     "One is a stale `__dirlock` in the Playwright cache, left by an install that stopped "
     "halfway. The other is an install that hangs while it unpacks under Node 26.11 with "
     "Playwright 1.58. "
-    "Remedy: run `pgrep -fl playwright` to confirm that no install is running, then remove the "
+    "Remedy: run `pgrep -f playwright` (it prints pids only) to confirm that no install is running, then remove the "
     "stale `__dirlock`. If the install still hangs, run it under Node 22 with `npx -y node@22 "
     "node_modules/playwright/cli.js install`, which unpacks in under a second."
 )
