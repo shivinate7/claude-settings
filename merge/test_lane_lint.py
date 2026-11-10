@@ -155,7 +155,7 @@ class CiJobStub:
         return [c for c in calls if "--plan" not in c["argv"]]
 
 
-WAIT_LINE = "GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
+WAIT_LINE ="GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
 WAIT_CEILING = 600  # fake seconds a wait may run. The bound is the builder's choice; this ceiling only proves the wait is finite
 WAIT_POLLS_CEILING = 30  # pull request reads one wait may make
 RUNAWAY_PAUSES = 500  # pauses after which a wait that never ends is stopped, so a broken wait cannot hang the run
@@ -199,7 +199,8 @@ class IntermediateHeadHost(LagHost):
         return info
 
 
-class LaneLint(CiJobStub, tm.CloudSession):
+class LaneFixture(CiJobStub, tm.CloudSession):
+    """The lane-lint fixture: the repo pair, the stub ci-job and the run helpers. LaneLint and CrossMeasure share it."""
     @classmethod
     def setUpClass(cls):
         unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
@@ -244,6 +245,10 @@ class LaneLint(CiJobStub, tm.CloudSession):
         sh = tm.sh
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")
+
+
+class LaneLint(LaneFixture):
+    """The lane-lint cases: the lint's verdicts, the stack check, the shallow reads and the ref targets."""
 
     def progress_run(self, steps, rc, *argv):
         """Run merge in a subprocess through HARNESS, with the stub of `steps` (see PROGRESS). -> (rc, stdout, stderr).
@@ -822,6 +827,463 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+
+# The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
+# lane, and against the PRs --with names, with `git merge-tree --write-tree`. The same lane is decided by one rule, in one helper pair
+# (session_of, same_lane): the session URL line of the PR body.
+OWN = "session_01OwnLaneSeven"  # the session that opened the lane's PR, PR 7
+OTHER = "session_01OtherLaneSeven"  # another session's PR
+SESSION_URL = "https://claude.ai/code/%s"  # the line a PR body carries for its session
+
+
+def lane_body(session_id, text="Lane work."):
+    """A PR body with its session's URL line, as a lane's PR carries it."""
+    return "%s\n\n%s\n" % (text, SESSION_URL % session_id)
+
+
+def session_of(body):
+    """-> the session id a PR body names by its URL line, or None. The one home of the same-lane key: a rule change moves this and same_lane."""
+    found = re.search(r"claude\.ai/code/(session_[A-Za-z0-9]+)", body or "")
+    return found.group(1) if found else None
+
+
+def same_lane(body, other):
+    """True when two PR bodies name the same session. The cases use it for their preconditions; merge.py holds the rule."""
+    mine = session_of(body)
+    return mine is not None and mine == session_of(other)
+
+
+def branch_of(n):
+    """The branch a case pushes for PR n. Letters only, so no PR number shows up in a branch name."""
+    return "lane-" + str(n).translate(str.maketrans("0123456789", "abcdefghij"))
+
+
+def names_pr(text, number):
+    """True when `text` names PR `number`, as #N or as a bare N. A hex run, such as a commit's sha, never counts."""
+    return re.search(r"(?<![0-9a-f])#?%d(?![0-9a-f])" % number, text) is not None
+
+
+def lane_lint_usage():
+    """-> the `merge --lane-lint` entry of merge.py's usage text (its module docstring), from its first line to the next entry. None when absent."""
+    lines = (merge.__doc__ or "").splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith("  merge --lane-lint")]
+    if not starts:
+        return None
+    end = next((i for i in range(starts[0] + 1, len(lines)) if lines[i].startswith("  merge ")), len(lines))
+    return "\n".join(lines[starts[0]:end])
+
+
+class CrossMeasure(LaneFixture):
+    """`merge --lane-lint <pr>` checks the PR's head against each other open PR of its lane and against the PRs --with names: one
+    open-PR list read, then one `git merge-tree --write-tree` per checked PR. A conflict FAILs before the ci-job run and names each
+    conflicting PR and file. A stack pair is skipped. The counts come from the fake host (FakeHost.pulls, pull_list_reads) and from
+    the merge.sh call log (tree_calls)."""
+
+    contains = LaneLint.contains  # the ancestor read the stack cases use: one home, LaneLint's
+
+    def setUp(self):
+        super().setUp()
+        self.host.body = lane_body(OWN)
+        self.host.pulls = {}
+        self.tree_reply, self.tree_calls = None, []  # tree_reply: the (rc, text) every merge-tree call returns, when a case sets one
+        real_sh = merge.sh
+
+        def log_merge_tree(args, *rest, **kwargs):
+            if "merge-tree" in args:
+                self.tree_calls.append(list(args))
+                if self.tree_reply is not None:
+                    return self.tree_reply
+            return real_sh(args, *rest, **kwargs)
+
+        patch = unittest.mock.patch.object(merge, "sh", log_merge_tree)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def commit_on(self, name, files, start):
+        """Commit `files` ({path: text}) on branch `name`, cut from `start` in the second clone, and push it. -> the commit's sha."""
+        o, sh = self.other, tm.sh
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", name, start)
+        for path, text in files.items():
+            tm.put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "%s: %s" % (name, ", ".join(sorted(files))))
+        sh(o, "git", "push", "-q", "origin", name)
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def own_writes(self, files):
+        """The lane's head gains a commit with `files`. -> its sha."""
+        return self.commit_on("feat", files, "origin/feat")
+
+    def listing(self, n, head, body, state="open", draft=False):
+        """PR n on `head` with `body`, as the fake host's open-PR list and its PR read carry it. -> the head."""
+        self.host.pulls[n] = tm.REST.list_item(n, head, branch_of(n), "main", body=body, draft=draft, state=state)
+        return head
+
+    def list_pr(self, n, head, body, state="open", draft=False):
+        """PR n on the existing commit `head`: its branch is pushed, so the lane can fetch it, and then it is listed."""
+        tm.sh(self.other, "git", "push", "-q", "origin", "%s:refs/heads/%s" % (head, branch_of(n)))
+        return self.listing(n, head, body, state=state, draft=draft)
+
+    def pr_writes(self, n, files, body, start="origin/main", state="open", draft=False):
+        """PR n: a commit with `files`, cut from `start`, listed as PR n. -> its head sha."""
+        head = self.commit_on(branch_of(n), files, start)
+        return self.listing(n, head, body, state=state, draft=draft)
+
+    def measured(self, *argv):
+        """Run merge in the lane checkout, cloud off, with the counters reset. -> (rc, text, lint runs, PR-list reads, merge-tree calls).
+        A refused flag reads as its rc and text (no argparse guard), so each case asserts the outcome, not the parser."""
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        self.host.pull_list_reads = 0
+        self.tree_calls.clear()
+        rc, out, err = self.run_main(*argv, CLAUDE_CODE_REMOTE=None)
+        return rc, out + err, len(self.lint_calls()), self.host.pull_list_reads, len(self.tree_calls)
+
+    def cost_lane(self):
+        """The cost pins' lane. PR 8 is checked (same lane, disjoint). PR 9 is a stack pair, so it is skipped. PR 10 is another
+        session's and conflicts, so it is read only when --with names it."""
+        self.own_writes({"own-b.txt": "lane 7\n"})
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OWN))
+        stacked = self.pr_writes(9, {"stack.txt": "stacked on this head\n"}, lane_body(OWN), start="origin/feat")
+        self.assertTrue(self.contains(stacked, self.head("feat")), "precondition: PR 9 does not contain this head, so it is no stack pair")
+        self.pr_writes(10, {"own-b.txt": "lane 10\n"}, lane_body(OTHER))
+
+    def test_a_same_lane_pr_whose_head_conflicts_fails_and_names_its_number_and_file(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a same-lane PR whose head conflicts with this head did not refuse: " + text)
+        self.assertTrue(names_pr(text, 8), "the refusal does not name the conflicting PR #8: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the conflicting file: " + text)
+        self.assertRegex(text, r"FAIL", "the refusal does not read as a FAIL: " + text)
+        self.assertEqual(pass_lines(text), [], "a conflicting same-lane PR printed a PASS line: " + text)
+        self.assertRegex(text, r"(?i)again", "the refusal lacks its remedy: " + text)
+
+    def test_two_conflicting_same_lane_prs_are_both_named_each_with_its_files(self):
+        self.own_writes({"shared-a.txt": "lane 7\n", "shared-b.txt": "lane 7\n", "shared-c.txt": "lane 7\n", "shared-d.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n", "shared-b.txt": "lane 8\n"}, lane_body(OWN))
+        self.pr_writes(9, {"shared-c.txt": "lane 9\n", "shared-d.txt": "lane 9\n"}, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "two conflicting same-lane PRs did not refuse: " + text)
+        for number, files in ((8, ("shared-a.txt", "shared-b.txt")), (9, ("shared-c.txt", "shared-d.txt"))):
+            self.assertTrue(names_pr(text, number), "the refusal does not name conflicting PR #%d: %s" % (number, text))
+            for name in files:
+                self.assertIn(name, text, "the refusal does not name %s, a file of PR #%d: %s" % (name, number, text))
+
+    def test_a_same_lane_pr_with_a_disjoint_change_passes_with_no_row(self):  # control
+        self.own_writes({"own-only.txt": "lane 7\n"})
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OWN))
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a disjoint same-lane PR refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing lane: " + text)
+        self.assertFalse(names_pr(text, 8), "a disjoint same-lane PR got a row: " + text)
+
+    def test_a_pr_of_another_session_is_not_read_as_this_lane_and_passes(self):  # control
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OTHER))
+        self.assertFalse(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is in this lane, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a conflicting PR of another session refused this lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertFalse(names_pr(text, 8), "a PR of another session is named: " + text)
+
+    def test_a_stack_pair_is_skipped_and_a_conflicting_pr_beside_it_still_fails(self):
+        """The stack pair (PR 9 contains this head) is never merge-tree'd. PR 10 conflicts, so the run FAILs naming PR 10 only."""
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        stacked = self.pr_writes(9, {"stack.txt": "stacked on this head\n"}, lane_body(OWN), start="origin/feat")
+        self.pr_writes(10, {"shared-a.txt": "lane 10\n"}, lane_body(OWN))
+        self.assertTrue(self.contains(stacked, self.head("feat")), "precondition: PR 9 does not contain this head, so it is no stack pair")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, trees = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the conflicting PR beside a stack pair did not refuse: " + text)
+        self.assertTrue(names_pr(text, 10), "the refusal does not name the conflicting PR #10: " + text)
+        self.assertFalse(names_pr(text, 9), "the refusal names the stack pair PR #9, which is skipped: " + text)
+        self.assertEqual(trees, 1, "git merge-tree ran %d times, want one (PR #10 alone): the stack pair was read" % trees)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the refusal: " + text)
+
+    def test_a_stack_pair_whose_head_lies_behind_this_head_passes_and_reads_the_list_once(self):
+        before = self.head("feat")
+        self.own_writes({"own-b.txt": "lane 7\n"})
+        behind = self.list_pr(9, before, lane_body(OWN))
+        self.assertTrue(self.contains(self.head("feat"), behind), "precondition: this head does not contain PR 9's head, so it is no stack pair")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, reads, trees = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a stack pair whose head lies behind this one refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
+        self.assertEqual(trees, 0, "git merge-tree ran %d times for a stack pair, want none" % trees)
+
+    def test_with_names_a_pr_of_another_session_and_its_conflict_fails(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(9, {"shared-a.txt": "lane 9\n"}, lane_body(OTHER))
+        self.assertFalse(same_lane(self.host.body, self.host.pulls[9]["body"]), "precondition: PR 9 is in this lane, so --with probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")  # control: without --with, another session's PR is not read
+        self.assertEqual(rc, 0, "a PR of another session, not named by --with, refused the lane: " + text)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--with", "9")
+        self.assertEqual(rc, 1, "--with 9 did not refuse a conflicting PR of another session: " + text)
+        self.assertTrue(names_pr(text, 9), "the refusal does not name the --with PR #9: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the conflicting file: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the --with refusal: " + text)
+
+    def test_with_names_a_pr_that_does_not_exist_and_stops_unknown(self):
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--with", "99")
+        self.assertEqual(rc, 1, "--with 99, a PR that does not exist, did not stop: " + text)
+        self.assertTrue(names_pr(text, 99), "the stop does not name PR #99: " + text)
+        self.assertRegex(text, r"(?i)unknown|not found|does not exist|no such|404", "the stop does not say it could not read PR #99: " + text)
+        self.assertEqual(pass_lines(text), [], "--with of a missing PR printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the stop: " + text)
+
+    def test_with_names_a_closed_pr_and_stops_unknown(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(9, {"shared-a.txt": "lane 9\n"}, lane_body(OTHER), state="closed")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--with", "9")
+        self.assertEqual(rc, 1, "--with 9, a closed PR, did not stop: " + text)
+        self.assertTrue(names_pr(text, 9), "the stop does not name the closed PR #9: " + text)
+        self.assertEqual(pass_lines(text), [], "--with of a closed PR printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the stop: " + text)
+
+    def test_a_with_list_reads_each_named_pr(self):
+        self.own_writes({"shared-a.txt": "lane 7\n", "shared-b.txt": "lane 7\n"})
+        self.pr_writes(11, {"shared-a.txt": "lane 11\n"}, lane_body(OTHER))
+        self.pr_writes(12, {"shared-b.txt": "lane 12\n"}, lane_body(OTHER))
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", "11,12")
+        self.assertEqual(rc, 1, "--with 11,12 did not refuse the conflicts of both named PRs: " + text)
+        self.assertTrue(names_pr(text, 11), "the refusal does not name the --with PR #11: " + text)
+        self.assertTrue(names_pr(text, 12), "the refusal does not name the --with PR #12: " + text)
+        self.assertEqual(trees, 2, "git merge-tree ran %d times for --with 11,12, want two: one for each named PR" % trees)
+        self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the --with refusal: " + text)
+
+    def test_a_with_list_with_a_blank_or_non_digit_item_stops_at_parse_and_never_passes(self):
+        """The list is parsed before any PR is read: a blank or non-digit item is a Stop, so no PR is read, no merge-tree runs and no lint runs."""
+        self.pr_writes(11, {"elsewhere.txt": "lane 11\n"}, lane_body(OTHER))  # a real PR, so a lenient parse would read it and could pass
+        self.use_ci_job(PASSING, 0)
+        for value in ("", " ", "11,", "11,,12", "11,x"):
+            with self.subTest(value=value):
+                rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", value)
+                self.assertEqual(rc, 1, "--with %r did not stop at parse: %s" % (value, text))
+                self.assertEqual(pass_lines(text), [], "--with %r printed a PASS line: %s" % (value, text))
+                self.assertEqual(reads, 0, "--with %r read the open PRs before the parse refused it" % value)
+                self.assertEqual(trees, 0, "--with %r ran git merge-tree before the parse refused it" % value)
+                self.assertEqual(lints, 0, "--with %r ran the ci-job lint: %s" % (value, text))
+
+    def test_a_with_list_that_repeats_a_number_reads_that_pr_once(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(11, {"shared-a.txt": "lane 11\n"}, lane_body(OTHER))
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", "11,11")
+        self.assertEqual(rc, 1, "--with 11,11 did not refuse the conflict of PR #11: " + text)
+        self.assertTrue(names_pr(text, 11), "the refusal does not name the --with PR #11: " + text)
+        self.assertEqual(trees, 1, "git merge-tree ran %d times for --with 11,11, want one: a repeated number is read once" % trees)
+        self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
+        self.assertEqual(lints, 0, "the ci-job lint ran past the --with refusal: " + text)
+
+    def test_a_closed_same_lane_pr_is_skipped_and_an_open_one_beside_it_fails(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN), state="closed")
+        self.pr_writes(9, {"shared-a.txt": "lane 9\n"}, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the open same-lane PR beside a closed one did not refuse: " + text)
+        self.assertTrue(names_pr(text, 9), "the refusal does not name the open PR #9: " + text)
+        self.assertFalse(names_pr(text, 8), "the refusal names the closed PR #8, which is skipped: " + text)
+
+    def test_a_draft_same_lane_pr_is_still_open_and_its_conflict_fails(self):
+        """A draft is an open PR, so the lane's list read counts it. A closed PR beside it is skipped (the case above)."""
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN), draft=True)
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a conflicting draft of this lane did not refuse: " + text)
+        self.assertTrue(names_pr(text, 8), "the refusal does not name the draft PR #8: " + text)
+
+    def test_an_unreadable_merge_tree_stops_unknown_and_no_unknown_ok_reason_lifts_it(self):
+        self.pr_writes(8, {"elsewhere.txt": "lane 8\n"}, lane_body(OWN))
+        self.tree_reply = (128, "fatal: merge-tree could not read the trees")  # exit 128: neither clean (0) nor conflict (1)
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, trees = self.measured("--lane-lint", "7")
+        self.assertGreater(trees, 0, "git merge-tree was not run, so the case probes nothing")
+        self.assertEqual(rc, 1, "an unreadable merge-tree passed the lane: " + text)
+        self.assertEqual(pass_lines(text), [], "an unreadable merge-tree printed a PASS line: " + text)
+        self.assertRegex(text, r"(?i)unknown", "an unreadable merge-tree does not stop as unknown: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past an unreadable merge-tree: " + text)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted an unreadable merge-tree: " + text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for an unreadable merge-tree: " + text)
+        self.assertRegex(text, r"(?i)unknown", "--lint-unknown-ok does not leave the unknown stop: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past an unreadable merge-tree with a reason: " + text)
+
+    def test_a_conflict_fail_is_never_lifted_by_an_unknown_ok_reason(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a conflict FAIL: " + text)
+        self.assertTrue(names_pr(text, 8), "the refusal does not name conflicting PR #8: " + text)
+        self.assertEqual(pass_lines(text), [], "a conflict FAIL printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past a conflict FAIL: " + text)
+
+    def test_with_no_other_open_pr_the_run_reads_the_list_once_and_merge_tree_never(self):  # the empty state
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, reads, trees = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(reads, 1, "the open PRs were read %d times with no other PR, want once" % reads)
+        self.assertEqual(trees, 0, "git merge-tree ran %d times with no other PR, want none" % trees)
+
+    def test_the_cost_is_one_list_read_and_one_merge_tree_for_each_checked_pr(self):
+        self.cost_lane()
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, reads, trees = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "the cost lane refused, so a PR that is not checked was read: " + text)
+        self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
+        self.assertEqual(trees, 1, "git merge-tree ran %d times, want one (PR #8 alone): the stack pair or another session's PR was read" % trees)
+
+    def test_with_adds_one_merge_tree_for_each_named_pr(self):
+        self.cost_lane()
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", "10")
+        self.assertEqual(rc, 1, "--with 10 did not refuse PR #10's conflict: " + text)
+        self.assertTrue(names_pr(text, 10), "the refusal does not name the --with PR #10: " + text)
+        self.assertFalse(names_pr(text, 8), "the refusal names PR #8, which does not conflict: " + text)
+        self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
+        self.assertEqual(trees, 2, "git merge-tree ran %d times with --with 10, want two (PR #8 and PR #10)" % trees)
+
+    def test_the_usage_text_names_the_cost_of_the_cross_measure(self):
+        block = lane_lint_usage()
+        self.assertIsNotNone(block, "the usage text has no merge --lane-lint entry")
+        self.assertRegex(block, r"merge-tree", "the lane-lint usage does not name git merge-tree as a cost: " + block)
+        self.assertRegex(block, r"(?i)(PR|pull[ -]request)[ -]list", "the lane-lint usage does not name the PR-list read as a cost: " + block)
+        self.assertRegex(block, r"(?i)per other", "the lane-lint usage does not say merge-tree runs per other PR: " + block)
+
+    def test_a_long_open_list_costs_one_list_read_and_merge_tree_only_for_the_lane(self):  # the full-size state
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        head = self.head("feat")
+        for n in range(100, 219):  # 119 other sessions' open PRs: none is read
+            self.listing(n, head, lane_body(OTHER))
+        self.pr_writes(219, {"shared-a.txt": "lane 219\n"}, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, reads, trees = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "the conflicting same-lane PR in a long list did not refuse: " + text)
+        self.assertTrue(names_pr(text, 219), "the refusal does not name PR #219: " + text)
+        self.assertFalse(names_pr(text, 150), "the refusal names another session's PR #150: " + text)
+        self.assertEqual(reads, 1, "the open PRs were read %d times in a long list, want once" % reads)
+        self.assertEqual(trees, 1, "git merge-tree ran %d times in a long list, want one (PR #219 alone)" % trees)
+
+    def test_the_cross_measure_runs_before_the_ci_job_and_a_fail_never_runs_it(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)  # the stub would pass, so only the cross-measure can stop the lint
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a conflicting same-lane PR did not refuse: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran although the cross-measure refused: " + text)
+
+    def test_the_usage_text_says_a_pr_under_another_session_id_is_missed_unless_with_names_it(self):
+        block = lane_lint_usage()
+        self.assertIsNotNone(block, "the usage text has no merge --lane-lint entry")
+        self.assertRegex(block, r"(?i)another session[^.]*--with|--with[^.]*another session",
+                         "the lane-lint usage does not say a PR posted under another session id is not found unless --with names it: " + block)
+
+
+    def unfetched_pr(self, n, body):
+        """PR n whose head is a commit only the second clone holds, as a fork's head is to origin: the lane cannot fetch it. -> its sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "fork-only", "origin/main")
+        tm.put(os.path.join(o, "fork-only.txt"), "not on origin\n")
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "fork-only")
+        return self.listing(n, tm.sh(o, "git", "rev-parse", "HEAD"), body)
+
+    def assert_remedy_names_a_merge_or_a_rebase(self, text):
+        """The conflict remedy holds for any base: it says to merge one head into the other, or to rebase one on the other."""
+        self.assertRegex(text, r"(?i)merge[^.]*into the other", "the conflict remedy does not say to merge one head into the other: " + text)
+        self.assertRegex(text, r"(?i)rebase[^.]*on the other", "the conflict remedy does not say to rebase one head on the other: " + text)
+
+    def test_an_unreadable_head_of_a_compared_pr_stops_unknown_and_no_unknown_ok_reason_lifts_it(self):
+        """A compared PR whose head cannot be read is a stop: skipping it would read as a pass."""
+        self.own_writes({"own-b.txt": "lane 7\n"})
+        self.unfetched_pr(8, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a compared PR whose head cannot be read passed the lane: " + text)
+        self.assertEqual(pass_lines(text), [], "a compared PR whose head cannot be read printed a PASS line: " + text)
+        self.assertRegex(text, r"(?i)unknown", "a compared PR whose head cannot be read does not stop as unknown: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past an unreadable compared head: " + text)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted an unreadable compared head: " + text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for an unreadable compared head: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past an unreadable compared head with a reason: " + text)
+
+    def test_a_head_the_lane_cannot_fetch_stops_unknown_names_the_pr_and_never_says_run_again(self):
+        self.own_writes({"own-b.txt": "lane 7\n"})
+        self.unfetched_pr(8, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a head the lane cannot fetch did not stop: " + text)
+        self.assertEqual(pass_lines(text), [], "a head the lane cannot fetch printed a PASS line: " + text)
+        self.assertTrue(names_pr(text, 8), "the stop does not name the PR whose head could not be fetched: " + text)
+        self.assertRegex(text, r"(?i)could not be fetched", "the stop does not say the head could not be fetched: " + text)
+        self.assertNotRegex(text, r"(?i)run again", "the stop says to run again, which a head the lane cannot fetch does not clear: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past a head the lane cannot fetch: " + text)
+
+    def test_with_names_the_linted_pr_itself_and_stops_before_any_read(self):
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", "7")
+        self.assertEqual(rc, 1, "--with 7, the linted PR itself, did not stop: " + text)
+        self.assertEqual(pass_lines(text), [], "--with 7 printed a PASS line: " + text)
+        self.assertEqual(self.host.pr_calls, [], "--with 7 read a PR before the parse refused it: %r" % (self.host.pr_calls,))
+        self.assertEqual(reads, 0, "--with 7 read the open PRs before the parse refused it: " + text)
+        self.assertEqual(trees, 0, "--with 7 ran git merge-tree before the parse refused it: " + text)
+        self.assertEqual(lints, 0, "--with 7 ran the ci-job lint: " + text)
+
+    def test_the_usage_text_says_the_pr_list_read_still_runs_with_no_other_pr(self):
+        block = lane_lint_usage()
+        self.assertIsNotNone(block, "the usage text has no merge --lane-lint entry")
+        self.assertRegex(block, r"(?i)list read[^.]*still runs[^.]*no other PR",
+                         "the lane-lint usage does not say the PR-list read still runs when there is no other PR: " + block)
+
+    def test_the_usage_text_says_the_origin_heads_fetch_covers_every_origin_branch(self):
+        block = lane_lint_usage()
+        self.assertIsNotNone(block, "the usage text has no merge --lane-lint entry")
+        self.assertRegex(block, r"(?i)every origin branch", "the lane-lint usage does not say the origin-heads fetch covers every origin branch: " + block)
+
+    def test_the_usage_text_says_a_shallow_clone_runs_fetch_unshallow_once(self):
+        block = lane_lint_usage()
+        self.assertIsNotNone(block, "the usage text has no merge --lane-lint entry")
+        self.assertRegex(block, r"(?i)shallow[^.]*fetch --unshallow[^.]*once",
+                         "the lane-lint usage does not say a shallow clone runs fetch --unshallow once: " + block)
+
+    def test_the_conflict_remedy_names_a_merge_or_a_rebase_for_a_main_base_pr(self):
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a conflicting same-lane PR did not refuse: " + text)
+        self.assert_remedy_names_a_merge_or_a_rebase(text)
+
+    def test_the_conflict_remedy_names_a_merge_or_a_rebase_for_a_release_base_pr(self):
+        self.push_release_branch()  # release is main's tip, so the lane's head holds it and the stack check passes
+        self.host.base = "release"
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a conflicting same-lane PR under a release-base PR did not refuse: " + text)
+        self.assert_remedy_names_a_merge_or_a_rebase(text)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
