@@ -12102,7 +12102,7 @@ sh("hook-bypass allow: running hooks/mutate_shared.py, whose own checkout sets c
 # runs only these. Every case runs in NOGIT.
 #
 # A refuse case reads `allow` on a guard without the rule, so each one is red there. An allow case
-# passes on main today, and it must still pass once the rule lands.
+# checks a form the rule must keep passing, so a fix that refuses too much fails it.
 
 # The shell readers that the guard and the sweep spawn. They are read from source, so a reader that
 # changes is tested as it now reads.
@@ -12182,8 +12182,8 @@ for _words, _rel in _argv_readers().items():
     sh("argv: allow, the reader in %s spawns: %s" % (_rel, _cmd), _cmd, "allow", cwd=NOGIT)
 
 # The Playwright refusal tells a session to run a pgrep. A command the rule refuses would send the
-# session into a refusal, so each command it names must pass. Green on main; red after the rule lands
-# if the remedy still names a refused form.
+# session into a refusal, so each command it names must pass. The case fails when the rule refuses one of
+# them, so a remedy that names a refused form fails here.
 for _cmd in _playwright_remedy_commands():
     sh("argv: allow, the Playwright remedy tells a session to run: " + _cmd, _cmd, "allow", cwd=NOGIT)
 
