@@ -2860,8 +2860,11 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
     const bh = Math.max(box ? box.h : ht, 1), bw = box ? Math.max(box.w, 1) : DW;
     let sc = Math.min(maxScale || 1, ww / bw), scroll = false, g = 0, pw = 0;
     if (maxH) {
-      // A capped picture is the card's column wide, at most maxScale x its own width. The column is floored, as clientWidth rounds up and the box would pass it. Before it is placed, the column is the picture's own width.
-      const col = wrap.parentElement ? Math.floor(wrap.parentElement.getBoundingClientRect().width) : DW + 2, room0 = Math.max(col - 2, 1);
+      // A capped picture is the card's column wide, at most maxScale x its own width. The column is floored, as clientWidth rounds up and the box would pass it.
+      // Out of the page, or in a hidden part of it, the column is unknown: the box reserves the picture at its own drawn width, and stays pending. render() fits a pending box once its card is in the page, in the same task, so the first frame is the placed size. A resize observer is too late for that: it runs after the frame's animation callbacks.
+      const pc = wrap.isConnected && wrap.parentElement ? Math.floor(wrap.parentElement.getBoundingClientRect().width) : 0;
+      me.pending = pc <= 0;
+      const col = pc > 0 ? pc : DW + 2, room0 = Math.max(col - 2, 1);
       sc = Math.min(maxScale || 1, room0 / bw);
       // It draws whole while it is no taller than a FIT_W x PHONE_H phone picture at that width (and no shorter than maxH). A taller one scrolls. A pass of 1px or less counts as fitting.
       const F = Math.max(maxH, Math.ceil(room0 * PHONE_H / FIT_W));
@@ -2876,21 +2879,11 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
       }
       pw = Math.min(Math.ceil(bw * sc), room0 - (scroll ? g : 0)); // ceil can pass the room by 1px from float error
       const o = wrap.closest(".opic"); if (o) picHint(o, scroll);
-      if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
-      if (wrap.parentElement) {
-        // The width and height come from the column. bh is the declared height until the mockup reports its own, so the first paint is the height it settles to.
-        sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px"; sizer.style.aspectRatio = ""; sizer.style.marginBottom = ""; sizer.style.maxWidth = "";
-        wrap.style.width = pw + 2 + g + "px"; wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.maxWidth = "";
-        wrap.style.height = (scroll ? maxH : Math.ceil(bh * sc)) + "px";
-      } else {
-        // Not placed yet, so the column is unknown and only CSS can size the box. The sizer takes the column's width inside the border, at most maxScale x the picture's width, and the picture's aspect. Its margin takes back the 2px of border, so the box is as high as the placed one (the border-box height ceil(bh * sc)).
-        // A picture taller than a FIT_W x PHONE_H phone picture scrolls at any column that fits it whole above maxH, so its box is capped at maxH. That is exact except for a picture whose aspect is within 1px of the phone's, where it is as high as the whole picture. The placement then fits the box again.
-        sizer.style.width = ""; sizer.style.height = ""; sizer.style.aspectRatio = bw + " / " + bh; sizer.style.marginBottom = "-2px";
-        sizer.style.maxWidth = bw * (maxScale || 1) + "px";
-        wrap.style.width = ""; wrap.style.height = ""; wrap.style.aspectRatio = "";
-        wrap.style.maxWidth = Math.ceil(bw * (maxScale || 1)) + 2 + "px";
-        wrap.style.maxHeight = bh * FIT_W > bw * PHONE_H ? maxH + "px" : "";
-      }
+      if (!po && !me.pending && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
+      // The width and height come from the column. bh is the declared height until the mockup reports its own, so the first paint is the height it settles to.
+      sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px";
+      wrap.style.width = pw + 2 + g + "px";
+      wrap.style.height = (scroll ? maxH : Math.ceil(bh * sc)) + "px";
     }
     f.style.height = ht + "px";
     f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
@@ -2904,7 +2897,8 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
     }
     if (scroll) picEdges(wrap);
   };
-  FITS.push({ f, key, fit });
+  const me = { f, key, fit, pending: false };
+  FITS.push(me);
   if (window.ResizeObserver) { const ro = new ResizeObserver(fit); ro.observe(wrap); if (head) ro.observe($("dTitle")); }
   fit(); return wrap;
 }
@@ -3015,6 +3009,7 @@ document.addEventListener("keydown", (e) => {
 function render() {
   renderList(); renderRail(); renderBar(); renderSent(); releaseSent();
   FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
+  FITS.forEach((x) => { if (x.pending) x.fit(); }); // a picture built out of the page fits to its column now, before the first frame
   const nd = allDesigns().length;
   $("dCount").textContent = nd || ""; $("tabD").hidden = !state.items.some((i) => designsOf(i).length);
   // The count box has a fixed width, so a count that grows moves no tab. It stays empty until the items load.
