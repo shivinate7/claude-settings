@@ -5,8 +5,8 @@
   "order": 967,
   "owner": null,
   "why": "Coordinator incident, 04:06 CST Nov 10: it released #2515 to runner 8 while `merge --reviewed` listed it under \"No record\". Its grep for \"^#2515 \" printed nothing, and it read the silence as fine. The harm: an unreviewed PR reaches a batch.",
-  "note": "Fix: one script runs every release check: the `merge --reviewed` line is present and done, the record is unedited, the lint verdict, merge-tree, and the stack bases. It prints PASS or FAIL per PR, and a missing line is FAIL. Step release-pairwise-clash (the pairwise merge-tree check) can become one of its checks. Coordinator started lane session_013NEJKyjEhPeuaT1HrHD16Y at 04:53 CST Nov 10.",
-  "updatedAt": "2026-11-10T04:53:00-06:00",
+  "note": "Fix: one script runs every release check: the `merge --reviewed` line is present and done, the record is unedited, the lint verdict, merge-tree, and the stack bases. It prints PASS or FAIL per PR, and a missing line is FAIL. Step release-pairwise-clash (the pairwise merge-tree check) can become one of its checks. Coordinator started lane session_013NEJKyjEhPeuaT1HrHD16Y at 04:53 CST Nov 10. #2539 released to the batch ( CST Nov 10, coordinator); round-3 low notes are note release-check-low-notes.",
+  "updatedAt": "2026-11-10T09:35:00-06:00",
   "lane": "session_013NEJKyjEhPeuaT1HrHD16Y",
   "blockedBy": []
 }
