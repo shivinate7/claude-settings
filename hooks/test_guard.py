@@ -28065,7 +28065,7 @@ LOG_CHECKS_EXTRA.append(("agent-remote-tools: REMOTE_OUTWARD_TOOLS holds exactly
                          pinned_outward_check))
 FAMILY = "rule9"  # the family the cases below had before this section
 
-# ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
+# ---- Lane effort pin. A lane session runs Sonnet at medium effort. On a cloud session the only
 # prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
 # command. So a create_session that tags a lane must carry that prompt alone. Calls without the
 # lane tag are not judged by this rule.
