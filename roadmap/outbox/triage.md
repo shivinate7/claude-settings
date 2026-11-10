@@ -375,3 +375,14 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - twob-c-flag-unpinned (#1583 two-worktrees-one-branch round 3, lane override-plain-ask 01:27 CST Nov 10; decision two-worktrees-one-branch): no hook case proves `-C` picks the tree that rule 1b2 judges; a mutant that drops head_root passes the family (hooks/guard.py, rule 1b2's two_worktrees_hit call). Matters only where other-checkout lets a cross-checkout `-C` through (a scratchpad worktree, or an override).
 - twob-pins-other-checkout (#1583): the case "git -C <holder> checkout -B x ... denies by other-checkout" in hooks/test_guard.py pins other-checkout's verdict; it goes stale if other-checkout changes.
 - twob-deny-term (#1583): docs/decisions/two-worktrees-one-branch.md line 5 says "the deny"; write "the refusal" (glossary).
+- spsm-header-drops-acts (#2464 stop-push-skips-merged, coordinator 01:29 CST Nov 10; none a safety hole): the shortened header drops "and acts".
+- spsm-silent-fail-closed (#2464): silent paths fail closed when cp, awk or mktemp fails.
+- spsm-symlink-follow (#2464): -f/-w follow a symlink, and mv -f replaces it.
+- spsm-concurrent-dup-line (#2464): two concurrent runs could insert the same line twice.
+- spsm-mode-0755-only (#2464): the file mode is tested only at 0755.
+- checkout-theirs-mid-merge (#2464, process): a builder ran `git checkout --theirs docs/catalog.md` mid-merge (the brief allowed it for a generated file, regenerated at once); no guard flags that form during a merge conflict.
+- mtmc-future-header (#1447 message-time-matches-clock): a dated future header ("Meeting, 2026-11-12 09:00 CST:") is refused at any distance; the decision's false-alarm list omits it.
+- mtmc-offset-two-homes (#1447): _STAMP_OFFSET_HOURS copies offsets that local_time.py owns (one home).
+- mtmc-dash-docstring (#1447): the dash regex needs a space only before the dash; the docstring says both sides.
+- mtmc-limit-unit (#1447): the reason text "the limit is 1" has no unit.
+- mtmc-sendmessage-unjudged (#1447): SendMessage (agent to agent) stamps are not judged and are not listed as a known miss.
