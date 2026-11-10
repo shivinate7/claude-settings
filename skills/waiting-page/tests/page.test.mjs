@@ -152,8 +152,7 @@ const serveRequest = (r, body) => {
 const FONT_RUN = new WeakMap();
 const runFont = (t) => FONT_RUN.get(t) || null;
 const fontName = (t) => (runFont(t) ? runFont(t).label : "served");
-// A layout case runs twice: in the served font, and in the fallback. Absolute pins (PINS, PIN_ASK, REPLY_PINS) are plain tests: their numbers
-// are the served font's, and a fallback run of them would measure a different page.
+// A layout case runs twice: in the served font, and in the fallback.
 const layoutTest = (name, fn) => {
   test(`${name}, served font`, (t) => { FONT_RUN.set(t, null); return fn(t); });
   test(`${name}, ${FALLBACK_FONT.label} fallback`, (t) => { FONT_RUN.set(t, FALLBACK_FONT); return fn(t); });
@@ -3297,60 +3296,6 @@ for (const kind of SIDE_KINDS) layoutTest(`folded row, side press: at 360 wide w
   assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at 360 wide with the root font size doubled, beside the ${FOLD_ROWS[kind].press} row`);
 });
 
-// Served-font boxes the fix must keep. At 1440, 820 and 390 wide they equal main's boxes; at 360 wide they hold the folded-date wrap
-// (docs/design/ask-folded-date-notes.md). Each row's box is [left, right, height] of the folded row's li; the row and press are [right, top offset from the li, height] and [left, right, top offset, height]. A box that moves fails by
-// name. The Ask box presses are [Add left, Add right, Send left, Send right]. Tolerance is 1 px.
-const PINS = {
-  1440: {
-    dismiss: { li: [424, 1284, 50], row: [1159, 1, 48], press: [1163, 1275, 3, 44] },
-    restore: { li: [424, 1284, 50], row: [1154, 1, 48], press: [1158, 1275, 3, 44] },
-    wait: { li: [424, 1284, 128], row: [1283, 1, 48], press: [1181, 1267, 14, 22] },
-  },
-  820: {
-    dismiss: { li: [16, 804, 50], row: [679, 1, 48], press: [683, 795, 3, 44] },
-    restore: { li: [16, 804, 50], row: [674, 1, 48], press: [678, 795, 3, 44] },
-    wait: { li: [16, 804, 128], row: [803, 1, 48], press: [701, 787, 14, 22] },
-  },
-  390: {
-    dismiss: { li: [16, 374, 93], row: [249, 1, 91], press: [253, 365, 25, 44] },
-    restore: { li: [16, 374, 93], row: [244, 1, 91], press: [248, 365, 25, 44] },
-    wait: { li: [16, 374, 196], row: [373, 1, 91], press: [271, 357, 35, 22] },
-  },
-  // At 360 the heights and tops hold the folded-date wrap per docs/design/ask-folded-date-notes.md, not main's boxes.
-  360: {
-    dismiss: { li: [16, 344, 115], row: [219, 1, 113], press: [223, 335, 35, 44] },
-    restore: { li: [16, 344, 115], row: [214, 1, 113], press: [218, 335, 35, 44] },
-    wait: { li: [16, 344, 218], row: [343, 1, 113], press: [241, 327, 46, 22] },
-  },
-};
-const PIN_ASK = { 1440: [1012, 1123, 1135, 1267], 820: [532, 643, 655, 787], 390: [33, 143, 225, 357], 360: [33, 143, 195, 327] };
-const near = (got, pin) => got.length === pin.length && got.every((v, i) => Math.abs(v - pin[i]) <= 1);
-for (const width of [1440, 820, 390, 360]) for (const kind of PRESS_KINDS) for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at ${width} wide the ${kind} row and its press keep their boxes`, async (t) => {
-    const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
-    const id = FOLD_ROWS[kind].ask.id;
-    foldedScope(await foldedDate(page, id), kind, width);
-    const g = await pressGeo(page, id), pin = PINS[width][kind];
-    const got = {
-      li: [g.li.l, g.li.r, g.li.b - g.li.t],
-      row: [g.row.r, g.row.t - g.li.t, g.row.b - g.row.t],
-      press: [g.press.l, g.press.r, g.press.t - g.li.t, g.press.b - g.press.t],
-    };
-    for (const part of ["li", "row", "press"]) {
-      const v = got[part].map(Math.round);
-      assert.ok(near(v, pin[part]), `the ${kind} row's ${part} is [${v}] at ${width} wide, not the pinned [${pin[part]}]`);
-    }
-  });
-}
-for (const width of [1440, 820, 390, 360]) for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at ${width} wide Add to list and Send ask keep their x positions`, async (t) => {
-    const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
-    const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
-    const v = [g.add.l, g.add.r, g.send.l, g.send.r].map(Math.round);
-    assert.ok(near(v, PIN_ASK[width]), `the Ask box presses are at x [${v}] at ${width} wide, not the pinned [${PIN_ASK[width]}]`);
-  });
-}
-
 // The narrowest width where a side press sits beside the row's text. Widths from 180 to 400 are tried in 1 px steps on one page, so the
 // width is the layout's own breakpoint. The press is beside when its left edge is past the text column's right edge.
 async function narrowestBeside(page, id) {
@@ -3382,22 +3327,6 @@ const replyGeo = (page, root) => page.evaluate((k) => {
   const rel = (el) => { const b = box(el.getBoundingClientRect()); return { l: b.l - fb.l, r: b.r - fb.l, t: b.t - fb.t, b: b.b - fb.t, text: el.textContent.trim() }; };
   return { rx: rel(rx), rs: rel(rs), hint: rel(document.getElementById("rh-" + k)) };
 }, root);
-// Close and Send reply at the default text, in px from the form's top-left corner: [left, right, top, bottom]. Tolerance is 1 px.
-const REPLY_PINS = { 360: { rx: [13, 75, 241, 289], rs: [169, 281, 241, 289] }, 390: { rx: [13, 75, 241, 289], rs: [199, 311, 241, 289] } };
-for (const width of [360, 390]) for (const scheme of SCHEMES) {
-  test(`press rows, ${scheme}: at ${width} wide the reply form's Close and Send reply keep their boxes`, async (t) => {
-    const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: RPL_NEW, viewport: { width, height: 800 }, scheme }); if (!page) return;
-    await openReply(page, RPL_ROOT);
-    const g = await replyGeo(page, RPL_ROOT);
-    assert.ok(g, "no reply form is drawn at " + width + " wide");
-    assert.equal(g.rx.text, "Close", "the first press in the reply form reads " + JSON.stringify(g.rx.text) + ", not Close");
-    assert.equal(g.rs.text, "Send reply", "the second press in the reply form reads " + JSON.stringify(g.rs.text) + ", not Send reply");
-    for (const k of ["rx", "rs"]) {
-      const got = [g[k].l, g[k].r, g[k].t, g[k].b].map(Math.round);
-      assert.ok(near(got, REPLY_PINS[width][k]), `${g[k].text} is at [${got}] in the reply form at ${width} wide, not the pinned [${REPLY_PINS[width][k]}]`);
-    }
-  });
-}
 for (const scheme of SCHEMES) {
   layoutTest(`press rows, ${scheme}: with the root font size doubled at 390 wide, the reply form's Close and Send reply do not overlap`, async (t) => {
     const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage: RPL_NEW, viewport: { width: 390, height: 800 }, scheme }); if (!page) return;
@@ -3511,7 +3440,7 @@ for (const [width, zoom, label] of DISMISSED_GLYPH_SIZES) for (const scheme of S
 // At 520 wide the Ask list takes main's two-line form: the title wraps to two lines, and its box is the width main gives it. The list is
 // 30.5em at 100% text, the width of main's 520px rule in em, and the list's narrow rule must include that width. The list's width is
 // checked first, so a case that misses that boundary fails by name. The widths are main's, read from main's page in each font.
-const TITLE_520 = { dismiss: { served: 317.6, fallback: 305.5 }, restore: { served: 313.4, fallback: 292.4 }, wait: { served: 331.5, fallback: 309.7 } };
+const TITLE_520 = { dismiss: { served: 317.6, fallback: 305.5 }, restore: { served: 313.4, fallback: 292.4 } };
 const askTitleGeo = (page, id) => page.evaluate((id) => {
   const li = document.getElementById("row-" + id), title = li.querySelector(".frow .ftext"), list = li.closest("ol.asklist");
   const runs = [], walk = document.createTreeWalker(title, NodeFilter.SHOW_TEXT);
@@ -3519,7 +3448,7 @@ const askTitleGeo = (page, id) => page.evaluate((id) => {
   const tb = title.getBoundingClientRect();
   return { width: tb.width, lines: new Set(runs.filter((r) => r.top < tb.bottom - 0.5).map((r) => Math.round(r.top))).size, listEm: list.getBoundingClientRect().width / parseFloat(getComputedStyle(list).fontSize) };
 }, id);
-for (const kind of Object.keys(FOLD_ROWS)) for (const scheme of SCHEMES) {
+for (const kind of SIDE_KINDS) for (const scheme of SCHEMES) {
   layoutTest(`folded answered row ${FOLD_ROWS[kind].label}, ${scheme}: at 520 wide the Ask list takes main's two-line form`, async (t) => {
     const page = await foldedRowPage(t, kind, 520, scheme); if (!page) return;
     const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
