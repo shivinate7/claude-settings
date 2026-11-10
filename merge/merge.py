@@ -3662,7 +3662,7 @@ def clean_merges_after(h, head, live):
         if len(parents) == 1:  # an empty commit keeps the record; any other single-parent commit changes the lane's diff
             before = commit(parents[0])[1]
             if not tree or not before:
-                raise Stop(f"the commit read names no tree for {sha[:9]} or its parent {parents[0][:9]}")
+                raise Stop(f"the commit read names no tree for {sha[:9]} or its parent {parents[0][:9]} " + REVIEW_CITE)
             if tree != before:
                 return False
         else:
@@ -3670,7 +3670,7 @@ def clean_merges_after(h, head, live):
                 return False
             state, why = merge_state(h, parents, tree)
             if state == "unknown":
-                raise Stop(why)
+                raise Stop(why + " " + REVIEW_CITE)
             if state != "clean":
                 return False
         sha = parents[0]
