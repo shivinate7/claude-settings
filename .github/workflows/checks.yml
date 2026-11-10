@@ -795,23 +795,73 @@ jobs:
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
 
-      # The waiting page template (skill waiting-page) in the same browser. Its paths fall to the
-      # all-on arm of ci-scope.sh, so a change there runs this job. A red shoot suite above
-      # skips this step; it runs again once that suite is green. The merged-page cases run the
-      # roadmap build and the splice (tests/merged_page.py), so the runner needs python3 and git.
-      # ubuntu-latest has both; the first line fails the step at once if one goes missing.
-      - name: waiting page suite
-        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
-        shell: bash
-        run: |
-          python3 --version && git --version
-          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
-
+      # The waiting page suite (skill waiting-page) runs in the `shoot` job below, in five shards. Its paths fall to the
+      # all-on arm of ci-scope.sh, so a change there runs both jobs.
       - name: roadmap page suite
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         shell: bash
         run: |
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs
+
+  # The waiting page suite (skill waiting-page) in five shards, one per matrix leg. The suite holds 2144 cases at about 0.3 s each
+  # on the runner, 11.4 min in one step: it was killed at checks-shoot's 10 min cap (runs 42777877919 and 42788696668). node's
+  # --test-shard slices by test file, and the suite is one file, so each leg picks its cases by name instead. The case names end
+  # ", served font" or ", DejaVu Sans fallback" (layoutTest in page.test.mjs), and the tab list family starts "tab list". Each
+  # test lands in exactly one leg: font suffix served or fallback, times tab list or not, and the leg with neither suffix. Every
+  # leg gets both patterns, never an empty one: node refuses an empty pattern, and a `^$` skip pattern skipped every case in the proof run. The job key is `shoot`, so its scope
+  # condition reads needs.scope.outputs.shoot, the flag of checks-shoot, which keeps the shoot and roadmap suites. Both test files
+  # go to every leg; test_check_designs.mjs has no suffix, so it runs in the last leg only.
+  shoot:
+    runs-on: ubuntu-latest
+    needs: scope
+    # Cap 10 min, provisional. The killed run did 1790 cases in 9.5 min, 0.32 s a case. A local timing of the case families
+    # (0.32 s served, 0.51 s DejaVu, 0.49 s other) scaled to that rate gives each leg 2.4 to 3.3 min, plus about 15 s of setup.
+    # The legs hold 392 to 544 cases. Measured on a laptop, unmeasured on the runner.
+    timeout-minutes: 10 # provisional
+    name: waiting page suite (${{ matrix.leg }})
+    strategy:
+      # A red leg must not cancel the others: the rollup reads every leg, and a cancelled leg hides its own verdict.
+      fail-fast: false
+      matrix:
+        include:
+          - leg: served font
+            name_pattern: ', served font$'
+            skip_pattern: '^tab list'
+          - leg: DejaVu fallback
+            name_pattern: ', DejaVu Sans fallback$'
+            skip_pattern: '^tab list'
+          - leg: tab list, served font
+            name_pattern: '^tab list.*, served font$'
+            skip_pattern: ', DejaVu Sans fallback$'
+          - leg: tab list, DejaVu fallback
+            name_pattern: '^tab list.*, DejaVu Sans fallback$'
+            skip_pattern: ', served font$'
+          - leg: no font suffix
+            name_pattern: '.'
+            skip_pattern: ', served font$|, DejaVu Sans fallback$'
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Playwright and Chromium, no apt step
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        uses: $/actions/playwright-setup
+        with:
+          package-dir: .github/shoot
+
+      # The merged-page cases run the roadmap build and the splice (tests/merged_page.py), so the runner needs python3 and git.
+      # ubuntu-latest has both; the first line fails the step at once if one goes missing.
+      - name: waiting page suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        env:
+          NAME_PATTERN: ${{ matrix.name_pattern }}
+          SKIP_PATTERN: ${{ matrix.skip_pattern }}
+        run: |
+          python3 --version && git --version
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test --test-name-pattern="$NAME_PATTERN" --test-skip-pattern="$SKIP_PATTERN" skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
@@ -1869,6 +1919,7 @@ jobs:
       - checks-guard
       - checks-guard-2
       - checks-shoot
+      - shoot
       - pointer-windows
       - shell-macos
       - checks-macos
@@ -1904,6 +1955,7 @@ jobs:
       - checks-guard
       - checks-guard-2
       - checks-shoot
+      - shoot
       - pointer-windows
       - shell-macos
       - checks-macos
