@@ -243,9 +243,22 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
-# The in-place flag of `sed` wherever a segment's text shows it: alone, last in a flag cluster (`-ri`, `-Ei`,
-# `-ni`, `-i.bak`), or long. A flag glued to a word (`--in-place`) starts after a space, never inside a word.
-_SED_IN_PLACE = r"(?<![\w-])(?:-[A-Za-z]*i\b|--in-place\b)"
+# `sed` edits a file in place when a flag of its own says so, never when a script word looks like one. The words
+# are read as `sed` reads them (`_sed_read`): `-i[SUFFIX]` takes the rest of its cluster as the suffix, so `-ie`
+# and `-ibak` are in place. A quoted word is searched too, for `bash -c "sed -i F"`.
+_SUBSTITUTION_LEAD = re.compile(r"""^[^'"]*[({`]""")   # `$(sed`, `x=$(sed`, `(sed`, a backtick
+
+
+def _sed_edits_in_place(text: str) -> bool:
+    """True when a `sed` in the text carries the in-place flag, as a command word or inside a quoted script."""
+    for segment in split_segments(text, []):
+        words = _quoted_words(segment)
+        for at, word in enumerate(words):
+            if _name(_SUBSTITUTION_LEAD.sub("", word)) == "sed" and _sed_read(["sed", *words[at + 1:]])[1]:
+                return True
+            if word[:1] in "'\"" and "sed" in word and _sed_edits_in_place(_unquoted(word)):
+                return True
+    return False
 
 
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
@@ -261,13 +274,12 @@ def _script_mutates(script: str) -> bool:
     for segment in split_segments(script):
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
-        if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(_SED_IN_PLACE, word) for word in rest)):
+        if _mutates_as_command(command, rest) or (command == "sed" and _sed_read([command, *rest])[1]):
             return True
     return False
 
 
-def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
+def writes_to(path: str, cmd: str, command=None, words=(), segment=None) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
     Two ways to write a named file from a shell: redirect onto it, or hand it to a command that
@@ -279,17 +291,20 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     counting as a write to a path named in a comment.
     """
     target = re.escape(path)
+
+    def sed_writes() -> bool:
+        return _sed_edits_in_place(cmd if segment is None else segment) and bool(
+            re.search(r"\bsed\b[^\n;|&]*" + target, cmd))
+
     if re.search(r"\d?>>?\s*['\"]?" + target, cmd):
         return True
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*" + _SED_IN_PLACE + r"[^\n;|&]*" + target, cmd))
+        return command == "sed" and sed_writes()
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*" + _SED_IN_PLACE + r"[^\n;|&]*" + target, cmd):
-        return True
-    return False
+    return sed_writes()
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -1738,15 +1753,21 @@ _SED_VALUE_FLAGS = {"expression": (True, True), "file": (False, True), "line-len
 
 
 def _sed_script_words(words) -> set:
-    """The indexes of the words of a `sed` segment that are its script: the value of each `-e` or
-    `--expression`. With no `-e`, `-f` or `--file` anywhere (spaced or glued), the first operand is the
-    script. sed reads its flags wherever they stand, so an operand before `-e` or `-f` is a file, and
+    """The indexes of the script words of a `sed` segment, as `_sed_read` finds them."""
+    return _sed_read(words)[0]
+
+
+def _sed_read(words) -> tuple:
+    """(the script words, whether `-i` or `--in-place` is set) of a `sed` segment. The in-place flag is read
+    from the flags `sed` reads, never from a script or value word. The script words are the indexes of the
+    words that are its script: the value of each `-e` or `--expression`. With no `-e`, `-f` or `--file`
+    anywhere (spaced or glued), the first operand is the script. sed reads its flags wherever they stand, so an operand before `-e` or `-f` is a file, and
     only `--` ends the flags. A script is text, never a path. A `-f` or `-l` value and the other operands
-    are not. Empty when the segment is no `sed`."""
+    are not. No script and no in-place flag when the segment is no `sed`."""
     index = resolve_command(tuple(words))
     if index is None or _name(words[index]) != "sed":
-        return set()
-    scripts, operands, explicit, at, flags = set(), [], False, index + 1, True
+        return set(), False
+    scripts, operands, explicit, at, flags, in_place = set(), [], False, index + 1, True, False
     while at < len(words):
         word = _unquoted(words[at])
         if flags and word == "--":
@@ -1755,6 +1776,7 @@ def _sed_script_words(words) -> set:
             operands.append(at)
         elif word.startswith("--"):
             name, glued, _value = word[2:].partition("=")
+            in_place = in_place or name == "in-place"
             kind = next((flag for flag in _SED_VALUE_FLAGS if name and flag.startswith(name)), None)
             if kind:
                 is_script, gives_script = _SED_VALUE_FLAGS[kind]
@@ -1765,6 +1787,7 @@ def _sed_script_words(words) -> set:
         else:
             for place, letter in enumerate(word[1:]):
                 if letter == "i":
+                    in_place = True
                     break   # the rest of the cluster is the backup suffix
                 if letter in "efl":
                     glued = place + 2 < len(word)
@@ -1776,7 +1799,7 @@ def _sed_script_words(words) -> set:
         at += 1
     if not explicit and operands:
         scripts.add(operands[0])
-    return scripts
+    return scripts, in_place
 
 
 def _value_uses(text) -> list:
@@ -2237,7 +2260,8 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 if not hit and fed and word != '""' and position not in dest_words:
                     walked = _first_test_under(word, at, predicate, (filters or {}).get(_unquoted(word)))
                     hit = bool(walked)
-            if hit and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if hit and writes_to(word, text, *(_segment_command(script) if command_position else (None, ())),
+                                   segments[number]):
                 return word + _TOO_LARGE_NOTES.get(walked, "")
         if written and not closed and not predicate_command:
             wrote = _copy_written_hit(raw, at, predicate, bool(fed), filters, made)
