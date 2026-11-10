@@ -35734,6 +35734,30 @@ role_model_refuse("role-model: fix check: Explore on sonnet with the marker is d
                   "Explore", "sonnet", FIX_MARKER + ". Find where X is defined.", carries=(EXPLORE_MARKER,),
                   lacks=ROLE_LACKS + (FIX_MARKER,))
 
+# ---- served model on a fix check (decision agent-model-cap, the reviewer row; owner item 444 a, 2026-11-08 15:04 CST).
+# A fix check runs Sonnet, set per spawn. Its first line is the bare marker, not a round line, so step-up does not read it
+# (step_up_reason reads rounds 2 and 3 only). With no model the row passes it: through the env default when
+# CLAUDE_CODE_SUBAGENT_MODEL is set, and through the agent file's `haiku` pin when it is not. The tag "served-model:" selects
+# these cases alone (MUTATE_ONLY). Failure classes: a false allow (a no-model fix check serves haiku); a false deny (the
+# controls below, which a fix must leave allowed).
+SERVED_REMEDY = (("model sonnet", "(sonnet)"),)
+role_model_refuse("role-model: served-model: fix check, reviewer with no model is denied when the default is sonnet",
+                  "reviewer", None, FIX_MARKER + ". Re-run the cases.", env=SONNET_DEFAULT, carries=SERVED_REMEDY)
+role_model_refuse("role-model: served-model: fix check, reviewer with no model is denied when the default is unset",
+                  "reviewer", None, FIX_MARKER + ". Re-run the cases.", env=UNSET_DEFAULT, carries=SERVED_REMEDY)
+role_model_refuse("role-model: served-model: fix check, Round 1 of 3 after the marker, reviewer with no model is denied "
+                  "when the default is sonnet", "reviewer", None, FIX_MARKER + ". Round 1 of 3 finding F1, head abc1234.",
+                  env=SONNET_DEFAULT, carries=SERVED_REMEDY)
+# Controls, green on the old code too: a reviewer's first round with no marker runs on its row, with no model or on haiku.
+role_model_allow("role-model: served-model: reviewer with no marker and no model is allowed when the default is sonnet",
+                 "reviewer", None, "Check the diff for typos.", env=SONNET_DEFAULT)
+role_model_allow("role-model: served-model: reviewer with no marker on haiku is allowed, at its own row",
+                 "reviewer", "haiku", "Check the diff for typos.")
+role_model_allow("role-model: served-model: record-writer with no model is allowed when the default is unset (its file "
+                 "pins haiku)", "record-writer", None, "Record the decision.", env=UNSET_DEFAULT)
+role_model_allow("role-model: served-model: record-writer with no model is allowed when the default is sonnet",
+                 "record-writer", None, "Record the decision.", env=SONNET_DEFAULT)
+
 # A reviewer's refusal names each brief form that lifts it above its row: rounds 2 and 3, and the fix check on line one.
 # It also says the first round and the test-author run on their role's model. A builder's refusal names none of these.
 role_model_refuse("role-model: reviewer on sonnet with no round line names each brief form and the round 1 sentence",
