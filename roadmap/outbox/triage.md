@@ -397,3 +397,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - tfoh-gaps (#2264 time-from-one-helper, coordinator 01:31 CST Nov 10): the tests pin only the helper path, not --iso; two section headers read "#===="; the local-time-central rule does not name now-central.
 - mrml-head-is-newest-run (#2492 merge-red-main-latest-run): "the base's head" means the newest run's commit on the page read, not the git tip; if the tip has no run yet, a re-run tests an older commit.
 - mrml-noise-and-get (#2492): a red verdict may list a re-run that does not clear it (noise); base_state reads r["event"] where r.get("event") would match the line above.
+- asmc-workflow-no-model (#2486 agent-served-model-check, coordinator 01:33 CST Nov 10; decision agent-model-cap): a Workflow agent() with no model is not judged.
+- asmc-per-spawn-unmeasured (#2486): per-spawn-beats-pin is unmeasured for Workflow builders.
+- (debt) served-model-not-checked-at-end (#2486; decision agent-model-cap): no check that the served model equals the requested one at agent end; not built. Debt, not note: the owner's 19:44 CST Nov 9 incident (set to Sonnet, settings model unchanged; step agent-served-model-check) shows Claude hits it in normal work.
+- push-alone-unguarded (triage 01:31 CST Nov 10): a `git push` ran in one Bash call with a commit and other commands, and no hook refused it. Handoff premise P7 said hooks hold "each git push in its own call"; check whether any guard does, or drop the premise.
