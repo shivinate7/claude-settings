@@ -23,7 +23,7 @@ Old ruling or "was:", or a "was:" after the word "old" in its block) is a proble
 The merge tool (merge/merge.py) writes the records page on the pull request head before it merges. So
 `--check` waives a stale or missing records page on a pull request run (GITHUB_BASE_REF set, or GITHUB_REF
 under refs/pull/) and on a dispatched run of a branch other than main (GITHUB_EVENT_NAME workflow_dispatch,
-GITHUB_REF under refs/heads/). It fails on any other run: a dispatch of main, a push to main, a bare run.
+GITHUB_REF under refs/heads/ with a branch name that is not empty and not main). It fails on any other run: a dispatch of main, a push to main, a bare run.
 
 Sources, all read from the root:
   settings.json `hooks`   one row per registration (event, matcher, `if`, command or prompt).
@@ -736,8 +736,8 @@ def render_records():
 
 
 def pull_request_run():
-    """True on a run whose branch the merge tool will rebuild the records page on: a pull request run in
-    Actions, as the stamp engine reads it (onDefaultBranch), or a dispatched run of a branch other than main."""
+    """True on a pull request run in Actions, as the stamp engine reads it (onDefaultBranch), or on a dispatched
+    run of any branch other than main. A lane's dispatched run needs the waiver for its retire run."""
     ref = os.environ.get("GITHUB_REF", "")
     branch = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ""
     dispatched_lane = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" and branch not in ("", "main")
