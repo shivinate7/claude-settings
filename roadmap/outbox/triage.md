@@ -342,3 +342,8 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - stamp-write-forms-untested (#2480): the write forms redirect, rm, mv, cp, tee, sed -i, git add and push have no test. Family: stamp-shell-write-not-judged.
 - stamp-docstring-handoff (#2480): the guard.py docstring row says the handoff is no evidence; the code excludes only a Read of it.
 - shell-tools-two-homes (#2480): SHELL_TOOLS is declared twice, in precompact_handoff.py and guard_core.py.
+- (debt) pull-files-two-homes (#2431 red-fix-finds-open-pr, coordinator 01:13 CST Nov 10): Host.pull_files duplicates main's Host.pr_files and lacks its 3000-file cap check, so a PR over 3000 files could read clear. One-home defect.
+- merge-touches-not-allowed (#2431): settings.json entry "Merge Tool Read Checks" names three read flags, not --touches, so `merge --touches` may be asked or refused. Widening is the owner's call; note until it bites.
+- touches-ignores-session-config (#2431): --touches ignores --session/--config; no test pins the closing-reason order.
+- red-run-term (#2431): "red run" in session-tiers.md and merge.py should read "failed run" (glossary).
+- red-fix-earlier-notes (#2431): one parsed line accounts for a whole failed job; rollup exempt even when cancelled; rollup matched by exact name.
