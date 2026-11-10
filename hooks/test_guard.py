@@ -20438,7 +20438,8 @@ def bs_stop(name, expected, repo, role, key, stop_active=False, rule=None, lacks
             "transcript_path": BS_TRANSCRIPT, "agent_transcript_path": bs_agent(key)}
     if stop_active:
         body["stop_hook_active"] = True
-    add(name, expected, rule=rule, raw=json.dumps(body), cwd=repo, lacks=lacks,
+    # The raw JSON doubles Windows backslashes, so materialize_for cannot match the transcript in it.
+    add(name, expected, rule=rule, raw=json.dumps(body), cwd=repo, lacks=lacks, transcript=BS_TRANSCRIPT,
         carries=BS_REMEDY if rule else ())
 
 
