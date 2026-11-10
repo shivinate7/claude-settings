@@ -1667,7 +1667,7 @@ def named_outside_lane_undo(got, own):
 class OwnLineCap(unittest.TestCase):
     """branch_only_lines reads every lost line of one file as the branch's own or not, never a capped prefix.
     A merge that drops more than 25 own lines of one file must not read as undone main work."""
-    # A merge that puts app.txt back to its pre-feat text is the lane undo read's whole-file put-back (owner ruling, page item 167, 2026-11-03 18:16 CST).
+    # A merge that puts app.txt back to its pre-feat text is the lane undo read's whole-file put-back (decision silent-undo-check-design).
 
     def test_a_merge_that_drops_thirty_own_lines_of_one_file_reads_clean(self):
         r, m = drop_merge(OWN30, own=True)
@@ -1742,7 +1742,7 @@ def note_merge(kept):
 class OwnLineScale(unittest.TestCase):
     """A per-file cap of any realistic size is far below 1000 lines. A merge that drops 1000 own lines of one
     file reads clean, so a cap of any size goes red here."""
-    # The same whole-file put-back as OwnLineCap: the lane undo read flags it (owner ruling, page item 167, 2026-11-03 18:16 CST).
+    # The same whole-file put-back as OwnLineCap: the lane undo read flags it (decision silent-undo-check-design).
 
     def test_a_merge_that_drops_a_thousand_own_lines_of_one_file_reads_clean(self):
         r, m = drop_merge(OWN1000, own=True)
