@@ -391,6 +391,40 @@ MUTATIONS = [
      '        return merge.removeprefix("refs/heads/") if merge else None\n    return None',
      '        return merge.removeprefix("refs/heads/") if merge else None\n    return current', "guard",
      'push.default matching'),
+    # The review-record rule: each mutant removes one link of the chain, and one named case must go red.
+    ("push-needs-review-record: the guard.py call is dropped",
+     'review_record_hit(transcript, lambda: push_destinations(args, where, overrides), where)',
+     '(False, "")', "guard", 'the incident: a reviewer FAIL in the foreground result'),
+    ("push-needs-review-record: a posted record never clears its report",
+     'pending = [report for report in pending if report not in held]',
+     'pending = list(pending)', "guard", 'a FAIL round 1, then a FAIL record posted'),
+    ("push-needs-review-record: a fix check PASS no longer denies its head branch",
+     'if heads[number] in destinations():',
+     'if False:', "guard", 'a fix check PASS for PR 1464 posted, then a push to its head branch'),
+    ("push-needs-review-record: a verdict on the Done label line is not read",
+     '                if loose and marker:\n                    return loose.group(), "round" if marker.group(1) else "fix", int(marker.group(1)) if marker.group(1) else None',
+     '                if loose and marker:\n                    return None', "guard",
+     'a reviewer FAIL round 1 on the Done label line, no record, then the push'),
+    ("push-needs-review-record: a held report is never counted",
+     '    return counted',
+     '    return []', "guard",
+     'a FAIL naming diff base A then head B'),
+    ("push-needs-review-record: a commit on main counts for a held report",
+     '    if on_main is not False:',
+     '    if False:', "guard",
+     'a FAIL naming only diff base A'),
+    ("push-needs-review-record: a report no PR counts is dropped, not kept for the next PR",
+     'early = [report for report in early if report[:-1] not in counted]   # held for a later PR',
+     'early = []', "guard",
+     'a FAIL naming head B, then a PR for another branch'),
+    ("push-needs-review-record: the Done label round marker ignores case",
+     '", re.I)\n_LABEL_WORD',
+     '")\n_LABEL_WORD', "guard",
+     'a Done label line reading Round 1 with a capital R'),
+    ("push-needs-review-record: the Done label verdict is the first all-caps word",
+     ' if word.group() in verdicts',
+     '', "guard",
+     'a Done label line whose first all-capitals word is HEAD'),
     ("force-push: quoted text is read as a push",
      'return PUSH_QUOTED.sub(" ", segment)', 'return segment', "guard",
      'false alarm: --force quoted in a commit message'),
@@ -3847,6 +3881,14 @@ def run_mutant(sources, work: str, entry):
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
+        # The guard reads merge/merge.py beside its hooks folder, or from the clone the global rules point at.
+        # The suite runs under an empty CLAUDE_CONFIG_DIR, so with no merge beside the copy every review-record
+        # decision fails open: the baseline allows, and a mutant's red is the baseline's, not its own. merge.py
+        # imports lint/hook_catalog.py from root/lint, which the lint copy below provides, and reads
+        # actions/ci-alarm beside itself, so actions/ takes the copy too.
+        for part in ("merge", "actions"):
+            shutil.copytree(os.path.join(os.path.dirname(HERE), part), os.path.join(root, part),
+                            ignore=shutil.ignore_patterns("__pycache__", "test_*"))
         # The guard loads ../bin/sim-lease beside its hooks folder, so the copy takes it too, mutated or not.
         os.makedirs(os.path.join(root, "bin"), exist_ok=True)
         if target == "simlease":

@@ -119,6 +119,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-agent-branch    ask. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. A delete, a mirror and a dry run pass.
+  push-needs-review-record  deny. A `git push` (not a dry run) while the session's own transcript shows a PR and a reviewer or
+                       design-reviewer report with no later posted review record holding that role, verdict and round, or a push to
+                       the head branch of a PR whose posted record already holds a Fix check line.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -490,6 +493,7 @@ while True:
             PUSH_AGENT_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
             parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
         )
+        from guard_push_delete import review_record_hit, push_destinations
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
@@ -4417,6 +4421,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
+                record_hit, record_reason = review_record_hit(transcript, lambda: push_destinations(args, where, overrides), where)
+                if record_hit:
+                    refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)
                 # A non-forced push that writes main or master (rule push-main), an agent-worktree
                 # branch name (rule push-agent-branch), or an implied destination off the branch's
                 # upstream (rule push-stray-branch). A dry run writes nothing.
