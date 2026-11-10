@@ -4061,22 +4061,18 @@ def run_mutant(sources, work: str, entry):
     return label, code, red, required, None, seen
 
 
-def main() -> int:
-    if "--report" in sys.argv[1:]:
-        return report_main(sys.argv[1:])
-    if "--replay" in sys.argv[1:]:
-        return replay_main(sys.argv[1:])
-    if "--changed" in sys.argv[1:]:
-        return changed_main(sys.argv[1:])
-    if "--known-defects" in sys.argv[1:]:
-        return known_defects_main(sys.argv[1:])
-    if "--tests-for" in sys.argv[1:]:
-        return tests_for_main(sys.argv[1:])
+def read_sources():
+    """{target: source text} of each file a mutation may name."""
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
             sources[name] = handle.read()
+    return sources
 
+
+def check_anchors(sources):
+    """The anchor pre-check: `--anchors` runs it alone, and a full run runs it first. -> 0 when every mutation holds, else 1 after
+    one ERROR line. It runs no control, suite or mutant, so the checks job can run it in seconds."""
     # Every anchor is checked BEFORE any suite runs, so a stale mutation fails in the first
     # second, not after the mutants ahead of it in the list have spent their minutes. A mutation
     # whose anchor sits in the WRONG file is stale too, which is what the target lookup catches.
@@ -4139,6 +4135,24 @@ def main() -> int:
                       "%r and %r both produce %s" % (other[1], label, candidate))
                 return 1
             seen_paths[candidate.lower()] = (control_index, label)
+    return 0
+
+
+def main() -> int:
+    if "--report" in sys.argv[1:]:
+        return report_main(sys.argv[1:])
+    if "--replay" in sys.argv[1:]:
+        return replay_main(sys.argv[1:])
+    if "--changed" in sys.argv[1:]:
+        return changed_main(sys.argv[1:])
+    if "--known-defects" in sys.argv[1:]:
+        return known_defects_main(sys.argv[1:])
+    if "--tests-for" in sys.argv[1:]:
+        return tests_for_main(sys.argv[1:])
+    sources = read_sources()
+    failed = check_anchors(sources)
+    if failed or "--anchors" in sys.argv[1:]:
+        return failed
 
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
