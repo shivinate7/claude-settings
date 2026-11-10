@@ -364,6 +364,12 @@ jobs:
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_ci.py
 
+      # The anchor pre-check of the guard mutation test, alone and in seconds: a stale anchor reads red here, in the job a batch's
+      # lane lint runs, not only in checks-mutate-guard after the batch is ready.
+      - name: Guard mutation anchors
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        run: python3 hooks/mutate_guard.py --anchors
+
       - name: Landed-directory check fixture suite
         run: python3 lint/test_check_landed_dirs.py
 

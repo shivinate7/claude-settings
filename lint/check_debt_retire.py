@@ -33,6 +33,7 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 Unknown = records.Unknown  # a git read failed, so the closes are not known
 CITE = "Retire-run"
 TIMEOUT = 600
+RAN_PAST = "ran past"  # run_span's unknown text for a test that hit TIMEOUT; merge's batch lint reads it to tell a timeout from other unknowns
 # Each runnable suffix with the argv that starts it. The check never runs anything else.
 INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
@@ -94,7 +95,7 @@ def run_span(wt, span, timeout):
         r = _nowindow.run([exe, *argv[1:], span], cwd=wt, capture_output=True, encoding="utf-8", errors="replace",
                                   timeout=timeout, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
     except subprocess.TimeoutExpired:
-        return "unknown", "%s ran past %d s" % (span, timeout)
+        return "unknown", "%s %s %d s" % (span, RAN_PAST, timeout)
     except OSError as e:
         return "unknown", "%s did not start: %s" % (span, e)
     if r.returncode:

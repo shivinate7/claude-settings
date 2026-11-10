@@ -229,7 +229,7 @@ LINT_CMD = re.compile(r"(?:python3 (?:lint|actions)/[\w./-]+\.py|bin/ste-changed
                       r"(?: [^|&;`<>]*)?")
 INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|immutable)|(?:python3 -m )?pip install(?: -[-\w]+)* -r [^\s|&;`<>$()]+"
                          r"|npx(?: --no-install)? [\w@./-]+ (?:sync|generate))(?: [^|&;`<>$()]*)?")
-RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
+RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS", "CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID"}  # absent from a runner step's env unless its env: or the zizmor with: sets them; the two CLAUDE_CODE_ markers a cloud session sets would flip suites that branch on them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
 SHA_PIN = pin_regex(("code-check", "zizmor"))  # a uses: pinned to a commit of this repo's action
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run

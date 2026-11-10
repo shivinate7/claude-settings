@@ -43,6 +43,11 @@
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
+                          A head whose branch starts `batch-` gets the batch checks instead: each closed debt's Retire check (a timeout
+                          prints its `Retire-run:` cite and goes on), a rebuilt records page, then the whole checks job and the Windows
+                          slice, each run up to 3600 s (BATCH_SECONDS; a timeout is never lifted by --lint-unknown-ok). A FAIL or
+                          unknown step is run again on origin/<base>; the same state there is named `... on main too` and does not
+                          stop the lint. Cost: up to 3 ci-job runs of the head and as many on main, one extra worktree.
                           A PR number is also checked, before the ci-job run, against each other open PR of its lane (a draft counts; a
                           PR whose body holds a session URL the linted PR's body holds) with `git merge-tree --write-tree`. A conflict
                           FAILs, naming each PR and file, with its remedy (--lint-unknown-ok never lifts it). PRs in one stack (one head
@@ -380,16 +385,24 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
     if problems:
         raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(problems) + f"\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_CITE}")
 
-def debt_check(wt, base_ref, host, info):
+def debt_check(wt, base_ref, host, info, timeouts_go_on=False):
     """The debt-close lint (lint/check_debt_retire.py): each debt the branch closes has its Retire check run on the head.
     A finding, red or unknown or prose, refuses. No reason flag lifts it. A cited run is judged against the PR head, never the worktree
-    HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR."""
+    HEAD: the claim commit goes on top of the PR head, and a run on the head is still the run of this PR.
+    timeouts_go_on (a batch's lane lint): a Retire check that ran past its bound prints its `Retire-run:` cite remedy and no longer
+    refuses; any other finding still does. The merge itself keeps the refusal, so the cite must be in the PR body by then."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import check_debt_retire as debt
     try:
         found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
     except debt.Unknown as e:
         raise Unread(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
+    if timeouts_go_on:
+        slow = [f for f in found if f.kind == "unknown" and re.search(rf"{re.escape(debt.RAN_PAST)} \d+ s\. Retire: ", f.text)]
+        for f in slow:
+            say(f"merge: the Retire check of debt {f.slug} ran past {debt.TIMEOUT} s here, so it is unknown, not green. The lint goes on. "
+                f"Run that check where it fits, and cite a passing run in the PR body: `{debt.CITE}: {f.slug} -- <run URL>`. {DEBT_CITE}")
+        found = [f for f in found if not any(f is s for s in slow)]
     if found:
         text = "the branch closes a debt without proof that its Retire check holds:\n  " + "\n  ".join(f"{f.slug} [{f.kind}]: {f.text}" for f in found) + f"\n{DEBT_CITE}"
         if all(f.kind == "unknown" for f in found):  # each is a check that could not run: no finding is proven
@@ -1687,6 +1700,7 @@ READY_ROUTES = ("Mark ready in cloud by MCP update_pull_request draft=false; on 
                 "a GraphQL call a cloud session gets 403 on (route pr-ready-mcp-cloud, route pr-ready-gh-cli-cloud, route pr-ready-gh-cli-local)")
 DRAFT_SKIP_CHECK = REQUIRED_CHECK  # the one required check a draft run skips (actions/all-jobs-passed): its skip means the ready run is still to come, not green
 LINT_SECONDS = 1200  # the bound on the lint run of the merge result, and again on the suites it hits; the lock is extended to cover each
+BATCH_SECONDS = 3600  # the bound on each ci-job run of a batch head's lane lint (the whole checks job, the Windows slice, a re-run on main); a lane lint takes no lock, so it extends none
 SUITE_LINE = re.compile(r"(python3|node|bash) ([\w./-]+\.(?:py|mjs|sh))(?: [^|&;`<>$(){}]*)?")  # a suite line run as written: no shell syntax
 
 def needles(path):
@@ -2726,19 +2740,20 @@ def cross_measure(root, head, n, body, host, with_prs):
     if unknown:
         raise Stop("\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY]))
 
-def ci_job_run(wt, *args, notes=None):
+def ci_job_run(wt, *args, notes=None, seconds=LINT_SECONDS, every=False):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
-    notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
+    notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them.
+    seconds: the run's time bound. every: on exit 1, lines holds the unknown lines too, so a caller that compares each red step with main misses none."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
     try:
-        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
+        c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=seconds, live_stderr=True)
     except subprocess.TimeoutExpired:
-        return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
+        return "unknown", [f"ci-job did not finish in {seconds} s"], [], False
     lines = out.splitlines()
     log = [l for l in lines if l.startswith("log=")][-1:]
     if c == 0:
@@ -2746,10 +2761,97 @@ def ci_job_run(wt, *args, notes=None):
             notes.extend(l.rstrip() for l in lines if PIN_NOTE_MARKER in l)
         return "pass", [l.split(None, 1)[1].split(": ", 1)[0] for l in lines if l.startswith("skipped") and len(l.split(None, 1)) > 1], log, False
     if c == 1:
-        return "fail", [l.rstrip() for l in lines if l.startswith("FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
+        return "fail", [l.rstrip() for l in lines if l.startswith(("FAIL", "unknown") if every else "FAIL")] or [f"(no FAIL line read; ci-job exit {c})"], log, False
     if c == 2:
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
+
+BATCH_PREFIX = "batch-"  # a branch with this prefix is a batch's integration branch: its lane lint runs the batch checks (decision lanes-run-no-full-ci-job)
+WINDOWS_SLICE = ("checks-windows-guard", "Guard fixture suite (Windows slice)")  # job and step of the Windows slice a batch head also runs; the step is named by its text in checks.yml, which the lane-lint tests read
+
+def ref_branch(target):
+    """The branch name a --lane-lint ref target spells, or "" for a sha (it names no branch)."""
+    if re.fullmatch(r"[0-9a-fA-F]{7,64}", target):
+        return ""
+    return re.sub(r"^(?:refs/heads/|origin/)", "", target)
+
+def ci_rows(lines):
+    """-> [(state, name, line)] for the FAIL and unknown lines of a ci-job run (`<state, padded> <step>: <detail>`). A line that names no
+    step reads with name None: it has nothing to compare with main."""
+    rows = []
+    for line in lines:
+        state, _, rest = line.partition(" ")
+        name, sep, _ = rest.strip().partition(": ")
+        rows.append((state, name if sep and state in ("FAIL", "unknown") else None, line))
+    return rows
+
+def plan_names(wt, args):
+    """-> the step names a ci-job plan for `args` lists in the tree `wt`: each `would run NAME`, and each step the plan says will not run
+    (`unknown`, `skipped`, `not run locally`). Empty when the plan cannot be read, so no step reads as present."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+    try:
+        _c, out = sh([sys.executable, CI_JOB, *args, "--plan"], cwd=wt, env=env, timeout=120)
+    except subprocess.TimeoutExpired:
+        return set()
+    names = set()
+    for line in out.splitlines():
+        if line.startswith("would run "):
+            names.add(line[len("would run "):].strip())
+        elif m := re.match(r"(?:unknown|skipped|not run locally)\s+(.+?): ", line):
+            names.add(m.group(1))
+    return names
+
+def batch_run(root, wt, base, notes):
+    """The checks of a batch head, run before its integration PR goes ready: the whole `checks` job and the Windows slice,
+    each through ci_job_run on the BATCH_SECONDS bound. A FAIL or unknown step is run again on origin/<base> in a temporary tree: the same
+    state there is named `red on main too` or `unknown on main too` and does not stop the lint. -> (state, lines, log, liftable, excused) as
+    ci_job_run, but with the main-too steps taken out of `lines` and named in `excused`. A step with no name to compare, or any timeout or
+    odd exit, is never excused."""
+    ref = f"origin/{base}"
+    jobs = [(("checks", "--base", ref), ()), ((WINDOWS_SLICE[0], "--base", ref), (WINDOWS_SLICE[1],))]
+    def argv(job, steps):
+        return (*job, *(arg for step in steps for arg in ("--step", step)))
+    rows, log, skipped, hard = [], [], [], None
+    for job, steps in jobs:
+        state, lines, got, _liftable = ci_job_run(wt, *argv(job, steps), notes=notes, seconds=BATCH_SECONDS, every=True)
+        log += got
+        if state == "pass":
+            skipped += lines
+        elif lines and all(l.startswith(("FAIL", "unknown")) for l in lines):
+            rows += [(job, steps, *r) for r in ci_rows(lines)]
+        else:
+            hard = hard or (state, lines)  # a timeout, an odd exit or a line that is no step's: no step to compare
+    excused = []
+    if rows:
+        tmp, base_wt = add_worktree(root, ref)
+        try:
+            for job, steps in jobs:
+                mine = [r for r in rows if r[0] is job]
+                names = [r[3] for r in mine if r[3]]
+                if names:  # a step main lacks is the head's own: ci-job reads a missing --step name as one unknown that stops the whole run
+                    present = plan_names(base_wt, argv(job, ()))
+                    names = [n for n in names if n in present]
+                if not names:
+                    continue
+                state, lines, _got, _liftable = ci_job_run(base_wt, *argv(job, names), seconds=BATCH_SECONDS, every=True)
+                on_main = {name: s for s, name, _l in ci_rows(lines)} if lines and all(l.startswith(("FAIL", "unknown")) for l in lines) else {}
+                for r in mine:
+                    if r[3] and on_main.get(r[3]) == r[2]:
+                        excused.append(r)
+        finally:
+            drop_worktree(root, tmp, base_wt)
+    left = [r for r in rows if not any(r is e for e in excused)]
+    said = [f"merge: step {r[3]}: {'red' if r[2] == 'FAIL' else 'unknown'} on main too ({ref} gives the same {r[2]} line)" for r in excused]
+    if hard and not left:
+        return hard[0], hard[1], log, False, said
+    if any(r[2] == "FAIL" for r in left) or hard and hard[0] == "fail":
+        return "fail", [r[4] for r in left if r[2] == "FAIL"] or hard[1], log, False, said
+    if left or hard:
+        lines = [r[4] for r in left] or hard[1]
+        return "unknown", lines, log, not hard, said
+    if any(r[2] == "unknown" for r in excused):
+        return "unknown on main", skipped, log, False, said
+    return "pass", skipped, log, False, said
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
@@ -2758,7 +2860,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     then cross_measure checks the head against the lane's other open PRs and `with_prs`.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
-    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
+    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
+    A target whose branch starts BATCH_PREFIX instead gets the batch checks: its closed debts' Retire checks, a fresh records page, then batch_run
+    (the whole checks job and the Windows slice, each on BATCH_SECONDS). A timeout there is never lifted by --lint-unknown-ok."""
     host = host or Host()
     if target.isdigit():
         host = host or Host()
@@ -2767,29 +2871,45 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
         head = info["head"]
+        branch = info["branch"]
         tmp, wt = add_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
+        branch = ref_branch(target)
         tmp, wt = add_worktree(root, head)
+    batch = branch.startswith(BATCH_PREFIX)
+    excused = []
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes = []
         if target.isdigit():
             refuse_unstacked_head(root, head, base)
             cross_measure(root, head, int(target), info["body"], host, with_prs)
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        if batch:
+            debt_check(wt, f"origin/{base}", host, info if target.isdigit() else {"head": head, "body": ""}, timeouts_go_on=True)
+            rebuild_records(wt)  # the hook catalog step reads the records page, so the tree must hold a fresh one
+            state, lines, log, liftable, excused = batch_run(root, wt, base, pin_notes)
+        else:
+            state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
+    what = "batch checks" if batch else "lint"
+    if excused:
+        say(*excused)
+    if state == "unknown on main":  # each step that is not green is unknown on main too: this head adds none, and no PASS line says more than that
+        say(f"merge: the {what} of {short} against {base} ends with steps unknown on main too, not a pass. The head adds none.", *pin_notes)
+        return 0
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
-        say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.", *pin_notes)
+        said = f" ({len(excused)} step{'s' if len(excused) != 1 else ''} red on main too)" if excused else ""
+        say(f"PASS: {what} of {short} against {base} passes{named}{said}. The batch runner may take this head, or join it to a batch.", *pin_notes)
         return 0
     if state == "fail":
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
+        raise Stop("\n".join([f"the {what} of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
     if liftable and unknown_ok.strip():
-        say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
+        say(f"merge: {what} of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
         return 0
-    head_line = f"the lint of {short} against {base} is unknown, not a pass:"
+    head_line = f"the {what} of {short} against {base} is unknown, not a pass:"
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
         raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
     raise Liftable("\n".join([head_line, *lines, *log,
