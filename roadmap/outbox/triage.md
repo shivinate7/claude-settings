@@ -369,3 +369,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - rrs-design-branch-untested (#2326 review-record-stack round 3, coordinator 01:24 CST Nov 10): no test for the design branch in uncleared_round; a merge.py mutant survived.
 - rrs-chain-base-no-sonnet (#2326): no Sonnet check on the chain base. The coordinator calls it the same gap as a known note; no matching outbox line found by grep (sonnet + chain/base), so filed here to fold when found.
 - rrs-report-guard-review-state (#2326): report_guard.py reads review_state alone.
+- rgpb-veto-unpinned (#2435 role-guard-plumbing-bypass, coordinator 01:25 CST Nov 10): the set_override_veto(lambda: True) line in plumbing_refusal is pinned by no test or mutant, and the refusal text still offers "override 15m". Fix: a test-author edit in a later lane.
+- rgpb-deny-term (#2435): GLOSSARY says "refusal", not "deny": fix the slug plumbing-non-builder-final-deny and one docstring.
