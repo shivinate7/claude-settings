@@ -1842,3 +1842,4 @@
 - launch-cloud-mirror-marker-reads-stderr: merge/launch.py `git()` joins stderr to stdout, so a git warning on `config --get claude-settings.cloudMirror` hides the marker and the mirror is fast-forwarded. install.sh and hooks/session_start.sh read stdout only.
 - launch-cloud-mirror-hides-other-reason: a marked mirror that is also dirty or off main prints only "cloud mirror" in launch.py's left-as-is line.
 - launch-cloud-mirror-test-gaps: no case pins a dirty marked mirror or a non-literal true spelling (`yes`, `1`); the code matches install.sh's literal `true`.
+- refusal-cite-helper-reach-forms: the refusal cite scan (lint/test_rule_audit.py, `_Helpers`) does not read a block dict passed to a printing helper by `{**p}` spread, a print inside a nested def, `*args`, a method printer, or a name bound first and then passed. Also unread on main: a print with `+ "\n"` and `sys.stdout.write`. Found by step stop-block-cites review round 1.
