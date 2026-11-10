@@ -103,6 +103,7 @@ FAMILIES = {
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
+    "push-batch-held": "a non-forced push to a lane's branch while a ready integration pull request holds that branch's remote tip: refused; allowed and logged when the open list or a compare cannot be read; the gh calls it makes",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
@@ -1330,11 +1331,13 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None, repos=None, refs=(), tips=None):
+                 count_file=None, compares=None, pr=None, repos=None, refs=(), tips=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `pr`, when given, is a dict merged over the fake's own pull request (for a draft flag, or a base).
 
     `repos`, when given, maps each repo name ("owner/name") to that repo's own answers, for a case whose
     lane spans repos: `compares` (its containment reads; "missing" is a 404, "network" a refused
@@ -1409,6 +1412,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "refs": list(refs),  # branch names the repo holds: the matching-refs read answers the ones under its prefix
         "tips": dict(tips or {}),  # branch name -> the sha of its tip; a branch not listed is at f * 40
     }
+    state["pr"].update(pr or {})
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
     fake_py = os.path.join(folder, "ghfake.py")
@@ -13400,7 +13404,9 @@ record_allow("a commit message that names a push to roadmap is text",
 
 def record_push_cost_case():
     """roadmap-one-writer's stated cost (session-tiers, the Cost line): per `git push` call, one
-    `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
+    `git rev-parse --show-toplevel`. A non-main push also reads the local remote-tracking tip of its
+    destination under push-batch-held (decision batch-freeze-lane-set), so it starts three `git rev-parse`
+    calls in all, and a main push starts one. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
@@ -13444,18 +13450,18 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want, *cwd in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 3, "symbolic-ref": 1, "diff": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 3, "symbolic-ref": 2, "config": 1, "diff": 1}),
+        ("a bare push", "push", {"rev-parse": 3, "symbolic-ref": 2, "config": 2, "diff": 1}),
         ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
         ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
-        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 3, "diff": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
-         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
+         {"rev-parse": 3, "symbolic-ref": 1, "diff": 3}),
         # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
         # the conflict check rejects that base and reads the upstream: two diff reads.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
-         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
+         {"rev-parse": 3, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
@@ -13474,7 +13480,7 @@ def record_push_cost_case():
         problems.append("a push to roadmap with an unreadable transcript: %s, want deny" % got)
     if problems:
         return False, "; ".join(problems)
-    return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
+    return True, "three rev-parse per non-main push, one per main push, symbolic-ref for HEAD and bare, " \
                  "push.default for bare only; " \
                  "the transcript is read only at the record branch"
 
@@ -20100,6 +20106,376 @@ for _label, _check in (
         ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, reads no record",
          own_read_case("body-int", [None]))):
     LOG_CHECKS_EXTRA.append((_label, _check))
+# =========================================================================== 3b. a push into a held lane
+#
+# Rule push-batch-held (roadmap step lane-push-frozen-in-batch). A non-forced push to a lane's branch is refused while
+# that branch's remote tip sits inside the head of an open, ready pull request on the default base, from a different
+# head branch: a running batch was built from that head, so a moved head breaks its confirm. The reads are one open
+# pull request list, and one compare of `<tip>...<head>` per ready pull request, on a push that reaches the rule only.
+# A read that fails allows the push and logs push-batch-unread.
+#
+# Each lane here is cut from origin/main, and its remote tip is its remote-tracking ref. A local commit that is not
+# pushed makes the local head differ from the tip. The fake keys every compare by the tip's real sha, so a guard that
+# compares any other sha reads "diverged", and allows.
+FAMILY = "push-batch-held"
+PUSH_BATCH_RULE = "push-batch-held"
+PUSH_BATCH_UNREAD = "push-batch-unread"
+# The deny names the rule, the hold and the remedy (wait, drop the lane, or a new lane). It names no forced push,
+# no hook skip and no delete.
+BH_CARRIES = (("held", "holds"), "batch", ("wait", "drop"), "new lane")
+BH_LACKS = ("--force", "force-with-lease", "--no-verify", "--delete")
+
+BH_HELD = os.path.join(ROOT, "bhheldrepo")                # lane-held: its tip held by pull request 2, one local commit ahead
+BH_HELD_GH = os.path.join(ROOT, "bhheldgh")               # the open list, and the compare of the tip reads ahead
+BH_HELD_BROKEN_GH = os.path.join(ROOT, "bhheldbrokengh")  # the open list cannot be read
+BH_HELD_SERVER_GH = os.path.join(ROOT, "bhheldservergh")  # the compare of the tip fails with a server error
+BH_IDENT = os.path.join(ROOT, "bhidentrepo")              # lane-ident: its batch head is identical to the tip
+BH_IDENT_GH = os.path.join(ROOT, "bhidentgh")
+BH_SECOND = os.path.join(ROOT, "bhsecondrepo")            # lane-second: the second ready pull request holds the tip
+BH_SECOND_GH = os.path.join(ROOT, "bhsecondgh")
+BH_DRAFT = os.path.join(ROOT, "bhdraftrepo")              # lane-draft: its only holder is a draft
+BH_DRAFT_GH = os.path.join(ROOT, "bhdraftgh")
+BH_EMPTY_GH = os.path.join(ROOT, "bhemptygh")             # no open pull request at all, beside lane-draft
+BH_BASE = os.path.join(ROOT, "bhbaserepo")                # lane-base: its holder is on another base
+BH_BASE_GH = os.path.join(ROOT, "bhbasegh")
+BH_SAME = os.path.join(ROOT, "bhsamerepo")                # lane-same: local head equals its tip
+BH_SAME_GH = os.path.join(ROOT, "bhsamegh")
+BH_INT = os.path.join(ROOT, "bhintrepo")                  # integration/b68: a branch that is its own pull request's head
+BH_INT_GH = os.path.join(ROOT, "bhintgh")
+BH_NEW = os.path.join(ROOT, "bhnewrepo")                  # lane-new: pushed nowhere, so it has no remote tip
+BH_NEW_GH = os.path.join(ROOT, "bhnewgh")
+BH_FULL = os.path.join(ROOT, "bhfullrepo")                # lane-full: its holder is past the first page of the open list
+BH_FULL_GH = os.path.join(ROOT, "bhfullgh")
+BH_COUNT = os.path.join(ROOT, "bhcountrepo")              # lane-count: two ready pull requests, neither holds its tip
+BH_COUNT_GH = os.path.join(ROOT, "bhcountgh")
+BH_MERGED = os.path.join(ROOT, "bhmergedrepo")            # lane-merged: its tip is an ancestor of origin/main, and a ready pull request holds it
+BH_MERGED_GH = os.path.join(ROOT, "bhmergedgh")
+
+
+def _bh_commit(where, name, text):
+    write(os.path.join(where, name), text)
+    run_vcs(where, "add", "-A")
+    commit = run_vcs(where, *IDENT, "commit", "-q", "-m", "push-batch fixture: " + name)
+    if commit.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: a commit in %r failed. stderr: %s"
+                 % (where, commit.stderr.strip()))
+
+
+def _bh_head(where):
+    return run_vcs(where, "rev-parse", "HEAD").stdout.strip()
+
+
+def _bh_lane(where, lane, pushed=True, local_ahead=True, merged=False):
+    """A checkout on `lane`, cut from origin/main, with one commit. When `pushed`, origin/<lane> holds that commit and
+    the lane's upstream is set. When `local_ahead`, one more commit is not pushed. When `merged`, origin/main moves one
+    commit past that first commit, so the tip is an ancestor of origin/main and not equal to it. Returns (the first
+    commit, the local head), each read back with git, so no case judges a fixture that lacks its state."""
+    make_repo(where, {"base.txt": "base\n"})
+    run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(where, "config", "push.default", "simple")
+    run_vcs(where, "checkout", "-q", "-b", lane)
+    _bh_commit(where, "lane.txt", "pushed\n")
+    first = _bh_head(where)
+    if pushed:
+        run_vcs(where, "update-ref", "refs/remotes/origin/" + lane, "HEAD")
+        run_vcs(where, "branch", "--set-upstream-to=origin/" + lane, lane)
+    if merged:
+        past = run_vcs(where, *IDENT, "commit-tree", first + "^{tree}", "-p", first, "-m", "main past the merged tip")
+        if past.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: %r could not commit past %s" % (where, first))
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", past.stdout.strip())
+    if local_ahead:
+        _bh_commit(where, "lane.txt", "not pushed\n")
+    remote = run_vcs(where, "rev-parse", "-q", "--verify", "refs/remotes/origin/" + lane)
+    if (remote.returncode == 0) != pushed or (pushed and remote.stdout.strip() != first):
+        sys.exit("fixture setup failed in build_fixtures: %r needs origin/%s at its first commit, pushed=%s"
+                 % (where, lane, pushed))
+    if (_bh_head(where) != first) != local_ahead:
+        sys.exit("fixture setup failed in build_fixtures: %r needs local_ahead=%s" % (where, local_ahead))
+    if merged and (run_vcs(where, "merge-base", "--is-ancestor", first, "refs/remotes/origin/main").returncode != 0
+                   or run_vcs(where, "rev-parse", "refs/remotes/origin/main").stdout.strip() == first):
+        sys.exit("fixture setup failed in build_fixtures: %r needs its tip an ancestor of origin/main, not equal" % where)
+    if pushed and run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/" + lane:
+        sys.exit("fixture setup failed in build_fixtures: %r needs upstream origin/%s" % (where, lane))
+    return first, _bh_head(where)
+
+
+def _bh_pr(number, head, ref, base="main", draft=False):
+    """One open pull request for the fake tool: its head sha and branch, its base, and its draft flag."""
+    return {"number": number, "head": head, "ref": ref, "base": base, "draft": draft, "checks": [], "runs": []}
+
+
+def _bh_fake(folder, key, rows, statuses=None, broken=False):
+    """A counted fake pull request tool at `folder`, whose other open pull requests are `rows`. Its own pull request
+    is a draft, so it is no candidate. `statuses` maps a row's head sha to the status of the compare `<key>...<head>`;
+    a head with no entry compares diverged, as the fake answers every pair it does not list."""
+    make_fake_gh(folder, "main", others=rows, broken=broken,
+                 pr={"draft": True, "base": {"ref": "main", "repo": {"default_branch": "main"}}},
+                 compares={key + "..." + head: status for head, status in (statuses or {}).items()},
+                 count_file=os.path.join(folder, ARCHIVE_CALLS))
+
+
+def _build_bh_held():
+    tip, _ = _bh_lane(BH_HELD, "lane-held")
+    rows = [_bh_pr(2, "pr-two-head", "integration/b68")]
+    _bh_fake(BH_HELD_GH, tip, rows, {"pr-two-head": "ahead"})
+    _bh_fake(BH_HELD_BROKEN_GH, tip, rows, {"pr-two-head": "ahead"}, broken=True)
+    _bh_fake(BH_HELD_SERVER_GH, tip, rows, {"pr-two-head": "server"})
+
+
+def _build_bh_ident():
+    tip, _ = _bh_lane(BH_IDENT, "lane-ident")
+    _bh_fake(BH_IDENT_GH, tip, [_bh_pr(2, "pr-two-head", "integration/b68")], {"pr-two-head": "identical"})
+
+
+def _build_bh_second():
+    tip, _ = _bh_lane(BH_SECOND, "lane-second")
+    rows = [_bh_pr(2, "pr-two-head", "integration/b68"), _bh_pr(3, "pr-three-head", "integration/b69")]
+    _bh_fake(BH_SECOND_GH, tip, rows, {"pr-three-head": "ahead"})
+
+
+def _build_bh_draft():
+    tip, _ = _bh_lane(BH_DRAFT, "lane-draft")
+    _bh_fake(BH_DRAFT_GH, tip, [_bh_pr(2, "pr-two-head", "integration/b68", draft=True)], {"pr-two-head": "ahead"})
+    _bh_fake(BH_EMPTY_GH, tip, [], {})
+
+
+def _build_bh_base():
+    tip, _ = _bh_lane(BH_BASE, "lane-base")
+    _bh_fake(BH_BASE_GH, tip, [_bh_pr(2, "pr-two-head", "integration/b68", base="release-1")], {"pr-two-head": "ahead"})
+
+
+def _build_bh_same():
+    tip, _ = _bh_lane(BH_SAME, "lane-same", local_ahead=False)
+    _bh_fake(BH_SAME_GH, tip, [_bh_pr(2, "pr-two-head", "integration/b68")], {"pr-two-head": "ahead"})
+
+
+def _build_bh_int():
+    tip, _ = _bh_lane(BH_INT, "integration/b68")
+    _bh_fake(BH_INT_GH, tip, [_bh_pr(2, "pr-two-head", "integration/b68")], {"pr-two-head": "ahead"})
+
+
+def _build_bh_new():
+    _, head = _bh_lane(BH_NEW, "lane-new", pushed=False, local_ahead=False)
+    # The compare is keyed by the local head, not by a remote tip (there is none). A guard that judged the local head would deny.
+    _bh_fake(BH_NEW_GH, head, [_bh_pr(2, "pr-two-head", "integration/b68")], {"pr-two-head": "ahead"})
+
+
+def _build_bh_full():
+    tip, _ = _bh_lane(BH_FULL, "lane-full")
+    rows = [_bh_pr(n, "pr-fill-%d" % n, "integration/fill-%d" % n, draft=True) for n in range(100, 132)]
+    rows.append(_bh_pr(200, "pr-two-head", "integration/b68"))
+    _bh_fake(BH_FULL_GH, tip, rows, {"pr-two-head": "ahead"})
+
+
+def _build_bh_count():
+    tip, _ = _bh_lane(BH_COUNT, "lane-count")
+    rows = [_bh_pr(2, "pr-two-head", "integration/b68"), _bh_pr(3, "pr-three-head", "integration/b69")]
+    _bh_fake(BH_COUNT_GH, tip, rows)
+
+
+lazy_fixture([BH_HELD, BH_HELD_GH, BH_HELD_BROKEN_GH, BH_HELD_SERVER_GH], _build_bh_held)
+lazy_fixture([BH_IDENT, BH_IDENT_GH], _build_bh_ident)
+lazy_fixture([BH_SECOND, BH_SECOND_GH], _build_bh_second)
+lazy_fixture([BH_DRAFT, BH_DRAFT_GH, BH_EMPTY_GH], _build_bh_draft)
+lazy_fixture([BH_BASE, BH_BASE_GH], _build_bh_base)
+lazy_fixture([BH_SAME, BH_SAME_GH], _build_bh_same)
+lazy_fixture([BH_INT, BH_INT_GH], _build_bh_int)
+lazy_fixture([BH_NEW, BH_NEW_GH], _build_bh_new)
+lazy_fixture([BH_FULL, BH_FULL_GH], _build_bh_full)
+lazy_fixture([BH_COUNT, BH_COUNT_GH], _build_bh_count)
+
+
+def _build_bh_merged():
+    tip, _ = _bh_lane(BH_MERGED, "lane-merged", merged=True)
+    _bh_fake(BH_MERGED_GH, tip, [_bh_pr(2, "pr-two-head", "integration/b68")], {"pr-two-head": "ahead"})
+
+
+lazy_fixture([BH_MERGED, BH_MERGED_GH], _build_bh_merged)
+
+
+def _bh_env(fake):
+    """The PATH a case's guard runs on: the counted fake first, then the interpreter's and git's folders."""
+    return fake + os.pathsep + PY_PATH + os.pathsep + GIT_PATH
+
+
+def _bh_push(name, tail, expected, fake, cwd, **kw):
+    """One `git push` case, judged with its lane's fake pull request tool first on PATH."""
+    sh("push-batch: " + name, VCS + " push " + tail, expected, cwd=cwd, env_path=_bh_env(fake), **kw)
+
+
+BH_REFUSE = {"rule": PUSH_BATCH_RULE, "carries": BH_CARRIES, "lacks": BH_LACKS}
+# DENY, rule push-batch-held. Each lane's tip is held by a ready pull request on main, so each push is refused.
+_bh_push("refused, an explicit HEAD refspec to a held lane", "origin HEAD:lane-held", "deny", BH_HELD_GH, BH_HELD,
+         **BH_REFUSE)
+_bh_push("refused, a colon-less refspec that names the held lane", "origin lane-held", "deny", BH_HELD_GH, BH_HELD,
+         **BH_REFUSE)
+_bh_push("refused, the refs/heads spelling of the held lane", "origin HEAD:refs/heads/lane-held", "deny", BH_HELD_GH,
+         BH_HELD, **BH_REFUSE)
+_bh_push("refused, a bare push of the held lane under its upstream", "", "deny", BH_HELD_GH, BH_HELD, **BH_REFUSE)
+_bh_push("refused, -u HEAD to the held lane", "-u origin HEAD", "deny", BH_HELD_GH, BH_HELD, **BH_REFUSE)
+sh("push-batch: refused, a held push chained after an echo", "echo ok && " + VCS + " push origin HEAD:lane-held",
+   "deny", cwd=BH_HELD, env_path=_bh_env(BH_HELD_GH), **BH_REFUSE)
+_bh_push("refused, a lane whose tip a second ready pull request holds", "origin HEAD:lane-second", "deny",
+         BH_SECOND_GH, BH_SECOND, **BH_REFUSE)
+_bh_push("refused, a lane whose holder is past the first page of the open list", "origin HEAD:lane-full", "deny",
+         BH_FULL_GH, BH_FULL, **BH_REFUSE)
+_bh_push("refused, a lane whose batch head is identical to its tip", "origin HEAD:lane-ident", "deny",
+         BH_IDENT_GH, BH_IDENT, **BH_REFUSE)
+
+# CONTROL: each is an allow or an ask the rule must leave unchanged, and each names its rule.
+_bh_push("control, a push that moves nothing to a held lane is silent", "origin HEAD:lane-same", "allow",
+         BH_SAME_GH, BH_SAME, silent=True)
+_bh_push("control, a bare push that moves nothing to a held lane is silent", "", "allow", BH_SAME_GH, BH_SAME,
+         silent=True)
+_bh_push("control, a lane with no remote tip is silent", "origin HEAD:lane-new", "allow", BH_NEW_GH, BH_NEW,
+         silent=True)
+_bh_push("control, a holder on another base is silent", "origin HEAD:lane-base", "allow", BH_BASE_GH, BH_BASE,
+         silent=True)
+_bh_push("control, a holder that is a draft is silent", "origin HEAD:lane-draft", "allow", BH_DRAFT_GH, BH_DRAFT,
+         silent=True)
+_bh_push("control, an empty open list is silent", "origin HEAD:lane-draft", "allow", BH_EMPTY_GH, BH_DRAFT,
+         silent=True)
+_bh_push("control, a push to the integration branch itself is silent", "origin HEAD:integration/b68", "allow",
+         BH_INT_GH, BH_INT, silent=True)
+_bh_push("control, two ready pull requests that hold no tip are silent", "origin HEAD:lane-count", "allow",
+         BH_COUNT_GH, BH_COUNT, silent=True)
+_bh_push("control, a dry run into a held lane is silent", "--dry-run origin HEAD:lane-held", "allow", BH_HELD_GH,
+         BH_HELD, silent=True)
+_bh_push("control, a push of main asks push-main", "origin main", "ask", BH_HELD_GH, BH_HELD,
+         rule=PUSH_MAIN_RULE)
+sh("push-batch: control, a quoted push into a held lane is silent", 'echo "' + VCS + ' push origin HEAD:lane-held"',
+   "allow", cwd=BH_HELD, env_path=_bh_env(BH_HELD_GH), silent=True)
+
+
+# A held lane moved in the same push as a delete, and --all naming a held lane branch, are refused. A literal name and
+# -u alone stay refused. A delete-only push and --all with no held tip keep their verdicts.
+_bh_push("refused, a held lane moved in the same push as a delete", "origin HEAD:lane-held :old-zz", "deny",
+         BH_HELD_GH, BH_HELD, **BH_REFUSE)
+_bh_push("control, a delete-only push is silent", "origin :old-zz", "allow", BH_HELD_GH, BH_HELD, silent=True)
+_bh_push("refused, --all with a held lane branch", "--all origin", "deny", BH_HELD_GH, BH_HELD, **BH_REFUSE)
+_bh_push("control, --all with no held tip keeps ask push-main", "--all origin", "ask", BH_COUNT_GH, BH_COUNT,
+         rule=PUSH_MAIN_RULE)
+_bh_push("control, a literal destination name is refused", "origin HEAD:lane-held", "deny", BH_HELD_GH, BH_HELD,
+         **BH_REFUSE)
+_bh_push("control, -u alone into a held lane is refused", "-u origin HEAD:lane-held", "deny", BH_HELD_GH, BH_HELD,
+         **BH_REFUSE)
+
+
+# The cost, pinned on the counted fake: one open-list call, then one compare per ready pull request, and nothing for a
+# push of main or a dry run. ARCHIVE_CALLS is the counted fake's log (gh_calls_taken reads and clears it).
+def _bh_gh_calls(folder, command, cwd):
+    """The guard's verdict on one Bash command, and the gh calls its fake logged for that command."""
+    gh_calls_taken(folder)
+    decision, reason = decide({"raw": None, "tool": "Bash", "cwd": cwd, "session": None,
+                               "env_path": _bh_env(folder), "tool_input": {"command": command}})
+    return decision, reason, gh_calls_taken(folder)
+
+
+def _bh_kinds(calls):
+    """Each gh call's kind: the open list ("pulls"), a compare, or other. Sorted, so the order of reads does not count."""
+    return sorted("pulls" if "pulls" in call else "compare" if "compare" in call else "other" for call in calls)
+
+
+def _bh_cost_case(fake, lane_cwd, command, want_decision, want_calls, label):
+    """The verdict is want_decision, and the gh calls are want_calls, as kinds (see _bh_kinds)."""
+    decision, reason, calls = _bh_gh_calls(fake, VCS + " " + command, lane_cwd)
+    if decision != want_decision:
+        return False, "%s: %s, not %s (%s)" % (label, decision, want_decision, reason[:90])
+    if _bh_kinds(calls) != sorted(want_calls):
+        return False, "%s: gh calls %r wanted, %r made" % (label, sorted(want_calls), _bh_kinds(calls))
+    return True, label
+
+
+def bh_draft_only_cost_case():
+    return _bh_cost_case(BH_DRAFT_GH, BH_DRAFT, "push origin HEAD:lane-draft", "allow", ["pulls"],
+                         "a holder that is a draft costs the open list alone, one gh call")
+
+
+def bh_empty_list_cost_case():
+    return _bh_cost_case(BH_EMPTY_GH, BH_DRAFT, "push origin HEAD:lane-draft", "allow", ["pulls"],
+                         "an empty open list costs one gh call, the list")
+
+
+def bh_two_ready_cost_case():
+    return _bh_cost_case(BH_COUNT_GH, BH_COUNT, "push origin HEAD:lane-count", "allow",
+                         ["pulls", "compare", "compare"],
+                         "two ready pull requests that hold no tip cost the list and one compare each, 3 gh calls")
+
+
+def bh_main_push_cost_case():
+    return _bh_cost_case(BH_HELD_GH, BH_HELD, "push origin main", "ask", [],
+                         "control, a push of main makes no gh call")
+
+
+def bh_dry_run_cost_case():
+    return _bh_cost_case(BH_HELD_GH, BH_HELD, "push --dry-run origin HEAD:lane-held", "allow", [],
+                         "control, a dry run makes no gh call")
+
+
+def bh_unread_case(config_name, fake, label, tail="origin HEAD:lane-held"):
+    """A push the batch read cannot judge is allowed, and its log holds a push-batch-unread line. The log is the
+    signal: an unread read that allowed silently would be a pass nobody can see. `tail` is the push's arguments."""
+    def check():
+        config = os.path.join(ROOT, config_name)
+        os.makedirs(config, exist_ok=True)
+        log = os.path.join(config, "guard.log")
+        if os.path.exists(log):
+            os.remove(log)
+        decision, reason = decide({"raw": None, "tool": "Bash", "cwd": BH_HELD, "session": None,
+                                   "env_path": _bh_env(fake), "config": config,
+                                   "tool_input": {"command": VCS + " push " + tail}})
+        if decision != "allow":
+            return False, "%s: the push was %s, not allowed (%s)" % (label, decision, reason[:90])
+        text = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+        if PUSH_BATCH_UNREAD not in text:
+            return False, "%s: the allow left no %s line in guard.log" % (label, PUSH_BATCH_UNREAD)
+        return True, "%s: allowed, and logged as %s" % (label, PUSH_BATCH_UNREAD)
+    return check
+
+
+def bh_merged_tip_cost_case():
+    return _bh_cost_case(BH_MERGED_GH, BH_MERGED, "push origin HEAD:lane-merged", "allow", [],
+                         "a tip already merged into origin/main is allowed, with no gh call")
+
+
+def bh_unmerged_cost_case():
+    return _bh_cost_case(BH_HELD_GH, BH_HELD, "push origin HEAD:lane-held", "deny", ["pulls", "compare"],
+                         "control, an unmerged held tip still denies, one list and one compare")
+
+
+def bh_short_dry_run_cost_case():
+    return _bh_cost_case(BH_HELD_GH, BH_HELD, "push -nu origin HEAD:lane-held", "allow", [],
+                         "a dry run in a short-flag cluster (-nu) is allowed, with no gh call")
+
+
+LOG_CHECKS_EXTRA.append(("push-batch-held: a holder that is a draft costs the open list alone, one gh call",
+                         bh_draft_only_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: an empty open list costs one gh call, the list",
+                         bh_empty_list_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: two ready pull requests that hold no tip cost the list and one compare each",
+                         bh_two_ready_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: control, a push of main makes no gh call", bh_main_push_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: control, a dry run makes no gh call", bh_dry_run_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: an open list that cannot be read allows the push, and logs push-batch-unread",
+                         bh_unread_case("bhunreadlist", BH_HELD_BROKEN_GH, "the open list cannot be read")))
+LOG_CHECKS_EXTRA.append(("push-batch-held: a compare that cannot be read allows the push, and logs push-batch-unread",
+                         bh_unread_case("bhunreadcmp", BH_HELD_SERVER_GH, "the compare cannot be read")))
+LOG_CHECKS_EXTRA.append(("push-batch-held: a tip already merged into origin/main is allowed, with no gh call",
+                         bh_merged_tip_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: control, an unmerged held tip still denies, one list and one compare",
+                         bh_unmerged_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: a dry run in a short-flag cluster (-nu) is allowed, with no gh call",
+                         bh_short_dry_run_cost_case))
+LOG_CHECKS_EXTRA.append(("push-batch-held: a destination name the guard cannot read is allowed, and logs push-batch-unread",
+                         bh_unread_case("bhunreaddollar", BH_HELD_GH, "the destination name cannot be read",
+                                        tail="origin HEAD:$LANEB")))
+
+
+FAMILY = "lane-closes-after-records"
 
 
 def _still_open(fd):
@@ -29949,9 +30325,9 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_override_case),
     ("worktree-home: the cross-checkout read costs one git spawn per write call and none otherwise",
      worktree_home_cross_checkout_cost_case),
-    ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
-     "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
-     "no read for HEAD:<branch>, "
+    ("roadmap-one-writer: a non-main push starts three rev-parse calls, push-batch-held's tip read included, "
+     "symbolic-ref for a refspec, HEAD and bare, push.default for bare only, one config read of the remote for a "
+     "literal main destination, no config or symbolic-ref read for HEAD:<branch>, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
     ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",
@@ -38568,7 +38944,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
-    ("roadmap-one-writer: a push starts one rev-parse", "push-delete"),
+    ("roadmap-one-writer: a non-main push starts three rev-parse calls", "push-delete"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
