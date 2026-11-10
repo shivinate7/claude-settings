@@ -34311,19 +34311,23 @@ for _command in ("echo x >> docs/todo.md",
                  'echo "first\nsecond > README.md"', "echo \"it's > README.md\"",
                  "cat > docs/todo.md <<'EOF'\n# heading > README.md\nEOF"):
     cs_shell("shell_write_allowed", "allow", _command)
-# A `>` inside the double quotes of a `gh` comment body reads as a redirect here, so the coordinator's rule refuses each
-# body below. That is the known false alarm of the coordinator-gh-body-redirect debt, and these cases hold its verdict.
-# The controls: a body with no `>` is allowed, and a real redirect to a product path is refused.
+# gh runs no shell over a `gh` comment or review body, so a `>` quoted in it is text, and coordinator-scope's shell
+# reader reads these bodies as text. Cloud gh-write-cloud refuses every gh comment write, so each body below is denied
+# by that rule, and the case holds that the refusal is its own, not coordinator-scope's.
+_gh_cfg, _gh_transcript = cs_pair("coordinator")
 for _command in ('gh pr comment 5 --body "Round 2 -> pass"',
                  'gh pr comment 5 --body "> quoted text"',
                  'gh pr comment 5 --body "CI is green (3 > 2 jobs)"'):
-    cs_shell("gh_comment_body_quoted_gt_denied", "deny", _command)
+    add("coordinator-scope: gh_comment_body_quoted_gt_is_not_a_coordinator_scope_refusal, shell: " + _command,
+        "deny", rule=GH_WRITE_RULE, tool="Bash", command=_command, cwd=GITMAIN,
+        session=CS_PAYLOAD_SID, config=_gh_cfg, transcript=_gh_transcript, env=dict(CS_REMOTE), lacks=("coordinator-scope",))
 # Coordinator-scope judges this call first and does not refuse it; gh-write-cloud then denies it. The case holds that
 # the refusal is that rule's, not coordinator-scope's.
-_gh_cfg, _gh_transcript = cs_pair("coordinator")
 add("coordinator-scope: gh_comment_body_without_gt_is_not_a_coordinator_scope_refusal, shell: gh pr comment 5 --body \"Round 2 passes\"",
     "deny", rule=GH_WRITE_RULE, tool="Bash", command='gh pr comment 5 --body "Round 2 passes"', cwd=GITMAIN,
     session=CS_PAYLOAD_SID, config=_gh_cfg, transcript=_gh_transcript, env=dict(CS_REMOTE), lacks=("coordinator-scope",))
+# A `>` outside the quotes is a real redirect, so coordinator-scope still refuses a gh comment that carries one.
+cs_shell("gh_comment_body_unquoted_redirect_denied", "deny", "gh pr comment 5 --body hi > src/app.py", "app.py")
 cs_shell("gh_comment_body_control_redirect_denied", "deny", "echo x > hooks/x.py", "x.py")
 
 # ---- `sed -i`: the script is code, and the file operands that follow it are what it writes. A script that holds `|`, `;`,
