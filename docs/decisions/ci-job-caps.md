@@ -11,7 +11,18 @@ Owner, 2026-10-27, roadmap step c95 (the cap rule):
 - A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
 - A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
 
-Superseded in part, 2026-11-10 14:09 and 14:24 CST, by decision `time-limits-end-hangs-only` (a time limit ends only a hung run). Every CI job keeps a total-time limit, computed by a script from recent green runs and generously large (owner, 14:24 CST). A margin multiplies the measured value (for example 1.5 times) and never adds a fixed amount (owner, 14:24 CST). Not built: the stored caps stay in force until the reader is built.
+Superseded in part, 2026-11-10 14:09, 14:24 and 14:36 CST, by decision `time-limits-end-hangs-only` (a time limit ends only a hung run). Every CI job keeps a total-time limit, computed by a script from recent green runs. Each is generously large ("generously large maybe", owner, 14:24 CST). A margin multiplies the measured value (for example 1.5 times) and never adds a fixed amount (owner, 14:24 CST). New jobs: see the New jobs section below (owner, 14:36 CST). Not built: the stored caps stay in force until the reader is built.
+
+## New jobs, 2026-11-10 14:36 CST
+
+Owner, 14:36 CST: "b is probably fine for now, with some sorta flag that if it quickly fails that it was misjudged and it goes to largest current job x1.5". Owner, 14:36-14:37 CST: "yeah as in like if it was just made and it then fails in its first run or two that's a sign it was misjudged". <!-- ste-disable-line STE008 owner's words, quoted -->
+
+Rule, not built:
+
+- Until a new CI job has green runs, its limit is 1.5 times the computed limit of its nearest similar job.
+- A new job that hits its limit in its first one or two runs is flagged misjudged. Its limit then moves to 1.5 times the computed limit of the largest current job.
+- A hit is a run that reaches the job's time limit. A red test is not a hit.
+- This replaces the stored 60 for a new job, and the provisional caps in the table.
 
 ## The table
 
@@ -68,7 +79,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 3. A cap end is a run whose job minutes reach the cap, whose conclusion is cancelled or failure, and with no failed test step.
 4. Per-step times come from the GitHub API job steps (`started_at` and `completed_at`).
 5. A run cancelled before its cap by another act, such as a newer push or a batch rebuild, is left out of the sample, and the record names it.
-6. A new job takes a provisional cap of 60 min until it has 5 green runs. The 60 is a stored number, which part 3 of `time-limits-end-hangs-only` forbids. The owner has not ruled what a job with no green runs gets. `merge.deadlineMinutes` is computed from the current CI job limits, not stored (not built).
+6. A new job takes its limit from the New jobs section above (not built). That section replaces the stored 60 and the 5-green-run wait in this step. `merge.deadlineMinutes` is computed from the current CI job limits, not stored (not built).
 
 Kind: process
 Home: .github/workflows/checks.yml

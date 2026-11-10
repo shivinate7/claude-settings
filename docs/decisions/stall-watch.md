@@ -1,4 +1,4 @@
-# A stalled background command is reported, never stopped
+# A stalled background command is reported; a verdict check stops on silence
 
 ## The ruling
 
@@ -23,8 +23,8 @@ Split, owner 2026-11-10 14:24 CST ("yes that's ok" <!-- ste-disable-line STE008 
   (builtins only) lists its own pid. The table lists the same processes. Two limits: an orphan (`(sleep N &); sleep N`) is adopted by
   init and not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it).
 - The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
-  running and the watcher never stops it, except a verdict check (the split above). The wrapper keeps exit 3 after a stall, so the session gets no
-  exit code from the job, even a healthy silent one such as `python3 hooks/test_guard.py` (owner ruling,
+  running and the watcher never stops it, except a verdict check, which stops on silence (the split above; not built). The wrapper keeps exit 3 after a stall, so the session gets no
+  exit code from the job, even a healthy silent one such as `npm ci` (owner ruling,
   2026-10-18 15:15 CDT).
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
   of the session. The guard refuses a stop of a process outside the session, unless the owner's override
