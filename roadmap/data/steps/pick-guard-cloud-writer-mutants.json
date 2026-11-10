@@ -1,0 +1,14 @@
+{
+  "title": "Mutation tests for the cloud page-writer key in the pick guard",
+  "phase": "now",
+  "status": "todo",
+  "order": 959,
+  "owner": "lane",
+  "why": "PR #2489's pick-guard change has no mutants for its key read, so a later edit could break it with every test green.",
+  "note": "From lane pick-guard-cloud-writer (#2489), coordinator 01:52 CST Nov 10. A test-author writes the post-build mutants: swap the precedence; the lane reads the key; drop the fallback; `ran` set on any get. Starts after #2489 merges. The layout extras key is now `page-writer` (not `waiting-page-writer`), after the glossary refused the old name.",
+  "updatedAt": "2026-11-10T01:52:00-06:00",
+  "lane": "",
+  "blockedBy": [
+    "pick-guard-cloud-writer"
+  ]
+}
