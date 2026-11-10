@@ -13417,11 +13417,11 @@ record_allow("a commit message that names a push to roadmap is text",
 
 # =========================================================================== roadmap-artifact-cites
 #
-# Rule roadmap-artifact-cites, decision waiting-data-in-repo (owner ruling fb-1458-2, option a): a roadmap step cites
-# an artifact as `artifact:<id>`, never by its link, and a write to the record branch refuses a bare link. A push
-# reaches no CI run that reads the record branch, so the check runs at the push. It reads the pushed head's
-# roadmap/data/steps/*.json and judges each string with lint/check_artifact_cites.py's findings, the one home of the
-# link test. Only a triage push gets here, after roadmap-one-writer has allowed it, so a lane keeps its own refusal.
+# Rule roadmap-artifact-cites, decision waiting-data-in-repo: a roadmap step cites an artifact as `artifact:<id>`,
+# never by its link, and a write to the record branch refuses a bare link. A push reaches no CI run that reads
+# the record branch, so the check runs at the push. It reads the pushed head's roadmap/data/steps/*.json and
+# judges each string with lint/check_artifact_cites.py's findings, the one home of the link test. Only a triage
+# push gets here, after roadmap-one-writer has allowed it, so a lane keeps its own refusal.
 FAMILY = "roadmap-artifact-cites"
 ARTCITE_RULE = "roadmap-artifact-cites"
 ARTCITE_LACKS = RECORD_LACKS + ("claude.ai/",)  # the remedy names no push and no link
