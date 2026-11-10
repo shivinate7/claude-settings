@@ -11827,6 +11827,226 @@ def incident_write_strip_case():
 FIXTURELESS_CHECKS.add(incident_write_strip_case)  # it loads the module and builds no fixture
 
 
+# ---- env false alarms and holes, env family. Decision env-file-stays-unread.
+# An allow row names a folder called .env, or text that names one, and reads no env file. A deny row
+# reaches an env file by a form the guard misses. The walk rows need a folder that holds an env file,
+# so the three folders below are fixtures, each named so no name is a substring of another.
+ENVWALK_HELD = os.path.join(ROOT, "envwalk-held")    # an env file and an ordinary file
+ENVWALK_CLEAN = os.path.join(ROOT, "envwalk-clean")  # ordinary files and no env file
+ENVWALK_EMPTY = os.path.join(ROOT, "envwalk-empty")  # no files at all
+ENVWALK_IGNORED = os.path.join(ROOT, "envwalk-ignored")      # a git repo whose .gitignore lists the env file
+ENVWALK_UNIGNORED = os.path.join(ROOT, "envwalk-unignored")  # a git repo whose .gitignore does not
+ENVWALK_NESTED = os.path.join(ROOT, "envwalk-nested")        # a top-level folder that holds an env file
+ENVWALK_LARGE = os.path.join(ROOT, "envwalk-large")          # one folder over the walk cap, no env file
+ENVWALK_BULK = os.path.join(ROOT, "envwalk-bulk")            # a clean repo whose .gitignore lists node_modules, which holds the bulk
+ENVWALK_MODULES_OPEN = os.path.join(ROOT, "envwalk-modules-open")  # the same bulk tree, with no .gitignore line
+
+
+def build_envwalk_folders():
+    write(os.path.join(ENVWALK_HELD, ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVWALK_HELD, "README.md"), "held\n")
+    write(os.path.join(ENVWALK_HELD, "src", "app.txt"), "X\n")  # a subfolder that holds no env file
+    write(os.path.join(ENVWALK_CLEAN, "README.md"), "clean\n")
+    os.makedirs(ENVWALK_EMPTY, exist_ok=True)
+
+
+lazy_fixture((ENVWALK_HELD, ENVWALK_CLEAN, ENVWALK_EMPTY), build_envwalk_folders)
+
+
+def build_envwalk_repos():
+    # Two git repos, so rg reads .gitignore. The env file is on disk in both; only the ignore rule differs.
+    make_repo(ENVWALK_IGNORED, {".gitignore": ENV + "\n", ENV: "FIXTURE=1\n", "README.md": "ignored\n"})
+    make_repo(ENVWALK_UNIGNORED, {".gitignore": "*.log\n", ENV: "FIXTURE=1\n", "README.md": "kept\n"})
+    write(os.path.join(ENVWALK_NESTED, "sub", ENV), "FIXTURE=1\n")
+    write(os.path.join(ENVWALK_NESTED, "README.md"), "nested\n")
+
+
+def build_envwalk_large():
+    # The walk cap is the guard's ENV_WALK_LIMIT entries (guard_env.py). The folder holds one more, so it
+    # is over the cap whatever the cap is set to. No file in it is an env file.
+    import guard_env
+    os.makedirs(ENVWALK_LARGE, exist_ok=True)
+    for number in range(guard_env.ENV_WALK_LIMIT + 1):
+        open(os.path.join(ENVWALK_LARGE, "f%06d" % number), "w").close()
+
+
+lazy_fixture((ENVWALK_IGNORED, ENVWALK_UNIGNORED, ENVWALK_NESTED), build_envwalk_repos)
+lazy_fixture((ENVWALK_LARGE,), build_envwalk_large)
+
+
+def build_envwalk_bulk_repo(where, ignore_modules):
+    # Each folder holds more than the cap on its own, so the bulk counts only if the walk enters it.
+    import guard_env
+    files = {"README.md": "bulk\n"}
+    if ignore_modules:
+        files[".gitignore"] = "node_modules/\n"
+    make_repo(where, files)
+    for folder in (os.path.join(where, "node_modules"), os.path.join(where, ".git", "bulk")):
+        os.makedirs(folder, exist_ok=True)
+        for number in range(guard_env.ENV_WALK_LIMIT + 1):
+            open(os.path.join(folder, "f%06d" % number), "w").close()
+
+
+def build_envwalk_bulk():
+    # A git repo whose .gitignore lists node_modules, as real repos do. rg and ag skip what it lists.
+    build_envwalk_bulk_repo(ENVWALK_BULK, ignore_modules=True)
+
+
+def build_envwalk_modules_open():
+    # The same tree with no .gitignore line, so rg and ag walk node_modules and its bulk is over the cap.
+    build_envwalk_bulk_repo(ENVWALK_MODULES_OPEN, ignore_modules=False)
+
+
+lazy_fixture((ENVWALK_BULK,), build_envwalk_bulk)
+lazy_fixture((ENVWALK_MODULES_OPEN,), build_envwalk_modules_open)
+
+# Allowed. A folder named .env (a virtualenv), and text that names it, read no env file.
+for _tool, _cmd in (
+    ("Bash", "source " + ENV + "/bin/activate"),
+    ("Bash", "rm -rf " + ENV + "/lib"),
+    ("PowerShell", r'gh pr comment 1 --body "the guard reads \.env names"'),
+    ("PowerShell", r'''python -c "print('see \.env')"'''),
+):
+    sh("env: false alarm, allowed: " + _cmd, _cmd, "allow", tool=_tool, cwd=NOGIT)
+
+# Refused. Each regex names an env file that the sample names do not cover, or a POSIX class that
+# Python reads as a nested set. The PowerShell tool passes the backslash of `\.env` differently from
+# Bash, which refuses the same text, so the PowerShell form is a hole of its own.
+for _cmd in (
+    r"ag --hidden -G '\.env\.prod$' K",
+    r"ag --hidden -G '\.env\.qa$' K",
+    r"ag --hidden -G '\.env\.ci$' K",
+    r"ag --hidden -G '[[:alpha:]]' K",
+):
+    sh("env: ag hidden hole, refused: " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+_ag_plain = r"ag --hidden -G '\.env' K"
+sh("env: ag hidden hole, PowerShell form, refused: " + _ag_plain, _ag_plain, "deny", "env-file",
+   tool="PowerShell", cwd=NOGIT)
+sh("env: ag hidden control, Bash form, refused: " + _ag_plain, _ag_plain, "deny", "env-file",
+   cwd=NOGIT)
+
+# A hidden search of a folder that holds an env file is refused. The same search of a folder with no
+# env file, or of an empty folder, is allowed.
+for _cmd in ("rg -uuu X .", "rg --hidden X .", "ag --hidden X ."):
+    sh("env: walk hole, folder holds an env file, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_HELD)
+    sh("env: walk control, folder has no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
+    sh("env: walk control, folder is empty, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_EMPTY)
+
+# grep -r reads dotfiles, so a recursive grep of a folder that holds an env file reads that file. Each
+# form below is refused over a folder that holds an env file (decision env-file-stays-unread). The `dir`
+# form names the held folder by its path.
+for _cmd, _cwd in (
+    ("grep -r X .", ENVWALK_HELD),
+    ("grep -rn X", ENVWALK_HELD),
+    ("grep -rl X .", ENVWALK_HELD),
+    ("grep -R X " + slash(ENVWALK_HELD), NOGIT),
+):
+    sh("env: grep walk hole, folder holds an env file, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=_cwd)
+# The same ruling allows each form below. An env name as an exclude glob reads nothing, and a path
+# that holds no env file reads none, even from a folder that holds one.
+for _cmd in ("grep -r X . --exclude='.env*'", "grep -r X . --exclude=" + ENV):
+    sh("env: grep walk control, env name as an exclude glob, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_HELD)
+sh("env: grep walk control, path holds no env file, allowed: grep -r X src", "grep -r X src", "allow",
+   cwd=ENVWALK_HELD)
+sh("env: grep walk control, folder has no env file, allowed: grep -r X .", "grep -r X .", "allow",
+   cwd=ENVWALK_CLEAN)
+
+# rg reads a dotfile only with a hidden flag, and in a git repo it skips what .gitignore lists. A listed
+# env file is not read, so a hidden search of its folder is allowed. An unlisted one is refused, and so
+# is a search that turns the ignore rules off.
+for _cmd in ("rg --hidden foo", "rg --hidden foo ."):
+    sh("env: rg hidden, env file listed in .gitignore, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_IGNORED)
+    sh("env: rg hidden, env file not listed in .gitignore, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVWALK_UNIGNORED)
+for _cmd in ("rg --hidden --no-ignore foo .", "rg -uu foo ."):
+    sh("env: rg hidden, env file listed in .gitignore, ignore rules off, refused: " + _cmd, _cmd, "deny",
+       "env-file", cwd=ENVWALK_IGNORED)
+# rg -u turns the ignore rules off and reads no dotfile. Only a hidden flag (-uu, --hidden) reaches one.
+sh("env: rg -u reads no dotfile, folder holds an env file, allowed: rg -u foo .", "rg -u foo .", "allow",
+   cwd=ENVWALK_HELD)
+sh("env: rg -uu reads dotfiles, folder holds an env file, refused: rg -uu foo .", "rg -uu foo .", "deny",
+   "env-file", cwd=ENVWALK_HELD)
+# A glob in the path names the folders it expands to. A hidden search of one that holds an env file reads it.
+sh("env: walk hole, glob names a folder that holds an env file, refused: rg --hidden foo *",
+   "rg --hidden foo *", "deny", "env-file", cwd=ENVWALK_NESTED)
+sh("env: walk control, glob names no folder with an env file, allowed: rg --hidden foo *",
+   "rg --hidden foo *", "allow", cwd=ENVWALK_CLEAN)
+sh("env: walk control, glob names a folder with no env file, allowed: rg --hidden foo src*",
+   "rg --hidden foo src*", "allow", cwd=ENVWALK_HELD)
+# A hidden walk past the cap is refused, because the walk cannot see past it. The reason says the folder is
+# too large to check, and never that an env file is held: none was seen.
+sh("env: walk over the cap, folder too large to check, refused: rg --hidden foo", "rg --hidden foo", "deny",
+   "env-file", cwd=ENVWALK_LARGE, carries=("too large", "cannot be shown clean"),
+   lacks="holds an environment file")
+# The checkout's .gitignore lists node_modules, so rg and ag skip it and its bulk does not count toward the cap.
+# .git holds no env file and is skipped too. A clean folder whose bulk sits there is allowed, and no reason
+# says an env file is held.
+sh("env: walk, bulk under node_modules and .git, folder holds no env file, allowed: rg --hidden foo",
+   "rg --hidden foo", "allow", cwd=ENVWALK_BULK, lacks="holds an environment file")
+# The same bulk tree with no .gitignore line: rg and ag walk node_modules, which holds more than the walk
+# cap, so the folder is too large to check. The reason says so, and never that an env file is held.
+sh("env: walk over the cap, node_modules not ignored, folder too large to check, refused: rg --hidden foo",
+   "rg --hidden foo", "deny", "env-file", cwd=ENVWALK_MODULES_OPEN,
+   carries=("too large", "cannot be shown clean"), lacks="holds an environment file")
+# A file regex that picks a dot-prefixed env name is refused. `[A-Z]*` may be empty, so `.env.md` is picked,
+# and `env\.prod$` picks `.env.prod`.
+for _cmd in (r"ag --hidden -G '\.env[A-Z]*\.md$' foo", r"ag --hidden -G 'env\.prod$' foo"):
+    sh("env: ag hidden regex hole, refused: " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+# A regex that names no env prefix of its own is judged on the sample env names alone (the accepted limit
+# in guard_env.py). These two pick none of them, whatever their size or their POSIX class, so they are allowed.
+for _cmd in (r"ag --hidden -G '.*a.*b.*c.*d.*e.*f' foo", r"ag --hidden -G '[[:^alpha:]]x' foo"):
+    sh("env: ag hidden regex, no sample env name it picks, allowed: " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+
+# Select-String -NotMatch is a switch, so the next word is the pattern. A word after the pattern is a
+# path, and an env name there is a read. An env name in the pattern is text.
+sh("env: Select-String -NotMatch, env name as the path, refused: Select-String -NotMatch x " + ENV,
+   "Select-String -NotMatch x " + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: Select-String -NotMatch, env name in a quoted pattern, allowed",
+   r"Select-String -NotMatch 'sub\.env' docs/a.md", "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: Select-String -NotMatch, bare env name as the pattern alone, allowed",
+   r"Select-String -NotMatch sub\.env", "allow", tool="PowerShell", cwd=NOGIT)
+# git grep reads tracked files and prints the lines that match. An env name in its pattern is text.
+for _cmd in (
+    VCS + r" grep -n 'sub\.env' -- docs",
+    VCS + r" grep -n 'sub\\\.env\|sub\.env' -- docs",
+    VCS + r" grep -n 'sub\\\.env\|sub\.env' HEAD -- .",
+    VCS + r" grep -n -i 'notmatch\|sub\\\.env' FETCH_HEAD -- docs hooks",
+):
+    sh("env: git grep, env name in the pattern, allowed: " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+
+def env_posix_class_stderr_case():
+    """The guard prints no FutureWarning on stderr for a `[[:alpha:]]` file regex.
+
+    Python's re reads a POSIX class as a nested set and warns at compile time. The guard catches that
+    warning, so a hook's stderr holds nothing from it. The check runs the guard in a child process,
+    because re caches a compiled pattern, and a cached pattern prints no warning again.
+    """
+    payload = {"tool_name": "Bash", "tool_input": {"command": r"ag --hidden -G '[[:alpha:]]' K"},
+               "cwd": NOGIT}
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = CFG
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    for name in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR",
+                 "CLAUDE_CODE_REMOTE"):
+        env.pop(name, None)
+    run = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True,
+                         text=True, env=env, timeout=120)
+    if "Traceback" in run.stderr:   # a crash prints no FutureWarning, so it must fail here, not pass
+        return False, "the guard crashed on the POSIX class regex: %s" % run.stderr.strip()[-100:]
+    if "FutureWarning" in run.stderr:
+        return False, "the guard printed a FutureWarning on stderr: %s" % run.stderr.strip()[-100:]
+    return True, "the POSIX class regex prints no FutureWarning and no traceback"
+
+
+FIXTURELESS_CHECKS.add(env_posix_class_stderr_case)  # it runs the guard in a child and builds no fixture
+
+
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
@@ -29634,6 +29854,8 @@ LOG_CHECKS = (
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
     ("env: heredoc-allow-strip: strip_heredoc_bodies keeps no body line of the incident cat write",
      incident_write_strip_case),
+    ("env: a POSIX class in an ag file regex prints no FutureWarning on stderr",
+     env_posix_class_stderr_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
     ("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
      process_start_ms_repeated_hour_cdt_case),
@@ -38288,6 +38510,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
+    ("env: a POSIX class in an ag file regex", "env"),
     ("roadmap-one-writer: a push starts one rev-parse", "push-delete"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
