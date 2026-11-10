@@ -20766,6 +20766,24 @@ sh("builder-find: sed -ni s/a/b/p tests/test_a.py, the in-place flag after -n, e
    "sed -ni s/a/b/p tests/test_a.py", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 sh("builder-find: sed --in-place s/a/b/ tests/test_a.py, the long in-place flag, edits a test, is refused",
    "sed --in-place s/a/b/ tests/test_a.py", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+# ---- the in-place flag as a word of the command. A sed script may hold a word with an `i` in it (`/-api/` searches for a
+# path): that word is text, and the file is only read. `-ie` and `-ibak` are the in-place flag with a backup suffix
+# (`-i[SUFFIX]`, GNU and BSD), so the file they name is edited in place and is refused. The controls are a lone `-i`, and
+# the same word after `-e` or in a search with no flag word.
+sh("builder-find: sed -n '/-api/p' hooks/test_guard.py, a -api word in the script, reads the test, is allowed",
+   "sed -n '/-api/p' hooks/test_guard.py", "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: sed -n -e '/-xi/p' hooks/test_guard.py, a -xi word after -e, reads the test, is allowed",
+   "sed -n -e '/-xi/p' hooks/test_guard.py", "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: sed -n '/-ibak/p' hooks/test_guard.py, a -ibak word in the script, reads the test, is allowed",
+   "sed -n '/-ibak/p' hooks/test_guard.py", "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: sed -n '/api/p' hooks/test_guard.py, a search with no flag word, reads the test, is allowed",
+   "sed -n '/api/p' hooks/test_guard.py", "allow", **dict(BR, cwd=FINDCP))
+sh("builder-find: sed -ie s/a/b/ hooks/test_guard.py, the in-place flag with suffix e, edits a test, is refused",
+   "sed -ie s/a/b/ hooks/test_guard.py", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: sed -ibak s/a/b/ hooks/test_guard.py, the in-place flag with suffix bak, edits a test, is refused",
+   "sed -ibak s/a/b/ hooks/test_guard.py", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
+sh("builder-find: sed -i s/a/b/ hooks/test_guard.py, the lone in-place flag, edits a test, is refused",
+   "sed -i s/a/b/ hooks/test_guard.py", "deny", rule=BT, carries=("test-author",), **dict(BR, cwd=FINDCP))
 # ---- the loop name inside a parameter expansion. `${f##*/}` and `${f%.py}` name the loop variable, so each copy writes
 # a name with no test prefix, or a file outside the repo. The `$(basename "$f")` copy is the same. All three are allowed.
 sh('builder-find: for f in src/*.py, cp "$f" "/tmp/${f##*/}", the basename copied out of the repo, is allowed',
@@ -20777,9 +20795,53 @@ sh('builder-find: for f in src/*.py, cp "$f" "/tmp/$(basename "$f")", the basena
 sh('builder-find: for f in src/*.py, cp "$f" "tests/${f##*/}", the basename copied into tests/, is refused',
    'for f in src/*.py; do cp "$f" "tests/${f##*/}"; done', "deny", rule=BT, carries=("test-author",),
    **dict(BR, cwd=FINDCP))
+# The `$(basename "$f")` copy into tests/ writes tests/test_x.py, a test, so it is refused as the `${f##*/}` copy is.
+sh("builder-find: for f in hooks/*.py, cp \"$f\" \"tests/$(basename \"$f\")\", the basename copied into tests/, is refused",
+   "for f in hooks/*.py; do cp \"$f\" \"tests/$(basename \"$f\")\"; done", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+# A destination with a `$` is one the check cannot read, so the copy is refused. This row pins that fail-closed deny. It
+# does not show that single quotes are read as text: the `*.txt` loop above is allowed under either reading.
+sh("builder-find: for f in hooks/*.py, cp \"$f\" '$(basename \"$f\")', a dollar-paren in single quotes, is refused",
+   "for f in hooks/*.py; do cp \"$f\" '$(basename \"$f\")'; done", "deny", rule=BT, carries=("test-author",),
+   **dict(BR, cwd=FINDCP))
+# A lone apostrophe in a trailing comment is text, so the loop is read whole. Its copies write docs/notes.txt, no test,
+# so the copy is allowed. A scanner that reads the apostrophe as an open quote fails closed and refuses it.
+sh("builder-find: a loop of cp of hooks/*.txt into docs/, a lone apostrophe in a trailing comment, writes no test, is allowed",
+   "for f in hooks/*.txt; do cp \"$f\" docs/; done # don't", "allow", **dict(BR, cwd=FINDCP))
 # ---- the cost of a loop over 1000 plain files. The copy of each to a .bak name is judged within 5 s.
 add("builder-find: for f in bulk/*, cp \"$f\" \"$f.bak\", 1000 plain files, is allowed within 5 s",
     "allow", max_seconds=5, command='for f in bulk/*; do cp "$f" "$f.bak"; done', **dict(BR, cwd=FINDCP))
+# ---- the segment cache. The time row above proxies `_cd_facts` (guard_core), the one reader of a segment's parentheses
+# and tokens. The loop unrolls into N segments, and each walks the segments before it, so without a cache about N*N/2
+# reads run. Cached, each distinct segment text is read once. judge_in_process loads guard_core afresh, so the cache
+# the judge uses starts empty: no cache_clear is needed, and cache_info() read after the judge is that judge's cache.
+CD_FACTS_FILES = 1000
+
+
+def cd_facts_cache_check():
+    """The 1000-file loop is judged once. Each distinct segment is read through `_cd_facts` once: misses reach the file
+    count (the loop was reached there), and stay under twice it (not quadratic)."""
+    command = 'for f in bulk/*; do cp "$f" "$f.bak"; done'
+    decision, reason, _took = _cap_judge(command, FINDCP)
+    if decision != "allow":
+        return False, "the 1000-file loop got %s %r, want allow" % (decision, reason)
+    cached = getattr(sys.modules.get("guard_core"), "_cd_facts", None)
+    info = getattr(cached, "cache_info", None)
+    if info is None:
+        return False, "guard_core._cd_facts has no cache_info, so its segment reads are not cached"
+    stats = info()
+    if stats.misses < CD_FACTS_FILES:
+        return False, ("_cd_facts read %d distinct segments for %d files, want at least one per file: the loop was not "
+                       "judged there" % (stats.misses, CD_FACTS_FILES))
+    if stats.misses > 2 * CD_FACTS_FILES:
+        return False, ("_cd_facts missed %d times for %d files, want at most %d: each segment should be read once, not "
+                       "once per later segment" % (stats.misses, CD_FACTS_FILES, 2 * CD_FACTS_FILES))
+    return True, "the segment cache read each of the %d segments once: %d misses, %d hits" % (
+        CD_FACTS_FILES, stats.misses, stats.hits)
+
+
+LOG_CHECKS_EXTRA.append(("builder-find: a loop of 1000 plain files reads each segment once through the segment cache",
+                         cd_facts_cache_check))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
