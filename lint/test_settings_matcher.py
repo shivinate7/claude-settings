@@ -110,6 +110,14 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_guard_matcher_covers_agent_send_message(self):
+        # Rule message-role-scope refuses an Agent SendMessage that sends a builder a test edit, so a guard matcher
+        # must see the SendMessage tool itself. That is not the send_message MCP tool named above.
+        matchers = guard_matchers()
+        tool = "SendMessage"
+        self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                        "no guard matcher covers %s: %r" % (tool, matchers))
+
     def test_guard_matcher_covers_sendmessage(self):
         # Rule sendmessage-session-id refuses a SendMessage that names a cloud session, so a guard matcher must see it.
         matchers = guard_matchers()

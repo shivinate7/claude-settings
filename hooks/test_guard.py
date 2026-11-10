@@ -110,6 +110,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "message-role": "a SendMessage to an agent: refused when its newest spawn is a builder and the message edits a test, or a test-author and it edits product code; the refusal names the role to send it to",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
@@ -12901,6 +12902,50 @@ def role_said(text):
     return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
 
 
+# An Agent spawn in the parent transcript, in the shape a session writes: the assistant line that calls Agent with
+# its subagent_type, and the user line that answers it. The answer's toolUseResult carries the agentId that a
+# SendMessage names in `to` (rule message-role-scope). Field names are copied from a real session transcript.
+SPAWN_TOOL = "Agent"
+SPAWN_PROMPT = "Task: a red case for one role's scope."
+
+
+def spawn_use(tool_id, subagent_type):
+    """The assistant line that calls Agent for one agent of `subagent_type`."""
+    return role_use(tool_id, SPAWN_TOOL, {"description": "Red cases", "subagent_type": subagent_type,
+                                          "isolation": "worktree", "run_in_background": True,
+                                          "prompt": SPAWN_PROMPT})
+
+
+def spawn_result(tool_id, agent_id):
+    """The user line that answers the spawn: the text names the agent, and toolUseResult holds its agentId."""
+    body = "Async agent launched successfully.\nagentId: %s" % agent_id
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": body}]}]},
+        "toolUseResult": {"isAsync": True, "status": "async_launched", "agentId": agent_id,
+                          "description": "Red cases"}})
+
+
+def spawn_call(tool_id, agent_id, subagent_type):
+    """One Agent spawn, its call and its answer, paired by `tool_id`."""
+    return [spawn_use(tool_id, subagent_type), spawn_result(tool_id, agent_id)]
+
+
+# The agent ids the message-role fixtures name. Each has 17 hex digits, as a spawn's agentId does.
+SENDTO_BUILDER = "b5d0c71e9a24f3e81"
+SENDTO_AUTHOR = "c3e9a0f17d4b82a6e"
+SENDTO_REVIEWER = "d91f2a6e0c7b53f48"
+SENDTO_OTHER = "e0a4b8c2d16f97e3a"
+SENDTO_UNKNOWN = "f7b2c4d9e1a05c6b8"  # no spawn record names it
+
+
+def sendto_full_lines():
+    """A long parent transcript: 300 spawns of other agents, then the builder's own spawn as the newest record."""
+    lines = []
+    for n in range(300):
+        lines += spawn_call("x%03d" % n, "%017x" % (n + 1), "test-author" if n % 2 else "reviewer")
+    return lines + spawn_call("s1", SENDTO_BUILDER, "builder")
+
+
 CREATE_SESSION = "mcp__claude-code-remote__create_session"
 ROLE_NEW = "session_ROLENEW01"  # the id a create_session call starts, and a send_message names
 
@@ -13061,6 +13106,15 @@ ROLE_LINES = {
     "body-int-then-lane": role_call("r0", RUNNER_TAGS) + [role_use("g1", GET_SESSION, {"session_id": ROLE_OTHER}),
                                                           role_result_block("g1", content=7)]
                           + role_target_call("g2", ARCH_LANE_TAGS),
+    # message-role-scope shapes: one spawn of each role; the newest of two spawns of one id (a test-author, then a
+    # builder with the same agent id); 300 spawns of other agents, then the builder's; and an empty file.
+    "msg-builder": spawn_call("s1", SENDTO_BUILDER, "builder"),
+    "msg-author": spawn_call("s1", SENDTO_AUTHOR, "test-author"),
+    "msg-reviewer": spawn_call("s1", SENDTO_REVIEWER, "reviewer"),
+    "msg-other": spawn_call("s1", SENDTO_OTHER, "builder"),
+    "msg-newest-builder": spawn_call("s1", SENDTO_BUILDER, "test-author") + spawn_call("s2", SENDTO_BUILDER, "builder"),
+    "msg-full": sendto_full_lines(),
+    "msg-empty": [],
     # A get_session result whose record nests too deep to parse: the call line, then the result, as a read returns it.
     "body-deep": role_target_raw("g1", role_wrapped(DEEP_RECORD)),
     # The branch read. Each target record arrives wrapped, as another session's text does. Its branches are the
@@ -18828,6 +18882,319 @@ sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
 
+# ---- message-role-scope: a SendMessage to an agent is judged by the role of that agent's spawn. The receiver is the
+# agent `to` names. Its role is the subagent_type of the NEWEST Agent spawn whose answer names that agent id, read from
+# the parent transcript (transcript_path). A builder is not sent an edit of a test, and a test-author is not sent an
+# edit of product code. The refusal names the role to send it to, never the path. Mutation tests (hooks/mutate_*.py)
+# stay a builder's. A target with no spawn record, the main session and a reviewer pass. Rule roles-one-role-per-agent;
+# decision builders-cannot-edit-tests.
+FAMILY = "message-role"
+SENDTO_RULE = "message-role-scope"
+SENDTO_TOOL = "SendMessage"
+SENDTO_MSG1 = "Edit hooks/test_guard.py: add a case for the empty brief."  # a test edit: refused to a builder
+T_SENDTO_BUILDER = role_path("msg-builder")
+T_SENDTO_AUTHOR = role_path("msg-author")
+T_SENDTO_REVIEWER = role_path("msg-reviewer")
+T_SENDTO_OTHER = role_path("msg-other")
+T_SENDTO_NEWEST = role_path("msg-newest-builder")
+T_SENDTO_FULL = role_path("msg-full")
+T_SENDTO_EMPTY = role_path("msg-empty")
+
+
+def sendto_refuse(name, to, message, transcript, send_to, lacks=()):
+    """A SendMessage the guard refuses under message-role-scope. The reason names the role to send it to (`send_to`),
+    and it names none of the `lacks` fragments, which are the path the message edits."""
+    add("message-role: " + name, "deny", rule=SENDTO_RULE, tool=SENDTO_TOOL, cwd=NOGIT, transcript=transcript,
+        to=to, message=message, carries=(send_to,), lacks=lacks)
+
+
+def sendto_allow(name, to, message, transcript=None):
+    """A SendMessage the guard lets through silently."""
+    add("message-role: " + name, "allow", tool=SENDTO_TOOL, cwd=NOGIT, silent=True, transcript=transcript,
+        to=to, message=message)
+
+
+# Refused: a test edit to a builder. The refusal sends it to a test-author, and never names the test path.
+sendto_refuse("a test edit to a builder is refused, and the refusal names test-author",
+              SENDTO_BUILDER, SENDTO_MSG1, T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+# Refused: the incident form, the path in the sentence before the verb.
+sendto_refuse("the incident form, the path before the verb, to a builder is refused",
+              SENDTO_BUILDER,
+              "merge/test_lane_lint.py ~683: `assertIn(\"unknown\", ...)` holds for any Liftable. "
+              "Replace it with an assert on \"no lint CI step ran\".",
+              T_SENDTO_BUILDER, "test-author", lacks=("merge/test_lane_lint.py",))
+sendto_refuse("a failing case in a test file, sent to a builder, is refused",
+              SENDTO_BUILDER, "Fix the failing case in tests/test_app.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/test_app.py",))
+# Refused: a product edit to a test-author. The refusal sends it to a builder.
+sendto_refuse("a product edit to a test-author is refused, and the refusal names builder",
+              SENDTO_AUTHOR, "Fix guard.py so the new case passes.", T_SENDTO_AUTHOR, "builder", lacks=("guard.py",))
+sendto_refuse("a product edit with the path after the verb, to a test-author, is refused",
+              SENDTO_AUTHOR, "Change hooks/guard.py: drop the early return.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+# Refused: the newest spawn decides. The id was spawned as a test-author, then as a builder, so a test edit is refused.
+sendto_refuse("the newest spawn of an id decides its role: a builder spawned after a test-author refuses a test edit",
+              SENDTO_BUILDER, SENDTO_MSG1, T_SENDTO_NEWEST, "test-author", lacks=("hooks/test_guard.py",))
+# Refused: the same edit, found in a long transcript: the builder's spawn is the newest of 301 records.
+sendto_refuse("a test edit to a builder is refused in a transcript of 301 spawns",
+              SENDTO_BUILDER, SENDTO_MSG1, T_SENDTO_FULL, "test-author", lacks=("hooks/test_guard.py",))
+
+# Allowed to a builder: product fixes, test runs, reads, a green goal, and a check. None edits a test.
+sendto_allow("a fix to product code, whose goal is a test going green, is allowed to a builder",
+             SENDTO_BUILDER, "Fix guard.py so hooks/test_guard.py goes green.", T_SENDTO_BUILDER)
+sendto_allow("a test run the builder reports on is allowed",
+             SENDTO_BUILDER, "Run `python3 hooks/test_guard.py` and report the verdict.", T_SENDTO_BUILDER)
+sendto_allow("a read of a failing test, then a product fix, is allowed to a builder",
+             SENDTO_BUILDER, "Read the failing case in hooks/test_guard.py, then fix guard.py.", T_SENDTO_BUILDER)
+sendto_allow("a green goal on a test, with no edit verb, is allowed to a builder",
+             SENDTO_BUILDER, "Make hooks/test_guard.py green.", T_SENDTO_BUILDER)
+sendto_allow("a check of a test-run verdict is allowed to a builder",
+             SENDTO_BUILDER, "Check: verdict python3 merge/test_lane_lint.py PASS.", T_SENDTO_BUILDER)
+# A path a message runs, reads or waits on to go green is no edit, though an edit verb is in the message.
+sendto_allow("a fix to guard.py, with a test the message makes green, is allowed to a builder",
+             SENDTO_BUILDER, "Fix guard.py to make tests/x.py green.", T_SENDTO_BUILDER)
+# A bare path with no edit verb is no edit: the message names the path and says nothing is to change in it.
+sendto_allow("a fix already made for a test path, with no edit verb, is allowed to a builder",
+             SENDTO_BUILDER, "Here is the fix for tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("a test path said to be wrong, with no edit verb, is allowed to a builder",
+             SENDTO_BUILDER, "tests/x.py is wrong.", T_SENDTO_BUILDER)
+# A path leads its clause, and the edit verb after it governs it: refused to a builder, naming test-author.
+sendto_refuse("a test path before a colon, with replace after it, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "tests/x.py: replace the assert.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+# Allowed to a test-author: its own test edits, and a product fix it hands to the builder.
+sendto_allow("a test edit to a test-author, with the product fix left to the builder, is allowed",
+             SENDTO_AUTHOR, "Edit hooks/test_guard.py: add the case. The builder will fix guard.py.", T_SENDTO_AUTHOR)
+sendto_allow("a test addition to a test-author is allowed",
+             SENDTO_AUTHOR, "Add the case to merge/test_lane_lint.py.", T_SENDTO_AUTHOR)
+# Allowed: a target in no scope. No spawn record names it, it is the main session, or it is a reviewer.
+sendto_allow("a target with no spawn record passes, though message 1 is a test edit",
+             SENDTO_UNKNOWN, SENDTO_MSG1, T_SENDTO_OTHER)
+sendto_allow("the main session as the target passes", "main", SENDTO_MSG1, T_SENDTO_OTHER)
+sendto_allow("a reviewer as the target is out of scope and passes", SENDTO_REVIEWER, SENDTO_MSG1, T_SENDTO_REVIEWER)
+sendto_allow("with no transcript, an unknown role passes", SENDTO_BUILDER, SENDTO_MSG1)
+sendto_allow("an empty transcript names no spawn, so a builder's id passes", SENDTO_BUILDER, SENDTO_MSG1,
+             T_SENDTO_EMPTY)
+# Allowed: mutation tests (hooks/mutate_*.py) stay a builder's. A builder adds a mutant.
+sendto_allow("a mutant added to hooks/mutate_guard.py, sent to a builder, is allowed",
+             SENDTO_BUILDER, "Add a mutant to hooks/mutate_guard.py.", T_SENDTO_BUILDER)
+# Each case here pins one edge: a negated verb, a green word before a path, a
+# nodeid with `::`, a noun `fix` and a read verb, a reference path after a clause, and a path carried across a sentence.
+sendto_allow("a negated change to a test is no edit, and a fix to guard.py is allowed to a builder",
+             SENDTO_BUILDER, "Do not change tests/test_app.py. Fix guard.py.", T_SENDTO_BUILDER)
+sendto_allow("a negated edit of a test is no edit for a builder",
+             SENDTO_BUILDER, "Don't edit tests/test_app.py.", T_SENDTO_BUILDER)
+sendto_allow("a fix to guard.py that passes a test names the test as the goal, not an edit, for a builder",
+             SENDTO_BUILDER, "Fix guard.py to pass tests/test_guard.py.", T_SENDTO_BUILDER)
+sendto_allow("a fix to guard.py that matches a test names the test as the goal, not an edit, for a builder",
+             SENDTO_BUILDER, "Fix guard.py to match tests/test_guard.py.", T_SENDTO_BUILDER)
+sendto_allow("a negated edit of product code is no edit for a test-author",
+             SENDTO_AUTHOR, "Never edit hooks/guard.py.", T_SENDTO_AUTHOR)
+sendto_allow("a product path named as the source of a rule is no edit for a test-author",
+             SENDTO_AUTHOR, "Add a case to tests/test_guard.py for the rule in hooks/guard.py.", T_SENDTO_AUTHOR)
+sendto_refuse("a test nodeid with :: is a test path: a fix of it to a builder is refused, naming test-author",
+              SENDTO_BUILDER, "Fix tests/test_app.py::test_case_3 so it passes.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/test_app.py",))
+sendto_refuse("a fix made in a test path, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Make the fix in tests/test_app.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/test_app.py",))
+sendto_refuse("a test path read in one clause and fixed in the next, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Look at tests/test_app.py, then fix it.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/test_app.py",))
+sendto_refuse("a path read in one sentence is carried to Replace it in the next, to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py. Replace it with the fix.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+# A `make sure` is no edit, a run verb's path is not carried to a later fix, and a product path
+# is not cleared by a green word that follows `to`.
+sendto_allow("a make-sure request for a test to pass is no edit, for a builder",
+             SENDTO_BUILDER, "Make sure tests/x.py passes.", T_SENDTO_BUILDER)
+sendto_allow("a run of a test, then a fix of guard.py, is allowed to a builder",
+             SENDTO_BUILDER, "Run tests/x.py. Fix the failure in guard.py.", T_SENDTO_BUILDER)
+sendto_refuse("a product fix whose goal is a test passing, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "Fix guard.py to pass tests/test_guard.py.", T_SENDTO_AUTHOR, "builder",
+              lacks=("guard.py",))
+# A path in a clause that names a reference (`the case in X`, `as X says`, `agree with X`), or a read
+# path carried only to an anaphor (`it`, `that`, `them`, `the/that assert|case|test`), and a negated edit clause.
+sendto_allow("make guard.py handle a case that a test path holds is allowed to a builder",
+             SENDTO_BUILDER, "Make guard.py handle the case in tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("make guard.py agree with a test path is allowed to a builder",
+             SENDTO_BUILDER, "Make guard.py agree with tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("make a note of failures in a test path is allowed to a builder",
+             SENDTO_BUILDER, "Make a note of the failures in tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("fix guard.py for a failure in a test path is allowed to a builder",
+             SENDTO_BUILDER, "Fix guard.py for the failure in tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("update guard.py to satisfy a case in a test path is allowed to a builder",
+             SENDTO_BUILDER, "Update guard.py to satisfy the case in tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("fix guard.py as a test line says is allowed to a builder",
+             SENDTO_BUILDER, "Fix guard.py as tests/x.py:40 says.", T_SENDTO_BUILDER)
+sendto_allow("read a test path, then add a note to the report, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Add a note to your report.", T_SENDTO_BUILDER)
+sendto_allow("read a test line, then fix the cause, is allowed to a builder",
+             SENDTO_BUILDER, "Read the case at tests/x.py:40. Fix the cause.", T_SENDTO_BUILDER)
+sendto_allow("look at a test line, then fix the cause, is allowed to a builder",
+             SENDTO_BUILDER, "Look at tests/x.py:40, then fix the cause.", T_SENDTO_BUILDER)
+sendto_allow("a case added to a test file for a product path is allowed to a test-author",
+             SENDTO_AUTHOR, "Add a case to hooks/test_guard.py for hooks/guard.py.", T_SENDTO_AUTHOR)
+sendto_allow("red cases for a brief, placed in a product path, are allowed to a test-author",
+             SENDTO_AUTHOR, "Add red cases for the empty brief in hooks/guard.py.", T_SENDTO_AUTHOR)
+sendto_refuse("a test line replaced after a negated clause is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "The assertion at tests/x.py:40 is not specific, replace it with an exact one.",
+              T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+sendto_refuse("a test path updated after a negated fix of product code is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Don't just fix guard.py, also update tests/x.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+sendto_refuse("a test path updated after Don't forget is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Don't forget to update tests/x.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+sendto_refuse("a read of a test line, then Replace that assert, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py:40. Replace that assert.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+# Edge cases the reader rests on. A leading `To pass X,` clause is a goal, so its path is no edit. `for` names a spec,
+# not an object. An adverb between a negation and its edit verb keeps the negation. `file` is filler between an edit
+# verb and its path. A path joined to another by `and` is governed. `the case` after an edit verb points back to a
+# test path that a read verb named.
+sendto_allow("a leading To pass clause names a test path as the goal, then a product fix, is allowed to a builder",
+             SENDTO_BUILDER, "To pass tests/x.py, fix the code.", T_SENDTO_BUILDER)
+sendto_allow("a path after for, named as the spec of a fix, is allowed to a builder",
+             SENDTO_BUILDER, "Fix the bug for tests/x.py.", T_SENDTO_BUILDER)
+sendto_allow("a negated edit with an adverb between is no edit, for a builder",
+             SENDTO_BUILDER, "Don't just edit tests/x.py.", T_SENDTO_BUILDER)
+sendto_refuse("an edit of the file tests/x.py, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Edit the file tests/x.py.", T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+sendto_refuse("a test path joined to a product path by and, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Edit hooks/a.py and tests/b.py.", T_SENDTO_BUILDER, "test-author", lacks=("tests/b.py",))
+sendto_refuse("a read of a test path, then Fix the case, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py. Fix the case.", T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+# Allowed: a builder asked to fix the guard for a red test run, or to make red cases green, and a test-author asked to
+# add a red case for a guard, or to update tests after a guard change. A path there names a run, a spec or the source
+# of a bug, not an edit. A double-quoted example is data. The two refused controls keep a test edit to a builder refused.
+sendto_allow("a reviewer's report of a failing test line, then Fix the guard, is allowed to a builder",
+             SENDTO_BUILDER,
+             "Reviewer: hooks/test_guard.py:13480 expects deny but the guard returns allow. Fix the guard.",
+             T_SENDTO_BUILDER)
+sendto_allow("a CI red line on a test path, then Fix the guard, is allowed to a builder",
+             SENDTO_BUILDER, "CI is red on hooks/test_guard.py:13480. Fix the guard.", T_SENDTO_BUILDER)
+sendto_allow("a count of FAIL lines in a test file, then Fix the guard, is allowed to a builder",
+             SENDTO_BUILDER, "hooks/test_guard.py: 3 FAIL. Fix the guard.", T_SENDTO_BUILDER)
+sendto_allow("red cases in a test file, then Make them green, is allowed to a builder",
+             SENDTO_BUILDER, "Red cases are in hooks/test_guard.py. Make them green.", T_SENDTO_BUILDER)
+sendto_allow("a bug in guard.py, then Add a red case that shows it, is allowed to a test-author",
+             SENDTO_AUTHOR, "The bug is in hooks/guard.py. Add a red case that shows it.", T_SENDTO_AUTHOR)
+sendto_allow("guard.py changed, then Update tests to match, is allowed to a test-author",
+             SENDTO_AUTHOR, "hooks/guard.py changed. Update tests to match.", T_SENDTO_AUTHOR)
+sendto_allow("a double-quoted example of a product fix in a case for a test-author is data, so it is allowed",
+             SENDTO_AUTHOR,
+             'Add a case: "Fix guard.py to pass tests/test_guard.py." sent to a test-author is refused.',
+             T_SENDTO_AUTHOR)
+# Refused controls: a test edit sent to a builder stays refused, naming test-author.
+sendto_refuse("hooks/test_guard.py:683 holds for any input, then Replace it, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace it with an exact assert.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("the incident form with a backtick span, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER,
+              'merge/test_lane_lint.py ~683: `assertIn("unknown", ...)` holds for any Liftable. '
+              'Replace it with an assert on "no lint CI step ran".',
+              T_SENDTO_BUILDER, "test-author", lacks=("merge/test_lane_lint.py",))
+# A green word right after an anaphor (`Make them green`), or after `the`/`that` and a test noun, makes the
+# anaphor a goal and clears the carry. A green word further on describes the replacement, so the path still carries.
+sendto_refuse("a green word later in the replacement does not clear the carry: Replace it with a passing assert",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace it with a passing assert.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a failing word later in the replacement does not clear the carry: Rewrite it as a failing case",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Rewrite it as a failing case.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a red word later in the replacement does not clear the carry: Replace it with the red case",
+              SENDTO_BUILDER,
+              "hooks/test_guard.py:683 holds for any input. Replace it with the red case from the brief.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a green word after a second pronoun does not clear the carry: Change it, it passes on the old code",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Change it, it passes on the old code too.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+# Allowed: the same red cases in a test file, when the goal is a green word right after the anaphor or its noun.
+sendto_allow("red cases in a test file, then Make the cases pass, is allowed to a builder",
+             SENDTO_BUILDER, "Red cases are in tests/x.py. Make the cases pass.", T_SENDTO_BUILDER)
+sendto_allow("red cases in a test file, then Make that case green, is allowed to a builder",
+             SENDTO_BUILDER, "Red cases are in tests/x.py. Make that case green.", T_SENDTO_BUILDER)
+# Each deny names a path in the sentence before, then edits it without a pronoun: by a noun for the path (`the
+# assertion`, `the tests`, `the expected value`, `the guard`, `the bug`), by a quoted path, or by a participle
+# after `it` (`it, passing an exact assert`). The control keeps `Make that pass` a goal, so it is allowed.
+sendto_refuse("an edit of the assertion, with the path in the sentence before, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace the assertion with an exact one.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("an edit of the tests, with the path in the sentence before, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Fix the tests.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("an edit of the expected value, with the path in the sentence before, is refused to a builder",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace the expected value with 3.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a path quoted from a reviewer, then Fix it, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, 'Quote the reviewer: "tests/x.py:12 is wrong". Fix it.',
+              T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+sendto_refuse("a path in the sentence before, then Make it pass by changing the expected value, is refused to a builder",
+              SENDTO_BUILDER, "tests/x.py:12 holds. Make it pass by changing the expected value to 3.",
+              T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+sendto_refuse("a path in the sentence before, then Replace it, passing an exact assert, is refused to a builder",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace it, passing an exact assert.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a product path named in a CI red line, then Fix the guard, is refused to a test-author, naming builder",
+              SENDTO_AUTHOR, "CI is red on hooks/guard.py. Fix the guard.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+sendto_refuse("a product path in the sentence before, then Fix the bug, is refused to a test-author, naming builder",
+              SENDTO_AUTHOR, "hooks/guard.py:683 holds. Fix the bug.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+sendto_allow("red cases in a test file, then Make that pass, is allowed to a builder",
+             SENDTO_BUILDER, "Red cases are in hooks/test_guard.py. Make that pass.", T_SENDTO_BUILDER)
+# A read of a path, then an edit whose object is a role noun for the other side (`Fix the assertion error`,
+# `Write the guard tests`), or a goal reached through an anaphor (`Make them all pass`). Each refused control keeps
+# one noun or anaphor rule in force: the same shape with the object on the other side is refused.
+sendto_allow("a read of a test path, then Fix the assertion error, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Fix the assertion error.", T_SENDTO_BUILDER)
+sendto_allow("a read of a test path, then Fix the fixture bug, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Fix the fixture bug.", T_SENDTO_BUILDER)
+sendto_allow("a CI red line on a test path, then Make it pass by fixing the guard, is allowed to a builder",
+             SENDTO_BUILDER, "CI is red on tests/x.py. Make it pass by fixing the guard.", T_SENDTO_BUILDER)
+sendto_allow("a read of a test path, then Make them pass by changing the guard, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Make them pass by changing the guard.", T_SENDTO_BUILDER)
+sendto_allow("a read of a test path, then Make them all pass, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Make them all pass.", T_SENDTO_BUILDER)
+sendto_allow("a read of a test path, then Make that new case pass, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Make that new case pass.", T_SENDTO_BUILDER)
+sendto_refuse("a read of a test path, then Fix the assertion, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py. Fix the assertion.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+sendto_refuse("a read of a test path, then Fix the fixture, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py. Fix the fixture.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+sendto_allow("a read of a product path, then Write the guard tests, is allowed to a test-author",
+             SENDTO_AUTHOR, "Read hooks/guard.py. Write the guard tests.", T_SENDTO_AUTHOR)
+sendto_allow("a read of a product path, then Add the hook cases, is allowed to a test-author",
+             SENDTO_AUTHOR, "Read hooks/guard.py. Add the hook cases.", T_SENDTO_AUTHOR)
+sendto_allow("a read of a product path, then Write the bug repro, is allowed to a test-author",
+             SENDTO_AUTHOR, "Read hooks/guard.py. Write the bug repro.", T_SENDTO_AUTHOR)
+sendto_refuse("a read of a product path, then Fix the guard, is refused to a test-author, naming builder",
+              SENDTO_AUTHOR, "Read hooks/guard.py. Fix the guard.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+
+
+# The crash pin. The guard's main fails open on any exception, so the hook shows a silent allow for a message whose
+# judging raises. A plain word `quotespan0` is read as a masked quote that is not there, so only this direct call
+# shows the defect. Registered as a log check where LOG_CHECKS_EXTRA exists (see below).
+MESSAGE_ROLE_CRASH_LABEL = ("message-role: message_edit_paths does not raise on a plain word quotespan0 "
+                            "(The guard masks quotespan0 here. Fix guard.py.)")
+
+
+def message_edit_quotespan_check():
+    """(ok, note): message_edit_paths returns for the message, with no exception."""
+    guard = _load_guard_module()
+    if not hasattr(guard, "message_edit_paths"):
+        return False, "the guard has no message_edit_paths to read the message with"
+    try:
+        guard.message_edit_paths("The guard masks quotespan0 here. Fix guard.py.")
+    except Exception as exc:
+        return False, "message_edit_paths raised %s on the plain word quotespan0: %s" % (type(exc).__name__, exc)
+    return True, "message_edit_paths returns for the message, with no exception"
+
+
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
 BASE_FILES = {
@@ -19588,6 +19955,11 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+# The message-role crash pin (see message_edit_quotespan_check). The append tags the family in force here, so the
+# family is set by hand after it.
+FIXTURELESS_CHECKS.add(message_edit_quotespan_check)
+LOG_CHECKS_EXTRA.append((MESSAGE_ROLE_CRASH_LABEL, message_edit_quotespan_check))
+LOG_FAMILY[MESSAGE_ROLE_CRASH_LABEL] = "message-role"
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the

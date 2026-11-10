@@ -326,6 +326,16 @@ Other tools, in `judge` order:
                        holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
                        rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
+  message-role-scope   deny. A SendMessage whose receiver is a builder or a test-author (the role of the newest
+                       Agent or Task spawn whose toolUseResult.agentId equals `to`, read from the transcript) and
+                       whose message asks it to leave that role: a builder to change a test, a test-author to
+                       change product code. The refusal names the role to send the work to, never the path. An
+                       edit verb must govern the path, in the same clause or, when the verb's clause names no
+                       path, from the sentence right before. A path that is run, read, checked or waited on to go
+                       green, or that sits inside a command, is no edit. The transcript is read only when the
+                       message edits a path. No transcript, no spawn record, `main`, an unreadable file and any
+                       other role pass. An override lifts it. `mcp__claude-code-remote__send_message` is not
+                       judged. (message-role-scope)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   handoff-sections     deny. A Write, Edit or MultiEdit to a session handoff (a `.md` file in
@@ -2333,6 +2343,337 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
             workflow_builder_refused(o, n) for o, n in workflow_pairs(tool_input, _expanded(target, cwd)) or ()):
         return target
     return ""
+
+
+# ---- message-role-scope: a SendMessage is judged by the role its receiver was spawned in (decision message-role-scope).
+# A builder is not sent an edit of a test, and a test-author is not sent an edit of product code. The edit verb and the
+# path it governs are read per sentence, so a path a message only runs, reads or waits on is no edit.
+MESSAGE_ROLE_TOOL = "SendMessage"
+MESSAGE_ROLE_BUILDER_REASON = (
+    "This message asks a builder to change a test. Send test changes to a test-author. "
+    "(decision message-role-scope, a message to an agent stays inside its role)"
+)
+MESSAGE_ROLE_AUTHOR_REASON = (
+    "This message asks a test-author to change product code. Send product changes to a builder. "
+    "(decision message-role-scope, a message to an agent stays inside its role)"
+)
+# `make` is an edit verb (`make the fix in X`); `make X green` and `make sure` are cleared by MESSAGE_GREEN and the check
+# in _message_edits.
+MESSAGE_EDIT_VERBS = {"edit", "change", "fix", "update", "modify", "replace", "rewrite", "add", "remove", "delete",
+                      "drop", "re-point", "write", "make"}
+# A word before a verb that makes it a noun (`the fix`), and a word that makes the verb another agent's act.
+MESSAGE_NOT_VERB_BEFORE = {"the", "a", "an", "this", "that", "these", "those", "your", "my", "its", "their", "our",
+                           "one", "no", "any", "each", "every", "some"}
+MESSAGE_OTHER_ACTORS = {"builder", "test-author", "reviewer", "orchestrator", "designer", "record-writer",
+                        "coordinator", "i", "i'll", "we", "we'll", "they", "he", "she"}
+# A verb that only looks at a path or runs it. The nearest verb before a path says whether the path is edited.
+MESSAGE_READ_VERBS = {"run", "rerun", "re-run", "read", "check", "show", "see", "view", "open", "cat",
+                      "verify", "inspect", "execute", "report", "look", "compare", "diff", "grep", "list"}
+# A path a read verb names carries only to an anaphor (`fix it`). A path a run verb names never carries.
+MESSAGE_RUN_VERBS = {"run", "rerun", "re-run", "execute", "check", "verify", "report", "grep"}
+# A word right before an edit verb that makes it a prohibition, and an adverb that may sit between (`don't just fix`).
+MESSAGE_NEGATIONS = {"not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
+MESSAGE_NEGATED_ADVERBS = {"just", "simply", "only", "ever", "even"}
+# A path right after one of these is the target the edit must reach, not its object.
+MESSAGE_TARGET_VERBS = {"pass", "passes", "match", "matches", "satisfy", "satisfies"}
+# The head noun of an edit verb's object, read before the first preposition. A note governs no path
+# (`make a note of ... in X`). A test noun makes the path a spec for a test-author (`add cases for ... in X`).
+MESSAGE_NOTE_NOUNS = {"note", "notes", "report", "summary"}
+MESSAGE_TEST_NOUNS = {"case", "cases", "test", "assert"}
+# A path that does not follow its verb is its object only after one of the LOCATIONS (`the failing case in X`, `add
+# a case to X`). After another preposition it is a spec (`fix the bug for X`, `agree with X`).
+MESSAGE_LOCATIONS = {"in", "at", "of", "to", "into"}
+MESSAGE_PREPOSITIONS = MESSAGE_LOCATIONS | {"for", "from", "with", "on", "by", "as", "about"}
+# A word that may sit between an edit verb and the path it takes directly (`edit the file X`).
+MESSAGE_DIRECT = MESSAGE_NOT_VERB_BEFORE | {"file", "files"}
+# The word right after an edit verb that points back to a path a read verb named (`Read X. Replace it.`).
+MESSAGE_ANAPHORS = {"it", "that", "them"}
+# A role noun after one of these determiners is an anaphor too (`Fix the tests`). A test-side noun carries only a test
+# path, a product-side noun only a product path, so `X_test.py:12 holds. Fix the guard.` carries nothing. `expected
+# value` is two words.
+MESSAGE_DETERMINERS = {"the", "this", "that", "these"}
+MESSAGE_TEST_SIDE_NOUNS = {"assert", "assertion", "case", "cases", "test", "tests", "expected value", "fixture"}
+MESSAGE_PRODUCT_SIDE_NOUNS = {"guard", "bug", "code", "hook", "function", "fix"}  # glossary-ok: bug is a word the messages use
+# `make it pass by changing X` is an edit of X, not a goal.
+MESSAGE_EDIT_GERUNDS = {"editing", "changing", "fixing", "updating", "modifying", "replacing", "rewriting", "adding",
+                        "removing", "deleting", "dropping", "re-pointing", "writing"}
+# What follows ` and ` inside one clause: another edit, or a thing to edit. Anything else starts a new clause.
+MESSAGE_AND_KEEPS = MESSAGE_EDIT_VERBS | MESSAGE_NOT_VERB_BEFORE
+MESSAGE_GREEN = {"green", "pass", "passes", "passing", "passed", "red", "fails", "failing"}
+# A word that may sit between an anaphor and its green word (`Make them all pass`). `new` takes the noun after it too
+# (`Make that new case pass`).
+MESSAGE_GOAL_FILLERS = {"all", "finally"}
+# A word with no slash is a path only with one of these extensions, so a method call (`os.path`) is none.
+MESSAGE_CODE_EXT = {"py", "js", "ts", "tsx", "jsx", "mjs", "cjs", "json", "yml", "yaml", "toml", "sh", "ps1", "swift",
+                    "java", "kt", "go", "rs", "rb", "c", "cc", "cpp", "h", "hpp", "cs", "css", "html", "sql", "ini",
+                    "cfg", "txt", "md", "mdx", "xml", "lock", "snap", "bat", "php", "vue", "svelte"}
+# A command word starts a command that runs to the clause end: a path in it is run, not edited.
+MESSAGE_COMMANDS = {"python", "python3", "node", "bash", "sh", "pwsh", "verdict", "pytest", "npm", "npx", "git"}
+MESSAGE_FENCE = re.compile(r"```.*?```", re.S)
+# A backtick or double-quoted span of several words is a command or a quoted example: data, not an order.
+MESSAGE_SPAN = re.compile(r"`([^`\n]*)`")
+MESSAGE_QUOTE = re.compile(r'"([^"\n]*)"')
+MESSAGE_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+MESSAGE_CLAUSE = re.compile(r"\s*;\s*|\s*,\s*then\b\s*|\s+then\b\s*|\s*,\s*so\b\s*|\s+so\b\s*|\s+and\s+(?=\S)", re.I)
+MESSAGE_NAME = re.compile(r"^[\w@+-][\w@+.-]*\.([A-Za-z][A-Za-z0-9]{0,5})$")
+MESSAGE_SPAN_MASK = " cmdspan "
+MESSAGE_QUOTE_MASK = "quotespan"  # a quoted span of several words, numbered: its paths are read, not ordered
+MESSAGE_QUOTE_WORD = re.compile(MESSAGE_QUOTE_MASK + r"\d+")
+
+
+def _message_token(raw: str) -> str:
+    """One word of a message without its punctuation, its trailing `:` and its `:12` or `#L12` line mark."""
+    return re.sub(r"(?::\d+){1,2}$|#L\d+(?:-L?\d+)?$", "", raw.strip("\"'()[]{}<>,;!?*").rstrip(".:"))
+
+
+def _message_path(raw: str) -> str:
+    """The path a word names, else ''."""
+    tok = _message_token(raw).split("::", 1)[0]  # a test node id, `file.py::case`, names its file
+    if not tok or "://" in tok or tok[0] in "-$#" or tok.lower() in ("e.g", "i.e"):
+        return ""
+    slashed = norm(tok)
+    found = MESSAGE_NAME.match(slashed.rstrip("/").rsplit("/", 1)[-1])
+    if "/" not in slashed:
+        return tok if found and found.group(1).lower() in MESSAGE_CODE_EXT else ""
+    return tok if found or slashed.endswith("/") or slashed.count("/") >= 2 else ""
+
+
+def _message_words(clause: str):
+    """(word, path, stop) per word of one clause. A word after a command word is part of that command and names no path.
+    `stop` is True when the raw word ends in a comma, `;` or `:`."""
+    words, in_command = [], False
+    for raw in clause.split():
+        word = _message_token(raw).lower()
+        in_command = in_command or word in MESSAGE_COMMANDS
+        words.append((word, "" if in_command else _message_path(raw), raw.endswith((",", ";", ":"))))
+    return words
+
+
+def _message_edit_verb(words, at: int) -> str:
+    """'edit' when the word at `at` is an edit verb the receiver is told to do, 'void' when a prohibition clears it
+    (`not`, `don't` or `never` right before it, or one adverb between), else ''."""
+    word, before = words[at][0], words[at - 1][0] if at else ""
+    ahead = words[at + 1][0] if at + 1 < len(words) else ""
+    if (word not in MESSAGE_EDIT_VERBS or before in MESSAGE_NOT_VERB_BEFORE
+            or (word == "make" and ahead in ("sure", "certain"))):
+        return ""
+    negator = words[at - 2][0] if at > 1 else ""
+    if before in MESSAGE_NEGATIONS or (before in MESSAGE_NEGATED_ADVERBS and negator in MESSAGE_NEGATIONS):
+        return "void"
+    return "edit"
+
+
+def _message_goal(words, at: int) -> bool:
+    """True when the path at `at` is a goal, not an object: it goes green or passes, or follows `pass`, `match` or
+    `satisfy`."""
+    return ((at > 0 and words[at - 1][0] in MESSAGE_TARGET_VERBS)
+            or any(w in MESSAGE_GREEN and words[at + k][0] != "to" for k, (w, _, _) in enumerate(words[at + 1:at + 4])))
+
+
+def _anaphor_end(words, at: int):
+    """(last index, side) of the anaphor that starts at `at`, else (-1, ''). `it`, `that` and `them` are anaphors of any
+    path (side 'any'). A role noun after the/this/that/these is one of its side's paths, 'test' or 'product', when it
+    ends the clause, or a comma or a preposition (`to`, `with`) follows it. Another word after it makes a noun compound
+    (`the assertion error`, `the guard tests`, `that case green`): no anaphor, and `that` there is no pronoun. `so`
+    starts a new clause (MESSAGE_CLAUSE), so a role noun before it ends its clause."""
+    word = words[at][0] if at < len(words) else ""
+    if word in MESSAGE_DETERMINERS:
+        for size in (2, 1):
+            noun = " ".join(w for w, _, _ in words[at + 1:at + 1 + size])
+            if len(noun.split()) == size and noun in MESSAGE_TEST_SIDE_NOUNS | MESSAGE_PRODUCT_SIDE_NOUNS:
+                end = at + size
+                if end + 1 < len(words) and not words[end][2] and words[end + 1][0] not in MESSAGE_PREPOSITIONS:
+                    return -1, ""
+                return end, "test" if noun in MESSAGE_TEST_SIDE_NOUNS else "product"
+    return (at, "any") if word in MESSAGE_ANAPHORS else (-1, "")
+
+
+def _anaphor_carry(words, at: int) -> str:
+    """The side of the paths the anaphor at `at` carries (see _anaphor_end), else ''. An anaphor that goes green is a
+    goal and carries nothing: the green word follows it at once, with no comma between (`them green`), or after one
+    filler (`them all pass`, `that new case pass`). A green word further on describes a replacement (`Replace it with a
+    passing assert`). `make it pass by <gerund> X` edits X: a role noun X of one side (`by fixing the guard`, `by
+    changing the expected value to 3`) narrows the carry to that side, and any other X keeps the anaphor's side."""
+    end, side = _anaphor_end(words, at)
+    if end < 0 or words[end][2]:
+        return side
+    green = end + 1
+    filler = words[green][0] if green < len(words) else ""
+    if filler in MESSAGE_GOAL_FILLERS:
+        green += 1
+    elif filler == "new":
+        green += 2
+    if green >= len(words) or words[green][0] not in MESSAGE_GREEN:
+        return side
+    means = [w for w, _, _ in words[green + 1:green + 3]]
+    if not (len(means) == 2 and means[0] == "by" and means[1] in MESSAGE_EDIT_GERUNDS):
+        return ""
+    edited = _anaphor_end(words, green + 3)[1]
+    if edited in ("", "any") or edited == side:
+        return side
+    return edited if side == "any" else ""
+
+
+def _message_path_side(path: str) -> str:
+    """'test' for a test path, else 'product'."""
+    return "test" if is_test_rel(norm(path).removeprefix("./")) else "product"
+
+
+def _message_edits(words):
+    """(governed, named, anaphor) for one clause. `governed` is None when the clause has no edit verb, else
+    (path, test_object) per path its edit verbs govern. An edit verb governs the first path after it, and a path joined
+    to that one by `and`, `or` or a comma; a later path is a spec or a target. With no edit verb's path, a path that
+    leads the clause is governed. `named` is (path, kind, test_object) per path a later pathless clause may mean: kind
+    'read' carries only to an anaphor. `anaphor` is the set of sides the anaphors after the edit verbs carry (see
+    _anaphor_carry); it is empty when none does."""
+    named, governed, led = [], [], []
+    edit_seen = actor_seen = False
+    anaphor = set()
+    kind = verb = ""
+    slot = head_open = note = test_object = False
+    verb_at = last_object = -1
+    for at, (word, path, _) in enumerate(words):
+        before = words[at - 1][0] if at else ""
+        act = "" if actor_seen else _message_edit_verb(words, at)
+        if act:
+            kind, verb, verb_at, slot, head_open, note, test_object = act, word, at, act == "edit", True, False, False
+            if act == "edit":
+                edit_seen = True
+                side = _anaphor_carry(words, at + 1)
+                if side:
+                    anaphor.add(side)
+            continue
+        if word in MESSAGE_READ_VERBS:
+            kind, verb, slot = "read", word, False
+        actor_seen = actor_seen or word in MESSAGE_OTHER_ACTORS
+        if not path:
+            if kind == "edit" and head_open:
+                head_open = word not in MESSAGE_PREPOSITIONS
+                note = note or (head_open and word in MESSAGE_NOTE_NOUNS)
+                test_object = test_object or (head_open and word in MESSAGE_TEST_NOUNS)
+            continue
+        joined = last_object >= 0 and (at - 1 == last_object or (before in ("and", "or") and at - 2 == last_object))
+        if kind == "edit" and (slot or joined):
+            slot = False
+            direct = joined or all(w in MESSAGE_DIRECT for w, _, _ in words[verb_at + 1:at])
+            if note or _message_goal(words, at) or not (direct or before in MESSAGE_LOCATIONS):
+                continue
+            governed.append((path, test_object and not direct))
+            named.append((path, "edit", test_object and not direct))
+            last_object = at
+        elif not kind:
+            if not _message_goal(words, at):
+                led.append((path, False))
+                named.append((path, "led", False))
+        elif kind == "read" and verb not in MESSAGE_RUN_VERBS and not _message_goal(words, at):
+            named.append((path, "read", False))
+    return (governed or led if edit_seen else None), named, anaphor
+
+
+def message_edit_paths(message: str):
+    """(path, test_object) per path a message asks its receiver to edit. A path counts when an edit verb governs it
+    (_message_edits), or the verb's clause names no path at all and an earlier clause of the sentence (`Look at X, then
+    fix it`), else the sentence right before, names it (`X.py ~683: ... . Replace it ...`). A path a read verb named,
+    or one that led its clause, carries only when the verb is followed by an anaphor that does not go green
+    (`Make them green`). A role noun anaphor (`Fix the tests`) carries only a path of its side (_anaphor_carry). A path inside a quote
+    is data for an order, but a read path for a carry (`Quote: "X:12 is wrong". Fix it.`). `test_object` marks a path a test noun object makes a spec
+    for a test-author (`Add red cases for ... in X`)."""
+    quoted = []
+
+    def mask(found):
+        return found.group(1) if len(found.group(1).split()) == 1 else MESSAGE_SPAN_MASK
+
+    def mask_quote(found):
+        if len(found.group(1).split()) == 1:
+            return found.group(1)
+        quoted.append([path for path in map(_message_path, found.group(1).split()) if path])
+        return f" {MESSAGE_QUOTE_MASK}{len(quoted) - 1} "
+    text = MESSAGE_QUOTE.sub(mask_quote, MESSAGE_SPAN.sub(mask, MESSAGE_FENCE.sub(MESSAGE_SPAN_MASK, message)))
+    hits, before = [], []
+    for sentence in (s for s in MESSAGE_SENTENCE.split(text) if s.strip()):
+        pieces, joins = MESSAGE_CLAUSE.split(sentence), MESSAGE_CLAUSE.findall(sentence)
+        clauses = [pieces[0]]
+        for join, piece in zip(joins, pieces[1:]):
+            lead = _message_token(piece.split()[0]).lower() if piece.split() else ""
+            if join.strip().lower() == "and" and (lead in MESSAGE_AND_KEEPS or _message_path(lead)):
+                clauses[-1] += " and " + piece
+            else:
+                clauses.append(piece)
+        named, earlier = [], []
+        for clause in clauses:
+            words = _message_words(clause)
+            governed, seen, anaphor = _message_edits(words)
+            seen = seen + [(path, "read", False) for word, _, _ in words if MESSAGE_QUOTE_WORD.fullmatch(word)
+                           and int(word[len(MESSAGE_QUOTE_MASK):]) < len(quoted)
+                           for path in quoted[int(word[len(MESSAGE_QUOTE_MASK):])]]
+            named += seen
+            if governed:
+                hits += governed
+            elif governed is not None and not any(path for _, path, _ in words):
+                hits += [(path, test) for path, kind, test in earlier or before
+                         if kind == "edit" or "any" in anaphor or _message_path_side(path) in anaphor]
+            earlier = seen or earlier
+        before = named
+    return hits
+
+
+def _message_spawn_role(transcript: str, agent: str) -> str:
+    """The role of the newest Agent or Task spawn whose answer names `agent`, read from the parent transcript, else ''.
+    The call carries the subagent_type, and the user line that answers it carries toolUseResult.agentId."""
+    uses, role = {}, ""
+    with open(transcript, encoding="utf-8") as handle:
+        for line in handle:
+            if '"subagent_type"' not in line and agent not in line:  # glossary-ok: subagent_type is Claude Code's own field name
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            content = (record.get("message") or {}).get("content") if isinstance(record, dict) else None
+            if not isinstance(content, list):
+                continue
+            if record.get("type") == "assistant":
+                for block in content:
+                    if (isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") in SPAWN_TOOLS
+                            and isinstance(block.get("input"), dict)):
+                        uses[block.get("id")] = block["input"].get("subagent_type")
+            elif isinstance(record.get("toolUseResult"), dict) and record["toolUseResult"].get("agentId") == agent:
+                for block in content:
+                    if isinstance(block, dict) and block.get("tool_use_id") in uses:
+                        role = role_key(str(uses[block["tool_use_id"]] or "").rsplit(":", 1)[-1])
+    return role
+
+
+def message_role_hit(tool: str, tool_input, transcript):
+    """(matched, reason) when this SendMessage asks a builder to change a test, or a test-author to change product code,
+    else None. The receiver's role is its spawn's. A message that edits no path reads no transcript. An unknown role
+    passes: no transcript, no spawn record, the main session, an unreadable file, and any role but these two."""
+    if tool != MESSAGE_ROLE_TOOL or not isinstance(tool_input, dict):
+        return None
+    to, message = tool_input.get("to"), tool_input.get("message")
+    if (not isinstance(to, str) or not to or to == "main" or not isinstance(message, str)
+            or not isinstance(transcript, str) or not transcript):
+        return None
+    paths = message_edit_paths(message)
+    if not paths:
+        return None
+    try:  # cost: one transcript read per SendMessage that edits a path
+        role = _message_spawn_role(transcript, to)
+    except Exception:
+        return None
+    for path, test_object in paths:
+        slashed = norm(path)
+        rooted = slashed.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:/", slashed))
+        rel = repo_rel(path, "", outside=role == BUILDER_ROLE) if rooted else slashed.removeprefix("./")
+        if rel is None:
+            continue
+        if role == BUILDER_ROLE and is_test_rel(rel):
+            return path, MESSAGE_ROLE_BUILDER_REASON
+        ext = os.path.splitext(norm(rel).rstrip("/"))[1].lower()
+        if (role == AUTHOR_ROLE and ext and ext != ".md" and not test_object and not norm(rel).startswith("../")
+                and not author_path_ok(rel) and not is_workflow_rel(rel)):
+            return path, MESSAGE_ROLE_AUTHOR_REASON
+    return None
 
 
 # HEAD reflog subjects (`%gs`). The agent's own commit: `commit`, `commit (initial)`, `commit (amend)` and
@@ -5944,6 +6285,12 @@ def judge(payload) -> None:
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
+
+    # A message to an agent that asks it to leave its role: a test edit to a builder, product code to a test-author
+    # (rule message-role-scope). An override lifts it: it is not in never_lifted, because the owner may mean the message.
+    sent = message_role_hit(tool, tool_input, trust_transcript)
+    if sent:
+        refuse(tool, "deny", "message-role-scope", sent[1], sent[0])
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
