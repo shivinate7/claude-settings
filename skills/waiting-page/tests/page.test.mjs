@@ -3250,8 +3250,28 @@ for (const [width, zoom] of [[280, false], [240, false], [180, false], [360, tru
     assert.ok(g.press.t >= g.title.b - 1, `the ${FOLD_ROWS[kind].press} press is drawn at ${Math.round(g.press.t)} px, beside the text that ends at ${Math.round(g.title.b)} px, at ${atWidth(width, zoom)}`);
   });
 }
+// A dropped Dismiss press lines its label up with the title (docs/design/press-row-reflow-notes.md, section 2). The claim is the label,
+// within 2 px; the press box is not read, since its padding sits outside the label.
+const pressLabelLeft = (page, id) => page.evaluate((id) => {
+  const li = document.getElementById("row-" + id), row = li.querySelector(".frow");
+  const press = li.querySelector(":scope > button.btn") || row.querySelector(".fgo");
+  const rg = document.createRange(); rg.selectNodeContents(press);
+  const runs = [...rg.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5);
+  return runs.length ? Math.min(...runs.map((r) => r.left)) : null;
+}, id);
+for (const [width, zoom] of [[280, false], [240, false], [180, false], [360, true]]) {
+  layoutTest(`folded row, side press: at ${atWidth(width, zoom)}, the Dismiss press label starts within 2 px of the text's start`, async (t) => {
+    const page = await foldedRowPage(t, "dismiss", width); if (!page) return;
+    const id = FOLD_ROWS.dismiss.ask.id;
+    if (zoom) await zoomText(page);
+    foldedScope(await foldedDate(page, id), "dismiss", width);
+    const g = await pressGeo(page, id), label = await pressLabelLeft(page, id);
+    assert.ok(g.press.t >= g.title.b - 1, `the Dismiss press is drawn at ${Math.round(g.press.t)} px, not under the text that ends at ${Math.round(g.title.b)} px, at ${atWidth(width, zoom)}`);
+    assert.notEqual(label, null, `the Dismiss press has no label text at ${atWidth(width, zoom)}`);
+    assert.ok(Math.abs(label - g.title.l) <= 2, `the Dismiss label starts at ${Math.round(label)} px, not within 2 px of the text's start at ${Math.round(g.title.l)} px, at ${atWidth(width, zoom)}`);
+  });
+}
 // A dropped Restore press starts at the text's start (owner item 448 a): its box edge is the title's edge. The scope is the drop itself.
-// Dismiss is not pinned here: its box starts 12 px before the title, and its label starts 1 to 2 px before it (docs/design/press-row-reflow-notes.md, section 2).
 for (const [width, zoom] of [[280, false], [240, false], [180, false], [360, true]]) {
   layoutTest(`folded row, side press: at ${atWidth(width, zoom)}, the Restore press starts at the text's start`, async (t) => {
     const page = await foldedRowPage(t, "restore", width); if (!page) return;
@@ -3426,25 +3446,15 @@ for (const scheme of SCHEMES) {
     assert.ok(!(beside(g.rs) && below(g.rx)), `Send reply sits right of the hint while Close is below it, at 600 wide with the root font size doubled`);
   });
 }
-// The reply rules in page.html stack the reply form's two presses where its box is narrow: Send reply on the first line, Close on the next.
-// Each case checks that the presses stack, then the order: screen order by top, Tab order by the buttons' DOM order. Send reply is
-// disabled while the reply is empty, and a disabled button keeps its place in DOM order.
-const replyTabOrder = (page) => page.evaluate(() => [...document.querySelectorAll("form.replyform button")].map((b) => ({ id: b.id, tabindex: b.getAttribute("tabindex") })));
+// The reply rules in page.html stack the reply form's two presses where its box is narrow, with Send reply on the first line and Close on
+// the next. The case checks that the presses stack, then the screen order by their tops. Tab order is not checked here: the markup order
+// is owned by a separate lane.
 for (const scheme of SCHEMES) for (const [width, zoom] of [[180, false], [390, true]]) {
   layoutTest(`press rows, ${scheme}: at ${atWidth(width, zoom)}, the reply form stacks Send reply above Close`, async (t) => {
     const r = await replyFormAt(t, { width, scheme, zoom }); if (!r) return;
     const { g } = r;
     assert.ok(Math.abs(g.rx.t - g.rs.t) > 1, `Close and Send reply share a line at ${atWidth(width, zoom)}, so the reply form does not stack`);
     assert.ok(g.rs.t < g.rx.t, `Close is drawn above Send reply at ${atWidth(width, zoom)} (Close top ${Math.round(g.rx.t)} px, Send reply top ${Math.round(g.rs.t)} px)`);
-  });
-  layoutTest(`press rows, ${scheme}: at ${atWidth(width, zoom)}, Tab reaches Send reply before Close`, async (t) => {
-    const r = await replyFormAt(t, { width, scheme, zoom }); if (!r) return;
-    const { g } = r;
-    assert.ok(Math.abs(g.rx.t - g.rs.t) > 1, `Close and Send reply share a line at ${atWidth(width, zoom)}, so the reply form does not stack`);
-    const order = await replyTabOrder(r.page), ids = order.map((b) => b.id);
-    assert.ok(ids.includes("rs-" + RPL_ROOT) && ids.includes("rx-" + RPL_ROOT), `the reply form's buttons are ${ids.join(", ")} at ${atWidth(width, zoom)}, not Send reply and Close`);
-    assert.ok(order.every((b) => !(Number(b.tabindex) > 0)), `a reply form button has a positive tabindex at ${atWidth(width, zoom)}`);
-    assert.ok(ids.indexOf("rs-" + RPL_ROOT) < ids.indexOf("rx-" + RPL_ROOT), `Tab reaches Close before Send reply at ${atWidth(width, zoom)} (order: ${ids.join(", ")})`);
   });
 }
 
