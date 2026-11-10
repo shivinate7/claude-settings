@@ -10,23 +10,26 @@ His reason, in his words: "time limits as a rule make little to no sense when th
 2. **A stop reads "stopped, no output for N min", never "failed".** A stop means that the run hung. A stop is never red and never refuses a merge. Retry the run once. Then report it to the owner.
 3. **Where a total-time limit must stay, read it. Never store it.** It is the one exception to part 1. CI's billing limit is one example. Read it from recent green runs each time. Never stored as a number (code, YAML and JSON alike).
 
-## Open
+## Owner's answers, 2026-11-10 14:24 CST
 
-- The silence window N comes from a measurement. That measurement is not made yet, so N is unmeasured. No value is set here.
-- The ruling does not say which CI job caps stay as total-time limits, and which only end a hung run. The stored caps stay until the reader is built.
-- The watcher in `hooks/stall_watch.py` prints a report after 300 quiet seconds, and never stops a job. Decision `stall-watch` (a stalled background command is reported, never stopped) holds that. Part 1 stops a silent run. The two conflict. This ruling does not change `stall-watch`.
-- `merge.deadlineMinutes` (65, in `.github/stamp.json`) is not named here. It stays until the owner rules.
+Owner, 14:24 CST, typed in the retrospective session. The coordinator relayed it at 14:24 CST. He answered four open points:
 
-## Replaces (not built)
+4. **Verdict checks stop on silence.** Owner: "yes that's ok". <!-- ste-disable-line STE008 owner's words, quoted --> A check that gives a verdict (lint, tests, the Retire check) stops on silence, is retried once, and reports "stopped, no output for N min". Any other background command is only reported and keeps running. Decision `stall-watch` (a stalled background command is reported, never stopped, except a verdict check) holds that split.
+5. **Every CI job keeps a total-time limit.** Owner: "that's fine too but it should be generously large maybe". <!-- ste-disable-line STE008 owner's words, quoted --> GitHub needs one. A script computes each CI job's limit from recent green runs. No one edits it by hand. Each limit is generously large. Local tools use only the silence stop: lane lint, the Retire check, mutation runs and the Python floor check.
+6. **`merge.deadlineMinutes` is a moving target.** Owner: "this needs to be a moving target". A script computes it each time from the current CI job limits. It is never stored. When a run reaches it, the report reads "CI still running", never a refusal.
+7. **The silence window is measured per tool.** Owner: "that's fine too as long as its generous though like +5m is not as generous as like +1.5x etc". <!-- ste-disable-line STE008 owner's words, quoted --> The window is the longest gap between output lines in green runs, measured per tool. The measure reads `verdict` logs locally and timestamped job logs in CI.
 
-The code still holds these limits. Each one leaves the code when its change is built, under part 1 or part 3.
+General rule, from the same answer: a margin multiplies the measured value, for example 1.5 times. It never adds a fixed amount. The multiplier's value is not set here.
 
-- `merge/merge.py`: `LINT_SECONDS = 1200`.
-- `lint/check_debt_retire.py`: `TIMEOUT = 600`.
-- `hooks/mutate_guard.py`: one 1200 s `timeout=` in a subprocess call.
-- `janitor/mutate_sweep.py`: one 1200 s `timeout=` in a subprocess call.
-- `lint/check_python_floor.py`: `TIMEOUT = 300`.
-- The CI job caps and CI step caps in decision `ci-job-caps` (CI job caps). Their stored values stay until the reader is built.
+## Not built
+
+Nothing here is built. Each item is code, a value or a script.
+
+- The silence stop in each local tool. Each leaves the code for it: `merge/merge.py` `LINT_SECONDS = 1200` (the lint run and `ci_job_run`), `lint/check_debt_retire.py` `TIMEOUT = 600`, `hooks/mutate_guard.py` and `janitor/mutate_sweep.py` (one 1200 s `timeout=` each), `lint/check_python_floor.py` `TIMEOUT = 300`.
+- The silence stop for verdict checks in `hooks/stall_watch.py`. It never stops a job today.
+- The silence window per tool, and the multiplier. Neither value is set. The window N is unmeasured.
+- The CI job limits, computed by a script from recent green runs. Their stored values stay in force until the reader is built (decision `ci-job-caps`).
+- `merge.deadlineMinutes` (65, stored in `.github/stamp.json`). It is computed from the current CI job limits, and never stored. It stays 65 until the reader is built.
 
 Kind: process
 Home: merge/merge.py

@@ -10,6 +10,8 @@ guard rule, so the watcher does the waiting and the session is told once.
 
 `hooks/stall_watch.py` does it.
 
+Split, owner 2026-11-10 14:24 CST ("yes that's ok" <!-- ste-disable-line STE008 owner's words, quoted -->), by decision `time-limits-end-hangs-only`: a check that gives a verdict (lint, tests, the Retire check) stops on silence and is retried once. Every other background command keeps the rule above, reported and never stopped. The stop is not built.
+
 - The hook (`--hook`, a PreToolUse hook on Bash) returns `updatedInput` only for a call with
   `run_in_background` true. It sets no permission decision, so no permission changes.
 - The original command stays as unquoted top-level shell code inside `{ ... }`, so a settings deny rule
@@ -21,7 +23,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   (builtins only) lists its own pid. The table lists the same processes. Two limits: an orphan (`(sleep N &); sleep N`) is adopted by
   init and not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it).
 - The watcher (`--watch-pid`) prints a STALL report and exits 3 after 300 quiet seconds. The job keeps
-  running and the watcher never stops it. The wrapper keeps exit 3 after a stall, so the session gets no
+  running and the watcher never stops it, except a verdict check (the split above). The wrapper keeps exit 3 after a stall, so the session gets no
   exit code from the job, even a healthy silent one such as `python3 hooks/test_guard.py` (owner ruling,
   2026-10-18 15:15 CDT).
 - The report tells the session to ask the owner to stop the job. After the report, the job is not a child
