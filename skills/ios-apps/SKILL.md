@@ -42,9 +42,16 @@ this repo (the `compliance-check` skill runs it). A row checked by hand is read 
 
 ## Folding the iPhone Duo simulator
 
-`simctl` cannot fold a simulator, and this Xcode has no Simulator app. Use the `hinge` command
-(artemnovichkov/hinge at commit `abd539d6`, at `~/.local/bin/hinge`, owner choice 2026-10-25). It
-opens no window. Never drive Device Hub to fold.
+`simctl` cannot fold a simulator, and this Xcode has no Simulator app. Fold with
+`bin/duo-fold <udid> <folded|open>`. It folds with `hinge` (artemnovichkov/hinge, owner choice
+2026-10-25), reads the angle back, and refuses unless the angle is within 0.5 of 0 (folded) or 180
+(open). Exit 0 passes. Exit 1 is a refusal, with a `duo-fold:` line on stderr. Exit 64 means wrong
+arguments. A hinge move that exits non-zero is noted on stderr, and the angle is still read. No
+retry. The tool runs only on an arm64 Mac; on any other machine it exits 1 before any hinge call.
+With `HINGE` unset, it fetches hinge v0.3.0 at its pinned commit,
+`afb8f0bd277cb12187f0844a79542cbac35e7385`. The tool's pin is the one to use.
+`~/.local/bin/hinge` (commit `abd539d6`) is for hand use. It opens no window. Never drive Device
+Hub to fold.
 
 - `hinge -d <udid> open|close|half|<degrees>|get|posture`. Run it outside the sandbox. When
   `-t 6` times out, read `posture`: the angle may be set already.
