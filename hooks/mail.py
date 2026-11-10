@@ -39,6 +39,12 @@ def safe(value):
     return bool(SAFE.match(value)) and not any(part in (".", "..") for part in value.split("/"))
 
 
+def utf8(text):
+    """The one encode of message text: a lone surrogate (a non-UTF-8 byte read in text mode) becomes "?", as text mode did,
+    so the pushed blob and the sha the read-back computes hold the same bytes."""
+    return text.encode("utf-8", errors="replace")
+
+
 def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     """One git process. Returns (returncode, stdout, stderr). Raises MailError on a timeout or a missing git.
     No prompt can open: a hook has no terminal to answer it. A ssh command or GIT_SSH program the caller set is kept;
@@ -50,7 +56,7 @@ def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     prefix = ["git", "-c", "commit.gpgsign=false"] + (["--git-dir", cache] if cache else [])
     # Bytes in and out: text mode on Windows may rewrite "\n" to "\r\n" on the child's stdin, which would change
     # blob bytes and put a CR in an index path.
-    data = None if input_text is None else input_text.encode("utf-8")
+    data = None if input_text is None else utf8(input_text)
     try:
         done = _nowindow.run(prefix + args, env=run_env, input=data, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -138,7 +144,7 @@ def commit_tree(env, tip, adds, removes, message):
 
 
 def blob_sha(text):
-    data = text.encode("utf-8")
+    data = utf8(text)
     return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
 
