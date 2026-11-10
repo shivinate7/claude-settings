@@ -3681,6 +3681,8 @@ const AP_LONG_TITLE = "A closed item whose title runs on and on and on and on, s
 const AP_LONG = mk("ap-long", 77, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "", title: AP_LONG_TITLE, reply: "Filed with no home." });
 // The newer of two closed lines in the Answered section. AP_CLOSED (No. 70) closed at 15:00 the same day, so it sits under this one.
 const AP_NEWER = mk("ap-newer", 78, { status: "closed", closed: "2026-11-09T16:00:00Z", home: "step:ask-phase-out", title: "Newer line", reply: "Newer." });
+// A closed item with a home, a long title and a New reply: the row whose head must fit at tablet and phone width.
+const AP_LONG_HOME = mk("ap-long-home", 79, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", title: AP_LONG_TITLE, reply: "Filed as step ask-phase-out.", replied: "2026-10-28T09:00:00Z" });
 const apWrites = (page, coll) => page.evaluate((c) => window.__log.filter((l) => l[0] === "update" && l[1] === c).map((l) => ({ id: l[2], body: l[3] })), coll);
 const apBad = (page, coll) => page.evaluate((c) => window.__log.filter((l) => (l[0] === "set" || l[0] === "delete") && l[1] === c), coll);
 // Waits, up to 1.5 s, for the store to hold n updates of one collection. The caller asserts the count, so a wait that gives up fails by name.
@@ -3978,13 +3980,13 @@ test("ask-phase-out: the home pill of a line keeps its whole text at 768 and 128
   }
 });
 
-// From 521 px the head of a line is one row: the number, the New reply mark and the home pill keep their width, and the title shrinks. So with the
-// mark drawn, the head's children stay inside the head, the title keeps 60 px, and the home pill does not cover Show answer. Each width's
-// cause is its own line in the message, so one width's failure does not hide the others.
-test("ask-phase-out: a long title beside the New reply mark keeps its head inside the row, a 60 px title and a home clear of Show answer, at 521, 600 and 640 px", async (t) => {
-  const row = { ...AP_LONG, home: AP_CLOSED.home, replied: "2026-10-28T09:00:00Z" };
+// Below 701 px the head of a line wraps (page.html, the 701px rule). From 701 px it is one row, so the list runs to 701 px, the first one-row
+// width. At each width the case checks that, with the New reply mark drawn, the head's children stay inside the head, the title keeps 60 px,
+// and the home pill does not cover Show answer. Each width's cause is its own line in the message, so one width's failure does not hide the others.
+test("ask-phase-out: at 521 to 701 px a long title beside the New reply mark keeps its head's children inside the head, a 60 px title and a home clear of Show answer", async (t) => {
+  const row = AP_LONG_HOME;
   const causes = [];
-  for (const width of [521, 600, 640]) {
+  for (const width of [521, 600, 640, 650, 700, 701]) {
     const at = `at ${width} px`;
     const page = await open(t, { items: [AP_OPEN, row], storage: RPL_NEW, viewport: { width, height: 900 } }); if (!page) return;
     // The scope comes first: the mark, the head's parts and Show answer are drawn before any of them is measured.
