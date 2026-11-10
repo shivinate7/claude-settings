@@ -12323,6 +12323,35 @@ sh("argv: deny, the remedy names no refused PowerShell form (trigger CommandLine
    "Get-Process | Select Name,CommandLine", "deny", "process-args", tool="PowerShell", cwd=NOGIT,
    lacks=ARGV_NEW_FORMS_NOT_IN_REMEDY)
 
+# A grep-style command takes its pattern as a bare word, or after -e. A cmdline path given as the pattern
+# names no file, so each form here passes. The path is a file only when a later operand follows.
+ARGV_GREP_PATTERN_ALLOWED = (
+    r'grep -rn "/proc/1/cmdline" docs',
+    r'grep -e "/proc/1/cmdline" hooks/test_guard.py',
+    "echo hi | grep /proc/1/cmdline",
+    "egrep -n /proc/1/cmdline notes.md",
+    "fgrep /proc/1/cmdline notes.md",
+    'rg "/proc/1/cmdline" docs',
+    "rg -n -e /proc/1/cmdline docs",
+)
+for _cmd in ARGV_GREP_PATTERN_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+# The file operand of a grep-style command is a read, whether the pattern is bare or given with -e. These
+# are controls: a fix that exempts the whole command, or reads only the first operand, fails them.
+ARGV_GREP_FILE_REFUSED = (
+    "grep tailscale /proc/1/cmdline", "grep -a x /proc/*/cmdline", "rg x /proc/1/cmdline",
+    "grep -e tailscale /proc/1/cmdline",
+)
+for _cmd in ARGV_GREP_FILE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# find runs its -exec command on each path it takes, so the command after -exec reads the cmdline file.
+ARGV_FIND_EXEC_REFUSED = (
+    r"find /proc/1/cmdline -exec cat {} \;",
+    r"find /proc/*/cmdline -exec grep -a tailscale {} +",
+)
+for _cmd in ARGV_FIND_EXEC_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
