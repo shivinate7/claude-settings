@@ -624,3 +624,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - 2026-11-10 17:11 CST (coordinator note): #2566 lane lint PASSED (703 s) at 3f1490636, a head that conflicts with main 2d6f67f7c in two files; main did not move. Read merge.py --lane-lint: does it merge-tree against main? If not, a debt.
 
 - 2026-11-10 17:26 CST: #2559 round 2 notes (not debts): N1 page.html:921 'Its other widths are 520px and 960px' omits the 400px rule at page.html:430; N2 page.test.mjs:3996 samples skip 651-699 px, add 663 or 664 to pin the bound.
+
+- 2026-11-10 17:31 CST: lane lint on #2563 (f744895fd) blamed a clash with #2573's head in lint/report_guard.py and merge/test_merge.py. #2573 touches neither: #2563 lacks main (base a8a9fcdd5) and conflicts with main there. The cross-PR merge-tree names a PR when the clash is with main. Ties to the 17:11 note: the main merge-tree read is missing or comes after the cross-PR one.
