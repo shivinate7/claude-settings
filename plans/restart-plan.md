@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 16:19 CST.
+the history. Last rewrite: 2026-11-10 16:25 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -124,6 +124,11 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
   #2551 green in CI at 11:15 CST, refused at merge 11:50 CST by the Retire check's 600 s local limit;
   one full CI run lost. Home: decision debt-close-runs-retire; step retire-check-whole-suite;
   merge.readyChecks in decision lanes-run-no-full-ci-job.
+- **R15. One PR template.** Owner 16:22 CST Nov 10: "no pr template: yes that seems like a must have".
+  .github/pull_request_template.md holds the PR-body lines the merge tool reads (`Retire-run:`,
+  `Drops-lines:`), so every PR has one shape and no session reports "no PR template". Other repos get it
+  through skill project-ops. Unmeasured: how many PRs are refused today for a missing line. Step
+  pr-template-merge-lines. Home: decision debt-close-runs-retire.
 
 ### 3.2 Time limits end hangs only
 
@@ -226,6 +231,11 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   as a best practice for other hooks that make you regurgitate output again".
   guard-remedy-not-to-owner:177 already says "post only the corrected lines ... Never send the report
   again", but no refusal text says it. Each Stop-hook refusal ends with that line. Home: decision
+  guard-remedy-not-to-owner.
+- **R14. A fix to a session's own notes prints nothing.** Owner 16:22 CST Nov 10: "fixed my notes
+  question: yes". A Stop-hook refusal about a session's own notes (feedback log, handoff) is fixed with
+  no line to the owner, since the reply did not change; guard.log still records it. A builder first
+  confirms a Stop can end with no text. Step notes-fix-no-owner-line. Home: decision
   guard-remedy-not-to-owner.
 
 ### 3.10 One catalog of every hook and setting
