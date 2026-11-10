@@ -5,7 +5,7 @@
   "order": 971,
   "owner": "coordinator",
   "why": "A cloud triage has no thread tool. With no threads list, build.py reads every upkeep row unknown, though only Live work's thread count reads threads. Triage then passes threads: [], which shows a made-up zero.",
-  "note": "Found  CST Nov 10 by triage at the live-file-archive-fields build: with no threads key, 9 rows read 'unknown (the live file has no threads list)', among them stalled step, ready not started and lanes to archive. Fix: those rows need only readAt, pulls, sessions and items; a missing threads list makes only the thread count unknown. Source: skills/roadmap/build.py on origin/main 0e6509a96. Doing 05:59 CST Nov 10 in lane session_013NEJL3WizfBeubmNydf4EV (coordinator).",
-  "updatedAt": "2026-11-10T06:00:00-06:00",
+  "note": "Found  CST Nov 10 by triage at the live-file-archive-fields build: with no threads key, 9 rows read 'unknown (the live file has no threads list)', among them stalled step, ready not started and lanes to archive. Fix: those rows need only readAt, pulls, sessions and items; a missing threads list makes only the thread count unknown. Source: skills/roadmap/build.py on origin/main 0e6509a96. Doing 05:59 CST Nov 10 in lane session_013NEJL3WizfBeubmNydf4EV (coordinator). Released to batch 72 as #2534 at  CST Nov 10 (coordinator).",
+  "updatedAt": "2026-11-10T08:08:00-06:00",
   "lane": "session_013NEJL3WizfBeubmNydf4EV"
 }
