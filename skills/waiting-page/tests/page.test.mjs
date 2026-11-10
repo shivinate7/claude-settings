@@ -709,7 +709,8 @@ test("the viewer counts options times widths, steps with Prev and Next, wraps at
   assert.equal(await page.locator("#dsheet").isHidden(), true);
 });
 
-for (const width of [390, 1440]) {
+// Unchanged by the ruling at 390: the card is 294 wide, so the 300 wide focus draws at its own scale, under 2x.
+for (const width of [390]) {
   test(`a design's focus fills the card box whole, never cut, at ${width} wide`, async (t) => {
     const mock = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>';
     const it = mk("focus-q", 51, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "f-a" }], designs: [{ slug: "f-a", label: "A", focus: "#panel" }] });
@@ -727,6 +728,28 @@ for (const width of [390, 1440]) {
     assert.ok(m.wrapH < 260, `the box shows more than the focused element (${m.wrapH}px)`);
   });
 }
+
+// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a focus draws at the card's width, up to 2x its own.
+// At 1440 this one-option card is wide enough for the focus to draw at 2x, so the box is the focus at that scale.
+test("a design's focus fills the card box whole, never cut, at the card's width or 2x, at 1440 wide", async (t) => {
+  const mock = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>';
+  const it = mk("focus-q", 51, { pick: "a", options: [{ key: "a", label: "A", how: "h", gain: "g", lose: "l", design: "f-a" }], designs: [{ slug: "f-a", label: "A", focus: "#panel" }] });
+  const page = await open(t, { items: [it], designData: { "f-a": mock }, viewport: { width: 1440, height: 900 } }); if (!page) return;
+  await frameSettled(page, 1400);
+  await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+  await settleFit(page, it.id);
+  const wrap = card(page, it).locator(".opic .dfitwrap");
+  const m = await wrap.evaluate((w) => {
+    const f = w.querySelector("iframe"), r = w.getBoundingClientRect(), fr = f.getBoundingClientRect();
+    const sc = fr.width / 390;
+    return { wrapTop: r.top, wrapH: r.height, wrapW: r.width, panelTop: fr.top + 700 * sc, panelH: 200 * sc, panelW: 300 * sc };
+  });
+  const room = await budget(page, it.id), sc = Math.min(2, room / 300);
+  assert.ok(Math.abs(m.panelTop - m.wrapTop) < 4, `the focused element starts ${m.panelTop - m.wrapTop}px from the top of the box`);
+  assert.ok(m.panelH <= m.wrapH + 1, "the focused element is cut at the bottom");
+  assert.ok(m.panelW <= m.wrapW + 1, "the focused element is cut at the side");
+  assert.ok(Math.abs(m.wrapH - Math.ceil(200 * sc)) <= 1, `the box is ${m.wrapH} high, not the focus's ${Math.ceil(200 * sc)} at its scale ${sc.toFixed(2)}`);
+});
 
 test("SKILL.md and the designer agent carry the mockup convention", async () => {
   const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
@@ -814,21 +837,39 @@ test("a focus box taller than the card scrolls inside the focus box and opens at
   assert.ok(Math.abs(m.fTop + 300 * sc - m.top) <= 2, "the focus does not start at the top of the box");
 });
 
-// Owner ruling, waiting-page item 84 pick b (2026-10-30 14:45 CDT), c204 option 5B: a scrolling picture draws min(221.8, column - 2 - gutter) wide.
-// 221.8 is 480 x 390 / 844, the width a 390 x 844 phone picture gets. A picture that does not scroll keeps today's scale.
+// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a scrolling picture is the card's width less 2 and the gutter.
+// It replaced the 221.8 cap of item 84 pick b (2026-10-30 14:45 CDT), c204 option 5B. SCROLL_W is that cap: it still names the width at 1280 and 1440,
+// where the card is 233 wide, so the column term is the smaller and both rules give the same width.
 const SCROLL_W = (480 * 390) / 844;
 // The column is the .opic that holds the box, less its padding.
 const column = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
   const o = w.parentElement, cs = getComputedStyle(o);
   return o.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
 });
+// The picture's width budget at the card: the column's rect, floored, less the 2px border. The rect, not clientWidth, which rounds up.
+const budget = (page, id) => page.locator(boxSel(id)).evaluate((w) => Math.floor(w.parentElement.getBoundingClientRect().width) - 2);
 // Waits until the frame keeps one width for two frames, so a measure reads the last fit and not a first pass.
 const settleFit = (page, id) => page.waitForFunction((sel) => new Promise((done) => {
   const f = document.querySelector(sel).querySelector("iframe"), a = f.getBoundingClientRect().width;
   requestAnimationFrame(() => requestAnimationFrame(() => done(Math.abs(f.getBoundingClientRect().width - a) < 0.01)));
 }), boxSel(id), { polling: 50 });
 
-for (const width of [390, 1440]) {
+test("a tall picture in a 480px box draws the card's width less 2 and the gutter, fills its box, and adds no sideways scroll, at 390 wide", async (t) => {
+  const it = picItem("scroll-width", 57);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2400);
+  await settleFit(page, it.id);
+  const m = await measure(page, it.id), room = await budget(page, it.id);
+  const want = room - m.g;
+  assert.ok(Math.abs(m.fw - want) <= 1, `the picture is ${m.fw} wide, not the card's ${room} less the ${m.g}px gutter = ${want}`);
+  assert.ok(Math.abs(m.h - 480) <= 1, `the box is ${m.h} high, not 480`);
+  assert.ok(m.w <= room + 3, `the box is ${m.w} wide in a ${room + 2} wide column`);
+  assert.ok(Math.abs(m.fw - m.cw) <= 1, `the picture is ${m.fw} wide in a ${m.cw} wide box: it does not fill the box`);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
+});
+
+// Unchanged by the ruling: at 1440 the card is 233 wide, so min(221.8, ...) gives the column term.
+for (const width of [1440]) {
   test(`a tall picture in a 480px box draws min(221.8, column - 2 - gutter) wide and fills its box, with no sideways scroll, at ${width} wide`, async (t) => {
     const it = picItem("scroll-width", 57);
     const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(2400) }, viewport: { width, height: 900 } }); if (!page) return;
@@ -842,20 +883,39 @@ for (const width of [390, 1440]) {
     assert.ok(Math.abs(m.fw - m.cw) <= 1, `the picture is ${m.fw} wide in a ${m.cw} wide box: it does not fill the box`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
   });
+}
 
-  test(`a mockup that fits whole keeps today's scale, with no scroll and no cue, at ${width} wide`, async (t) => {
+// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a picture under a phone's height draws at the card's width, whole.
+// 830 is under a phone's 844 and over the 480 box, so today's cap draws it smaller than the card at both widths.
+for (const width of [390, 1440]) {
+  test(`a mockup under a phone's height draws at the card's width, with no scroll and no cue, at ${width} wide`, async (t) => {
     const it = picItem("fits-whole", 58);
-    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1550) }, viewport: { width, height: 900 } }); if (!page) return;
-    await frameSettled(page, 1550);
+    const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(830) }, viewport: { width, height: 900 } }); if (!page) return;
+    await frameSettled(page, 830);
     await settleFit(page, it.id);
-    const m = await measure(page, it.id);
-    const want = (480 * 390) / 1550; // the mockup is scaled to the box's 480px, so it is 120.8px wide
-    assert.ok(Math.abs(m.fw - want) <= 1, `the picture is ${m.fw} wide, not ${want.toFixed(1)}`);
-    assert.ok(Math.abs(m.h - 480) <= 1, `the box is ${m.h} high, not 480`);
+    const m = await measure(page, it.id), room = await budget(page, it.id);
+    const want = Math.ceil((830 * room) / 390);
+    assert.ok(Math.abs(m.fw - room) <= 1, `the picture is ${m.fw} wide, not the card's ${room}`);
+    assert.ok(Math.abs(m.h - want) <= 1, `the box is ${m.h} high, not the picture's ${want} at ${room} wide`);
     assert.ok(!/scroll/.test(m.cls), "a picture that fits whole scrolls");
     assert.notEqual((await cueState(page, it.id)).disp, "flex", "the cue is drawn on a picture that fits whole");
   });
+}
 
+test("a tall focus box that scrolls draws the card's width less 2 and the gutter, at 390 wide", async (t) => {
+  const it = picItem("focus-width", 59, { focus: "#panel" });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": FOCUS_TALL }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 2600);
+  await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+  await settleFit(page, it.id);
+  const m = await measure(page, it.id), room = await budget(page, it.id);
+  const want = room - m.g;
+  assert.ok(/scroll/.test(m.cls), "the focus box does not scroll");
+  assert.ok(Math.abs(m.fw - want) <= 1, `the focus picture is ${m.fw} wide, not the card's ${room} less the ${m.g}px gutter = ${want}`);
+});
+
+// Unchanged by the ruling: at 1440 the card is 233 wide, so min(221.8, ...) gives the column term.
+for (const width of [1440]) {
   test(`a tall focus box that scrolls draws min(221.8, column - 2 - gutter) wide, at ${width} wide`, async (t) => {
     const it = picItem("focus-width", 59, { focus: "#panel" });
     const page = await open(t, { items: [it], designData: { ...PICS, "price-a": FOCUS_TALL }, viewport: { width, height: 900 } }); if (!page) return;
@@ -1068,21 +1128,22 @@ for (const scheme of ["light", "dark"]) {
 }
 
 // Each row: name, mockup, focus, mockup height, box width and height, the focus's top in the mockup, and a declared size.
+// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: each row draws at the card's width, 2x its own at most.
 const FIT_CASES = [
   ["a focus that fits", '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>', "#panel", 1400, 300, 200, 700],
-  ["a 1200px mockup", '<body style="margin:0"><div style="height:1200px;background:#2a6"></div></body>', undefined, 1200, 390, 1200, 0],
+  ["a mockup under a phone's height", '<body style="margin:0"><div style="height:830px;background:#2a6"></div></body>', undefined, 830, 390, 830, 0],
   ["a focus with a declared size", '<body style="margin:0;width:700px"><div style="height:700px"></div><div id="panel" style="width:600px;height:400px;background:#a62"></div></body>', "#panel", 1100, 600, 400, 700, { w: 600, h: 400 }],
 ];
 for (const width of [390, 1280, 1440]) {
   for (const [name, mock, focus, H, bw, bh, ty, size] of FIT_CASES) {
-    test(`${name} is drawn as today, with no scroll and no cue, at ${width} wide`, async (t) => {
+    test(`${name} is drawn at the card's width, with no scroll and no cue, at ${width} wide`, async (t) => {
       const it = picItem("fit", 39, { focus, size });
       const page = await open(t, { items: [it], designData: { ...PICS, "price-a": mock }, viewport: { width, height: 900 } }); if (!page) return;
       await frameSettled(page, H);
       if (focus) await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
       const m = await measure(page, it.id);
       const col = await page.locator(boxSel(it.id)).evaluate((w) => w.parentElement.clientWidth);
-      const sc = Math.min(1, (col - 2) / bw, Math.max(480 / bh, 120 / bw));
+      const sc = Math.min(2, (col - 2) / bw);
       assert.equal(m.w, Math.ceil(bw * sc) + 2, "the box width");
       assert.equal(m.h, Math.ceil(bh * sc), "the box height");
       assert.ok(!/scroll/.test(m.cls), "a picture that fits scrolls");
@@ -1103,13 +1164,30 @@ test("a 1564px mockup at 390 wide scrolls in its box, and the cue shows", async 
   assert.equal((await cueState(page, it.id)).disp, "flex", "the cue is not drawn on a picture that scrolls");
 });
 
-test("a mockup 1px over the fitted height gives a box of at most 480 and no cue, at 390 wide", async (t) => {
+// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a picture scrolls only when its drawn height is over the phone's fit plus 1px.
+// A phone is 844 high, so 845 draws 1px over the phone's fit at 390 wide and still draws whole; 846 draws 2px over and scrolls.
+test("a mockup 1px taller than a phone draws whole at the card's width, with no scroll and no cue, at 390 wide", async (t) => {
   const it = picItem("edge", 53);
-  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(1561) }, viewport: { width: 390, height: 900 } }); if (!page) return;
-  await frameSettled(page, 1561);
-  const m = await measure(page, it.id);
-  assert.ok(m.h <= 480, `the box is ${m.h} high, over 480`);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(845) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 845);
+  await settleFit(page, it.id);
+  const m = await measure(page, it.id), room = await budget(page, it.id);
+  const want = Math.ceil((845 * room) / 390);
+  assert.ok(Math.abs(m.h - want) <= 1, `the box is ${m.h} high, not the picture's ${want} at ${room} wide`);
+  assert.ok(!/scroll/.test(m.cls), "a picture 1px over the fit scrolls");
   assert.notEqual((await cueState(page, it.id)).disp, "flex", "the cue shows on a picture 1px over the fit");
+});
+
+test("a mockup 2px taller than a phone scrolls in a 480px box at the card's width less the gutter, at 390 wide", async (t) => {
+  const it = picItem("edge-over", 55);
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": TALL_PIC(846) }, viewport: { width: 390, height: 900 } }); if (!page) return;
+  await frameSettled(page, 846);
+  await settleFit(page, it.id);
+  const m = await measure(page, it.id), room = await budget(page, it.id);
+  assert.ok(/scroll/.test(m.cls), "a picture 2px over the fit does not scroll");
+  assert.ok(Math.abs(m.h - 480) <= 1, `the box is ${m.h} high, not 480`);
+  assert.ok(Math.abs(m.fw - (room - m.g)) <= 1, `the picture is ${m.fw} wide, not the card's ${room} less the ${m.g}px gutter`);
+  assert.equal((await cueState(page, it.id)).disp, "flex", "the cue is not drawn on a picture that scrolls");
 });
 
 test("a picture that differs from its siblings keeps its 3px border inside its box, and still scrolls, at 1280 wide", async (t) => {
@@ -5312,17 +5390,20 @@ test("a receipt wholly below the screen drops its height without moving the page
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
-// A phone mockup shows whole, so the design caps its height at 480px (docs/design/c193-sizes.md item 3); it scales to its card and stays centred.
-for (const width of SIZES) test(`an option's picture is at most 480px high and centred in its card at ${width}px wide`, async (t) => {
+// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a phone picture draws at its card's width, whole, and stays centred.
+for (const width of SIZES) test(`an option's phone picture draws at its card's width, whole, and centred, at ${width}px wide`, async (t) => {
   const it = mk("cap-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) });
   const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>']));
   const page = await open(t, { items: [it], designData, viewport: { width, height: 900 } }); if (!page) return;
   await card(page, it).locator("label.opt .dfitwrap").first().scrollIntoViewIfNeeded();
-  await page.waitForTimeout(300);
-  const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt .opic`)].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.getBoundingClientRect(); return { h: w.height, w: w.width, off: Math.abs((w.left + w.right) / 2 - (b.left + b.right) / 2), room: b.width }; }), it.id);
+  await framesAt(page, LOOK_OPTS.length, 844);
+  await boxesSettled(page, it.id);
+  const m = await page.evaluate((id) => [...document.querySelectorAll(`#item-${id} label.opt .opic`)].map((o) => { const w = o.querySelector(".dfitwrap").getBoundingClientRect(), b = o.getBoundingClientRect(); return { h: w.height, w: w.width, off: Math.abs((w.left + w.right) / 2 - (b.left + b.right) / 2), col: Math.floor(b.width) }; }), it.id);
+  assert.equal(m.length, LOOK_OPTS.length, "the card does not hold the options the case gave it");
   for (const o of m) {
-    assert.ok(o.h <= 481, "the picture is taller than 480px: " + o.h);
-    assert.ok(o.w <= Math.min(390, o.room) + 1, "the picture is wider than its card or the mockup: " + JSON.stringify(o));
+    const room = o.col - 2;
+    assert.ok(Math.abs(o.w - (room + 2)) <= 1, `the picture box is ${o.w} wide, not the card's ${room + 2}`);
+    assert.ok(Math.abs(o.h - (844 * room) / 390) <= 1.5, `the picture is ${o.h} high, not a phone's ${((844 * room) / 390).toFixed(1)} at ${room} wide`);
     assert.ok(o.off <= 1, "the picture is not centred: " + JSON.stringify(o));
   }
 });
