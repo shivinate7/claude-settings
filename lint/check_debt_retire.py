@@ -32,7 +32,7 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 
 Unknown = records.Unknown  # a git read failed, so the closes are not known
 CITE = "Retire-run"
-TIMEOUT = 600
+TIMEOUT = 1800  # per suite; interim stopgap (owner 12:11 CST Nov 10, decision ci-job-caps; ends with step time-pinned-tests-go)
 RAN_PAST = "ran past"  # run_span's unknown text for a test that hit TIMEOUT; merge's batch lint reads it to tell a timeout from other unknowns
 # Each runnable suffix with the argv that starts it. The check never runs anything else.
 INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}

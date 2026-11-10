@@ -72,7 +72,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    lint route, and so does a lane branch such as `batch-push-full-checks`. Every run prints one line naming
    the route and why. The batch route runs the full checks job, not only lint. It also runs the guard
    mutation anchor check (`python3 hooks/mutate_guard.py --anchors`) and the Windows guard slice (the slice
-   CI step of job `checks-windows-guard`). Its budget is 3600 s (`BATCH_SECONDS`), not the 1200 s lint
+   CI step of job `checks-windows-guard`). Its budget is 3600 s (`BATCH_SECONDS`), not the lint
    budget. The batch runner runs it from a session that is not worktree-isolated, as a background Bash call
    with `run_in_background` and `timeout` 7200000 ms. The default background timeout, 1800 s, is under the
    3600 s budget. When the run ends, the runner reads the verdict.
