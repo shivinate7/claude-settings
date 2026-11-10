@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 14:41 CST.
+Last rewrite: 2026-11-10 14:57 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -15,7 +15,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    its time. It is the first PR after the drain. Open: an express pass for prose (stage 5) would make
    this PR fast; until then it takes the normal docs-only route.
 3. **Change how every lane flows,** before any other lane starts. Each is one lane, in this order:
-   0. One glossary of roles, the same on local and cloud (rulings G1-G10; step
+   0. One glossary of roles, the same on local and cloud (rulings G1-G12; step
       glossary-same-local-cloud). First because every later brief uses its terms.
    1. Checks that can refuse a merge run in CI (ruling R2).
    2. Time limits end hangs only (ruling R3). R2 and R3 together stop a green batch from being
@@ -61,6 +61,11 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
     running", never a refusal. ("this needs to be a moving target")
   - The silence window is measured per tool from the longest gap between output lines in green runs.
   - Margins multiply, never add: "+5m is not as generous as like +1.5x".
+  - A new CI job with no green runs: its nearest similar job's computed limit x1.5. If it hits that limit,
+    it is flagged as misjudged and moves to the largest current job's computed limit x1.5. Owner 14:36
+    CST: "b is probably fine for now, with some sorta flag that if it quickly fails that it was
+    misjudged and it goes to largest current job x1.5"; 14:37 CST: "if it was just made and it then fails
+    in its first run or two that's a sign it was misjudged". Replaces the stored 60 min in ci-job-caps.
 
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
@@ -112,6 +117,19 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   PR as batch runner. How many sessions share the roles depends on the size of the run, never on local
   or cloud. A solo run the owner is watching asks in chat, and writes a page item only when it must
   wait on him while he is away.
+- **G11. Topic 1 closes: one behaviour on local and cloud.** Owner 14:36 CST Nov 10: "agree on your
+  proposed close on topic 1"; 14:37 CST: "yes it can be closed". Every split a rule chose is removed, so
+  both places behave the same. A split the platform forces lives only inside the tool, never in a role's
+  definition. Splits to remove in the glossary lane (stage 3.0): two tests for "cloud" in the code;
+  guards that judge only one of start_session and create_session; the merge role file on the cloud only;
+  the load brake on the owner's computer only; a lane the owner starts cannot merge on the cloud yet
+  (docs/todo.md, "Let a solo session merge", owner 2026-11-02 14:02 CST). Deferred to a later build
+  phase (owner 14:37 CST, "can be targeted after/later"): the details of forced splits, mainly a team
+  that mixes local and cloud sessions while the mailbox bridge (MAILBOX_REPO) is off.
+- **G12. A lane's behaviour follows the size of the work.** Owner 14:55 CST Nov 10: "yes A this is good".
+  Any lane builds a short list of edits itself when nothing can run in parallel; otherwise it fans out to
+  agents, whoever started it. Merges rules roles-solo-builds-short-edit-list and
+  roles-orchestrator-never-builds. Home: CLAUDE.md, decision session-tiers.
 
 ## Directions, not yet settled
 
@@ -128,20 +146,15 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   the entirety of prose to be fast to review i'd be open to considering that". One idea: a PR that only
   adds owner words with their time is checked by machine against the inbox and merges without review.
 
-## Glossary points still open (topic 1)
-
-- Other local/cloud splits (15 found): two tests for "cloud" in the code; start_session vs
-  create_session judged by different guards; send_message vs SendMessage with the mailbox bridge off;
-  merge role file cloud-only; load brake local-only.
-- A lane the owner starts cannot merge on the cloud yet: the merge tool's cloud confirm needs the
-  batch-runner role (docs/todo.md, "Let a solo session merge", owner 2026-11-02 14:02 CST). G2 needs it.
-
 ## Open topics, not yet discussed
 
 - How many lanes start: the owner said in the same answer "the limit isn't the problem, it's how the limit
   batches that's the problem". Covered by stage 3.4 for now.
 - Lane lint runs three times per lane (hand-off, join, batch head) against
-  roles-each-layer-proves-once.
+  roles-each-layer-proves-once. In discussion (owner 14:54 CST: "is there no truly fast way that retains
+  accuracy?"). Proposed option d: keep the hand-off run; drop the join and batch-head runs; batch CI
+  starts with lint and cancels the run at once when it goes red; the red files name the lane to drop.
+  Unmeasured: whether CI cancels on first failure; whether every red lint maps to one lane.
 - Guards with recorded false alarms: report guard 15, frozen-path 6, ask-alone 4, question-form 4,
   builder-test-edit 4 (counts of notes, not firings).
 - About 89% of 746 open steps work on this repo's own merge, review and lint machinery (title
