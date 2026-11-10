@@ -1565,8 +1565,8 @@ def _step_held_hit(steps, subject, target_tags, target, cwd: str, rows=frozenset
                 if not _REPO_NAME.fullmatch(repo):
                     raise ValueError("not an owner/name repo tag")
                 with module.shared_deadline(MERGE_READ_TIMEOUT):
-                    rows = open_pull_rows(module, repo)
-                for row in rows:
+                    pulls = open_pull_rows(module, repo)
+                for row in pulls:
                     if str(row["head"]["ref"]).lower() in lane_head_refs(step):
                         return ("ask", "lane step " + step + " has open pull request " + str(row.get("number", "?")),
                                 STEP_DUP_PR_REASON % (row.get("number", "?"), step))
