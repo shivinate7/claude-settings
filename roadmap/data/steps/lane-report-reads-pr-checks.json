@@ -1,0 +1,12 @@
+{
+  "title": "A lane's pass claim on a PR names the PR's GitHub check state on that head, read once, or the report is refused",
+  "phase": "now",
+  "status": "todo",
+  "order": 1009,
+  "owner": "triage",
+  "why": "A lane told the owner \"no failure\" on #2552 after reading only the local lane lint; the PR's run (windows-latest) check was red (hooks/test_mail.py 3 of 38 failed on Windows). The lane lint runs Linux checks only.",
+  "note": "Filed by triage 12:47 CST Nov 10 from the messaging topic session (session_013NEJL1YBVqsXRPBac7nRcz, lane on #2552, step mail-send-no-file), owner-prompted 12:46 CST (\"seems like useful feedback for how we operate\"). Guard: the report check reads the PR's check runs once (get_check_runs on the named head) before a pass claim. Cost: one GitHub read per pass claim. Second note: the Windows run was the first run of hooks/test_mail.py on Windows; RoundTrip and TakeRace on main may fail there too (push to the file:// test store). Unmeasured on main. hooks/mail.py reason() kept only git's last error line; #2552's head 98d0a1c0e keeps the cause line.",
+  "updatedAt": "2026-11-10T12:47:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
