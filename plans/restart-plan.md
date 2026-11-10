@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 14:34 CST.
+Last rewrite: 2026-11-10 14:41 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -15,7 +15,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    its time. It is the first PR after the drain. Open: an express pass for prose (stage 5) would make
    this PR fast; until then it takes the normal docs-only route.
 3. **Change how every lane flows,** before any other lane starts. Each is one lane, in this order:
-   0. One glossary of roles, the same on local and cloud (rulings G1-G7; step
+   0. One glossary of roles, the same on local and cloud (rulings G1-G10; step
       glossary-same-local-cloud). First because every later brief uses its terms.
    1. Checks that can refuse a merge run in CI (ruling R2).
    2. Time limits end hangs only (ruling R3). R2 and R3 together stop a green batch from being
@@ -80,8 +80,11 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   lane after its merge, and each lane whose PR was superseded. The coordinator archives a lane it
   decides to stop. Builds on owner 2026-11-06 11:38 CST (decision session-tiers).
 - **G4. Plain names.** Owner 14:29 CST Nov 10: "check fix reviewer should be the name", "review log is
-  fine", "feedback log is good too". fix check -> fix reviewer (read: the reviewer that checks one fix);
-  review record -> review log; the per-session inbox file -> feedback log. The mailbox keeps its name.
+  fine", "feedback log is good too". 14:33 CST: "i meant let's call it the "check fix reviewer" (or find a
+  better name that's cool too)". Picked under that leave: fix check -> fix verifier (the reviewer that
+  verifies one fix). Reason: "check" already names a lint, test or CI job in the glossary, so a name
+  with "check" in it would clash. review record -> review log; the per-session inbox file -> feedback
+  log. The mailbox keeps its name.
 - **G5. Rounds are numbered by the review they answer.** Owner 14:29 CST Nov 10: "approved on fixing the
   naming trap on the rounds". The fix after review 1 is labelled "Fix for review 1", not "Round 2 of 3".
 - **G6. One role proof, local and cloud.** Owner 14:29 CST Nov 10: "yes cloud tags can be optional
@@ -92,7 +95,23 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   and stuff in general are no longer replaced they just compact graciously it's odd that the other
   prose still remained". Matches session-tiers:18 (owner 2026-11-01, item 109 b). Stale text to
   rewrite: session-tiers:81 (arbiter "rotated before it goes stale, like triage"), GLOSSARY.md:63
-  ("Triage, batch runner and arbiter rotate"), skills/project-ops/SKILL.md:3 and :17.
+  ("Triage, batch runner and arbiter rotate"), skills/project-ops/SKILL.md:3 and :17. Rewrite approved,
+  owner 14:32 CST ("agreed on the rewriting from g7").
+- **G8. A wrong term gets a gentle correction.** Owner 14:30 CST Nov 10: "i often call things by the wrong
+  terms sometimes and don't want that to result in confusion for claude and instead be met with strong
+  pushback and a gentle correction"; form approved 14:32 CST ("agreed on g8"). Three cases: the word maps
+  to one term: act, and add one line "You said X; the term is Y, which does Z". The word names the wrong
+  session or role: one line saying whose job it is and why, then route it. The word fits two terms: ask
+  before acting. Home: CLAUDE.md speak-one-name-per-thing and the output style's
+  style-wrong-tier-one-line, rewritten in place.
+- **G9. Triage always writes the waiting page.** Owner 14:32 CST Nov 10: "yea triage always writes the
+  waiting page". Replaces the three definitions ("where triage runs", "a project with a triage thread",
+  "when no triage lives").
+- **G10. Roles are hats.** Owner 14:33 CST Nov 10: "yes hats model works". A role is a set of jobs. In a
+  solo run one lane holds every role it needs: it writes its own page items as triage and merges its own
+  PR as batch runner. How many sessions share the roles depends on the size of the run, never on local
+  or cloud. A solo run the owner is watching asks in chat, and writes a page item only when it must
+  wait on him while he is away.
 
 ## Directions, not yet settled
 
@@ -111,8 +130,6 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 
 ## Glossary points still open (topic 1)
 
-- Page writer: three records define it three ways ("where triage runs", "a project with a triage
-  thread", "when no triage lives"). Proposed: triage always writes the page.
 - Other local/cloud splits (15 found): two tests for "cloud" in the code; start_session vs
   create_session judged by different guards; send_message vs SendMessage with the mailbox bridge off;
   merge role file cloud-only; load brake local-only.
