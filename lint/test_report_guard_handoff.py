@@ -123,21 +123,21 @@ WIDENED_LINES = (
     "Why yours: the remote is rejecting the push, since the trailer needs the owner.",
     "Why yours: the push is being rejected, since the trailer needs the owner.",
 )
-# A choice reason that holds a widened word. The choice phrase exempts the line, so each passes on main too.
+# A choice reason that holds a widened word. The choice phrase exempts the line, so each passes whatever the widened words read.
 CHOICE_NEW_LINES = (
     "Why yours: it is your call, and I couldn't decide for you.",
     "Why yours: it is your call, and I couldn’t decide for you.",
     "Why yours: it is your choice whether to retry, since the push was rejected.",
     "Why yours: the remote returned 401, and the safety rules keep the retry for you.",
 )
-# A cited reason that holds a widened word. The cite backs it, so each passes on main and after the widening. A
-# "could not" line is left out: on main the cannot-claim check reads it as a claim, so it is no green control here.
+# A cited reason that holds a widened word. The cite backs it, so each passes the hand-off check. A
+# "could not" line is left out: the cannot-claim check reads it as a claim, so it is no green control here.
 CITED_NEW_LINES = (
     "Why yours: the remote returned 401 to the push (route %s)." % ROUTE_ID,
     "Why yours: the push was rejected (route %s)." % ROUTE_ID,
     "Why yours: the push was rejected (measured 2026-11-06, check_red_run exited 1).",
 )
-# Text a widened form must not catch. `\b401\b` matches only a whole number, so these pass on main and after. Left out:
+# Text a widened form must not catch. `\b401\b` matches only a whole number, so these pass. Left out:
 # "401(k)" and "401-page", which `\b401\b` matches, so no regex tells them from a status; "could not tell" and
 # "rejected option", the same, since a word cannot tell its use.
 NEAR_MISS_401 = (
