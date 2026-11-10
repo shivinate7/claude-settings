@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 14:30 CST.
+Last rewrite: 2026-11-10 14:34 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -15,7 +15,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    its time. It is the first PR after the drain. Open: an express pass for prose (stage 5) would make
    this PR fast; until then it takes the normal docs-only route.
 3. **Change how every lane flows,** before any other lane starts. Each is one lane, in this order:
-   0. One glossary of roles, the same on local and cloud (rulings G1-G3; step
+   0. One glossary of roles, the same on local and cloud (rulings G1-G7; step
       glossary-same-local-cloud). First because every later brief uses its terms.
    1. Checks that can refuse a merge run in CI (ruling R2).
    2. Time limits end hangs only (ruling R3). R2 and R3 together stop a green batch from being
@@ -73,10 +73,26 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   Solo, one lane and lane session collapse into one role, lane. A lane the owner starts, with no
   coordinator above it, may merge its own PR under a merge grant. The terms shape, tier-as-separate-axis
   and orchestrator drop. Home: decision session-tiers, decision lanes-start-as-agents, GLOSSARY.md.
-- **G3. The batch runner archives lanes.** Already ruled (owner 2026-11-06 11:38 CST, decision
-  session-tiers: "A is fine the batch runner keeps archiving more automatically"). Owner 14:23 CST
-  Nov 10 asked who and why; the coordinator also needs a part. Open: who archives a lane that never
-  merges (dropped, closed or abandoned).
+- **G3. Archiving.** Owner 14:29 CST Nov 10: "archiving as part of the batch runners responsibilities is
+  approved, with the coordinator archiving the ones that it decides to spot (in general though i assume
+  that with my rules on how PRs should close older prs sooner that would mean batch role has more
+  exposure to superceded prs/sessions and will be able to archive them)". The batch runner archives each
+  lane after its merge, and each lane whose PR was superseded. The coordinator archives a lane it
+  decides to stop. Builds on owner 2026-11-06 11:38 CST (decision session-tiers).
+- **G4. Plain names.** Owner 14:29 CST Nov 10: "check fix reviewer should be the name", "review log is
+  fine", "feedback log is good too". fix check -> fix reviewer (read: the reviewer that checks one fix);
+  review record -> review log; the per-session inbox file -> feedback log. The mailbox keeps its name.
+- **G5. Rounds are numbered by the review they answer.** Owner 14:29 CST Nov 10: "approved on fixing the
+  naming trap on the rounds". The fix after review 1 is labelled "Fix for review 1", not "Round 2 of 3".
+- **G6. One role proof, local and cloud.** Owner 14:29 CST Nov 10: "yes cloud tags can be optional
+  agreed", "local sessions do have sesion id yes". A session proves its role from one roster both
+  places read (the Standing sessions list on the roadmap branch); cloud tags become optional. Local
+  sessions have a session id, so the split is chosen, not forced.
+- **G7. Standing sessions compact, they are not replaced.** Owner 14:29 CST Nov 10: "both it and triage
+  and stuff in general are no longer replaced they just compact graciously it's odd that the other
+  prose still remained". Matches session-tiers:18 (owner 2026-11-01, item 109 b). Stale text to
+  rewrite: session-tiers:81 (arbiter "rotated before it goes stale, like triage"), GLOSSARY.md:63
+  ("Triage, batch runner and arbiter rotate"), skills/project-ops/SKILL.md:3 and :17.
 
 ## Directions, not yet settled
 
@@ -95,18 +111,13 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 
 ## Glossary points still open (topic 1)
 
-- Owner 14:23 CST: "idk what fix check even is; idk what review record is; inbox either". Proposed plain
-  names: fix check -> fix review; review record -> review log; the per-session inbox file -> feedback log
-  (the mailbox keeps its name).
-- The "Round N of 3" marker names the fix after round N-1 by the round it leads into. Proposed: number a
-  fix by the review it answers.
 - Page writer: three records define it three ways ("where triage runs", "a project with a triage
   thread", "when no triage lives"). Proposed: triage always writes the page.
-- Tier proof: a session proves its role only by cloud tags (get_session); a local session has none.
-  Proposed: one roster both read, the Standing sessions list on the roadmap branch's CLAUDE.md.
 - Other local/cloud splits (15 found): two tests for "cloud" in the code; start_session vs
   create_session judged by different guards; send_message vs SendMessage with the mailbox bridge off;
   merge role file cloud-only; load brake local-only.
+- A lane the owner starts cannot merge on the cloud yet: the merge tool's cloud confirm needs the
+  batch-runner role (docs/todo.md, "Let a solo session merge", owner 2026-11-02 14:02 CST). G2 needs it.
 
 ## Open topics, not yet discussed
 
