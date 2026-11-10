@@ -680,13 +680,13 @@ class Pages:
         return anchors[k - 1] + 1
 
     def _uses_after(self, start):
-        """The tool_use blocks after `start` that did not fail: a use whose id is in `self.failed`, or whose result, paired by
-        tool_use_id, is an error, is left out. A use with no id or no result stays."""
+        """The tool_use blocks after `start` whose result is no error; a failed send proves nothing."""
+        # A use whose id is in `self.failed`, or whose result, paired by tool_use_id, is an error, is left out.
+        # A use with no id or no result stays.
         results = self._results()
-        return (use for r in self.records[start:] if r.get("type") == "assistant"
-                for use in _transcript.tool_uses(r)
-                if use.get("id") not in self.failed
-                and (results.get(use.get("id")) or {}).get("is_error") is not True)
+        uses = (use for r in self.records[start:] if r.get("type") == "assistant"
+                for use in _transcript.tool_uses(r) if use.get("id") not in self.failed)
+        return (use for use in uses if (results.get(use.get("id")) or {}).get("is_error") is not True)
 
     def proof_state(self, text, k, proof, stamp, label="page"):
         """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
