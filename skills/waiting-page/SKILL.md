@@ -211,7 +211,7 @@ Each page has one writer. In a repo, it is the orchestrating session that owns t
 project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers"). A repo may name the writer's session id in its
-extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. A rotation updates it.
+extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. The key send counts only on a delivered result. A rotation updates it.
 
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
   to its parent in the same turn, and the orchestrator writes the item ("Add an item", step 0).
