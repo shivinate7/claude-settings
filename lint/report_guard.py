@@ -2601,11 +2601,11 @@ def _gh_json(args, cwd):
 
 def _newest_record(n, comments, merge_mod, cutover=None):
     """(parsed record, body) of the newest review record comment of `comments` (oldest first). No marked comment is
-    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read. (None, None) as well when
-    merge's review_newest says the record cannot be trusted: the newest record, or a comment after it, was edited, so a PASS claim reads as
-    merge --reviewed reads it, bad. With a `cutover` (merge's review_stamp_since), the comment's last edit time (updated_at, else
-    created_at) goes to parse_review, so an unstamped record from before the cutover reads as merge --reviewed reads it. With no cutover,
-    the Stamp line is required."""
+    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read. With a `cutover`
+    (merge's review_stamp_since), the comment's last edit time (updated_at, else created_at) goes to parse_review, so an unstamped
+    record from before the cutover reads as merge --reviewed reads it. With no cutover, the Stamp line is required.
+    (None, None) as well when merge's review_newest says the record cannot be trusted: the newest record, or a comment after it,
+    was edited, so a PASS claim reads as merge --reviewed reads it, bad."""
     newest, why = merge_mod.review_newest(comments)
     if newest is None or why:
         return None, None
