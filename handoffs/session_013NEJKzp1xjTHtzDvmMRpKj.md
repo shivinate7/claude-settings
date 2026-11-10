@@ -1,0 +1,7 @@
+# Lane: grants-read-from-main (session_013NEJKzp1xjTHtzDvmMRpKj), received 09:51 CST 2026-11-10, kind B
+
+Handoff (B), lane grants-read-from-main (step 841, hooks), session_013NEJKzp1xjTHtzDvmMRpKj. Nothing unpushed; nothing new started.
+1. Worked on: session start fetches origin once per checkout, warns when CLAUDE.md or .claude/CLAUDE.md differs from origin/main, and counts local main against it (hooks/session_start.sh, one home), plus a Windows fix to its fetch-count tests.
+2. Repo shivinate7/claude-settings, PR #2340, head 86f34db34efcf17fc7ad6b034feb6ee7b64673fe: merged 2026-11-09 11:55 CST by shivinate7 (merged: true, branch deleted). Review records on the PR: round 1 FAIL, round 2 PASS, round 3 PASS; lane lint PASS.
+3. Left, not started (the freeze forbids new work): the post-merge notes PR the coordinator asked for, one line each in docs/debts/notes.md: T1 (the "did not run" dedup is unpinned; one default-branch case with a bad origin would pin it), N8 (run_traced never asserts the trace is non-empty), N9 (the watchdog case reads any `sleep 7` on the machine), and N2 (unknown reads on cloud clones are likely the 2 s fetch bound; clone is neither shallow nor single-branch, measured by the old coordinator 2026-11-08 18:54 CST).
+4. Unproven: whether Git for Windows honours GIT_TRACE with a C:/ path, so the fetch-count cases on Windows (only a Windows job shows it); the watchdog-reap case skips on Windows.

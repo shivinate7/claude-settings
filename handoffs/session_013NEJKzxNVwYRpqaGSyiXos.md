@@ -1,0 +1,3 @@
+# guard-brief-reproduces-incident (session_013NEJKzxNVwYRpqaGSyiXos), received 09:51 CST 2026-11-10, kind KEEP
+
+KEEP: PR #1556 (guard and check lanes reproduce the incident first) was handed to runner 8 on 2026-11-07 16:06 CST. Its head is 9573987c9, its review record is posted, and lane-lint passed. It only waits for the merge, and nothing is unpushed. Caveat: it is still a draft and unmerged after 3 days, and its base 174b005c1 is far behind main. If runner 8 no longer holds it, treat this as a (B) handoff instead: branch guard-brief-reproduces-incident; what is left is a rebase onto main, a re-lint, a new review record, and the merge.

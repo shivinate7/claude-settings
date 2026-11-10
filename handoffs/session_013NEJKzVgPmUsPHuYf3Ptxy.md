@@ -7,3 +7,6 @@ Handoff, lane lease-sha-form-hint:
 4. Problem: #1324 is stacked on #1316, and #1316 is now closed unmerged. Its lease allow line moved to #1429, which also covers `--force-with-lease --force-if-includes`. #1324's tests pin #1316's entry text.
 5. Left: rebase #1324 onto main once #1429 merges, and re-point the test at #1429's entry. Or close #1324 if #1429's line makes the remedy change moot. The owner's call on 286 b against #1429 decides which.
 6. Nothing is unpushed.
+
+
+Addendum (verbatim): Addendum to the lease-sha-form-hint handoff: the coordinator closed my open question at 09:53 CST. Answer (a), deferred: after #1429 merges and the freeze lifts, a new lane redoes #1324 on main (item 286 b, teach the sha form). #1324 stays open. Nothing is unpushed; this lane is ready to archive.

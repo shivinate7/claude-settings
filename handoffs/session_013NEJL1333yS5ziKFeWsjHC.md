@@ -1,0 +1,3 @@
+# lane: agent-report-shas-resolve (session_013NEJL1333yS5ziKFeWsjHC), received 09:51 CST 2026-11-10, kind KEEP
+
+KEEP: lane agent-report-shas-resolve has nothing unpushed. Its three PRs are released to batch runner 8 and only wait for their merge, in this order: #1842 (made-up shas in agent reports, head 3e5acf1ef, record issuecomment-6727520027), #2235 (refs in messages between sessions, head 421521c49, record issuecomment-6726353070), #2265 (a PR word apart from its number, head 9a97ca39b, record issuecomment-6727182711). Each has rounds 1-3 with net value positive and a passing lane lint. Main has moved far since, so a merge conflict is likely when runner 8 picks them up.
