@@ -15574,6 +15574,87 @@ def _cmk_verdict_case(what, command, fixtures, want, unread, folder):
     return check
 
 
+def _cmk_folder_calls(guard, command, cwd, folder):
+    """(verdict, args of each git call COMMAND makes in FOLDER), each such call answered None."""
+    return _cmk_verdict(guard, command, cwd, lambda args: True, folder)
+
+
+def _cmk_preface(fixtures):
+    """(guard, problem): the fixtures are built, and the guard loads under the names the patch reaches."""
+    for fixture in fixtures:
+        materialize(fixture)
+    guard = _load_guard_module()
+    missing = [name for name in CMK_READ_MODULES if name not in sys.modules]
+    if missing:
+        return guard, "the guard no longer loads %s under those names: the reader moved" % ", ".join(missing)
+    return guard, None
+
+
+def _cmk_no_call_case(what, command, fixture, want, control):
+    """COMMAND in FIXTURE is WANT with git unpatched, and makes no git call in that folder. CONTROL, a commit there,
+    makes one, so the patch is in scope and a silent add makes no read."""
+    def check():
+        guard, problem = _cmk_preface((fixture,))
+        if problem:
+            return False, problem
+        got_plain, _nulled = _cmk_verdict(guard, command, fixture)
+        if got_plain != want:
+            return False, "%r with git unpatched, want %r: the fixture changed" % (got_plain, want)
+        _verdict, scope = _cmk_folder_calls(guard, control, fixture, fixture)
+        if not scope:
+            return False, "scope: %s makes no git call in the folder, so the patch cannot reach it" % control
+        got, calls = _cmk_folder_calls(guard, command, fixture, fixture)
+        if calls:
+            return False, "%s makes %d git calls in the folder, want none: %r" % (what, len(calls), calls[0])
+        if got != want:
+            return False, "%r with no git call in the folder, want %r" % (got, want)
+        return True, "%r with no git call in the folder; the control makes %d" % (got, len(scope))
+    return check
+
+
+def _cmk_add_adds_no_call_case(what, add_then_push, push, fixture, want, control):
+    """ADD_THEN_PUSH in FIXTURE is WANT with git unpatched, and makes the same git calls in that folder as PUSH alone:
+    the add before it makes none. CONTROL, a commit there, makes some, so the patch is in scope."""
+    def check():
+        guard, problem = _cmk_preface((fixture,))
+        if problem:
+            return False, problem
+        got_plain, _nulled = _cmk_verdict(guard, add_then_push, fixture)
+        if got_plain != want:
+            return False, "%r with git unpatched, want %r: the fixture changed" % (got_plain, want)
+        _verdict, scope = _cmk_folder_calls(guard, control, fixture, fixture)
+        if not scope:
+            return False, "scope: %s makes no git call in the folder, so the patch cannot reach it" % control
+        _got, both = _cmk_folder_calls(guard, add_then_push, fixture, fixture)
+        _verdict, alone = _cmk_folder_calls(guard, push, fixture, fixture)
+        if both != alone:
+            return False, "%s makes %d git calls in the folder, %s alone makes %d: the add makes a call" % (
+                what, len(both), push, len(alone))
+        return True, "%r unpatched; the push's %d calls in the folder, the add none; the control makes %d" % (
+            got_plain, len(both), len(scope))
+    return check
+
+
+def _cmk_refused_no_read_case(what, command, fixtures, want, folder, control):
+    """COMMAND in FIXTURES[0] is WANT with git unpatched, and makes no git call in FOLDER at all: it is refused before
+    any read there. CONTROL, a commit in FOLDER, makes one, so the patch is in scope."""
+    def check():
+        guard, problem = _cmk_preface(fixtures)
+        if problem:
+            return False, problem
+        got_plain, _nulled = _cmk_verdict(guard, command, fixtures[0])
+        if got_plain != want:
+            return False, "%r with git unpatched, want %r: the fixture changed" % (got_plain, want)
+        _verdict, scope = _cmk_folder_calls(guard, control, folder, folder)
+        if not scope:
+            return False, "scope: %s makes no git call in the folder, so the patch cannot reach it" % what
+        _got, calls = _cmk_folder_calls(guard, command, fixtures[0], folder)
+        if calls:
+            return False, "%s makes %d git calls in the folder, want none: %r" % (what, len(calls), calls[0])
+        return True, "%r unpatched; no git call in the folder; the control makes %d" % (got_plain, len(scope))
+    return check
+
+
 # Two folders in one call: A is a clean repository, B holds a staged triplet. The triplet is in B, so each row's
 # deny is B's. A triplet already found keeps its deny; unread applies only when no read finds one.
 CMK_TWO_FOLDERS = ("cd " + slash(CMK_CLEAN) + " && " + VCS + " add -A && " + VCS + " commit -m x; cd "
@@ -15588,17 +15669,16 @@ cmk_fold_verify_head_case = _cmk_verdict_case(
 cmk_fold_marker_case = _cmk_verdict_case(
     "the marker read in the clean folder", CMK_TWO_FOLDERS, CMK_TWO_FIXTURES, ("commit", "src/app.py"),
     lambda args: "--check" in args, CMK_CLEAN)
-# A blind commit of the staged triplet, then a folder whose reads answer None, then a push: the chain is refused
-# before the push reads anything, so the unread folder does not turn the chain into unread.
-cmk_fold_chain_case = _cmk_verdict_case(
-    "every read in the clean folder, after a blind commit of a staged triplet",
-    "./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && cd " + slash(CMK_CLEAN) + " && "
-    + VCS + " add -A && " + VCS + " push", (CMK_STAGED, CMK_CLEAN), ("chain", "git push"),
-    lambda args: True, CMK_CLEAN)
-# An add carries nothing into history, so an add alone with its toplevel unreadable is no hit, as on main.
-cmk_fold_add_only_case = _cmk_verdict_case(
-    "rev-parse --show-toplevel, on git add -A alone", VCS + " add -A", (CMK_STAGED,), ("", ""),
-    lambda args: "--show-toplevel" in args, CMK_STAGED)
+# A blind commit of the staged triplet, then the clean folder's add and its push: the guard refuses the chain before
+# the push, so no git call reaches the clean folder.
+CMK_CHAIN_PUSH = ("./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && cd " + slash(CMK_CLEAN)
+                  + " && " + VCS + " add -A && " + VCS + " push")
+cmk_fold_chain_case = _cmk_refused_no_read_case(
+    "the chain after a blind commit of a staged triplet", CMK_CHAIN_PUSH, (CMK_STAGED, CMK_CLEAN),
+    ("chain", "git push"), CMK_CLEAN, VCS + " commit -m x")
+# An add carries nothing into history: an add alone makes no git call and is no hit, as on main.
+cmk_fold_add_only_case = _cmk_no_call_case(
+    "git add -A alone", VCS + " add -A", CMK_STAGED, ("", ""), VCS + " commit -m x")
 cmk_unread_merge_continue_case = _cmk_unread_case(
     "rev-parse --show-toplevel, on git merge --continue", lambda args: "--show-toplevel" in args,
     command=VCS + " merge --continue", fixture=CMK_STAGED, plain=("commit", "src/app.py"))
@@ -15627,9 +15707,9 @@ cmk_none_source_ref_case = _cmk_verdict_case(
 cmk_none_checked_out_case = _cmk_verdict_case(
     "the checked-out branch read, for a push of HEAD", VCS + " push origin HEAD", (CMK_PU,), ("push", "src/app.py"),
     lambda args: "symbolic-ref" in args and args[-1:] == ("HEAD",), None)
-cmk_none_clean_push_case = _cmk_verdict_case(
-    "the add's toplevel read, before a push of a clean range", VCS + " add -A && " + VCS + " push", (CMK_CL,),
-    ("", ""), lambda args: "--show-toplevel" in args, CMK_CL)
+cmk_none_clean_push_case = _cmk_add_adds_no_call_case(
+    "a push of a clean range after add -A", VCS + " add -A && " + VCS + " push", VCS + " push", CMK_CL, ("", ""),
+    VCS + " commit -m x")
 
 
 # The conflict-markers checks, each beside its rows. Each materializes only the fixture it names.
@@ -15669,10 +15749,10 @@ CMK_CHECKS = (
     ("conflict-markers: add -A and commit in a clean folder with the marker read unreadable, then a staged triplet in "
      "another folder, is refused as that commit",
      cmk_fold_marker_case),
-    ("conflict-markers: a blind commit of a staged triplet, then add and push in a folder whose reads are unreadable, "
-     "is refused as a chain",
+    ("conflict-markers: a blind commit of a staged triplet, then add and push in a clean folder, is refused as a chain "
+     "with no git call in that folder",
      cmk_fold_chain_case),
-    ("conflict-markers: git add -A alone, with rev-parse --show-toplevel unreadable, is not a hit",
+    ("conflict-markers: git add -A alone makes no git call and is not a hit",
      cmk_fold_add_only_case),
     ("conflict-markers: git merge --continue, with rev-parse --show-toplevel unreadable, is asked as unread",
      cmk_unread_merge_continue_case),
@@ -15690,8 +15770,8 @@ CMK_CHECKS = (
      "triplet in the upstream range, is refused", cmk_none_source_ref_case),
     ("conflict-markers: a push of HEAD, with a read that answers None on the checked-out branch and a triplet in the "
      "upstream range, is refused", cmk_none_checked_out_case),
-    ("conflict-markers: add -A then a push of a clean range, with a read that answers None on the add's toplevel, is "
-     "no hit", cmk_none_clean_push_case),
+    ("conflict-markers: add -A then a push of a clean range makes the push's git calls only, and is no hit",
+     cmk_none_clean_push_case),
 )
 FIXTURELESS_CHECKS.update(check for _label, check in CMK_CHECKS)
 
