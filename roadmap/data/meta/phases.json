@@ -1,6 +1,6 @@
 {
   "design": {
-    "asOf": "Measured Nov 9: claude-settings 81a720c, banchi 78398f4, q_max 32d4373, home-app 60a5b74 (home merged in)",
+    "asOf": "Measured Nov 10: claude-settings 6e8d6cc, banchi 78398f4, q_max 32d4373, home-app daffb31 (home merged in)",
     "foot": "banchi's 88 design checks are from the Oct 17 audit.",
     "metrics": [
       {
@@ -29,7 +29,7 @@
     ]
   },
   "later": {
-    "asOf": "Measured Nov 9 at claude-settings 81a720c",
+    "asOf": "Measured Nov 10 at claude-settings 6e8d6cc",
     "foot": "Later steps start once the core is steady.",
     "metrics": [
       {
@@ -55,7 +55,7 @@
     ]
   },
   "organize": {
-    "asOf": "Measured Nov 9: claude-settings 81a720c, banchi 78398f4, q_max 32d4373, home-app 60a5b74 (home merged in)",
+    "asOf": "Measured Nov 10: claude-settings 6e8d6cc, banchi 78398f4, q_max 32d4373, home-app daffb31 (home merged in)",
     "foot": "All four repos measured (home merged into home-app).",
     "metrics": [
       {
@@ -91,9 +91,10 @@
           281,
           456,
           1360,
-          2017
+          2017,
+          2267
         ],
-        "value": 2017
+        "value": 2267
       },
       {
         "label": "Repos with a living roadmap page",
@@ -104,7 +105,7 @@
     ]
   },
   "rollout": {
-    "asOf": "Measured Nov 9: q_max 32d4373, home-app 60a5b74",
+    "asOf": "Measured Nov 10: q_max 32d4373, home-app daffb31",
     "foot": "Counting method is in each tile, so later counts compare like with like.",
     "metrics": [
       {
@@ -123,7 +124,7 @@
         "label": "home-app padding or spacing literals",
         "rule": "Views.swift (2,701 lines, Oct 25, 65315da): .padding(...) or spacing: calls with a number, counted per match. The Oct 17 audit counted about 95 another way (r3)",
         "target": "0",
-        "value": 194
+        "value": 199
       },
       {
         "label": "home-app web border radii",
