@@ -1,0 +1,12 @@
+{
+  "title": "The guard applies a role's file scope to Bash writes too (cp, mv, tee, redirect)",
+  "phase": "now",
+  "status": "queued",
+  "order": 1017,
+  "owner": "triage",
+  "why": "On #2015's mixed merge a test-author wrote 5 product files with cp, so the guard's file-edit refusal for that role never fired.",
+  "note": "Coordinator 14:07 CST Nov 10. Home: the role file-scope guard (decision builders-cannot-edit-tests). Red cases first: a test-author's cp, mv, tee and > redirect onto a product file are refused; the same onto a test file is allowed; a builder's Bash write onto a test file is refused.",
+  "updatedAt": "2026-11-10T14:09:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
