@@ -178,6 +178,7 @@ REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
 STEP_HOME = re.compile(r"step:([A-Za-z0-9_-]+)")
 STEP_PATH = override.STEP_DIR + "%s.json"  # where a `step:<slug>` home resolves, as a blob on some ref
 NOT_A_GRANT = "not-a-grant"  # the home of a [note] that says its grant word is no grant
+NOT_PAGE_FORM = "not-page-form"  # the home of a [note] that says its waiting-page comment is not page form (rule page-form-to-template)
 # A chat answer to waiting-page item n: `<n> <letter>` (a to h), an optional parenthetical, one per
 # comma or line. Letters outside a to h are no answer, so "1 y, 2 n" passes.
 _ONE_ANSWER = r"\d+[ \t]*:?[ \t]*[a-hA-H]\.?(?:[ \t]*\([^)\n]*\))?"
@@ -215,6 +216,7 @@ FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
 FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
 FAIL_OPEN_FILING = "Feedback guard: page filing not checked (%s)."
+FAIL_OPEN_FORM = "Feedback guard: page form not checked (%s)."
 FAIL_OPEN_EXPORT = "Feedback guard: waiting copy export not checked (%s)."
 EXPORT_SCRIPT = "export_page.py"
 EXPORT_SAME = "same"  # the verdict export_page.py prints when nothing differs
@@ -393,6 +395,7 @@ class Homes:
 
     def __init__(self, cwd, worked_in=None):
         self.cwd, self.skip, self.skip_closed, self.skip_filing = cwd, None, None, None
+        self.skip_form = None  # why the page-form rule stood down, for the systemMessage line
         self.worked_in = worked_in  # the folder the inbox's sidecar binds: where the session worked
         self._tops = None  # the repo tops of worked_in and cwd, read once per Stop
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
@@ -499,10 +502,10 @@ class Homes:
         return None
 
     def closed_problem(self, item_id, rest):
-        """None when a closed note's home is a page, a not-a-grant verdict, a `step:<slug>` whose step file
+        """None when a closed note's home is a page, a not-a-grant or not-page-form verdict, a `step:<slug>` whose step file
         some branch holds, or a file git tracks; else the reason text. None too when the check stood down."""
         word = home_word(rest)
-        if PAGE_HOME.fullmatch(word) or word == NOT_A_GRANT:
+        if PAGE_HOME.fullmatch(word) or word in (NOT_A_GRANT, NOT_PAGE_FORM):
             return None
         if ruling_home._unwrap(word) == ruling_home.PROCESS_ONLY:  # value_resolves accepts it; a close needs a file
             return self._closed_reason(item_id)
@@ -520,15 +523,20 @@ class Homes:
     @staticmethod
     def _closed_reason(item_id):
         return ("%s [note] is closed with no home: a closed note needs a tracked file, `step:<slug>` naming a"
-                " step file that some branch holds, `page:<n>` or `not-a-grant`" % item_id)
+                " step file that some branch holds, `page:<n>`, `not-a-grant` or `not-page-form`" % item_id)
 
     def step_names_template(self, root, branch, slug):
-        """True when the step file `slug` at origin/<branch> holds TEMPLATE_DIR. False when it holds none, or
-        no such file is on that ref. One cat-file per step, asked once."""
+        """True when the step file `slug` at origin/<branch> holds TEMPLATE_DIR, False when it holds none. None when
+        the read fails (the ref does not resolve, or the cat-file fails): the rule stands down and `skip_form` says
+        so, as filed_numbers does. One cat-file per step, asked once."""
         key = (branch, slug)
         if key not in self._templated:
             run = ruling_home._run_git(root, ["cat-file", "-p", "refs/remotes/origin/%s:%s" % (branch, STEP_PATH % slug)])
-            self._templated[key] = run.returncode == 0 and TEMPLATE_DIR in run.stdout
+            if run.returncode != 0:
+                self.skip_form = "no step file %s at origin/%s" % (STEP_PATH % slug, branch)
+                self._templated[key] = None
+            else:
+                self._templated[key] = TEMPLATE_DIR in run.stdout
         return self._templated[key]
 
     def page_form_scope(self, url):
@@ -916,7 +924,6 @@ def grant_problem(b, text, items):
 PAGE_BANNER = re.compile(r"\[Artifact comment sent to Claude\]\s*\nArtifact:[ \t]*(\S+)")  # a block's start, and its page
 PAGE_QUOTE = re.compile(r"^=== BEGIN ARTIFACT COMMENT (\S+) ===\n(.*?)\n=== END ARTIFACT COMMENT \1 ===", re.M | re.S)
 SAVED_WAKE = "Saved on the waiting page"
-NOT_PAGE_FORM = "not-page-form"  # the home of a [note] that says its comment is not page form
 
 
 def page_form_problem(text, items, homes, pages, session):
@@ -940,8 +947,10 @@ def page_form_problem(text, items, homes, pages, session):
             if it[1].startswith("[note]") and home_word(it[1]) == NOT_PAGE_FORM:
                 return None
             step = step_home(it[1]) if it[1].startswith("[task]") else None
-            if step and homes.step_names_template(scope[0], scope[1], step.group(1)):
-                return None
+            if step:
+                named = homes.step_names_template(scope[0], scope[1], step.group(1))
+                if named is None or named:  # None: the step read failed, so the rule stands down
+                    return None
     except ruling_home._GitFailure:
         return None
     return ("this is a waiting-page comment, and a page comment is never answered with a thread reply (ruling c164):"
@@ -1436,6 +1445,8 @@ def inbox_stop(hook):
                 notes.append(FAIL_OPEN_CLOSED % homes.skip_closed)
             if homes.skip_filing:
                 notes.append(FAIL_OPEN_FILING % homes.skip_filing)
+            if homes.skip_form:
+                notes.append(FAIL_OPEN_FORM % homes.skip_form)
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
