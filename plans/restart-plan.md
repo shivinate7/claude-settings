@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 16:29 CST.
+the history. Last rewrite: 2026-11-10 16:37 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -129,6 +129,16 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
   `Drops-lines:`), so every PR has one shape and no session reports "no PR template". Other repos get it
   through skill project-ops. Unmeasured: how many PRs are refused today for a missing line. Step
   pr-template-merge-lines. Home: decision debt-close-runs-retire.
+- **R17. A repo with no CI gets a starter CI, not an exemption.** Owner 16:25 CST Nov 10: "repos that
+  have no CI need to get an easy exemption so that they can still call claude-settings but basically
+  things that need CI don't pertain to them -- how can that become a thing?"; 16:36 CST: "this is
+  approved and sounds better than allowing no ci". Keeps decision same-check-kinds (owner item 87,
+  2026-10-30: every repo runs the same kinds of checks, as many as its size needs). Skill project-ops
+  writes a starter CI to any repo without one: quick checks on what the repo holds (links resolve,
+  scripts parse, JSON parses) inside the shared all-jobs-passed rollup. When the merge tool or lane lint
+  refuses for no CI, the refusal names that one step as the fix. Folds in roadmap step c33 (repo home,
+  the one repo with no CI on Oct 22). Cost: one workflow file per such repo and a short CI run per PR.
+  Home: decision same-check-kinds; skill project-ops.
 
 ### 3.2 Time limits end hangs only
 
