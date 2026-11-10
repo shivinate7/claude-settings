@@ -498,6 +498,8 @@ SPAN_RUN_VERB = re.compile(_RUN_VERB + r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S
 # command_in_item_hit), and a fence is never quoted.
 SPAN_EDIT_VERB = re.compile(r"\b(?:find|locate|replace|swap|search\s+for|look\s+for|edit|delete|remove)\b"
                             r"(?:(?![.;!?](?:\s|$)).)*$", re.I | re.S)
+# A run verb in the step text after a span, up to the next sentence break: "Find `x --y` and run it" runs it.
+SPAN_RUN_AFTER = re.compile(r"(?:(?![.;!?](?:\s|$)).)*?" + _RUN_VERB, re.I | re.S)
 EFFECT_TEXT = re.compile(r"\b(?:Gain|Lose):.*?(?=\b(?:Gain|Lose):|$)", re.I | re.S)
 CHAT_URL = re.compile(r"https://[^\s)>\]\"']+", re.I)
 
@@ -775,7 +777,10 @@ def command_in_item_hit(data) -> str:
     for text in texts:
         for start, body, fenced in _code_spans(text):
             run = fenced or bool(SPAN_RUN_VERB.search(text[:start]))
-            hit = _shell_line(body, run, quoted=not run and bool(SPAN_EDIT_VERB.search(text[:start])))
+            after = text[text.index(body, start) + len(body):]
+            quoted = (not run and bool(SPAN_EDIT_VERB.search(text[:start]))
+                      and not SPAN_RUN_AFTER.match(after))
+            hit = _shell_line(body, run, quoted=quoted)
             if hit:
                 return hit
     return ""
