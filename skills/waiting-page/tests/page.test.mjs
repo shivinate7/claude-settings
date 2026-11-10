@@ -46,7 +46,7 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // failSetText: a write to asks whose text holds it is refused with code denied, so one ask of a batch fails and the rest save.
 // hold: { set: n } or { delete: n }. An asks write or delete after the first n waits at the hold until window.__release() runs; window.__held counts the calls waiting.
 // A case disarms it with window.__hold = null, since the init script arms it again on every load (a reload).
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failUpdate = false, comments, meta, groups, receipts, holdReceipts, dbExtra = {}, noStore = false, hold = {} }) {
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failUpdate = false, comments, meta, groups, receipts, holdReceipts, holdAsks = false, dbExtra = {}, noStore = false, hold = {} }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
@@ -71,7 +71,8 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
   window.__putDoc = (name, id, body) => { (data[name] = data[name] || {})[id] = body; fire(name, id); };
   window.__putItem = (it) => window.__putDoc("items", it.id, it);
   // holdReceipts: the receipts' first snapshot waits for window.__releaseReceipts(), so a case can act before receipts arrive.
-  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); if (holdReceipts && name === "receipts") window.__releaseReceipts = () => cb(snap(name)); else setTimeout(() => cb(snap(name)), 0); return () => {}; };
+  // holdAsks: the asks' first snapshot waits for window.__releaseAsks(), so a case can act while the answers list reads Loading.
+  const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); if (holdReceipts && name === "receipts") window.__releaseReceipts = () => cb(snap(name)); else if (holdAsks && name === "asks") window.__releaseAsks = () => cb(snap(name)); else setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
     doc: (path) => db.collection(path.split("/")[0]).doc(path.split("/")[1]),
     collection: (name) => ({
@@ -120,7 +121,7 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -135,7 +136,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore, hold });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, holdAsks, dbExtra, noStore, hold });
   await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
@@ -3007,6 +3008,197 @@ test("the Ask seen stamp moves when the tab hides with the answers list on scree
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the answers list on screen did not stamp the asks as seen");
 });
 
+// A tab hides with the answers list on screen, then the page is restored from the back-forward cache and is visible again. The restore
+// sends visibilitychange only when visibilityEvent is true. The browser's own event order on a restore is unmeasured: this models both paths.
+const TAB_LATER = "2026-10-31T07:00:00Z", TAB_LATER_STAMP = "2026-10-31T07:00:00.000Z";
+// The shared start of the restore cases: the tab hides with the answers list on screen, and the page goes into the back-forward cache.
+async function hiddenAndCached(t) {
+  const page = await tabOpen(t); if (!page) return null;
+  await page.locator("#asks").scrollIntoViewIfNeeded();
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen at the first hide, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "the first hide with the answers list on screen did not stamp, so this case cannot show the later switch");
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+  return page;
+}
+async function hideThenRestore(t, visibilityEvent) {
+  const page = await hiddenAndCached(t); if (!page) return null;
+  await page.evaluate((sendEvent) => {
+    Object.defineProperty(document, "hidden", { value: false, configurable: true });
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    if (sendEvent) document.dispatchEvent(new Event("visibilitychange"));
+  }, visibilityEvent);
+  assert.equal(await page.evaluate(() => document.hidden), false, "the restored page reads as hidden, so this case cannot show a later switch");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen after the restore, so this case cannot show a later switch");
+  await page.clock.setFixedTime(new Date(TAB_LATER));
+  return page;
+}
+test("the Ask seen stamp moves on the tab switch after a bfcache restore, with no visibilitychange on the restore", async (t) => {
+  const page = await hideThenRestore(t, false); if (!page) return;
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_LATER_STAMP, "the tab switch after a bfcache restore did not stamp the asks as seen");
+});
+test("the Ask seen stamp moves on the tab switch after a bfcache restore that sends visibilitychange: control", async (t) => {
+  const page = await hideThenRestore(t, true); if (!page) return;
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_LATER_STAMP, "the tab switch after a bfcache restore with visibilitychange did not stamp the asks as seen");
+});
+
+// The answers list shows a placeholder while the store has not answered, or cannot be read. The placeholder is inside #askList, so the
+// stamp must not count it as the asks the owner has seen.
+test("the Ask seen stamp does not move when the tab hides while the asks load: the Loading placeholder", async (t) => {
+  const page = await open(t, { dbExtra: { asks: TAB_ASKS() }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT, holdAsks: true }); if (!page) return;
+  await page.locator("#asks").scrollIntoViewIfNeeded();
+  assert.match(await page.textContent("#askList"), /Loading your asks/, "the answers list does not read Loading, so this case cannot show a hide while the asks load");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_SEED, "hiding the tab while the asks load moved the Ask seen stamp: no answer was listed, and the stamp counts it as seen");
+});
+test("the Ask seen stamp does not move when the tab hides while the asks cannot be read: the placeholder", async (t) => {
+  const page = await open(t, { noStore: true, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  await page.locator("#asks").scrollIntoViewIfNeeded();
+  assert.match(await page.textContent("#askList"), /cannot be read/, "the answers list does not read cannot-be-read, so this case cannot show a hide with no asks to read");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_SEED, "hiding the tab while the asks cannot be read moved the Ask seen stamp: no answer was listed, and the stamp counts it as seen");
+});
+test("the Ask seen stamp moves when the tab hides with rows shown after the asks load: control", async (t) => {
+  const page = await open(t, { dbExtra: { asks: TAB_ASKS() }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT, holdAsks: true }); if (!page) return;
+  await page.evaluate(() => window.__releaseAsks());
+  await shownBox(page, "Seen answer 1");
+  await page.locator("#asks").scrollIntoViewIfNeeded();
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with rows shown did not stamp the asks as seen");
+});
+
+// A fresh answer on an older thread sorts below the newer threads, so it can sit under the fold while the list still overlaps the viewport.
+const FRESH_OLD = { id: "ask-fresh-old", text: "Old ask, answered after the seen mark", at: "2026-10-01T09:00:00Z", owner: "triage", answered: "2026-10-31T04:00:00Z", reply: "The answer that came after the seen mark, on an older thread." };
+const rowOnScreen = (page, id) => page.evaluate((k) => { const r = document.getElementById("row-" + k).getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; }, id);
+test("a fresh answer below the fold keeps its New answer mark when the answers list only overlaps the fold", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [FRESH_OLD.id]: FRESH_OLD } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  await scrollTopTo(page, "#askList", TAB_SHORT.height - 40);
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show an overlap with the fold");
+  assert.equal(await page.locator(`#row-${FRESH_OLD.id}`).count(), 1, "the fresh answer is not listed, so this case cannot show it below the fold");
+  assert.equal(await rowOnScreen(page, FRESH_OLD.id), false, "the fresh answer is in view, so this case cannot show an answer below the fold");
+  await hideTab(page);
+  await page.clock.setFixedTime(new Date(TAB_CLOSE));
+  await page.reload();
+  await shownBox(page, "Seen answer 1");
+  assert.equal(await page.locator(`#row-${FRESH_OLD.id} .newmark`).count(), 1, "the fresh answer below the fold lost its New answer mark: the hide stamped it as seen");
+});
+test("the Ask seen stamp moves when the tab hides with a fresh answer in view: control", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [FRESH_OLD.id]: FRESH_OLD } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  await page.locator(`#row-${FRESH_OLD.id}`).scrollIntoViewIfNeeded();
+  assert.equal(await rowOnScreen(page, FRESH_OLD.id), true, "the fresh answer is not in view, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with a fresh answer in view did not stamp the asks as seen");
+});
+
+// A newer answer to a row the owner has already seen. Its data-new key is new, so it is unseen: the row's earlier key does not carry over.
+// The answers list still overlaps the fold, with the row below it, so the hide must not stamp past the newer answer.
+test("a newer answer to a row already seen, listed below the fold, does not move the Ask seen stamp when the tab hides", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [FRESH_OLD.id]: FRESH_OLD } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  await page.locator(`#row-${FRESH_OLD.id}`).scrollIntoViewIfNeeded();
+  assert.equal(await rowOnScreen(page, FRESH_OLD.id), true, "the row is not in view, so the owner has not seen it");
+  await page.waitForFunction((k) => [...askSeenNew].some((s) => s.startsWith(k)), FRESH_OLD.id);
+  await scrollTopTo(page, "#askList", TAB_SHORT.height - 40);
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  assert.equal(await rowOnScreen(page, FRESH_OLD.id), false, "the row is in view, so this case cannot show a newer answer below the fold");
+  // A newer answer to the same row lands while the tab is still visible. Its time is before the hide.
+  const NEWER = { ...FRESH_OLD, reply: "Answer 2 on the same older thread.", answered: "2026-10-31T05:00:00Z" };
+  await page.evaluate((a) => window.__putDoc("asks", a.id, a), NEWER);
+  await page.waitForFunction((k) => /Answer 2 on the same older thread/.test(document.getElementById("row-" + k).textContent), FRESH_OLD.id);
+  assert.equal(await listOnScreen(page), true, "the newer answer moved the answers list off screen, so this case cannot show a hide that stamps");
+  assert.equal(await rowOnScreen(page, FRESH_OLD.id), false, "the newer answer brought the row into view, so this case cannot show an answer below the fold");
+  assert.equal(await page.locator(`#row-${FRESH_OLD.id} .newmark`).count(), 1, "the newer answer has no New answer mark, so it is not a new answer");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_SEED, "hiding the tab with a newer answer below the fold moved the Ask seen stamp past it");
+  await page.evaluate((asks) => localStorage.setItem("__stub.asks", JSON.stringify(asks)), { ...TAB_ASKS(), [FRESH_OLD.id]: NEWER });
+  await page.clock.setFixedTime(new Date(TAB_CLOSE));
+  await page.reload();
+  await shownBox(page, "Seen answer 1");
+  assert.equal(await page.locator(`#row-${FRESH_OLD.id} .newmark`).count(), 1, "the newer answer lost its New answer mark at the next load: the hide stamped it as seen");
+});
+
+// A New answer row the owner saw, then scrolled above the fold while the answers list stays on screen. The row was read, so the hide stamps.
+// NARROW is a 300 px wide screen.
+const SEEN_ROW = { id: "ask-seen-row", text: "New row the owner scrolls past", at: "2026-10-30T12:00:00Z", owner: "triage", answered: "2026-10-31T03:00:00Z", reply: "The reply the owner reads." };
+const NARROW = { width: 300, height: 400 };
+const seenRowOpen = (t) => open(t, { dbExtra: { asks: { ...TAB_ASKS(), [SEEN_ROW.id]: SEEN_ROW } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: NARROW });
+test("a New answer row the owner saw, then scrolled above the fold, still stamps the asks as seen on the hide", async (t) => {
+  const page = await seenRowOpen(t); if (!page) return;
+  await page.locator("#asks").scrollIntoViewIfNeeded();
+  await page.locator("#row-" + SEEN_ROW.id).scrollIntoViewIfNeeded();
+  assert.equal(await page.locator(`#row-${SEEN_ROW.id} .newmark`).count(), 1, "the row has no New answer mark, so this case cannot show a New row scrolled away");
+  assert.equal(await rowOnScreen(page, SEEN_ROW.id), true, "the New row is not in view before the owner scrolls past it, so this case cannot show a row seen and then scrolled away");
+  await page.evaluate((k) => window.scrollBy(0, document.getElementById("row-" + k).getBoundingClientRect().bottom + 30), SEEN_ROW.id);
+  assert.equal(await rowOnScreen(page, SEEN_ROW.id), false, "the New row is still in view after the scroll, so this case cannot show a row above the fold");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen after the scroll, so this case cannot show a hide with the list on screen");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "the owner saw the New answer row and scrolled past it, and the hide did not stamp the asks as seen");
+});
+test("the Ask seen stamp moves when the tab hides with the New answer row in view, 300 px wide: control", async (t) => {
+  const page = await seenRowOpen(t); if (!page) return;
+  await page.locator("#row-" + SEEN_ROW.id).scrollIntoViewIfNeeded();
+  assert.equal(await rowOnScreen(page, SEEN_ROW.id), true, "the New row is not in view, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the New answer row in view did not stamp the asks as seen");
+});
+
+// A reply in a folded thread is answered after the seen mark. Its answer shows as a folded reply row (.fwait), which carries no New answer
+// mark, so the stamp check does not see it. Below the fold it has not been read, so the hide must not stamp past it.
+const FOLD_ROOT = { id: "ask-fold-root", text: "Folded thread root", at: "2026-09-20T09:00:00Z", owner: "triage", answered: "2026-10-02T08:00:00Z", reply: "Folded root reply." };
+const FOLD_REPLY = { id: "ask-fold-reply", text: "Follow-up in the folded thread", at: "2026-10-20T09:00:00Z", re: FOLD_ROOT.id };
+const FOLD_REPLY_ANSWERED = { ...FOLD_REPLY, reply: "Follow-up answer.", answered: "2026-10-31T05:00:00Z" };
+const foldNoticeOnScreen = (page, k) => page.evaluate((id) => { const r = document.querySelector("#row-" + id + " .fwait").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; }, k);
+test("a folded thread's fresh reply answer below the fold does not move the Ask seen stamp, and its notice shows at the next load", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [FOLD_ROOT.id]: FOLD_ROOT, [FOLD_REPLY.id]: FOLD_REPLY } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  assert.equal(await page.locator(`#row-${FOLD_ROOT.id}.folded`).count(), 1, "the thread is not folded at load, so this case cannot show a folded reply's answer");
+  await page.evaluate((a) => window.__putDoc("asks", a.id, a), FOLD_REPLY_ANSWERED);
+  await page.waitForFunction((s) => /Answer from/.test(document.querySelector(s) ? document.querySelector(s).textContent : ""), `#row-${FOLD_ROOT.id} .fwait`);
+  await page.evaluate((k) => window.scrollBy(0, document.querySelector("#row-" + k + " .fwait").getBoundingClientRect().top - innerHeight - 10), FOLD_ROOT.id);
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  assert.equal(await foldNoticeOnScreen(page, FOLD_ROOT.id), false, "the folded reply's answer is in view, so this case cannot show an answer below the fold");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_SEED, "hiding the tab with a folded reply's answer below the fold moved the Ask seen stamp past it");
+  await page.evaluate((asks) => localStorage.setItem("__stub.asks", JSON.stringify(asks)), { ...TAB_ASKS(), [FOLD_ROOT.id]: FOLD_ROOT, [FOLD_REPLY.id]: FOLD_REPLY_ANSWERED });
+  await page.clock.setFixedTime(new Date(TAB_CLOSE));
+  await page.reload();
+  await shownBox(page, "Seen answer 1");
+  assert.equal(await page.locator(`#row-${FOLD_ROOT.id} .newmark`).count(), 1, "the folded reply's answer has no New answer mark at the next load: the hide stamped it as seen");
+});
+
+// The control for the refusal above: a folded reply's fresh answer in view at the hide does move the stamp, so the refusal is not a stamp that never moves.
+test("the Ask seen stamp moves when the tab hides with a folded thread's fresh reply answer in view: control", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [FOLD_ROOT.id]: FOLD_ROOT, [FOLD_REPLY.id]: FOLD_REPLY } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: TAB_SHORT }); if (!page) return;
+  assert.equal(await page.locator(`#row-${FOLD_ROOT.id}.folded`).count(), 1, "the thread is not folded at load, so this case cannot show a folded reply's answer");
+  await page.evaluate((a) => window.__putDoc("asks", a.id, a), FOLD_REPLY_ANSWERED);
+  await page.waitForFunction((s) => /Answer from/.test(document.querySelector(s) ? document.querySelector(s).textContent : ""), `#row-${FOLD_ROOT.id} .fwait`);
+  await page.locator(`#row-${FOLD_ROOT.id} .fwait`).scrollIntoViewIfNeeded();
+  assert.equal(await foldNoticeOnScreen(page, FOLD_ROOT.id), true, "the folded reply's answer is not in view, so this case cannot show a hide that stamps");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hide that stamps");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with a folded reply's answer in view did not stamp the asks as seen");
+});
+
+// The restore's pageshow is still queued when the tab hides. The page's record of visibility is the one from before the restore, so the
+// hide must still stamp.
+test("the Ask seen stamp moves on a tab hide that runs before the queued pageshow after a bfcache restore", async (t) => {
+  const page = await hiddenAndCached(t); if (!page) return;
+  await page.clock.setFixedTime(new Date(TAB_LATER));
+  await page.evaluate(() => Object.defineProperty(document, "hidden", { value: false, configurable: true }));
+  assert.equal(await page.evaluate(() => document.hidden), false, "the restored page reads as hidden, so this case cannot show a hide after a restore");
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen after the restore, so this case cannot show a hide that stamps");
+  // The hide runs, then the queued pageshow is delivered.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  assert.equal(await seenStamp(page), TAB_LATER_STAMP, "the hide that ran before the queued pageshow did not stamp the asks as seen");
+});
+
 test("Send ask never cuts a text over 4000 characters: it stores the full text, or writes nothing and shows a notice", async (t) => {
   const page = await open(t); if (!page) return;
   await mustHave(page, "#askText", "Ask box");
@@ -4674,13 +4866,14 @@ test("two designs of one slug with different focus keep their own size, and the 
 // ---------------------------------------------------------------- the mockup draw width has one home
 // FIT_W is the width a mockup is laid out at. A CSS rule or a comment that repeats the number goes stale when FIT_W moves.
 const FIT_W_DECL = /const FIT_W = (\d+)/;
-// A restatement is FIT_W's number as a width value: after width, max-width or min-width and a colon or equals sign, or
-// followed by the word wide. The width may be an attribute (width="390"), a dotted style property (el.style.width = "390px"),
-// the second argument of setAttribute("width", 390), or the argument of calc(, min(, max( or clamp(. Strings, comments and
-// templates are read as plain text, so a restatement counts wherever it stands. A count, a font weight, a height or a sibling
-// number is not one: 3900, 1390, 0.390, a390, #390 (a hex colour) and "390 units".
+// A restatement is FIT_W's number as a width value: after width, min-width, max-width, minWidth or maxWidth and a colon or
+// equals sign, or followed by the word wide. The width may be an attribute (width="390"), a dotted style property
+// (el.style.width = "390px", el.style.maxWidth = "390px"), the second argument of setAttribute("width", 390), or any argument
+// of calc(, min(, max( or clamp(, quoted or not, with one level of brackets inside it: min(calc(100% - 20px), 390px) counts. Strings, comments
+// and templates are read as plain text, so a restatement counts wherever it stands. A count, a font weight, a height, a gap or
+// a sibling number is not one: 3900, 1390, 0.390, a390, #390 (a hex colour), "390 units", gap: min(100%, 390px).
 // A media or container condition is a breakpoint that CSS cannot read FIT_W in, so it is skipped.
-const WIDTH_BEFORE = /(?:^|[\s;{(,"'.])(?:min-|max-)?width(?:["']?\s*[:=]\s*|["']\s*,\s*)(?:(?:calc|min|max|clamp)\(\s*)?["']?$/i, WIDE_AFTER = /^(?:px)?\s+wide\b/i, AT_RULE = /^\s*@(?:container|media)\b/;
+const WIDTH_BEFORE = /(?:^|[\s;{(,"'.])(?:(?:min|max)-?)?width(?:["']?\s*[:=]\s*|["']\s*,\s*)(?:["']?(?:calc|min|max|clamp)\((?:[^();{}]|\([^();{}]*\))*)?["']?$/i, WIDE_AFTER = /^(?:px)?\s+wide\b/i, AT_RULE = /^\s*@(?:container|media)\b/;
 function restatements(src, num) {
   const decl = FIT_W_DECL.exec(src), own = decl ? decl.index + decl[0].length - decl[1].length : -1;
   const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g"), found = new Set();
@@ -4736,7 +4929,31 @@ test("the restatement scan finds a width written as an attribute, a style assign
   ]);
 });
 
-test("the restatement scan skips a number equal to FIT_W that is not a width value: a count, a font weight, a breakpoint, a height", () => {
+test("the restatement scan finds a width inside min(), max() or clamp(), quoted or not, and a camelCase maxWidth or minWidth", () => {
+  const src = [
+    "const FIT_W = 390;",
+    "div { width: min(100%, 390px); }",
+    "div { width: clamp(300px, 100%, 390px); }",
+    "div { width: min(calc(100% - 20px), 390px); }",
+    "div { min-width: max(390px, 50%); }",
+    'el.style.maxWidth = "390px";',
+    'el.style.minWidth = "390px";',
+    "const s = { maxWidth: 390 };",
+    'el.style.width = "min(100%, 390px)";',
+  ].join("\n");
+  assert.deepEqual(restatements(src, "390"), [
+    "line 2: div { width: min(100%, 390px); }",
+    "line 3: div { width: clamp(300px, 100%, 390px); }",
+    "line 4: div { width: min(calc(100% - 20px), 390px); }",
+    "line 5: div { min-width: max(390px, 50%); }",
+    'line 6: el.style.maxWidth = "390px";',
+    'line 7: el.style.minWidth = "390px";',
+    "line 8: const s = { maxWidth: 390 };",
+    'line 9: el.style.width = "min(100%, 390px)";',
+  ], "the scan misses a width inside min(), max(), clamp(), or a camelCase maxWidth or minWidth, or one whose function value is quoted");
+});
+
+test("the restatement scan skips a number equal to FIT_W that is not a width value: a count, a font weight, a breakpoint, a height, a gap, a max-height", () => {
   const src = [
     "const FIT_W = 390;",
     "const rows = 390; // the count of rows",
@@ -4744,6 +4961,10 @@ test("the restatement scan skips a number equal to FIT_W that is not a width val
     "@container (min-width: 390px) { .pk { gap: 16px } }",
     'el.style.height = "390px";',
     'el.setAttribute("height", 390);',
+    "div { gap: min(100%, 390px); padding: clamp(8px, 2vw, 390px); }",
+    "div { width: min(100%, 300px); padding: 390px; }",
+    'el.style.maxHeight = "390px";',
+    "const widthRatio = 390; const s = { maxHeight: 390 };",
   ].join("\n");
   assert.deepEqual(restatements(src, "390"), []);
 });
