@@ -1516,6 +1516,14 @@ def case_step_edit_verb_quotes_span_flag_clause():
          entry_of(task_item(["Run the check, then find `scripts/x.py --y` in the hook."])), refused)
 
 
+def case_step_edit_span_then_run_after_is_refused():
+    # A run verb after the span is in the same sentence as the edit verb before it, so the span is a command and refuses,
+    # as main refuses it. Only the text before the span is read for a run verb (SPAN_RUN_VERB), so the span is quoted
+    # unless that reading covers the whole sentence.
+    page("a step that finds `scripts/x.py --y` and runs it after the span is refused", "set",
+         entry_of(task_item(["Find `scripts/x.py --y` and run it."])), ("command-in-item", "shell line"))
+
+
 def case_step_folder_with_title_hyphen_is_text():
     # A folder whose last segment is Title-Hyphen (`Claude-Settings`) names a path, not a cmdlet: the word before the hyphen
     # is no approved PowerShell verb, so each passes. Main passes all four; head refuses them as a shell line.
@@ -2834,7 +2842,7 @@ def main():
                  case_powershell_bash_prefix_command_substitution,
                  case_powershell_two_deep_expansion,
                  case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_after_a_determiner_is_text,
-                 case_step_edit_verb_quotes_span_flag_clause,
+                 case_step_edit_verb_quotes_span_flag_clause, case_step_edit_span_then_run_after_is_refused,
                  case_step_folder_with_title_hyphen_is_text, case_step_absolute_path_cmdlet_is_refused_in_every_form,
                  case_step_verb_noun_folder_with_slash_is_text, case_step_folder_without_slash_names_the_slash_remedy,
                  case_printed_reason_names_each_fix,
