@@ -437,3 +437,12 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - ilaam-cite-audit-concat (#2225): hold_reason returns `"" + runner` so the rule audit resolves it, which drops the runner branch from the cite audit. Honest fix: exempt that branch by name, or teach _Reasons.alts that `"" + x` reads as x.
 - (debt) batch-drop-relint-docs-wrong (#2382 lane-lint-runs-comment-check, coordinator 02:16 CST Nov 10): skills/ci-hygiene SKILL.md and decision batch-freeze-lane-set say a batch drop re-lints nothing; that is wrong.
 - (debt) lint-unknown-ok-no-comment (#2382): `merge --lint-unknown-ok` posts no PR comment.
+- llrcc-revert-claim-relint (#2382 lane-lint-runs-comment-check, lane 02:17 CST Nov 10; decision lanes-run-no-full-ci-job; fails closed): merge/merge.py claim_only needs a Record-claim trailer, but relayed_head_holds accepts the tool's `Revert "Claim record numbers"`; after a failed claim and its revert, a rejoin reads `no lint` and needs one more `merge --lane-lint`. Cost only.
+- llrcc-claim-only-keyerror (#2382): claim_only reads `k["folder"]`, which raises KeyError for a heading-shape kind with `file` (actions/stamp/examples/heading.stamp.json:39); a traceback, not a Stop, on a resumed join only. Dead code here (.github/stamp.json kinds []). Also duplicate trailer ids.
+- llrcc-lint-check-hides-cause (#2382): lint_check reports `no lane-lint PASS names this head` when the branch fetch or the claim_only read failed; the cause is hidden.
+- llrcc-reviewed-usage-states (#2382; decision pr-review-record): the `--reviewed` usage text (merge.py:25) and merge/README (~line 146) omit the states `no lint`, `lint fail`, `lint unknown`.
+- llrcc-claim-only-rules-untested (#2382): merge/test_lane_lint.py does not test claim_only's single-parent rule, its direct-child-of-a-kind-folder rule, or the marker-is-first-line rule (merge.py:938); mutants survive. Low harm: needs a deliberate forge. No test of `--head` against a real Host; dead `GET user` shim route in merge/test_merge.py.
+- (debt) mutation-lane-lint-unknown-unliftable (#2443 mutate-harness-change-timed-run, coordinator 02:18 CST Nov 10): no case lifts an unknown lint with --lint-unknown-ok on a lane that touches a mutation test file.
+- mhct-env-filter-unpinned (#2443): the env filter on the mutation test run is unpinned.
+- mhct-docs-no-whole-ci (#2443): skills/ci-hygiene/SKILL.md and skills/project-ops/templates/brief.md still say lanes run no whole CI job.
+- mhct-summary-drops-skipped (#2443): the summary drops the tally's skipped count.
