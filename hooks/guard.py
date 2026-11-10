@@ -56,6 +56,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
+  pointer-edit         deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
+                       pointer checkout's own files. The pointer's `.git`, a linked worktree under
+                       `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
+                       missing pointer and the read tools pass. A shell write is not judged. The
+                       reason names the EnterWorktree tool. An override lifts a direct pointer path. A
+                       config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
+                       per target), so no override lifts it, as with frozen-path. It spawns no git.
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -77,7 +84,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   cite-by-id          deny. A commit message or PR body that cites a record by its path.
   lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
                        (lane-by-slug)
-  machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
+  scratchpad-commit-msg-owner  deny. A commit from an agent's call whose -F message file resolves
+                       into any session's scratchpad. `-F -`, `-m`, an orchestrator's call and a file
+                       elsewhere pass. (scratchpad-commit-msg-owner)
+  machine-wide-kill   deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
@@ -125,9 +135,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   lane-closes-after-records
                        deny. An archive_session of a lane (newest get_session record of the target, read from the
                        transcript, tagged cs-build:lane) while an open pull request of its cs-repo has a head ref
-                       equal to its cs-step slug. No record of the target, a lane with no cs-step or cs-repo tag,
-                       and a read of the open list that fails (gh missing too) are refusals. A target with no lane
-                       tag passes. An override lifts it.
+                       equal to its cs-step slug, or while a branch of the record (external_metadata.current_branches)
+                       is ahead of its repo's default branch and nothing covers it; the repos are the cs-repo tags,
+                       the record's github sources and the repo-named current_branches keys, and a 404 on a compare
+                       skips that branch in that repo. Slug-form branches (`<slug>`, `lane/<slug>` and their `-*`
+                       variants) are read too; archive/ branches are skipped. An open pull request covers. A merged
+                       one covers only when its head is the tip. A closed unmerged one covers only when the tip is in
+                       an open or merged pull request's head. An `archive/<branch>` copy holding the tip covers. No record of the target, a lane with no cs-step or cs-repo
+                       tag, and a read that fails (gh missing too) are refusals. A target with no lane tag passes.
+                       An override lifts it.
   lane-one-topic      deny. A send_message whose first non-blank line starts with the marker
                        `Lane brief: <step>. Topic: <topic>.` (guard_merge.LANE_BRIEF_MARKER), when the target's newest
                        record (get_session, or the create_session that made it, read from the transcript) is tagged
@@ -136,12 +152,22 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  agent-no-remote-tools
+                       deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
+                       tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
+                       scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
+                       An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
+                       ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
+                       or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
+                       explicit GET and the merge tool pass. A local session skips it. An override lifts it.
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
+                       A merge's own page at MERGE_HEAD, on the base's first-parent line, passes.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
                        line in one file's added lines, read with `git diff --check`: the index, or the working
@@ -189,8 +215,11 @@ Other tools, in `judge` order:
                        A write or `cd` into a separate clone of the same repo (same origin, read
                        from the config files) is refused too, as is a write from a cwd stranded
                        in one while `CLAUDE_PROJECT_DIR` names the home clone; a git verb that
-                       changes files (SESSION_HOME_GIT_VERBS) is refused from that stranded cwd
-                       and as `git -C <separate clone>`, while `git log` and `git show` pass; the
+                       changes files (OTHER_CHECKOUT_GIT_VERBS: SESSION_HOME_GIT_VERBS, `add`, `rm`, `mv`,
+                       `update-index`, `read-tree`, `checkout-index`)
+                       is refused from that stranded cwd and as `git -C <separate clone>`, and as
+                       `git -C <another checkout of this clone>` by the same exemptions as the
+                       `cd` form, while `git log`, `git show` and `git status` pass; the
                        temp folder, other repos, an unreadable origin and the home clone pass.
                        (an-agent-outside-its-home-tree-must-stop)
   session-home         deny. A session whose recorded worktree folder is gone, with its cwd in the primary
@@ -201,12 +230,22 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
+  scratchpad-owner     ask. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+                       writes over one, that another agent wrote. Each such write records its agent in a
+                       sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
+                       command word; a write is a Write-family target or a shell write target. A first
+                       write, the agent's own file, a file that no longer exists, a call with no `agent_id` (its
+                       write deletes the file's record) and a read pass. The record moves before an overwrite ask.
+                       The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
+                       (scratchpad-owner)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
                        carries the `Audit:` marker, a reviewer on a later-round brief, a reviewer
                        whose brief's first non-blank line starts with `Fix check` (up to Sonnet;
-                       owner item 444 a) and every Opus spawn pass it. An unread record
+                       owner item 444 a) and every Opus spawn pass it. A reviewer's refusal names
+                       the round forms, `Fix check`, `Round N of 3 (fix check)` and the role-model
+                       sentence. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan
@@ -347,6 +386,7 @@ import difflib
 import importlib
 import importlib.machinery
 import importlib.util
+import itertools
 import json
 import os
 import re
@@ -405,7 +445,7 @@ while True:
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
-            _segment_cd_target, _strip_heredoc_bodies_unconditionally,
+            _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
@@ -421,10 +461,11 @@ while True:
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            scratchpad_clear_writer, scratchpad_record_writer, scratchpad_writer_of,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_head_hit,
+            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -435,8 +476,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -467,7 +508,7 @@ while True:
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
-            rm_after_cd_hits, rm_after_cd_reason, rm_var_hits, rm_var_reason,
+            _rm_values, rm_after_cd_hits, rm_after_cd_reason, rm_var_hits, rm_var_reason,
         )
         _loading = "guard_mask_script"
         from guard_mask_script import (
@@ -1154,6 +1195,7 @@ OTHER_CHECKOUT_CD_REASON = (
 OTHER_CLONE_DETAIL = "write into another clone: "
 OTHER_CLONE_CD_DETAIL = "cd into another clone: "
 OTHER_CLONE_GIT_DETAIL = "git write into another clone: "
+OTHER_CHECKOUT_GIT_DETAIL = "git write into another checkout: "
 OTHER_CLONE_REMEDY = (
     "Remedy: change files only in your home checkout. To read another clone, use "
     "`git -C <dir> log` or `git -C <dir> show`, or a path."
@@ -1531,6 +1573,46 @@ UNREAD_REASON = (
 )
 
 
+SCRATCH_MSG_REASON = (
+    "Rule (Git): this commit takes its message from a file in a folder that every agent of the session "
+    "shares, so the file may hold another agent's message and the commit would carry it. "
+    "Remedy: pass your own message with `-F -` and a heredoc, or with `-m`. "
+    "(decision scratchpad-commit-msg-owner, an agent commits the message it wrote itself)"
+)
+
+
+_SCRATCH_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+
+
+def scratchpad_commit_file(segments, number: int, cwd: str, ends, scope: str) -> str:
+    """Return the first message file of this commit segment that resolves into any session's
+    scratchpad, else ''. The path alone decides, never the file's text, and a link is judged by the
+    file it resolves to. A relative path is read from the directory the shell is in when the segment
+    runs (`dir_before_segment`, then the call's own `-C`); a name `scope` binds to literals is
+    expanded (`_rm_values`), and any other variable stays as the environment gives it. When that
+    directory cannot be told, only an absolute path is judged."""
+    segment = segments[number]
+    call = git_call_of(segment)
+    if call is None or call[0] != "commit":
+        return ""
+    where = dir_before_segment(segments, number, cwd, ends)
+    tokens = segment_tokens(segment)
+    named = _segment_git_c_target(tokens) if tokens else None
+    if named is not None:
+        where = None if _unexpanded(named) else shell_abs(named, where)
+    values = _rm_values(scope)
+    for name in message_sources(call[1], "commit")[1]:
+        names = sorted({a or b for a, b in _SCRATCH_EXPANSION.findall(name) if values.get(a or b)})
+        picks = list(itertools.product(*(values[n] for n in names)))[:64]
+        for pick in picks or [()]:
+            mapping = dict(zip(names, pick))
+            path = _SCRATCH_EXPANSION.sub(lambda m: mapping.get(m.group(1) or m.group(2), m.group(0)), name)
+            absolute = _absolute(path, where)
+            if os.path.isabs(absolute) and in_any_session_scratchpad(os.path.normpath(absolute)):
+                return name
+    return ""
+
+
 def heredoc_offsets(segments, ends, bodies_kept=True):
     """Return, for each segment, the count of heredoc headers ahead of it (own_heredoc_bodies's
     `before`). A line inside a body is no header: `x = 1 << y` in `python3 - <<'EOF'` would shift the
@@ -1692,8 +1774,9 @@ XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
 TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
-# The three mutation tests are test code for a test-author, named one by one so a later product
-# mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
+# The three mutation tests are test code: only a test-author edits them, since a builder that writes mutants
+# grades its own code. Named one by one so a later product mutate_*.py stays a builder's. Case folds as in
+# `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
 MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS}
 TEST_CONFIG = re.compile(
@@ -1780,12 +1863,22 @@ def is_test_config_rel(rel: str) -> bool:
     return bool(TEST_CONFIG.match(basename(rel)))
 
 
+def is_mutation_test_rel(rel: str) -> bool:
+    """True when a repository-relative path is one of the three mutation tests (`AUTHOR_MUTATION_TESTS`)."""
+    return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS
+
+
+def is_builder_test_rel(rel: str) -> bool:
+    """A path a builder may not change: a test path, or a mutation test."""
+    return is_test_rel(rel) or is_mutation_test_rel(rel)
+
+
 def author_path_ok(rel: str) -> bool:
     """A test-author may change a test path, test config, or a dev dependency list. `package.json`
     and `pyproject.toml` pass here and are read by content in `role_offences`. A workflow does not pass
     here: its whole test-run steps pass in `role_write_hit` and `role_offences` (`workflow_test_steps_only`)."""
     return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES
-            or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)
+            or is_mutation_test_rel(rel))
 
 
 # ---- workflow files (decision builders-cannot-edit-tests). The test-author check and the builder check are two
@@ -1964,7 +2057,7 @@ WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 
 def workflow_runs_test(path: str) -> bool:
-    """A run of this path is a test run: a test path, or a mutation test (not a test path for edit ownership).
+    """A run of this path is a test run: a test path, or a mutation test (also a test path for edit ownership).
     A mutation test counts by file name, so `cd hooks && python3 mutate_guard.py` and a `working-directory`
     step are runs too."""
     return is_test_rel(path) or basename(norm(path).lower()) in MUTATION_TEST_NAMES
@@ -2181,17 +2274,18 @@ def builder_test_path(path: str, cwd: str) -> bool:
     if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
             and repo_rel(path, where, outside=False) is None):
         return False
-    return is_test_rel(rel)
+    return is_builder_test_rel(rel)
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
-    python or node script a heredoc body or `-c` / `-e` holds, on the raw command. `tool` is the
+    python or node script a heredoc body, `-c` / `-e` or a script file run by name holds, on the raw
+    command (this is the one caller that reads script files). `tool` is the
     call's tool: it sets which shell's rules read the text."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
     return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
-            or interpreter_write_hit(raw, cwd, builder_test_path))
+            or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True))
 
 
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
@@ -2216,7 +2310,17 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         # Another session's scratchpad is neither this one's nor "outside a repository".
         if in_any_session_scratchpad(full):
             return target
-        return "" if repo_rel(target, cwd, outside=False) is None else target
+        if repo_rel(target, cwd, outside=False) is None:
+            return ""
+        # The merge route: a test-author resolves a whole merge that has a test conflict, so a product path git left
+        # conflicted is its own.
+        # Git runs only here, for a path refused so far, and the answer reads none of the target's text.
+        if role == AUTHOR_ROLE:
+            where = norm(os.path.normpath(full))
+            where = where[:len(where) - len(rel)] if rel and where.endswith(rel) else ""
+            if where and norm(rel).lstrip("/") in merge_route_paths(merge_conflicts(where) or ()):
+                return ""
+        return target
     if role == WRITER_ROLE:
         return "" if rel.lower().endswith(".md") else target
     if builder_test_path(target, cwd):
@@ -2286,13 +2390,47 @@ def changed_paths(root: str, old: str, new=None, top: str = ""):
 
 
 def merge_tree(root: str, ours: str, theirs: str):
-    """The tree git's own merge of two commits makes, each conflict left as markers; None when git
-    failed. A path that differs from it is one the agent resolved or added. Needs git 2.38 or newer
-    (`merge-tree --write-tree`), and writes the merged objects to the object store."""
+    """`(tree, conflicts)` for git's own merge of two commits: the tree it makes, each conflict left as
+    markers, and the sorted paths it left conflicted. None when git failed. A path that differs from the
+    tree is one the agent resolved or added. This is the one home for "conflicted in this merge": the
+    index list goes empty after `git add`. Needs git 2.38 or newer (`merge-tree --write-tree`), and
+    writes the merged objects to the object store.
+
+    The `-z` output is the tree id, then one `<mode> <id> <stage>\\t<path>` entry per conflicted stage,
+    each ended by NUL, then an empty entry before any message (`--no-messages` leaves none)."""
     answer = guard_core._git(root, "merge-tree", "--write-tree", "--no-messages", "-z", ours, theirs)
     if answer is None or answer.returncode not in (0, 1):
         return None
-    return answer.stdout.split("\0", 1)[0].strip() or None
+    tree, *entries = answer.stdout.split("\0")
+    if not tree.strip():
+        return None
+    conflicts = set()
+    for entry in entries:
+        if not entry:
+            break
+        conflicts.add(entry.partition("\t")[2])
+    return tree.strip(), sorted(conflicts)
+
+
+def merge_route_paths(conflicts):
+    """The paths a test-author owns in a merge that left `conflicts` (decision builders-cannot-edit-tests).
+    The route needs a test path among the conflicts, and covers product paths only: a workflow, test
+    config or manifest keeps its own content check (`role_offences`), so it is no product path."""
+    if not any(is_test_rel(path) for path in conflicts):
+        return []
+    return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]
+
+
+def merge_conflicts(root: str):
+    """The paths git's own merge of HEAD and MERGE_HEAD left conflicted, for the merge in progress at
+    `root`; [] when no merge is in progress; None when git failed."""
+    merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
+    if merging is None or merging.returncode not in (0, 1):
+        return None
+    if merging.returncode:
+        return []
+    merged = merge_tree(root, "HEAD", merging.stdout.strip())
+    return None if merged is None else merged[1]
 
 
 def upstream_kept(root: str, orig: str, onto: str):
@@ -2312,8 +2450,10 @@ def upstream_kept(root: str, orig: str, onto: str):
 
 
 def own_changes(root: str, top: str = ""):
-    """The agent's own change, as a list of `(old, new, paths, kind)`; None when git could not answer:
-    unknown, never clear. `new` None is the working tree, and `old` '' is no commit.
+    """The agent's own change, as a list of `(old, new, paths, kind, conflicts)`; None when git could not
+    answer: unknown, never clear. `new` None is the working tree, and `old` '' is no commit. `conflicts`
+    holds the paths git's own merge left conflicted, for a 2-parent merge commit and for the working tree
+    while a merge is in progress, and is empty for any other change.
 
     OWN (a builder's test path in it is refused):
       - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
@@ -2358,33 +2498,39 @@ def own_changes(root: str, top: str = ""):
         parents = parents.stdout.split()
         if len(parents) > 2:
             return None
-        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")
-        if old is None:
-            return None
+        conflicts = ()
+        if len(parents) == 2:
+            merged = merge_tree(root, *parents)
+            if merged is None:
+                return None
+            old, conflicts = merged
+        else:
+            old = parents[0] if parents else ""
         paths = (changed_paths(root, old, sha) if old else
                  git_names(root, "diff-tree", "--no-relative", "--root", "-r", "--name-only",
                            "--no-commit-id", "-z", "--no-renames", sha))
         if paths is None:
             return None
-        changes.append((old, sha, paths, kind))
-    old = "HEAD"
+        changes.append((old, sha, paths, kind, conflicts))
+    old, conflicts = "HEAD", ()
     if merging.returncode == 0:
-        old = merge_tree(root, "HEAD", merging.stdout.strip())
-        if old is None:
+        merged = merge_tree(root, "HEAD", merging.stdout.strip())
+        if merged is None:
             return None
+        old, conflicts = merged
     paths = changed_paths(root, old, top=top)
     if paths is None:
         return None
     replaying = merging.returncode != 0 and any(
         os.path.exists(os.path.join(gitdir.stdout.strip(), mark)) for mark in REPLAY_MARKS)
-    changes.append((old, None, paths, NOTED if replaying else OWN))
+    changes.append((old, None, paths, NOTED if replaying else OWN, conflicts))
     for index, (sha, subject) in enumerate(entries):
         if index and entry_kind(subject) == "start":
             kept = upstream_kept(root, entries[index - 1][0], sha)
             if kept is None:
                 return None
             if kept:
-                changes.append((sha, None, kept, KEPT))
+                changes.append((sha, None, kept, KEPT, ()))
     return changes
 
 
@@ -2450,15 +2596,18 @@ def text_at(root: str, rev, rel: str, top: str = "") -> str:
     return answer.stdout if answer is not None and answer.returncode == 0 else ""
 
 
-def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
+def role_offences(root: str, top: str, role: str, paths, old: str, new=None, conflicts=()):
     """The paths among `paths`, changed from `old` to `new` (see `own_changes`), whose change the role
-    may not make. Each path is checked as spelled and as resolved through symlinks."""
+    may not make. Each path is checked as spelled and as resolved through symlinks. A test-author owns a
+    path in `conflicts`: it resolves the whole merge (decision builders-cannot-edit-tests)."""
     found = []
     for rel in paths:
         # `is_test_rel` is the one place a backslash becomes `/`. A path outside the repository
         # reads `../...`, which no role owns.
         real = os.path.realpath(os.path.join(top, rel))
         names = [rel, os.path.relpath(real, top)]
+        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):
+            continue
         if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
                 is_workflow_rel(n) or author_path_ok(n) for n in names):
             bad = not workflow_test_steps_only(text_at(root, old, rel, top), text_at(root, new, rel, top))
@@ -2473,7 +2622,7 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
+            bad = any(is_builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel, top).splitlines(), text_at(root, old, rel, top).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel, top), text_at(root, new, rel, top)))
         if bad:
@@ -2494,10 +2643,10 @@ def diff_violation(root: str, role: str):
         return None, []
     builder = role == BUILDER_ROLE
     noted = []
-    for old, new, paths, kind in changes:
+    for old, new, paths, kind, conflicts in changes:
         if kind == KEPT and not builder:
             continue
-        found = role_offences(root, top, role, paths, old, new)
+        found = role_offences(root, top, role, paths, old, new, conflicts)
         if found is None:
             return None, []
         for rel in found:
@@ -2519,7 +2668,7 @@ def builder_diff_reason() -> str:
         "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
         "you added. If a commit of yours holds the change, stop and report it. "
         "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
-        "and report the conflict to the orchestrator; a test-author resolves it. "
+        "and report it, so the orchestrator hands the whole merge to a test-author. "
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
 
@@ -2570,11 +2719,16 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
-# The one home of the claude-code-remote server name. lint/check_agent_models.py reads it from here.
-REMOTE_SERVER = "mcp__claude-code-remote"
+from shared_names import REMOTE_OUTWARD_TOOLS, REMOTE_SERVER  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
+AGENT_NO_REMOTE_REASON = (
+    "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
+    "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
+    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "(decision lanes-start-as-agents, an agent is not a lane)"
+)
 from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
@@ -3279,7 +3433,11 @@ ROLE_MODEL_REASON = (
 )
 # A reviewer has a second way past its row, so only its refusal names it. Rounds come from the constant at call time.
 ROLE_REVIEWER_ROUND_REMEDY = ", or, when this brief is for review round %s, open its first line with a `Round N of 3` marker (%s)"
-ROLE_REVIEWER_FIX_CHECK_REMEDY = ", or, when this brief is a fix check, open its first line with the `%s` marker"
+ROLE_REVIEWER_FIX_CHECK_REMEDY = (", or, when this brief is a fix check, open its first line with the `%s` marker, "
+                                  "or with `Round N of 3 (fix check)` (N = %s)")
+# Last sentence of a reviewer's refusal. It says the first review runs on the role's model only while "1" is not in ROLE_REVIEWER_FREE_ROUNDS.
+ROLE_REVIEWER_FIRST_ROUND_NOTE = "; review round 1 and the test-author run on their role's model"
+ROLE_TEST_AUTHOR_NOTE = "; the test-author runs on its role's model"
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
 # does not lift a model the table does not rank.
 ROLE_EXPLORE_AUDIT_REMEDY = ", or, when this brief is an audit, open its first line with the `%s` marker"
@@ -3524,9 +3682,11 @@ def role_model_one(tool_input):
             if role == "reviewer":
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(ROLE_REVIEWER_FREE_ROUNDS),
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
-                extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % FIX_CHECK_MARKER
+                extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(ROLE_REVIEWER_FREE_ROUNDS))
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
+            if role == "reviewer":
+                extra += ROLE_TEST_AUTHOR_NOTE if "1" in ROLE_REVIEWER_FREE_ROUNDS else ROLE_REVIEWER_FIRST_ROUND_NOTE
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
@@ -4047,9 +4207,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
     # each segment takes its own bodies: heredoc_offsets counts the headers ahead of it (1c's split)
-    for segment, before in zip(segments, heredoc_offsets(segments, ends, stripped == raw)):
+    number = 0
+
+    def scratchpad_message_file(segment, where):   # the segment at `number`, read with its place in the command
+        return scratchpad_commit_file(segments, number, cwd, ends, stripped)
+
+    for number, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
         if not segment.strip():
             continue
+        matched = agent and scratchpad_message_file(segment, cite_where)
+        if matched:
+            refuse(tool, "deny", "scratchpad-commit-msg-owner", SCRATCH_MSG_REASON, matched)
         matched = cited_record_path(segment, raw, cite_where, before)
         if matched.startswith(UNREAD_MARK):
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
@@ -4207,6 +4375,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
+    # 5b. A gh write in a cloud session (rule gh-write-cloud): the GitHub MCP tools and the merge tool write there.
+    # It runs before steps 6 and 6b so a cloud pr merge or pr create gets the MCP remedy, not one that names the
+    # refused form.
+    if is_cloud():
+        for text, _in_message in _substitutions(stripped)[0]:
+            for seg in split_segments(text):
+                label = gh_write_of(seg) if seg.strip() else ""
+                if label:
+                    refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
+
     # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
     # could not run. Judged per segment from the command word, so quoted text never fires it.
     for segment in split_segments(stripped):
@@ -4294,17 +4472,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
-def data_tool_judge(tool_input, cwd=""):
+def data_tool_judge(tool_input, cwd="", session_id=None):
     """((rule, matched), writes): data_tool_hit's verdict and the item writes it judged, for the rule that
     reads the writes again (page-item-design)."""
     import question_form
-    return question_form.page_item_hit(tool_input, cwd)
+    return question_form.page_item_hit(tool_input, cwd, session_id)
 
 
-def data_tool_hit(tool_input, cwd=""):
+def data_tool_hit(tool_input, cwd="", session_id=None):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
     filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
-    return data_tool_judge(tool_input, cwd)[0]
+    return data_tool_judge(tool_input, cwd, session_id)[0]
 
 
 # ------------------------------------------------------------------ a waiting page behind main is not published
@@ -5019,16 +5197,16 @@ def _same_repo(common: str, other: str) -> bool:
             and _origin_key(urls[0]) != "" and _origin_key(urls[0]) == _origin_key(urls[1]))
 
 
-def _git_verb_called(command: str) -> bool:
-    """True when COMMAND runs a git verb of SESSION_HOME_GIT_VERBS. A text with no `git` in it is
-    never scanned, so a call with no git word spends nothing."""
+def _git_verb_called(command: str, verbs) -> bool:
+    """True when COMMAND runs a git verb of VERBS. A text with no `git` in it is never scanned, so a
+    call with no git word spends nothing."""
     return "git" in command and any(
-        verb in SESSION_HOME_GIT_VERBS
+        verb in verbs
         for segment in split_segments(command, []) for verb, _args in git_calls(segment))
 
 
-def _git_verb_may_hit(command: str, where: str) -> bool:
-    """True when a git verb of SESSION_HOME_GIT_VERBS in COMMAND can change another clone's files, so
+def _git_verb_may_hit(command: str, where: str, verbs) -> bool:
+    """True when a git verb of VERBS in COMMAND can change another checkout's or clone's files, so
     it is worth the one `git worktree list`: the cwd is stranded in a separate clone of the
     `CLAUDE_PROJECT_DIR` clone, or a `-C` or `cd` folder's nearest `.git` is not the cwd's. The folder
     of each verb is read by session_home_git_hit, the one reader. Stat and small file reads; no git."""
@@ -5038,7 +5216,8 @@ def _git_verb_may_hit(command: str, where: str) -> bool:
     stranded = _clone_scope(None, own_root)[2]
     return bool(session_home_git_hit(
         command, where,
-        lambda folder, _at: stranded or _checkout_root_by_stat(os.path.realpath(folder)) != own_root))
+        lambda folder, _at: stranded or _checkout_root_by_stat(os.path.realpath(folder)) != own_root,
+        verbs))
 
 
 def _separate_clone(path: str, tops, common: str) -> bool:
@@ -5157,7 +5336,11 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     folder passes too, a shell `cp` may also name its root); a `cd` toward a folder
     under another `.git` entry spends the git read. A target in a separate clone of the same repo
     (the nearest `.git` above it names another common dir with the same origin, read by file) is
-    refused the same way; the clone check spawns no git. Liftable by an owner override, unlike `worktree_home_hit`
+    refused the same way; the clone check spawns no git. A git verb that changes files
+    (OTHER_CHECKOUT_GIT_VERBS) run as `git -C <path>`, or after a `cd`, in another checkout or a
+    separate clone is refused by that same `elsewhere()` test, and the red-run exemption reads the
+    resolved folder, as the `cd` form reads its target;
+    `git -C <primary> status` passes and spends no git. Liftable by an owner override, unlike `worktree_home_hit`
     (decision an-agent-outside-its-home-tree-must-stop)."""
     where = _expanded(cwd, "") if cwd and os.name == "nt" else cwd
     moves = []
@@ -5171,7 +5354,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         writes = bool(SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", command))) or interpreter_may_write(raw)
         moves = _cd_targets(tool, raw, where) if where else []
         # A git verb spends the list only when stat and file reads show it can reach another clone.
-        writes = writes or (_git_verb_called(command) and _git_verb_may_hit(command, where))
+        writes = writes or (_git_verb_called(command, OTHER_CHECKOUT_GIT_VERBS)
+                            and _git_verb_may_hit(command, where, OTHER_CHECKOUT_GIT_VERBS))
     else:
         return ""
     if moves:
@@ -5223,13 +5407,24 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         if not hit and interpreter_may_write(raw):
             hit = interpreter_write_hit(raw, where, elsewhere)
         if not hit:
-            # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
-            # reader of such verbs is session_home_git_hit; only the folder test differs.
+            # A git verb that changes files, run in another checkout or a separate clone of this one,
+            # or from a stranded cwd. The one reader of such verbs is session_home_git_hit; only the
+            # folder test differs, and it is elsewhere(), so the `cd` form's exemptions hold here too.
+            flagged = []
+
             def in_clone(folder, _at):
-                elsewhere(folder, folder)
-                return clone_hit.get(folder, False)
-            verb = session_home_git_hit(command, where, in_clone) if "git" in command else ""
-            return OTHER_CLONE_GIT_DETAIL + verb if verb else ""
+                # As the `cd` loop above: the folder's own root counts as the red-run folder, since a
+                # git verb run there writes its files, not the folder's name. The test reads the
+                # resolved folder, as elsewhere() does, so a `..` climb out of it cannot pass.
+                if elsewhere(folder, folder) and not _own_red_run(payload, roots[0], _resolved(folder, folder)):
+                    flagged.append(folder)
+                    return True
+                return False
+            verb = (session_home_git_hit(command, where, in_clone, OTHER_CHECKOUT_GIT_VERBS)
+                    if "git" in command else "")
+            if not verb:
+                return ""
+            return (OTHER_CLONE_GIT_DETAIL if clone_hit.get(flagged[-1]) else OTHER_CHECKOUT_GIT_DETAIL) + verb
         return ("shell write into another clone: " if clone_hit.get(hit) else
                 "shell write into another checkout: ") + hit
     for target in targets:
@@ -5252,6 +5447,13 @@ SESSION_HOME_DIR = "session-homes"
 # and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
                           "stash", "cherry-pick", "revert", "am", "apply", "clean")
+# The verbs other-checkout refuses in another checkout or clone: the session-home verbs plus the verbs
+# that change that checkout's files or index without moving a branch (`add`, `rm`, `mv`, `update-index`,
+# `read-tree`, `checkout-index`). Every form of these counts as a write, `rm --cached` and `rm -n`
+# included: the guard does not parse each verb's flags, so a dry run is refused too. session-home
+# leaves them out, so this set extends the tuple rather than copying it.
+OTHER_CHECKOUT_GIT_VERBS = SESSION_HOME_GIT_VERBS + (
+    "add", "rm", "mv", "update-index", "read-tree", "checkout-index")
 SESSION_HOME_REASON = (
     "Rule (session-home): this session's worktree is gone, so a write here would land in the primary "
     "checkout. "
@@ -5342,14 +5544,16 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
         pass  # an unwritable record means no refusal later, never a failed call
 
 
-def session_home_git_hit(command: str, where: str, in_primary) -> str:
-    """The verb of a git call in COMMAND that changes the primary's files or branch and runs in the
-    primary checkout, else ''. A leading `cd` and `git -C <path>` name the folder it runs in; a folder
-    that holds a variable is unknown and passes."""
+def session_home_git_hit(command: str, where: str, in_primary, git_verbs=None) -> str:
+    """The verb of a git call in COMMAND that changes files or a branch and runs in a folder that
+    IN_PRIMARY accepts, else ''. GIT_VERBS names the verbs; none means SESSION_HOME_GIT_VERBS. A
+    leading `cd` and `git -C <path>` name the folder it runs in; a folder that holds a variable is
+    unknown and passes."""
     ends = []
     segments = split_segments(command, ends)
     for number, segment in enumerate(segments):
-        verbs = [(verb, args) for verb, args in git_calls(segment) if verb in SESSION_HOME_GIT_VERBS]
+        verbs = [(verb, args) for verb, args in git_calls(segment)
+                 if verb in (git_verbs or SESSION_HOME_GIT_VERBS)]
         if not verbs:
             continue
         folder = dir_before_segment(segments, number, where, ends)
@@ -5421,6 +5625,137 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     for target in targets:
         if in_primary(target, where):
             return "write target in the primary checkout: " + target
+    return ""
+
+
+# ------------------------------------------------------------------ another agent's scratchpad script
+#
+# Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
+# scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
+# file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
+# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file. A call
+# with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
+# touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
+SCRATCHPAD_WORD = "scratchpad"
+SCRATCHPAD_OWNER_REASON = (
+    "Rule (scratchpad-owner): this script was written by another agent of this session, and running it "
+    "runs code you have not read. "
+    "Remedy: write your own copy of the script and run that, or ask the orchestrator to hand it to you. "
+    "(decision scratchpad-owner, an agent asks before it runs another agent's scratchpad script)"
+)
+SCRATCHPAD_OVERWRITE_REASON = (
+    "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
+    "destroys work that agent may still need. "
+    "Remedy: write your own file under a name of your own, or ask the orchestrator to hand the file to you. "
+    "(decision scratchpad-owner, an agent asks before it runs or overwrites another agent's scratchpad file)"
+)
+# Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
+SCRATCHPAD_REMOVERS = ("rm", "mv")
+SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
+
+
+def scratchpad_agent(payload) -> str:
+    """The valid `agent_id` of the call, or '' for the top-level session and a call with no valid id."""
+    agent = payload.get("agent_id") if isinstance(payload, dict) else None
+    return agent if isinstance(agent, str) and AGENT_ID.match(agent) else ""
+
+
+def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
+    """(agent, session, the scratchpad files this call writes, those of them a remover verb names): the Write
+    family's targets and the shell write targets `_shell_write_hit` reads. `agent` is '' for a call with no
+    `agent_id`. Only a call that names a scratchpad reaches the disk; any other call gets no files."""
+    agent, session = scratchpad_agent(payload), session_id_of(payload)
+    files, removed = [], set()
+    if not session:
+        return agent, session, files, removed
+    try:
+        if tool in WRITE_TOOLS:
+            for target in write_targets(tool_input):
+                full = target if os.path.isabs(target) else os.path.join(cwd, target)
+                if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session):
+                    files.append(full)
+        elif tool in SHELL_TOOLS:
+            command = str(tool_input.get("command", "") or "")
+            if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
+                return agent, session, files, removed
+            command, found = strip_heredoc_bodies(command), {}
+
+            def in_scratchpad(word, at, verb):
+                full = shell_abs(word, at)
+                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
+                    found[word] = (full, verb in SCRATCHPAD_REMOVERS)
+                    return True
+                return False
+
+            for _ in range(SCRATCHPAD_WRITE_PASSES):   # the reader names one hit a pass: exclude each as it is listed
+                hit = _shell_write_hit(command, cwd, in_scratchpad, follow_cd=True, predicate_command=True)
+                if not hit:
+                    break
+                files.append(found[hit][0])
+                if found[hit][1]:
+                    removed.add(found[hit][0])
+    except Exception:
+        pass   # a file that cannot be read is not judged and not recorded, never a failed call
+    return agent, session, files, removed
+
+
+def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
+    """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
+    file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
+    writes, and asks when a file's record named another agent. The record is written before the ask, because
+    an approval in the UI never reaches the guard again; a file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file and a file
+    that no longer exists pass (`scratchpad_writer_of`). Run once the call's other rules passed."""
+    agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
+    if not agent:
+        for full in files:
+            scratchpad_clear_writer(full, session)
+        return
+    taken = ""
+    for full in files:
+        writer = scratchpad_writer_of(full, session)
+        if writer and writer != agent and not taken:
+            taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+    for full in files:
+        if full not in removed:
+            scratchpad_record_writer(full, session, agent)
+    if taken:
+        refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON, taken)
+
+
+def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule scratchpad-owner: the log detail when an agent's shell call runs a scratchpad file that another
+    agent of the session wrote, else ''. A run is an interpreter or runner word (`_RUNNER`) with the file as
+    its first plain argument, or the file as the command word. A `cd` ahead of the run names the folder a
+    relative path is read from (`dir_before_segment`). Quoted text, comments and heredoc bodies hold no
+    run: the segments come from `split_segments` over the heredoc-stripped command, its variables read
+    as `_shell_write_hit` reads them (`_resolve_vars`)."""
+    agent, session = scratchpad_agent(payload), session_id_of(payload)
+    command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""
+    if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):
+        return ""
+    ends = []
+    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        word = tokens[index]
+        if _RUNNER(basename(word)):
+            args = list(tokens[index + 1:])
+            at = workflow_script_index(args)   # past the interpreter's flags and their values
+            # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
+            script = args[at] if at is not None and "-" not in args[:at] else ""
+        else:
+            script = word if "/" in word else ""
+        if not script:
+            continue
+        full = shell_abs(script, dir_before_segment(segments, number, cwd, ends))
+        if not full or SCRATCHPAD_WORD not in full or not under_session_scratchpad(full, session):
+            continue
+        writer = scratchpad_writer_of(full, session)
+        if writer and writer != agent:
+            return "agent %s runs a scratchpad file agent %s wrote: %s" % (agent, writer, full)
     return ""
 
 
@@ -5497,6 +5832,39 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
+    # 0, pointer-edit. A write into the pointer checkout's own files is live for every session. An override lifts it
+    # when the target is a direct pointer path. never_lifted calls is_frozen per target, so a config-dir spelling of a
+    # pointer file is not liftable, as with frozen-path.
+    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd) if tool in WRITE_TOOLS else ""
+    if pointer_hit:
+        refuse(tool, "deny", "pointer-edit", POINTER_EDIT_REASON, "write target in the pointer checkout: " + pointer_hit)
+
+    # 8a. The rules that own an outward claude-code-remote call judge it before agent-no-remote-tools (8b), so an agent's call to
+    # one of these tools gets the specific remedy. Each reads only its own tools, so none reorders with the spawn rules below.
+    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
+    trust_transcript = payload.get("transcript_path")
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    if matched:
+        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
+
+    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
+    archive_agent = payload.get("agent_id")
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
+    if archived:
+        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
+
+    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if briefed:
+        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
+    # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
+    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
+    # agent's create_session is refused here. An override lifts it.
+    if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
+        refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
@@ -5578,24 +5946,6 @@ def judge(payload) -> None:
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
-    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
-    trust_transcript = payload.get("transcript_path")
-    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
-    if matched:
-        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
-
-    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archive_agent = payload.get("agent_id")
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
-                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
-    if archived:
-        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
-
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
-
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
         target = tool_input.get("to")
@@ -5609,7 +5959,8 @@ def judge(payload) -> None:
         return
 
     if tool == DATA_TOOL:
-        (rule, matched), item_writes = data_tool_judge(tool_input, cwd)
+        import override  # the writer's record id (cse_<x> read as session_<x>); the payload's id is a local UUID
+        (rule, matched), item_writes = data_tool_judge(tool_input, cwd, override.remote_session_id())
         if rule:
             import question_form
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
@@ -5639,6 +5990,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
         if rule == "item-field-rendered":
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
+        if rule == "question-checked-with-repo":
+            refuse(tool, "deny", "question-checked-with-repo", question_form.PAGE_REASONS["question-checked-with-repo"], matched)
         if item_writes:
             unhomed = mockup_home_hit(item_writes, tool_input, cwd)
             if unhomed:
@@ -5674,6 +6027,11 @@ def judge(payload) -> None:
                     remedies.setdefault(n[0], remedy)
             if names:
                 sim_boot_refusal(tool, names, remedies)
+            # An ask, after the denies above: the shell call runs another agent's scratchpad script.
+            owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
+            if owned:
+                refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
+            scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: ask on an overwrite, else record the writer
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
@@ -5736,6 +6094,7 @@ def judge(payload) -> None:
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
+    scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: ask on an overwrite, else record the writer
 
 
 def write_targets(tool_input: dict) -> list:

@@ -423,6 +423,7 @@ WRAPPER_VALUE_FLAGS.update({
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+    "watch": {"-n", "--interval", "-q", "--equexit"},
 })
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
@@ -738,7 +739,7 @@ _FED_SHELL = re.compile(
     r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
-_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
+_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node|deno"
 _INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
 
 def SHELL_HEREDOC(text: str) -> bool:
@@ -1964,17 +1965,26 @@ def ssh_remote_script(tokens) -> str:
     return " ".join(tokens[index + 1:])   # tokens[index] is the host
 
 
+# The `find` actions that run a command on a match. `guard_env` builds its own find list on this.
+FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
+
+
 def wrapped_commands(tokens, at: int):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
-    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
+    `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
+    line."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "watch":
+        index, _ = _wrapper_flags(word, rest, 0)
+        return [" ".join(rest[index:])] if rest[index:] else []
     if word == "kubectl" and "exec" in rest and "--" in rest:
         return [shlex.join(rest[rest.index("--") + 1:])]
     if word == "find":
         found = []
         for i, token in enumerate(rest):
-            if token in ("-exec", "-execdir", "-ok", "-okdir"):
+            if token in FIND_EXEC_ACTIONS:
                 end = next((j for j in range(i + 1, len(rest)) if rest[j] in (";", "+")), len(rest))
                 found.append(shlex.join(rest[i + 1:end]))
         return found
@@ -1999,7 +2009,7 @@ def wrapped_commands(tokens, at: int):
 def bare_words(segment: str):
     """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
     no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
-    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    a runner no reader names (`docker run`, `uv run`) still shows its inner command, and
     quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
     words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
     has no bare word."""
