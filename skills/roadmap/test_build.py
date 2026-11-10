@@ -1079,7 +1079,7 @@ class StalledStep(UpkeepFixture):
 
     def test_doing_step_whose_lane_names_a_live_session_is_not_stalled(self):
         self.lane_steps()
-        ids, out = self.lane_step_ids(LANE_SESSION, [self.working_row("cs-step:c3")])
+        ids, out = self.lane_step_ids(LANE_SESSION, [self.working_row(shared_names.LANE_TAG, "cs-step:c3")])
         self.assertEqual(ids, ["c4"], "c2's lane names a live session that works c3, so only the control c4 is stalled")
         self.assertEqual(self.stalled_lines(out), ["stalled step: c4 (resume, pause or done)"])
         self.assertEqual(self.code, 1, "a stalled step must exit 1")
@@ -1087,23 +1087,23 @@ class StalledStep(UpkeepFixture):
     def test_lane_session_archived_or_ended_does_not_clear_the_step(self):
         self.lane_steps()
         ended = {
-            "archived": session_row(LANE_SESSION, "SESSION_STATUS_ARCHIVED", self.REPO, "cs-step:c3", status_bucket=BUCKET_WORKING),
-            "completed": session_row(LANE_SESSION, "SESSION_STATUS_IDLE", self.REPO, "cs-step:c3", status_bucket=BUCKET_COMPLETED),
-            "failed": session_row(LANE_SESSION, "SESSION_STATUS_IDLE", self.REPO, "cs-step:c3", status_bucket=BUCKET_FAILED),
+            "archived": session_row(LANE_SESSION, "SESSION_STATUS_ARCHIVED", self.REPO, shared_names.LANE_TAG, "cs-step:c3", status_bucket=BUCKET_WORKING),
+            "completed": session_row(LANE_SESSION, "SESSION_STATUS_IDLE", self.REPO, shared_names.LANE_TAG, "cs-step:c3", status_bucket=BUCKET_COMPLETED),
+            "failed": session_row(LANE_SESSION, "SESSION_STATUS_IDLE", self.REPO, shared_names.LANE_TAG, "cs-step:c3", status_bucket=BUCKET_FAILED),
         }
         for name, row in ended.items():
             with self.subTest(name):
                 # The live control comes first: the same lane clears c2 while its session is live, so the lane is what clears it.
-                ids, _ = self.lane_step_ids(LANE_SESSION, [self.working_row("cs-step:c3")])
+                ids, _ = self.lane_step_ids(LANE_SESSION, [self.working_row(shared_names.LANE_TAG, "cs-step:c3")])
                 self.assertEqual(ids, ["c4"], "a live lane session clears c2")
                 ids, _ = self.lane_step_ids(LANE_SESSION, [row])
                 self.assertEqual(ids, ["c2", "c3", "c4"], "the %s session holds no step, so c2 and c3 stay stalled" % name)
 
     def test_lane_session_of_another_repo_does_not_clear_the_step(self):
         self.lane_steps()
-        other = session_row(LANE_SESSION, "SESSION_STATUS_RUNNING", "cs-repo:owner/other-repo", "cs-step:c3",
-                            status_bucket=BUCKET_WORKING)
-        ids, _ = self.lane_step_ids(LANE_SESSION, [self.working_row("cs-step:c3")])  # the live control
+        other = session_row(LANE_SESSION, "SESSION_STATUS_RUNNING", "cs-repo:owner/other-repo", shared_names.LANE_TAG,
+                            "cs-step:c3", status_bucket=BUCKET_WORKING)
+        ids, _ = self.lane_step_ids(LANE_SESSION, [self.working_row(shared_names.LANE_TAG, "cs-step:c3")])  # the live control
         self.assertEqual(ids, ["c4"], "a live lane session clears c2")
         ids, _ = self.lane_step_ids(LANE_SESSION, [other])
         self.assertEqual(ids, ["c2", "c3", "c4"], "a session of another repo holds no step, so c2 and c3 stay stalled")
@@ -1111,12 +1111,12 @@ class StalledStep(UpkeepFixture):
     def test_lane_prose_holding_a_live_session_id_clears_the_step(self):
         self.lane_steps()
         prose = "coordinator (%s) to route" % LANE_SESSION
-        ids, _ = self.lane_step_ids(prose, [self.working_row("cs-step:c3")])
+        ids, _ = self.lane_step_ids(prose, [self.working_row(shared_names.LANE_TAG, "cs-step:c3")])
         self.assertEqual(ids, ["c4"], "a lane whose prose holds the live session's id clears c2")
 
     def test_lane_naming_no_listed_session_or_empty_or_null_keeps_the_step_stalled(self):
         self.lane_steps()
-        live = [self.working_row("cs-step:c3")]
+        live = [self.working_row(shared_names.LANE_TAG, "cs-step:c3")]
         ids, _ = self.lane_step_ids(LANE_SESSION, live)  # the live control: the bare id clears c2
         self.assertEqual(ids, ["c4"], "a bare live session id clears c2")
         for name, lane in (("an id not in the list", UNLISTED_SESSION), ("empty", ""), ("null", None)):
@@ -1415,7 +1415,8 @@ class ReadyNotStarted(ReadyFixture):
         self.ready_step("c2", order=2, lane=LANE_SESSION)
         self.ready_step("c3", order=3)  # control: no lane, so it is listed
         self.ready_step("c4", order=4, status="doing")  # the live session works c4, the step its cs-step tag names
-        working = session_row(LANE_SESSION, "SESSION_STATUS_RUNNING", self.REPO, "cs-step:c4", status_bucket=BUCKET_WORKING)
+        working = session_row(LANE_SESSION, "SESSION_STATUS_RUNNING", self.REPO, shared_names.LANE_TAG, "cs-step:c4",
+                              status_bucket=BUCKET_WORKING)
         self.known_read(sessions=[working])
         page, out = self.build_from_main("--live", str(self.live))
         self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "a todo step whose lane names a live session is not listed")
