@@ -607,7 +607,7 @@ def live_work(path, steps, slug=None):
     names that is not an open step is listed in `strays`. One list of lane rows (not archived, carrying this repo's
     cs-repo tag) feeds liveness: `sessionSteps` holds their step ids and `laneTags` their topic and build tags, for an
     item's lane; `liveSteps` holds the step ids of those rows not ended (ENDED_BUCKETS), for a step's lane and a
-    draft; `liveSessionIds` holds the ids of the same not-ended rows, for a step's own `lane` field. `staleWhy` says why the live reading is unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
+    draft; `liveSessionIds` holds the ids of the same not-ended rows that carry cs-build:lane (LANE_TAG), for a step's own `lane` field. `staleWhy` says why the live reading is unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
     unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
     "items" (optional, the waiting page's rows `{"n", "status", "home", "lane"?, "owner"?}`) feeds the page-ruling upkeep
@@ -698,7 +698,8 @@ def live_work(path, steps, slug=None):
         session_steps = sorted(step_tag_ids(tags))
         live_steps = sorted(step_tag_ids(t for r in rows if r.get("status_bucket") not in ENDED_BUCKETS
                                          for t in r.get("tags") or []))
-        live_ids = sorted(r["id"] for r in rows if r.get("status_bucket") not in ENDED_BUCKETS)
+        live_ids = sorted(r["id"] for r in rows if r.get("status_bucket") not in ENDED_BUCKETS
+                          and LANE_TAG in [t.strip() for t in r.get("tags") or [] if isinstance(t, str)])
         lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
         lane_sessions = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
                           "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None}
@@ -1145,11 +1146,12 @@ def lane_live(work, lane, item=False):
 
 
 def step_lane_live(work, key, step):
-    """lane_live for a step, which is also live when its own `lane` field holds the id of a live session (the step's
+    """lane_live for a step, which is also live when its own `lane` field holds the id of a live lane session (the step's
     work runs in a session that carries no cs-step tag for it). The field may be prose around the id, so it matches by
-    substring: session ids have a fixed length. A non-text field names none."""
+    substring: session ids have a fixed length. A non-text field names none, and an empty id matches none. Only lane
+    sessions (rows carrying cs-build:lane) are in liveSessionIds, so a topic or tier session in the field does not count."""
     lane = step.get("lane")
-    return lane_live(work, key) or (isinstance(lane, str) and any(i in lane for i in work["liveSessionIds"]))
+    return lane_live(work, key) or (isinstance(lane, str) and any(i and i in lane for i in work["liveSessionIds"]))
 
 
 def laneless(open_, marks, work):
