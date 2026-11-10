@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 16:37 CST.
+the history. Last rewrite: 2026-11-10 16:49 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -95,6 +95,11 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
 - **G9. Triage always writes the waiting page.** Owner 14:32 CST Nov 10: "yea triage always writes the
   waiting page". Replaces the three definitions ("where triage runs", "a project with a triage thread",
   "when no triage lives").
+- **G15. The owner talks in two places.** Owner 16:46 CST Nov 10: "Yes that's approved". In a larger
+  build: the page, for anything waiting on him (his answer wakes the session that asked); the
+  coordinator's chat, for anything new (it starts the other sessions, so it routes the item). Never a
+  lane directly. Side sessions such as this retrospective hold rules talk only. Home: decision
+  session-tiers; skill waiting-page.
 - **G14. The triage artifact is one page.** Owner 15:52 CST Nov 10: "when i say triage artifact i meant
   both given that they've merged into one (and if you thought otherwise that's a prose fault that needs
   correcting)". skills/roadmap/SKILL.md:6 says so; GLOSSARY.md has no row for it, and the roadmap skill's
@@ -311,6 +316,10 @@ After 3.11, because its third part uses the same owner grant route.
   Replaces CLAUDE.md questions-go-to-owner, "The started session may wait on it." Unmeasured: how often
   lanes have stalled on a popup so far. Home: CLAUDE.md questions-go-to-owner; decision
   questions-go-to-owner.
+- **D3. How much a lane writes (open).** Owner 16:46 CST Nov 10: "lane's own chat never reaches me
+  anyway, pretty true -- but they do still type a whole fuckton of a lot, and that is tbd on whether we
+  should have some sorta rules on how much a lane "chirps" in a snese". Open: measure lane output per
+  turn first; a lane's only readers are its parent (the report) and its handoff.
 
 ## Stage 4. Make the roadmap and triage mechanical
 
@@ -327,6 +336,13 @@ After 3.11, because its third part uses the same owner grant route.
   is the right spot right? but for rn it only make senses that it is read". A check, run when triage
   reports status, lists each owner ruling in the outbox and whether its home on main holds its words.
   Whether the outbox stays the place for rulings is open. Home: decision owner-feedback-inbox.
+- **D2. What a page Send wakes, and how words are passed along (open).** Owner 16:46 CST Nov 10: "I do
+  think the process of what's being woken, and how to pass words along / relays needs to be vastly
+  improved as the current process is broken/flawed". Today (skill waiting-page, "Read the answers"): a
+  Send posts one comment that wakes every session watching the page, the writer and each session that
+  owns an open item; only the asker routes its item; a peer passes only the page URL, item id and act
+  (decision relayed-grant-read-from-page). Open: which failures the owner has seen; the coordinator's
+  record of wake and relay failures.
 
 ## Stage 5. Express pass for prose
 
