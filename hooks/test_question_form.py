@@ -37,6 +37,17 @@ Interface the module must match (the lane's form contract):
 - A waiting-page task's Why yours line (rule task-why-cited, decision claims-carry-backing part (v)): a
   capability reason needs a cite that holds on this surface, a `(route <id>)` whose row says refused or asks, or a
   dated `(measured <date>, ...)`. The page reads no refusals file. Cases: case_task_why_cited_reds and _greens.
+- question_form.cross_repo_hit(op, data, page_repo, session_id=None) -> reason or None (rule
+  question-checked-with-repo). An open decision or task set (a missing kind is a decision, and any status but closed
+  is open), or an update carrying `repo`, that names a repo other than the page's needs a session-shaped
+  `checked_with`. A `checked_with` equal to the session id in `owner`, or to the writer's `session_id`, is refused.
+  A `repo` that is not owner/name is refused with the format reason. `repo` is required on the set: a direct call
+  with page_repo None refuses a missing one, but item_hit does not judge it when the page repo is unknown, since no
+  compare can run. A str_replace on `repo` or `checked_with` is refused as this rule. An update that
+  carries `checked_with` without `repo` is refused, naming `repo`. item_hit and page_item_hit take the writer's
+  session_id. guard.py passes the cloud session's record id (env CLAUDE_CODE_REMOTE_SESSION_ID read as session_<x>),
+  never the payload's local UUID. The page repo is read from the checkout at cwd,
+  and None (no cwd, or no origin) skips only the compare.
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
   chat_hit names; the model sees only a box that passes.
 
@@ -53,6 +64,7 @@ import io
 import json
 import os
 import re
+import inspect
 import shutil
 import sys
 from unittest import mock
@@ -1836,8 +1848,448 @@ def test_task_str_replace_prose_label_mention_passes():
     _judged(case_task_str_replace_prose_label_passes)
 
 
+def case_item_stray_field_refused_from_a_record_branch_checkout():
+    """The page checks run from a checkout on the record branch. Its extras file is on origin/main
+    only, and the page reads it from there (lint/layout.py waiting_page), so an item set with a stray top-level field is
+    refused as item-field-rendered, as at the page's own checkout. Scope first: when the page url reads as unknown, no
+    page check runs and the case stops at that one cause."""
+    repo = tcj.record_branch_checkout()
+    check("scope: the record-branch checkout holds no extras file",
+          not os.path.isfile(os.path.join(repo, ".claude", "layout-extras.json")), "the checkout holds the extras file")
+    tool_input = {"action": "set", "url": PAGE_URL, "collection": tcj.PAGE_ITEMS, "doc_id": DOC, "data": page_item(focus="#fill")}
+    named = call("is_waiting_page", tool_input, repo) is True
+    check("scope: the page url names the page at the record-branch checkout", named,
+          "the page url reads as unknown at a checkout with no extras file, so no page check runs")
+    if not named:
+        return
+    got = call("page_item_hit", tool_input, repo)
+    verdict("page_item_hit at the record-branch checkout: a stray top-level field is refused", got[0], ("item-field-rendered", "focus"))
+    control = call("page_item_hit", dict(tool_input), tcj.PAGE_REPO)
+    verdict("control: the same stray field at the page's own checkout is refused", control[0], ("item-field-rendered", "focus"))
+
+
+# ------------------------------------------------------------------ a decision on another repo is checked with that repo
+#
+# Rule question-checked-with-repo (CROSS_REPO_RULE). An open decision or task set that names a `repo` other than the
+# page's repo needs a session-shaped `checked_with`, and a `checked_with` equal to the session id in `owner` is refused.
+# `repo` is required on an open decision or task set: a set with no repo is refused. The page's repo is the origin of
+# the checkout the write is judged at (cwd). With no cwd, or no origin, it is None: there is nothing to compare, so a
+# foreign repo passes, but a set with no repo is still refused.
+# The fixture is the incident item ma144-tab-bar (mailaudit #144) as it was written, opened, with the repo field.
+
+CROSS_REPO_RULE = "question-checked-with-repo"
+PAGE_REPO_NAME = "shivinate7/claude-settings"  # the page's repo: the origin of tcj.origin_page_repo()
+OTHER_REPO = "shivinate7/mailaudit"
+CHECKED = "session_013ABCdefGHI"
+MA144_ID = "ma144-tab-bar"
+MA144_OWNER_SESSION = "session_013NEJKymmzw37seAr3Qq5nv"  # the session id in MA144's owner field
+VI_FRAGMENTS = (r"\brepo\b", r"shivinate7/claude-settings")
+
+MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
+
+
+def ma144(repo=OTHER_REPO, checked=None, **over):
+    """The incident item, judged on `repo` (None leaves the field out). `checked` sets checked_with (None leaves it
+    out, "" sets it empty). `over` sets or replaces any other field."""
+    item = copy.deepcopy(MA144)
+    if repo is not None:
+        item["repo"] = repo
+    if checked is not None:
+        item["checked_with"] = checked
+    item.update(over)
+    return item
+
+
+def ma144_write(**over):
+    """The `set` entry for the incident item, as the page's ArtifactData call carries it."""
+    return entry_of(ma144(**over), doc_id=MA144_ID)
+
+
+def cross(name, op, data, page_repo, fragments=None):
+    """cross_repo_hit's result: None for a pass, else a reason that matches every regex in `fragments`. A missing
+    function returns the MISSING sentinel, which fails the check by name."""
+    got = call("cross_repo_hit", op, data, page_repo)
+    if fragments is None:
+        check("cross_repo_hit: " + name, got is None, "want a pass (None), got %r" % (got,))
+    else:
+        ok = isinstance(got, str) and all(re.search(f, got, re.I) for f in fragments)
+        check("cross_repo_hit: " + name, ok, "want a reason naming %s, got %r" % (list(fragments), got))
+
+
+def at_page(name, op, entry, cwd, fragments=None):
+    """One page write judged at `cwd` by question_form.item_hit and by guard.data_tool_hit. A pass is ("", ""). A
+    refusal is the cross-repo rule, with a reason that matches every regex in `fragments`. The page's repo is the
+    origin of `cwd`'s checkout, so only a cwd with an origin reaches the rule."""
+    tool_input = dict(entry, url=PAGE_URL, action=op)
+    surfaces = (("item_hit", call("item_hit", op, entry, cwd)), ("guard", guard.data_tool_hit(tool_input, cwd)))
+    for surface, got in surfaces:
+        label = "%s at cwd: %s" % (surface, name)
+        if fragments is None:
+            check(label, got == ("", ""), "want a pass, got %r" % (got,))
+        else:
+            ok = got[0] == CROSS_REPO_RULE and all(re.search(f, str(got[1]), re.I) for f in fragments)
+            check(label, ok, "want %s naming %s, got %r" % (CROSS_REPO_RULE, list(fragments), got))
+
+
+def case_cross_repo_missing_checked_with():
+    """(i) An open decision on another repo with no checked_with is refused, and the reason names checked_with. On
+    main the write is refused as an unknown field, so only the new rule's reason passes this case."""
+    cross("(i) no checked_with", "set", ma144(), PAGE_REPO_NAME, ("checked_with",))
+    cross("(i) empty checked_with", "set", ma144(checked=""), PAGE_REPO_NAME, ("checked_with",))
+    at_page("(i) no checked_with", "set", ma144_write(), tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_checked_with_passes():
+    """(ii) A session-shaped checked_with on another repo's decision passes."""
+    cross("(ii) session-shaped checked_with", "set", ma144(checked=CHECKED), PAGE_REPO_NAME)
+    at_page("(ii) session-shaped checked_with", "set", ma144_write(checked=CHECKED), tcj.origin_page_repo())
+
+
+def case_cross_repo_same_repo_passes():
+    """(iii) A decision on the page's own repo passes with no checked_with."""
+    cross("(iii) repo is the page repo", "set", ma144(repo=PAGE_REPO_NAME), PAGE_REPO_NAME)
+    at_page("(iii) repo is the page repo", "set", ma144_write(repo=PAGE_REPO_NAME), tcj.origin_page_repo())
+
+
+def case_cross_repo_compares_lowercase():
+    """(iv) The page's repo in other case passes. Only the case differs, so the compare folds case."""
+    cross("(iv) Shivinate7/Claude-Settings is the page repo", "set", ma144(repo="Shivinate7/Claude-Settings"),
+          PAGE_REPO_NAME)
+    at_page("(iv) Shivinate7/Claude-Settings is the page repo", "set",
+            ma144_write(repo="Shivinate7/Claude-Settings"), tcj.origin_page_repo())
+
+
+def case_cross_repo_no_page_repo_passes():
+    """(v) With no page repo the compare is skipped, so a foreign repo with no checked_with passes: a direct call with
+    page_repo None, and a write judged at a checkout with no origin (tcj.PAGE_REPO), which reads as no page repo. A set
+    with no repo is still refused (case_cross_repo_required_when_page_repo_unknown)."""
+    cross("(v) page_repo None", "set", ma144(), None)
+    at_page("(v) checkout with no origin", "set", ma144_write(), tcj.PAGE_REPO)
+
+
+def case_cross_repo_required():
+    """(vi) repo is required on an open decision or task set. A set with no repo is refused, and the reason names
+    `repo` and the page's own repo, so the writer fixes it in one try."""
+    cross("(vi) no repo", "set", ma144(repo=None), PAGE_REPO_NAME, VI_FRAGMENTS)
+    at_page("(vi) no repo", "set", ma144_write(repo=None), tcj.origin_page_repo(), VI_FRAGMENTS)
+
+
+def case_cross_repo_checked_with_not_the_owner():
+    """(vii) A checked_with equal to the session id in owner is refused: the owner's own session did not check."""
+    cross("(vii) checked_with is the owner's session", "set", ma144(checked=MA144_OWNER_SESSION), PAGE_REPO_NAME,
+          ("checked_with",))
+    at_page("(vii) checked_with is the owner's session", "set", ma144_write(checked=MA144_OWNER_SESSION),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_str_replace_not_judged():
+    """(viii) A str_replace on context is not judged by this rule, whatever repo it carries. A str_replace on repo or
+    checked_with is judged (case_cross_repo_str_replace_on_repo_and_checked_with)."""
+    cross("(viii) str_replace with a foreign repo", "str_replace",
+          {"repo": OTHER_REPO, "kind": "decision", "status": "open"}, PAGE_REPO_NAME)
+    at_page("(viii) str_replace on context", "str_replace",
+            entry_of(None, doc_id=MA144_ID, field="context", old_str="README, choice 3.",
+                     new_str="README, choice 3, and the Duo sizes."), tcj.origin_page_repo())
+
+
+def case_cross_repo_update_carrying_repo():
+    """(ix) An update that carries repo is judged as a set is. It names only its own fields, so the stored kind is
+    unseen and the repo alone decides. An update that carries no repo passes."""
+    cross("(ix) update with a foreign repo, no checked_with", "update", {"repo": OTHER_REPO}, PAGE_REPO_NAME,
+          ("checked_with",))
+    cross("(ix) update with no repo", "update", {"title": MA144["title"]}, PAGE_REPO_NAME)
+    at_page("(ix) update with a foreign repo, no checked_with", "update", entry_of({"repo": OTHER_REPO},
+            doc_id=MA144_ID), tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_closed_item_passes():
+    """(x) A closed item asks the owner nothing, so it passes whatever its repo."""
+    cross("(x) closed decision on another repo", "set", ma144(status="closed"), PAGE_REPO_NAME)
+    at_page("(x) closed decision on another repo", "set", ma144_write(status="closed"), tcj.origin_page_repo())
+
+
+def case_cross_repo_task_names_checked_with():
+    """(xi) An open task set on another repo is refused without checked_with, as a decision is. The task carries its
+    Why yours line, so only this rule judges it."""
+    task = task_item(["Open the page and answer item ma144-tab-bar."], repo=OTHER_REPO)
+    cross("(xi) open task on another repo, no checked_with", "set", task, PAGE_REPO_NAME, ("checked_with",))
+    at_page("(xi) open task on another repo, no checked_with", "set", entry_of(task, doc_id="ma144-task"),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_malformed_checked_with():
+    """(xii) A checked_with that is not session-shaped is refused, and the reason names checked_with."""
+    cross("(xii) checked_with is not a session id", "set", ma144(checked="batch runner 9"), PAGE_REPO_NAME,
+          ("checked_with",))
+    at_page("(xii) checked_with is not a session id", "set", ma144_write(checked="batch runner 9"),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+# ------------------------------------------------------------------ question-checked-with-repo: the gaps of the rule
+#
+# One case per gap in the rule above, each with a concrete input. A red case is judged by the verdict it names, never by
+# a crash. The writer's session is judged through cross_judged: a build with no session_id parameter is called with the
+# signature it has, so its verdict shows instead of a TypeError. The case that needs the parameter asserts it first.
+
+WRITER_SESSION = "session_01WRITERxyz"  # the record id of the session that files the item: the env's cse_<x> read as session_<x>, never the payload's UUID (case_cross_repo_writer_guard_path)
+NO_REPO_FRAGMENTS = (r"\brepo\b",)  # the reason names `repo`; with no page repo it cannot name the page's own
+
+
+def takes_session_id():
+    """True when cross_repo_hit takes the writer's session_id."""
+    fn = getattr(question_form, "cross_repo_hit", None)
+    return fn is not None and "session_id" in inspect.signature(fn).parameters
+
+
+def cross_judged(op, data, page_repo, session_id=None):
+    """cross_repo_hit with the writer's session_id when the build takes one, else with the signature it has."""
+    if takes_session_id():
+        return call("cross_repo_hit", op, data, page_repo, session_id)
+    return call("cross_repo_hit", op, data, page_repo)
+
+
+def cross_as_writer(name, data, session_id, fragments=None):
+    """cross_repo_hit on the page repo with the writer's session_id: a pass is None, a refusal a reason that matches
+    every regex in `fragments`."""
+    got = cross_judged("set", data, PAGE_REPO_NAME, session_id)
+    if fragments is None:
+        check("cross_repo_hit: " + name, got is None, "want a pass (None), got %r" % (got,))
+    else:
+        ok = isinstance(got, str) and all(re.search(f, got, re.I) for f in fragments)
+        check("cross_repo_hit: " + name, ok, "want a reason naming %s, got %r" % (list(fragments), got))
+
+
+def cross_format(name, data, page_repo=PAGE_REPO_NAME):
+    """A repo that is not owner/name: the reason is the format reason, which names owner/name and not checked_with."""
+    got = call("cross_repo_hit", "set", data, page_repo)
+    ok = isinstance(got, str) and re.search(r"owner/name", got) is not None and re.search(r"checked_with", got) is None
+    check("cross_repo_hit: " + name, ok, "want a format reason naming owner/name and not checked_with, got %r" % (got,))
+
+
+def case_cross_repo_open_filter_is_the_one_home():
+    """(xiii) The open filter is the one home _open_decision: a set with no kind is a decision, and a status other than
+    closed is still open. Each of these sets, on another repo with no checked_with, is refused."""
+    no_kind = ma144()
+    no_kind.pop("kind")
+    cross("(xiii) a set with no kind, on another repo, no checked_with", "set", no_kind, PAGE_REPO_NAME,
+          ("checked_with",))
+    at_page("(xiii) a set with no kind, at the page's checkout", "set", entry_of(no_kind, doc_id=MA144_ID),
+            tcj.origin_page_repo(), ("checked_with",))
+    cross("(xiii) status Open", "set", ma144(status="Open"), PAGE_REPO_NAME, ("checked_with",))
+    cross("(xiii) status pending", "set", ma144(status="pending"), PAGE_REPO_NAME, ("checked_with",))
+    at_page("(xiii) status pending, at the page's checkout", "set", ma144_write(status="pending"),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_open_filter_controls():
+    """(xiii controls) A set with no status is open, so it is judged. A closed set with no kind is not open, so it
+    passes. Both hold with or without the fix."""
+    no_status = ma144()
+    no_status.pop("status")
+    cross("(xiii control) a set with no status is open, no checked_with", "set", no_status, PAGE_REPO_NAME,
+          ("checked_with",))
+    closed_no_kind = ma144(status="closed")
+    closed_no_kind.pop("kind")
+    cross("(xiii control) a closed set with no kind passes", "set", closed_no_kind, PAGE_REPO_NAME)
+
+
+def case_cross_repo_str_replace_on_repo_and_checked_with():
+    """(xiv) A str_replace on `repo` or `checked_with` changes the cross-repo verdict, which the page cannot see, so it
+    is refused as this rule, whatever the page's repo is. The first two writes are judged with no cwd, which pins the
+    unknown-page-repo verdict."""
+    page("(xiv) a str_replace on repo that swaps in the page's own repo", "str_replace",
+         entry_of(None, doc_id=MA144_ID, field="repo", old_str=OTHER_REPO, new_str=PAGE_REPO_NAME),
+         (CROSS_REPO_RULE, "repo"))
+    page("(xiv) a str_replace on checked_with", "str_replace",
+         entry_of(None, doc_id=MA144_ID, field="checked_with", old_str=CHECKED, new_str=WRITER_SESSION),
+         (CROSS_REPO_RULE, "checked_with"))
+    # The same writes at the page's checkout, where the stored repo is judged by the rule's compare: the bypass is a
+    # set that names the page's own repo, then a str_replace that makes it foreign with no checked_with.
+    at_page("(xiv) a str_replace on repo, the page's own repo to a foreign one", "str_replace",
+            entry_of(None, doc_id=MA144_ID, field="repo", old_str=PAGE_REPO_NAME, new_str=OTHER_REPO),
+            tcj.origin_page_repo(), ("repo",))
+    at_page("(xiv) a str_replace on repo, a foreign repo to the page's own", "str_replace",
+            entry_of(None, doc_id=MA144_ID, field="repo", old_str=OTHER_REPO, new_str=PAGE_REPO_NAME),
+            tcj.origin_page_repo(), ("repo",))
+    at_page("(xiv) a str_replace on checked_with", "str_replace",
+            entry_of(None, doc_id=MA144_ID, field="checked_with", old_str=CHECKED, new_str=WRITER_SESSION),
+            tcj.origin_page_repo(), ("checked_with",))
+
+
+def case_cross_repo_required_when_page_repo_unknown():
+    """(xv) `repo` is required on a set: cross_repo_hit called with page_repo None refuses a set with no repo, or an
+    empty one, and the reason names `repo`. A write judged at a checkout with no origin is not refused for a missing
+    repo (see the ruling below). The origin checkout pins the requirement end to end."""
+    cross("(xv) no repo, page repo unknown", "set", ma144(repo=None), None, NO_REPO_FRAGMENTS)
+    cross("(xv) empty repo, page repo unknown", "set", ma144(repo=""), None, NO_REPO_FRAGMENTS)
+    # With the page repo unknown, item_hit does not judge a missing repo: no compare can run.
+    at_page("(xv) no repo, a checkout with no origin passes", "set", ma144_write(repo=None), tcj.PAGE_REPO)
+    at_page("(xv) no repo, at the page's checkout with an origin", "set", ma144_write(repo=None),
+            tcj.origin_page_repo(), NO_REPO_FRAGMENTS)
+
+
+def case_cross_repo_malformed_repo_is_a_format_refusal():
+    """(xvi) A repo that is not owner/name is refused with the format reason. shivinate7/claude-settings.git passes the
+    repo-name pattern, so it is judged as a repo off the page's own and asks for checked_with."""
+    cross_format("(xvi) repo shivinate7/claude-settings.git, no checked_with",
+                 ma144(repo="shivinate7/claude-settings.git"))
+    cross_format("(xvi) repo shivinate7/claude-settings.git, a session-shaped checked_with",
+                 ma144(repo="shivinate7/claude-settings.git", checked=CHECKED))
+    at_page("(xvi) repo shivinate7/claude-settings.git, at the page's checkout", "set",
+            ma144_write(repo="shivinate7/claude-settings.git"), tcj.origin_page_repo(), (r"owner/name",))
+
+
+def case_cross_repo_malformed_repo_controls():
+    """(xvi controls) q_max and a URL fail the repo-name pattern, so they already get the format reason. They hold with
+    or without the fix."""
+    cross_format("(xvi control) repo q_max", ma144(repo="q_max"))
+    cross_format("(xvi control) repo https://github.com/a/b", ma144(repo="https://github.com/a/b"))
+
+
+def case_cross_repo_writer_session_is_not_the_checker():
+    """(xvii) A checked_with equal to the writer's own session is refused: the session that files the item did not
+    check with the other repo. The owner here is the coordinator, so only the writer's session can refuse it."""
+    check("cross_repo_hit takes session_id (xvii)", takes_session_id(),
+          "cross_repo_hit has no session_id parameter, so a checked_with equal to the writer's session is not refused")
+    cross_as_writer("(xvii) checked_with is the writer's session, owner coordinator",
+                    ma144(checked=WRITER_SESSION, owner="coordinator"), WRITER_SESSION, ("checked_with",))
+
+
+def case_cross_repo_writer_session_controls():
+    """(xvii controls) A checked_with that differs from the writer's session passes. With no session id, a checked_with
+    equal to a session id passes, since the writer's refusal does not apply. Both hold with or without the fix."""
+    cross_as_writer("(xvii control) checked_with is another session, the writer is WRITER_SESSION",
+                    ma144(checked=CHECKED, owner="coordinator"), WRITER_SESSION)
+    cross_as_writer("(xvii control) no session id, checked_with equal to WRITER_SESSION passes",
+                    ma144(checked=WRITER_SESSION, owner="coordinator"), None)
+
+
+# ------------------------------------------------------------------ the writer's session, through the guard's dispatch
+#
+# Rule question-checked-with-repo, the writer's own session. The hook payload's session_id is the local session's UUID.
+# A cloud session's record id is the env CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x>, read as session_<x> by
+# override.remote_session_id). The writer's refusal compares checked_with with that record id. The cases below run
+# guard.judge(payload) in process, as the hook runs it, so the session id has to travel from the payload and the env
+# through the guard's dispatch into page_item_hit. The cases above that call cross_repo_hit with a session id directly
+# cannot show that.
+
+LANE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"
+CLOUD_LANE = "cse_013TESTabc"  # this cloud session's env value
+CLOUD_RECORD = "session_013TESTabc"  # the same session's record id: the writer's session id in checked_with
+OTHER_SESSION = "session_013OTHERxyz"  # another session's record id
+LOCAL_UUID = "60f6df14-79ff-4a1e-9c2b-5d7e8f901a2b"  # the hook payload's session_id: a UUID, not a record id
+
+
+def writer_input(checked=None, **over):
+    """The tool_input of one `set` on the incident item, as ArtifactData sends it, with checked_with set to `checked`
+    (None leaves it out). `over` sets or replaces any other field of the item."""
+    return dict(ma144_write(checked=checked, **over), url=PAGE_URL, action="set")
+
+
+def guard_refusal(tool_input, lane_env):
+    """The reason guard.judge prints for one ArtifactData call at the page's checkout, with the payload's session_id
+    LOCAL_UUID and CLAUDE_CODE_REMOTE_SESSION_ID set to lane_env (None unsets it: a local session). None when the
+    call passes. guard.judge exits through refuse(), which prints the deny JSON, so the print is what is read."""
+    payload = {"tool_name": "ArtifactData", "hook_event_name": "PreToolUse", "cwd": tcj.origin_page_repo(),
+               "session_id": LOCAL_UUID, "tool_input": tool_input}
+    printed = io.StringIO()
+    with mock.patch.dict(os.environ):  # the env is put back as it was on exit
+        if lane_env is None:
+            os.environ.pop(LANE_ENV, None)
+        else:
+            os.environ[LANE_ENV] = lane_env
+        try:
+            with contextlib.redirect_stdout(printed):
+                guard.judge(payload)
+        except SystemExit:
+            pass
+        except Exception as exc:  # a crash is a wrong verdict, shown by name
+            return "RAISED %s: %s" % (type(exc).__name__, exc)
+    text = printed.getvalue().strip()
+    return json.loads(text)["hookSpecificOutput"]["permissionDecisionReason"] if text else None
+
+
+def writer_verdict(name, reason, refused):
+    """refused: the reason names the rule and `checked_with`. Else the call passes, with no refusal printed."""
+    if refused:
+        ok = isinstance(reason, str) and CROSS_REPO_RULE in reason and "checked_with" in reason
+        check(name, ok, "want %s naming checked_with, got %r" % (CROSS_REPO_RULE, reason))
+    else:
+        check(name, reason is None, "want a pass (no refusal), got %r" % (reason,))
+
+
+def case_cross_repo_writer_guard_path():
+    """(xviii) guard.judge refuses a checked_with equal to the writer's own session. The cloud session's record id comes
+    from CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x> read as session_<x>), not from the payload's UUID. The red: on the
+    build that reads the payload's UUID, the writer's session is never the record id, so the refusal does not fire.
+    The controls: another session passes; a local session (env unset) has no writer's session to refuse; a missing
+    checked_with is refused end to end (green on the build that has this rule: it shows the guard dispatches it)."""
+    writer_verdict("(xviii) guard: checked_with is this cloud session's record id, env cse_013TESTabc",
+                   guard_refusal(writer_input(checked=CLOUD_RECORD, owner="coordinator"), CLOUD_LANE), refused=True)
+    writer_verdict("(xviii control) guard: checked_with is another session, env cse_013TESTabc",
+                   guard_refusal(writer_input(checked=OTHER_SESSION, owner="coordinator"), CLOUD_LANE), refused=False)
+    writer_verdict("(xviii control) guard: local session, env unset, checked_with is the record id",
+                   guard_refusal(writer_input(checked=CLOUD_RECORD, owner="coordinator"), None), refused=False)
+    writer_verdict("(xviii control) guard: no checked_with is refused, env cse_013TESTabc",
+                   guard_refusal(writer_input(owner="coordinator"), CLOUD_LANE), refused=True)
+
+
+def case_cross_repo_writer_page_item_hit():
+    """(xix) page_item_hit takes the writer's session id and refuses a checked_with equal to it. It is called direct, so a
+    build that drops the id on the way (question_form.py, item_hit's cross-repo call) fails here too, not only in the
+    guard case above. Green on the build that threads the id: this case holds the threading in place."""
+    got = call("page_item_hit", writer_input(checked=CLOUD_RECORD, owner="coordinator"), tcj.origin_page_repo(),
+               CLOUD_RECORD)
+    hit = got[0] if isinstance(got, tuple) and got else got
+    ok = isinstance(hit, tuple) and len(hit) == 2 and hit[0] == CROSS_REPO_RULE and "checked_with" in str(hit[1])
+    check("page_item_hit: checked_with equal to the writer's session is refused, naming checked_with", ok,
+          "want %s naming checked_with, got %r" % (CROSS_REPO_RULE, hit))
+    got = call("page_item_hit", writer_input(checked=OTHER_SESSION, owner="coordinator"), tcj.origin_page_repo(),
+               CLOUD_RECORD)
+    hit = got[0] if isinstance(got, tuple) and got else got
+    check("control: page_item_hit, checked_with another session passes", hit == ("", ""),
+          "want a pass, got %r" % (hit,))
+
+
+def model_calls_of_call_judge(checked):
+    """How many model calls hooks/call_judge.py makes for one ArtifactData write of the page, the payload's session_id
+    LOCAL_UUID and CLAUDE_CODE_REMOTE_SESSION_ID set to CLOUD_LANE. A write that a rule refuses makes none."""
+    payload = {"tool_name": "ArtifactData", "hook_event_name": "PreToolUse", "cwd": tcj.origin_page_repo(),
+               "session_id": LOCAL_UUID, "tool_input": writer_input(checked=checked, owner="coordinator")}
+    with mock.patch.dict(os.environ, {LANE_ENV: CLOUD_LANE}):
+        run = tcj.run_hook(json.dumps(payload))
+    return len(run.calls)
+
+
+def case_cross_repo_writer_call_judge():
+    """(xxi) call_judge.py reads the writer's session the way guard.py does. A checked_with equal to the cloud session's
+    record id is a hit, so call_judge asks no model about the write. The red: on a build that passes the payload's UUID,
+    the write is no hit there and the model is asked. The control, another session's checked_with, is asked, so the
+    model call is seen."""
+    refused = model_calls_of_call_judge(CLOUD_RECORD)
+    check("(xxi) call_judge: checked_with is this cloud session's record id, no model call", refused == 0,
+          "want no model call for a write the rule refuses, got %d call(s)" % refused)
+    asked = model_calls_of_call_judge(OTHER_SESSION)
+    check("(xxi control) call_judge: checked_with is another session, the model is asked", asked > 0,
+          "want a model call for a write no rule refuses, got %d" % asked)
+
+
+def case_cross_repo_update_checked_with_needs_repo():
+    """(xviii) An update that carries checked_with but no repo is refused, and the reason names `repo`. The stored repo
+    is unseen, so a checked_with alone cannot be judged against it. The controls carry repo, so they hold with or
+    without this refusal."""
+    cross("(xx) update with checked_with, no repo", "update", {"checked_with": CHECKED}, PAGE_REPO_NAME, ("`repo`",))
+    at_page("(xx) update with checked_with, no repo", "update", entry_of({"checked_with": CHECKED}, doc_id=MA144_ID),
+            tcj.origin_page_repo(), ("`repo`",))
+    cross("(xx control) update with a foreign repo and checked_with", "update",
+          {"repo": OTHER_REPO, "checked_with": CHECKED}, PAGE_REPO_NAME)
+    cross("(xx control) update with the page's own repo and checked_with", "update",
+          {"repo": PAGE_REPO_NAME, "checked_with": CHECKED}, PAGE_REPO_NAME)
+
+
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
+    for case in (case_item_92, case_item_51_stray_field, case_item_stray_field_refused_from_a_record_branch_checkout,
+                 case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
@@ -1860,7 +2312,19 @@ def main():
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
-                 case_task_str_replace_prose_label_passes):
+                 case_task_str_replace_prose_label_passes,
+                 case_cross_repo_missing_checked_with, case_cross_repo_checked_with_passes,
+                 case_cross_repo_same_repo_passes, case_cross_repo_compares_lowercase,
+                 case_cross_repo_no_page_repo_passes, case_cross_repo_required,
+                 case_cross_repo_checked_with_not_the_owner, case_cross_repo_str_replace_not_judged,
+                 case_cross_repo_update_carrying_repo, case_cross_repo_closed_item_passes,
+                 case_cross_repo_task_names_checked_with, case_cross_repo_malformed_checked_with,
+                 case_cross_repo_open_filter_is_the_one_home, case_cross_repo_open_filter_controls,
+                 case_cross_repo_str_replace_on_repo_and_checked_with, case_cross_repo_required_when_page_repo_unknown,
+                 case_cross_repo_malformed_repo_is_a_format_refusal, case_cross_repo_malformed_repo_controls,
+                 case_cross_repo_writer_session_is_not_the_checker, case_cross_repo_writer_session_controls,
+                 case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
+                 case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo):
         try:
             case()
         except Exception as exc:

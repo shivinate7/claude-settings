@@ -287,9 +287,6 @@ def rewritten(line, hs, base=(), modified=False):
     return False
 
 
-OWN_LOOKUPS = 25  # per file: lost lines checked for a branch-only adder in one `git log -p` read; the rest count as lost
-
-
 def changed(patch):
     """The normalized added and removed lines of a patch. Headers are skipped by state, never by prefix:
     a line is content only after the first `@@` of its file section, so `++i;` and `-- note` count."""
@@ -308,18 +305,19 @@ def branch_only_lines(cwd, p, bases, path, lines, refs):
     """The subset of `lines` that only the branch added: for each, the commit that first added it on
     the way to parent p is reachable from none of refs (upstream and the default branch). A read that
     fails, or finds no adding commit, leaves the line out, so it counts. Unknown is never clear.
-    One `git log -m -p` per file, read once: a commit is marked by a changed line (added or removed,
-    as `-G` read it) that holds the line, whitespace-collapsed. `-m` lets a line that entered through
+    One `git log -m -p` per file, read once: a commit is marked by a changed line (added or removed)
+    that equals the line, whole-line and whitespace-collapsed: a longer line that only contains it
+    does not mark. `-m` lets a line that entered through
     a merge's own resolution show up. The oldest marked commit is the real adder: a line from main
     always has main's own commit in the range, older than any merge that carried it."""
     try:
         _, out = git(cwd, "log", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%x00%H", p, "--not", *bases, "--", path)
     except Unknown:
         return set()
-    commits = []  # (sha, the changed lines of that diff, newline-joined)
+    commits = []  # (sha, the set of that diff's normalized changed lines)
     for chunk in out.split("\0")[1:]:  # NUL: a text diff never holds one
         sha, _, body = chunk.partition("\n")
-        commits.append((sha.strip(), "\n".join(changed(body))))
+        commits.append((sha.strip(), set(changed(body))))
     held, res = {}, set()
     for line in lines:
         sha = next((c for c, text in reversed(commits) if line in text), None)
@@ -404,6 +402,31 @@ def lost_lines(cwd, m, refs=()):
     return found
 
 
+def unrestored(cwd, h, m, found, unspent):
+    """lost_lines items of merge m less each line that head h holds again in the same path, at least as often as the parent
+    held it. unspent (one dict per check(): (path, line) -> head copies not yet used) lets one head copy clear one loss."""
+    if not found:
+        return []
+    blobs, out = Blobs(cwd), []
+    try:
+        for path, p, lines in found:
+            if not blobs.get(m, path):  # the merge renamed or deleted the path: a head copy at that name restores nothing
+                out.append((path, p, lines))
+                continue
+            in_p, at_h = counts(blobs.get(p, path)), counts(blobs.get(h, path))  # "" for a path the head lacks: nothing restored
+            left = []
+            for l in lines:
+                if unspent.setdefault((path, l), at_h.get(l, 0)) >= in_p.get(l, 0):
+                    unspent[(path, l)] -= in_p.get(l, 0)
+                else:
+                    left.append(l)
+            if left:
+                out.append((path, p, left))
+    finally:
+        blobs.close()
+    return out
+
+
 def lost_in_parent(cwd, m, p, bases, refs, blobs):
     """lost_lines for one parent p of merge m; blobs reads every file text."""
     found = []
@@ -438,7 +461,7 @@ def lost_in_parent(cwd, m, p, bases, refs, blobs):
                 if not rewritten(l, hs, in_b, mod):
                     lost.append(l)
         if refs and lost:
-            own = branch_only_lines(cwd, p, bases, path, lost[:OWN_LOOKUPS], refs)  # the rest count as lost, unread
+            own = branch_only_lines(cwd, p, bases, path, lost, refs)
             lost = [l for l in lost if l not in own]
         if lost:
             found.append((path, p, lost))
@@ -714,10 +737,10 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
-    items, octopus = [], []
+    items, octopus, unspent = [], [], {}
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         try:
-            items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
+            items += [(x[0], fmt_lost(m, *x)) for x in unrestored(cwd, h, m, lost_lines(cwd, m, refs), unspent)]
         except Octopus as e:  # the other reads still run: their findings must not hide behind this one
             octopus.append(str(e))
     items += revived_notes(cwd, upstream, h)
