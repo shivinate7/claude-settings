@@ -6106,6 +6106,18 @@ sh("git-after-cd: a cd that lands, then && true || a test that may be skipped, t
    "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 
 
+# A REAL CHECK IS NO DIR TEST. _dir_test_before_its_cd excuses a step only when it is a dir test that heads a cd to
+# that folder. A check in the chain keeps its failure in view, with or without a dir test ahead of it: the push after
+# ; runs whatever the check did. The folder exists, so each cd lands and the cd walk looks through it. The check walk
+# is what must refuse these pushes.
+sh("git-after-cd: a real check, then && a cd that lands, then ; a git push -u is refused",
+   "make check && cd %s; %s push -u origin b" % (slash(NOGIT), VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a dir test, then && a real check, then && a cd to the same folder that lands, then ; a git push -u is refused",
+   "[ -d %s ] && make check && cd %s; %s push -u origin b" % (slash(NOGIT), slash(NOGIT), VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+
+
 # THE REFUSAL BRANCHES. _never_runs and _dir_test_word refuse three forms that a skipped cd could pass for. Each form
 # is refused only because one branch holds: drop that branch and the form is allowed. Each is checked under bash with
 # a stub git. A regular file for M makes -e pass and the cd fail. The push then runs in the start folder.
