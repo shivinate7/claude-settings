@@ -15,7 +15,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 - Each repo's copy lives on its record branch, the `roadmap` branch by default. Owner, 2026-11-02 15:12 CST (fb-1512-1): "wb". The rest of that sentence is the sources' summary of the reply, not owner words: the page writer pushes the copy with no PR. Main moves only by pull request (rule `git-main-only-by-pr`, main moves only by pull request).
 - Degen moves its copy to its record branch and retires its own export. It calls this repo's export (fb-1512-1, the same summary, not owner words).
 - A cite names the artifact's id and its repo path, written `artifact:<id>`. It never names the link (ruled: the owner's "A" on option a, fb-1458-2). Open: `lint/check_artifact_cites.py` reads the id only, so the repo-path part is not checked yet. The check refuses a bare link and an unregistered id.
-- The 14 roadmap step links become `artifact:<id>` cites under the same pick (fb-1458-2). Open: the links are still bare. Until they are fixed, the check runs with `--steps list`, which prints each step link and fails no step. The guard refuses a bare link at each write to the record branch (coordinator's option a, event 46a1a427, 14:56 CST): rule `roadmap-artifact-cites`.
+- The 14 roadmap step links become `artifact:<id>` cites under the same pick (fb-1458-2). Done: no step holds a bare link, and `check_artifact_cites.py --steps refuse` exits 0. The guard refuses a bare link at each write to the record branch (coordinator's option a, event 46a1a427, 14:56 CST): rule `roadmap-artifact-cites`.
 - Owner, 2026-11-02 11:00 CST (waiting-page gripe, via the coordinator): the waiting page keeps a copy of its data in the repo, so a lost page loses no item. The owner said not to take the ask verbatim, but the gripe is real.
 - The id `waiting-data-in-repo` names this decision. The page writer's step lives in the waiting-page skill, not in a rule.
 - The waiting page's copy is folder `waiting/` on the record branch. It holds five collections: `items`, `answers`, `groups`, `asks` and `meta`. Each document is one file, `waiting/<collection>/<doc_id>.json` (rule `git-record-own-file-per-kind`, one file per kind).
@@ -32,7 +32,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 
 Cost: each run of the page writer makes one list call per page of each collection and starts one python process. It makes one commit when a file changed. No timer and no watcher.
 
-Cost of rule `roadmap-artifact-cites`: per `git push` to the record branch that the triage session may make, two git processes (`git ls-tree`, `git cat-file --batch`) per ref sent, one when the head holds no step, on top of the one-writer check's reads. A dry run and a push to another branch start none. No file written, no timer.
+Cost of rule `roadmap-artifact-cites`: a `git push` to the record branch that the triage session may make starts two git processes per ref sent (`git ls-tree`, `git cat-file --batch`). It starts one when the head holds no step. These add to the one-writer check's reads. A dry run and a push to another branch start none. No timer. A noted verdict writes one guard.log line. Nothing else is written.
 
 Known limits:
 
