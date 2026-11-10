@@ -1,0 +1,11 @@
+# The page-item judge passed item 475 though owner pick 457 a may decide it
+
+**What.** Page item 475 (doc id `merge-read-flags-allow`) asked the owner whether six read-only merge-tool flags may run without a prompt, up from three. The page-write judge (`hooks/call_judge.py`, item 8) passed it. One probe on 2026-11-10 (03:41 CST) ran the item as triage posted it through the same judge: verdict `{ok: true}`, no error. The same run listed step `lane-lint-runs-comment-check` twice among its 343 candidates. That step's note says: "Owner pick on the waiting page (13:09 CST Nov 9): item 457 a. The lane changes only the reason sentence of the "Merge Tool Read Checks" allow entry in #2382; the allowed commands stay the same." The Stop hook's check on the coordinator's report cited that note and refused. The coordinator reads "the allowed commands stay the same" as ruling out the six-flag widening. That reading is not an owner ruling, and the probe is one run.
+
+**Item text, as posted.** Title: "Let six read-only merge-tool flags run without a permission prompt, up from three?" Context: Goal "the merge tool's read-only flags stop asking for permission"; Problem (rule) "your earlier grant covered only three merge-tool read flags, so adding three more needs your typed words"; Based on (read) "the lane for the pull request that enforces the batch lane freeze holds an unpushed diff that rewrites the settings entry "Merge Tool Read Checks" to six flags with new reason text"; Departs from "main's three-flag entry — the entry lists six flags". Options: a "Allow six flags" (marked `widens: true`), b "Keep three flags". The item never named step `lane-lint-runs-comment-check` or pick 457 a.
+
+**Where.** `hooks/call_judge.py` (`PAST_RULING_ITEM`) and `hooks/question_form.py` (`past_rulings`, `_step_rulings`). The ruling sentence names no subject: "item 457 a" with one detail sentence, so the judge must link it to a question about different flags.
+
+**Decision.** `question-form` (every question is vetted against past rulings). The judge is not tuned in this record: one probe cannot tell a judge miss from a pick that does not decide 475.
+
+**Retire.** The owner says whether pick 457 a decides item 475. If it does, a rule or a test makes the judge refuse this item with the ruling cited. If it does not, the record is deleted.
