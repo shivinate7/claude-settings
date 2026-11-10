@@ -198,5 +198,5 @@ Design:
 - Q4, answered: a cloud session that waits on a reply may set one `send_later` check-in for that one
   reply. Under rule `outcomes-mechanize-rules`, a one-time check-in for one named outside event is not
   tracking. It sets the next one only when a new named event arrives. Never use it to reset the
-  peer-guard chain. Cost: one one-shot scheduled task per waiting request; no process, no file.
+  peer-guard chain. Cost: one one-shot scheduled task per waiting reply. It fires once, closes, delays or expires nothing, starts no long-lived process, and writes no local file. Rule wording: commit `0b8296e8e` (2026-11-08 04:00 CST); the "or a reply" case since `f966e26e4` (2026-11-06 15:01 CST).
 - Q3, scope: the debt fix (done, commit 7059961a) and the git-mailbox build steps 1 to 5. The parser for the message format was dropped 2026-11-06 13:15 CST and stays dropped (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.
