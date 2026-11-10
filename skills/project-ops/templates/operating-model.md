@@ -23,6 +23,8 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
+  The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
+  branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
   step with no live lane and no open PR becomes `todo` or `done`, or gets a `paused` field with who decides; an item
   is re-routed or closed. When triage marks a step `done`, its note gets the line
