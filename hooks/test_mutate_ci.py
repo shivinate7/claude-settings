@@ -12,8 +12,9 @@ The modes, as the builder implements them. This file is their interface.
   runs every suite that `select` lists for a file, changed or not. Without `select`, only the changed suites run,
   as `--replay` does. It prints the replay row, then `catch share: K/R (P%)` (K killed over R ran; a crash is not a
   kill), then one `untested: path:line` line per line whose mutant survived or was not run. It exits 1 when mutants are
-  made and none ran, and prints one `no mutant ran: ...` line that names the count not run. It exits 0 otherwise,
-  whatever the share. `--budget S` is a wall deadline counted from the start of the run: a mutant not started by then is
+  made and none ran, and prints one `no mutant ran: ...` line that names the count not run. It also exits 1, with one
+  `no mutant ran: <cause>` line, when the run stopped before any mutant ran: the checkout refused, the install refused, or
+  the replay raised. It exits 0 otherwise, whatever the share. `--budget S` is a wall deadline counted from the start of the run: a mutant not started by then is
   not_run, and a suite still running then is killed, its mutant not_run too. `--log PATH` writes one JSON file with the
   keys base, head, profile, made, killed, crashed, survived, not_run and untested, and writes nothing else into REPO.
   With no changed mutant the share reads `0/0` with no percentage, and the run exits 0.
@@ -218,10 +219,13 @@ LOCK_TEXT = "kb-oracle==1.0\n"
 # ---------------------------------------------------------------------------------------------------
 # Fixture repositories. Each one is a base commit on main, and a change cut from it on branch feat.
 
-def partial_repo():
-    """feat adds sub and div. Its suite gains a check for sub only, so sub's mutants die and div's survive."""
+def partial_repo(extra=None):
+    """feat adds sub and div. Its suite gains a check for sub only, so sub's mutants die and div's survive. `extra`
+    ({path: text}) joins the base commit, for a case that needs a file beside calc.py."""
     repo = new_repo()
-    put(repo, {"calc.py": CALC_BASE, "test_calc.py": SUITE})
+    files = {"calc.py": CALC_BASE, "test_calc.py": SUITE}
+    files.update(extra or {})
+    put(repo, files)
     commit(repo, "Base: add and mul")
     topic(repo, "feat", {"calc.py": CALC_SUB_DIV, "test_calc.py": SUITE_WITH_SUB}, "Add sub and div")
     return repo
@@ -407,14 +411,18 @@ def untested_of(out):
     return ["%s:%s" % pair for pair in UNTESTED.findall(out)]
 
 
-def assert_no_mutant_ran(case, code, out, err, not_run):
-    """A run in which every mutant is not_run exits 1 and prints one `no mutant ran:` line, which names the count not run.
-    One shared step for every case of that run, so the rule is stated once."""
+def assert_no_mutant_ran(case, code, out, err, not_run=None, cause=None):
+    """A run in which no mutant ran exits 1 and prints one `no mutant ran:` line. With `not_run`, the line names that count
+    (a run every mutant of which is not_run). With `cause`, the line names the cause (a run that stopped before any mutant
+    ran has no count). One shared step for every case of that run, so the rule is stated once."""
     case.assertEqual(code, 1, "a run in which no mutant ran must exit 1, got exit %d\n%s%s" % (code, out, err))
     lines = NO_MUTANT.findall(out)
     case.assertEqual(len(lines), 1, "want one `no mutant ran:` line, got %d in:\n%s" % (len(lines), out))
-    case.assertRegex(lines[0], r"(?<!\d)%d(?!\d)" % not_run,
-                     "the `no mutant ran:` line must name the %d mutants not run:\n%s" % (not_run, lines[0]))
+    if not_run is not None:
+        case.assertRegex(lines[0], r"(?<!\d)%d(?!\d)" % not_run,
+                         "the `no mutant ran:` line must name the %d mutants not run:\n%s" % (not_run, lines[0]))
+    if cause is not None:
+        case.assertIn(cause, lines[0], "the `no mutant ran:` line must name the cause %r:\n%s" % (cause, lines[0]))
 
 
 def verdicts_of(out):
@@ -576,6 +584,27 @@ class ChangedTests(unittest.TestCase):
         self.assertEqual((killed, ran), (0, 0), "no mutant ran: the share reads 0/0")
         self.assertIsNone(percent, "0/0 must not print a percentage: UNKNOWN never reads as a rate")
         self.assertEqual(untested_of(out), [], "no mutant, no untested line")
+
+    def test_a_refused_install_exits_1_and_names_the_deps_cause(self):
+        repo = partial_repo()
+        facts = partial_facts(repo)
+        self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
+        code, out, err = changed_run(repo, dict(CHANGED, install=[PY, "-c", "pass"]))
+        assert_no_mutant_ran(self, code, out, err, cause="no lockfile")
+
+    def test_a_checkout_refused_by_its_install_link_exits_1_and_names_the_checkout_cause(self):
+        repo = partial_repo(extra={"package-lock.json": LOCK_TEXT})
+        facts = partial_facts(repo)
+        self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
+        code, out, err = changed_run(repo, dict(CHANGED, install=[PY, "-c", "pass"], link="calc.py"))
+        assert_no_mutant_ran(self, code, out, err, cause="checkout failed")
+
+    def test_an_error_in_the_replay_exits_1_and_names_the_error(self):
+        repo = partial_repo()
+        facts = partial_facts(repo)
+        self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
+        code, out, err = changed_run(repo, dict(CHANGED, classify="no-such-classifier"))
+        assert_no_mutant_ran(self, code, out, err, cause="the replay raised KeyError")
 
     def test_limit_caps_the_mutants_made_and_jobs_and_timeout_are_accepted(self):
         repo = partial_repo()
@@ -1202,13 +1231,18 @@ class ReplayBaseWiringTests(unittest.TestCase):
 
 CATCH_STEP = "Report the catch share of the changed lines"
 NO_MUTANT_OUTPUT = "catch share: 0/0\nno mutant ran: 4 mutants not run, no changed suite reaches calc.py\n"
+# A tool that crashes on an uncaught error exits 1 too, and its output holds no `no mutant ran:` line.
+TRACEBACK_OUTPUT = ("Traceback (most recent call last):\n"
+                    "  File \"mutate_guard.py\", line 1, in <module>\n"
+                    "KeyError: 'no-such-classifier'\n")
 
 
 class ReportSummaryTests(unittest.TestCase):
     """The catch-share step of actions/mutation-report/action.yml, run as the runner runs its script (bash with -e and
     pipefail, from a file), with a fake tool in place of hooks/mutate_guard.py. The fake prints `output` and exits `code`.
     The tool's exit code and its output are the contract the step reads: a run that exits 1 for no mutant ran prints its
-    `no mutant ran:` line, and the job summary must show that line."""
+    `no mutant ran:` line, and the job summary must show that line. The step itself is a report, never a check, so it
+    exits 0 whatever the tool exits."""
 
     def summary_for(self, code, output):
         """The job summary the step writes when the tool prints `output` and exits `code`."""
@@ -1235,6 +1269,9 @@ class ReportSummaryTests(unittest.TestCase):
                 text = handle.read()
         self.assertIn("### Mutation catch share", text,
                       "the step wrote no job summary; its output:\n" + proc.stdout + proc.stderr)
+        self.assertEqual(proc.returncode, 0,
+                         "the step exits 0 whatever the tool exits, got %d; its output:\n%s%s"
+                         % (proc.returncode, proc.stdout, proc.stderr))
         return text
 
     def test_a_run_that_exits_1_shows_its_no_mutant_ran_line_in_the_summary(self):
@@ -1246,6 +1283,12 @@ class ReportSummaryTests(unittest.TestCase):
         summary = self.summary_for(1, NO_MUTANT_OUTPUT)
         self.assertNotIn("UNKNOWN: the report did not run", summary,
                          "the job summary reads UNKNOWN for exit 1:\n" + summary)
+
+    def test_an_exit_1_with_no_no_mutant_ran_line_reads_unknown_in_the_summary(self):
+        self.assertIsNone(NO_MUTANT.search(TRACEBACK_OUTPUT), "the fixture: the output holds no `no mutant ran:` line")
+        summary = self.summary_for(1, TRACEBACK_OUTPUT)
+        self.assertRegex(summary, r"(?m)^UNKNOWN: .*exit 1",
+                         "an exit 1 with no `no mutant ran:` line must read UNKNOWN in the job summary:\n" + summary)
 
     def test_a_run_that_exits_2_still_reads_as_the_report_did_not_run(self):
         summary = self.summary_for(2, "ERROR no such profile\n")
