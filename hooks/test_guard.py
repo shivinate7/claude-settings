@@ -35098,8 +35098,8 @@ for _label, _check in (
 def hu_stub_check(module, text):
     """install-hooks-whole (decision install-hooks-whole, item 10): with `module` replaced by `text`, a flagged
     session's call is refused as guard-crash, never allowed. The intact copy is the control: it refuses the same
-    call for the unread handoff, so the fixture is shown to bite. `text` imports, so the guard's load check passes
-    and the fault shows only when the call is judged."""
+    call for the unread handoff, so the fixture is shown to bite. The guard's load check refuses a stub that lacks
+    what reread_check takes from it, so the fault shows at load, before any call is judged."""
     cfg = os.path.join(ROOT, "hu-copy")
     hu_files(cfg, flag=True, handoff=True)
     control = _hu_copy_run(_guard_copy("hu-stub-intact", None), cfg)
@@ -35116,9 +35116,9 @@ def hu_stub_check(module, text):
     return True, "%s replaced: a flagged call is refused as guard-crash" % module
 
 
-# A precompact_handoff that imports and names nothing: the guard's load check reads only reread_check.ph, so it
-# passes, and unread_handoff then raises on the missing names. A reread_check that imports but has no unread_handoff
-# raises in the judge (guard.py, the handoff-unread call). Each must refuse, never allow.
+# Two stubs that the guard's load check must refuse at load, never allow. A precompact_handoff that imports and names
+# nothing: reread_check nulls its ph (PH_NAMES), so the load check raises. A reread_check with no callable
+# unread_handoff: the load check raises the same way. Each must refuse a flagged call as guard-crash.
 for _label, _check in (
     ("handoff-unread: install-hooks-whole: a precompact_handoff that imports but names nothing refuses a flagged call as guard-crash",
      lambda: hu_stub_check("precompact_handoff.py",

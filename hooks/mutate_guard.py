@@ -2571,8 +2571,8 @@ MUTATIONS = [
      "guard", 'override: a refusal an override lifts ends with the main override line'),
     ("override line: the missing-module deny stops saying that no override lifts it",
      '"then retry. No override lifts this refusal, because the failed guard cannot check "\n'
-     '                    "the acts that no override lifts. "\n'
-     '                    "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
+     '            "the acts that no override lifts. "\n'
+     '            "(decision guard-hooks-fail-closed, a guard with a missing part refuses the call)")}}))',
      '"then retry.")}}))',
      "guard", 'override: a missing-module deny says that no override lifts it'),
     ("override line: the Opus spawn ask no longer names the Opus word",
