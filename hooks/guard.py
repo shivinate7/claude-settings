@@ -3392,14 +3392,15 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 
 def step_up_reason(prompt: str, role, model) -> str:
-    model = spawn_model(model)[0].lower()
+    named = str(model or "").lower()
     for kind, n in brief_markers(prompt):
         kind = kind.lower()
-        if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
+        if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in named:
             return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
-        if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
+        if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in named and "opus" not in named:
             return "Reviewer round 3 runs on Sonnet. Spawn it with model sonnet."
-    if role == "builder" and builder_third_round(prompt) and "opus" not in model:
+    # Only the builder's rule reads the env value: a reviewer with no model must still name Sonnet, as its agent file pins haiku.
+    if role == "builder" and builder_third_round(prompt) and "opus" not in spawn_model(model)[0].lower():
         return "Builder round 3 runs on Opus. Spawn it with model opus."
     return ""
 
