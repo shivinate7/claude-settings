@@ -17134,6 +17134,35 @@ chained_ask("cap data: a JSON payload naming a sed -i on a settings file with th
    "printf '%s' '" + json.dumps({"tool_input": {"command": "sed -i s/x/y/ " + PROJ_SETTINGS + " "
    + CAP_KEY}}) + "' | python hooks/guard.py", cwd=NOGIT, carries=("agent-model-cap",))
 
+# A SETTINGS WRITE OUTSIDE A DATA BODY. A python data body is not run, but a redirect outside it still writes the
+# file, and the cap text inside the body is still what the file gets. Both forms below are an ask-alone deny,
+# because each chains the write with the python command: a brace group whose redirect names the settings file,
+# and an `exec >` that sends the rest of the shell there.
+CAP_DATA_BODY = "import json\nprint(json.dumps({\"env\": {" + json.dumps(CAP_KEY) + ": " + json.dumps(OPUS) + "}}))\n"
+chained_ask("cap data: a brace group that redirects onto a settings file, around a python data body with the cap text, "
+   "denies as a chained ask command",
+   "{\npython3 - <<'PY'\n" + CAP_DATA_BODY + "PY\n} > " + PROJ_LOCAL, cwd=NOGIT, carries=("agent-model-cap",))
+chained_ask("cap data: an exec onto a settings file, then a python data body with the cap text, denies as a chained "
+   "ask command",
+   "exec > " + PROJ_LOCAL + "\npython3 - <<'PY'\n" + CAP_DATA_BODY + "PY", cwd=NOGIT, carries=("agent-model-cap",))
+# A spawner the deny names do not list. asyncio.create_subprocess_shell runs a shell, so a body that calls it
+# writes the file, and the write asks.
+sh("cap data: a python data body that calls asyncio.create_subprocess_shell on a settings write asks",
+   "python3 - <<'PY'\nimport asyncio\nasyncio.create_subprocess_shell('echo " + CAP_KEY + "=" + OPUS + " > "
+   + PROJ_LOCAL + "')\nPY", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+
+# A FALSE ALARM. A method or a module attribute that only shares a prefix with a name that runs (`write`, `copy`,
+# `exec`) runs nothing from the body, so the incident body that calls it stays data. Each row adds one such call.
+sh("cap data: the incident shape whose body calls sys.stdout.write allows",
+   "python3 - <<'PYEOF'\n" + INCIDENT_BODY + "sys.stdout.write(guard.cap_change(cmd))\nPYEOF",
+   "allow", cwd=NOGIT)
+sh("cap data: the incident shape whose body calls d.copy() allows",
+   "python3 - <<'PYEOF'\n" + INCIDENT_BODY + "args = {\"cmd\": cmd}.copy()\nPYEOF",
+   "allow", cwd=NOGIT)
+sh("cap data: the incident shape whose body reads sys.executable allows",
+   "python3 - <<'PYEOF'\n" + INCIDENT_BODY + "print(sys.executable)\nPYEOF",
+   "allow", cwd=NOGIT)
+
 # A quoted project settings path with a space asks. Ask-alone chains the tee, cp and Out-File forms
 # with a command, so those deny. The lone Set-Content asks. Rule 8 reads the whole command for the cap
 # key, so each write names it on its line. Only the value is pinned.
