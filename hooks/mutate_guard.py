@@ -3185,6 +3185,7 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_branch_worktree.py": ["branch-worktree"],
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
+    "hooks/guard_argv.py": ["argv"],
 }
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",

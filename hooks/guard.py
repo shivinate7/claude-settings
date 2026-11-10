@@ -128,6 +128,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        that cannot be read, or a `$NAME` destination, allows the push and
                        logs `push-batch-unread`. (decision batch-freeze-lane-set)
   env-file             deny. Any read or write of an environment file.
+  process-args         deny. A command that prints other processes' full arguments, which can hold a
+                       secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
+                       `ps -x`, `pgrep -a` or `-l` with `-f`, `pstree -a`, `top -c`, a command or `<`
+                       redirect that reads `/proc/<pid|glob|$var>/cmdline`, and a PowerShell or `wmic`
+                       read that selects `CommandLine`. Pid and name forms pass. Read from the parsed
+                       command words, also inside wrappers, `bash -c` and `$(...)`, so quoted text and a
+                       heredoc body pass. (process-args-guard)
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
@@ -424,7 +431,7 @@ if sys.path[:1] != [_HERE]:
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
-                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
+                   "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
 # (the repo copy, or an old file from before the stamp). A set of all placeholders matches, which is the
@@ -522,6 +529,8 @@ while True:
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
             lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
+        _loading = "guard_argv"
+        from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
@@ -4424,6 +4433,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 label = gh_write_of(seg) if seg.strip() else ""
                 if label:
                     refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
+
+    # 5c. A command that prints other processes' full arguments (rule process-args). Judged per
+    # command word from the parsed segments, so quoted text and a heredoc body never fire it.
+    matched = process_args_hit(raw, stripped)
+    if matched:
+        refuse(tool, "deny", "process-args", PROCESS_ARGS_REASON, matched)
 
     # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
     # could not run. Judged per segment from the command word, so quoted text never fires it.
