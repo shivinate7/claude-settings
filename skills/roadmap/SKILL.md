@@ -185,7 +185,7 @@ Triage disposes each stalled step by writing, on the record branch, one of three
 `{"why": "<text>", "decides": "owner" | "coordinator" | "triage", "at": "<ISO time with a zone>", "by":
 "triage"}`.
 A valid `paused` field moves the step off the stalled list and into the page's Paused list. A wrong-shaped `paused` field keeps the
-step stalled and lists it as a bad pause. That means a missing or empty `why`, a `decides` outside the set, an `at`
+step stalled and lists it as a bad pause. That means that a missing or empty `why`, a `decides` outside the set, an `at`
 with no zone, or a `by` other than `triage`. Resume is not stored: a live lane makes the step not stalled.
 
 ## Mockups
