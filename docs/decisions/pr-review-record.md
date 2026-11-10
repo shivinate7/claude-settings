@@ -66,7 +66,7 @@ The review a changed head owes. Coordinator pick (owner session coordinator, 202
 
 - A chain gets one fix check, except a merge of the base into the fixed head after that fix check PASSed (see the last bullet under The limits).
 - The PR gets one fresh full review at the live head when any of these holds:
-  - the newest record holds a fix check, unless it PASSed on a merge of the base into the fixed head with Guard or check `no`, which closes the review;
+  - the newest record holds a fix check, unless that fix check PASSed on a merge of the base into the fixed head. Such a PASS closes the review for any change whose rounds are complete, with Guard or check `yes` or `no` (triage ruling, 2026-11-10 13:40 CST. Process-only, not the owner's words);
   - a fix check failed;
   - a round read an older head than the live one;
   - the record was made or edited by hand;
