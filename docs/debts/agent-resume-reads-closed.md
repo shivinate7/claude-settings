@@ -4,6 +4,6 @@
 
 **Where.** `hooks/stall_watch.py`, `scan_jobs`: `done` holds the closed ids for the whole transcript, and `scan_jobs` drops every id in it.
 
-**Decision.** stall-watch (a stalled background command is reported; a verdict check stops on silence).
+**Decision.** stall-watch (a stalled background command is reported; a verdict check is to stop on silence).
 
 **Retire.** An agent closes only by a notice or TaskStop newer than its latest launch or SendMessage resume record. A resumed agent that goes quiet is listed, and a closed agent with no resume stays unlisted. A case in `hooks/test_stall_watch_stop.py` shows both: a TaskStop, a resume under the same id, and a quiet transcript.

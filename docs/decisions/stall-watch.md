@@ -1,4 +1,4 @@
-# A stalled background command is reported; a verdict check stops on silence
+# A stalled background command is reported; a verdict check is to stop on silence
 
 ## The ruling
 
