@@ -1,11 +1,11 @@
 {
   "title": "Fix two real gaps the delete pass kept: agent-end log loses a row; install checkout flake",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 1.3,
   "owner": "coordinator",
   "why": "Coordinator, 14:32 CST Nov 7.",
-  "note": "Title read from the slug; the coordinator was asked for a one-line goal.",
-  "lane": "session_013NEJL38tqHPZrQNHNdo9ba",
-  "updatedAt": "2026-11-07T14:33:00-06:00"
+  "note": "Title read from the slug; the coordinator was asked for a one-line goal. Triage sweep 04:49 CST Nov 10: back to ready. Lane session_013NEJL38tqHPZrQNHNdo9ba is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main.",
+  "lane": null,
+  "updatedAt": "2026-11-10T04:49:00-06:00"
 }

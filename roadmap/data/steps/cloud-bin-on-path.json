@@ -1,11 +1,11 @@
 {
   "title": "In a cloud session, wait-pid and verdict run by bare name, as the printed remedies say",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 645,
   "owner": "coordinator",
-  "lane": "session_013NEJL2k68U41yt5xBhfp93",
+  "lane": null,
   "why": "The stall watcher (hooks/stall_watch.py) prints `wait-pid <pid>` as its remedy, but in a cloud container ~/.claude/bin is not on PATH, so the bare command fails with command not found and the wait ends at once while the job runs on. A builder also could not find `verdict` (lane notes-fix-large-2, 07:15 CST Nov 8).",
-  "note": "Done check: in a cloud session, `command -v wait-pid` and `command -v verdict` succeed, or every remedy that names them prints the path install.sh writes; a test pins whichever is chosen. A fix for a found gap (item 410 a). Slug and title by triage. Doing 09:57 CST Nov 8 in lane cloud-install (session_013NEJL2k68U41yt5xBhfp93), which takes cloud-install-code-check-config and cloud-bin-on-path together (coordinator, 09:55 CST). Sighting (lane draft-pr-guard-text-false-alarm, 11:23 CST Nov 8): bare `wait-pid` and `verdict` gave rc 127 in a cloud lane, and the run swallowed the error, so it read as an instant return.",
-  "updatedAt": "2026-11-08T11:24:00-06:00"
+  "note": "Done check: in a cloud session, `command -v wait-pid` and `command -v verdict` succeed, or every remedy that names them prints the path install.sh writes; a test pins whichever is chosen. A fix for a found gap (item 410 a). Slug and title by triage. Doing 09:57 CST Nov 8 in lane cloud-install (session_013NEJL2k68U41yt5xBhfp93), which takes cloud-install-code-check-config and cloud-bin-on-path together (coordinator, 09:55 CST). Sighting (lane draft-pr-guard-text-false-alarm, 11:23 CST Nov 8): bare `wait-pid` and `verdict` gave rc 127 in a cloud lane, and the run swallowed the error, so it read as an instant return. Triage sweep 04:49 CST Nov 10: back to ready. Lane session_013NEJL2k68U41yt5xBhfp93 is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main.",
+  "updatedAt": "2026-11-10T04:49:00-06:00"
 }
