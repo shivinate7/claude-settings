@@ -66,17 +66,25 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    run: `bin/ci-job` reads its steps from the workflow, so it cannot miss one. A lane never runs a whole
    CI job (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job). The batch form below is the
    exception, for the batch's head only.
-   **The batch form.** When the target is an integration branch whose name starts `batch-`,
-   `--lane-lint` runs the full checks job, not only lint. It also runs the guard mutation anchor check
-   (`python3 hooks/mutate_guard.py --anchors`) and the Windows guard slice (the slice step of job
-   `checks-windows-guard`). Its budget is 3600 s (`BATCH_SECONDS`), not the 1200 s lint budget. The
-   runner starts it in the background, with `run_in_background`, because one Bash call stops at 600 s.
-   When the run ends, the runner reads the verdict.
-   - A step that ends FAIL or UNKNOWN is re-run on `origin/<base>`. A line `red on main too` or
-     `unknown on main too` means that the step is red or unknown on main as well. The run goes on, with no
-     stop. Read that line before you drop a lane for the step.
-   - A FAIL only on the head stops the run. An UNKNOWN only on the head stops it, unless
-     `--lint-unknown-ok "<reason>"` is given. A timeout at the 3600 s budget is an unknown that the flag does not lift.
+   **The batch form.** `--lane-lint` takes the batch route only for an integration branch named `batch-`
+   plus a digit (`batch-73`). It normalises the target first, stripping `refs/heads/`,
+   `refs/remotes/origin/` and `origin/`. A bare sha, or a name that does not resolve to a branch, takes the
+   lint route, and so does a lane branch such as `batch-push-full-checks`. Every run prints one line naming
+   the route and why. The batch route runs the full checks job, not only lint. It also runs the guard
+   mutation anchor check (`python3 hooks/mutate_guard.py --anchors`) and the Windows guard slice (the slice
+   CI step of job `checks-windows-guard`). Its budget is 3600 s (`BATCH_SECONDS`), not the 1200 s lint
+   budget. The batch runner runs it from a session that is not worktree-isolated, as a background Bash call
+   with `run_in_background` and `timeout` 7200000 ms. The default background timeout, 1800 s, is under the
+   3600 s budget. When the run ends, the runner reads the verdict.
+   - A CI step that ends FAIL or UNKNOWN on the head is re-run on `origin/<base>`.
+   - A head FAIL is excused, with the line `red on main too`, only when main also FAILs and every failing
+     case name on the head is also a failing case name on main. A failing case name is a unittest
+     `FAIL: <case>` or `ERROR: <case>` line in the CI step's own log section. Otherwise, or when either side
+     gives no case names, the FAIL stops the run. Read a `red on main too` line before you drop a lane for
+     the CI step.
+   - An UNKNOWN on the head stops the run, whatever main reads, unless `--lint-unknown-ok "<reason>"` is
+     given. An unknown on main too prints `unknown on main too` and does not lift the stop. Each lift is
+     printed. A timeout at the 3600 s budget is an unknown that the flag does not lift.
    - A Retire check (check_debt_retire) that times out at 600 s prints a `Retire-run:` cite remedy, and
      the run goes on. Add the cite to the PR body's last paragraph: `Retire-run: <slug> -- <run URL>`,
      where the run is a green run of that check on the PR head or a commit above it. A cite clears an
