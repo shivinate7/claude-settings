@@ -11,7 +11,8 @@ refuses an Input Needed line that cites a closed item. The rules the cases pin:
   "**Items**: 214", "item(s) 214", "item **214**", "items:" then a bullet list whose bullets may carry text
   ("> - 214: pick a or b"), a label such as "Items waiting on you:" before such a list, "Cockpit item 214",
   "item 214 a", "item 1 of 3" (cites 1). Not in Done or Next, not inside backticks or quotes, not PR numbers
-  ("PR 214", "#214"), not a date ("item 2026-11-10"), not a bare number, not a list marker ("> 1. 214" cites 214).
+  ("PR" or "#" before the number), not an ISO date after "item", not a bare number, not a list marker
+  ("> 1. 214" cites 214).
 - Not a cite, though a number follows the item: a count ("214 and 5 others", "381, 2 of which"), a clock time,
   a percent, an hour count, an ordinal, a fraction ("11/10"), a dash option ("214 - 3 options"), a blockquoted
   bullet option after the item ("item 214" then "> - 3 options").
@@ -60,7 +61,7 @@ PREFIX_2140 = ((2140, "closed"), (214, "open"))
 FORTY = ((214, "closed"),) + tuple((100 + i, "open") for i in range(39))
 CLOSED_RANGE = ((214, "closed"), (215, "open"), (216, "closed"))  # 215 is the middle of the range, an accepted gap
 CLOSED_2 = ((2, "closed"), (214, "open"))
-DATE_PARTS = ((2026, "closed"), (10, "closed"), (11, "closed"))  # every number of "2026-11-10" closed
+DATE_PARTS = ((2026, "closed"), (10, "closed"), (11, "closed"))  # each part of an ISO date closed
 CLOSED_PAIR = ((214, "closed"), (381, "closed"), (383, "open"))
 CLOSED_1_OF_3 = ((1, "closed"), (3, "open"))  # 3 stays open, so the M of "item 1 of 3" is not pinned
 NUMBERED = ((1, "closed"), (2, "closed"), (214, "closed"), (381, "closed"))
@@ -361,7 +362,8 @@ class ClosedItemCiteFormTests(ClosedItemFixture):
         self.assert_refused(out, [2], "the item 2 in the diff plan, item 2 closed")
 
     def test_item_date_is_no_cite(self):
-        # Catches: "item 2026-11-10" read as item 2026 (and 11 or 10, in a range), so a closed 2026 refuses the Stop.
+        # Catches: an ISO date after "item" read as item 2026 (and its month or day, in a range), so a closed 2026
+        # refuses the Stop.
         # Old code reads 2026 as a cite, so this case is red there.
         repo = copy_repo("date-parts", DATE_PARTS)
         self.assertEqual(copy_status(repo, 2026), "closed", "the fixture copy must hold item 2026 closed")
