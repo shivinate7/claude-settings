@@ -1,13 +1,13 @@
 {
   "title": "A PR closes as replaced the moment the PR that replaces it opens",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 953,
   "owner": "coordinator",
   "why": "Old PRs left open until their replacement merged built a backlog the owner called \"so massive\" (owner, 21:27 CST Nov 9).",
-  "note": "Owner ruling in chat, 21:27 CST Nov 9, relayed by the coordinator 21:30 CST: \"u rly need to be closing old prs as soon as new ones that replace them come about else we end up how we are now which is so massive \u2014 i think before wed close prs only after the newer one merged but does that rly make sense\". Scope: (1) rewrite in place the close-after-merge text (skill ci-hygiene step 8, \"When the integration PR merges, each lane PR closes as replaced\"; decision session-tiers, the line about replaced drafts) to: a PR closes as replaced when the PR that replaces it opens; its branch stays, and it reopens if the replacement is dropped. (2) Mechanize: the act that opens a replacing PR closes the PR it names, and the batch runner's wake closes any open PR that an open PR names as replaced. Meanwhile the coordinator closed #919, #1143, #1378, #1595, #1804, #1808, #1847, #1855, #1868 and #1931 (replacers open). Related: steps pr-backlog-clear and close-replaced-prs-1103 (one-off close lists).",
-  "updatedAt": "2026-11-09T21:28:00-06:00",
-  "lane": null,
+  "note": "Owner ruling in chat, 21:27 CST Nov 9, relayed by the coordinator 21:30 CST: \"u rly need to be closing old prs as soon as new ones that replace them come about else we end up how we are now which is so massive \u2014 i think before wed close prs only after the newer one merged but does that rly make sense\". Scope: (1) rewrite in place the close-after-merge text (skill ci-hygiene step 8, \"When the integration PR merges, each lane PR closes as replaced\"; decision session-tiers, the line about replaced drafts) to: a PR closes as replaced when the PR that replaces it opens; its branch stays, and it reopens if the replacement is dropped. (2) Mechanize: the act that opens a replacing PR closes the PR it names, and the batch runner's wake closes any open PR that an open PR names as replaced. Meanwhile the coordinator closed #919, #1143, #1378, #1595, #1804, #1808, #1847, #1855, #1868 and #1931 (replacers open). Related: steps pr-backlog-clear and close-replaced-prs-1103 (one-off close lists). Owner chat 21:29 CST, relayed 21:33 CST: \"i mean prs that are now stacked as another pr can still be considered closed and if the stacked pr fails then they reopen? unsure but ik for a fact the amt of open prs we have now is not best practices\". Added scope: a PR carried in full by another open PR (its head is an ancestor of that PR's head) also closes, and reopens if the carrier is dropped.",
+  "updatedAt": "2026-11-09T21:30:00-06:00",
+  "lane": "session_013NEJL2ESvfj9vmLqdMhDQk",
   "blockedBy": null,
   "paused": null
 }

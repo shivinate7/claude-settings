@@ -1,0 +1,15 @@
+{
+  "title": "A draft PR that no live session owns and no doing step names closes as stale",
+  "phase": "now",
+  "status": "todo",
+  "order": 954,
+  "owner": "coordinator",
+  "why": "The open-PR count was 763 at 21:00 CST Nov 9; the owner wants it down to live work (owner chat 21:27 and 21:29 CST: \"the amt of open prs we have now is not best practices\").",
+  "note": "Starts after close-replaced-at-open. Goal: open PRs are live work only. Test: no live (unarchived) session owns the draft PR, and no step marked doing names it. Then it closes as stale with a comment that names why; its branch stays, and it reopens on need. The first pass is a preview list for the coordinator's read before any close. Filed from coordinator 21:34 CST, corrected 21:35 CST (dropped a 7-day no-commit test as an unmeasured fixed value).",
+  "updatedAt": "2026-11-09T21:30:00-06:00",
+  "lane": null,
+  "blockedBy": [
+    "close-replaced-at-open"
+  ],
+  "paused": null
+}
