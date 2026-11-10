@@ -110,6 +110,15 @@ the log of `origin/main` (`--main-branch` names another). It marks each named op
 #N", where #N is the pull request whose merge put the commit on main. It never closes a step: triage
 closes it, from the upkeep list. A trailer that names no step is listed there too.
 
+A step has also landed when the live file's `landedPulls` holds a row for it. The row is
+`{"number": int, "branch": str, "head"?: sha, "merged"?: bool}`. It counts when its branch is the step id or
+`lane/<id>`, the step is open, and one more test holds. Either `merged` is JSON true, or `head` (7-64 hex) is an
+ancestor of main (`git merge-base --is-ancestor`). The build marks that step "Landed in #N" with the row's number.
+A failed git read, no main ref or a row of any other shape marks nothing; a malformed row is counted in
+`skipped`. The publisher (triage) must fill `landedPulls` from GitHub: the closed pull requests of the last 14
+days, each with its head ref, head sha and merged flag. A merge that drops the `Step:` trailer, or a lane that
+closes its pull unmerged, then still reads right.
+
 ## Refusals
 
 - A file under `roadmap/`, `briefs/`, `plans/` or `handoffs/` on the record branch holds a git
@@ -130,7 +139,7 @@ exits 1. The printed line tells the two apart.
 build.py also exits 1 on a stalled step. A `doing` or `active` step with no live lane and no open PR is
 stalled until it has a disposition (the same test as the in-progress upkeep row, so the two never
 disagree). It prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in
-#N)` when a `Step:` trailer is on main, writes the page, then exits 1. A landed feel-fix with no valid
+#N)` when a `Step:` trailer is on main or a `landedPulls` row proves it, writes the page, then exits 1. A landed feel-fix with no valid
 device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` on
 a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A session whose status
 bucket is completed or failed has ended and holds no step; an idle or review ready one still does. The tag value is
@@ -154,7 +163,7 @@ One function, `next_act`, gives each ready step and each stalled step `id`, `act
 step's act is `start lane`. The owner is the step's `owner` field, else `coordinator`.
 A ready step more than `READY_AGE_LIMIT_HOURS` (24, unmeasured) old prints
 `ready over limit: <id> (start lane; owner <owner>; age <N>h)`, and build.py exits 1, as on a stalled step. A step
-with no age is never over. A `todo` or `ready` step that has landed on main (a `Step:` trailer) is not listed: it has
+with no age is never over. A `todo` or `ready` step that has landed on main (a `Step:` trailer or a `landedPulls` row) is not listed: it has
 no lane to start, and the landed upkeep rows name it. A `todo` or `ready` step with a missing or wrongly cased phase
 prints `ready not started: unknown (<id> has no usable phase)` and is not listed. Every build prints
 `ready not started count: <N>`, zero included, or `ready not started count: unknown (<why>)` when a phase is unusable.
@@ -210,7 +219,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
   whose status is none of `todo`, `ready`, `doing`, `active` or `done` is listed as `<id> (unknown status
   "<status>")`. Each other entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)` when
-  a `Step:` trailer is on main. Triage sets each step back. The red line prints a `stalled step:` line
+  a `Step:` trailer is on main or a `landedPulls` row proves it. Triage sets each step back. The red line prints a `stalled step:` line
   for each entry except an unknown-status one, built from the same test. The row reads one `unknown (<why>)` entry,
   never an empty list, in these cases:
   - `--live` is missing or unreadable, or has no `sessions` list;
@@ -256,7 +265,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
     has no bucket is never listed;
   - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
-    `Step:` trailer is on main, or its status is `done`;
+    `Step:` trailer is on main, a `landedPulls` row proves it, or its status is `done`;
   - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
     draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
     releases the lane. A ready pull always holds it. A failed git read reads as not landed;
