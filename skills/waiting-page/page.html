@@ -940,13 +940,14 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .reline { margin: 0; font-size: .90625rem; color: var(--muted); overflow-wrap: anywhere; }
 /* The Ask box. Its narrow form (the hint on its own line, Add to list at the start and Send ask at the end of the next) reads the box's own
    width in em: 28.375em is the box in a 520px window at 100% text. In that form Send ask drops under Add to list only when the two no
-   longer fit side by side. The hint keeps three lines in em, so typing moves no button at any text size. */
+   longer fit side by side. The hint keeps three lines in em, so typing moves no button at any text size. A reply form is an .askform
+   too; it keeps main's 520px rules and its own rules below. */
 @container askf (width < 28.375em) {
-  .askform > .askrow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; }
-  .askform > .askrow .askhint { flex: 1 1 100%; min-height: max(66px, 3 * 1.55em); }
-  .askform > .askrow .slot { flex: 1 1 100%; order: 1; }
-  .askform > .askrow .btn { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; white-space: normal; }
-  .askform > .askrow .btn.fixw { grid-template-columns: minmax(0, max-content); }
+  .askform:not(.replyform) > .askrow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; }
+  .askform:not(.replyform) > .askrow .askhint { flex: 1 1 100%; min-height: max(66px, 3 * 1.55em); }
+  .askform:not(.replyform) > .askrow .slot { flex: 1 1 100%; order: 1; }
+  .askform:not(.replyform) > .askrow .btn { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; white-space: normal; }
+  .askform:not(.replyform) > .askrow .btn.fixw { grid-template-columns: minmax(0, max-content); }
 }
 /* A reply form in the same box keeps the arrangement the 520px rule gives it: the hint on its own line, then Close at the start and
    Send reply at the end of one line. Where those two no longer fit side by side, Send reply takes the first line and Close the next. */
