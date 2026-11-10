@@ -8,14 +8,20 @@ recommended pick:
 
 1. Gate the named act in the receiving session, before the auto-mode classifier.
 2. A fixed grant word, with its act catalogue in code. No free-text grant.
-3. The first catalogue is `merge <pr>` and `self-edit`.
-4. `self-edit` reaches the target's agents. `merge` stays with the batch runner, never its agents.
+3. The first catalogue is `merge <pr>` and `self-edit`. Open for the owner's word: the plan's measurements (2026-11-06) show `self-edit` gates nothing and `merge <pr>` is covered by decision `standing-merge-grant`. The plan recommends the lane's `Agent` spawn first.
+4. `self-edit` reaches the target's agents. `merge` stays with the batch runner, never its agents. Moot while `self-edit` gates nothing.
 5. Probe the `PreToolUse` hook gate first, the mod `tool.check` gate second.
 6. Design A, the server-attested pointer, only. Design B only if Design A's computer probes fail.
 7. Keep the cloud merge allow rule (`merge/cloud_allow.json`) until the probe shows why batch
-   runner 8 was refused.
+   runner 8 was refused. Waits on ruling 3: no merge refusal is on record after 2026-11-01.
 
 Build step 1 is a probe in one session. Nothing past it is built until the probe reads back.
+
+Older rulings a build would change. Nothing is built, so none changes now. A build that adds the grant word rewrites each sentence in place, in the same change:
+
+- Decision `relayed-grant-read-from-page`: "Auto mode trusts only words typed in the session's own chat." Design A has a session read the owner's typed event in another session.
+- Decision `standing-merge-grant`: "It holds no grant of its own." A grant word gives the batch runner a grant of its own.
+- Decision `owner-override`: "An override covers only the session where the owner typed it." A grant word is typed in one session and names another.
 
 Why: the owner had to type a grant again in each session (plan, section "The problem").
 
