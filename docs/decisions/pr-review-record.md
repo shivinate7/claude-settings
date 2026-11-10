@@ -11,6 +11,13 @@ Owner, 2026-11-01 04:26 CST, waiting-page item 113 a. Source: the brief. The wai
 
 Source: `waiting/items/builder-probe-round-4.json` on the roadmap branch. That grant covers only that change (rule `outcomes-grant-covers-named-act`). The coordinator's brief for step `record-granted-round` lets the record hold a granted round.
 
+Owner, 2026-11-10 14:07 CST, typed in the retrospective session. The coordinator relayed it at 14:08 CST. Words: "i agree on letting it survive a clean merge where batch ci sees the problem rather than asecond review i agree it shd be mechanical tooo"
+
+- A clean merge of main keeps a review record valid. The merge tool proves the merge mechanically.
+- Batch CI catches what the merge breaks.
+- A conflicted merge after a PASS fix check takes one more fix check (a chain).
+- Any other difference keeps today's rules.
+
 ## The incident
 
 - 2026-10-31 15:31 CDT. The auto-mode classifier refused a `send_message`. It handed banchi PR #1002 to the batch runner as "Merge Without Review".
@@ -41,8 +48,8 @@ CI: read live by merge --reviewed
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed or out of place, or round numbers skip. Nor is it one when a round is above 3 with no `Grant` line, above 4 with one, or short of 4 with one.
-- The newest record for a head counts. A record for an old head is stale.
-- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
+- The newest record for a head counts. A record for an old head is stale, unless a clean merge of main keeps it (The review a changed head owes).
+- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current. A clean merge of main is the one push that keeps them.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
 - The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
 
@@ -62,11 +69,14 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open until round 3 is done, even after a fix check PASSes (item 402 a, owner, 2026-11-08 06:08 CST). The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
 
-The review a changed head owes. Coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads it instead of asking.
+The review a changed head owes. The first three bullets are the owner's ruling of 2026-11-10 14:07 CST, above. The other bullets are a coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads them instead of asking.
 
-- A chain gets one fix check, except a clean merge of the base into the fixed head after that fix check PASSed (see the last bullet under The limits).
-- The PR gets one fresh full review at the live head when any of these holds:
-  - the newest record holds a fix check, unless that fix check PASSed on a merge of the base into the fixed head and the merge meets the rules under The limits. Such a PASS closes the review for any change whose rounds are complete, with Guard or check `yes` or `no` (triage ruling, 2026-11-10 13:40 CST. Process-only, not the owner's words);
+- Owner's ruling. A clean merge of main keeps the record. A record stays valid for a live head that differs from its reviewed head only by clean merges of main (no conflict, the lane's own diff unchanged). Every commit after the record's Head, up to the live head, is a merge commit with two parents. Its second parent is on origin/main. Its tree equals `git merge-tree --write-tree` run on its two parents. The merge tool proves this. The record then reads as it did for its reviewed head. No fix check and no fresh review are owed. Batch CI catches what the merge breaks. Not built (see The limits).
+- Owner's ruling. A conflicted merge of main after a PASS fix check takes one more fix check (a chain). Its prior record must be a PASS that `review_state` accepts. Its reviewed head is that record's Head.
+- Owner's ruling. Any other difference keeps today's rules, below.
+- Coordinator pick. A chain gets one fix check.
+- Coordinator pick. The PR gets one fresh full review at the live head when any of these holds. A clean merge of main adds none.
+  - the newest record holds a fix check, unless its fix check PASSed and the live head is a conflicted merge of main into the fixed head (the chain above);
   - a fix check failed;
   - a round read an older head than the live one;
   - the record was made or edited by hand;
@@ -81,7 +91,6 @@ The review a changed head owes. Coordinator pick (owner session coordinator, 202
 - A round 3 FAIL with net value at or above zero merges (round 3 done rule above).
 - A lane merges origin/main once, after the pending batch lands. It uses an ordinary merge commit. It never replays, rebases or force-pushes.
 - A merge with both test and product conflicts waits for the mixed-merge route, which is on main (decision `builders-cannot-edit-tests`, Builders cannot edit tests, its merge route; owner, 2026-11-08 10:05 CST, waiting-page item 420 pick a; cases in `hooks/test_guard.py`).
-- Any other conflicted merge is not a merge fix check. It needs its own fix check by a reviewer, in place of the fresh full review above.
 
 ## The cost
 
@@ -91,7 +100,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
-- `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. When the newest earlier record holds a PASS Fix check line, it also reads the `--head` commit, and one compare when that commit has two parents whose first is HEAD. It writes nothing. Once the tree check is built, it adds one local `git merge-tree` run on that same path: a process start, no gh call, no file.
+- `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. When the newest earlier record holds a PASS Fix check line, it also reads the `--head` commit, and one compare when that commit has two parents whose first is HEAD. It writes nothing. Not built: the clean-merge survival check reads the commits from a stale record's Head to the live head, and runs one local `git merge-tree --write-tree` per merge commit: a process start, no gh call, no file. It runs at each `merge --reviewed` run, for each open PR whose record is stale. Count unmeasured.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
@@ -109,13 +118,14 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
-- One fix check per record. A second fix on a fixed head starts a new lane at round 1, except a clean merge of the base into that head (below). A conflicted merge gets its own fix check by a reviewer instead. `--fix-check` checks in this order:
+- One fix check per record. A second fix on a fixed head gets the fresh full review in The review a changed head owes, not a fix check. The one exception is a conflicted merge of main after a PASS fix check, which takes one more fix check (the chain). A clean merge takes none. `--fix-check` checks in this order:
   - HEAD must be the Head of the newest earlier record on the PR. Otherwise it refuses (exit 2).
   - If that record has no Fix check line, it accepts the fix check.
   - If that record has a PASS Fix check line, the `--head` commit must have exactly two parents. Its first parent must be HEAD. Its second parent must be on the PR's base branch: the base branch contains it, so GitHub's compare reads ahead or identical. Otherwise it refuses (exit 2).
   - A FAIL Fix check on that record refuses (exit 2).
-  - Not built yet: the PASS record must also read as done under `review_state`, and the `--head` tree must equal git's clean merge of the two parents (`git merge-tree`). A conflicted merge fails that check.
-  - This route came from a coordinator's ask, 2026-11-10 13:03 CST, for roadmap step `fix-check-after-main-merge` (a fix check after a merge of main). Process-only, not the owner's words.
+  - Not built: the parent check cannot yet tell a clean merge, a conflicted merge and any other merge apart. The chain takes a conflicted merge only (`git merge-tree --write-tree` exits 1 on the two parents).
+  - Not built: the prior record must also read as done under `review_state`.
+- Not built: the clean-merge survival in The review a changed head owes. `review_state` reads a record for any other head as stale. The tool does not walk the commits or run the tree check.
 
 ## Lane picks
 

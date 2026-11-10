@@ -26,6 +26,7 @@ Later coordinator rulings, Nov 7:
 - Coordinator, 2026-11-07 13:54 CST: `merge --lane-lint <pr> --integration` sets the `batch` label after a PASS only.
 - Coordinator, 2026-11-07 14:40 CST: a lane whose status bucket is completed or failed is not live. Every other bucket stays live, `review_ready` included; an idle session status is live.
 - Coordinator, 2026-11-07 15:10 CST: design times use the delivery time, 12:33 CST.
+- Owner, 2026-11-10 14:07 CST, relayed by the coordinator at 14:08 CST: "i agree on letting it survive a clean merge where batch ci sees the problem rather than asecond review i agree it shd be mechanical tooo". The rule is in decision `pr-review-record`, The review a changed head owes.
 
 ## The evidence
 
@@ -57,13 +58,11 @@ One ledger. Home: `merge/merge.py`. It extends `merge --reviewed`. It adds no to
 
 Each open PR gets exactly one next act. The tool reads it from GitHub alone. The first match wins:
 
-- Done review record for the live head: `batch`.
+- Done review record for the live head: `batch`. A clean merge of main keeps a record for the live head (decision `pr-review-record`, The review a changed head owes). Not built.
 - Review record open: `lane round n`, n the next round owed. A failed fix check: `lane round 1`.
 - Review record stale, newest record has no Fix check line: fix check.
-- Review record stale, newest record has a Fix check that PASSed: fix check only for a merge of the base. `--fix-check` admits the live head only when it has two parents, its first parent is the record's Head, and its second parent is on origin/main.
-  - Not built yet (step `fix-check-after-main-merge`, a fix check after a merge of main): the record's PASS must also read as done under `review_state`. The head's tree must equal git's clean merge of its two parents (`git merge-tree`).
-  - A conflicted merge is not a merge fix check. It needs its own fix check by a reviewer.
-- Review record stale, in any other case, a failed fix check included: new lane at round 1 (decision `pr-review-record`; rule `roles-review-cap-three`).
+- Review record stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: fix check (a chain, decision `pr-review-record`). Its prior record must be a PASS that `review_state` accepts. Not built.
+- Review record stale, in any other case: the fresh full review at the live head, as decision `pr-review-record` (The review a changed head owes) sets it.
 - Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item.
 - Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event.
 - Based on, or stacked on, #N: blocked on #N.
@@ -108,7 +107,7 @@ Per rule `outcomes-mechanize-rules`:
   - the open-PR list, and the repo's comments since the oldest open PR (one list each);
   - one `issues/<n>/events` list for each PR that reaches the hold rule with the `batch` label, or with a hold label and a valid `Waits on:` line;
   - when a batch line exists, one page (50) of main's runs. A run's jobs are read only when that run did not succeed, plus, for each candidate run it examines, its jobs and, unless the red already stands, its workflow file.
-  - for each open PR whose newest record is stale and holds a PASS Fix check: one `commits/<sha>` read of the live head, and one compare read when that commit has two parents whose first is the record's Head.
+  - Not built: for each open PR whose newest record is stale, the clean-merge survival check reads the commits from the record's Head to the live head, and runs one local `git merge-tree --write-tree` per merge commit. The read count is not measured. The merge-tree run is a process start, with no gh call and no file.
   - The count per run is not measured yet.
 - Reads per lane Stop (part 2): none unless the final report claims a round PASS. Then two `gh api` reads per claimed PR: the PR's head and its comments.
 - Tests to write with the build, one per red: no review record; stale head; batch over its limit; hold with no item.
