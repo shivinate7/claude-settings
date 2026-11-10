@@ -124,7 +124,7 @@ def override_line(result):
     if kind == "opus":
         roles = " and ".join(result[2]) if isinstance(result[2], list) else result[2]  # one role, or a list of 2 or more
         who = "%s spawns" % roles if roles else "spawns"
-        return "Opus override: Opus %s go through without the ask until %s." % (who, central_hhmm(until))
+        return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, central_hhmm(until))
     if kind == "once":
         return "Override: the next refused act goes through, once. It ends at %s if unused." % central_hhmm(until)
     return "Override: every refused act goes through until %s." % central_hhmm(until)
