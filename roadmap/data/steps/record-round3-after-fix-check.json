@@ -1,8 +1,8 @@
 {
  "id": "record-round3-after-fix-check",
- "title": "merge --review-record records the round 3 that a fix check leaves owed",
+ "title": "One name for the final round a fix check leaves owed",
  "status": "todo",
  "repo": "shivinate7/claude-settings",
- "why": "R9 (retrospective relay, 16:07 CST Nov 10): a guard change fixed under a fix check owes round 3. merge --review-record refuses that record: rounds must rise 1, 2, 3, and a fix check is not round 2. Hit twice on 2026-11-10: #2570 (round 1 PASS, fix check PASS, round 3 PASS net positive) and #1338 (round 1 FAIL, fix check PASS, round 3 PASS net zero). Neither round 3 is on its record, so the batch runner cannot see it. Either the tool takes a round 3 after a fix check, or R9 is rewritten to match the tool; one record of the rule either way (step rounds-rules-one-record).",
+ "why": "R9 (retrospective relay, 16:07 CST Nov 10) calls the review a fix check leaves owed 'round 3'. merge --review-record records it as the next round number instead (round 2 after a lone round 1), and refuses a round 3 with no round 2. On 2026-11-10 triage first left that review off the record for #2570 and #1338, then recorded it as round 2 at 17:43 CST. Fix: the rule and the tool use one name for it (step rounds-rules-one-record).",
  "source": "triage 2026-11-10 17:41 CST"
 }
