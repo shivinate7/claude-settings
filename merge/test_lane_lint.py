@@ -8,7 +8,7 @@ case reads what the tool ran, in which tree, at which head. The repo builder, th
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
-BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a lane's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -1287,18 +1287,18 @@ class CrossMeasure(LaneFixture):
         self.assert_remedy_names_a_merge_or_a_rebase(text)
 
 
-BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
-BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same batch with the Red-run trailer's script left out
+LINT_FLAGS = "lint-flags"  # the lane branch the case lints: a pushed branch whose checks job holds the four CI steps below
+BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same checks job with the Red-run trailer's script left out
 BASE = "main"  # the base the lint runs against: lane_lint's base, and the PR base the CI steps read
 BATCH_CI_STEPS = ("Silent undo check", "Comment narration check", "Red-run trailer", "STE lint")  # checks.yml's job `checks` CI steps this suite lints
 STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
 REPO = os.path.dirname(HERE)
 CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")  # read at test time; no expectation comes from a copy of it
 CALL_STUB = "import json, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n    print(json.dumps({'argv': sys.argv}), file=f)\n"  # logs its argv, exits 0
-BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_LINT_STEPS: no lint step at all
+LINT_FLAGS_NO_LINT = "lint-flags-no-lint"  # a lane whose checks job holds NO_LINT_STEPS: no lint step at all
 NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
                  ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
-BATCH_PUSH_ONLY = "batch-lint-flags-push-only"  # a batch whose checks job adds one lint step that runs only off a pull request
+LINT_FLAGS_PUSH_ONLY = "lint-flags-push-only"  # a lane whose checks job adds one lint step that runs only off a pull request
 PUSH_ONLY = "Push-only lint"
 PUSH_ONLY_STEP = (PUSH_ONLY, "      - name: Push-only lint\n        if: ${{ github.event_name != 'pull_request' }}\n"
                              "        run: python3 lint/check_push_only.py\n")
@@ -1377,7 +1377,12 @@ def link_or_copy(src, dst):
 
 
 class BatchLintFlags(tm.Env):
-    """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
+    """`merge --lane-lint <lane>` runs the real bin/ci-job on a lane's checks job with the lint flags: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
+
+    def assert_lint_flags_route(self, branch):
+        """The scope of a lint-flags case: the branch name lacks merge's batch prefix, so lane_lint runs the lint steps and no batch checks."""
+        self.assertFalse(branch.startswith(merge.BATCH_PREFIX),
+                         "%s starts with %s, so lane_lint runs the batch checks, not the lint steps" % (branch, merge.BATCH_PREFIX))
 
     def setUp(self):
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
@@ -1433,12 +1438,13 @@ class BatchLintFlags(tm.Env):
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             return merge.lane_lint(self.co, target, self.host, base=BASE)
 
-    def test_lane_lint_runs_each_batch_check_once_with_the_argv_checks_yml_gives(self):
-        head = self.push_batch(BATCH)
+    def test_lane_lint_runs_each_lint_check_once_with_the_argv_checks_yml_gives(self):
+        self.assert_lint_flags_route(LINT_FLAGS)
+        head = self.push_batch(LINT_FLAGS)
         self.assertEqual(sorted(name for name, _ in self.found), sorted(BATCH_CI_STEPS),
                          "checks.yml's checks job does not hold exactly the four CI steps this suite lints")
         out = io.StringIO()
-        rc = self.lane_lint(BATCH, out)
+        rc = self.lane_lint(LINT_FLAGS, out)
         text = out.getvalue()
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(pass_lines(text)), 1, text)
@@ -1481,7 +1487,8 @@ class BatchLintFlags(tm.Env):
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint with a check script missing read as a pass: " + out.getvalue())
 
     def test_a_batch_whose_checks_job_runs_no_lint_step_refuses_as_unknown_and_never_passes(self):
-        self.push_batch(BATCH_NO_LINT, found=NO_LINT_STEPS)
+        self.assert_lint_flags_route(LINT_FLAGS_NO_LINT)
+        self.push_batch(LINT_FLAGS_NO_LINT, found=NO_LINT_STEPS)
         root = tempfile.mkdtemp(prefix="lint-steps-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, root, True)
         tm.put(os.path.join(root, ".github", "workflows", "checks.yml"), workflow_text(NO_LINT_STEPS))
@@ -1491,14 +1498,15 @@ class BatchLintFlags(tm.Env):
                          "the checks job of the batch holds a lint step: " + plan.stdout)  # the scope
         out = io.StringIO()
         with self.assertRaises(merge.Liftable) as raised:
-            self.lane_lint(BATCH_NO_LINT, out)
+            self.lane_lint(LINT_FLAGS_NO_LINT, out)
         self.assertIn("no lint CI step ran", str(raised.exception), out.getvalue())
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint run that picked no lint step read as a pass: " + out.getvalue())
 
     def test_a_lint_step_that_runs_only_off_a_pull_request_is_named_on_the_pass_line(self):
-        self.push_batch(BATCH_PUSH_ONLY, found=self.found + [PUSH_ONLY_STEP])
+        self.assert_lint_flags_route(LINT_FLAGS_PUSH_ONLY)
+        self.push_batch(LINT_FLAGS_PUSH_ONLY, found=self.found + [PUSH_ONLY_STEP])
         out = io.StringIO()
-        rc = self.lane_lint(BATCH_PUSH_ONLY, out)
+        rc = self.lane_lint(LINT_FLAGS_PUSH_ONLY, out)
         text = out.getvalue()
         self.assertEqual(rc, 0, text)
         lines = pass_lines(text)
