@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "session_013NEJKzLjdrBsFWzoCdBwG7",
+  "lane": "session_013NEJKzp9uMCVGV7smPn7qJ",
   "why": "No mutant proves the substitution read in guard_merge._push_calls; a change that drops it alone is not caught.",
-  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Stacked on #1506. Not done, no PR (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10). The coordinator starts a lane for it.",
-  "updatedAt": "2026-11-10T04:58:00-06:00"
+  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Stacked on #1506. Not done, no PR (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10). The coordinator starts a lane for it. Coordinator started lane session_013NEJKzp9uMCVGV7smPn7qJ at 04:57 CST Nov 10.",
+  "updatedAt": "2026-11-10T05:00:00-06:00"
 }
