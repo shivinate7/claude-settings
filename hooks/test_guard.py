@@ -16902,6 +16902,28 @@ sh("frozen pin: echo naming a settings copy allows [cap-ask-fix r2 pin]",
 sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask-fix r2 pin]",
    "gh pr create --draft --title \"Update " + CFG_CLAUDEMD + "\" --body \"notes\"", "allow", cwd=NOGIT)
 
+# A FROZEN PATH HELD IN A SHELL VARIABLE, written by a script that a `python -c` or `node -e` runs. The guard
+# expands `$F` in the command text, so the script's own text names the frozen hook, and the write denies. The
+# same text printed by python writes nothing, so it allows.
+sh("frozen var: a frozen hook path in a shell variable, written by os.system in python -c, denies",
+   "F=" + slash(CFG) + "; python3 -c \"import os; os.system('echo x >> $F/hooks/guard.py')\"",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen var: a frozen hook path in a shell variable, written by execSync in node -e, denies",
+   "F=" + slash(CFG) + "; node -e \"require('child_process').execSync('echo x >> $F/hooks/guard.py')\"",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen var: a frozen hook path in a shell variable, printed by python -c, writes nothing and allows",
+   "F=" + slash(CFG) + "; python3 -c \"print('echo x >> $F/hooks/guard.py')\"",
+   "allow", cwd=NOGIT)
+
+# A FROZEN PATH JOINED BY `+` INSIDE A `node -e` STRING. The whole-script reading cannot read a string join, so
+# the script's text is refused whole. Each command writes the frozen hook through the joined path, so each denies.
+sh("frozen join: a frozen hook path joined by + into a node -e execSync cp, denies",
+   "node -e \"const p='" + CFG_HOOK + "'; require('child_process').execSync('cp /tmp/x ' + p)\"",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen join: a frozen hook path joined by + into a node -e execSync tee, denies",
+   "node -e \"const p='" + CFG_HOOK + "'; require('child_process').execSync('tee ' + p)\"",
+   "deny", "frozen-path", cwd=NOGIT)
+
 
 # =========================================================================== 6b. the model cap
 FAMILY = "model-cap"
@@ -17401,6 +17423,13 @@ sh("cap pin: a cat redirect into .claude/settings.json with the cap in its hered
 chained_ask("cap pin: a quoted body written to x.sh, then run by sh x.sh, writing the cap, denies as a chained ask command [cap-string-false-alarm pin]",
    "cat > x.sh <<'SH'\nprintf '%s' '" + CAP_STRING_COMPACT + "' > .claude/settings.json\nSH\nsh x.sh",
    cwd=PROJ, carries=("agent-model-cap",))
+
+# THE CAP THROUGH A SHELL VARIABLE. The settings path sits in `$F`, set by an assignment chained ahead of the
+# python -c. Main denies it as a chained ask command (ask-alone), so a cap write does not pass when its path is
+# held in a variable.
+chained_ask("cap var: a cap write to a settings path held in a shell variable, through os.system in python -c, denies as a chained ask command",
+   "F=" + PROJ_SETTINGS + "; python3 -c \"import os; os.system('echo " + CAP_KEY + "=opus >> $F')\"",
+   cwd=NOGIT, carries=("agent-model-cap",))
 
 # =========================================================================== 6c. ask alone
 FAMILY = "ask-alone"
