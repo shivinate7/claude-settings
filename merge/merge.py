@@ -3403,10 +3403,10 @@ def review_state(rec, head):
     A final-round line holds the change before the net-value and guard rules. Four module constants set which lines hold: a FAIL always holds; a PARTIAL holds
     when the PARTIAL switch is on; a design-reviewer line holds only when the design switch is on; a fix check PASS lifts a reviewer's final-round hold when
     the fix-PASS switch is on, so the final-round done rules decide, but never a design reviewer's: that hold stays, and its why names the design reviewer;
-    a fix check FAIL after the final round holds when the fix-FAIL switch is on, else it reads open.
+    a fix check FAIL that counts as the final round or a later one (the last recorded round plus 1) holds when the fix-FAIL switch is on, else it reads open.
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
-    A fix check (rec["fix"], decision hold-unsafe-after-round-3) is read after the held rule. A FAIL is open, whatever the rounds say, and counts
-    as the next round (after the last recorded one). A WIDE is open, counts no round and
+    A fix check (rec["fix"], decision hold-unsafe-after-round-3) is read after the held rule. A FAIL counts as the next round (after the last recorded
+    one) and reads open, unless that round is the final one or later, which holds it. A WIDE is open, counts no round and
     needs a new lane at the first round. A PASS counts as the last recorded round passing, even when that round failed, and for a delete-only change with Guard or check yes
     too, so a PASS before the final round owes no net-value test. The design-reviewer hold stays, and with no round recorded it is open. On the final
     round the rules above run as written: it keeps the net value that round gave and settles none that is owed."""
@@ -3426,7 +3426,7 @@ def review_state(rec, head):
     holding = {"FAIL", "PARTIAL"} if ROUND3_PARTIAL_HOLDS else {"FAIL"}
     cleared = FIX_PASS_CLEARS_ROUND3_HOLD and fix and fix[3] == "PASS"
     if (not cleared and any(i == REVIEW_LAST_ROUND and v in holding and (role == REVIEW_ROLES[0] or ROUND3_DESIGN_FAIL_HOLDS) for i, role, _, v in rounds)) \
-            or (FIX_FAIL_AFTER_ROUND3_HOLDS and fix and fix[3] == "FAIL" and top >= REVIEW_LAST_ROUND):
+            or (FIX_FAIL_AFTER_ROUND3_HOLDS and fix and fix[3] == "FAIL" and top + 1 >= REVIEW_LAST_ROUND):  # a fix FAIL counts as round top + 1
         return "held", f"round {REVIEW_LAST_ROUND} failed, so the finding becomes a new lane at round 1"
     held_design = next((v for i, role, _, v in rounds if i == REVIEW_LAST_ROUND and role == REVIEW_ROLES[1] and v in holding), None)
     if ROUND3_DESIGN_FAIL_HOLDS and held_design:  # reached only when a fix check PASS cleared the reviewer lines
@@ -3471,12 +3471,16 @@ def round_floor(earlier, rec):
     """-> why, when the newest parsed record `rec` breaks a round count set by `earlier` (the parsed records before it on the same PR, oldest first, a
     record that did not parse already dropped); else None. Counts never go down on one PR (decision pr-review-record): the floor is the highest, over
     `earlier`, of a record's last round, plus 1 when its fix check FAILed before the final round, since that FAIL counts as the next round. A newest
-    record below the floor reads open. A counted FAIL slot is filled only by a FAIL line: a record whose round N+1 has none reads open. A WIDE or PASS
+    record below the floor reads open. A newest record with a fix check also reads open when the newest earlier record's fix check FAILed and counts as the
+    final round, since no round is left for a second fix check. A counted FAIL slot is filled only by a FAIL line: a record whose round N+1 has none reads open. A WIDE or PASS
     fix check floors at the record's own last round and counts no slot. A failed round stays failed: an earlier record's last round N is uncleared when
     it has a FAIL or PARTIAL line, or the record's fix check is FAIL or WIDE. That record, or one after it, clears it by reaching a round above N or by
     carrying a fix check PASS; at the final round only the PASS can. A fix check PASS never clears a design reviewer's FAIL or PARTIAL. An uncleared round reads
     open, and the why names the earliest record at the highest such round. The floor comes from the bodies the listing already holds."""
     last = max((i for i, *_ in rec["rounds"]), default=0)
+    if earlier and rec["fix"] and earlier[-1]["fix"] and earlier[-1]["fix"][3] == "FAIL" \
+            and max((i for i, *_ in earlier[-1]["rounds"]), default=0) + 1 >= REVIEW_LAST_ROUND:  # the newest earlier fix FAIL counts as the final round: no round is left for a second fix check
+        return f"the record on head {earlier[-1]['head'][:9]} has a fix check FAIL that counts as round {REVIEW_LAST_ROUND}, and a second fix check has no round left to count as"
     best = None  # (floor, failed, record): the earliest record at the highest floor, a failed fix check first
     for e in earlier:
         n = max((i for i, *_ in e["rounds"]), default=0)
@@ -3869,8 +3873,8 @@ def main(argv, host=None, lock=None, hosts=None):
                     return 2
                 if last_fix:
                     top = max((i for i, *_ in last["rounds"]), default=0)
-                    if last_fix[3] != "FAIL" or top >= REVIEW_LAST_ROUND:
-                        print("merge: --fix-check: the newest earlier record already has a Fix check line, and only a FAIL before round "
+                    if last_fix[3] != "FAIL" or top + 1 >= REVIEW_LAST_ROUND:  # the FAIL counts as round top + 1, and a second fix check needs a round after it
+                        print("merge: --fix-check: the newest earlier record already has a Fix check line, and only a FAIL that counts as a round before round "
                               f"{REVIEW_LAST_ROUND} leaves a round to count a second fix check as. " + REVIEW_CITE, file=sys.stderr)
                         return 2
                     why = round_floor(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
