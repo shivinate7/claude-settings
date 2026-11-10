@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 15:46 CST.
+Last rewrite: 2026-11-10 16:03 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -11,11 +11,14 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 
 1. **Drain.** In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we speak"). The freeze holds
    (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
+   Freeze exception, owner 16:02 CST: "i see yes fix it then" - one lane makes the settings.json guard
+   matcher route the GitHub MCP write tools to guard.py (audit hole H1, R11), with a test that every tool
+   the guard judges is reached by the matcher.
 2. **Land this plan on main.** One prose PR holds every settled ruling below in the owner's words with
    its time. It is the first PR after the drain. The express pass (R7, stage 5) would make
    this PR fast; until it lands, the PR takes the normal docs-only route.
 3. **Change how every lane flows,** before any other lane starts. Each is one lane, in this order:
-   0. One glossary of roles, the same on local and cloud (rulings G1-G13; step
+   0. One glossary of roles, the same on local and cloud (rulings G1-G14; step
       glossary-same-local-cloud). First because every later brief uses its terms.
    1. Checks that can refuse a merge run in CI (ruling R2).
    2. Time limits end hangs only (ruling R3). R2 and R3 together stop a green batch from being
@@ -27,6 +30,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    7. One model table that every spawn, guard and check reads (ruling R8).
    8. One rounds record; round 3 only for a guard or check change that failed a round (ruling R9).
    9. A hook refusal asks for a short correction, never the whole reply again (ruling R10).
+   10. One catalog of every hook and setting, with where each runs, linked from the page (ruling R11).
 4. **Make the roadmap and triage mechanical** (direction D1, open; ruling R6).
 5. **Express pass for prose** (ruling R7). It can move before stage 2 so this plan's PR uses it.
 6. **Resume lanes** under the new flow. Then the rest of the queue.
@@ -116,6 +120,16 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   again". guard-remedy-not-to-owner:177 already says "post only the corrected lines ... Never send the
   report again", but no refusal text says it. Each Stop-hook refusal ends with that line.
   Home: decision guard-remedy-not-to-owner.
+- **R11. One catalog of every hook and setting.** Owner 16:00 CST Nov 10: "A -- but also i kinda meant how
+  when questions reach triage, do the pre tool question use stuff run on it just like it would when
+  uqestions used to come in line in the chats?". docs/catalog.md (lint/hook_catalog.py) lists all 36
+  hooks but no permissions, autoMode rules, env, cloud-only allow rules, githooks or mod events. It
+  grows to every hook and setting with a "runs on" column (Mac, Windows, cloud), and the page's Status
+  tab links it. Audit holes to close: H1 GitHub MCP writes never reach the guard (settings.json matcher);
+  H2 unarmed clones commit env files; H3 hooks fail open on a partial install; H4 a repo's
+  disableAllHooks is unwatched; H5 no rm shim on Windows; H6 decision watch desktop-only.
+  Page questions: ArtifactData writes run the same question form (guard.py) and judge (call_judge.py,
+  past rulings included) as the chat box. Home: decision hook-catalog-page.
 
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
@@ -186,6 +200,12 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   starts no lanes, and grants no Opus. The arbiter session itself runs Opus (agent-model-cap:61).
   Rewrite session-tiers:81 ("a standing session and an orchestrator"). Home: decision session-tiers,
   GLOSSARY.md.
+- **G14. The triage artifact is one page.** Owner 15:52 CST Nov 10: "when i say triage artifact i meant both
+  given that they've merged into one (and if you thought otherwise that's a prose fault that needs
+  correcting)". skills/roadmap/SKILL.md:6 says so; GLOSSARY.md has no row for it, and the roadmap skill's
+  trigger words still say "roadmap page". One glossary row: page, the repo's one page that triage
+  writes, holding the waiting items and the Status tab. "Roadmap page" retires. Home: GLOSSARY.md,
+  decision questions-go-to-owner.
 
 ## Directions, not yet settled
 
