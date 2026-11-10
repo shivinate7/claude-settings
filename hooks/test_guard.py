@@ -14969,6 +14969,15 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+# A brief opens with the owner's Grant line, then the marker line. The guard skips the Grant line, so the marker line is
+# judged as the marker case above is: topic colors to a lane on topic icons is refused, on the topic's reason.
+step_refuse("a Grant line, then a brief for topic colors to a lane on topic icons, is refused: the Grant line is skipped",
+            role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nLane brief: icon-a. Topic: colors.",
+            carries=("names a topic the lane does not hold",))
+# Passes, the green control beside the refusal above: a Grant line, then plain text with no marker, passes as plain
+# text does with no Grant line. The Grant line alone is not a refusal.
+step_allow("a Grant line, then plain status text with no marker, is allowed",
+           role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nStatus: PR #12 merged for icon-a.")
 
 
 # =========================================================================== 5i. SendMessage to a cloud session
