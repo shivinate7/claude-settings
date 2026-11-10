@@ -2563,6 +2563,71 @@ class TodoWithOpenPull(UpkeepFixture):
         self.assertEqual(self.pair_lines(out), ["r8 (#80)", "r9 (#90)"], "a ready step is a todo step for the pair line")
 
 
+class WaitOnClosedPull(UpkeepFixture):
+    """The upkeep row for an open step whose title, why or note waits on a pull request that GitHub shows closed and
+    unmerged (roadmap step dead-pr-waits, a wait on a dead PR). The build reads GitHub's answer from the --live file and never calls GitHub: a
+    closed pull is a landedPulls row with merged false, and an open pull is a pulls row. Each negative case shares its
+    live file with a control that the row must name, so an empty row cannot pass."""
+
+    LABEL = "open step waits on a closed unmerged PR"
+    CONTROL = "c-closed"
+
+    def closed(self, number):
+        return self.pull_row(number, "lane-%d" % number, merged=False)
+
+    def merged(self, number):
+        return self.pull_row(number, "lane-%d" % number, merged=True)
+
+    def listed(self, out):
+        return self.entries(self.row(out, self.LABEL)[1])
+
+    def assert_control_listed(self, out):
+        self.assertIn("%s (#41)" % self.CONTROL, self.listed(out),
+                      "the control step, which waits on the closed unmerged #41, is not in the %r row:\n%s" % (self.LABEL, out))
+
+    def test_open_step_waiting_on_a_closed_unmerged_pull_is_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.publish(landed=[self.closed(41)])
+        out = self.out_with_live()
+        self.assertEqual(self.listed(out), ["c-closed (#41)"], "the closed unmerged #41 is not listed as its waiting step")
+
+    def test_wait_in_title_or_why_is_listed_like_one_in_the_note(self):
+        self.commit_step("c-title", title="Waits on #51 to land", note="n")
+        self.commit_step("c-why", why="Blocked on #52 for its fix.", note="n")
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.publish(landed=[self.closed(41), self.closed(51), self.closed(52)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        for sid, pr in (("c-title", 51), ("c-why", 52)):
+            with self.subTest(field=sid):
+                self.assertIn("%s (#%d)" % (sid, pr), self.listed(out),
+                              "a wait on closed unmerged #%d in the step %s is not listed" % (pr, sid))
+
+    def test_open_pull_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-open", note="Waits on #42 to land.")
+        self.publish(landed=[self.closed(41)], pulls=[{"number": 42, "title": "lane 42", "branch": "lane-42"}])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-open (#42)", self.listed(out), "a step that waits on the open #42 is listed as waiting on a closed PR")
+
+    def test_merged_pull_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-merged", note="Waits on #43 to land.")
+        self.publish(landed=[self.closed(41), self.merged(43)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-merged (#43)", self.listed(out), "a step that waits on the merged #43 is listed as waiting on a closed PR")
+
+    def test_done_step_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-done", status="done", note="Waits on #44 to land.")
+        self.publish(landed=[self.closed(41), self.closed(44)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-done (#44)", self.listed(out), "a done step that waits on #44 is listed; a done step is not open")
+
+
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
     with no live-phase filter. `draft PRs over 12 h with no live lane` lists each draft pull created more than
