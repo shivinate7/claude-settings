@@ -12,9 +12,31 @@
   later. The branch check has no time bound and no commit-count floor.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the merge base. It
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
-  commit added on the branch alone is the branch's. A merge of three or more parents is not read, and the
+  commit added on the branch alone is the branch's, except to the lane undo read. A merge of three or more parents is not read, and the
   check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
   carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
+- **Lane undo.** A commit of the branch drops work that an earlier commit E of the same branch added,
+  and head still lacks it. The read covers every non-merge commit of the branch, also under a merge. It
+  flags two shapes. One is a whole file put back to its text before E, whatever the file held just
+  before. It counts when E changed 6 or more non-blank lines in it (`BLOCK_LINES`), on any path. Within one
+  non-blank line of E's parent text counts, so a copy of the old text plus one new line is no way out.
+  The other is a net loss or a delete of E's lines on a test path (`is_test_rel` in `hooks/guard.py`):
+  the commit removes more of E's lines than it adds in the same hunk, so a reworded line is an edit.
+  A net loss of one line counts, with no line-count floor. Each is cleared by one reason line (owner,
+  2026-11-04 17:44 CST, page item 220, pick b). Measured: 62 flags in 16 of the 31 batches, about 41
+  reason lines. A floor of 6 lines would miss a weakened test, and 6 is the size of the 3297d8fa hunk.
+  A line is E's work only when no earlier state of the branch held it, so a restore is never an undo.
+  A line that head holds again in any file, as often as before, is moved, not lost (one reworded line
+  per block of 6 or more, as below). A merge of main that drops the branch's own lines counts too: a
+  conflict fix keeps both sides. A branch of one commit has nothing to read. Cost: the read's git calls
+  grow linearly with the lane's commits. Measured once on commits to distinct files: 41 calls at 10
+  commits, 61 at 20, 101 at 40. Test `LaneUndoCost` pins the 41 at 10. Two shapes, not any line
+  a lane added (owner, 2026-11-03 18:16 CST, page item 167, no-undo-check-scope, pick a). Measured on
+  the 31 batches merged 2026-10-31 to 2026-11-02: any line goes red on 22, with 84 findings; the two
+  shapes go red on 16, with 62 findings (7 whole files, 55 test net losses). Incident (owner, 2026-11-02 10:41 CST, fb-1041-1): 19 restore commits from 2026-10-31 to
+  2026-11-02, such as 3297d8fa, which undid 091c8708, and df25a68d, which dropped 49 test lines. Each
+  cost a review round. Builders now edit in place, and a round 2 or 3 brief has a `Keep:` line
+  (`agents/builder.md`, `roles-brief-contents`).
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
   (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
@@ -23,7 +45,8 @@
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
 nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
-reason. No switch turns the check off.
+reason. No switch turns the check off. The lane undo read takes the same line: one excuse line, and
+no second name (owner, 2026-11-02 10:52 CST, page item 165, pick a).
 
 A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
 that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
@@ -67,7 +90,8 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
 **What is not a loss.**
 
 - Whitespace and blank lines.
-- A move, a rename or a reorder: a removed line that the change adds to another file.
+- A move, a rename or a reorder: a removed line that the change adds to another file. In a block of 6
+  lines or more (`BLOCK_LINES`), one line of the move may be reworded.
 - A rename git pairs (`-M`, 50% similar or more): the new file is judged on its edits, as if made in place. Below that it stays a delete and an add.
 - A re-wrapped prose line. A short line never passes as a re-wrap.
 - A rewrite by the resolver, when a line of the same hunk reads very much like the lost line. Adding

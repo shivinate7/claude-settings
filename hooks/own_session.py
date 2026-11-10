@@ -64,6 +64,20 @@ def own_session_read(transcript, own_id, created=False):
     return _scan(transcript, own_id, created)[:3]
 
 
+def _read_own_session(transcript, own_id, created=False):
+    """(tags, tagged_after, parent, own_tags): own_session_read plus the own tags now, the newest record's tags
+    plus each tag a later set_session_tags call on own_id adds, minus each tag one removes (with no record, the
+    adds minus the removes). _scan fills own_tags in place, so its own return stays the one main reads."""
+    own_tags = set()
+    return (*_scan(transcript, own_id, created, own_tags)[:3], own_tags)
+
+
+def own_session_tags(transcript, own_id):
+    """The own tags now (set): the newest get_session record's tags, plus own set_session_tags adds and minus
+    own removes since it. Empty with no record and no own add."""
+    return _read_own_session(transcript, own_id)[3]
+
+
 def own_session_ccr(transcript, own_id):
     """The whole `ccr` dict of the newest get_session result whose ccr.id is own_id, else None. The
     branch and source fields of the record are read from it (lane-closes-after-records).
@@ -80,8 +94,9 @@ def own_session_ccr(transcript, own_id):
         return None
 
 
-def _scan(transcript, own_id, created):
+def _scan(transcript, own_id, created, own_tags=None):
     """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers."""
+    own_tags = set() if own_tags is None else own_tags  # the caller's set, filled in place (_read_own_session)
     uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     with open(transcript, encoding="utf-8") as handle:
@@ -108,6 +123,9 @@ def _scan(transcript, own_id, created):
                     ids = (block.get("input") or {}).get("session_ids") if isinstance(block.get("input"), dict) else None
                     if not isinstance(ids, list) or own_id in ids:
                         tagged_after = True
+                    if isinstance(ids, list) and own_id in ids:
+                        own_tags |= {t for t in block["input"].get("add") or () if isinstance(t, str)}
+                        own_tags -= {t for t in block["input"].get("remove") or () if isinstance(t, str)}
                 elif block.get("type") == "tool_result" and (block.get("tool_use_id") in uses or block.get("tool_use_id") in creates):
                     body = block.get("content")
                     if isinstance(body, list):
@@ -115,6 +133,8 @@ def _scan(transcript, own_id, created):
                     if block.get("tool_use_id") in creates:
                         if _created_session_id(body) == own_id:
                             (newest, parent), tagged_after, newest_ccr = creates[block.get("tool_use_id")], False, None
+                            own_tags.clear()
+                            own_tags.update(newest)
                         continue
                     if not isinstance(body, str):
                         continue
@@ -124,6 +144,8 @@ def _scan(transcript, own_id, created):
                             newest, tagged_after, newest_ccr = ccr["tags"], False, ccr
                             found = ccr.get("parent_session_id")
                             parent = found if isinstance(found, str) and found else None
+                            own_tags.clear()
+                            own_tags.update(t for t in newest if isinstance(t, str))
                     except (ValueError, KeyError, TypeError):
                         continue
     return newest, tagged_after, parent, newest_ccr
