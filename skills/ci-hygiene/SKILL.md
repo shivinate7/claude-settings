@@ -89,8 +89,13 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
-   the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
-   each lane PR closes as replaced.
+   the new run is the re-run. A lone lane is its own integration PR and has no replacer.
+   Other lane PRs stay draft. A lane PR closes as replaced when the integration PR that names it
+   ("Replaces #N") opens. An open PR whose head is an ancestor of another open PR's head
+   (`git merge-base --is-ancestor`) closes at once as carried, with the comment "Carried by #R;
+   reopens if #R is dropped." Each closed PR keeps its branch. It reopens if the PR that replaced
+   or carried it closes unmerged. The merge tool's wake will list these closes (step
+   `close-replaced-at-open`, not built yet). Until it lands, the batch runner closes them by hand.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
    Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
    run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
