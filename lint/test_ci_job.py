@@ -11,6 +11,8 @@ StepMaps reads a step's with: and env: values: a block scalar as its lines, an i
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
+ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the cpu count up to 4), keeps the printed
+lines and each step's log lines in workflow order, and treats an install step as a barrier. Overlap is proven by rendezvous.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -40,6 +42,7 @@ STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
 ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
+ENV.pop("CI_JOB_LINT_WORKERS", None)
 
 
 def workflow(*steps):
@@ -962,6 +965,340 @@ class NotRunLines(Job):
         rc, lines, out = self.run_job(push_only, step("Python lint", "python3 lint/check_clean.py"),
                                       args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, by_step(lines)), (0, {"Push-only lint": "skipped", "Python lint": "PASS"}), out)
+
+
+RV = '''import os
+
+
+def arrive(name):
+    open(name, "w").close()
+
+
+def wait_for(*names):
+    """Waits, with no bound, until every named file exists: the marker is the only exit."""
+    yield_cpu = getattr(os, "sched_yield", lambda: None)
+    while not all(os.path.exists(n) for n in names):
+        yield_cpu()
+'''
+
+
+def meet(mine, *others):
+    """Lint body: announce `mine`, then wait, with no bound, for each of `others` to announce."""
+    names = ", ".join("'arrived-%s'" % o for o in others)
+    return "rv.arrive('arrived-%s')\nrv.wait_for(%s)\n" % (mine, names)
+
+
+def done(name):
+    """Lint body: announce that `name` is finished, as its last act."""
+    return "rv.arrive('done-%s')\n" % name
+
+
+def cpus(n):
+    """ci-job's launch with os.cpu_count() reporting `n`, None included."""
+    return ("-c", launcher("import os\nos.cpu_count = lambda: %r" % (n,)))
+
+
+def normal(lines):
+    """Each output line with its shell and script, its seconds and its log path fixed, one space between words."""
+    out = []
+    for ln in lines:
+        ln = re.sub(r"\S*bash -e \S+\.sh", "SHELL", ln)
+        ln = re.sub(r"\(\d+\.\d+s\)", "(N)", ln)
+        ln = re.sub(r"log=\S+", "log=L", ln)
+        out.append(re.sub(r"\s+", " ", ln))
+    return out
+
+
+class ParallelLint(Job):
+    """--lint runs its lint CI steps at once, up to a worker count: CI_JOB_LINT_WORKERS when that is a positive int, else
+    min(os.cpu_count(), 4), at least 1 (the cpu cases patch os.cpu_count). Steps prove they overlap by rendezvous on marker
+    files. No wait has a bound, no count and no clock: each ends only on its marker. So a wrong build (serial, or a cap
+    that lets too many run) blocks instead of failing, and the CI job's own timeout reds it. Verdict lines, the summary
+    and each lint step's log lines keep workflow order. An install CI step is a barrier. Plain runs, --step and --plan
+    stay serial."""
+
+    INSTALL = "touch installed.marker\n"
+    L3_CHECKS = ("if not os.path.exists('installed.marker'):\n"
+                 "    print('install not finished when this lint step started')\n    sys.exit(1)\n"
+                 "print('install finished before this lint step started')\n")
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.root, "lint"))
+        with open(os.path.join(self.root, "lint", "rv.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(RV)
+
+    def script(self, name, body):
+        """A lint script under lint/, its imports first."""
+        with open(os.path.join(self.root, "lint", name + ".py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("import os, rv, sys\n" + body)
+
+    def lint(self, name, body):
+        """A lint CI step with its own script: its whole run: is `python3 lint/<name>.py`."""
+        self.script(name, body)
+        return step(name, "python3 lint/%s.py" % name)
+
+    def rendezvous_steps(self, names):
+        """One lint CI step per name; each waits for every other name, then announces it is done."""
+        return [self.lint(n, meet(n, *[m for m in names if m != n]) + done(n)) for n in names]
+
+    def check_all_pass(self, names, **kw):
+        rc, lines, out = self.run_lint(*self.rendezvous_steps(names), **kw)
+        self.assertEqual(list(by_step(lines).items()), [(n, "PASS") for n in names], out)
+        self.assertEqual(rc, 0, out)
+
+    def check_cap(self, names, **kw):
+        """Under the cap every name passes. The last name starts only after a worker has finished, and a finished name has
+        written its done marker, so the last name finds one. Run all at once, the last name may find none and read FAIL.
+        No marker can hold a finished name back, so that red is a race, not a forced one."""
+        group, last = names[:-1], names[-1]
+        steps = [self.lint(g, meet(g, *[m for m in group if m != g]) + done(g)) for g in group]
+        freed = " or ".join("os.path.exists('done-%s')" % g for g in group)
+        steps.append(self.lint(last, "if not (%s):\n    print('no worker had finished when %s started: the cap did not hold')\n"
+                                     "    sys.exit(1)\n" % (freed, last) + meet(last, *group) + done(last)))
+        rc, lines, out = self.run_lint(*steps, **kw)
+        self.assertEqual(list(by_step(lines).items()), [(n, "PASS") for n in names], out)
+        self.assertEqual(rc, 0, out)
+
+    def fresh_run(self):
+        """Removes the last run's files, so a second run in one case starts with no marker of the first."""
+        for name in os.listdir(self.root):
+            if name not in (".git", "lint"):
+                path = os.path.join(self.root, name)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+        for name in os.listdir(os.path.join(self.root, "lint")):
+            path = os.path.join(self.root, "lint", name)
+            if name != "rv.py":
+                if os.path.isdir(path):  # a step's __pycache__ when bytecode is written
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+
+    def read(self, rel):
+        try:
+            with open(os.path.join(self.root, rel), encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except OSError:
+            return "(no %s)" % rel
+
+    def run_lint(self, *steps, workers=None, args=("--lint", "--base", "origin/main"), launch=(), env=None):
+        """(rc, stdout lines, output). The lines are ci-job's stdout as printed, log= included (run_job strips it). The
+        output adds stderr and the run's verdict log, so a failure names the cause the step itself kept. self.err_lines
+        holds ci-job's stderr lines, its `start:` lines included. No timeout: a wrong build blocks."""
+        extra = {"CI_JOB_LINT_WORKERS": str(workers)} if workers is not None else {}
+        argv, run_env = self.job_call(*steps, args=args, env={**extra, **(env or {})}, launch=launch)
+        proc = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=run_env)
+        self.err_lines = proc.stderr.splitlines()
+        return proc.returncode, proc.stdout.splitlines(), \
+            proc.stdout + proc.stderr + "\n--- verdict log ---\n" + self.read("verdict.log")
+
+    def test_two_workers_run_a_pair_at_once(self):
+        self.check_all_pass(["a", "b"], workers=2)
+
+    def test_with_two_cpus_the_default_runs_a_pair_at_once(self):
+        self.check_all_pass(["a", "b"], launch=cpus(2))
+
+    def test_two_workers_never_run_three_at_once(self):
+        self.check_cap(["a", "b", "c"], workers=2)
+
+    def test_with_two_cpus_the_default_never_runs_three_at_once(self):
+        self.check_cap(["a", "b", "c"], launch=cpus(2))
+
+    def test_a_worker_count_of_four_runs_four_steps_at_once_even_on_a_two_cpu_machine(self):
+        self.check_all_pass(["w1", "w2", "w3", "w4"], workers=4, launch=cpus(2))
+
+    def test_with_eight_cpus_the_default_runs_four_at_once(self):
+        self.check_all_pass(["w1", "w2", "w3", "w4"], launch=cpus(8))
+
+    def test_with_eight_cpus_the_default_never_runs_five_at_once(self):
+        self.check_cap(["w1", "w2", "w3", "w4", "w5"], launch=cpus(8))
+
+    def test_an_invalid_worker_count_falls_back_to_the_default(self):
+        for value in ("0", "abc"):
+            self.fresh_run()
+            rc, lines, out = self.run_lint(*self.rendezvous_steps(["a", "b"]), workers=value, launch=cpus(4))
+            self.assertEqual(list(by_step(lines).items()), [("a", "PASS"), ("b", "PASS")],
+                             "CI_JOB_LINT_WORKERS=%s did not fall back to the default worker count:\n%s" % (value, out))
+            self.assertEqual(rc, 0, out)
+
+    def test_verdict_lines_and_summary_keep_workflow_order_whatever_order_steps_finish(self):
+        steps = (self.lint("first", "rv.wait_for('done-third')\n"),
+                 self.lint("second", "print('second')\n"),
+                 self.lint("third", done("third")))
+        rc, lines, out = self.run_lint(*steps, workers=3)
+        self.assertEqual(list(by_step(lines).items()), [("first", "PASS"), ("second", "PASS"), ("third", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual((lines[-2], lines[-1][:4]), ("summary: ran 3 of 3 steps", "log="), out)
+
+    def test_the_log_keeps_each_step_output_in_workflow_order(self):
+        # alpha, first in workflow order, waits for beta's done marker. A log appended in finish order usually puts beta's
+        # output first, since beta's exit and alpha's exit race after their markers: the marker orders the writes, not the exits.
+        steps = (self.lint("alpha", "rv.wait_for('done-beta')\nprint('ALPHA-OUTPUT')\n"),
+                 self.lint("beta", "print('BETA-OUTPUT')\n" + done("beta")),
+                 self.lint("gamma", "print('GAMMA-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=3)
+        self.assertEqual(list(by_step(lines).items()), [("alpha", "PASS"), ("beta", "PASS"), ("gamma", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        log = self.read("verdict.log")
+        self.assertTrue(0 <= log.find("ALPHA-OUTPUT") < log.find("BETA-OUTPUT") < log.find("GAMMA-OUTPUT"),
+                        "the log does not keep the step order:\n" + out)
+
+    def test_a_step_that_fails_fast_does_not_stop_the_others_and_the_log_is_the_run_log(self):
+        steps = (self.lint("f", "print('F-OUTPUT')\nsys.exit(1)\n"),
+                 self.lint("p1", meet("p1", "p2") + "print('P1-OUTPUT')\n" + done("p1")),
+                 self.lint("p2", meet("p2", "p1") + "print('P2-OUTPUT')\n" + done("p2")),
+                 self.lint("u", "print('U-OUTPUT')\nsys.exit(127)\n"))
+        rc, lines, out = self.run_lint(*steps, workers=4)
+        self.assertEqual(list(by_step(lines).items()), [("f", "FAIL"), ("p1", "PASS"), ("p2", "PASS"), ("u", "unknown")], out)
+        self.assertEqual(rc, 1, out)
+        f_line = next(ln for ln in lines if ln.startswith("FAIL") and " f: " in ln)
+        self.assertIn("log=%s" % self.log, f_line, "a parallel step's line does not name the run's log:\n" + out)
+        self.assertEqual(lines[-1], "log=%s" % self.log, "the run's log= line is not the run's log:\n" + out)
+        log = self.read("verdict.log")
+        self.assertEqual(log.count("=== verdict run"), 4, "the run's log does not hold each step's own lines:\n" + log)
+        self.assertTrue(all(tok in log for tok in ("F-OUTPUT", "P1-OUTPUT", "P2-OUTPUT", "U-OUTPUT")),
+                        "the run's log is missing a step's output:\n" + log)
+
+    def test_a_log_that_cannot_join_the_run_log_is_named_on_stderr_and_kept(self):
+        # VERDICT_LOG is a directory, so no CI step's copy can join it. Each verdict and the exit code stay as they are; ci-job
+        # names each kept log on stderr, and each kept log holds its own CI step's output.
+        os.makedirs(self.log)
+        steps = (self.lint("one", "print('ONE-OUTPUT')\n"), self.lint("two", "print('TWO-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("one", "PASS"), ("two", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        kept = {}
+        for ln in self.err_lines:
+            m = re.match(r"ci-job: could not add the log of CI step (\S+) to the run's log; its output is kept in (.+)$", ln)
+            if m:
+                kept[m.group(1)] = m.group(2)
+        self.assertEqual(sorted(kept), ["one", "two"], "a failed copy is not named on stderr:\n" + out)
+        for name, token in (("one", "ONE-OUTPUT"), ("two", "TWO-OUTPUT")):
+            path = kept[name]
+            self.addCleanup(shutil.rmtree, os.path.dirname(path), True)
+            self.assertTrue(os.path.exists(path), "the kept log named for %s is missing: %s\n%s" % (name, path, out))
+            with open(path, encoding="utf-8", errors="replace") as f:
+                self.assertIn(token, f.read(), "the kept log for %s does not hold its output\n%s" % (name, out))
+
+    def test_an_unknown_step_alone_exits_two_while_the_others_pass(self):
+        steps = (self.lint("u", "print('U-OUTPUT')\nsys.exit(127)\n"),) + tuple(self.rendezvous_steps(["p1", "p2"]))
+        rc, lines, out = self.run_lint(*steps, workers=4)
+        self.assertEqual(list(by_step(lines).items()), [("u", "unknown"), ("p1", "PASS"), ("p2", "PASS")], out)
+        self.assertEqual(rc, 2, out)
+
+    def test_a_failing_neighbours_runner_marker_is_not_read_by_a_passing_parallel_step(self):
+        steps = (self.lint("noisy", "rv.wait_for('arrived-clean')\nprint('** TEST FAILED **')\n"
+                                    "rv.arrive('printed-noisy')\nsys.exit(1)\n"),
+                 self.lint("clean", "rv.arrive('arrived-clean')\nrv.wait_for('printed-noisy')\nprint('CLEAN-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("noisy", "FAIL"), ("clean", "PASS")], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_a_step_that_exits_127_is_unknown_and_its_neighbour_passes(self):
+        steps = (self.lint("missing", meet("missing", "clean") + "rv.arrive('printed-missing')\nsys.exit(127)\n"),
+                 self.lint("clean", "rv.arrive('arrived-clean')\nrv.wait_for('arrived-missing', 'printed-missing')\n"
+                                    "print('CLEAN-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("missing", "unknown"), ("clean", "PASS")], out)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("tool missing", next(ln for ln in lines if ln.startswith("unknown")), out)
+
+    def test_a_command_missing_at_run_time_is_unknown_and_its_neighbour_passes(self):
+        # plan checks only a line's first word, so the argument's command substitution reaches the shell at run time:
+        # the shell prints its real `command not found` line into this step's own log, and the python still exits 0.
+        self.script("gate", "rv.arrive('arrived-miss')\nrv.wait_for('arrived-clean')\nrv.arrive('gate-ok')\n")
+        self.script("miss", "rv.arrive('printed-miss')\n")
+        steps = (step("miss", 'python3 lint/miss.py "$(python3 lint/gate.py)" $(no-such-tool-c69 --x)'),
+                 self.lint("clean", "rv.arrive('arrived-clean')\nrv.wait_for('printed-miss')\n"
+                                    "if not os.path.exists('gate-ok'):\n    sys.exit(1)\n"
+                                    "print('CLEAN-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("miss", "unknown"), ("clean", "PASS")], out)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("no-such-tool-c69", next(ln for ln in lines if ln.startswith("unknown")), out)
+
+    def install_steps(self, install_body, l3_body):
+        """Two lint CI steps that must overlap, then an install CI step, then a lint CI step that reads what it made."""
+        env = InstallSteps.stub_path(self, npm=install_body)  # the npm stub: InstallSteps holds the one home
+        steps = (self.lint("l1", meet("l1", "l2")), self.lint("l2", meet("l2", "l1")),
+                 step("Install deps", "npm ci"), self.lint("l3", l3_body))
+        _, plan_lines, plan_out = plan_lint(self.root, workflow(*steps), extra=("--base", "origin/main"))
+        self.assertEqual(would_run(plan_lines), ["Install deps", "l1", "l2", "l3"], plan_out)
+        return self.run_lint(*steps, workers=4, env=env)
+
+    def test_lint_steps_before_an_install_run_together_and_the_later_ones_wait_for_it(self):
+        rc, lines, out = self.install_steps(self.INSTALL, self.L3_CHECKS)
+        self.assertEqual(list(by_step(lines).items()),
+                         [("l1", "PASS"), ("l2", "PASS"), ("Install deps", "PASS"), ("l3", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        # Order of the start lines: the install CI step starts before the lint CI step after it. A build with no barrier
+        # starts that lint step as soon as the run begins, before the install CI step starts.
+        order = [ln for ln in self.err_lines if ln in ("start: Install deps", "start: l3")]
+        self.assertEqual(order, ["start: Install deps", "start: l3"],
+                         "the lint CI step after the install started before the install:\n" + out)
+
+    def test_a_failed_install_leaves_the_later_lint_steps_unknown_and_the_earlier_ones_pass(self):
+        rc, lines, out = self.install_steps('echo "npm: stub install failed" >&2\nexit 1',
+                                            "rv.arrive('l3-ran')\nprint('l3 ran')\n")
+        self.assertEqual(list(by_step(lines).items()),
+                         [("l1", "PASS"), ("l2", "PASS"), ("Install deps", "unknown"), ("l3", "unknown")], out)
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "l3-ran")), "a lint step ran after its install failed:\n" + out)
+
+    # Controls: each stays serial, and each passes on the serial code it already has.
+
+    def test_workers_one_keeps_the_serial_lines_and_the_serial_start_order(self):
+        err_path = os.path.join(self.root, "stderr.txt")
+        seen = ("err = open(os.environ['ERR_FILE'], encoding='utf-8').read()\n"
+                "open('seen-one.txt', 'w').write('one:%s two:%s' % ('start: one' in err, 'start: two' in err))\n")
+        steps = (self.lint("one", seen + "print('one')\n"), self.lint("two", "print('two')\nsys.exit(1)\n"),
+                 self.lint("three", "print('three')\n"))
+        argv, env = self.job_call(*steps, args=("--lint", "--base", "origin/main"),
+                                  env={"CI_JOB_LINT_WORKERS": "1", "ERR_FILE": err_path})
+        with open(err_path, "w", encoding="utf-8") as err:
+            proc = subprocess.run(argv, cwd=self.root, stdout=subprocess.PIPE, stderr=err, text=True, env=env)
+        self.assertEqual(normal(proc.stdout.splitlines()),
+                         ["PASS one: PASS SHELL (N)", "FAIL two: FAIL SHELL rc=1 (N) log=L",
+                          "PASS three: PASS SHELL (N)", "summary: ran 3 of 3 steps", "log=L"], proc.stdout)
+        self.assertEqual(self.read("seen-one.txt"), "one:True two:False", "the second step's start line was out before the first ran")
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+
+    def serial_probe(self, args):
+        """Runs two steps, the first a probe. The probe writes whether the second step's start line was already on stderr
+        when it began: a serial run has not started the second step yet. Returns (stdout lines, rc, the probe's answer)."""
+        err_path = os.path.join(self.root, "stderr.txt")
+        probe = ("err = open(os.environ['ERR_FILE'], encoding='utf-8').read()\n"
+                 "open('seen-b.txt', 'w').write(str('start: b' in err))\n")
+        steps = (self.lint("a", probe + "print('a')\n"), self.lint("b", "print('b')\n"))
+        argv, env = self.job_call(*steps, args=args, env={"CI_JOB_LINT_WORKERS": "4", "ERR_FILE": err_path})
+        with open(err_path, "w", encoding="utf-8") as err:
+            proc = subprocess.run(argv, cwd=self.root, stdout=subprocess.PIPE, stderr=err, text=True, env=env)
+        return proc.stdout.splitlines(), proc.returncode, self.read("seen-b.txt"), proc.stdout
+
+    def test_a_run_without_lint_keeps_its_steps_serial(self):
+        lines, rc, seen, out = self.serial_probe(args=())
+        self.assertEqual((list(by_step(lines).items()), seen), ([("a", "PASS"), ("b", "PASS")], "False"), out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_step_run_keeps_its_steps_serial(self):
+        lines, rc, seen, out = self.serial_probe(args=("--step", "a", "--step", "b"))
+        self.assertEqual((list(by_step(lines).items()), seen), ([("a", "PASS"), ("b", "PASS")], "False"), out)
+        self.assertEqual(rc, 0, out)
+
+    def test_plan_under_lint_runs_nothing_and_lists_the_steps_in_order(self):
+        steps = self.rendezvous_steps(["a", "b"]) + [self.lint("c", "print('c')\n")]
+        code, lines, out = plan_lint(self.root, workflow(*steps))
+        self.assertEqual((code, selected(lines)), (0, ["a", "b", "c"]), out)
+        self.assertEqual([n for n in os.listdir(self.root) if n.startswith(("arrived", "done", "printed"))], [], out)
+
+    def test_with_no_cpu_count_the_steps_still_run(self):
+        rc, lines, out = self.run_lint(self.lint("x1", "print('x1')\n"), self.lint("x2", "print('x2')\n"),
+                                       self.lint("x3", "print('x3')\n"), launch=cpus(None))
+        self.assertEqual(list(by_step(lines).items()), [("x1", "PASS"), ("x2", "PASS"), ("x3", "PASS")], out)
+        self.assertEqual(rc, 0, out)
 
 
 class Progress(Job):
