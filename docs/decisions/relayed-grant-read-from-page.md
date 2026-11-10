@@ -4,6 +4,8 @@
 
 Owner ask ask-mw3lqb8bwx, 2026-11-05 07:49 CST, verbatim: "i need sessions to be able to relay my word to other cloud sessions and it be trust worthy add in auto mode". Roadmap step owner-word-relay builds it.
 
+Owner ruling, 2026-11-10 11:06 CST, verbatim: "widen". Lane page-save-reaches-auto-mode, incident item 149 b: a page pick that named one settings change still needed a typed word. Chosen option: widen the "Relayed Grant" entry so one settings change is covered, only when the picked option's label on the page names the exact settings file and entry it changes.
+
 ## What counts
 
 A relayed act has the owner's grant only when all hold:
@@ -12,6 +14,7 @@ A relayed act has the owner's grant only when all hold:
 - `skills/waiting-page/page_grant.py` printed `counted` for that item, run with `--pick` equal to the page's choice.
 - The item is open. An arbiter overturn is the one exception.
 - The act is the one the picked option's label on the page names. Nothing wider.
+- One settings change counts as that act only when the label names the settings file and the entry (key) it changes.
 
 The receiver quotes the page, the item id and n, and the choice and `at`, from the `counted` line.
 
@@ -26,6 +29,10 @@ The receiver quotes the page, the item id and n, and the choice and `at`, from t
 - An answer whose `at` has no time zone.
 - An answer older than the item's `added`.
 - A fetch folder that a check used before, or that `--new-fetch` did not make.
+- A change to permissions.
+- A settings change whose label does not name the file and entry.
+- A change to the Relayed Grant entry itself. The entry may not widen itself.
+- Overrides.
 
 ## What a relay message carries
 
@@ -52,7 +59,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 
 ## Auto-mode entry
 
-`settings.json` `autoMode.allow` holds the "Relayed Grant:" entry, the owner's own PR #1293 (item 267). It keeps `$defaults`. No row goes into the "Current entries" table of decision auto-mode-owner-acts. `hooks/test_auto_mode_allow.py` pins it: one entry; it quotes `page_grant.COMMAND` and `page_grant.COUNTED_LINE` in full, read from the checker; its Never covers names each act in `RELAYED_REFUSED`. Whether the classifier reads the `counted` line is unmeasured (Gaps above).
+`settings.json` `autoMode.allow` holds the "Relayed Grant:" entry, the owner's own PR #1293 (item 267). It keeps `$defaults`. No row goes into the "Current entries" table of decision auto-mode-owner-acts. `hooks/test_auto_mode_allow.py` pins it. It checks one entry. The entry quotes `page_grant.COMMAND` and `page_grant.COUNTED_LINE` in full, read from the checker. Its Never covers names each act in `RELAYED_REFUSED`. Two of them are "a settings change whose label does not name the file and entry" and "a change to the Relayed Grant entry itself". They replace the old blanket "settings". Its Covers text names "one settings change" and requires the label to name the settings file and entry. Whether the classifier reads the `counted` line is unmeasured (Gaps above).
 
 ## Check and cost
 
