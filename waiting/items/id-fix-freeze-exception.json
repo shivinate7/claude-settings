@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-10T22:14:00Z",
+  "context": "Goal: the page never shows a missing-id notice again (your comment at 16:00 CST: \"how is this id field bug still there\").\nProblem (rule): the fix is built but sits as a draft, and the freeze lets a new lane start only with your word for this item.\nBased on (ruling): your 13:06 CST freeze: no new sessions, and new lanes only for items that land on main.\nBased on (read): the id-from-key fix has been an open draft since Nov 6, 14:05 CST, 3,333 commits behind main, in no batch.\nBased on (measured): triage wrote 7 items with no id today, and each showed the notice until 16:09 CST.\nDeparts from: main (each page reader takes the id from a field inside the item) \u2014 every reader takes it from the stored key, so an item with no id field still shows.\nMeanwhile: triage keeps adding the id field by hand to each item it writes.",
+  "home": "step page-item-id-check",
+  "id": "id-fix-freeze-exception",
+  "kind": "decision",
+  "lane": "page-item-id-check",
+  "n": 503,
+  "options": [
+    {
+      "gain": "The notice stops on every page, whoever writes the item.",
+      "how": "A builder merges main into the id fix, a fresh reviewer reads it, and the coordinator puts it in the next batch.",
+      "key": "a",
+      "label": "Yes, one lane lands it (Recommended)",
+      "lose": "One more lane runs during the freeze."
+    },
+    {
+      "gain": "No new lane during the freeze.",
+      "how": "The fix stays a draft; triage adds the id by hand.",
+      "key": "b",
+      "label": "No, wait until the freeze lifts",
+      "lose": "A missed id still shows the notice until the freeze lifts."
+    }
+  ],
+  "owner": "triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "pick": "a",
+  "ref": "owner page comment 16:00 CST Nov 10; coordinator 16:06 CST",
+  "replied": "2026-11-10T22:18:00Z",
+  "reply": "You picked a in chat at 16:15 CST (relayed by the coordinator). A builder started at 16:17 CST: it merges main into the id-from-key fix. Then a fresh reviewer reads it, and the batch runner puts it in the next batch. Step page-item-id-check tracks it. (Triage, 16:18 CST.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Land the id fix in the freeze?",
+  "status": "closed",
+  "title": "May triage start one lane now to land the built id-from-key fix, so the missing-id notice stops?",
+  "why": "The fix is already built, so one short lane ends a bug you keep seeing."
+}

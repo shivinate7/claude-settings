@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-10T22:03:00Z",
+  "context": "Goal: a push that would move main by mistake is stopped, not left to an approval prompt.\nProblem (rule): your 14:59 CST \"Refuse it\" was built for an agent's checkout only, so a push of every branch from the main or a lane checkout still asks you, and only you can widen the rule.\nBased on (ruling): your 14:59 CST answer \"Refuse it\", on a push that sends main from an agent's checkout.\nBased on (ruling): record plain-push-asks (your 2026-11-03 22:23 CST ruling): --all and --branches pushes ask; this asks whether 14:59 CST replaces that for every checkout.\nBased on (read): the guard refuses that push from an agent's checkout; from the main or a lane checkout, a push with --all or --branches still raises an approval prompt, the same as a plain push of main.\nDeparts from: main (those pushes ask) \u2014 option a makes the guard refuse them from every checkout.\nMeanwhile: nothing waits; the narrow build is in batch 74 and loosens nothing.",
+  "home": "decision plain-push-asks",
+  "id": "push-all-refuse-scope",
+  "kind": "decision",
+  "n": 502,
+  "options": [
+    {
+      "gain": "No session can send main with a push of every branch, from any checkout.",
+      "how": "A lane makes the guard refuse --all and --branches pushes from every checkout, with the remedy to push the one branch by name.",
+      "key": "a",
+      "label": "Refuse them everywhere (Recommended)",
+      "lose": "A session that truly means to push every branch must push each one by name."
+    },
+    {
+      "gain": "No new refusal to learn.",
+      "how": "Nothing changes: those pushes keep raising an approval prompt for you.",
+      "key": "b",
+      "label": "Keep the prompt outside agent checkouts",
+      "lose": "You still get a prompt to judge each such push."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 16:02 CST Nov 10",
+  "replied": "2026-11-10T22:18:00Z",
+  "reply": "You answered in chat at 16:08 CST (relayed by the coordinator): \"I either want it approved or declined whichever is correct. I know for a fact I dont want to be asked.\" So a push of every branch never asks you. The guard works out what the push would do: it refuses the push when it would update main or master on the remote, and allows it otherwise. Home: record plain-push-asks is rewritten in place, and step push-all-resolve-no-ask builds it once the agent-checkout refusal is on main. (Triage, 16:18 CST.)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Refuse push --all everywhere?",
+  "status": "closed",
+  "title": "Does your \"Refuse it\" also cover a push of every branch from the main or a lane checkout?",
+  "why": "It settles whether your ruling reaches every checkout or only an agent's."
+}

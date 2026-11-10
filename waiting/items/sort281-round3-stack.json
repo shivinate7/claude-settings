@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-10T21:56:00Z",
+  "context": "Goal: shrink the open-PR pile without losing wanted work (your words at 15:31 CST: bundle them to see if they are still wanted and make sense to land).\nProblem (cannot undo): closing the three PRs drops a refusal at merge time that no other PR carries, so it needs your word.\nBased on (ruling): your 15:31 CST chat answer: match the PRs to steps, bundle them, and judge each; no PR closes before you see the list.\nBased on (ruling): record pr-review-record, question 1, pick a: no refusal at merge time for now.\nBased on (measured): a Sonnet reader compared the stack with main at 2d6f67f7c: main's review check already says round 3 is owed after a fix check, and `merge --release-check` holds the gate; only a refusal at merge time is missing; all three conflict with main and sit about 3,000 commits behind.\nDeparts from: main (the three PRs stay open) \u2014 the batch runner closes all three with a note naming the review check and `merge --release-check` on main.\nMeanwhile: the other wanted bundles are queued on the roadmap to merge main and land; nothing closes before your answer.",
+  "home": "step-matching pass for the 281 open PRs that cite no step",
+  "id": "sort281-round3-stack",
+  "kind": "decision",
+  "n": 501,
+  "options": [
+    {
+      "gain": "Three fewer stale PRs, and the round-3 gate stays on main as it is today.",
+      "how": "The batch runner closes #1773, #1939 and #1994 with a note naming what on main covers them; each branch is kept on an archive branch.",
+      "key": "a",
+      "label": "Close all three (Recommended)",
+      "lose": "No refusal at merge time for a missing round 3, which record pr-review-record already chose not to have for now."
+    },
+    {
+      "gain": "A refusal at merge time is ready if you want it later.",
+      "how": "A lane merges main into the stack and runs its review again.",
+      "key": "b",
+      "label": "Keep them, merge main in later",
+      "lose": "A lane spends time on a change your earlier pick put aside, and the merge clashes with another open PR that rewrites the same round-3 rules."
+    }
+  ],
+  "owner": "triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "ref": "triage 15:56 CST Nov 10",
+  "repo": "shivinate7/claude-settings",
+  "short": "Close the round-3 merge stack?",
+  "status": "open",
+  "title": "Close #1773, #1939 and #1994, the merge-tool round-3 stack that main already covers?",
+  "why": "Of the 31 doubtful PRs, this is the only bundle whose change main already covers; the rest still look wanted and need main merged in."
+}
