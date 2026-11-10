@@ -132,6 +132,7 @@ def record(id_, slug):
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
+    own_number = 7  # the lane's own PR: pr() serves its head from the branch; the lane-lint cases name it 7
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
@@ -145,6 +146,7 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
+        self.pulls, self.pull_list_reads = None, 0  # pulls: {number: REST row} of the other PRs a case scripts (None: the own PR only); pull_list_reads: each open_pulls call
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
 
@@ -155,11 +157,24 @@ class FakeHost:
 
     def pr(self, n):
         self.pr_calls.append(n)
+        if self.pulls is not None and n != self.own_number:  # a scripted PR: its row, or the 404 Host.pr raises for a PR that is not there
+            if n not in self.pulls:
+                raise merge.Stop(f"reading the pull request failed: HTTP 404: Not Found (#{n})")
+            row = self.pulls[n]
+            return {"head": row["head"]["sha"], "branch": row["head"]["ref"], "base": row["base"]["ref"], "state": row["state"].upper(),
+                    "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": bool(row["draft"]), "body": row["body"] or ""}
         head = merge.origin_head(self.root, self.branch)
         base = (self.base_seq.pop(0) if len(self.base_seq) > 1 else self.base_seq[0]) if self.base_seq else self.base
         return {"head": self.head_override or head, "branch": self.branch, "base": base, "state": self.pr_state,
                 "mergeable": self.mergeable, "merge_state": "CLEAN", "draft": self.draft, "body": self.body,
                 "changed_files": len(self.changed) if self.changed_files is None else self.changed_files}
+
+    def open_pulls(self):
+        """-> the open pull requests as `GET pulls` lists them: the own PR, then each scripted row that is open. Each call is one list read."""
+        self.pull_list_reads += 1
+        head = self.head_override or merge.origin_head(self.root, self.branch)
+        own = REST.list_item(self.own_number, head, self.branch, self.base, body=self.body, draft=self.draft)
+        return [own] + [row for row in (self.pulls or {}).values() if row["state"] == "open"]
 
     def required_names(self):
         return ["checks"]
@@ -3837,9 +3852,9 @@ def pull(number, head, head_ref, base_ref, state="open", merged=False, draft=Fal
             "mergeable_state": mergeable_state, "merge_commit_sha": merge_commit_sha, "html_url": "https://github.com/o/r/pull/%d" % number,
             "head": {"ref": head_ref, "sha": head, "label": "o:" + head_ref}, "base": {"ref": base_ref, "sha": "b" * 40, "label": "o:" + base_ref}}
 
-def list_item(number, head, head_ref, base_ref):
-    """An open pull request as `GET pulls` lists it: no mergeable, merged or mergeable_state."""
-    full = pull(number, head, head_ref, base_ref)
+def list_item(number, head, head_ref, base_ref, body="", draft=False, state="open"):
+    """A pull request as `GET pulls` lists it: no mergeable, merged or mergeable_state. An empty body is null, as on GitHub."""
+    full = pull(number, head, head_ref, base_ref, state=state, draft=draft, body=body)
     return {k: v for k, v in full.items() if k not in ("merged", "mergeable", "mergeable_state")}
 '''
 
@@ -4244,6 +4259,55 @@ def gh_case_setup(test):
     test.ticks, test.paused, test.at_pause = 0, [], []
     GhHalf.set(test, checks_seq=[[("checks", "pass", "")]])
 
+WS_PROBE = " \t\n\r\f\v"  # the whitespace characters a \s repeat can take
+
+def adjacent_whitespace_repeats(pattern):
+    """-> where in `pattern` a repeat that can take a whitespace run is followed, with only skippable items between, by a repeat that can take a whitespace run too.
+    Both repeats then take the same run, so a search backtracks over it once for each split between them. Reads the parsed pattern, never its source text, and reads no clock."""
+    try:
+        from re import _parser as sre_parse, _compiler as sre_compile  # Python 3.11 and later
+    except ImportError:  # Python 3.10 and earlier
+        import sre_parse, sre_compile
+    repeats = (sre_parse.MAX_REPEAT, sre_parse.MIN_REPEAT)
+
+    def begins_ws(body):
+        """True when the sub-pattern `body` can consume a whitespace character at its first position."""
+        compiled = sre_compile.compile(body)
+        for c in WS_PROBE:
+            for tail in ("", c, "x", "#2390"):
+                m = compiled.match(c + tail)
+                if m is not None and m.end() > 0:
+                    return True
+        return False
+
+    def sub_patterns(value):
+        if isinstance(value, sre_parse.SubPattern):
+            yield value
+        elif isinstance(value, (tuple, list)):
+            for v in value:
+                yield from sub_patterns(v)
+
+    found = []
+
+    def walk(seq, where):
+        items = list(seq.data)
+        for i, (op, av) in enumerate(items):
+            if op not in repeats or not begins_ws(av[2]):
+                continue
+            for j in range(i + 1, len(items)):
+                op2, av2 = items[j]
+                if op2 in repeats and begins_ws(av2[2]):
+                    found.append(f"{where}: items {i} and {j}")
+                    break
+                if not (op2 in repeats and av2[0] == 0):  # a required item stops the scan: nothing skippable lies between
+                    break
+        for i, (op, av) in enumerate(items):
+            for sub in sub_patterns(av):
+                walk(sub, f"{where}/{i}")
+
+    walk(sre_parse.parse(pattern), "top")
+    return found
+
 class CloseKeywordReason(Env):
     """A reason flag's reason lands in the merge commit (lift_message), and GitHub closes an issue that a commit names after a closing keyword.
     So a reason with a closing keyword before an issue ref is refused, after argparse and before the lock, any host read and any write.
@@ -4252,17 +4316,18 @@ class CloseKeywordReason(Env):
     NINE = ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved")
     REFUSED = ([f"{word} #2390" for word in NINE]
                + ["FiXeS #2390", "CLOSED #2390", "rEsOlVeS #2390", "fixes: #2390", "fixes:#2390", "fixes#2390", "Resolves:   #2390",
-                  "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too"])
+                  "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too",
+                  "fixes   #2390", "fixes : #2390", "fixes\t#2390", "fixes\n#2390"])
     REFUSED_URL = ([f"{word} https://github.com/o/r/issues/2390" for word in NINE]
                    + ["Fixes: https://github.com/o/r/issues/2390", "resolves http://github.com/o/r/issues/2390",
                       "closed www.github.com/o/r/issues/2390", "fix https://github.com/o/r/pull/2390",
                       "fixes https://www.github.com/o/r/issues/2390", "closes:https://github.com/shivinate7/claude-settings/issues/2390",
                       "base red; this fixes https://github.com/o/r/issues/2390 too"])
     ALLOWED = ("PR #2390", "#2390", "fix the base", "fix the base, see #2390", "prefixes #2390", "cause and fix: PR 2390",
-               "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5")
+               "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5",
+               "fixtures/x#12", "prefix fixtures/x#12")
     REWORD = "cause and fix: PR 2390"  # the example the refusal gives
-    CLOSE_FORM = re.compile(r"(?i)\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b\s*:?\s*"
-                            r"(?:(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)")  # a closing keyword before an issue ref or an issue URL
+    LONG_RUN = " " * 20000  # the whitespace run after a keyword: one home for the long-run cases
 
     def refused_each(self, flag, reasons):
         """Each refused reason, given with `flag`, stops before the host read. The PR is CLOSED, so a run that reads it stops on a CLOSED line instead."""
@@ -4275,7 +4340,7 @@ class CloseKeywordReason(Env):
                 self.assertEqual(rc, 1, out + err)
                 self.assertIn(self.REWORD, err, "the refusal does not give the reword example")
                 self.assertRegex(err, r"(?i)reword", "the refusal does not say to reword the reason")
-                self.assertIsNone(self.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref or URL")
+                self.assertIsNone(merge.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref or URL")
                 self.assertNotIn("Traceback", err)
 
     def refusal_writes_nothing(self, flag, reason="fixes #2390"):
@@ -4311,17 +4376,44 @@ class CloseKeywordReason(Env):
     def test_close_keyword_undo_check_unknown_ok_refused_issue_url_takes_no_lock_and_writes_nothing(self):
         self.refusal_writes_nothing("--undo-check-unknown-ok", "fixes https://github.com/o/r/issues/2390")
 
+    def reaches_host_read(self, *flag_reasons):
+        """A run with these flag and reason pairs is not refused, so it reaches the PR's state read. The caller sets the PR CLOSED, so the run stops on the CLOSED line."""
+        reads = len(self.host.pr_calls)
+        rc, out, err = self.run_args("7", "--confirm", *flag_reasons)
+        self.assertGreater(len(self.host.pr_calls), reads, "the reason was refused before the host read")
+        self.assertIn("CLOSED", err, "the run did not reach the PR's state read")
+        self.assertNotRegex(err, r"(?i)reword", "an allowed reason got the reword refusal")
+
     def test_close_keyword_allowed_reasons_reach_the_host_read_for_both_flags(self):
         # the controls: a reason with no closing form before a ref is not refused, so the run goes on to read the PR, which is CLOSED here
         self.host.pr_state = "CLOSED"
         for flag in self.FLAGS:
             for reason in self.ALLOWED:
                 with self.subTest(flag=flag, reason=reason):
-                    reads = len(self.host.pr_calls)
-                    rc, out, err = self.run_args("7", "--confirm", flag, reason)
-                    self.assertGreater(len(self.host.pr_calls), reads, "the reason was refused before the host read")
-                    self.assertIn("CLOSED", err, "the run did not reach the PR's state read")
-                    self.assertNotRegex(err, r"(?i)reword", "an allowed reason got the reword refusal")
+                    self.reaches_host_read(flag, reason)
+
+    def test_close_keyword_pattern_has_no_adjacent_whitespace_repeats(self):
+        # the cause: two repeats that both take the same whitespace run, with nothing required between them. A search backtracks over the run once for each split between them.
+        found = adjacent_whitespace_repeats(merge.CLOSE_FORM.pattern)
+        self.assertEqual(found, [], f"the closing-form pattern has two repeats that take the same whitespace run, with nothing required between them: {found}")
+
+    def test_close_keyword_repeat_check_flags_each_respelling_and_passes_the_group_form(self):
+        # the check's own pins, read from the parsed text: each two-run respelling is flagged, and the group form is not
+        for pattern in (r"\s*:?\s*", r"\s*:{0,1}\s*", r"\s*[:-]?\s*"):
+            with self.subTest(pattern=pattern):
+                self.assertTrue(adjacent_whitespace_repeats(pattern), "the check does not flag a two-run respelling")
+        self.assertEqual(adjacent_whitespace_repeats(r"\s*(?::\s*)?"), [], "the check flags the group form, which takes one run")
+
+    def test_close_keyword_long_whitespace_run_keeps_its_result(self):
+        # result only, no timing: a closing word with a long run and no ref after it is allowed, and the same run before a ref is refused
+        cases = (("keyword, run, no ref", "fixes" + self.LONG_RUN + "x"),
+                 ("keyword, run, #-less ref", "fixes" + self.LONG_RUN + "2390"),
+                 ("bare keyword, run", "fix" + self.LONG_RUN),
+                 ("keyword, run, colon, run, no ref", "fixes" + self.LONG_RUN[:10000] + ":" + self.LONG_RUN[:10000] + "x"))
+        for label, text in cases:
+            with self.subTest(case=label):
+                self.assertIsNone(merge.CLOSE_FORM.search(text), "a closing word with a long run and no issue ref after it was refused")
+        self.assertIsNotNone(merge.CLOSE_FORM.search("fixes" + self.LONG_RUN + "#2390"), "a closing word with a long run before an issue ref was allowed")
 
 class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
@@ -12104,6 +12196,116 @@ class RedMainBrake(Env):
         self.merged(rc, out)
         self.assertNotIn("actions/runs/1302/jobs", self.host.reads, "only the newest completed run of the group is judged")
 
+    # The cancelled-newest shape (decision no-merge-onto-red-main): main's newest push run, 1403, was cancelled with no red job. Its older
+    # green push run 1402 passed every job of the older red schedule run 1401. The verdict stays red, and the cancelled run is named beside
+    # it with its own re-run as the way out. A lone cancelled run is UNKNOWN, and names the same way out.
+    CAN_RED, CAN_GREEN, CAN_CANCELLED = 1401, 1402, 1403
+
+    def cancelled_beside_red(self):
+        """-> (runs, jobs) of the incident, newest run first, as `go` takes them."""
+        runs = [main_run(self.CAN_CANCELLED, "cancelled"), main_run(self.CAN_GREEN, "success"), main_run(self.CAN_RED, "failure", event="schedule")]
+        jobs = {self.CAN_RED: [main_job("checks", "failure", 20), main_job("scope", "success")],
+                self.CAN_GREEN: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)],
+                self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+        return runs, jobs
+
+    def lone_cancelled(self):
+        """-> (runs, jobs) of a cancelled newest run with no run beneath it."""
+        return [main_run(self.CAN_CANCELLED, "cancelled")], {self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+
+    def assert_rerun_remedy(self, text, run_id):
+        """The way out for a cancelled run is its own re-run, which tests that run's own commit."""
+        self.assertIn(f"gh run rerun {run_id}", text, f"the cancelled run {run_id} is not named with its re-run, `gh run rerun {run_id}`")
+        self.assertIn("own commit", text, "the remedy does not say the re-run tests the run's own commit")
+
+    def test_a_cancelled_newest_run_beside_a_red_run_is_named_with_its_rerun(self):
+        rc, out, before = self.go(*self.cancelled_beside_red())
+        self.refused(rc, out, before)
+        self.assertIn(f"run {self.CAN_RED}", out)
+        self.assertIn("checks: fail", out)
+        self.assert_rerun_remedy(out, self.CAN_CANCELLED)
+        self.assertNotIn(f"gh run rerun {self.CAN_RED}", out, "the red run gets no re-run remedy: only a cancelled run does")
+
+    def test_a_lone_cancelled_newest_run_is_unknown_and_names_its_rerun(self):
+        rc, out, before = self.go(*self.lone_cancelled())
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn(f"run {self.CAN_CANCELLED}", out)
+        self.assert_rerun_remedy(out, self.CAN_CANCELLED)
+
+    def test_base_verdict_names_the_rerun_of_the_cancelled_run_beside_a_red_run(self):
+        runs, jobs = self.cancelled_beside_red()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs)
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "red", detail)
+        self.assertIn(f"run {self.CAN_RED}", detail)
+        self.assert_rerun_remedy(detail, self.CAN_CANCELLED)
+
+    def test_base_verdict_names_the_rerun_of_a_lone_cancelled_run(self):
+        runs, jobs = self.lone_cancelled()
+        self.host = MainRunsHost(self.co, self.other, runs, jobs)
+        verdict, detail = merge.base_verdict(self.co, self.host, "main")
+        self.assertEqual(verdict, "unknown", detail)
+        self.assert_rerun_remedy(detail, self.CAN_CANCELLED)
+
+    def test_the_preview_line_names_the_rerun_beside_a_red_run(self):
+        rc, out, before = self.go(*self.cancelled_beside_red(), confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("red", line[0])
+        self.assert_rerun_remedy(line[0], self.CAN_CANCELLED)
+
+    def test_the_preview_line_names_the_rerun_of_a_lone_cancelled_run(self):
+        rc, out, before = self.go(*self.lone_cancelled(), confirm=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.refs(), before)
+        line = [l for l in out.splitlines() if l.strip().startswith("main run:")]
+        self.assertEqual(len(line), 1, out)
+        self.assertIn("unknown", line[0].lower())
+        self.assert_rerun_remedy(line[0], self.CAN_CANCELLED)
+
+    # Pins: these pass on the code as it is. The red run gets no re-run remedy, a re-run still going keeps its wait, and a re-run that
+    # passes reads green. Each is the green control beside the red cases above.
+
+    def test_a_red_newest_run_alone_is_refused_with_no_rerun_remedy(self):
+        rc, out, before = self.go([main_run(1421, "failure")], {1421: [main_job("checks", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1421", out)
+        self.assertNotIn("gh run rerun", out, "a red run is never offered a re-run")
+
+    def test_a_re_run_in_flight_keeps_its_wait_text_and_names_no_rerun(self):
+        rc, out, before = self.re_run_over_green("in_progress")
+        self.assert_unknown_for_re_run(rc, out, before, "in_progress", 1301)
+        self.assertNotIn("gh run rerun", out, "a re-run still going is waited for, never offered a re-run")
+
+    def test_a_cancelled_run_re_run_to_success_reads_green_and_merges(self):
+        # the re-run keeps its id at attempt 2 and is completed success: as the newest push run it clears the older red schedule run
+        rc, out, _ = self.go([main_run(self.CAN_CANCELLED, "success", run_attempt=2), main_run(self.CAN_RED, "failure", event="schedule")],
+                             {self.CAN_RED: [main_job("checks", "failure", 20), main_job("scope", "success")],
+                              self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)]})
+        self.merged(rc, out)
+
+    # A cancelled run gets its re-run named only when its commit is the base's head: the head_sha of the newest run in the page read.
+    # Here the cancelled run's commit A is older than the newest run's commit B, so no re-run is named.
+    FA_A, FA_B = "a" * 40, "b" * 40
+
+    def test_a_cancelled_run_older_than_an_in_progress_newest_run_is_named_with_no_rerun(self):
+        rc, out, before = self.go([main_run(1502, None, status="in_progress", sha=self.FA_B), main_run(1501, "cancelled", sha=self.FA_A)],
+                                  {1501: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]})
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("run 1501", out)
+        self.assertNotIn("gh run rerun", out, "the cancelled run 1501 is on a commit that is not the base's head, so no re-run is named")
+
+    def test_a_cancelled_run_older_than_a_green_schedule_newest_run_is_named_with_no_rerun(self):
+        rc, out, before = self.go([main_run(1602, "success", event="schedule", sha=self.FA_B), main_run(1601, "cancelled", sha=self.FA_A)],
+                                  {1602: [main_job("scope", "success")], 1601: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1601", out)
+        self.assertNotIn("gh run rerun 1601", out, "the cancelled run 1601 is on a commit that is not the base's head, so no re-run is named")
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
@@ -13252,11 +13454,12 @@ REVIEW_FAILED_THREE = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, so
 REVIEW_FLAGS = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS")
 REVIEW_FOOTER = "\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"  # the footer a GitHub post carries, a lane's or the server's
 
-def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no", net="not owed", n=7, marker=REVIEW_MARKER, fix=()):
+def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no", net="not owed", n=7, marker=REVIEW_MARKER, fix=(), grant=()):
     """The record line by line, in the order the form gives. A keyword replaces one field, so a case changes only what it tests. `fix` holds the
-    fix check lines, which follow the rounds and come before Net value."""
+    fix check lines, which follow the rounds and come before Net value. `grant` holds the Grant lines, which follow Guard or check and come before
+    the rounds."""
     return "\n".join([marker, f"PR: #{n}", f"Head: {head}", f"Kind: {kind}", f"Guard or check: {guard}",
-                      *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
+                      *grant, *rounds, *fix, f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
 def fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD, role="reviewer", model=merge.REVIEW_FIX_GUARD_MODEL):
     """The one literal of the fix check line: the reviewed head the fix diff starts from, the role, the model and the verdict."""
@@ -14196,12 +14399,13 @@ class ReviewGuardTestPaths(unittest.TestCase):
 
 class ReviewGuardKinds(unittest.TestCase):
     """merge.kind_misfits(kind, files): the sorted paths that break the kind, over the (path, status, additions) triples of the diff. docs-only:
-    each path not ending in .md. delete-only: each path that adds lines (additions above 0), or is new (status added, renamed or copied). normal: none."""
+    each path that is not a doc, a .md under docs/ or the root README.md (merge.is_doc). delete-only: each path that adds lines (additions above
+    0), or is new (status added, renamed or copied). normal: none."""
 
     def test_normal_owes_no_kind_check(self):
         self.assertEqual(review_fn(self, "kind_misfits")("normal", [("hooks/a.py", "modified", 4), ("x.py", "removed", 0)]), [])
 
-    def test_docs_only_names_each_path_not_ending_in_md_sorted(self):
+    def test_docs_only_names_each_path_that_is_not_a_doc_sorted(self):
         files = [("lint/x.py", "modified", 2), ("docs/a.md", "modified", 1), ("hooks/y.txt", "modified", 0), ("docs/b.md", "removed", 0)]
         self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["hooks/y.txt", "lint/x.py"])
 
@@ -14252,7 +14456,7 @@ class ReviewGuardRefusal(ReviewGuardEnv):
         self.assert_refused(*self.run_args(*self.review_argv()), "hooks/README.md")
 
     def test_docs_only_on_a_guard_path_refuses(self):
-        # the guard path is markdown, so the docs-only kind holds and only the guard refuses
+        # hooks/README.md is no doc, but the guard refuses it before the kind is checked, so the Guard reason holds
         self.host.changed = [("docs/notes.md", "modified", 0), ("hooks/README.md", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "hooks/README.md")
 
@@ -14340,6 +14544,93 @@ class ReviewGuardRefusal(ReviewGuardEnv):
         rc, out, err = self.run_args(*self.review_argv("delete-only"))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+class ReviewDocsOnlyDiff(ReviewGuardEnv):
+    """`--kind docs-only` prints the record only when every changed path is a doc: a .md under docs/, or the root README.md, matched without
+    regard to letter case and never stripped (decision docs-only-prs-skip-review). Any other .md is a rule, skill or agent file, which steers
+    behaviour, so it is refused. A path under a guard folder is refused by the guard before the kind is checked."""
+
+    def run_docs(self, *paths):
+        """-> (rc, stdout, stderr) of a docs-only record for pull request 7 whose changed paths are `paths`, each modified with no added line."""
+        self.host.changed = [(p, "modified", 0) for p in paths]
+        return self.run_args(*self.review_argv("docs-only"))
+
+    def assert_docs_refused(self, rc, out, err, *paths):
+        """A docs-only record that names a path which is not a doc: rc 1, no record on stdout, the Kind reason on stderr, each path named."""
+        self.assertEqual(rc, 1, "docs-only record not refused: a path that is not a doc printed the record\n" + out + err)
+        self.assertEqual(out, "", "the refused docs-only record printed on stdout")
+        self.assertIn("Kind", err, "the refusal does not hold on Kind\n" + err)
+        for path in paths:
+            self.assertIn(path, err, f"the refusal does not name {path}")
+
+    def assert_docs_printed(self, rc, out, err):
+        """A docs-only record that prints: exit 0, and the record on stdout reads docs-only."""
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only", "the printed record is not docs-only")
+
+    def test_a_rule_file_at_the_root_refuses_the_docs_only_record(self):
+        rc, out, err = self.run_docs("docs/a.md", "CLAUDE.md")
+        self.assert_docs_refused(rc, out, err, "CLAUDE.md")
+        self.assertNotIn("docs/a.md", err, "the refusal names a doc, which is no offending path")
+
+    def test_a_rule_file_under_a_folder_refuses_the_docs_only_record(self):
+        self.assert_docs_refused(*self.run_docs(".claude/CLAUDE.md"), ".claude/CLAUDE.md")
+
+    def test_an_output_style_file_refuses_the_docs_only_record(self):
+        self.assert_docs_refused(*self.run_docs("output-styles/x.md"), "output-styles/x.md")
+
+    def test_a_claude_rules_file_refuses_the_docs_only_record(self):
+        self.assert_docs_refused(*self.run_docs(".claude/rules/hooks.md"), ".claude/rules/hooks.md")
+
+    def test_a_skill_file_refuses_the_docs_only_record(self):
+        self.assert_docs_refused(*self.run_docs("skills/waiting-page/SKILL.md"), "skills/waiting-page/SKILL.md")
+
+    def test_an_agent_file_refuses_the_docs_only_record(self):
+        self.assert_docs_refused(*self.run_docs("agents/builder.md"), "agents/builder.md")
+
+    def test_a_readme_in_a_folder_refuses_the_docs_only_record(self):
+        # Only the root README.md is a doc. A README in a folder is not under docs/ either.
+        self.assert_docs_refused(*self.run_docs("skills/README.md"), "skills/README.md")
+
+    def test_a_leading_space_refuses_the_docs_only_record(self):
+        # A space is part of the name, so " docs/a.md" is not under docs/. The old check reads it as a doc, since it ends in .md.
+        self.assert_docs_refused(*self.run_docs(" docs/a.md"), " docs/a.md")
+
+    def test_a_trailing_space_refuses_the_docs_only_record(self):
+        # Green on the old code too, which refuses it for not ending in .md. It guards a future strip of the path.
+        self.assert_docs_refused(*self.run_docs("docs/a.md "), "docs/a.md ")
+
+    def test_a_rename_from_a_rule_file_refuses_the_docs_only_record(self):
+        # A rename's old path is a change to that file too, so the rule file the rename left is named.
+        self.host.changed = [("docs/x.md", "renamed", 0), ("CLAUDE.md", "removed", 0)]
+        rc, out, err = self.run_args(*self.review_argv("docs-only"))
+        self.assert_docs_refused(rc, out, err, "CLAUDE.md")
+
+    def test_a_markdown_file_under_a_guard_folder_is_no_doc(self):
+        # Unit level: the guard refuses these paths before the kind is checked, so the kind's own rule is read from merge.kind_misfits.
+        kind_misfits = review_fn(self, "kind_misfits")
+        for path in ("hooks/README.md", "hooks/precompact_handoff_prompt.md"):
+            with self.subTest(path=path):
+                self.assertEqual(kind_misfits("docs-only", [(path, "modified", 0)]), [path], f"{path} is a doc under the docs-only rule")
+
+    def test_an_upper_case_docs_md_prints_the_record(self):
+        # Red on the old code, which tests endswith(".md") case-sensitively and refuses DOCS/Notes.MD. The rule ignores letter case.
+        rc, out, err = self.run_docs("DOCS/Notes.MD")
+        self.assertEqual(rc, 0, "an upper-case doc was refused: the docs-only rule must ignore letter case\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only", "the printed record is not docs-only")
+
+    def test_a_docs_md_prints_the_record(self):
+        self.assert_docs_printed(*self.run_docs("docs/a.md"))
+
+    def test_the_root_readme_alone_prints_the_record(self):
+        self.assert_docs_printed(*self.run_docs("README.md"))
+
+    def test_a_docs_md_beside_a_records_file_prints_the_record(self):
+        self.assert_docs_printed(*self.run_docs("docs/decisions/x.md", "docs/records.md"))
+
+    def test_an_empty_diff_prints_the_record(self):
+        # The empty state: no changed path, so no path that is not a doc.
+        self.assert_docs_printed(*self.run_docs())
 
 class ReviewGuardFiles(ReviewGuardEnv):
     """The guard and the kind read the files through the real Host.pr_files, so a rename counts by both its names and every page of the list is
