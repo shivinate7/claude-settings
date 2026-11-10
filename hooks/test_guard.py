@@ -6199,6 +6199,10 @@ LEAK_FORMS = (
      "cat <<'EOF' > notes.txt\nhello\nEOF"),
     ("cat writes x.py with print('it\\'s'), then python3 x.py", "cat <<'EOF' > x.py\nprint('it\\'s')\nEOF\n"
      "python3 x.py"),
+    # A lone " leaks the same way, so the restore at a delimiter line must take back a " as well as a '.
+    ('python, quoted delimiter, body print("say hi), a lone " in the body', "python3 - <<'PY'\nprint(\"say hi)\nPY"),
+    ('node, JSX body <p>Say "hi</p>, a lone " in text', "node - <<'JS'\nconst el = <p>Say \"hi</p>;\nJS"),
+    ('bash, body echo "say hi, a lone " in the body', "bash <<'SH'\necho \"say hi\nSH"),
 )
 for _label, _head in LEAK_FORMS:
     sh("heredoc: lone-quote leak, %s, a kill after the closer denies" % _label,

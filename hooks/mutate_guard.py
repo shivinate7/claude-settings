@@ -287,6 +287,10 @@ MUTATIONS = [
      '            if index == at and quote != saved.get(head_end, quote):',
      '            if False:', "guard",
      "heredoc: lone-quote leak, python, quoted delimiter, body print('it\\'s'), a kill after the closer denies"),
+    ("kill: a delimiter line restores only a lone ' quote, so a lone \" in the body goes unjudged after the closer",
+     '            if index == at and quote != saved.get(head_end, quote):',
+     '            if index == at and quote == "\'" and quote != saved.get(head_end, quote):', "guard",
+     'heredoc: lone-quote leak, python, quoted delimiter, body print("say hi), a lone " in the body, a kill after the closer denies'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
