@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 15:09 CST.
+Last rewrite: 2026-11-10 15:19 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -82,9 +82,14 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 - **R5. One guard cull now, then notes only.** Owner 15:04 CST Nov 10: "i'd say option e works for now
   with a revisit maybe to threshold lanes if it turns out to be problematic". One cull lane in stage 3
   fixes or deletes each guard or check with a recorded wrong refusal (60 "false alarm" lines in
-  docs/debts/notes.md), whichever costs less. After it, wrong refusals are notes only. If they turn out
+  docs/debts/notes.md), whichever costs less; the cost of deleting counts the harm the guard stops
+  (rule building-guard-needs-incident). The list also covers the lane pick guard's wrong fires and the
+  Departs-from separator and Recovered-line fires (owner 15:18 CST: "A is fine -- but the coordinator
+  probably has way more data on how hooks have been acting than your small sample size does"); the
+  coordinator sends triage its record of hook fires for the same list. After it, wrong refusals are notes only. If they turn out
   to be a problem again, revisit a threshold (a guard with 3 recorded wrong refusals gets its own lane).
-  Home: decision cull-rules, rewritten in place.
+  Home: new decision cull-guard-wrong-refusals, beside cull-rules (triage branch cull-false-alarms-once;
+  rulings-declare-kind allows one ruling per record).
 
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
