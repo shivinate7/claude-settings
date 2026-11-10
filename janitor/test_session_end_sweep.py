@@ -726,8 +726,9 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
                 self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
 
     def test_the_sweep_is_told_it_is_the_session_end_run(self):
-        """The SessionEnd run scopes the sweep to this session's own repository. Without
-        `--session-end` the sweep reads every machine-wide tier, which is the daily job's job."""
+        """The SessionEnd run passes `--session-end`: it judges branches and worktrees in its own
+        repository only, stops proven orphans machine-wide like the scheduled job, and skips the
+        loose-process report."""
         repo = os.path.join(ROOT, "session_end_flag_repo")
         make_repo(repo)
         calls = self.sweep_argv_for(repo, 0.0)
@@ -740,10 +741,9 @@ class SessionEndHookStartsOneSweepProcess(unittest.TestCase):
     """Cost of the SessionEnd path (rule outcomes-mechanize-rules: a test proves the cost a hook
     states). One payload with a cwd and no scratchpad, the case every session end takes.
 
-    Measured on main before the SessionEnd scope change, with `hook_starts(..., every_call=True)`, one fixture
-    repository with one commit: 3 process starts in all, 2 git (`git_reads.primary_checkout`) and
-    1 sweep subprocess, with 0 `ps` reads (no scratchpad in the payload). The sweep's own pid-list
-    reads are measured by SessionEndScopeTests in janitor/test_sweep.py.
+    Measured with `hook_starts(..., every_call=True)`, one fixture repository with one commit: 3 process starts
+    in all, 2 git (`git_reads.primary_checkout`) and 1 sweep subprocess, with 0 `ps` reads (no scratchpad in
+    the payload). The sweep's own pid-list reads are measured by SessionEndScopeTests in janitor/test_sweep.py.
     """
 
     def setUp(self):
