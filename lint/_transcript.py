@@ -384,9 +384,10 @@ def _finds_writer(node):
     return None
 
 
-def page_writer_id(records):
-    """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None."""
-    pending, writer = set(), None
+def _page_reads(records):
+    """(ran, writer): whether the main session ran an ArtifactData get of meta/page, and the `writer` string
+    in the newest such result, else None."""
+    pending, writer, ran = set(), None, False
     for rec in records:
         if rec.get("isSidechain"):
             continue
@@ -397,6 +398,7 @@ def page_writer_id(records):
                     and (inp.get("path") == "meta/page"
                          or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):
                 pending.add(use.get("id"))
+                ran = True
         content = (rec.get("message") or {}).get("content")
         for block in content if isinstance(content, list) else ():
             if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("tool_use_id") in pending:
@@ -408,4 +410,14 @@ def page_writer_id(records):
                     found = m.group(1) if m else None
                 if found:
                     writer = found
-    return writer
+    return ran, writer
+
+
+def page_writer_id(records):
+    """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None."""
+    return _page_reads(records)[1]
+
+
+def page_read_ran(records):
+    """True when the main session ran an ArtifactData get of meta/page, whatever its result named."""
+    return _page_reads(records)[0]

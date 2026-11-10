@@ -438,13 +438,17 @@ def record_branch(root):
 WAITING_PAGE_COLOUR = "waiting-page-colour"  # the extras key: the page's colour, #rrggbb
 WAITING_PAGE_ICON = "waiting-page-icon"  # the extras key: the page's icon file, a path inside the repo
 WAITING_PAGE_WRITER = "waiting-page-writer"  # the extras key: the session id of the page's writer
+PARENT_TARGETS = frozenset({"@parent", "parent"})  # send targets that name the parent, never a session id
 
 
 def waiting_page_writer(root):
     """The session id of the waiting page's writer from the extras file of `root`; None when the key is missing,
-    null, empty or not a string. A session id is a claim, not checked here."""
+    null, not a string, blank, padded with whitespace or a parent alias (PARENT_TARGETS). A session id is a
+    claim, not checked past that."""
     found = _repo_keys(root).get(WAITING_PAGE_WRITER)
-    return found if isinstance(found, str) and found else None
+    if not isinstance(found, str) or not found or found != found.strip() or found in PARENT_TARGETS:
+        return None
+    return found
 
 
 def waiting_page_colour(root):

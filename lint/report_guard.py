@@ -164,7 +164,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
+    ARTIFACT_DATA, SEND_TOOLS, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
@@ -825,7 +825,7 @@ LANE_REFUSAL = owner_line(
     "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
     "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
-PARENT_TARGETS = {"@parent", "parent"}
+PARENT_TARGETS = set(layout.PARENT_TARGETS)
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
 # quote, double or single, opens and closes only at a non-word edge, so a lone quote or an apostrophe
@@ -1137,12 +1137,14 @@ def question_problem(records, turn, text, hook):
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
-    meta/page read's; with none, the layout's `waiting-page-writer` (its ack starts no turn either). The question box counts
+    meta/page read's; with no such read at all, the layout's `waiting-page-writer` (its ack starts no turn either).
+    A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
-    turn with no counted send, or with no transcript writer, reads it once."""
+    turn with no counted send reads the extras file once, for the page (`layout.waiting_page`); with no meta/page
+    read in the transcript it reads it a second time, for the writer key."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
@@ -1161,7 +1163,7 @@ def question_problem(records, turn, text, hook):
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
-    if not writer and root:
+    if not writer and root and not page_read_ran(records):
         writer = layout.waiting_page_writer(root)
         if writer:
             acks[writer] = {writer}
