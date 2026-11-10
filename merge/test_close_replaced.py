@@ -141,24 +141,19 @@ class CloseAsReplaced(CloseEnv):
         self.assertIn("close as replaced: o/alpha #6 by #8", lines, "control: #8 replaces open #6 and prints no line:\n" + "\n".join(lines))
         self.assertEqual(lines, ["close as replaced: o/alpha #6 by #8"], "a Closes, Fixes or Unreplaces body printed a replaced line for #4")
 
-    def test_a_replaced_replacer_holds_nothing(self):
-        # Re-pointed, ruling 2 (lane, 22:14 CST): a PR named on a close as replaced line holds nothing. #7 replaces #4 and is itself replaced by
-        # #9, so #7's claim on #4 closes nothing. Only `#7 by #9` prints. The old expectation let #7 hold #4 in the same run.
+    def test_a_replaced_replacer_still_replaces_its_target(self):
+        # Pin, ruling 2 correction (lane, 22:22 CST): every REPLACED claim stands. #7 replaces #4 and is itself replaced by #9: both lines print.
+        # Only the carried check drops replaced PRs. The 22:14 CST wording that voided #7's claim is withdrawn.
         pulls = [named_pull(4, head_of(4)), named_pull(7, head_of(7), body="Replaces #4"), named_pull(9, head_of(9), body="Replaces #7")]
         block = self.block_for_alpha(pulls=pulls)
-        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #7 by #9"], "\n".join(block))
+        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #4 by #7", "close as replaced: o/alpha #7 by #9"], "\n".join(block))
 
-    def test_a_full_repo_of_twelve_chained_prs_prints_no_replacer_that_is_replaced(self):
-        # Re-pointed, ruling 2 (lane, 22:14 CST): #11 is closed by #12, so #11 holds nothing and #10 by #11 prints no line. The ruling does not
-        # say how a whole chain resolves, so this pins only what it does say: #11 by #12 prints, and no replacer on a printed line is a PR
-        # that a printed line replaces.
+    def test_a_full_repo_of_twelve_chained_prs_closes_eleven(self):
+        # Pin, ruling 2 correction (lane, 22:22 CST): a chain of replacers prints one line per replaced PR, all in one pass, so twelve PRs
+        # give eleven lines.
         pulls = [named_pull(n, head_of(n), body=f"Replaces #{n - 1}" if n > 1 else "") for n in range(1, 13)]
-        lines = kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
-        self.assertIn("close as replaced: o/alpha #11 by #12", lines, "\n".join(lines))
-        self.assertNotIn("close as replaced: o/alpha #10 by #11", lines, "#11 is closed by #12, yet its claim on #10 prints")
-        replaced = {int(re.search(r"#(\d+) by", l).group(1)) for l in lines}
-        replacers = {int(re.search(r"by #(\d+)$", l).group(1)) for l in lines}
-        self.assertFalse(replaced & replacers, "a replacer on a printed line is itself replaced on one:\n" + "\n".join(lines))
+        block = self.block_for_alpha(pulls=pulls)
+        self.assertEqual(kind_lines(block, REPLACED), [f"close as replaced: o/alpha #{n} by #{n + 1}" for n in range(1, 12)], "\n".join(block))
 
     def test_a_mutual_replaces_closes_neither(self):
         # Ruling 1 (lane, 22:14 CST): #1 says Replaces #2 and #2 says Replaces #1. Neither closes. Control: #8 replaces open #6 and prints.
