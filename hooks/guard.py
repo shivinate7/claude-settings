@@ -3032,6 +3032,8 @@ class BriefScope:
         if not re.search(r"[a-z0-9]", token):
             return
         drive = BRIEF_DRIVE.match(token) and os.path.splitdrive(token)[0]
+        if drive == "":
+            return   # off Windows a drive path is no path of the repo, as a POSIX path outside the checkout
         if token.startswith("/") or drive:
             # An absolute path names a repo path only inside the checkout (`checkout_roots`). One outside it
             # (a pointer to a brief file in a scratchpad) can equal no path of the repo, so it names none.
