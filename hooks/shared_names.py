@@ -78,6 +78,10 @@ BRIEF_MARKERS = (
 # the fallback serves only a repo the default cannot reach (decision act-in-place, rule gh-login-switch).
 GH_DEFAULT_LOGIN = "shivinate7"
 GH_FALLBACK_LOGIN = "ssemwal-cdc"
+# The repo that holds the shared waiting-page template, and the folder of it (rule page-form-to-template: a page
+# comment is rewritten into the template, never answered by a thread reply). The one home of both strings.
+SETTINGS_REPO = GH_DEFAULT_LOGIN + "/claude-settings"
+TEMPLATE_DIR = "skills/waiting-page"
 
 # The tags a session carries (decision session-tiers, Tier tags). The roadmap build reads them from live sessions and
 # the guard's rule lane-repo-tag checks them on a lane `create_session`, so both name the same strings.

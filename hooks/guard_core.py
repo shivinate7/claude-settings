@@ -1287,20 +1287,47 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     return where
 
 
-def _segment_git_c_target(tokens):
-    """Return a tokenized segment's `git -C <path>` target, or None when it names none, or
-    when the segment's command word is not `git`.
+# The value flags of a wrapper that move the program it runs into another folder first, so `env
+# -C <dir> git ...` runs git in <dir>. `_wrapper_flags` already reads each flag's value with
+# `WRAPPER_VALUE_FLAGS`; this names which of them are a folder.
+WRAPPER_CHDIR_FLAGS = {"env": ("-C", "--chdir")}
+
+
+def _chain_chdir(base, value):
+    """One folder step: a relative VALUE joins onto BASE, as `env -C a env -C b` and `git -C a -C b` do,
+    and an empty one leaves BASE alone."""
+    return os.path.join(base, value) if base and value else (value or base)
+
+
+def _wrapper_chdir(tokens):
+    """Return the folder the command wrappers in front of a segment's command word move it into, or
+    None when none does. Each `env -C` or `env --chdir` is read through `_walk_wrappers`, the walk
+    that finds the command word, so the folder and the program come from one reading. A relative
+    folder joins onto the one before it, as `env -C a env -C b` does."""
+    found = None
+    for word, flags in _walk_wrappers(tuple(tokens))[1]:
+        for flag, value in flags:
+            if flag in WRAPPER_CHDIR_FLAGS.get(word, ()) and value:
+                found = _chain_chdir(found, value)
+    return found
+
+
+def _segment_git_c_parts(tokens):
+    """Return `(env folder, git -C folder)` of a tokenized segment, each None when the segment names none,
+    or None when the segment's command word is not `git` or a `-C` has no value. The env folder is the one
+    an `env -C <dir>` or `env --chdir <dir>` in front of the `git` moves it into (`_wrapper_chdir`). The
+    git -C folder is every `-C` after the `git`, chained. The two stay apart because `_run_dir` reads them
+    differently: an env folder moves only the segment's own program, and a git -C folder reads first-wins.
+    `_segment_git_c_target` joins them for every other caller.
 
     ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
     -C/some/path status` and `git -C=/some/path status` both fail with `unknown option:
-    -C/some/path` (or `-C=...`) and never run. An earlier version of this function also
-    accepted an attached `-C<path>` as if it named a tree, which let a command text attach any
-    path it liked to `-C` and have `_run_dir` read that path as though it were real, even
-    though git itself refused the call and the command ran wherever the shell's own cwd (or an
-    earlier, real `cd`) put it. Found in review of PR #75, reproduced against real git and
-    against the live guard: the attached form ALLOWED a `git reset --hard HEAD` that ran in a
-    real dirty checkout, because the fake `-C<path>` pointed the subject read at an unrelated
-    clean one.
+    -C/some/path` (or `-C=...`) and never run. Reading an attached `-C<path>` as a tree would
+    let a command text attach any path it liked to `-C` and have `_run_dir` read that path as
+    though it were real, even though git itself refuses the call and the command runs wherever
+    the shell's own cwd (or a real `cd`) puts it. A `git reset --hard HEAD` that runs in a real
+    dirty checkout would then be allowed, because the fake `-C<path>` points the subject read at
+    an unrelated clean one.
     """
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -1312,9 +1339,8 @@ def _segment_git_c_target(tokens):
         if token == "-C":
             if cursor + 1 >= len(tokens):
                 return None
-            value = tokens[cursor + 1]
             # git chains every `-C`: a relative one joins onto the one before it
-            found = os.path.join(found, value) if found and value else (value or found)
+            found = _chain_chdir(found, tokens[cursor + 1])
             cursor += 2
             continue
         if token in GIT_OPT_WITH_VALUE:
@@ -1324,7 +1350,19 @@ def _segment_git_c_target(tokens):
             cursor += 1
             continue
         break
-    return found
+    return _wrapper_chdir(tokens), found
+
+
+def _segment_git_c_target(tokens):
+    """Return a tokenized segment's `git -C <path>` target, or None when it names none, or
+    when the segment's command word is not `git`. An `env -C <dir>` or `env --chdir <dir>` in
+    front of the `git` moves it first, so a `git -C` after it joins onto that folder, and with
+    no `git -C` the `env` folder alone is the target. `_segment_git_c_parts` holds the reading
+    and its measured limits; this is its joined form, the one every caller but `_run_dir` shares."""
+    parts = _segment_git_c_parts(tokens)
+    if parts is None:
+        return None
+    return _chain_chdir(*parts)
 
 
 def _absolute(where: str, shell_cwd: str) -> str:
@@ -1358,7 +1396,8 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
 
 
 def _run_dir(cmd: str, shell_cwd: str) -> str:
-    """Return the directory the command RUNS in: a `git -C`, else the last `cd`, else the cwd.
+    """Return the directory the command RUNS in: a `git -C`, else the env folder when every git segment
+    has one, else the last `cd`, else the cwd.
 
     This is the part both roots share. Neither `--work-tree` nor `--git-dir` is read here,
     because each answers a different question and each belongs to one caller.
@@ -1368,8 +1407,18 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     tokenizes to `cd`/`git` as its OWN command word (via `resolve_command`, which already steps
     over wrappers and loop keywords) counts. A segment that fails to tokenize (an unmatched
     quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. The FIRST
-    `git -C` found, across all segments in order, still wins over every `cd`, matching this
-    function's behaviour before this fix; failing that, the LAST `cd` found wins.
+    segment with a `git -C` wins over every `cd` and over an env folder (only an env folder in its
+    own segment is kept, as its base), and its relative folder reads against the shell cwd, not
+    against the folder an earlier `cd` left. Without a `git -C`, an env folder is used only when
+    every git segment carries one (below); otherwise the last `cd`, else the cwd. That first-wins
+    reading of `git -C` is kept as the owner ruled.
+
+    AN `env -C` FOLDER MOVES ONLY ITS OWN PROGRAM, NOT THE SHELL: a later bare `git` in the command
+    still runs in the shell's folder. So the env folder is read only when EVERY git segment carries
+    one; the last of them wins, and a relative one joins onto the folder the last `cd` before it left.
+    Any bare git segment makes the shell's folder (the last `cd`, else the cwd) the answer, and so
+    does a command with no git segment. With a `git -C` in the same segment, the `git -C` joins onto
+    that env folder.
 
     HEREDOC BODIES ARE STRIPPED FIRST, unconditionally, even an interpreter body that
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
@@ -1377,20 +1426,30 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     """
     cmd = _strip_heredoc_bodies_unconditionally(cmd)
     where = None
-    last_cd = None
+    moved = None   # the folder the last `cd` left
+    env_moved = None   # the env folder of the last git segment that carries one
+    bare_git = False   # a git segment without an env folder runs in the shell's folder
     for segment in split_segments(cmd):
         tokens = segment_tokens(segment)
         if tokens is None:
             continue
-        if where is None:
-            git_c = _segment_git_c_target(tokens)
+        parts = _segment_git_c_parts(tokens)
+        if parts is not None:
+            env_dir, git_c = parts
+            if env_dir and moved:
+                env_dir = shell_abs(env_dir, moved) or env_dir
             if git_c is not None:
-                where = git_c
+                if where is None:
+                    where = _chain_chdir(env_dir, git_c)
+            elif env_dir:
+                env_moved = env_dir
+            else:
+                bare_git = True
         cd = _segment_cd_target(tokens)
         if cd is not None:
-            last_cd = cd
+            moved = cd
     if where is None:
-        where = last_cd
+        where = env_moved if env_moved and not bare_git else moved
     if where:
         where = _absolute(where, shell_cwd)
     return where or shell_cwd or ""
