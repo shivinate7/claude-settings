@@ -13937,6 +13937,16 @@ class ReviewFixFlag(ReviewEnv):
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
 
+    def test_fix_check_needs_a_round(self):
+        # the fix check is counted against a round, so a flag with no --round is a usage error that names the flag; with --round the same flag is accepted
+        rc, out, err = self.run_args("7", "--review-record", "--head", self.head(), "--kind", "normal", "--guard", "no", "--fix-check", self.fix_value(),
+                                     host=self.earlier_host())
+        self.assertEqual(rc, 2, "--fix-check with no --round was not refused:\n" + out + err)
+        self.assertIn("--fix-check needs --round", err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check with no round still printed a record")
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=self.earlier_host())
+        self.assertEqual(rc, 0, "the control with --round was refused:\n" + out + err)
+
 class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
     that record has no fix check line. The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
@@ -14004,6 +14014,46 @@ class ReviewFixBase(ReviewEnv):
         malformed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus"))
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
+
+    def fix_arg(self, head, verdict):
+        return f"{head}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:{verdict}"
+
+    def chain(self, comments, rounds, fix):
+        """Run a record on the live head with the rounds (N:ROLE:MODEL:VERDICT) and the fix check `fix`, over a host holding `comments`."""
+        args = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no"]
+        for r in rounds:
+            args += ["--round", r]
+        return self.run_args(*args, "--fix-check", fix, host=self.record_host(*comments))
+
+    def test_a_second_fix_check_after_a_fail_below_round_three_prints_the_record(self):
+        # a FAIL fix check counts as round 2, and the record that carries Round 2 FAIL takes a second fix check from its own head
+        earlier = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        failed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(verdict="FAIL", head=self.EARLIER_HEAD),)))
+        rc, out, err = self.chain((earlier, failed), ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:FAIL"), self.fix_arg(REVIEW_OLD_HEAD, "PASS"))
+        self.assertEqual(rc, 0, "a second fix check after a FAIL below round 3 was refused:\n" + out + err)
+        self.assertIn("Round 2: reviewer, sonnet, FAIL", posted_body(self, out).splitlines())
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"))
+
+    def test_a_second_fix_check_is_refused_after_a_pass_a_wide_or_a_round_three_fail(self):
+        # the newest earlier record carries a fix check that is not a FAIL below round 3, so the second is refused and names the fix line;
+        # each case's control has the same record with no fix line, and that control takes the fix check
+        earlier = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        one = ("Round 1: reviewer, sonnet, PASS",)
+        three = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, sonnet, FAIL")
+        cases = (("a PASS fix check", one, ("1:reviewer:sonnet:PASS",), "PASS"),
+                 ("a WIDE fix check", one, ("1:reviewer:sonnet:PASS",), "WIDE"),
+                 ("a FAIL fix check after a round-3 FAIL", three, ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:PASS", "3:reviewer:sonnet:FAIL"), "FAIL"))
+        for label, lines, args, verdict in cases:
+            with self.subTest(case=label):
+                fixed = record_text(head=REVIEW_OLD_HEAD, rounds=lines, fix=(fix_check_line(verdict=verdict, head=self.EARLIER_HEAD),))
+                rc, out, err = self.chain((earlier, review_comment(2, 7, fixed)), args, self.fix_arg(REVIEW_OLD_HEAD, "PASS"))
+                self.assertEqual(rc, 2, f"a second fix check after {label} was not refused:\n" + out + err)
+                self.assertIn("Fix check line", err, f"the refusal after {label} does not name the fix line on the newest record:\n" + err)
+                self.assertNotIn(REVIEW_MARKER, out, f"a refused fix check after {label} still printed a record")
+                plain = record_text(head=REVIEW_OLD_HEAD, rounds=lines)
+                rc, out, err = self.chain((earlier, review_comment(2, 7, plain)), args, self.fix_arg(REVIEW_OLD_HEAD, "PASS"))
+                self.assertEqual(rc, 0, f"control: the record after {label} with no fix line was refused:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"))
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
