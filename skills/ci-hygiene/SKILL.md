@@ -96,8 +96,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `update_pull_request`) and posts the comment, or it reopens the PR. The tool posts and closes nothing.
    When an integration PR opens with a body line `Replaces #N`, the lane PR it names closes as
    replaced. The replacer and the replaced PR must share a base. A bulleted `- Replaces #N` does not
-   count. The line must start with `Replaces #N`, outside a code fence and a quote. Two PRs that
-   name each other with `Replaces` close neither. An open PR with a done review record closes as
+   count. The line must start with `Replaces #N`, outside a code fence and a quote. A loop of PRs
+   that name each other with `Replaces` closes none, of any length. An open PR with a done review record closes as
    carried when another open PR on the same base holds its head (GitHub compare read). A PR closed
    as replaced cannot carry another. Each close comment starts a line. It reads `Replaced by #R;
    reopens if #R is dropped`, or `Carried by #R; reopens if #R is dropped`. A `reopen` line fires
