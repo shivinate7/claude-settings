@@ -164,6 +164,22 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  message-time-matches-clock
+                       deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
+                       then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
+                       optional `:SS`, and `CST` or `CDT` in any case, after optional markdown lead characters. The
+                       refusal fires when the zone name is not the clock's own (local_time's DST rule), whatever the
+                       minutes; when a dated stamp is more than 1 minute ahead of the clock (local_time.clock); or
+                       when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An
+                       undated stamp more than 60 minutes ahead reads as a quote from an earlier day, and passes; so
+                       does a stamp behind. The reason steers to your own label and prints the real time. No
+                       transcript or process; a missing clock module passes the message. A dated limit of 1 minute ahead also judges
+                       three written values, each an ISO instant with an offset: `added` in an ArtifactData set,
+                       update or batch write to collection items (inline, through `file_path`, one local file read
+                       only for an items write with no inline data, or as a str_replace's new text or time
+                       fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
+                       Edit's or MultiEdit's new text; the last literal `updatedAt` in a Bash command, single- or double-quoted, read as text. The reason prints the time in Central and ISO. One clock read only when
+                       a judged value is present. An override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
                        tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
@@ -519,7 +535,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -1271,16 +1287,16 @@ OTHER_CHECKOUT_REASON = (
     "Rule (other checkout): this write lands in another checkout of this clone, not the one this "
     "session stands in. "
     "Remedy: write only inside your own checkout, or report the change to the session that owns "
-    "the other one. To remove a whole worktree, use `git worktree remove`, or leave it to the "
-    "janitor sweep."
+    "the other one. To work in a checkout you own, call the EnterWorktree tool with `path` set to "
+    "it. To remove a whole worktree, use `git worktree remove`, or leave it to the janitor sweep."
 )
 
 OTHER_CHECKOUT_CD_DETAIL = "cd into another checkout: "
 OTHER_CHECKOUT_CD_REASON = (
     "Rule (other checkout): this command changes directory into another checkout of this clone, "
     "not the one this session stands in. "
-    "Remedy: stay in your own checkout. To read another one, use `git -C <dir>` or a path, never "
-    "`cd`."
+    "Remedy: stay in your own checkout. To work in a checkout you own, call the EnterWorktree tool "
+    "with `path` set to it. To read another one, use `git -C <dir>` or a path."
 )
 
 OTHER_CLONE_DETAIL = "write into another clone: "
@@ -4731,49 +4747,33 @@ def page_stale_hit(tool_input, cwd):
 # file the last allowed publish stamped (stale_pages.PUBLISHED). The checker runs the page's own code, so the
 # sentence a miss quotes is the page's. A miss denies. Unknown (no node, no stamp, the file gone, the checker
 # unable to render, a run past its cap) allows and logs one `noted` line. A write with no picture starts no node.
-CHECK_DESIGNS = "check_designs.mjs"
-CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
 # One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
 PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
 _design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
 PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
+def _page_check_module():
+    """skills/waiting-page/page_check.py, the one home of the picture check, or None when it is not found."""
+    folder = _waiting_page_folder("page_check.py")
+    if folder is None:
+        return None
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    return importlib.import_module("page_check")
+
+
 def _run_check_designs(page_file, item):
     """(code, text) from the checker on `item` (a dict) against `page_file`: code 0 pass, 1 miss with the page's
-    sentence as text, 3 unknown with the reason as text. The one seam that starts node."""
-    import shutil
-    import subprocess  # TimeoutExpired only; the child starts through _nowindow
-    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
-    import tempfile
-    node = shutil.which("node")
-    folder = _waiting_page_folder(CHECK_DESIGNS)
-    if node is None or folder is None:
-        return 3, "node is not installed" if node is None else CHECK_DESIGNS + " not found"
-    cap = CHECK_DESIGNS_CAP
+    sentence as text, 3 unknown with the reason as text. The seam of the guard; skills/waiting-page/page_check.py
+    is the one home that starts node, and this call only sets the cap from the call's deadline."""
+    page_check = _page_check_module()
+    if page_check is None:
+        return 3, "page_check.py not found"
+    cap = page_check.CHECK_DESIGNS_CAP
     if _design_deadline[0] is not None:
         cap = max(1.0, min(cap, _design_deadline[0] - time.monotonic()))
-    with tempfile.TemporaryDirectory() as scratch:
-        item_file = os.path.join(scratch, "item.json")
-        with open(item_file, "w", encoding="utf-8") as handle:
-            json.dump(item, handle)
-        try:
-            run = _nowindow.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
-                                capture_output=True, text=True, timeout=cap)
-        except subprocess.TimeoutExpired:
-            return 3, "no answer in %d s" % cap
-        except OSError as err:
-            return 3, str(err.strerror or err)
-    lines = run.stdout.strip().splitlines()
-    try:
-        problem = json.loads(lines[-1]).get("problem") if lines else None
-    except ValueError:
-        return 3, "no answer line; exit %d" % run.returncode
-    if run.returncode == 1 and isinstance(problem, str) and problem:
-        return 1, problem
-    if run.returncode == 0:
-        return 0, ""
-    return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
+    return page_check.run_check_designs(page_file, item, cap)
 
 
 # ------------------------------------------------------------------ a design names its file, in a mockup home
@@ -4833,25 +4833,36 @@ def page_design_hit(writes, tool_input, cwd):
         record(DATA_TOOL, "noted", "page-item-design",
                "unknown: " + ("no published page stamped" if not page_file else "the stamped page file is gone"))
         return None
-    deadline = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
-    _design_deadline[0] = deadline
     try:
-        for done, (doc_id, data) in enumerate(pictured):
-            if time.monotonic() >= deadline:
-                record(DATA_TOOL, "noted", "page-item-design",
-                       "unknown: the %d s budget of this call is spent, %d item(s) not checked"
-                       % (PAGE_ITEM_DESIGN_BATCH_SECONDS, len(pictured) - done))
-                return None
-            try:
-                code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
-            except Exception as err:
-                code, text = 3, type(err).__name__ + ": " + str(err)
-            if code == 1:
-                return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
-            if code != 0:
-                record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+        page_check = _page_check_module()
+    except Exception as err:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if page_check is None:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: page_check.py not found")
+        return None
+
+    def run_one(entry):
+        doc_id, data = entry
+        try:
+            return _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
+        except Exception as err:
+            return 3, type(err).__name__ + ": " + str(err)
+
+    _design_deadline[0] = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
+    try:
+        results, left = page_check.run_within_budget(pictured, PAGE_ITEM_DESIGN_BATCH_SECONDS, run_one, stop_on_miss=True)
     finally:
         _design_deadline[0] = None
+    for (doc_id, data), code, text in results:
+        if code == 1:
+            return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
+        if code != 0:
+            record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+    if left:
+        record(DATA_TOOL, "noted", "page-item-design",
+               "unknown: the %d s budget of this call is spent, %d item(s) not checked"
+               % (PAGE_ITEM_DESIGN_BATCH_SECONDS, left))
     return None
 
 
@@ -6107,6 +6118,16 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+
+    # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
+    stamped = stamp_hit(tool, tool_input)
+    if stamped:
+        refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
+    written = written_time_hit(tool, tool_input, cwd)
+    if written:
+        refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

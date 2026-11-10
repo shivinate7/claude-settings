@@ -14,7 +14,7 @@ lock for one base at once. Code: `confirm` in `merge/merge.py`.
   deadline is 45 minutes, so the expiry is 8700 s after the take. A lock past its expiry is free. Another
   run may take it. `LOCK_MAX_HOLD` (6 h from the take) bounds the extensions only.
 - **Extend.** Before each rate-limit wait, and before the lint run and the suite run of the small-move
-  check, `Lock.extend_for` moves the expiry to now + wait + 300 s. The wait is the rate wait, or 1200 s
+  check, `Lock.extend_for` moves the expiry to now + wait + 300 s. The wait is the rate wait, or 3600 s
   for a lint or suite run. It does nothing when the expiry already covers that time. It stops (`NetStop`) when
   the lock has expired, when the new expiry passes 6 h from the take, or when the push fails.
 - **Take over.** A live lock stops the run (`Held`). The exception is a holder whose pid is gone on the

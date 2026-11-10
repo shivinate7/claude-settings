@@ -186,13 +186,13 @@ NARRATED_TAIL_REASON = (
 # verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the verdict
 # itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
 # cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
-# (`--lane-lint`, `--review-record`) are refused in the foreground too. They count as `merge`,
+# (`--lane-lint`, `--review-record`, `--release-check`) are refused in the foreground too. They count as `merge`,
 # `merge.cmd`, or `merge/merge.py` or `merge/launch.py` run by `python`, a `python3.N`, `pythonw` or
 # `py`, behind a wrapper or `uv run`. A call through `verdict` is verdict-pipe's, never read here.
 # `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused twice.
 # `ci-job` is refused in the background only.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
-CHECK_FLAGS = ("--lane-lint", "--review-record")
+CHECK_FLAGS = ("--lane-lint", "--review-record", "--release-check")
 CHECK_SCRIPT_TAIL = "bin/ci-job"
 # The `uv` and `uv run` flags that take the next word as their value (`uv run --help`, uv 0.11), so
 # `uv run -w pytest python x.py` skips `pytest`. The global flags that sit before `run` are in this list too.
