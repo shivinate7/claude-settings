@@ -32,7 +32,7 @@ The upkeep list also names each step marked doing or active that has no live lan
 pull request, so triage can set it back (step roadmap-matches-lanes). A step is live when a session in
 the live file's "sessions" list is not archived (any other status counts) and carries both
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
-branch equals the step id or lane/<step id>. The step id matches exactly; the GitHub name ignores case. A session row
+branch equals the step id or lane/<step id>, or when the step's own `lane` field names the id of such a live session. The step id matches exactly; the GitHub name ignores case. A session row
 with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
 account-wide and step ids repeat across repos. A step whose status is none of todo, ready, doing, active or
 done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
@@ -607,7 +607,7 @@ def live_work(path, steps, slug=None):
     names that is not an open step is listed in `strays`. One list of lane rows (not archived, carrying this repo's
     cs-repo tag) feeds liveness: `sessionSteps` holds their step ids and `laneTags` their topic and build tags, for an
     item's lane; `liveSteps` holds the step ids of those rows not ended (ENDED_BUCKETS), for a step's lane and a
-    draft. `staleWhy` says why the live reading is unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
+    draft; `liveSessionIds` holds the ids of the same not-ended rows, for a step's own `lane` field. `staleWhy` says why the live reading is unknown, or None. `pullWhy` says why the todo-with-open-PR line reads
     unknown, or None; it reads only readAt and the pulls list, never the sessions.
     A live file with no sessions list still renders Live work.
     "items" (optional, the waiting page's rows `{"n", "status", "home", "lane"?, "owner"?}`) feeds the page-ruling upkeep
@@ -665,7 +665,7 @@ def live_work(path, steps, slug=None):
         if sid and (sid not in steps or steps[sid].get("status") == "done"):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
-    why, session_steps, live_steps, lane_sessions = [], [], [], None  # the first reason wins
+    why, session_steps, live_steps, live_ids, lane_sessions = [], [], [], [], None  # the first reason wins
     lane_tags = []  # the cs-topic: and cs-build: tags of the same live sessions, for lane_live
     if read.startswith("unknown"):
         why.append(read)
@@ -698,6 +698,7 @@ def live_work(path, steps, slug=None):
         session_steps = sorted(step_tag_ids(tags))
         live_steps = sorted(step_tag_ids(t for r in rows if r.get("status_bucket") not in ENDED_BUCKETS
                                          for t in r.get("tags") or []))
+        live_ids = sorted(r["id"] for r in rows if r.get("status_bucket") not in ENDED_BUCKETS)
         lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
         lane_sessions = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
                           "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None}
@@ -724,7 +725,7 @@ def live_work(path, steps, slug=None):
                            **{k: r[k] for k in ("lane", "owner") if k in r}) for r in raw["items"]]
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
-            "sessionSteps": session_steps, "liveSteps": live_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
+            "sessionSteps": session_steps, "liveSteps": live_steps, "liveSessionIds": live_ids, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
             "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions}
 
 
@@ -1143,6 +1144,14 @@ def lane_live(work, lane, item=False):
             or any(p.get("branch") in lane_head_refs(lane) for p in work["pulls"]))
 
 
+def step_lane_live(work, key, step):
+    """lane_live for a step, which is also live when its own `lane` field holds the id of a live session (the step's
+    work runs in a session that carries no cs-step tag for it). The field may be prose around the id, so it matches by
+    substring: session ids have a fixed length. A non-text field names none."""
+    lane = step.get("lane")
+    return lane_live(work, key) or (isinstance(lane, str) and any(i in lane for i in work["liveSessionIds"]))
+
+
 def laneless(open_, marks, work):
     """(why, [(id, fix)]): each doing or active step with no live lane and no open PR, in step order. `why` is the
     reason the live read is unknown, else None, and then the list is the answer. `fix` is "todo", or the landed
@@ -1152,7 +1161,7 @@ def laneless(open_, marks, work):
         return why, []
     out = []
     for k, d in open_:
-        if d.get("status") in ("doing", "active") and not lane_live(work, k):
+        if d.get("status") in ("doing", "active") and not step_lane_live(work, k, d):
             if k in marks and is_feel(d) and device_check(d) != "valid":
                 continue  # the device row lists it; it must not read "set to done" before a device check
             out.append((k, marks[k] if k in marks else "todo"))
@@ -1297,7 +1306,7 @@ def ready_steps(steps, work, marks=None, marks_why=None):
     read = live_read(work)
     out, unknown = [], []
     for k, d in open_steps(steps):
-        if (d.get("status") not in TODO_STATUS or k in (marks or {}) or k in pulled or lane_live(work, k)
+        if (d.get("status") not in TODO_STATUS or k in (marks or {}) or k in pulled or step_lane_live(work, k, d)
                 or pause_why(d) is None or k in unanswered):
             continue
         if phase_unusable(d):
