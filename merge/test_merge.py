@@ -15836,7 +15836,7 @@ class ReviewFixBaseRecord(ReviewEnv):
         host = self.record_host(self.source(rounds=(f"Round 1: reviewer, sonnet, PASS, {self.TOP}",)), head=REVIEW_HEAD, diffs=diffs)
         rc, out, err = self.flagged(self.argv(self.fix_of(self.TOP), self.link(), rounds=(f"1:reviewer:sonnet:PASS:{self.TOP}",)), host)
         self.assertEqual(rc, 0, "a copy whose fix base is the top round's own sha, beside the source Head, was refused:\n" + out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.TOP, "reviewer", "haiku", "PASS"),
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.TOP, "reviewer", "sonnet", "PASS"),
                          "the printed fix check does not start from the top round's sha")
 
     def test_a_stand_in_after_round_3_may_not_change_its_net_value_guard_or_kind(self):
