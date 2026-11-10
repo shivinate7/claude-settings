@@ -1,10 +1,10 @@
 {
   "title": "File the owner's audit answers (items 186, 188, 189, 190, 192) and redraft 185 and 168",
   "phase": "records",
-  "status": "doing",
+  "status": "blocked",
   "order": 531,
   "why": "Owner saved answers on the page Nov 3 18:16 CST; 185 and 168 got 'none' with questions.",
-  "note": "Lane session_013NEJKzSWu5KB6pXe3Spj2Q. It names which items to close and sends the 185 and 168 rewrites to triage. Named by the coordinator Nov 3 18:19 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL3Pqzneg85C1g5a7oG at 03:46-03:49 CST Nov 10. Coordinator 03:51 CST Nov 10: items 185-190 landed in Banchi #1041; 168 is held by decision lanes-start-as-agents. Item 192 is still open: the mailaudit coordinator must confirm the mailaudit Mac debt. Stays doing until then.",
-  "updatedAt": "2026-11-10T03:52:00-06:00",
-  "lane": "session_013NEJL3Pqzneg85C1g5a7oG"
+  "note": "Lane session_013NEJKzSWu5KB6pXe3Spj2Q. It names which items to close and sends the 185 and 168 rewrites to triage. Named by the coordinator Nov 3 18:19 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL3Pqzneg85C1g5a7oG at 03:46-03:49 CST Nov 10. Coordinator 03:51 CST Nov 10: items 185-190 landed in Banchi #1041; 168 is held by decision lanes-start-as-agents. Item 192 is still open: the mailaudit coordinator must confirm the mailaudit Mac debt. Stays doing until then. Coordinator 03:54 CST Nov 10: waiting. Item 192 needs a mailaudit session to confirm the Mac debt (docs/decisions/native-swift-rebuild.md). Lane session_013NEJL3Pqzneg85C1g5a7oG is done, and the coordinator archives it.",
+  "updatedAt": "2026-11-10T03:55:00-06:00",
+  "lane": null
 }
