@@ -615,9 +615,11 @@ def handoff_premises(path):
     return [(pid, kind) for pid, kind, _line in _premise_lines(text)]
 
 
-# The parts of a premise line that the checked-stamp rule reads (decision precompact-handoff, item 15).
-_LINE_SOURCE = re.compile(r"\bSource:[ \t]*(.*?)[ \t]*\.?[ \t]*\bChecked[ \t]")
-_LINE_CHECKED = re.compile(r"^.*\bChecked[ \t]+(.*?)[ \t]*\.?[ \t]*$")
+# The parts of a premise line that the checked-stamp rule reads (decision precompact-handoff, item 15). The stamp is
+# the line's text from its last `Checked` (or `Re-checked`) word to its end, so a spelling such as `Checked: x` counts.
+_STAMP_WORD = re.compile(r"\b(?:Re-?c|C)hecked\b")
+_STAMP_LEAD = re.compile(r"^(?:re-?)?checked\b[ \t:]*")
+_LINE_SOURCE = re.compile(r"\bSource:[ \t]*(.*)")
 # A Source token: a URL, a path (with a slash, or a file name with an extension), a 7+ hex hash with a digit, a
 # backticked command, or the slug or number after a record word. Text outside these is no token.
 _TOKEN_PATH = re.compile(r"https?://[^\s)`\]>]+|(?<![\w./~-])((?:[\w.~-]+(?:/[\w.~-]+)+)|(?:[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{1,4}))(?::\d+(?:-\d+)?)?(?![\w/])")
@@ -625,10 +627,16 @@ _TOKEN_HASH = re.compile(r"(?<![\w./-])[0-9a-f]{7,40}(?![\w-])")
 _TOKEN_TICKS = re.compile(r"`([^`\n]+)`")
 _TOKEN_RECORD = re.compile(r"\b(?:decision|debt|record|step|rule|lane|roadmap step|item)[ \t]+`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b"
                            r"|\b(?:PR|pull request|issue)[ \t]+#?(\d+)\b", re.I)
-# A call that starts an agent or sends a message names a path in its text and checks nothing, so it backs no premise.
-NO_CHECK_TOOLS = ("Agent", "Task", "SendMessage", "Workflow")
-READ_TOOLS = ("Read", "Grep", "Glob", "Bash", "PowerShell", "WebFetch", "WebSearch")  # a token-less Source needs one
+# A shell call that reads backs a premise; one that writes does not.
+SHELL_TOOLS = ("Bash", "PowerShell")
+READ_TOOLS = ("Read", "Grep", "Glob", "WebFetch", "WebSearch") + SHELL_TOOLS
 READ_MCP_WORDS = ("get", "list", "read", "query", "search", "view")
+# A whole name segment that makes an MCP tool a writer or a sender, whatever else its name says.
+WRITE_MCP_WORDS = ("write", "create", "update", "delete", "send", "set", "post", "add", "remove", "merge", "push",
+                   "resolve", "submit", "edit", "put", "patch", "run", "trigger", "reply", "comment", "fork")
+GIT_WRITES = ("commit", "push", "add", "tag", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash",
+              "cherry-pick", "apply", "am", "rm", "mv", "clean", "pull", "revert", "init", "clone", "config")
+SHELL_WRITES = ("rm", "mv", "cp", "touch", "mkdir", "tee", "chmod", "ln", "install", "truncate", "dd")
 
 
 def source_tokens(source):
@@ -645,25 +653,39 @@ def source_tokens(source):
 
 
 def premise_stamps(text, name=None):
-    """{id: (kind, source, checked)} of the premise lines in `text`. `checked` is the lowercased text after the last
-    `Checked`, minus a closing period, or None when the line has no `Checked`. `source` is the text between `Source:`
-    and `Checked`, or "" when the line has none. `name` as in _premise_lines."""
+    """{id: (kind, source, stamp)} of the premise lines in `text`. `stamp` is the line's text from its last `Checked`
+    or `Re-checked` word to its end, lowercased, spaces folded, a closing period dropped, or None when the line has
+    none. `source` is the text after `Source:` up to the stamp, minus a closing period, or "" when the line has none.
+    `name` as in _premise_lines."""
     stamps = {}
     for pid, kind, line in _premise_lines(text if isinstance(text, str) else "", name):
-        checked = _LINE_CHECKED.search(line) if "Checked" in line else None
-        source = _LINE_SOURCE.search(line)
-        stamps[pid] = (kind, source.group(1) if source else "", (checked.group(1).strip().lower() or None) if checked else None)
+        words = list(_STAMP_WORD.finditer(line))
+        at = words[-1].start() if words else len(line)
+        stamp = " ".join(line[at:].lower().split()).rstrip(" .") if words else None
+        source = _LINE_SOURCE.search(line[:at])
+        stamps[pid] = (kind, source.group(1).strip().rstrip(".").strip() if source else "", stamp)
     return stamps
 
 
+def _stamp_value(stamp):
+    """What a stamp says after its `Checked` word, or "" when it says nothing (or `stamp` is None)."""
+    return _STAMP_LEAD.sub("", stamp, count=1) if stamp else ""
+
+
 def stamp_changes(before, after, name=None):
-    """[(id, tokens)] of the premises of `after` whose Checked value is new or differs from `before` (None or "" holds
-    none), and that need evidence: a `ruling` and a `Checked never` need none. A new line counts as changed.
-    `name` is the marker's premises name, when the caller has it."""
+    """[(id, tokens)] of the premises of `after` whose stamp, spelling included, is new or differs from `before`'s, and
+    that need evidence. A stamp with no value counts as absent. A stamp present before and absent after is a change.
+    A premise whose kind in `before` is a `ruling` needs none, whatever the write relabels it to; a line new in `after`
+    is judged by its own kind. `Checked never` needs none. `name` is the marker's premises name, when the caller has it."""
     old = premise_stamps(before, name)
     need = []
-    for pid, (kind, source, checked) in premise_stamps(after, name).items():
-        if kind == PREMISE_KINDS[0] or checked in (None, "never") or (pid in old and old[pid][2] == checked):
+    for pid, (kind, source, stamp) in premise_stamps(after, name).items():
+        was = old[pid][2] if pid in old else None
+        if not _stamp_value(stamp):
+            stamp = None
+        if not _stamp_value(was):
+            was = None
+        if (old[pid][0] if pid in old else kind) == PREMISE_KINDS[0] or stamp == was or _stamp_value(stamp) == "never":
             continue
         need.append((pid, source_tokens(source)))
     return need
@@ -681,9 +703,38 @@ def _strings(value):
 
 
 def _is_read(name):
-    """True for a tool_use that reads: a read tool, a shell, or an MCP tool whose name says get, list, read, query, search or view."""
-    return name in READ_TOOLS or (isinstance(name, str) and name.startswith("mcp__")
-                                  and any(w in name.lower() for w in READ_MCP_WORDS))
+    """True for a tool that reads: a read tool, a shell, or an MCP tool with a whole name segment of get, list, read,
+    query, search or view and none of a write or send (`pull_request_review_write`, `send_message`, `resolve_review_thread`)."""
+    if not isinstance(name, str):
+        return False
+    if not name.startswith("mcp__"):
+        return name in READ_TOOLS
+    parts = set(re.split(r"[^a-z0-9]+", name.rsplit("__", 1)[-1].lower()))
+    return bool(parts & set(READ_MCP_WORDS)) and not parts & set(WRITE_MCP_WORDS)
+
+
+def _shell_reads(command):
+    """False when a shell command line changes something: a git call that writes, a write command, `sed -i`, or a
+    redirect onto a file. A bandaid, not a parser: it reads segments and tokens with guard_core's splitters, and an
+    unparsable segment counts as a read, the same stance as that module."""
+    import guard_core
+    if not isinstance(command, str):
+        return True
+    for segment in guard_core.split_segments(command):
+        if any(sub in GIT_WRITES for sub, _rest in guard_core.git_calls(segment)):
+            return False
+        tokens = guard_core.segment_tokens(segment) or []
+        at = guard_core.resolve_command(tokens) if tokens else None
+        if at is not None:
+            word = guard_core.basename(tokens[at])
+            if word in SHELL_WRITES or (word == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", t) for t in tokens[at + 1:])):
+                return False
+        for i, token in enumerate(tokens):
+            m = re.match(r"^\d?>>?(.*)$", token)
+            target = (m.group(1) or (tokens[i + 1] if i + 1 < len(tokens) else "")) if m else "&"
+            if m and not target.startswith("&") and target != "/dev/null":
+                return False
+    return True
 
 
 def _same_path(a, b):
@@ -693,11 +744,12 @@ def _same_path(a, b):
 
 def backed_premises(transcript, need, handoff):
     """The ids of `need` ([(id, tokens)] from stamp_changes) that the session's own transcript backs, or None when the
-    transcript cannot be read (the caller fails open). Evidence is a tool_use of the main session after the newest
-    `compact_boundary` record (none: the whole transcript) whose input holds a token of the premise's Source; a premise
-    with no token is backed by any one read tool_use. A record of an agent (isSidechain, or an agent_id) is no
-    evidence, nor is a call that starts an agent or sends a message, nor is a Read, Write or Edit of `handoff`, the
-    handoff itself. One open of the transcript."""
+    transcript cannot be read (the caller fails open). Evidence is a read-type tool_use (`_is_read`; a shell call must
+    not write) of the main session after the newest `compact_boundary` record (none: the whole transcript) whose input
+    holds a token of the premise's Source; a premise with no token is backed by any one such call. Not evidence: a
+    record of an agent (isSidechain, or an agent_id), a Write or Edit, a send (`_transcript.SEND_TOOLS`), a Read of
+    `handoff` itself, and a call whose result failed (`_transcript.failed_tool_use_ids`, over the whole transcript).
+    One open of the transcript."""
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)
@@ -706,6 +758,7 @@ def backed_premises(transcript, need, handoff):
         records = _transcript.read_transcript(transcript)
     except (OSError, ValueError):
         return None
+    failed = _transcript.failed_tool_use_ids(records)
     backed = set()
     for rec in records:
         if rec.get("isSidechain") or rec.get("agent_id"):
@@ -715,15 +768,16 @@ def backed_premises(transcript, need, handoff):
             continue
         for use in _transcript.tool_uses(rec):
             name, given = use.get("name"), use.get("input")
-            if not isinstance(given, dict):
+            if not isinstance(given, dict) or use.get("id") in failed or name in _transcript.SEND_TOOLS \
+                    or not _is_read(name):
                 continue
-            if name in NO_CHECK_TOOLS or (name in ("Read", "Write", "Edit", "MultiEdit")
-                                          and isinstance(given.get("file_path"), str)
-                                          and _same_path(given["file_path"], handoff)):
+            if name in SHELL_TOOLS and not _shell_reads(given.get("command")):
+                continue
+            if name == "Read" and isinstance(given.get("file_path"), str) and _same_path(given["file_path"], handoff):
                 continue
             text = "\n".join(_strings(given))
             for pid, tokens in need:
-                if pid not in backed and (any(t in text for t in tokens) if tokens else _is_read(name)):
+                if pid not in backed and (not tokens or any(t in text for t in tokens)):
                     backed.add(pid)
     return {pid for pid, _tokens in need if pid in backed}
 

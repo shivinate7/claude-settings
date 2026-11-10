@@ -1175,8 +1175,9 @@ HANDOFF_STAMP_REASON = (
 
 def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
     """(remedy lines, ids) for the premises that a write to a session handoff restamps with no evidence in the
-    session's transcript, else None. `result` is handoff_sections_result's (before, after), None for no handoff. A
-    Write has no before, so the handoff on disk is its before (a missing file holds none). Premise parsing and the
+    session's transcript, else None. A premise's before kind judges it, a stamp spelled other than `Checked <value>`
+    counts, and only a read-type call that did not fail backs a token (precompact_handoff.backed_premises).
+    `result` is handoff_sections_result's (before, after), None for no handoff. A Write has no before, so the handoff on disk is its before (a missing file holds none). Premise parsing and the
     transcript scan are precompact_handoff's. The transcript is read once, and only when a stamp changed. Fails open:
     no transcript_path, an unreadable transcript, handoff or prompt, a prompt with no premises name, a failed import."""
     if result is None or not isinstance(transcript, str) or not transcript:
