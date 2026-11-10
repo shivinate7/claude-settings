@@ -681,31 +681,47 @@ class Flips(unittest.TestCase):
         self.assertEqual(self.resolve("RULE_FLOOR = 80", "RULE_FLOOR = 91", "RULE_FLOOR = 94"), [])
 
 
-class OwnHistory(unittest.TestCase):
-    """A line the branch alone added is the branch's work. Removing it later, or in a merge, is no loss."""
+class MainLineDrop:
+    """The one home of the fixture for a case that merges main into a feat branch and drops lines main added to
+    app.txt. main is pushed with app.txt at BODY, and feat is cut from it with the commit `cut_feat` writes."""
     T0, T1, T2 = "2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00"
 
-    def setUp(self):
+    def cut_feat(self, msg, **files):
         r = self.r = Repo()
         r.put("app.txt", BODY)
         r.commit("base", date="2025-12-01T10:00:00", other_txt="o1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
-        r.commit("feat adds a line", date=self.T0, app_txt=BODY + "own line one\nown line two\n")
+        r.commit(msg, date=self.T0, **files)
 
-    def main_moves(self, n, date):
+    def main_commit(self, msg, date, **files):
+        """A commit on main, pushed; the checkout goes back to feat."""
         r = self.r
         r.sh("checkout", "-q", "main")
-        r.commit("main moves %d" % n, date=date, other_txt="o%d\n" % n)
+        r.commit(msg, date=date, **files)
         r.push()
         r.sh("checkout", "-q", "feat")
 
-    def merge_dropping_own_lines(self, date):
+    def merge_main_dropping(self, msg, date):
+        """Merges main into feat, then sets app.txt back to BODY: every line main added to it, with no conflict."""
         r = self.r
         r.sh("merge", "--no-commit", "--no-ff", "main")
         r.put("app.txt", BODY)
         r.sh("add", "-A")
-        r.sh("commit", "-q", "-m", "Merge main, drop my own lines", date=date)
+        r.sh("commit", "-q", "-m", msg, date=date)
+
+
+class OwnHistory(MainLineDrop, unittest.TestCase):
+    """A line the branch alone added is the branch's work. Removing it later, or in a merge, is no loss."""
+
+    def setUp(self):
+        self.cut_feat("feat adds a line", app_txt=BODY + "own line one\nown line two\n")
+
+    def main_moves(self, n, date):
+        self.main_commit("main moves %d" % n, date, other_txt="o%d\n" % n)
+
+    def merge_dropping_own_lines(self, date):
+        self.merge_main_dropping("Merge main, drop my own lines", date)
 
     def test_a_merge_that_removes_the_branchs_own_lines_is_green(self):
         self.main_moves(2, self.T1)
@@ -1268,8 +1284,8 @@ def probes(calls):
 
 
 class CallBound(unittest.TestCase):
-    """branch_only ran one `git log -G` per lost line, up to OWN_LOOKUPS per file. A merge that drops
-    20 lines of one file must cost a fixed number of git calls, not one per line."""
+    """The check reads every lost line of a file in one `git log -p`, never one `git log -G` per line. A merge
+    that drops 20 lines of one file must cost a fixed number of git calls, not one per line."""
 
     def lost(self, lines, own=False):
         r, m = drop_merge(lines, own)
@@ -1306,6 +1322,145 @@ class Scanner(unittest.TestCase):
     def test_none_of_the_twenty_own_lines_is_flagged(self):
         r, _ = drop_merge(scanner_lines("o"), own=True)
         self.assertEqual(r.verdict(), [])
+
+
+# ------------------------------------------------ own lines past position 25
+
+
+OWN30 = ["own line %02d" % i for i in range(1, 31)]  # more than 25: a per-file cap of 25 would leave own lines unread
+MAIN30 = ["main line %02d" % i for i in range(1, 31)]
+TAIL = ["main tail %d" % i for i in range(1, 4)]  # lost after the 30 own lines, so past position 25 of the lost list
+
+
+def dropped_from_parent(r, m, n, lines):
+    """True when merge m's n-th parent holds `lines` in app.txt and m holds none of them."""
+    held = r.sh("show", "%s^%d:app.txt" % (m, n)).split("\n")
+    merged = r.sh("show", "%s:app.txt" % m).split("\n")
+    return all(l in held for l in lines) and not any(l in merged for l in lines)
+
+
+def mixed_merge():
+    """A merge that drops 30 own lines and 3 main lines of one file from its first parent, feat. feat adds the
+    own lines above `function Card`, then merges main, which adds TAIL below it. `other` branches from the base
+    and holds neither kind, so the merge base has none of them. -> (repo, merge sha)."""
+    card = "function Card() {}\n"
+    r = base_repo()
+    base = r.sh("rev-parse", "HEAD")
+    r.sh("checkout", "-q", "-b", "feat")
+    r.commit("feat adds own lines", app_txt=BODY + "".join(l + "\n" for l in OWN30) + card)
+    r.sh("checkout", "-q", "main")
+    r.commit("main adds the tail", app_txt=BODY + card + "".join(l + "\n" for l in TAIL))
+    r.push()
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-edit", "--no-ff", "main")
+    r.sh("checkout", "-q", "-b", "other", base)
+    r.commit("other", other_txt="other v2\n")
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-commit", "--no-ff", "other")
+    r.put("app.txt", BODY + card)
+    r.sh("add", "-A")
+    r.sh("commit", "-q", "-m", "Merge other, drop the lines")
+    return r, r.sh("rev-parse", "HEAD")
+
+
+class OwnLineCap(unittest.TestCase):
+    """branch_only_lines reads every lost line of one file as the branch's own or not, never a capped prefix.
+    A merge that drops more than 25 own lines of one file must not read as undone main work."""
+
+    def test_a_merge_that_drops_thirty_own_lines_of_one_file_reads_clean(self):
+        r, m = drop_merge(OWN30, own=True)
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN30), "premise: the merge drops the 30 own lines from its first parent")
+        self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines past position 25 read as lost")
+        self.assertEqual(r.verdict(), [], "own lines past position 25 read as lost")
+
+    def test_thirty_main_carried_lines_a_merge_drops_are_all_flagged(self):
+        r, m = drop_merge(MAIN30, own=False)
+        self.assertTrue(dropped_from_parent(r, m, 2, MAIN30), "premise: the merge drops the 30 main lines from its second parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), sorted(MAIN30), "main-carried lines past position 25 are not all flagged")
+        text = "\n".join(r.verdict())
+        for line in MAIN30:
+            self.assertIn(line, text, "main-carried line missing from the verdict")
+
+    def test_own_lines_past_the_cap_are_not_flagged_beside_main_lines_past_it(self):
+        r, m = mixed_merge()
+        self.assertGreater(len(OWN30), 25, "premise: the 30 own lines are more than the old 25-line cap")
+        before = r.sh("show", "%s^1:app.txt" % m).split("\n")
+        self.assertEqual([l for l in before if l in OWN30 or l in TAIL], OWN30 + TAIL, "premise: the first parent lists the own lines, then the 3 main lines")
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN30 + TAIL), "premise: the merge drops all 33 lines from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual([l for l in flagged if l in OWN30], [], "own lines past position 25 reported as lost, beside the main lines")
+        self.assertEqual(sorted(flagged), sorted(TAIL), "the flagged lines are not exactly the 3 main lines past position 25")
+        text = "\n".join(r.verdict())
+        self.assertEqual([l for l in OWN30 if l in text], [], "the verdict names own lines past position 25")
+
+    def test_thirty_own_lines_cost_the_same_git_calls_as_five(self):
+        r30, m30 = drop_merge(OWN30, own=True)
+        _, c30 = git_calls(lambda: C.lost_lines(r30.dir, m30, ("origin/main",)))
+        r5, m5 = drop_merge(OWN30[:5], own=True)
+        _, c5 = git_calls(lambda: C.lost_lines(r5.dir, m5, ("origin/main",)))
+        self.assertLessEqual(len(c30) - len(c5), 3, "git calls: N=5 %d, N=30 %d, probes at N=30 %d" % (len(c5), len(c30), len(probes(c30))))
+        self.assertLessEqual(len(probes(c30)), 3, "probes at N=30: %d of %d git calls" % (len(probes(c30)), len(c30)))
+
+
+OWN1000 = ["own line %04d" % i for i in range(1, 1001)]  # far past any per-file cap of a realistic size
+SUB_NOTE = "own note: main tail 30"  # a branch-own line that holds "main tail 30" as a substring
+TAIL30 = ["main tail %02d" % i for i in range(1, 31)]
+
+
+def note_merge(kept):
+    """feat (the older commit) adds OWN30 and SUB_NOTE above `function Card`. main (the later commit) adds TAIL30
+    below it. feat merges main, then `other` (from the base, holding neither) is merged in, and the result keeps
+    the own lines and TAIL30[:kept], dropping SUB_NOTE and the rest of the tail. -> (repo, merge sha)."""
+    card = "function Card() {}\n"
+    r = base_repo()
+    base = r.sh("rev-parse", "HEAD")
+    r.sh("checkout", "-q", "-b", "feat")
+    r.commit("feat adds own lines and a note", date="2025-12-01T10:00:00", app_txt=BODY + "".join(l + "\n" for l in OWN30 + [SUB_NOTE]) + card)
+    r.sh("checkout", "-q", "main")
+    r.commit("main adds the tail", date="2025-12-02T10:00:00", app_txt=BODY + card + "".join(l + "\n" for l in TAIL30))
+    r.push()
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-edit", "--no-ff", "main")
+    r.sh("checkout", "-q", "-b", "other", base)
+    r.commit("other", other_txt="other v2\n")
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-commit", "--no-ff", "other")
+    r.put("app.txt", BODY + "".join(l + "\n" for l in OWN30) + card + "".join(l + "\n" for l in TAIL30[:kept]))
+    r.sh("add", "-A")
+    r.sh("commit", "-q", "-m", "Merge other, drop the note and the tail")
+    return r, r.sh("rev-parse", "HEAD")
+
+
+class OwnLineScale(unittest.TestCase):
+    """A per-file cap of any realistic size is far below 1000 lines. A merge that drops 1000 own lines of one
+    file reads clean, so a cap of any size goes red here."""
+
+    def test_a_merge_that_drops_a_thousand_own_lines_of_one_file_reads_clean(self):
+        r, m = drop_merge(OWN1000, own=True)
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN1000), "premise: the merge drops the 1000 own lines from its first parent")
+        self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines read as lost in a merge that drops 1000 of them")
+        self.assertEqual(r.verdict(), [], "the verdict flags own lines in a merge that drops 1000 of them")
+
+
+class OwnLineSubstring(unittest.TestCase):
+    """branch_only_lines finds a lost line's adding commit with `line in text`, a substring test over the changed
+    lines of each commit. A branch-own line that holds a main line as a substring is then taken for that main
+    line's adder, so the main line reads as own. The match must be whole lines."""
+
+    def test_a_main_line_an_own_line_holds_as_a_substring_is_flagged(self):
+        r, m = note_merge(29)
+        self.assertTrue(dropped_from_parent(r, m, 1, [SUB_NOTE, TAIL30[29]]), "premise: the merge drops the note and main tail 30 from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), [TAIL30[29]], "main tail 30 reads as own: the own note holds its text as a substring")
+        self.assertTrue(r.verdict(), "the verdict reads clean though main tail 30 was dropped")
+
+    def test_five_main_lines_dropped_beside_the_note_are_all_flagged(self):
+        r, m = note_merge(25)
+        dropped = TAIL30[25:]  # main tail 26 to 30
+        self.assertTrue(dropped_from_parent(r, m, 1, [SUB_NOTE] + dropped), "premise: the merge drops the note and main tail 26 to 30 from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), sorted(dropped), "a dropped main line reads as own: the own note holds its text as a substring")
 
 
 class NulLine(unittest.TestCase):
@@ -1742,6 +1897,126 @@ class SpawnCount:
 
     def armed(self):
         return unittest.mock.patch.object(subprocess, "Popen", self.popen)
+
+
+class RestoredLine(MainLineDrop, unittest.TestCase):
+    """A line a merge drops stays refused until a later commit on the branch puts it back in the same file, at least
+    as many times as the parent had it. A restore in another file, or a partial one, clears nothing."""
+    run_main = PrintedFindings.run_main
+
+    def setUp(self):
+        self.cut_feat("feat", other_txt="o2\n")
+
+    def main_adds(self, *lines):
+        self.main_commit("main adds", self.T1, app_txt=BODY + "".join(line + "\n" for line in lines))
+
+    def merge_dropping_main_lines(self):
+        self.merge_main_dropping("Merge main, drop its lines", self.T2)
+
+    def at(self, rev, path):
+        return self.r.sh("show", "%s:%s" % (rev, path))
+
+    def test_a_dropped_line_a_later_commit_puts_back_in_the_same_file_is_green(self):
+        self.main_adds("added by main")
+        self.merge_dropping_main_lines()
+        self.r.commit("put the line back", date=self.T2, app_txt=BODY + "added by main\n")
+        self.assertIn("added by main", self.at("HEAD", "app.txt"), "premise: the head holds the line again")
+        self.assertEqual(self.r.verdict(), [], "a line a later commit put back in the same file was still refused")
+
+    def test_a_line_put_back_in_a_different_file_is_still_refused(self):  # guard
+        self.main_adds("added by main")
+        self.merge_dropping_main_lines()
+        self.r.commit("put the line back in another file", date=self.T2, other_txt="o2\nadded by main\n")
+        self.assertNotIn("added by main", self.at("HEAD", "app.txt"), "premise: the head lacks the line in app.txt")
+        self.assertIn("added by main", self.at("HEAD", "other.txt"), "premise: the head holds the line in other.txt")
+        got = self.r.verdict()
+        self.assertTrue(got, "a line restored in another file cleared the drop")
+        self.assertTrue(any(p.startswith("app.txt:") and "added by main" in p for p in got),
+                        "no finding names the dropped line in app.txt: %r" % got)
+
+    def test_a_line_main_added_twice_and_restored_once_is_still_refused(self):  # guard
+        self.main_adds("twice-added line", "twice-added line")
+        self.merge_dropping_main_lines()
+        self.r.commit("put one copy back", date=self.T2, app_txt=BODY + "twice-added line\n")
+        self.assertEqual(self.at("origin/main", "app.txt").count("twice-added line"), 2, "premise: main added the line twice")
+        self.assertEqual(self.at("HEAD", "app.txt").count("twice-added line"), 1, "premise: the head holds one copy")
+        got = self.r.verdict()
+        self.assertTrue(got, "one restored copy of a line main added twice cleared the drop")
+        self.assertTrue(any(p.startswith("app.txt:") and "twice-added line" in p for p in got),
+                        "no finding names the dropped line in app.txt: %r" % got)
+
+    def test_a_line_main_added_twice_and_restored_twice_is_green(self):
+        self.main_adds("twice-added line", "twice-added line")
+        self.merge_dropping_main_lines()
+        self.r.commit("put both copies back", date=self.T2, app_txt=BODY + "twice-added line\ntwice-added line\n")
+        self.assertEqual(self.at("HEAD", "app.txt").count("twice-added line"), 2, "premise: the head holds both copies")
+        self.assertEqual(self.r.verdict(), [], "a line restored at the count main added it was still refused")
+
+    def test_a_dropped_line_with_no_later_commit_is_refused_and_the_remedy_names_the_trailer(self):  # guard
+        self.main_adds("added by main")
+        self.merge_dropping_main_lines()
+        self.assertNotIn("added by main", self.at("HEAD", "app.txt"), "premise: the head is the merge, which dropped the line")
+        got = self.r.verdict()
+        self.assertTrue(got, "a merge that dropped a line main added passed")
+        self.assertTrue(any(p.startswith("app.txt:") and "added by main" in p for p in got),
+                        "no finding names the dropped line in app.txt: %r" % got)
+        rc, text = self.run_main(["--repo", self.r.dir, "--upstream", "origin/main"], "utf-8")
+        remedy = [line for line in text.splitlines() if "put the work back" in line]
+        self.assertEqual(rc, 1, "the refused merge did not exit 1")
+        self.assertTrue(remedy and ("%s:" % C.TRAILER) in remedy[0],
+                        "the remedy line does not name the %s trailer" % C.TRAILER)
+
+    def test_two_dropped_lines_one_put_back_names_only_the_other(self):
+        self.main_adds("restored alpha", "still missing beta")
+        self.merge_dropping_main_lines()
+        self.r.commit("put alpha back", date=self.T2, app_txt=BODY + "restored alpha\n")
+        self.assertIn("restored alpha", self.at("HEAD", "app.txt"), "premise: the head holds the restored line")
+        self.assertNotIn("still missing beta", self.at("HEAD", "app.txt"), "premise: the head lacks the second line")
+        got = self.r.verdict()
+        self.assertTrue(any(p.startswith("app.txt:") for p in got), "no finding names app.txt: %r" % got)
+        text = "\n".join(got)
+        self.assertIn("still missing beta", text, "the line the head still lacks was not named")
+        self.assertNotIn("restored alpha", text, "a line a later commit put back in the same file was still named")
+
+    def test_two_merges_that_each_drop_one_copy_of_a_line_are_not_both_cleared_by_one_restored_copy(self):
+        r = self.r
+        fork = r.sh("rev-parse", "HEAD")  # the feat commit: a second lane starts here, on the same base
+        self.main_adds("added by main")
+        self.merge_dropping_main_lines()
+        merge_a = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "-b", "feat2", fork)
+        # its own message: the same parents, tree and date would make this the first merge's commit
+        self.merge_main_dropping("Merge main into the second lane, drop its line", self.T2)
+        merge_c = r.sh("rev-parse", "HEAD")
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-edit", "feat2", date=self.T2)
+        r.commit("put the line back", date=self.T2, app_txt=BODY + "added by main\n")
+        self.assertNotEqual(merge_a, merge_c, "premise: the two merges are two commits")
+        self.assertNotIn("added by main", self.at(merge_a, "app.txt"), "premise: the first merge dropped the line")
+        self.assertNotIn("added by main", self.at(merge_c, "app.txt"), "premise: the second merge dropped the line")
+        self.assertEqual(self.at("HEAD", "app.txt").count("added by main"), 1, "premise: the head holds one copy")
+        got = self.r.verdict()
+        self.assertEqual(len(got), 1, "two merges each dropped one copy, the head holds one: want 1 finding, got %r" % got)
+        self.assertIn("added by main", got[0], "the finding does not name the dropped line: %r" % got)
+
+    def test_a_loss_at_a_renamed_file_is_not_cleared_by_a_later_file_recreated_at_the_old_name(self):
+        r = self.r
+        self.main_adds("added by main")
+        r.sh("merge", "--no-commit", "--no-ff", "main")
+        r.sh("mv", "app.txt", "app2.txt")
+        r.put("app2.txt", BODY)  # the merge renames app.txt to app2.txt and drops the line main added to it
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main, rename app.txt, drop its line", date=self.T2)
+        merge = r.sh("rev-parse", "HEAD")
+        r.commit("recreate the old name with the line", date=self.T2, app_txt=BODY + "added by main\n")
+        names = r.sh("ls-tree", "--name-only", merge).split()
+        self.assertIn("app2.txt", names, "premise: the merge renamed app.txt to app2.txt")
+        self.assertNotIn("app.txt", names, "premise: the merge left no app.txt")
+        self.assertNotIn("added by main", self.at("HEAD", "app2.txt"), "premise: the head lacks the line at the new name")
+        self.assertIn("added by main", self.at("HEAD", "app.txt"), "premise: the head holds the line at the old name")
+        got = self.r.verdict()
+        self.assertTrue(got, "a line dropped at the new name was cleared by a file recreated at the old name")
+        self.assertTrue(any("added by main" in g for g in got), "no finding names the dropped line: %r" % got)
 
 
 class DropsLinesHint(unittest.TestCase):

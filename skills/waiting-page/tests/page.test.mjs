@@ -4132,7 +4132,8 @@ test("after a failed Undo, focus is on the ask box, not the body", async (t) => 
 });
 
 test("while an in-window Undo's delete runs, the hint says Send turns on when Undo is done, not when the count ends", async (t) => {
-  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  // The page's clock is fixed at LOAD_AT, so the Undo window cannot pass while the delete is held, however slow the runner.
+  const page = await open(t, { hold: { delete: 0 }, clock: LOAD_AT }); if (!page) return;
   await sendTyped(page, "Hint inside the window");
   await mustHave(page, ASK.undo, "Undo control");
   await page.click(ASK.undo);
@@ -4238,37 +4239,78 @@ test("two designs of one slug with different focus keep their own size, and the 
 // ---------------------------------------------------------------- the mockup draw width has one home
 // FIT_W is the width a mockup is laid out at. A CSS rule or a comment that repeats the number goes stale when FIT_W moves.
 const FIT_W_DECL = /const FIT_W = (\d+)/;
-// Each line of `src` that holds `num` as a number of its own, except the FIT_W declaration itself. Strings, comments and
-// templates are read as plain text: a restatement counts wherever it stands. 3900, 1390, a390, 0.390 and #390 (a hex
-// colour) are other values; 390px and "390 wide" are the same one.
+// A restatement is FIT_W's number as a width value: after width, max-width or min-width and a colon or equals sign, or
+// followed by the word wide. The width may be an attribute (width="390"), a dotted style property (el.style.width = "390px"),
+// the second argument of setAttribute("width", 390), or the argument of calc(, min(, max( or clamp(. Strings, comments and
+// templates are read as plain text, so a restatement counts wherever it stands. A count, a font weight, a height or a sibling
+// number is not one: 3900, 1390, 0.390, a390, #390 (a hex colour) and "390 units".
+// A media or container condition is a breakpoint that CSS cannot read FIT_W in, so it is skipped.
+const WIDTH_BEFORE = /(?:^|[\s;{(,"'.])(?:min-|max-)?width(?:["']?\s*[:=]\s*|["']\s*,\s*)(?:(?:calc|min|max|clamp)\(\s*)?["']?$/i, WIDE_AFTER = /^(?:px)?\s+wide\b/i, AT_RULE = /^\s*@(?:container|media)\b/;
 function restatements(src, num) {
   const decl = FIT_W_DECL.exec(src), own = decl ? decl.index + decl[0].length - decl[1].length : -1;
-  const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g");
-  return [...new Set([...src.matchAll(again)].filter((m) => m.index !== own).map((m) => src.slice(0, m.index).split("\n").length))]
-    .map((n) => `line ${n}: ${lines[n - 1].trim().slice(0, 100)}`);
+  const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g"), found = new Set();
+  for (const m of src.matchAll(again)) {
+    if (m.index === own) continue;
+    const n = src.slice(0, m.index).split("\n").length, start = src.lastIndexOf("\n", m.index - 1) + 1;
+    const width = WIDTH_BEFORE.test(src.slice(start, m.index)) || WIDE_AFTER.test(src.slice(m.index + num.length, m.index + num.length + 12));
+    if (width && !AT_RULE.test(lines[n - 1])) found.add(n);
+  }
+  return [...found].map((n) => `line ${n}: ${lines[n - 1].trim().slice(0, 100)}`);
 }
 
 test("the mockup draw width is written once in the page, in FIT_W", () => {
   const decl = FIT_W_DECL.exec(html);
   assert.ok(decl, "page.html has no `const FIT_W = <number>` declaration");
   const found = restatements(html, decl[1]);
-  assert.deepEqual(found, [], `page.html restates the draw width ${decl[1]} outside FIT_W. Read it from FIT_W or drop it:\n  ${found.join("\n  ")}`);
+  assert.deepEqual(found, [], `page.html restates the draw width ${decl[1]} as a width value outside FIT_W:\n  ${found.join("\n  ")}\n`
+    + "Remedy: if the number is the draw width, read FIT_W in its place. If it is another width that only equals FIT_W by chance, "
+    + "the scan has no exception for it: tell the owner, and do not write the number another way.");
 });
 
-test("the restatement scan finds a number behind a comment opener in a string, in a template and after a lone quote, and skips other numbers", () => {
+test("the restatement scan finds a width behind a comment opener in a string, in a template and after a lone quote, and skips other numbers", () => {
   const src = [
     "const FIT_W = 390;",
-    "const u = 'http://x/390px';",
-    'const c = "/* 390 */";',
-    'const h = "# 390";',
+    "const u = 'style=\"width:390px\"';",
+    'const c = "/* width: 390 */";',
+    'const h = "# width=390";',
     "const t = `a",
-    "b 390 c`;",
+    "b width: 390 c`;",
     "<p>Don't</p> 390 wide",
     "const other = 3900 + 1390 + 0.390 + 390.5 + a390 + #390;",
   ].join("\n");
   assert.deepEqual(restatements(src, "390"), [
-    "line 2: const u = 'http://x/390px';", 'line 3: const c = "/* 390 */";', 'line 4: const h = "# 390";', "line 6: b 390 c`;", "line 7: <p>Don't</p> 390 wide",
+    "line 2: const u = 'style=\"width:390px\"';", 'line 3: const c = "/* width: 390 */";', 'line 4: const h = "# width=390";', "line 6: b width: 390 c`;", "line 7: <p>Don't</p> 390 wide",
   ]);
+});
+
+test("the restatement scan finds a width written as an attribute, a style assignment, a setAttribute argument or a calc value", () => {
+  const src = [
+    "const FIT_W = 390;",
+    '<img width="390" alt="">',
+    "<svg width='390'></svg>",
+    'el.style.width = "390px";',
+    'el.setAttribute("width", 390);',
+    "div { width: calc(390px); }",
+  ].join("\n");
+  assert.deepEqual(restatements(src, "390"), [
+    'line 2: <img width="390" alt="">',
+    "line 3: <svg width='390'></svg>",
+    'line 4: el.style.width = "390px";',
+    'line 5: el.setAttribute("width", 390);',
+    "line 6: div { width: calc(390px); }",
+  ]);
+});
+
+test("the restatement scan skips a number equal to FIT_W that is not a width value: a count, a font weight, a breakpoint, a height", () => {
+  const src = [
+    "const FIT_W = 390;",
+    "const rows = 390; // the count of rows",
+    '<td>390 units</td> <i style="font-weight: 390"></i>',
+    "@container (min-width: 390px) { .pk { gap: 16px } }",
+    'el.style.height = "390px";',
+    'el.setAttribute("height", 390);',
+  ].join("\n");
+  assert.deepEqual(restatements(src, "390"), []);
 });
 
 test("a mockup frame is laid out at the width FIT_W holds", async (t) => {
@@ -6418,38 +6460,66 @@ test("the row tint: a paused row's title has the in-progress title's font weight
   const paused = await computedOf(page.locator("#s-a3 .rrow .ttl"), "fontWeight"), active = await computedOf(page.locator("#s-a4 .rrow .ttl"), "fontWeight");
   assert.equal(paused, active, `the paused step's title is weight ${paused}, not the in-progress title's ${active}`);
 });
+// The paused title's match with the in-progress title means something only if that title is bolder than a plain one. With both titles
+// plain, the paused match above passes, so this case fails: it is the anchor for that match.
+test("the row tint: the in-progress title is bolder than a to-do title", async (t) => {
+  const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
+  await openStatus(page);
+  assert.match(await page.locator("#s-a4 .rrow").getAttribute("aria-label"), /In progress/, "step a4 does not read In progress");
+  assert.match(await page.locator("#s-t7 .rrow").getAttribute("aria-label"), /To do/, "step t7 does not read To do");
+  const active = await computedOf(page.locator("#s-a4 .rrow .ttl"), "fontWeight"), todo = await computedOf(page.locator("#s-t7 .rrow .ttl"), "fontWeight");
+  assert.ok(Number(active) > Number(todo), `the in-progress title is weight ${active}, not bolder than the to-do title's ${todo}`);
+});
 // A paused row keeps no tint at rest, but takes the hover fill when the pointer is on it. The rule that gives it the fill is
 // .rsteps .pzd-row > .rrow:hover: it outranks the paused row's own background: none, which the plain .rrow:hover fill cannot beat.
-// The fill is read on the hovered row and compared with a probe of the same colour. The probe must not read transparent, or the
-// test would pass on a page that draws no fill at all.
-const HOVER_FILL = "color-mix(in srgb, var(--chip) 60%, transparent)";
+// The fill is read from a to-do row of the same page, hovered first, so no colour is copied from the page's CSS: a tint change moves both
+// rows and the test follows. The to-do row's fill must not read transparent, or the test would pass on a page that draws no fill at all.
 test("the row tint: a paused row takes the hover fill when the pointer is on it, in light and dark", async (t) => {
-  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
   await openStatus(page);
   assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "step a3 is not marked Paused: there is no paused row to hover");
-  const row = page.locator("#s-a3 .rrow");
+  const row = page.locator("#s-a3 .rrow"), todo = page.locator("#s-t7 .rrow");
   for (const scheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: scheme });
+    await todo.hover();
+    const wantBg = await computedOf(todo, "backgroundColor");
+    assert.notEqual(wantBg, await probeOf(todo, "backgroundColor", "transparent"), `in ${scheme} the hovered to-do row's fill ${wantBg} reads as transparent here, so there is no fill to compare`);
     await row.hover();
-    const wantBg = await probeOf(row, "backgroundColor", HOVER_FILL);
-    assert.notEqual(wantBg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the hover fill ${HOVER_FILL} reads as transparent here, so the fill cannot be read`);
     const bg = await computedOf(row, "backgroundColor");
-    assert.equal(bg, wantBg, `in ${scheme} the hovered paused row's background is ${bg}, not the hover fill ${wantBg}`);
+    assert.equal(bg, wantBg, `in ${scheme} the hovered paused row's background is ${bg}, not the to-do row's hover fill ${wantBg}`);
   }
 });
-// Control: a hovered to-do row takes the same fill, and no rule overrides it. It stays green on a page without the paused-row hover rule.
+// Control: a hovered to-do row takes the fill that the page's .rrow:hover rule declares, and no rule overrides it. The expected fill is read
+// from that rule's declaration, not from a row: a row compared with itself could never fail. A tint change moves the declaration and the
+// test follows. The declared fill must not read transparent, or the test would pass on a page that draws no fill at all. It stays green on a page without the paused-row hover rule.
 test("control: the row tint: a to-do row takes the hover fill when the pointer is on it, in light and dark", async (t) => {
   const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
   await openStatus(page);
   assert.match(await page.locator("#s-t7 .rrow").getAttribute("aria-label"), /To do/, "step t7 does not read To do");
   const row = page.locator("#s-t7 .rrow");
+  const declared = await page.evaluate(() => {
+    const find = (rules) => {
+      for (const r of rules) {
+        if (r.selectorText === ".rrow:hover") return r.style.getPropertyValue("background");
+        if (r.cssRules) { const v = find(r.cssRules); if (v) return v; }
+      }
+      return "";
+    };
+    for (const sheet of document.styleSheets) {
+      let v = "";
+      try { v = find(sheet.cssRules); } catch { continue; }  // a sheet from another origin has no readable rules
+      if (v) return v;
+    }
+    return "";
+  });
+  assert.ok(declared, "the page has no .rrow:hover rule with a background to read the hover fill from");
   for (const scheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: scheme });
+    const wantBg = await probeOf(row, "backgroundColor", declared);
+    assert.notEqual(wantBg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the .rrow:hover fill ${declared} reads as transparent here, so there is no fill to compare`);
     await row.hover();
-    const wantBg = await probeOf(row, "backgroundColor", HOVER_FILL);
-    assert.notEqual(wantBg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the hover fill ${HOVER_FILL} reads as transparent here, so the fill cannot be read`);
     const bg = await computedOf(row, "backgroundColor");
-    assert.equal(bg, wantBg, `in ${scheme} the hovered to-do row's background is ${bg}, not the hover fill ${wantBg}`);
+    assert.equal(bg, wantBg, `in ${scheme} the hovered to-do row's background is ${bg}, not the .rrow:hover fill ${wantBg}`);
   }
 });
 
@@ -8389,6 +8459,31 @@ test("control: the rail's cleanup label and the phase head's text name no blocke
   assert.doesNotMatch(label, /blocked/, `the rail's cleanup label names a blocked step that is not there: "${label}"`);
   assert.doesNotMatch(text, /blocked/, `the phase head's text names a blocked step that is not there: "${text}"`);
 });
+// The rail's label and the phase head's text name the in-progress steps too, as their bars draw them: barsPage has two (a4, d6).
+test("the rail's cleanup button names its in-progress steps in its label, as its bar draws them", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#svRail button[data-phase="cleanup"] .segbar > i.act').count(), 2, "the rail's cleanup bar does not draw the two in-progress steps (i.act)");
+  const label = (await page.locator('#svRail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  assert.match(label, /\b2 in progress\b/, `the rail's cleanup label does not name the in-progress steps: "${label}"`);
+});
+test("the phase head's text names its in-progress steps, as its bar draws them", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svPhases .ph-head .segbar > i.act").count(), 2, "the phase head's bar does not draw the two in-progress steps (i.act)");
+  const text = (await page.locator("#svPhases .ph-head .prog .sr").allTextContents()).join(" ").replace(/\s+/g, " ");
+  assert.match(text, /\b2 in progress\b/, `the phase head's text does not name the in-progress steps: "${text}"`);
+});
+// Control: a phase with no in-progress step names none, in the rail's label or the phase head's text.
+test("control: the rail's cleanup label and the phase head's text name no in-progress step when none is drawn", async (t) => {
+  const page = await open(t, { pageHtml: withStalled(phasePage(blockedSteps()), noStalled) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svPhases .ph-head .segbar > i.act").count(), 0, "the phase head's bar draws an in-progress cell with no in-progress step");
+  const label = (await page.locator('#svRail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  const text = (await page.locator("#svPhases .ph-head .prog .sr").allTextContents()).join(" ");
+  assert.doesNotMatch(label, /in progress/, `the rail's cleanup label names an in-progress step that is not there: "${label}"`);
+  assert.doesNotMatch(text, /in progress/, `the phase head's text names an in-progress step that is not there: "${text}"`);
+});
 // The Now card's bar counts a blocked step as blocked, as the rail's bar and the phase head's bar do.
 const blockedSteps = () => stepsOf([["c1", "cleanup", 1, "todo"], ["d1", "cleanup", 2, "done"], ["b2", "cleanup", 3, "blocked"], ["t3", "cleanup", 4, "todo"]]);
 const noStalled = { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS };
@@ -8537,12 +8632,15 @@ async function countLinesW(page, sel) {
     return lines.map((l) => l.words);
   }, sel);
 }
-for (const width of [390, 1280]) test(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
+// A phone width wraps the line, so the break assert below keeps the group check from passing on a line that never wraps. 360 is where
+// the nowrap rule decides: without it "1" ends one line and "paused" starts the next. 1280 does not wrap, so it has no break assert.
+for (const width of [360, 390, 1280]) test(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
   const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
   await openStatus(page);
   const lines = await countLinesW(page, "#svNow > div:first-child > .lead");
   assert.ok(lines && lines.length, "the Now card has no count line (#svNow > div:first-child > .lead)");
   const text = lines.map((l) => l.join(" ")).join(" | ");
+  if (width < 1280) assert.ok(lines.length >= 2, `at ${width} wide the count line does not wrap, so the group check proves nothing: ${text}`);
   const starts = lines.find((l) => bareOf(l[0]) === "" || GROUP_WORDS_W.has(bareOf(l[0])));
   assert.equal(starts, undefined, `at ${width} wide a line of the count line starts inside a group: ${text}`);
   const ends = lines.find((l) => /^\d+$/.test(bareOf(l[l.length - 1])));
