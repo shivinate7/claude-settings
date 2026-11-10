@@ -918,8 +918,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.rline .frow > .g { margin-top: 7px; }
 .frow .fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .frow .fhead .ftext { flex: 0 1 auto; }
-/* From 521px the head is one row: a long text shrinks and is cut with an ellipsis, so the number, the new mark and the home keep their place. Under it the head wraps (the phone rule below). */
-@media (min-width: 521px) {
+/* From 701px the head is one row: a long text shrinks and is cut with an ellipsis, so the number, the new mark and the home keep their place. Under 701px the head wraps, because 521 to 700px has no room for a readable title beside the number, the new mark and the home. */
+@media (min-width: 701px) {
   .frow .fhead { flex-wrap: nowrap; }
   .frow .fhead .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .frow .fhead .fno, .frow .fhead .newmark { flex: none; }
