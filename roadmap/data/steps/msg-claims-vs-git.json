@@ -1,0 +1,12 @@
+{
+  "title": "A message that says a lane was added or merged checks git first",
+  "phase": "now",
+  "status": "todo",
+  "order": 1011,
+  "owner": "triage",
+  "why": "Runner 8 told the coordinator #2268 and #2555 were added to batch 73 when git showed them only queued; a claim in a cross-session message went unchecked.",
+  "note": "Proposed by runner 8, relayed by coordinator 13:01 CST Nov 10; queued by triage. Guard: before a send_message says a lane was added, merged or released, the sender reads git log of the named branch, or the message guard refuses the claim.",
+  "updatedAt": "2026-11-10T13:04:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
