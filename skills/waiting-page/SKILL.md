@@ -751,7 +751,7 @@ The guard runs `check_designs.mjs` on the published page at each item write that
      such as `side-session-notes`, or a link is refused: an account switch loses it (guard rule `mockup-home`, decision `mockup-home`).
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element, scaled to fit the card, so the part being decided is in frame.
-     Without `focus` the card shows the whole mockup. Either way the picture is scaled to the card's width, at most 2x. It draws whole while it is no taller than a 390 × 844 phone picture at that width; a taller one stays 480px high, scrolls in its box, and opens at the top of what the card shows. Set `focus` on each design to the element
+     Without `focus` the card shows the whole mockup. Either way the picture is scaled to the card's width, at most 2x. It draws whole while it is no taller than a 390 × 844 phone picture at that width. A taller one stays 480px high, scrolls in its box, and opens at the top of what the card shows. One that fits once the scrollbar's gutter narrows it draws whole at that narrower width, with no scroll. Set `focus` on each design to the element
      being decided, such as the late-package row with its buttons.
    - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
      focused element, else the whole mockup). The card reserves that height before the mockup loads,

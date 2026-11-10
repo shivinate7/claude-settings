@@ -2830,7 +2830,7 @@ function withState(html, state) {
 const allDesigns = () => state.items.filter((it) => !isAnswered(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
 // A mockup is drawn FIT_W wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
 const MIN_PIC = 120; // check_designs.mjs and the write guard read this as a number; fitFrame no longer floors a width with it
-const PHONE_H = 844; // a picture that scrolls draws as wide as a FIT_W x PHONE_H phone picture gets in its box
+const PHONE_H = 844; // F, the tallest a picture draws whole, is the height of a FIT_W x PHONE_H phone picture at the card's width, and at least maxH
 const FIT_W = 390;
 let FITS = [];
 // Sizes the mockups reported, by slug plus focus. They are kept in this browser, so the next load reserves the height before the mockup loads.
@@ -2870,18 +2870,18 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
       if (scroll) {
         g = wrap.isConnected ? Math.max(wrap.offsetWidth - wrap.clientWidth - 2, 0) : 0; // the scrollbar's gutter, plus any border past 1px; the box grows by it so the scrollbar takes none of the picture's width
         const room = Math.max(room0 - g, 1), narrow = Math.min(maxScale || 1, room / bw);
-        // The gutter can make a picture that just passed fit in maxH. Then it draws whole at the first scale, with no scrollbar.
+        // The gutter can make a picture that just passed fit in the box's height (F is no help: a phone's height scales with the width, as the picture does). Then it draws whole at the narrowed scale, so it is no taller than maxH + 1, with no scrollbar and no cue.
+        sc = narrow;
         if (Math.ceil(bh * narrow) <= maxH + 1) { scroll = false; wrap.classList.remove("scroll"); g = 0; }
-        else sc = narrow;
       }
       pw = Math.min(Math.ceil(bw * sc), room0 - (scroll ? g : 0)); // ceil can pass the room by 1px from float error
       sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px";
       const o = wrap.closest(".opic"); if (o) picHint(o, scroll);
       if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
       if (wrap.parentElement) {
-        // The width and height come from the column in both the measured and the declared-size case, so the first paint has the size. A declared size gives the box's aspect, as before; a measure gives the picture's own height.
+        // The width and height come from the column. bh is the declared height until the mockup reports its own, so the first paint is the height it settles to.
         wrap.style.width = pw + 2 + g + "px"; wrap.style.aspectRatio = ""; wrap.style.maxHeight = "";
-        wrap.style.height = (scroll ? maxH : !c && size ? Math.ceil((pw + 2) * size.h / (focus ? size.w : DW)) : Math.ceil(bh * sc)) + "px";
+        wrap.style.height = (scroll ? maxH : Math.ceil(bh * sc)) + "px";
       } else {
         // Not placed yet, so the column is unknown: the box takes the column's width and the picture's aspect by CSS, and the placement fits it again before the first paint.
         wrap.style.width = ""; wrap.style.height = ""; wrap.style.maxHeight = ""; wrap.style.aspectRatio = bw + " / " + bh;
