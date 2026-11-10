@@ -1,0 +1,24 @@
+{
+  "added": "2026-11-08T19:23:00Z",
+  "checked_with": "session_013NEJL1kqjrZZqdqpz3eaGB",
+  "command": {
+    "mac": "cd ~\nnpx -y neonctl@latest branches create --project-id autumn-math-12676341 --name testers --parent production",
+    "powershell": "cd ~\nnpx -y neonctl@latest branches create --project-id autumn-math-12676341 --name testers --parent production"
+  },
+  "context": "You picked 441 b: you make a new shared Neon branch from production, and q_max D-757 names it. The lane named it testers, in Neon project Q_NEON. It is yours to make because no session touches Neon (q_max D-827). When it exists, the D-757 rewrite can merge.",
+  "home": "qmax-d757-wt-main-stale",
+  "id": "qmax-testers-branch",
+  "kind": "task",
+  "n": 442,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "your item 441 b (13:20 CST Nov 8); q_max D-757",
+  "reply": "Done at 15:12 CST Nov 8: a session on your Mac made Neon branch testers from production (branch br-dawn-shape-a566s7hb). Routed 15:13 CST to the coordinator and the q_max lane, so the D-757 PR (#1141) can merge.",
+  "repo": "shivinate7/q_max",
+  "short": "q_max: make Neon branch testers",
+  "status": "closed",
+  "steps": [
+    "Paste the command below into a terminal. The first run opens a Neon login in your browser. Or use the console instead: https://console.neon.tech/app/projects/autumn-math-12676341/branches \u2192 New branch \u2192 Parent: production \u2192 Name: testers \u2192 Create.",
+    "Press Done. Add \"testers exists\" in the note."
+  ],
+  "title": "Make Neon branch testers from production"
+}

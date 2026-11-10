@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-08T19:43:00Z",
+  "checked_with": "session_013NEJL1WFQtTFeWPY7r1qYP",
+  "context": "Goal: #2207 reaches batch runner 8 without three more reviews of code that has not changed.\nProblem (cannot undo): the lane lint refuses #2207's head d7fed63b3, a docstring-only commit with no Red-run line. The lane reworded that commit as ea0df1aa1 with the same files (git diff --quiet shows nothing). Moving #2207's branch to it needs a force push, which auto mode refused.\nBased on (ruling): decision auto-mode-middle-ground (your items 257 a, 278 c and d) already grants this act. You are asked only because the auto-mode classifier lacks the allow entry for it; step lease-push-c-and-d adds that entry. Option a is you typing allow-once in the lane's session.\nBased on (measured): check_red_run says \"d7fed63 ... adds lines to merge/test_merge.py with no valid Red-run trailer\".\nBased on (read): main's merge tool cannot yet carry a review record to a replacement PR; #2207 itself builds that.\nDeparts from: main \u2014 adds one force-with-lease push to a lane's own unmerged branch.\nMeanwhile: the lane waits; nothing else depends on it.",
+  "home": "replacement-pr-carries-review",
+  "id": "force-push-2207",
+  "kind": "decision",
+  "n": 443,
+  "options": [
+    {
+      "gain": "One fix check instead of three review rounds, then the hand-off to runner 8.",
+      "key": "a",
+      "label": "Allow one force push of the lane's own branch",
+      "lose": "It rewrites one pushed commit on a branch only this lane uses. The old commit stays on the lane's -v3 branch."
+    },
+    {
+      "gain": "No force push.",
+      "key": "b",
+      "label": "Open a replacement PR and review it again from round 1",
+      "lose": "Three more reviews of code that has not changed."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "PR #2207 (a replacement PR carries its passed review); guard step red-run-pre-push (#1582)",
+  "reply": "You picked a at 13:52 CST Nov 8. Routed 13:54 CST to lane replacement-pr-carries-review (session_013NEJL1WFQtTFeWPY7r1qYP), which runs the push alone. If auto mode refuses it, the lane asks you in its own chat to type the allow-once line. Home: step replacement-pr-carries-review.",
+  "repo": "shivinate7/claude-settings",
+  "short": "#2207: one force push, or three more reviews?",
+  "status": "closed",
+  "steps": [
+    "Pick a or b and press Done.",
+    "If you pick a: a pick on this page is not a grant in another session. The lane first points its local branch replacement-pr-carries-review-v2 at ea0df1aa1d675068566c0db1eff59ae7f14f1918. Then open the lane at https://claude.ai/code/session_013NEJL1WFQtTFeWPY7r1qYP and type there: allow once: git push --force-with-lease=replacement-pr-carries-review-v2:d7fed63b3ec3adba30ff50193140c63f97f8e882 origin replacement-pr-carries-review-v2",
+    "No rush: once #1429 (Own Branch Lease Push) merges, this push passes with no allow-once, so this item may simply wait for #1429."
+  ],
+  "title": "May lane replacement-pr-carries-review force-push its own branch once, so #2207 skips three repeat reviews?"
+}

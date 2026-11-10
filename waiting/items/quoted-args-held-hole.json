@@ -24,7 +24,8 @@
   "owner": "lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn)",
   "pick": "a",
   "ref": "branch guard-quoted-args-data at 8e8cf9232; decision hold-unsafe-after-round-3",
+  "reply": "Routed 11:00 CST Nov 8 to lane guard-relative-write-escape: one new fix lane from round 1 closes the built-path hole, then a fix check, then it merges after #1906. Home: step guard-python-quoted-redirect.",
   "short": "Held guard fix: one more lane?",
-  "status": "open",
+  "status": "closed",
   "title": "May the held quoted-text fix to the other-checkout guard get one more fix lane?"
 }

@@ -18,9 +18,9 @@
   "owner": "coordinator",
   "rank": 2,
   "ref": "item 332; step qmax-browser-main-red",
-  "reply": "15:02 CST: the prompt is in the steps above. Press Done with the count when the local session finishes.",
+  "reply": "11:49 CST Nov 8: done, routed to the coordinator. 113 wt- branches were deleted, with none failed. 0 remain, and production and live-backup-2026-10-02 were not touched. Your note goes to q_max too: a worktree that used a deleted branch has no working database, and a new worktree gets its own branch.",
   "short": "Paste the Neon prompt into a local q_max session",
-  "status": "open",
+  "status": "closed",
   "title": "Have a local q_max session delete the 611 `wt-` Neon branches",
   "why": "You asked at 15:01 CST for the prompt. Your ruling 332 b keeps cloud sessions off Neon, so a session you run on your Mac, under your own Neon login, does it."
 }

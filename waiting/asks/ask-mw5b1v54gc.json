@@ -8,5 +8,6 @@
   "re": "ask-mw59xljoxp",
   "read": "2026-11-06T18:36:00Z",
   "reply": "Got it. The four steps go ahead. I filed the audit you meant as step debate-coverage-audit, and sent it to the coordinator. An Opus agent goes through every place where one agent or hook makes a call: hooks that judge, and agents that plan, build or review. At each one, it checks whether a second, independent agent argues against that call before it counts. It ranks the places that have no such second voice.\n\nUpdate 21:38 CST Nov 7: debate-coverage-audit is done, merged. Source: the roadmap. Triage.",
+  "status": "closed",
   "text": "These are all good and definitely get started on all of these, but I actually moreso meant send an opus agent to evaluate that whenever I have like pretool use, or judgement, or planning / building / reviewing agents, just like those, do i have enough debate / adversarial agents in my codeflow process"
 }

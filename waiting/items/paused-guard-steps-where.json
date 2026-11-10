@@ -1,0 +1,20 @@
+{
+  "added": "2026-11-10T02:35:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: drop the paused guard steps that name no incident, as you asked at 20:25 CST.\nWhy yours: only you know where you read the 7 names: brief-ruling-has-source, lane-default-checks-rulings, hold-zero-tests-fails, review-model-from-agent-record, shared-tree-guard-reads-last-cd, silent-undo-reads-octopus, scratch-probe-cleanup (measured 2026-11-09, a search of the claude-settings roadmap steps, waiting and outbox folders, and main's files found none of the 7).\nNearest steps by meaning: review-model-from-agent-record is like agent-served-model-check (doing); silent-undo-reads-octopus is like octopus-merge-push-refused; scratch-probe-cleanup is like scratchpad-file-ownership (ready).\nMeanwhile: the coordinator changes nothing.",
+  "home": "coordinator audit of paused guard steps",
+  "id": "paused-guard-steps-where",
+  "kind": "task",
+  "n": 468,
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "owner message 20:25 CST Nov 9; nearest steps agent-served-model-check, octopus-merge-push-refused, scratchpad-file-ownership",
+  "repo": "shivinate7/claude-settings",
+  "short": "Where are the 7 paused steps?",
+  "status": "open",
+  "steps": [
+    "Reply on this item with where you saw them: another repo's roadmap, a page tab, or a report. A link or the repo name is enough.",
+    "Done when you have replied."
+  ],
+  "title": "Tell us where you saw the 7 paused guard steps, so the ones with no incident can be dropped",
+  "why": "Lets the coordinator drop the paused guard steps that name no incident, as you asked at 20:25 CST."
+}

@@ -1,0 +1,95 @@
+{
+  "added": "2026-11-08T16:42:00Z",
+  "context": "Goal: Past Rates shows every bar control at 1440 with the sidebar shut, and the tabs stay where they are, so browser check EPI2B-3 goes green on q_max main.\nProblem (rule): the only fit with room to spare pads the Past Rates pills 8px, not 12px. That departs from your ruling that every pill pads the same, so it needs your word.\nBased on (measured): the bar is 77.4px short at 1440 on main's build, and 83.6 to 115.4px short in CI. The lane sizes to CI's worst case. More Filters as an icon saves 81.5px, compact pills save 48px, and a tighter tab gap saves 48px.\nBased on (ruling): decisions/control-primitives-2b (D-684, the control primitives draw one select pill; owner): every pill pads --f2-gap-bar. Asked again because each fit that keeps it either folds a control or merges the tabs.\nBased on (ruling): decisions/worded-controls-become-icons (D-729, worded controls become icon buttons; owner): supports More Filters as an icon.\nDeparts from: D-684, every pill pads --f2-gap-bar \u2014 the Past Rates pills pad 8px.\nEach card shows the bar at 1440, sidebar shut, at CI's worst row width: a verdict line, a thumbnail of the whole bar, zoomed crops of the part that changes, and Today/New labels. \"Open full size\" shows the whole mockup. Figures are from main's real build: 14.1px spare for a and b, 11.4px short for c.\nMeanwhile: the lane waits on this answer. This replaces item 403, where you asked for picture mockups (10:20 CST Nov 8). #1117 (the D-300 locator fix) is with runner 9.",
+  "designs": [
+    {
+      "drawn": 440,
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#bar-today",
+      "label": "Today",
+      "size": {
+        "h": 635,
+        "w": 440
+      },
+      "slug": "pr1440-today",
+      "state": "today"
+    },
+    {
+      "drawn": 440,
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#bar-icon-compact",
+      "label": "Icon More Filters and compact pills",
+      "option": "a",
+      "size": {
+        "h": 556,
+        "w": 440
+      },
+      "slug": "pr1440-icon-compact",
+      "state": "icon-compact"
+    },
+    {
+      "drawn": 440,
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#bar-icon-tight",
+      "label": "Icon More Filters and tight tabs",
+      "option": "b",
+      "size": {
+        "h": 528,
+        "w": 440
+      },
+      "slug": "pr1440-icon-tight",
+      "state": "icon-tight"
+    },
+    {
+      "drawn": 440,
+      "file": "docs/design/mockups/past-rates-bar-1440.html",
+      "focus": "#bar-tight-compact",
+      "label": "Tight tabs and compact pills",
+      "option": "c",
+      "size": {
+        "h": 624,
+        "w": 440
+      },
+      "slug": "pr1440-tight-compact",
+      "state": "tight-compact"
+    }
+  ],
+  "home": "qmax-browser-main-red",
+  "id": "qmax-pastrates-bar-1440-pics",
+  "kind": "decision",
+  "look": true,
+  "n": 428,
+  "options": [
+    {
+      "design": "pr1440-icon-compact",
+      "gain": "Nothing folds at 1440, and the tab spacing stays.",
+      "how": "More Filters becomes an icon button, and the Past Rates pills pad 8px. Saves 129.5px, with 14.1px spare at CI's worst.",
+      "key": "a",
+      "label": "More Filters as an icon, plus compact pills",
+      "lose": "The Past Rates pills pad differently from the pills on other screens, and More Filters loses its word."
+    },
+    {
+      "design": "pr1440-icon-tight",
+      "gain": "The pills keep the same padding as every other screen.",
+      "how": "More Filters becomes an icon button, and the gap between the five tabs shrinks by 12px. Saves 129.5px, with 14.1px spare at CI's worst.",
+      "key": "b",
+      "label": "More Filters as an icon, plus tighter tabs",
+      "lose": "The five tabs read as one run, and their press areas overlap by 16px."
+    },
+    {
+      "design": "pr1440-tight-compact",
+      "gain": "More Filters keeps its word.",
+      "how": "The tab gap shrinks and the pills pad 8px. More Filters keeps its word. Saves 104px, 11.4px short at CI's worst.",
+      "key": "c",
+      "label": "Tighter tabs plus compact pills, no icon",
+      "lose": "Price Date still folds in CI, so browser check EPI2B-3 stays red."
+    }
+  ],
+  "owner": "lane qmax-browser-main-red (session_013NEJL3KvrWSBxStMe8hDMw), q_max branch claude/qmax-pastrates-1440-design",
+  "pick": "a",
+  "ref": "q_max mockup docs/design/mockups/past-rates-bar-1440.html on branch claude/qmax-pastrates-1440-design at 88dc480a; replaces item 403; CI run 42449067365",
+  "repo": "q_max",
+  "short": "Past Rates bar at 1440",
+  "status": "open",
+  "title": "How should the Past Rates bar fit at 1440 with the sidebar shut?"
+}

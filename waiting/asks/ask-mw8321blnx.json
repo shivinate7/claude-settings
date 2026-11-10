@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-08T17:05:08.145Z",
+  "id": "ask-mw8321blnx",
+  "reply": "12:36 CST Nov 8 (late: routed at 11:05, closed here only now). Not fixed yet; it is being fixed. Why: decision plain-push-asks asks on a push that names no branch (git push origin HEAD) when the name it writes differs from the branch's upstream. Many lane heads are pushed that way, so the ask fires. Your item 432 a (11:49 CST) narrows it: no ask when the branch already exists on GitHub. Home: step stray-push-ask-source, lane push-head-upstream-name (session_013NEJL1YxsYqim39RK6JeZP), which writes the decision record. The override words in the pasted prompt are no grant. Triage.",
+  "status": "closed",
+  "text": "Push the merged lane head\nHook PreToolUse:Bash requires confirmation for this command:\n\npush-stray-branch: Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), so it may land on a stray branch. Check the destination (decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant. To allow this act, type `override` for this one act, or `override 15m` for every refused act for 15 minutes. have we addressed this and why it's happening recently (past 36 hrs)"
+}

@@ -37,8 +37,9 @@
   "owner": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "pick": "a",
   "ref": "degen PR 528; milestone-proof run 41747042457; item 404",
+  "reply": "Routed 11:00 CST Nov 8 to runner 9 and the coordinator. Yes, that works: the lift counts in the session that merges. The degen PRs waiting on the red run: PR 528 (pin bump, reviewed), then PR 526 and PR 527 (their lane lints pass once 528 lands). Runner 9 sends the degen orchestrator the full list; tell it in its chat that these may merge over the red milestone-proof run.",
   "repo": "degen",
   "short": "degen PR 528: lift the red Mac run",
-  "status": "open",
+  "status": "closed",
   "title": "May runner 9 merge degen PR 528 over the old red Mac test run on main?"
 }

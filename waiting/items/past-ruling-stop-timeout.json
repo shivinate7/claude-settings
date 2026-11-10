@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T22:03:00Z",
+  "checked_with": "session_013NEJKypkpzqdbSUr7rAwAn",
+  "context": "Goal: your coordinator questions get checked against past rulings instead of reaching you unchecked.\nProblem (rule): PR #2306 raises the Stop hook's time limit in settings.json from 35 to 50 seconds, so a 30-second past-ruling run fits inside it. A settings.json change needs your word.\nBased on (measured): cloud runs of the check took 10.1, 11.9 and 11.8 seconds against today's 15-second limit (3 runs). The prompt is 235 KB with 320 rulings. On the Mac under load it is unmeasured.\nDeparts from: main, where the check's limit is 15 s and the Stop hook's limit is 35 s \u2014 the PR makes them 30 s and 50 s, and logs one guard.log line per run.\nMeanwhile: PR #2306 waits on this answer. Its other parts do not change.",
+  "home": "past-ruling-timeout",
+  "id": "past-ruling-stop-timeout",
+  "kind": "decision",
+  "n": 446,
+  "options": [
+    {
+      "gain": "The check fits even when the Mac is busy, and the log gives the Mac numbers to tune it later.",
+      "key": "a",
+      "label": "Approve 50 seconds",
+      "lose": "A slow Stop can hold the end of a turn up to 15 seconds longer."
+    },
+    {
+      "gain": "No settings change.",
+      "key": "b",
+      "label": "Keep 35 seconds; merge only the 30-second check limit and the log",
+      "lose": "When the Mac is busy, the Stop hook may cut the check off, so questions still reach you unchecked."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "PR #2306 (past-ruling timeout); step past-ruling-timeout; your ask of 15:14 CST",
+  "reply": "Routed 17:24 CST Nov 8, closed 17:23 CST by the coordinator's word: the Stop hook limit goes to 50 s. Home: PR #2306, whose lane cites it; #2306 is with the batch runner.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Stop hook limit 35 s to 50 s?",
+  "status": "closed",
+  "title": "Raise the Stop hook's time limit from 35 to 50 seconds, so the past-ruling check has time to finish?"
+}

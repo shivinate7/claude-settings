@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-09T00:38:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: fewer auto-mode stops on safe acts (your chat, 18:31 CST Nov 8).\nProblem (risk): each entry changes what auto mode allows, so it needs your word.\nBased on (read): roadmap steps, the triage outbox and debt notes since Nov 7. Local refusal logs cannot be read from the cloud.\nDeparts from: main's 6 allow entries, plus the 4 you are pushing now \u2014 this adds up to 3 more.\nThe three entries: (1) Merge Tool Read Checks: `merge <pr> --reviewed`, `--lane-lint` and `--review-record` only read and print; never `--confirm`, force or the ok flags. Refused once (runner 9, Nov 7). (2) A lane closes a PR it replaced with one it opened in the same session, with `Replaced by #n` in the body (wider Owner PR Housekeeping); 4 to 5 PRs were stuck on Nov 8; a closed PR can be reopened. (3) A lease-push call may chain a plain archive push `git push origin <b>:refs/heads/archive/<b>`; refused once on Nov 8.\nNo entry, rightly refused: an agent's create_session, encoded re-sends, a lane's settings writes, a PATCH on an issue comment.\nMeanwhile: lanes keep hitting these stops; replaced PRs wait on the close list for a Mac session.",
+  "home": "auto-mode-middle-ground",
+  "id": "automode-three-more",
+  "kind": "decision",
+  "n": 450,
+  "options": [
+    {
+      "gain": "No stops for read checks, replaced-PR closes or an archive push before a lease push.",
+      "how": "Lane relayed-yes-allow adds entries 1, 2 and 3 to settings.json autoMode.allow.",
+      "key": "a",
+      "label": "Add all three",
+      "lose": "Three more entries to keep right."
+    },
+    {
+      "gain": "Replaced PRs still close only on a Mac session.",
+      "how": "Entries 1 and 3 land; a replaced PR still closes only from a session on your Mac.",
+      "key": "b",
+      "label": "Add 1 and 3 only",
+      "lose": "The close list keeps growing."
+    },
+    {
+      "gain": "No change.",
+      "how": "No change.",
+      "key": "c",
+      "label": "Add none",
+      "lose": "These stops continue."
+    }
+  ],
+  "owner": "lane relayed-yes-allow, via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "port": false,
+  "ref": "step auto-mode-middle-ground; your ask ask-mw5av97rcg; your chat 18:31 CST Nov 8; settings.json autoMode.allow; decision auto-mode-owner-acts",
+  "reply": "Routed 18:40 CST Nov 8 to step auto-mode-middle-ground (lane relayed-yes-allow, via the coordinator), roadmap 19ac3b6d8. The entries are a settings change: the lane's PR merges under review and your merge word, or you push them as you did at 18:31 CST.",
+  "repo": "shivinate7/claude-settings",
+  "short": "3 more auto-mode allow entries?",
+  "status": "closed",
+  "title": "Which of three more auto-mode allow entries should land: merge-tool read checks, replaced-PR closes, archive push before a lease push?"
+}

@@ -3,6 +3,6 @@
   "id": "ask-mw7a4sixks",
   "re": "ask-mw79vy66rf",
   "reply": "Not yet. The fix is filed as step roadmap-push-refusal-says-fetch (todo, roadmap commit ae63e5da0), and no lane builds it yet. I asked the coordinator to start one now. I tell you here when it merges. Triage, 21:36 CST.",
-  "status": "answered",
+  "status": "closed",
   "text": "fixed?"
 }

@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-09T02:49:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: the waiting page works with a keyboard and at any size.\nProblem (rule): in the reply form at 520px or narrower, Send reply shows above Close, but Tab reaches Close first, so focus moves up the screen.\nBased on (read): round 3 of #2347 (reviewer sonnet) found it; a test pins Send-first, and the design notes give no reason for it.\nDeparts from: main shows Send reply above Close on a narrow screen \u2014 Close would show first, matching the keyboard order.\nMeanwhile: the lane keeps main's order and goes on.",
+  "home": "notes-fix-page",
+  "id": "reply-form-tab-order",
+  "kind": "decision",
+  "n": 454,
+  "options": [
+    {
+      "gain": "Focus follows the screen.",
+      "how": "On narrow screens Close shows above Send reply, so the screen order matches Tab order; the test that pins Send-first changes with it.",
+      "key": "a",
+      "label": "Close first",
+      "lose": "Send reply is no longer on top."
+    },
+    {
+      "gain": "No change to the layout.",
+      "how": "No change.",
+      "key": "b",
+      "label": "Keep Send reply first",
+      "lose": "Tab jumps focus up the screen."
+    }
+  ],
+  "owner": "lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "port": false,
+  "ref": "PR #2347 round 3 (reviewer sonnet); main's 520px-or-narrower rule in the waiting page",
+  "reply": "Routed 13:11 CST Nov 9 to step notes-fix-page (lane session_013NEJKzjkypcToggneCjJN8, via the coordinator), roadmap 2e2d190de. On narrow screens Close shows above Send reply.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Reply form: Close first on phones?",
+  "status": "closed",
+  "title": "On a narrow screen, should the reply form show Close above Send reply, so Tab moves down the screen?"
+}

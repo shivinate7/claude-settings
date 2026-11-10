@@ -1,0 +1,16 @@
+{
+  "added": "2026-11-09T02:18:00Z",
+  "context": "Goal: your one read of the page copies that stay public (item 451 a).\nWhat: an Explore agent (sonnet) read all 37 copies. It found no tokens, keys, emails, phone numbers or street addresses. 13 are worth a look; the other 24 are mockups, plans and workflow pages.\nbanchi (branch artifact-pages-export):\n- before-after-390, seams-review: TCGplayer order ids in screenshots (also in public main fixtures/orders-shipping.csv)\n- capture-mix: real store revenue\n- live-book-realignment: $18k stock value, order counts, SKUs\n- my-slabs, slabs-mockups: slab cert numbers and values\n- queue-6nu1: $65.6k holdings paid; a /Users/shivinate path\n- stock-mix: real per-card sale prices and dates\nclaude-settings (branch roadmap, artifacts/):\n- c127-survey, c52-plan, ci-options, orchestrator-vs-builtins, plan-check-other-repos: your claude.ai user id (@u_SJaV\u2026)\n- roadmap: one /Users/shivinate path\nSteps: open the links, read the flagged copies, then press Done. If any should come out, say which in the note; a lane removes it.",
+  "home": "artifact-pages-other-account",
+  "id": "page-copies-read",
+  "kind": "task",
+  "n": 453,
+  "owner": "lane artifact-pages-other-account (session_013NEJL49cWWQx8kXJAVpNoi), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "port": false,
+  "ref": "item 451 a; https://github.com/shivinate7/banchi/tree/artifact-pages-export/artifacts ; https://github.com/shivinate7/claude-settings/tree/roadmap/artifacts",
+  "reply": "Done 13:21 CST Nov 9 with no note, so all 13 flagged copies stay public. Routed to step artifact-pages-other-account (lane session_013NEJL49cWWQx8kXJAVpNoi, via the coordinator).",
+  "repo": "shivinate7/claude-settings",
+  "short": "Read 13 public page copies",
+  "status": "closed",
+  "title": "Read the 13 flagged page copies that stay public, and say if any should come out"
+}

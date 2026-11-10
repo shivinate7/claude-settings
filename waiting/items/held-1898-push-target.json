@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T12:09:00Z",
-  "answeredAt": "2026-11-08T12:11:17Z",
   "context": "Goal: the guard reads where a push goes, so that pushes to main or with --force are still stopped.\nProblem (risk): PR #1898 (lane lint-before-record-push, session_013NEJKzXyKNARtJsbz3Q1R2) failed round 3 with a negative net value. It closes F1, F2 and N1, but opens F3: after a heredoc commit message, the standard `git commit -m \"$(cat <<'EOF' ...)\" && git push`, the guard reads the push folder as empty. Then a push to main and a push to a stray branch stop asking, and `--force` drops from a refusal to an ask. The rule parks it until you decide.\nBased on (ruling): decision hold-unsafe-after-round-3 parks a held change, with no fix lane, until you decide.\nBased on (read): the round-3 reviewer's (sonnet) record on #1898, net value negative.\nBased on (read): the F3 fix is known: push_target finds the segment in the caller's split_segments, not in a re-stripped copy, red first on a push after a heredoc commit message.\nDeparts from: main, where #1898 is parked with no work \u2014 starts a fix lane for F3 at round 1, try 1.\nMeanwhile: #1898 waits. #1755 goes on alone with its one-anchor test fix.",
   "home": "lint-before-record-push",
   "id": "held-1898-push-target",

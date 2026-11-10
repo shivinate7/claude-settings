@@ -6,7 +6,7 @@
   "context": "Goal: q_max's browser checks run on local Postgres on your Mac, with no Neon (item 332 b).\nProblem (cannot undo): this installs Homebrew software and a background Postgres service on your Mac.\nBased on (read): harness/local-postgres.sh needs a server on 127.0.0.1:5432, pgvector, a passwordless postgres superuser and psql on PATH (lane qmax-browser-main-red, 13:23 CST).\nDeparts from: main, where your Mac has no local Postgres for q_max \u2014 adds Postgres 17 and pgvector.\nOn a, a Mac session runs the command below for you; lane qmax-browser-main-red (session_013NEJL42jmjfd1eLhrpSQx6) owns it.",
   "home": "lane qmax-browser-main-red (session_013NEJL42jmjfd1eLhrpSQx6)",
   "id": "qmax-local-postgres-mac",
-  "kind": "decision",
+  "kind": "task",
   "n": 354,
   "options": [
     {
@@ -26,8 +26,14 @@
   "pick": "a",
   "rank": 2,
   "ref": "item 332",
+  "reply": "12:31 CST Nov 8: you picked a. The command is in the box below this item: paste it into Terminal on your Mac. It is yours to run because it installs software on your Mac and no cloud session can reach your Mac (runner 9 and the coordinator found that today). It installs Postgres 17 and pgvector, starts Postgres in the background, makes a passwordless local postgres user, then runs q_max's harness/local-postgres.sh. Routed to the coordinator for lane qmax-browser-main-red.",
   "short": "Local Postgres on the Mac?",
   "status": "open",
+  "steps": [
+    "Open Terminal on your Mac.",
+    "Paste the command below and press Return. Homebrew may ask for your Mac password.",
+    "When it ends, paste its last lines into this item's note and press Done."
+  ],
   "title": "Install Postgres 17 and pgvector on your Mac, so q_max's browser checks run locally?",
   "why": "Your item 332 b: sessions never touch Neon. The browser checks then need a local database."
 }

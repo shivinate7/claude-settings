@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-08T18:19:00Z",
+  "context": "Goal: cut token spend without slowing the work.\nProblem (money): every lane session runs Opus. 13 sampled lanes cost $4-$40 each (about $18 on average), and 58-74% of that is Opus re-reading a context of 200k tokens or more on each turn. 77 lanes ran today, so about $1,400 by extrapolation (the total is unmeasured). It is yours because agent-model-cap is your ruling (a recorded decision changes only on your grant), and auto mode refuses a settings write without your typed words (refusal 11:54 CST today).\nBased on (measured): get_session usage.cost_usd on 13 lanes, 12:16 CST Nov 8 (lane token-spend-sources).\nBased on (ruling): c201 (your item 50 b, Oct 28 16:15 CDT) set lane sessions on Opus, held in agent-model-cap and session-tiers. Asked again because its cost was unmeasured then and is measured now: 58-74% of each lane's cost is Opus re-reading cache.\nDeparts from: agent-model-cap on main (lane sessions run Opus) \u2014 lane sessions run Sonnet; Opus stays for Plan, the designer, the design reviewer, a builder's third try, and the coordinator.\nAlso, no pick needed: three more fixes from the same lane are filed as steps. The coordinator reads lane status in one pass instead of one Opus turn per message (about $40 an hour today; 54 of its 56 turns between 11:28 and 12:06 CST were lane messages). The sweep reads session summaries before it messages a lane (the 11:28 sweep cost about $125-$610 on the lane side). And the Haiku share (10-25% of a lane) gets measured.\nMeanwhile: lanes stay on Opus; the three fixes start.",
+  "home": "token-spend-sources",
+  "id": "lane-model-sonnet",
+  "kind": "decision",
+  "n": 439,
+  "options": [
+    {
+      "gain": "Lane cost drops by most of the Opus share, which is 58-74% of a lane's cost.",
+      "key": "a",
+      "label": "Lanes run Sonnet",
+      "lose": "A lane's orchestration judgment may drop. A lane that stalls asks for Opus, which costs a round trip."
+    },
+    {
+      "gain": "No change in lane judgment.",
+      "key": "b",
+      "label": "Keep lanes on Opus",
+      "lose": "Spend stays at today's rate, about $18 a lane."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "your ask ask-mw83yebd18 (11:30 CST); step token-spend-sources",
+  "reply": "12:26 CST Nov 8: your direction, routed to the coordinator. Lane sessions run Sonnet for now; new lanes start on Sonnet from 12:21 CST. The change reaches main by PR: decision agent-model-cap rewritten, plus debt lane-model-recheck (check again by 2026-11-22), measured against today's $18-a-lane Opus average. Tracked at step lanes-sonnet-trial; lane session_013NEJKziVLcE1RT5jq36KVX builds it, on Sonnet (the first lane, session_013NEJL4A2ZieM3DGDsGxeZQ, started with no repo and was archived). A settings write still needs your typed words in the session that makes it.",
+  "short": "Lanes on Sonnet?",
+  "status": "closed",
+  "title": "Should lane sessions run Sonnet instead of Opus, to cut token spend?"
+}

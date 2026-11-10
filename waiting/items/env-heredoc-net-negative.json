@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-09T03:10:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: the env-file guard stops refusing heredocs that only name an env file in prose (your item 449 a restart).\nProblem (risk): round 3 found the change slightly net negative. It closes no hole and opens a few rare ones: a $( read inside a python \"\"\" string, a node regex class, or a lone // with a live read. The rule holds a net-negative change until you decide.\nBased on (read): #2315 round 3 record, reviewer sonnet.\nBased on (measured): 50 launcher probes, 56 escaped-quote combos and about 60k fuzz bodies show 0 cases where main refuses and the change allows, outside those forms.\nBased on (read): the same reads in plainer forms (os.system('cat ...'), open('...')) already pass on main.\nDeparts from: main refuses these heredocs \u2014 the change stops refusing them, and the rare forms above pass too.\nMeanwhile: #2315 is parked until your answer.",
+  "home": "env-heredoc-name-in-prose",
+  "id": "env-heredoc-net-negative",
+  "kind": "decision",
+  "n": 455,
+  "options": [
+    {
+      "gain": "The false refusal goes away.",
+      "how": "#2315 goes on to merge as it is.",
+      "key": "a",
+      "label": "Keep the change",
+      "lose": "The rare forms pass, beside plainer reads main already allows. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "No new gap.",
+      "how": "Close #2315; list the false refusal under the decision's known false alarms.",
+      "key": "b",
+      "label": "Drop it",
+      "lose": "The false refusal stays."
+    },
+    {
+      "gain": "Closes most of the gap.",
+      "how": "Python \"\"\" strings and node regex classes stay refused; the change goes through review again.",
+      "key": "c",
+      "label": "Narrow it",
+      "lose": "Part of the false refusal stays, and another review round.",
+      "widens": false
+    }
+  ],
+  "owner": "lane env-heredoc-name-in-prose (session_013NEJL1cp45E4ttwFy1ngig), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "c",
+  "port": false,
+  "ref": "https://github.com/shivinate7/claude-settings/pull/2315#issuecomment-6731273695",
+  "reply": "Routed 13:11 CST Nov 9 to step env-heredoc-name-in-prose (lane session_013NEJL1cp45E4ttwFy1ngig, via the coordinator), roadmap 2e2d190de. #2315 merges as it is, and its decision records the rare forms as a known gap, per your note.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Env-file heredoc fix: keep, drop or narrow?",
+  "status": "closed",
+  "title": "The env-file guard fix (#2315) removes a false refusal but lets a few rare reads through. Keep it, drop it, or narrow it?"
+}

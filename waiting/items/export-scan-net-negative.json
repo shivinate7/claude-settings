@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-09T04:00:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: your exports stop flagging false secret alarms, and a pasted secret is still refused.\nProblem (rule): the fix lane closed both holes you named, plus two more, but round 3 still found one rare form the change lets through where main refuses it: a quoted literal password before a templated host with no dot, such as a database URL whose quoted password sits before a {host} placeholder. That makes the change net negative, so it waits for you.\nBased on (measured): a 227,026-input fuzz at head 7f25552ed clears the false alarms in 9 files on disk and adds no new false alarm.\nBased on (read): #2372 round 3 record, reviewer sonnet, via the coordinator at 00:06 CST Nov 9.\nDeparts from: main's secret scan refuses that password form \u2014 #2372 lets it through.\nMeanwhile: the lane waits, and its temp branches are archived.",
+  "home": "export-scan-key-false-alarms",
+  "id": "export-scan-net-negative",
+  "kind": "decision",
+  "n": 456,
+  "options": [
+    {
+      "gain": "About 2,500 false alarms go now.",
+      "how": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. Merge #2372 and record the form as a known limit.",
+      "key": "a",
+      "label": "Accept the one form as a named limit and merge",
+      "lose": "That pasted database-address form gets past the export scan.",
+      "widens": true
+    },
+    {
+      "gain": "Nothing gets through that main refuses, and the false alarms go.",
+      "how": "A new fix lane closes this form, then review starts again at round 1.",
+      "key": "b",
+      "label": "One more fix lane for the one-line fix",
+      "lose": "Review starts over at round 1, and each of the last two fix lanes found a new form."
+    },
+    {
+      "gain": "Nothing new gets through.",
+      "how": "Close #2372 and the branch scan-code-false-positives.",
+      "key": "c",
+      "label": "Drop the branch",
+      "lose": "The false alarms on your exports stay."
+    }
+  ],
+  "owner": "lane export-scan-key-false-alarms (session_013NEJKzHdMUT3sLtNCaxGEf), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "b",
+  "port": false,
+  "ref": "#2372 round 3 record (reviewer sonnet), head 7f25552ed",
+  "reply": "Routed 13:11 CST Nov 9 to step export-scan-key-false-alarms (lane session_013NEJKzHdMUT3sLtNCaxGEf, via the coordinator), roadmap 2e2d190de. #2372 merges, and the database-address form is recorded as a known limit.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Export scanner fix: one rare hole left",
+  "status": "closed",
+  "title": "The export scanner fix (#2372) clears about 2,500 false secret alarms and closes the 2 holes you named, but one rare password form still gets through. Accept it, fix it, or drop the branch?"
+}

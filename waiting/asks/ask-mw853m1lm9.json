@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-08T18:02:20.889Z",
+  "id": "ask-mw853m1lm9",
+  "reply": "You answered this at 12:19 CST Nov 8 as page item 437 (pick a): keep the rule, and the guard counts only the builder's own test edits, measured against main after the merge. Home: decision builders-cannot-edit-tests. Your item 447 a later made mutants test-author only too. Triage.",
+  "status": "closed",
+  "text": "is it still a good idea that builders can never edit tests and need to ask a test author agent?"
+}

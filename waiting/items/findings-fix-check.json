@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T04:35:00Z",
-  "answeredAt": "2026-11-08T12:08:10.433Z",
   "context": "Goal: a lane's review findings ride in its own PR, as you picked on item 386 b, not in a stream of follow-up PRs.\nProblem (rule): filing a finding after the last review round moves the PR's head, so its review record goes stale. Today no push is allowed after a done record.\nBased on (ruling): your item 386 b, 22:25 CST Nov 7.\nBased on (read): decision hold-unsafe-after-round-3: a fix check covers only a fix to a round's defect.\nDeparts from: decision hold-unsafe-after-round-3, where a fix check covers only a round's defect fix \u2014 it also covers a diff that only adds the round's findings to the debt store or the notes file.\nMeanwhile: lane findings-ride-in-lane builds the parts both options share; the fix-check part waits.",
   "home": "findings-ride-in-lane",
   "id": "findings-fix-check",

@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-08T20:45:00Z",
+  "checked_with": "session_013NEJKz9HoqeRzdjbw9Fnga",
+  "context": "Goal: a fix check is as strong a read as the review round it may turn into.\nProblem (money): a failed fix check counts as the next round (item 347 a), and rounds 2 and 3 run Sonnet. Yet on non-guard PRs the fix check itself runs Haiku.\nBased on (ruling): item 351 a (2026-11-07 14:44 CST): fix checks on guard and check PRs run Sonnet. You are asked again because widening it to every PR is a variant of that ruling.\nBased on (ruling): item 347 a (2026-11-07 13:12 CST): a failed fix check counts as the next round.\nBased on (measured): four lanes labelled a Sonnet fix check \"Round 3 of 3\" to pass the spawn guard (#1458, #1774, #2257, #2196).\nDeparts from: main runs fix checks on non-guard PRs on Haiku \u2014 (a) runs every fix check on Sonnet, and the spawn guard gets an exact label for a fix check.\nMeanwhile: the lane builds the exact label, and guard PRs keep Sonnet fix checks under 351 a.",
+  "home": "guard-fix-check-sonnet",
+  "id": "fix-check-model-all-prs",
+  "kind": "decision",
+  "lane": "guard-fix-check-sonnet",
+  "n": 444,
+  "options": [
+    {
+      "gain": "One rule for all PRs, and a fix check that fails counts as a round read at round strength.",
+      "key": "a",
+      "label": "Every fix check runs on Sonnet",
+      "lose": "About one Sonnet call per small fix."
+    },
+    {
+      "gain": "Cheaper.",
+      "key": "b",
+      "label": "Keep Haiku on non-guard PRs, and add only the exact label",
+      "lose": "A Haiku fail can still count as round 2."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "your items 351 a and 347 a (Nov 7)",
+  "reply": "You picked a at 15:04 CST Nov 8: every fix check runs on Sonnet. Routed 15:05 CST to the coordinator and lane guard-fix-check-sonnet (session_013NEJKz9HoqeRzdjbw9Fnga). It stays open until that lane reports done, so the lane's grant check counts your answer.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Fix checks: Sonnet on every PR?",
+  "status": "open",
+  "title": "Which model runs a fix check on a PR that is not a guard or check PR?"
+}

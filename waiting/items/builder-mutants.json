@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T22:48:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: builders never write test content (your item 437 a).\nProblem (rule): mutants are broken copies of guard code that prove a test catches the fault. They live in hooks/mutate_guard.py, hooks/mutate_shared.py and janitor/mutate_sweep.py. Main lets a builder write them (decisions agents-get-standing-rules and red-run-trailer-on-test-commits; the coordinator's pick c, Nov 7). Item 437 a ruled on test files and does not name mutants, so whether it covers them needs your word.\nBased on (read): #2310's builder wrote six mutants, and the builder guard let them through by design (AUTHOR_MUTATION_TESTS in hooks/guard.py).\nDeparts from: main lets builders add mutants \u2014 option a makes them test-author only.\nMeanwhile: step builder-edits-mutation-tests waits. #1675 is held with runner 8, because its decision text says builders may add mutants. #1904 merges as it is, because its text does not name mutants.",
+  "home": "builder-edits-mutation-tests",
+  "id": "builder-mutants",
+  "kind": "decision",
+  "n": 447,
+  "options": [
+    {
+      "gain": "The builder never grades its own code.",
+      "key": "a",
+      "label": "Mutants are test content: only a test-author writes them",
+      "lose": "One more hand-off in each guard lane."
+    },
+    {
+      "gain": "Fewer hand-offs.",
+      "key": "b",
+      "label": "Keep the builder carve-out",
+      "lose": "A builder can write mutants that its own code is sure to kill."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "step builder-edits-mutation-tests; PR #2310 (the incident); PR #1675 (held); your item 437 a",
+  "reply": "Routed 17:24 CST Nov 8: mutants are test content, test-author only. Home: step builder-edits-mutation-tests (roadmap 3040349f3); the coordinator routes it, and #1675's text gets the same rewrite.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Mutants: test-author only?",
+  "status": "closed",
+  "title": "Are mutants test content, so only a test-author writes them and a builder never does?"
+}

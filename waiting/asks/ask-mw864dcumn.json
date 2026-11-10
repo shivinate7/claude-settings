@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-08T18:30:55.902Z",
+  "id": "ask-mw864dcumn",
+  "reply": "12:34 CST Nov 8: filed as step handoff-keeps-owner-waits. Lane handoff-keeps-owner-waits (session_013NEJL1h7mKMtSVohetjaW1, Sonnet) builds it: each coordinator's handoff gets a section that lists what waits on you in that session (an allow-once or always-allow prompt, a typed grant, an open question), plus a check that refuses a handoff without it. The coordinator answered you in the comment thread at 12:31 CST. Triage.",
+  "status": "closed",
+  "text": "tbh coordinators should be required to keep in their handoff memory all the items that are waiting on me on the specific session like always allows or allow once etc yanno?"
+}

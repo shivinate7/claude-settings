@@ -1,0 +1,23 @@
+{
+  "added": "2026-11-08T18:26:00Z",
+  "command": {
+    "mac": "For claude-settings triage (artifact guard lane): please send one raw tool_input for each of these mcp__claude-artifacts__ tools, from a past call or from the tool's schema. Keep every key, including nested ones; cut values short or blank them. 1) db_write: what one entry of the ops list looks like (op kind, collection or doc path, data). 2) db_str_replace: the path and field keys; is path like items/<id>? 3) db_get: the path key; is it like answers/<id> or items/<id>? 4) publish_files: is files a list or a map, and with which keys?",
+    "powershell": "For claude-settings triage (artifact guard lane): please send one raw tool_input for each of these mcp__claude-artifacts__ tools, from a past call or from the tool's schema. Keep every key, including nested ones; cut values short or blank them. 1) db_write: what one entry of the ops list looks like (op kind, collection or doc path, data). 2) db_str_replace: the path and field keys; is path like items/<id>? 3) db_get: the path key; is it like answers/<id> or items/<id>? 4) publish_files: is files a list or a map, and with which keys?"
+  },
+  "context": "Thanks for item 434: it confirmed the Mac tool names. A name alone fires no guard, because the guards read fields inside each call (which collection, which document, what data). To map the Mac calls onto those fields, the lane needs the nested shape of four of them. Values can be cut short or blanked; only the keys matter. No cloud session can reach the Home coordinator or the Mac tool's schema (this session has no mcp__claude-artifacts tools), so this needs you to pass the question on. The lane builds the name matching meanwhile.",
+  "home": "artifact-guard-matcher-names",
+  "id": "home-artifact-input-shapes",
+  "kind": "task",
+  "minutes": 2,
+  "n": 440,
+  "owner": "lane artifact-guard-matcher-names (session_013NEJL3kYhJPjjsWYNCApSh)",
+  "ref": "item 434; your ask ask-mw839r77zp, gap 3",
+  "reply": "12:31 CST Nov 8: thank you. Your answer (db_write ops of {op, path, data, ifVersion}; db_str_replace path items/<id> and field; db_get path <collection>/<id>; publish_files files as a list of {as, path}) is routed to lane artifact-guard-matcher-names (session_013NEJL3kYhJPjjsWYNCApSh); home: step artifact-guard-matcher-names.",
+  "short": "Home: send 4 artifact tool input shapes",
+  "status": "closed",
+  "steps": [
+    "Paste the message below into the Home coordinator's chat on your Mac.",
+    "Paste its answer into this item's note and press Done."
+  ],
+  "title": "Ask the Home coordinator for the input shapes of four artifact tools"
+}

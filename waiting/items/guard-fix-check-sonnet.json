@@ -1,6 +1,5 @@
 {
   "added": "2026-11-07T19:30:00Z",
-  "answeredAt": "2026-11-07T20:44:58.216Z",
   "context": "Goal: a guard PR's fix check catches a defect that Haiku misses.\nProblem (rule): a reviewer's model is a role rule, which needs your word.\nBased on (ruling): rule agent-model-cap, where reviewers run Sonnet from round 2 on.\nDeparts from: main, where the fix check runs on Haiku \u2014 a moves it to Sonnet for guard and check PRs.",
   "home": "step guard-fix-check-sonnet (lane session_013NEJKz9HoqeRzdjbw9Fnga)",
   "id": "guard-fix-check-sonnet",

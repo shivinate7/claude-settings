@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-09T10:30:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: fix slow merges, and merge only the head CI ran on.\nProblem (rule): #2274 rewrites the settings.json auto-mode entry \"Batch Runner Merge\", and a settings change needs your word.\nBased on (read): the entry then allows only `merge <pr> --confirm --head <sha>`, with the head named in the merge go, and lists \"a merge with no --head\" as never covered. It narrows the entry and widens nothing.\nBased on (read): #2249 (a relayed merge yes binds to the PR head) is merged; #2274's round 3 passed with net value positive.\nDeparts from: main's \"Batch Runner Merge\" entry, which allows `merge <pr> --confirm` with no head \u2014 #2274 requires `--head <sha>`.\nMeanwhile: #2274 is parked; batch 69 goes on without it.",
+  "home": "runner-merge-needs-head",
+  "id": "runner-merge-needs-head",
+  "kind": "decision",
+  "n": 461,
+  "options": [
+    {
+      "gain": "The batch runner can merge only the commit CI ran on.",
+      "how": "#2274 joins batch 69.",
+      "key": "a",
+      "label": "Yes, allow the settings change as written",
+      "lose": "A merge go that forgets the head is refused, and the coordinator resends it with the head."
+    },
+    {
+      "gain": "No settings change.",
+      "how": "#2274 stays parked.",
+      "key": "b",
+      "label": "No, keep main's entry",
+      "lose": "The merge tool refuses a merge with no head, but the permission entry still describes the old form, so the two disagree."
+    }
+  ],
+  "owner": "lane runner-merge-needs-head (session_013NEJKzw6Mmu5eviHC3vobt), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "port": false,
+  "ref": "#2274 (head 289711ca7)",
+  "reply": "Routed 13:11 CST Nov 9 to step runner-merge-needs-head (lane session_013NEJKzw6Mmu5eviHC3vobt, via the coordinator), roadmap 2e2d190de. The settings change in #2274 is allowed as written.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Batch runner merges only the CI-run head",
+  "status": "closed",
+  "title": "Let #2274 narrow the batch runner's merge permission so it merges only the commit CI ran on? This needs your word for a settings.json change."
+}

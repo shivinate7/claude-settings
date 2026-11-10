@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T16:51:00Z",
+  "context": "Goal: the lane lint's findings are caught before a push leaves.\nProblem (risk): the guard cannot read a commit that has not landed yet, so #2077 refuses any commit, merge, pull or rebase in the same call as `git push`, with \"run the push in a call of its own\". Claude often writes `git commit -m x && git push`, so each such push costs one retry in every repo with a fast lint step.\nBased on (code): hooks/guard_merge.py lane_lint_push_hit, chain branch, on #2077.\nBased on (read): main refuses a chained push today only when the commit follows a step the guard cannot read and conflict markers may be in play (conflict_markers_hit, merged 2026-11-07); a plain `git commit -m x && git push` passes on main.\nBased on (review): round 3 (reviewer sonnet) passed with positive net safety value; the retry rate is unmeasured.\nDeparts from: main, where a plain commit-then-push in one call passes \u2014 adds a refusal of every commit-making step before a push in one call.\nMeanwhile: the lane goes on with the refusal kept (records, lane lint, hand-off). Your answer can change it later.",
+  "home": "lane-lint-before-push",
+  "id": "lane-lint-chain-push-deny",
+  "kind": "decision",
+  "n": 431,
+  "options": [
+    {
+      "gain": "No chained push sends commits past the lane lint.",
+      "how": "#2077 merges as it is: a push runs in a call of its own after the commit lands.",
+      "key": "a",
+      "label": "Keep the refusal",
+      "lose": "One retry for each chained push, in every repo with a fast lint step."
+    },
+    {
+      "gain": "No retry.",
+      "how": "#2077 lets a chained push through with a note that it could not lint, and lints nothing for it.",
+      "key": "b",
+      "label": "Allow the chain",
+      "lose": "A chained push, the way Claude pushes most often, sends commits the lane lint never read."
+    }
+  ],
+  "owner": "lane lane-lint-before-push (session_013NEJL2RXfa7QBPNAXaXgp4)",
+  "pick": "a",
+  "ref": "PR #2077 (refuse a push whose commits fail the lane lint's fast checks); debt lane-lint-chain-blanket-deny",
+  "reply": "Withdrawn by triage, 10:51 CST Nov 8: the pick can be undone before #2077 merges, so it is the lane's call (item 423 ruling). The lane keeps the refusal (option a); debt lane-lint-chain-blanket-deny tracks the retry cost.",
+  "short": "Lane-lint push: refuse commit + push in one call?",
+  "status": "closed",
+  "title": "May the lane-lint push check refuse a commit and a push in one call?"
+}

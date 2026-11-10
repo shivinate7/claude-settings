@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-08T12:13:48.383Z",
+  "id": "ask-mw7sndunu0",
+  "re": "ask-mw79xeveem",
+  "reply": "In the batch now. Batch runner 8 put #1371 (the git mailbox, head 2e928151c) in batch 64, PR #1944. #1944 is ready, and its CI started at 06:06 CST. It merges when CI is green. A follow-up rewords two test comments; it does not hold #1371. After the merge, three things stay open (step session-mailbox-followups): Mac and Windows git auth, a settings default for the store, and a 20-message cloud-to-Mac trial. Triage, 06:31 CST Nov 8.",
+  "status": "closed",
+  "text": "status?"
+}

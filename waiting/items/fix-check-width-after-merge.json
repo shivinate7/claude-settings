@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T05:45:00Z",
-  "answeredAt": "2026-11-08T12:08:10.433Z",
   "context": "Goal: a lane whose only change since its review is a main merge plus a small fix merges on a fix check, not a full new review.\nProblem (rule): the rule says a wider diff starts again at round 1. After a main merge, the old-to-new diff holds all of main's changes, so every main merge counts as \"wider\" and forces a full round.\nBased on (ruling): rule roles-review-cap-three: a small fix gets a fix check; a FAIL or a wider diff starts at round 1. Asked because \"wider\" is unclear after a main merge.\nBased on (ruling): decisions/hold-unsafe-after-round-3: a fix check covers only a fix to a round's defect. Asked again because tonight at least six PRs took a full round for a main merge plus a one-line form fix, a cost that ruling did not weigh.\nBased on (observed): #1679, #1670, #1439, #1472, #1449 and #1655 each took a full round for a main merge plus a one-line form fix (coordinator, 23:40 CST Nov 7).\nDeparts from: main, where a fix's size is judged on old..new \u2014 it is judged on the PR's own diff (main...head) plus conflict edits.\nMeanwhile: the width follow-up on step fix-check-guard-scope waits on this answer. The guard-question part (#1787) goes on.",
   "home": "fix-check-guard-scope",
   "id": "fix-check-width-after-merge",

@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-09T00:26:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: the env-file guard stops refusing a python or node heredoc whose text only names an env file, without letting real env reads through.\nProblem (rule): a held change waits for your word. #2315 fixes that false alarm but opens 4 rare holes and closes 1, so round 3 found its net value negative (reviewer sonnet).\nBased on (measured): round 3 at c62328127. The 4 holes: a nested template literal in a node heredoc; an interpreter word anywhere before `<<` (such as `cat > node/go <<'EOF'`); a python triple-quoted string that holds `$(`; a node regex with // inside a character class.\nDeparts from: main refuses those heredocs as env reads \u2014 a new lane would allow heredocs that only name an env file in text, and keep refusing real reads.\nMeanwhile: nothing runs on #2315.",
+  "home": "env-heredoc-name-in-prose",
+  "id": "env-heredoc-held",
+  "kind": "decision",
+  "n": 449,
+  "options": [
+    {
+      "gain": "The false alarm goes, and the two new holes those narrowings target close.",
+      "how": "The new lane matches the interpreter only as the heredoc's command word, and stops blanking text after a nested backtick.",
+      "key": "a",
+      "label": "New lane at round 1, with two narrowings",
+      "lose": "One more review chain."
+    },
+    {
+      "gain": "No more work.",
+      "how": "Close #2315 and add the false alarm under the decision's Known false alarms.",
+      "key": "b",
+      "label": "Drop #2315 and list the false alarm",
+      "lose": "The false alarm stays."
+    }
+  ],
+  "owner": "lane env-heredoc-name-in-prose (session_013NEJL1cp45E4ttwFy1ngig), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "port": false,
+  "ref": "PR #2315; round 3 record https://github.com/shivinate7/claude-settings/pull/2315#issuecomment-6729311962; rule roles-review-cap-three",
+  "reply": "Routed 18:40 CST Nov 8 to step env-heredoc-name-in-prose, roadmap 19ac3b6d8: the coordinator starts a new lane at round 1 with the two narrowings; #2315 joins the close list when the new PR exists.",
+  "repo": "shivinate7/claude-settings",
+  "short": "#2315 held: new lane or drop?",
+  "status": "closed",
+  "title": "#2315 is held after round 3: run a new lane with two narrowings, or drop it and list the false alarm?"
+}

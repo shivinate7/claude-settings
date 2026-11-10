@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-08T21:14:50.479Z",
+  "id": "ask-mw8bz5rj1f",
+  "reply": "Filed 15:16 CST Nov 8 as step past-ruling-timeout, sent to the coordinator to start a lane. The step that retries once on a timeout (judge-timeout-retries-once) is waiting to merge, but a retry does not help when every run takes longer than 15 seconds, so this step measures first.",
+  "status": "closed",
+  "text": "5. past-ruling-timeout: the past-ruling check (lint/report_guard.py, model call_judge.PAST_RULING_MODEL with PAST_RULING_TIMEOUT = 15 s) timed out on every Home coordinator question on 2026-11-08, so each went to the owner unchecked. Likely cause, unmeasured: one `claude -p` cold start plus a long candidate-rulings prompt under Mac load 11\u201316 does not fit in 15 s. Done when: the check logs its duration and prompt size per run, and its time limit (or the candidate list's size) is set from those measurements, so a normal question gets a verdict."
+}

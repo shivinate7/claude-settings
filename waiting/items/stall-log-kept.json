@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T07:02:00Z",
-  "answeredAt": "2026-11-08T12:09:31Z",
   "context": "Goal: after the stall watcher flags a quiet job, you can still read whether that job passed.\nProblem (rule): a job removes its log when it ends, even after a STALL report. Tonight a lint was flagged, ran on unseen, and its log was deleted, so no one could tell if it passed. That line has no ruling of yours behind it, so changing it needs your word.\nBased on (record): decision stall-watch: \"The job removes its log and beat file when it ends, also after a STALL report\" (lane commit 78c608d45, Nov 4, to stop leftover files). Test A1 holds it.\nBased on (ruling): decisions/stall-watch (owner, 2026-10-18 15:15 CDT): the watcher never stops a job; it only reports. Option b goes against that.\nBased on (record): verdict already keeps its own logs 7 days, then prunes them (KEEP = 7 days).\nDeparts from: decision stall-watch, a stalled job's log is removed when the job ends \u2014 a stalled job's log is kept until a 7-day prune.\nMeanwhile: the lane ships the beat-file fix, the cause of tonight's stalls, on its own. It waits on this part only.",
   "home": "stall-watch-quiet-lint",
   "id": "stall-log-kept",

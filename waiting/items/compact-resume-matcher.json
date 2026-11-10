@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-09T23:18:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: a session that resumes after a compaction learns that its hooks lag main.\nProblem (rule): the session start hook does not run after a compaction, so a compacted session never learns its hooks are older than main, and changing when it runs is a settings.json edit that needs your word.\nBased on (read): settings.json on main today runs the start hook only on a new or resumed session, not after a compaction.\nBased on (read): PR #2473 adds a line to the start hook that says when a session's hooks are older than main.\nDeparts from: main settings.json SessionStart matcher `startup|resume` \u2014 becomes `startup|resume|compact`, so session_start.sh also runs after a compaction.\nMeanwhile: nothing waits on this; a fresh session is the route for a stale lane.",
+  "home": "compact-resume-runs-start",
+  "id": "compact-resume-matcher",
+  "kind": "decision",
+  "lane": "session_013NEJL1E4aAkTZ2bok4QsVD",
+  "n": 466,
+  "options": [
+    {
+      "gain": "A compacted session sees that its hooks lag main.",
+      "how": "A lane adds `compact` to the matcher and proves your pick with page_grant.py.",
+      "key": "a",
+      "label": "Yes, add compact to the matcher (Recommended)",
+      "lose": "One extra hook run per compaction: 2 git reads and 1 bounded fetch."
+    },
+    {
+      "gain": "None.",
+      "how": "No change.",
+      "key": "b",
+      "label": "No, keep the matcher",
+      "lose": "Stale hooks stay unseen after a compaction."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "port": false,
+  "ref": "settings.json SessionStart matcher; PR #2473 (the hooks-lag line)",
+  "reply": "Picked a at 19:22 CST. Step compact-resume-runs-start is now ready (roadmap 84920f334). The item stays open until the coordinator's lane adds compact to the matcher and proves your pick with page_grant.py.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Run start hook after compaction",
+  "status": "open",
+  "title": "Run the session start hook after a compaction too, so a compacted session learns its hooks lag main?"
+}

@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-09T01:37:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: keep your personal-account pages in git, with nothing private exposed.\nProblem (risk): banchi, claude-settings and mailaudit are public repos. banchi's branch `artifact-pages-export` holds 20 copies of pages from your outlook and gmail accounts, and claude-settings `roadmap` holds 18. The export scan blocks emails, keys and secrets, but lets personal facts in plain words through.\nBased on (read): `gh api repos/shivinate7/banchi` and `repos/shivinate7/claude-settings` both report public; lint/layout.json's public rule keeps personal data out of commits.\nBased on (read): the claude-settings copies are workflow pages: roadmap, waiting pages, plans, and mailaudit page answers (125 json files of answers). The coordinator read the file names, not each page.\nBased on (read): your gmail run report (pasted 20:03 CST Nov 8) also pushed copies to `artifact-pages-export` in claude-settings (48209bd00, 8492f61ee, 698cd3c31) and mailaudit (c50ebb9).\nDeparts from: main \u2014 adds other-account page copies to public repos.\nMeanwhile: banchi #1084 is held; everything else continues.",
+  "home": "artifact-pages-other-account",
+  "id": "page-copies-public",
+  "kind": "decision",
+  "n": 451,
+  "options": [
+    {
+      "gain": "One home; nothing moves.",
+      "how": "Read the copies and confirm nothing private is in them: https://github.com/shivinate7/claude-settings/tree/roadmap/artifacts , https://github.com/shivinate7/claude-settings/tree/artifact-pages-export , https://github.com/shivinate7/banchi/tree/artifact-pages-export and https://github.com/shivinate7/mailaudit/tree/artifact-pages-export",
+      "key": "a",
+      "label": "Keep them public, after your read",
+      "lose": "One read by you."
+    },
+    {
+      "gain": "No new exposure.",
+      "how": "Delete the `artifact-pages-export` branches in the public repos and revert the copies on claude-settings `roadmap`; a session on your Mac does the branch deletes. Git history on the public repos still holds what was pushed.",
+      "key": "b",
+      "label": "Move them to a private repo",
+      "lose": "The rebuild path lives in another repo."
+    },
+    {
+      "gain": "No new exposure.",
+      "how": "Revert the copies on the public repos and keep the registry entries.",
+      "key": "c",
+      "label": "Keep only the registry; drop every copy",
+      "lose": "Those pages have no git copy."
+    }
+  ],
+  "owner": "lane artifact-pages-other-account (session_013NEJL49cWWQx8kXJAVpNoi), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "port": false,
+  "ref": "banchi branch artifact-pages-export; claude-settings roadmap at fdb17ab4e (merged by triage 19:09 CST Nov 8); lint/layout.json public rule",
+  "reply": "Routed 20:04 CST Nov 8 to step artifact-pages-other-account (roadmap 53e5011f0): the copies stay public, after your own read; banchi #1084 is no longer held for this. The lane sends a list of the public copies, which goes on the page as an info item for your read. Your note on making all repos private is logged on the step as a note; nothing starts on it unless you ask.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Page copies in public repos?",
+  "status": "closed",
+  "title": "Your personal-account page copies sit in two public repos: keep them after a read, move them private, or drop the copies?"
+}

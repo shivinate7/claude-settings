@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-08T17:10:00Z",
+  "context": "Goal: stop the stray-branch prompt on \"Push the merged lane head\", which you saw recur over the past 36 h.\nProblem (rule): the fix narrows your ruling 206 a, so it needs your word.\nBased on (ruling): item 206 a (2026-11-03): a push that names no destination (`git push origin HEAD`) asks when the branch's own name differs from the branch it tracks; the measured harm was a new stray branch on GitHub.\nBased on (measured): a branch `lane-x` that tracks `origin/batch-1` asks on `git push origin HEAD` whether or not `origin/lane-x` exists; `git push origin HEAD:lane-x` passes (lane probe on main's guard, 11:09 CST Nov 8).\nBased on (notes): the prompt you saw is most likely such a push to the lane's own PR branch; this is unconfirmed until a Mac session reads the guard log near 11:00 CST.\nDeparts from: main, where every such push asks \u2014 the push asks only when the branch does not exist on GitHub yet.\nMeanwhile: the lane finishes another fix and holds this one until you answer. Either way, the prompt's remedy will name `git push origin HEAD:<branch>`.",
+  "home": "stray-push-ask-source",
+  "id": "stray-push-existing-branch",
+  "kind": "decision",
+  "n": 432,
+  "options": [
+    {
+      "gain": "No prompt when a lane pushes to its own existing PR branch.",
+      "how": "The guard reads the local copy of the remote's branch list once per such push, and asks only when the branch is not there yet.",
+      "key": "a",
+      "label": "Skip existing branches",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. A push to an existing branch that happens to share the local name passes with no prompt, so it could add commits to another lane's branch.",
+      "widens": true
+    },
+    {
+      "gain": "No change to your ruling; every off-upstream push still asks, and sessions learn the quiet form.",
+      "how": "Ruling 206 a stays; the prompt's remedy names `git push origin HEAD:<branch>`, so a session switches to that form, which never asks.",
+      "key": "b",
+      "label": "Keep the prompt; fix its text only",
+      "lose": "You still see the prompt about once per session before the session switches forms."
+    }
+  ],
+  "owner": "lane push-head-upstream-name (session_013NEJL1YxsYqim39RK6JeZP)",
+  "pick": "b",
+  "ref": "your ask ask-mw8321blnx; decision plain-push-asks (ruling 206 a); step stray-push-ask-source",
+  "reply": "11:49 CST Nov 8: a stands as your ruling, routed to lane push-head-upstream-name. It narrows 206 a, so the push stays quiet when the branch already exists on GitHub. On your note: 'quiet regardless' would also drop the prompt for a push that makes a new branch on GitHub. That is the stray-branch harm 206 a was made for. The lane builds a only. To also drop the new-branch prompt, say so here or in that lane, and it becomes a new question.",
+  "short": "Stray-branch prompt: skip existing branches?",
+  "status": "closed",
+  "title": "Should the stray-branch push prompt stay quiet when the branch already exists on GitHub?"
+}

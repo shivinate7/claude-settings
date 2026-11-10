@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-08T17:18:00Z",
+  "context": "Goal: every simulator boot that shows a blank or black first screen is caught before a lane relies on it.\nProblem (rule): decision sim-boot-is-verified says \"A boot by `bin/sim-test` is not checked\", and a recorded decision changes only on your word.\nBased on (ruling): sim-boot-is-verified decides that a boot by bin/sim-test is not checked. Asked again because the outcome it rested on, the crash-loop stop (sim-test-stops-a-crash-loop) catching a black screen with no crash, is unmeasured, and a hook-only check misses most boots.\nBased on (read): sim-test is the main boot path, so a check in the boot hook alone leaves most boots unchecked; today the hook judges only the screenshot's exit code (hooks/sim_boot_record.py sim_ok).\nDeparts from: main, where a sim-test boot gets no screen check \u2014 sim-test runs the same first-screen check after its own boot, and on a fail exits 1 and shuts down what it booted.\nMeanwhile: the lane builds the boot hook's screen check, which does not depend on this answer.",
+  "home": "sim-boot-screen-check",
+  "id": "sim-test-boot-frame-check",
+  "kind": "decision",
+  "n": 433,
+  "options": [
+    {
+      "gain": "Every boot is checked, from one PR.",
+      "how": "The lane adds the same screen check to sim-test and rewrites that line of the decision.",
+      "key": "a",
+      "label": "Check sim-test boots, in this lane",
+      "lose": "A wider PR, so its review rounds cover sim-test too."
+    },
+    {
+      "gain": "A smaller first PR.",
+      "how": "This lane ships the hook check only; a new step adds sim-test after it.",
+      "key": "b",
+      "label": "Check sim-test boots, in a later step",
+      "lose": "sim-test boots stay unchecked until the second PR lands."
+    },
+    {
+      "gain": "Nothing more to build.",
+      "how": "The decision line stays as written.",
+      "key": "c",
+      "label": "Leave sim-test boots unchecked",
+      "lose": "Most boots stay unchecked, as with Home PR 576, whose screens were never checked on a device."
+    }
+  ],
+  "owner": "lane sim-boot-screen-check (session_013NEJL3Zo2s3uQCh8o4Mfwo)",
+  "pick": "a",
+  "ref": "decision sim-boot-is-verified; step sim-boot-screen-check; Home hand-off ask-mw839r77zp",
+  "reply": "12:02 CST Nov 8: a, routed to lane sim-boot-screen-check. sim-test boots get the same first-screen check, in this lane. A real Duo screenshot through the check is still owed on your Mac.",
+  "short": "Check sim-test boots for a blank screen?",
+  "status": "closed",
+  "title": "Should simulator boots by sim-test also be checked for a blank or black first screen?"
+}

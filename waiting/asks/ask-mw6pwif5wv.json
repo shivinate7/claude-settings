@@ -4,5 +4,6 @@
   "home": "claude-settings hooks/call_judge.py (item 8, the past-ruling check)",
   "id": "ask-mw6pwif5wv",
   "reply": "Cause: before a session shows you a question, a check asks a model whether the question goes against one of your past rulings (hooks/call_judge.py, item 8). That model call timed out. So the hook refused the question and told the session to add an `Unvetted:` line. The guard's own text then reached you, but that text was meant for the session.\nFix: the check should retry once before it refuses. A session should add the `Unvetted:` line itself and never pass the guard's instructions to you. I sent both fixes to the coordinator to file.",
+  "status": "closed",
   "text": "what caused this issue and how could it have been fixed? Unvetted guard: the past-ruling check could not run (model subprocess timed out), so this question would reach the owner unchecked. Add the line `Unvetted: <why it could not be checked>` to the question and send it again. (rule reports-order-of-labels) Post only the corrected lines, as a short correction. Never send the report again.\n\nInput Needed (correction, add this line)\n\nUnvetted: the check that compares a question against your past rulings timed out, so this question was not checked against them."
 }

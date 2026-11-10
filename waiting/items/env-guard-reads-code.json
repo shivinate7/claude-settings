@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T05:20:00Z",
-  "answeredAt": "2026-11-08T12:08:10.433Z",
   "context": "Goal: secrets in .env files never reach a session's output by mistake.\nProblem (risk): the env guard reads shell words only. Code run through `python3 -c`, `node -e` or a quoted python or node heredoc that opens the env file passes unjudged. Only you can decide whether the guard reaches into code.\nBased on (read): debt env-interpreter-code-reads, filed by lane env-file-shell-c (#1767) at 23:16 CST Nov 7.\nBased on (decision): guard-guards-mistakes-only: a guard stops Claude's likely mistakes, not an attacker.\nDeparts from: decision env-file-stays-unread, where the guard judges shell words and a quoted heredoc body is text \u2014 it also judges interpreter code that opens the env file.\nMeanwhile: #1767 (bash -c and sh -c strings) goes on with runner 8; nothing waits on this answer.",
   "home": "env-file-shell-c",
   "id": "env-guard-reads-code",

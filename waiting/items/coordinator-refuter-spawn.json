@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-09T10:20:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: restart the flywheel, with plan refuters working for the coordinator.\nProblem (rule): your ruling 111 a lets a cloud coordinator start only Plan, Explore and claude-code-guide agents, but main's decision plan-refuter says a refuter runs after each Plan agent. On #1971's head the guard refuses a coordinator's refuter, and changing 111 a's list needs your word.\nBased on (read): #1971's Sonnet fix check failed on this one clash; nothing else was lost in its merge.\nBased on (read): #2123 merges right after #1971 and needs a fresh review anyway.\nDeparts from: main's ruling 111 a (three agent types) \u2014 adds the refuter as a fourth.\nMeanwhile: #1971 waits; other lanes go on.",
+  "home": "coordinator-refuter-spawn",
+  "id": "coordinator-refuter-spawn",
+  "kind": "decision",
+  "n": 460,
+  "options": [
+    {
+      "gain": "No extra build round on #1971.",
+      "how": "#1971 lands as it is, after a fresh full round 3; #2123 adds the refuter to the coordinator's list.",
+      "key": "a",
+      "label": "Add the refuter in #2123",
+      "lose": "Between the two merges, a coordinator's refuter is refused: a false alarm on a read-only agent, not a safety hole."
+    },
+    {
+      "gain": "No gap between the two merges.",
+      "how": "A test-author, a builder, then a fresh round 3 on #1971.",
+      "key": "b",
+      "label": "Add the refuter on #1971 now",
+      "lose": "One more build and review round on #1971."
+    },
+    {
+      "gain": "No change to ruling 111 a.",
+      "how": "Ruling 111 a stays at three agent types.",
+      "key": "c",
+      "label": "Leave the coordinator without refuters",
+      "lose": "Goes against decision plan-refuter: a coordinator's plans get no refuter."
+    }
+  ],
+  "owner": "lane revive-1042 (session_013NEJL2GCahFnLKLzmw1JAM), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "port": false,
+  "ref": "#1971 Sonnet fix check (FAIL); #2123",
+  "reply": "Routed 13:11 CST Nov 9 to step coordinator-refuter-spawn (lane revive-1042, via the coordinator), roadmap 2e2d190de. #1971 lands after a fresh full round 3; #2123 adds the refuter.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Coordinator may start plan refuters?",
+  "status": "closed",
+  "title": "Let a cloud coordinator start a plan refuter? Today your ruling 111 a allows it only Plan, Explore and claude-code-guide agents."
+}

@@ -7,5 +7,6 @@
   "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "read": "2026-11-06T18:36:00Z",
   "reply": "I filed this as step auto-mode-middle-ground and sent it to the coordinator. A lane lists the acts that cloud sessions are most often asked about or refused, from the guard log and the refusal notes. It then proposes allow lines for the safe ones, so the cloud behaves more like your desktop bypass mode while the guards still catch real mistakes. The list comes back to you for approval, because it changes what auto mode allows.\n\nUpdate 21:38 CST Nov 7: auto-mode-middle-ground is in progress in its own lane. Source: the roadmap. Triage.",
+  "status": "closed",
   "text": "how can i just add a bunch of stuff to the always allow on auto mode code we have so that way cloud sessions act a whole lot more like the bypass permissions mode i run on claude dekstop app (but maybe this gives us an opportunity to make a better middle ground)"
 }

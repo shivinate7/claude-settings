@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-08T19:15:00Z",
+  "checked_with": "session_013NEJL1kqjrZZqdqpz3eaGB",
+  "context": "Goal: testers and agents know which database tests and approvals use, now that Neon branch wt-main is gone.\nProblem (rule): q_max D-757 (wt-main is the one database testers share) puts all test data and approvals in Neon branch wt-main. That branch was deleted today, and D-827 says no session touches Neon, so the ruling cannot hold. Only your new ruling may change it.\nBased on (read): the Neon cleanup session (session_013NEJL3qxP6GqXNGS7bixMo) deleted 113 wt- branches; only production and live-backup-2026-10-02 remain.\nBased on (read): q_max data/ux-seed holds a wt-main dump from 2026-10-01 (93 jobs, 7,422 approvals); harness/data/load.mjs loads it into a local database.\nBased on (ruling): q_max D-827, a session never touches Neon.\nDeparts from: main D-757 (testers share Neon wt-main) \u2014 retire it, or name a new shared database.\nMeanwhile: lane qmax-d757-wt-main-stale (session_013NEJL1kqjrZZqdqpz3eaGB) waits; nothing else depends on it.",
+  "home": "qmax-d757-wt-main-stale",
+  "id": "qmax-d757-retire",
+  "kind": "decision",
+  "n": 441,
+  "options": [
+    {
+      "gain": "Matches D-827, and a session can run it. Tests seed from data/ux-seed. Approvals that matter go into production by your hand. Debt e7-no-wt-main-migration-step closes.",
+      "key": "a",
+      "label": "Retire D-757: each worktree tests on its own local database",
+      "lose": "No live shared test data, and the seed dates from 2026-10-01."
+    },
+    {
+      "gain": "One current, shared data set for human testers.",
+      "key": "b",
+      "label": "You make a new shared Neon branch from production, and D-757 names it",
+      "lose": "No session can reach it (D-827), and the migration-step debt stays open."
+    },
+    {
+      "gain": "Current data.",
+      "key": "c",
+      "label": "Production becomes the shared test database",
+      "lose": "Tests write to live data."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "q_max D-757; step qmax-d757-wt-main-stale; your item 361 (Neon wt- branches deleted)",
+  "reply": "13:20 CST Nov 8: you picked b (You make a new shared Neon branch from production, and D-757 names it). Routed to lane qmax-d757-wt-main-stale (session_013NEJL1kqjrZZqdqpz3eaGB), which rewrites D-757 to name the new branch. Making the branch is yours (D-827: no session touches Neon). The lane sends the exact name and steps, and they come back to you as one task on this page. Home: step qmax-d757-wt-main-stale.",
+  "repo": "shivinate7/q_max",
+  "short": "q_max: retire the wt-main ruling?",
+  "status": "closed",
+  "title": "Which database do q_max tests and approvals use, now that Neon branch wt-main is gone?"
+}

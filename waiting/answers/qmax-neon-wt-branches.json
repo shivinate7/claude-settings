@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-08T17:49:02.892Z",
+  "done": true,
+  "item": "qmax-neon-wt-branches",
+  "n": 361,
+  "note": "Done:\n\nOTHER: I deleted 113 branches whose names start with wt- from Q_NEON, the q_max Neon project. None failed.\nOTHER: I listed the branches again after the deletes. 0 wt- branches remain. The project now has 2 branches: production (the default branch) and live-backup-2026-10-02. I did not touch either one.\n\nNext: Any of this checkout\u2019s 4 worktrees that used one of the deleted branches no longer has a working database. The worktree hook gives a new worktree its own branch when it is created."
+}

@@ -8,5 +8,6 @@
   "re": "ask-mw5a7fr8p9",
   "read": "2026-11-06T18:36:00Z",
   "reply": "The review is done (12:37 CST). Its findings, most useful to you first:\n1. Saves that wake no one: PR #1301 fixes it.\n2. A card you answered stays folded after an update: this goes into step page-reply-uncollapse.\n3. Count which parts of the page you actually use (the Ask box, the Status tab parts, Copy) before cutting anything (step page-usage-counters). Steps 4 and 5 wait on these counts.\n4. One Ask box with one Send button.\n5. Cut the Status tiles, trend and burn chart if you don't read them.\n6. One receipt line instead of two.\n7. The skill's instructions state some rules up to 5 times; state each one once.\n8. Drop the mockups of closed items, and remove two pieces of code that appear twice.\nTwo bigger changes come to you as one question after the counts land: one shared page loader for all repos instead of a 287 KB copy each, or splitting the 3,337-line page into parts. Roadmap commit ecde2b51.\n\nUpdate 21:38 CST Nov 7: page-usage-counters is in progress in its own lane; page-reply-uncollapse is done, merged. Source: the roadmap. Triage.",
+  "status": "closed",
   "text": "review how our artifact has grown and changed to see if there's further improvements we can / should make"
 }

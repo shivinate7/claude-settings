@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-08T18:04:00Z",
+  "context": "Goal: a builder never weakens a test, and work does not park or get merged by hand to get round the guard.\nProblem (rule): the builder-diff guard counts main's own test changes, brought in by a main merge, as the builder's test edits, so PRs park and orchestrators merge by hand. Changing what the guard counts changes a recorded rule, so it needs your word.\nBased on (measured): 2 hand merges today (1a444eb96 on #1932; #2194 at 11:59 CST), 8 PRs parked on #1521, 1 false alarm on the word sed. Catches of a real test weakening: unmeasured.\nBased on (read): rule roles-one-role-per-agent and roles-each-layer-proves-once: a test-author writes the red tests, and the builder changes product code.\nDeparts from: the builder-diff guard on main (counts main's test changes against the builder) \u2014 counts only the builder's own test edits.\nMeanwhile: the 8 PRs stay parked on #1521.",
+  "home": "mixed-merge-resolver",
+  "id": "builder-test-edit-scope",
+  "kind": "decision",
+  "n": 437,
+  "options": [
+    {
+      "gain": "Builders still never write test content, main's own test changes pass, the 8 parked PRs move, and hand merges stop. Conflicts inside test files still go to a test-author (#1521).",
+      "key": "a",
+      "label": "Keep the rule; measure against main after the merge",
+      "lose": "One guard change, with up to 3 review rounds."
+    },
+    {
+      "gain": "Fewest steps; no guard to maintain.",
+      "key": "b",
+      "label": "Drop the rule; the reviewer checks test edits",
+      "lose": "No red-first proof: a builder could weaken a test and only a reviewer's read would catch it."
+    },
+    {
+      "gain": "No change.",
+      "key": "c",
+      "label": "Keep the guard as it is",
+      "lose": "PRs keep parking, and hand merges go on (2 today)."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "your ask ask-mw853m1lm9; #1521; step orchestrator-mixed-merge-refused",
+  "reply": "12:19 CST Nov 8: a, routed to lane builder-diff-merge-commit (session_013NEJKzVTWMbokJ3KFanBBC); home: decision builders-cannot-edit-tests. Builders still never write test content; the guard measures their test edits against main after the merge, so main's own test changes pass. Conflicts inside test files still go to a test-author (#1521).",
+  "short": "Builders and test edits",
+  "status": "closed",
+  "title": "Should the builder-test guard count only the builder's own test edits, not main's?"
+}

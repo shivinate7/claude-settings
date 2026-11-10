@@ -5,5 +5,6 @@
   "owner": "Triage (session_013NEJL42Sv3tJkjpzY7bExj)",
   "read": "2026-11-06T18:13:00Z",
   "reply": "Number: when the page writer (this session) adds an item, it takes the next free number and never reuses one. The number only names the item. It says nothing about order. Order: the page sorts in page.html's sorted(). Items fall into four sections: Blocking, then Upcoming (has a deadline), then Whenever, then Pick stands. Answered items sink to the bottom, newest answer first. Inside a section, items you haven't seen yet come first. Then items go by the writer's rank (lower first; an unranked item comes after the ranked ones), then by age, oldest first. In Upcoming, an earlier deadline comes first. In Whenever, a decision comes before a task. A group sits at its best member's place.",
+  "status": "closed",
   "text": "what determines the question number of items in this artifact and the order they're listed in ?"
 }

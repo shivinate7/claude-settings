@@ -1,0 +1,29 @@
+{
+  "added": "2026-11-08T18:04:00Z",
+  "context": "Goal: far fewer open sessions, so the ones in use are easy to find.\nProblem (rule): decision session-tiers keeps a lane open until its PR lands, so about 95 handed lanes sit idle only to wait for a merge, and a recorded decision changes only on your word.\nBased on (measured): about 95 of about 200 sweep replies were HANDED, 11:38-11:46 CST Nov 8 (coordinator's sweep).\nBased on (read): step idle-lane-archive-at-merge has the runner archive each lane when its batch merges.\nDeparts from: session-tiers on main (a lane closes after its PR lands) \u2014 a lane closes when its PR is handed to the runner.\nMeanwhile: lanes stay open, and the coordinator goes on.",
+  "home": "idle-lane-archive-at-merge",
+  "id": "archive-at-handoff",
+  "kind": "decision",
+  "n": 436,
+  "options": [
+    {
+      "gain": "About 95 fewer open sessions now, and each lane closes as soon as its work is handed.",
+      "key": "a",
+      "label": "Archive at hand-off",
+      "lose": "A PR the runner sends back needs a new lane, started from the same brief; the runner messages the coordinator when that happens."
+    },
+    {
+      "gain": "No change to session-tiers; the lane that wrote the PR is still there if it is sent back.",
+      "key": "b",
+      "label": "Keep the rule; archive at merge",
+      "lose": "About 95 sessions stay open until their batches merge."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "decision session-tiers; step idle-lane-archive-at-merge",
+  "reply": "12:07 CST Nov 8: answered b in the coordinator's chat at 12:03 CST (\"b is still the right answer -- A is not it's just you need that one lane to land that makes archiving faster and better\"). Decision session-tiers stays. The fix is lane archive-guard-reads-agent-calls (step 766, now marked your priority), plus step idle-lane-archive-at-merge. Posted here by mistake after you had answered.",
+  "short": "Archive lanes at hand-off",
+  "status": "closed",
+  "title": "Archive a lane as soon as its PR is handed to the runner?"
+}

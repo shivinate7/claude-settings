@@ -1,0 +1,68 @@
+{
+  "added": "2026-11-08T23:58:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: waiting-page rows with a press button stay readable at narrow widths and with large text.\nProblem (goal): at 280, 240 and 180 CSS px the text column in a press row shrinks to 66, 26 and 3 px, and \"Add to list\" overlaps \"Send ask\". Text sizes are in px, so browser text zoom does not make them bigger.\nBased on (measured): the designer's headless runs on main plus #2253.\nDeparts from: page.html press rows in px, with a 600px parked-line breakpoint \u2014 row text moves to rem at the same sizes, the breakpoint moves to 37.5rem, and below 19.5em the press button drops under the text.\nMeanwhile: the lane builds option a. Not blocking.",
+  "designs": [
+    {
+      "file": "docs/design/press-row-reflow.html",
+      "label": "Button under the text, at its start",
+      "option": "a",
+      "slug": "nfp-press-a",
+      "state": "start"
+    },
+    {
+      "file": "docs/design/press-row-reflow.html",
+      "label": "Button under the text, full width",
+      "option": "b",
+      "slug": "nfp-press-b",
+      "state": "full"
+    },
+    {
+      "file": "docs/design/press-row-reflow.html",
+      "label": "Today: px sizes, today's layout",
+      "option": "c",
+      "slug": "nfp-press-c",
+      "state": "today"
+    }
+  ],
+  "home": "notes-fix-page",
+  "id": "press-row-reflow",
+  "kind": "decision",
+  "look": true,
+  "n": 448,
+  "options": [
+    {
+      "design": "nfp-press-a",
+      "gain": "The text column stays at least 8em wide down to 240 px. At 1440, 820, 390 and 360 px nothing changes.",
+      "how": "Below 19.5em, the press button moves under the row text, at its start.",
+      "key": "a",
+      "label": "Button under the text, at its start",
+      "lose": "Rows get taller at narrow widths."
+    },
+    {
+      "design": "nfp-press-b",
+      "gain": "A bigger button to tap.",
+      "how": "Below 19.5em, the press button moves under the text and fills the row.",
+      "key": "b",
+      "label": "Button under the text, full width",
+      "lose": "Rows look heavier and get taller."
+    },
+    {
+      "design": "nfp-press-c",
+      "gain": "Nothing changes.",
+      "how": "No change.",
+      "key": "c",
+      "label": "Keep px sizes and today's layout",
+      "lose": "Below 280 px the buttons overlap and the text column shrinks to 3 px. Browser text zoom does nothing."
+    }
+  ],
+  "owner": "lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "port": false,
+  "ref": "mockup docs/design/press-row-reflow.html on branch nfp-ux-text-zoom at ec35e3776; PR #2253 (Dismiss and date overlap fix)",
+  "reply": "Routed 18:40 CST Nov 8 to step notes-fix-page (lane session_013NEJKzjkypcToggneCjJN8), roadmap 19ac3b6d8. The lane was already building a.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Press rows: narrow and large text",
+  "status": "closed",
+  "title": "How should a waiting-page row with a press button fit at narrow widths and with large text?"
+}

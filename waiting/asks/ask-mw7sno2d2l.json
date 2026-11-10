@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-08T12:14:01.621Z",
+  "id": "ask-mw7sno2d2l",
+  "re": "ask-mw7a4sixks",
+  "reply": "Built and reviewed, but in no batch yet. Runner 8 found no review record posted for #1777's head (26869a9fc), so the merge tool lists it under \"no record\". I told its lane to post the tool-printed record, run the lane lint, and hand it to runner 8 again. Then it goes in batch 65, which starts after batch 64 (#1944) merges. Triage, 06:31 CST Nov 8.",
+  "status": "closed",
+  "text": "status?"
+}

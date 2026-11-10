@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-09T07:27:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: nothing merges to main while a batch's CI runs (your words 20:31 CST Nov 8, \"that too ASAP\").\nProblem (rule): on main, the GitHub merge call never reaches the guard, because the guard's list of tools leaves it out. #2401 fixes that with a one-line change to settings.json, and a settings change needs your word.\nBased on (measured): the lane's report: the diff touches only the guard's tool list (the PreToolUse \"matcher\" string).\nDeparts from: main's tool list, which ends `|mcp__claude-code-remote__send_message` \u2014 #2401 adds `|mcp__github__merge_pull_request|mcp__github__enable_pr_auto_merge`, so the guard also judges those two calls.\nMeanwhile: #2401 also waits for batch 67 and #1521, to clear a merge conflict.",
+  "home": "batch-ci-merge-guard",
+  "id": "batch-ci-merge-matcher",
+  "kind": "decision",
+  "n": 459,
+  "options": [
+    {
+      "gain": "A merge or auto-merge through the GitHub tool is checked like any other merge, so none slips past during batch CI.",
+      "how": "#2401 lands with the two GitHub merge calls added to the guard's tool list.",
+      "key": "a",
+      "label": "Yes, allow this one settings line",
+      "lose": "One more settings change to trust."
+    },
+    {
+      "gain": "Settings stay as they are.",
+      "how": "#2401 drops the settings line.",
+      "key": "b",
+      "label": "No",
+      "lose": "The GitHub merge route stays unchecked, and #2401 cannot land as built."
+    }
+  ],
+  "owner": "lane batch-ci-merge-guard (session_013NEJKynokbBE1W2BNcp7hX), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "port": false,
+  "ref": "#2401 (step batch-ci-merge-guard)",
+  "reply": "Routed 13:11 CST Nov 9 to step batch-ci-merge-guard (lane session_013NEJKynokbBE1W2BNcp7hX, via the coordinator), roadmap 2e2d190de. #2401 lands with the two GitHub merge calls in the guard's tool list.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Guard the GitHub merge call: one settings line",
+  "status": "closed",
+  "title": "Let the guard check GitHub merge calls too, so nothing merges while a batch's CI runs? This needs one line in settings.json."
+}

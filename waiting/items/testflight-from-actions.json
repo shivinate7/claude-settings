@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-09T01:46:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: ship iOS builds to TestFlight without the Mac, in one shape for home, degen and mailaudit.\nProblem (risk): today the App Store Connect key lives only on the Mac, so every ship needs the Mac. Shipping from GitHub Actions puts a copy of that key in GitHub, which needs your word.\nBased on (read): decision ios-ship-is-one-shared-tool says the .p8 key lives only on the Mac and bin/ios-ship ships from there.\nBased on (read): the mailaudit, home and degen coordinators agreed one shared reusable macOS workflow on 2026-11-08; mailaudit is public (macOS minutes free), home and degen are private (minutes bill after the free credit).\nDeparts from: ios-ship-is-one-shared-tool (key only on the Mac, ship from the Mac) \u2014 the key also lives as a secret of a GitHub environment `testflight`, and a separate workflow uploads from main.\nMeanwhile: nothing ships from Actions; each repo keeps shipping from the Mac.",
+  "home": "testflight-from-actions",
+  "id": "testflight-from-actions",
+  "kind": "decision",
+  "n": 452,
+  "options": [
+    {
+      "gain": "Builds ship with the Mac off; one shape in three repos; each upload waits for your approval.",
+      "how": "One claude-settings record plus the shared reusable workflow: (1) the .p8 and its ids live only as secrets of a GitHub environment `testflight` that needs your approval and deploys only from main; (2) the upload is its own workflow, on push to main or manual dispatch, never on pull_request or pull_request_target; (3) test jobs run on plain pull_request with no secrets; (4) no session writes, prints or logs a key value, and you add the secret on GitHub's settings page; (5) a private repo states its macOS minute cost in the workflow's record. Each repo keeps its own ruling on where builds ship.",
+      "key": "a",
+      "label": "Adopt the shared rule",
+      "lose": "The key has a second home on GitHub; private repos pay macOS minutes after the free credit; you add the secret by hand in each repo."
+    },
+    {
+      "gain": "The key stays on one machine.",
+      "how": "No change: bin/ios-ship on the Mac stays the one way to ship.",
+      "key": "b",
+      "label": "Keep shipping from the Mac only",
+      "lose": "Every TestFlight build needs the Mac on and a session there."
+    }
+  ],
+  "owner": "mailaudit coordinator (session_01MVD32RMmHxq9LhRNihx66B), via page ask ask-mw8lneqo26",
+  "pick": "a",
+  "port": false,
+  "ref": "page ask ask-mw8lneqo26; mailaudit owner answer 65 a; claude-settings decision ios-ship-is-one-shared-tool; mailaudit decision native-ships-via-testflight",
+  "reply": "Closed as a, 19:53 CST Nov 8, on your word via the home cloud coordinator (ask ask-mw8lt9pjm7, 19:49 CST): builds ship from GitHub Actions, with the key in repo secrets ASC_KEY_P8, ASC_KEY_ID and ASC_ISSUER_ID, already set in home, degen and mailaudit. Home builds the workflow first; claude-settings lifts it into the shared rule once it proves out (step testflight-from-actions). Not ruled: the environment-approval detail in point 1, which home's version settles.",
+  "repo": "shivinate7/claude-settings",
+  "short": "TestFlight from GitHub Actions?",
+  "status": "closed",
+  "title": "Ship iOS builds to TestFlight from GitHub Actions, with the App Store key held as a protected GitHub secret?"
+}

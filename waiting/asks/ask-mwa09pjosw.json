@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-10T01:22:39.636Z",
+  "id": "ask-mwa09pjosw",
+  "reply": "Filed as roadmap step page-answer-no-receipt-list (ready, order 937), with your brief word for word: reuse the receipt fields, no new store, tests first and red on main, one Sonnet lane, PR to main. The coordinator starts the lane. Roadmap 84920f334, 19:23 CST.",
+  "status": "closed",
+  "text": "Build claude-settings roadmap step page-answer-no-receipt-list: a check that lists each waiting-page answer (answers/<id>) that has no receipt from the session that owns the item, older than one wake. Incident: item 143's answer sat 10.5 h unread. Read skills/waiting-page first; reuse its receipt fields, add no new store. Tests first, shown red on main. One lane, Sonnet builder, Sonnet reviewer, PR to claude-settings main."
+}

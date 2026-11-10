@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T10:20:00Z",
-  "answeredAt": "2026-11-08T12:11:17Z",
   "context": "Goal: a lane never stalls on an agent that cannot come back.\nProblem (rule): rule roles-resume-by-name says \"Resume a dead agent by name, never fresh. A finished reviewer's worktree is gone, so send a fresh reviewer the prior report instead.\" A resumed builder or test-author whose worktree was cleaned up has the same problem: it stops at the worktree-home guard (lane other-checkout-cp-own, Nov 8). The rule is your text, so widening it needs your word.\nBased on (read): main's CLAUDE.md, rule roles-resume-by-name, read 04:19 CST Nov 8.\nBased on (read): step resume-finished-reviewer-no-tree (in progress) builds the refusal for the reviewer case.\nDeparts from: the rule names only a finished reviewer \u2014 it would name any finished agent whose worktree is gone, with the same remedy: a fresh agent given the prior report.\nMeanwhile: lanes keep working; a stalled builder is restarted by hand.",
   "home": "resume-finished-reviewer-no-tree",
   "id": "resume-any-finished-agent",

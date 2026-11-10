@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T03:45:00Z",
-  "answeredAt": "2026-11-08T12:18:17Z",
   "context": "Goal: no PR sits idle with no owner.\nProblem (goal): banchi #961 (glossary) and #944 (dry-run reads photos at half size) are drafts with no lane since about Nov 2. Keep or close is your call.\nBased on (read): runner 9's list of idle PRs, 21:43 CST.\nDeparts from: main, where both stay open with no next act \u2014 each closes as parked with its branch kept, or gets a lane.\nMeanwhile: both stay open.",
   "home": "banchi-revive-944-961",
   "id": "banchi-stale-drafts",

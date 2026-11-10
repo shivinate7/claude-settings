@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T04:45:00Z",
-  "answeredAt": "2026-11-08T12:08:10.433Z",
   "context": "Goal: stop the guard refusing a builder's test file written outside every repo (`cd /tmp/x && : > tests/x`), with no new hole.\nProblem (rule): the change used its three review rounds. Round 3 found a hole: after an uncertain cd with `;`, a newline or `||`, a non-test file in a test folder is allowed where main refuses. So it is held, and more work needs your word.\nBased on (ruling): decision hold-unsafe-after-round-3.\nBased on (read): cause reproduced in hooks/guard_frozen.py `builder_test_path`, which judges against the folder after the cd; work on archive/bpfa-build, head 5fe1c2e70.\nDeparts from: main, which refuses a builder's test write after any cd into a test-like path \u2014 allows it when the cd leaves every repo, and refuses when either the cd folder or the call folder hits.\nMeanwhile: the lane waits; nothing else depends on it.",
   "home": "builder-probe-false-alarm",
   "id": "builder-probe-round-4",

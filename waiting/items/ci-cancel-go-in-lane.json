@@ -1,6 +1,5 @@
 {
   "added": "2026-11-08T16:17:00Z",
-  "answeredAt": "2026-11-08T16:19:52Z",
   "context": "Goal: the Own CI Run Cancel entry drops the example you picked to drop in item 419 a.\nWhy you: a settings.json autoMode change needs words you type in the session that makes it; your page pick does not reach that check, and no typed go has reached the lane (lane, 10:12 CST Nov 8).\nSteps: open the lane with the link below. Paste this line there: go: drop the measured example sentence from the Own CI Run Cancel entry in settings.json autoMode.allow, on branch lane/ci-cancel-followups. Then press Done here.",
   "home": "ci-cancel-example-drop",
   "id": "ci-cancel-go-in-lane",

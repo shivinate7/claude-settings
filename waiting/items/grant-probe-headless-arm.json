@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-08T17:52:00Z",
+  "context": "Goal: a grant you type in one session reaches the session it names.\nProblem (risk): the probe you allowed in item 222 cannot place its hook. The frozen-path guard refused its .claude/settings.json write, and auto mode refused the Write as \"[Auto-Mode Bypass]\".\nBased on (ruling): item 222 a set the probe's acts as a child cloud session. Asked again because those acts are refused, so the probe cannot run as you allowed it.\nBased on (read): the lane's plan, section 1, line 72. The 11-06 measure by session_013NEJKzxRE91RXP3PNdpC7J ran a nested `claude -p --permission-mode auto` with scratch settings.\nDeparts from: item 222 a's acts (a child cloud session that writes .claude/settings.json) \u2014 the probe's first test runs in a nested headless session with scratch settings, with no repo write.\nMeanwhile: only the lane's test-author runs.",
+  "home": "grant-reaches-lanes",
+  "id": "grant-probe-headless-arm",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Lane grant-reaches-lanes chat",
+      "url": "https://claude.ai/code/session_013NEJL4NCJj2aZuG9tmNnUA"
+    }
+  ],
+  "n": 435,
+  "options": [
+    {
+      "gain": "It measures the one fact still unmeasured (whether a hook can lift a refused act), and the build can start.",
+      "key": "a",
+      "label": "Run the first test headless, the 11-06 way",
+      "lose": "It tests a headless session, not a cloud one, so a cloud difference would stay unseen."
+    },
+    {
+      "gain": "No probe acts at all.",
+      "key": "b",
+      "label": "Drop the probe and build on the 11-06 measure",
+      "lose": "Whether a hook can lift a refused act stays unmeasured, and the build rests on that."
+    },
+    {
+      "gain": "Nothing spent now.",
+      "key": "c",
+      "label": "Park the lane",
+      "lose": "The grant gap stays open, and the build waits."
+    }
+  ],
+  "owner": "lane grant-reaches-lanes (session_013NEJL4NCJj2aZuG9tmNnUA)",
+  "pick": "a",
+  "ref": "item 222 a; step grant-reaches-lanes",
+  "reply": "11:56 CST Nov 8: a, routed to lane grant-reaches-lanes. The first test runs headless, the 11-06 way, with scratch settings and no repo write. The result lands in decision grant-reaches-lanes.",
+  "short": "Grant probe: headless run, drop it, or park",
+  "status": "closed",
+  "title": "Run the grant probe in a headless session, since the cloud refuses its hook write?"
+}

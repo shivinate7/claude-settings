@@ -3,6 +3,6 @@
   "id": "ask-mw6sd3zwp1",
   "re": "ask-mw6s6rc8x7",
   "reply": "Right, it was not. Nothing starts a ready step on its own: at 13:25 CST, 14 'now' steps had no lane and no pause. It started only because you asked. The fix goes into the PR ledger the Opus lane is building (step pr-state-is-on-the-pr): it covers ready steps too, so each one gets a next act and an owner, the same as an open PR. Triage, 13:30 CST.",
-  "status": "answered",
+  "status": "closed",
   "text": "doesn't seem like it was ever picked up mechanically then?"
 }

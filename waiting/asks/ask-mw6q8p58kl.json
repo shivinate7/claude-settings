@@ -4,5 +4,6 @@
   "home": "step sim-lease-gaps (roadmap, phase now)",
   "id": "ask-mw6q8p58kl",
   "reply": "Read it: 7 gaps in the shared simulator tools (sim-lease and sim-test). The worst is that reusing an already-booted phone takes no lease, so two repos drove Duo 1 at once today and the Home review lost 7 tries. Two runs also held the one Mac lock at once, and a stopped run leaves Duo 1 in Dark mode. I filed it as step sim-lease-gaps, near the top of the roadmap, and sent it to the coordinator to start a lane. Gaps 1-3 get a failing test first, then the fix. Gaps 4-7 each get a measure or a question to you. Slot 2 (the second Duo) is one of those questions.\n\nUpdate 21:38 CST Nov 7: sim-lease-gaps is in progress in its own lane. Source: the roadmap. Triage.",
+  "status": "closed",
   "text": "Check commit b7bc81da it provides feedback as to issues my mac has faced in sharing ios simulators."
 }

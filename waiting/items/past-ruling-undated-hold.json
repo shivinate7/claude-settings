@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-08T20:57:00Z",
+  "checked_with": "session_013NEJL3ZtjRrvWWB5nAzQiv",
+  "context": "Goal: the past-ruling judge stops citing notes that are not owner rulings, without missing real ones.\nProblem (rule): #2195's new prompt counts an owner line only with his words, a page item or a date. So the judge now skips undated owner rulings, for example \"The owner ruled that the page cache keeps its stale copy\": cited 4 of 4 times before, 0 of 4 after. About 6 of 229 owner sentences on the roadmap have this form, and most have a dated sibling that is still cited.\nBased on (ruling): decision hold-unsafe-after-round-3: a change with negative net value after round 3 is held until you decide.\nBased on (measured): the lane's production-path probe, 4 of 4 before and 0 of 4 after.\nDeparts from: main cites any step line that names the owner \u2014 #2195 stops citing incident notes, recommended picks and a lane's own call.\nMeanwhile: the lane waits on #2195. Its #1554, #1586, #1673 and #2041 stay with runner 8.",
+  "home": "past-ruling-on-send",
+  "id": "past-ruling-undated-hold",
+  "kind": "decision",
+  "lane": "past-ruling-on-send",
+  "n": 445,
+  "options": [
+    {
+      "gain": "Undated rulings are cited again, and the other three fixes stay.",
+      "key": "a",
+      "label": "Allow one fix: drop the evidence clause from that one prompt rule, then one fix check and a re-probe",
+      "lose": "One more review step."
+    },
+    {
+      "gain": "No more work.",
+      "key": "b",
+      "label": "Close #2195",
+      "lose": "The false citations it fixes go on."
+    },
+    {
+      "gain": "Ships now.",
+      "key": "c",
+      "label": "Merge #2195 as it is",
+      "lose": "A question that re-asks an undated ruling can reach you."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "PR #2195 (past-ruling judge); decision hold-unsafe-after-round-3",
+  "reply": "You picked a at 15:04 CST Nov 8. Done 16:04 CST: #2195's one fix (e0b623811) passed its fix check, and undated rulings are cited again in 3 of 3 test runs. #2195 is with runner 8 for merge. Home: step past-ruling-on-send.",
+  "repo": "shivinate7/claude-settings",
+  "short": "#2195 held: one fix, close, or merge?",
+  "status": "closed",
+  "title": "#2195 is held after round 3: allow one fix so the past-ruling judge cites undated owner rulings again?"
+}

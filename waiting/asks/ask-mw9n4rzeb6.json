@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-09T19:14:54.506Z",
+  "id": "ask-mw9n4rzeb6",
+  "reply": "You see these because the push-agent-branch rule asks instead of refusing, so its prompt reaches you instead of the session that made the push. An agent pushed its worktree-agent-<hex> branch by name, and the guard asked (decision plain-push-asks). Filed 13:19 CST Nov 9 as step agent-branch-push-refuses (roadmap fee6fbd1d): the rule refuses with its remedy, `git push origin HEAD:<lane-branch>`, so the session fixes the push itself. Approving one of these prompts lets only that one push through. Triage.",
+  "status": "closed",
+  "text": "push-agent-branch: Rule (Git): this push writes a branch named like an agent worktree (agent-<hex>, claude/agent-<hex> or worktree-agent-<hex>), not a lane branch (decision plain-push-asks). Push the lane branch by name: `git push origin HEAD:<lane-branch>`. Approving the prompt lets this one push through; it is not a grant. To allow this act, type `override 15m`. A one-act `override` does not reach an agent's call.\n\nwhy am i still seeing these"
+}

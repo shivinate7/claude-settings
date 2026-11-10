@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-09T20:00:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: the export scan clears about 2,500 false secret alarms and records its limits truthfully.\nProblem (rule): your 456 a accepted one quote-led password form. A fresh round 3 at f71e12a04 found a second form that passes beside it: a quoted password before an IP host and a closing quote or bracket, such as a database URL whose quoted password sits before an IP address and a closing quote. Your grant covers only the form it named, so this needs your word.\nBased on (measured): about 165,000 fuzz inputs on f71e12a04. No hole that main has is widened, and 1 new form opens. Round 3 found the net value negative, by a small margin.\nDeparts from: main's export scan refuses this form \u2014 option a lets it through.\nMeanwhile: #2372 stays held, and nothing else waits on it.",
+  "home": "export-scan-key-false-alarms",
+  "id": "export-scan-ip-closer",
+  "kind": "decision",
+  "lane": "session_013NEJKzHdMUT3sLtNCaxGEf",
+  "n": 465,
+  "options": [
+    {
+      "gain": "The form is caught, and #2372 merges with only the limit you already accepted.",
+      "how": "The lane stops blanking the IP before the host-start check, and the review rounds run again.",
+      "key": "b",
+      "label": "One more fix lane (Recommended)",
+      "lose": "One more lane of review before the 2,500 false alarms go."
+    },
+    {
+      "gain": "#2372 merges now, and the 2,500 false alarms go.",
+      "how": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. #2372 merges now, and the debt is reworded to name both limits.",
+      "key": "a",
+      "label": "Accept this form as a second named limit",
+      "lose": "That pasted database-address form gets past the export scan. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "No new hole.",
+      "how": "Close #2372.",
+      "key": "c",
+      "label": "Drop #2372",
+      "lose": "The 2,500 false alarms stay."
+    }
+  ],
+  "owner": "lane export-scan-key-false-alarms (session_013NEJKzHdMUT3sLtNCaxGEf), via the coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "port": false,
+  "ref": "PR #2372; your item 456 a; round 3 at f71e12a04",
+  "reply": "Relayed 14:58 CST to lane export-scan-key-false-alarms. Done 15:20 CST: the lane proved your pick with page_grant.py and cites it in #2372's body and in debt scan-quote-led-password-host, which names both limits. #2372 (head 8f24e073d) is ready for a batch. Home: step export-scan-key-false-alarms.",
+  "repo": "shivinate7/claude-settings",
+  "short": "#2372: second password form",
+  "status": "closed",
+  "title": "#2372 lets a second password form past the export scan. Fix it in one more lane, accept it as a second named limit, or drop #2372?"
+}

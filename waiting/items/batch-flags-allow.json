@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-09T05:52:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: batch merges do not stall on prompts.\nProblem (rule): the \"Merge Tool Read Checks\" allow rule in settings.json names three read flags, so auto mode may ask the batch runner before each new `--batch-build`, `--batch-drop` and `--ready` from #2378. A settings write needs your word.\nBased on (read): the lane's report on #2378.\nDeparts from: main's allow rule names three read flags \u2014 it would add the three batch flags.\nMeanwhile: #2378 goes on to the batch runner as is; the runner answers any prompt it meets.",
+  "home": "batch-freeze-lane-set-enforce",
+  "id": "batch-flags-allow",
+  "kind": "decision",
+  "n": 458,
+  "options": [
+    {
+      "gain": "No prompt per batch step.",
+      "how": "One settings edit adds `--batch-build`, `--batch-drop` and `--ready` to the allow rule.",
+      "key": "a",
+      "label": "Add the three flags",
+      "lose": "Auto mode no longer asks before these batch acts. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "Each batch act gets a human look.",
+      "how": "No settings change.",
+      "key": "b",
+      "label": "Keep the ask",
+      "lose": "The batch runner can stall on a prompt until someone answers."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB); lane batch-freeze-lane-set-enforce (session_013NEJL1SSD89Hzb8ahrTmfs)",
+  "pick": "b",
+  "port": false,
+  "ref": "#2378 (head 4b714a03f); settings.json autoMode.allow entry \"Merge Tool Read Checks\"",
+  "reply": "Your pick a stands. Reopened 13:21 CST Nov 9 so that lane batch-freeze-lane-set-enforce can read your answer from the page: page_grant.py (decision relayed-grant-read-from-page) counts an answer only on an open item. This item closes when the lane reports that the settings edit has landed. Home: step batch-freeze-lane-set-enforce.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Allow the three new batch flags without asking?",
+  "status": "open",
+  "title": "Should the merge tool's allow rule in settings.json also cover the three new batch flags from #2378, so the batch runner is not asked before each batch step?"
+}
