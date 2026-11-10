@@ -854,18 +854,22 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc .thread .filed { margin: 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: .875rem; color: var(--muted); }
 /* A folded answer is one button: the whole row unfolds it. */
 .askc.folded { padding: 0; }
-.frow { width: 100%; min-height: 48px; padding: 4px 16px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 4px 12px; color: var(--ink); }
+/* No width in px or em decides where a part of a row goes. Each row wraps, and a part moves to the next line only when the part before
+   it would fall under its minimum (the title's is 8rem), so the rule holds in any font and at any text size. The glyph and the title
+   sit in .fbody, with the date; "Show answer" stays outside it. */
+.frow { width: 100%; min-height: 48px; padding: 4px 16px; padding-inline-start: 40px; background: none; border: 0; border-radius: 12px; text-align: left; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 4px 12px; color: var(--ink); }
 .frow:hover { background: var(--acc-soft); }
-.frow .ftext { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.frow .fwhen { font-size: .875rem; color: var(--muted); white-space: nowrap; }
-.frow .fgo { color: var(--acc); font-weight: 600; font-size: .90625rem; white-space: nowrap; }
-@media (max-width: 520px) {
-  .frow { grid-template-columns: auto minmax(0, 1fr) auto; padding-block: 8px; }
-  .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .frow .fwhen { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
-  .frow .fdate { display: inline-block; }
-  .frow .fgo { grid-column: 3; grid-row: 1 / span 2; }
-}
+/* The body starts 24px before the title, so a part that wraps lines up with the title, not with the glyph. */
+.frow .fbody { flex: 1 1 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-inline-start: -24px; padding-inline-start: 24px; }
+/* The glyph hangs in the body's start padding: its own width and the gap after it net to nothing. */
+.frow .fbody > .g { margin: 0 0 0 -24px; }
+/* width: 0 keeps a long title's own length out of the row's minimum. The minimum is 8rem, or all the list can give (100cqi less the row's
+   64px of padding and glyph) where the list is narrower than that, so no row runs past the page. The date may wrap between its word and its date. */
+.frow .ftext { font-weight: 600; flex: 1 1 0; width: 0; min-inline-size: min(8rem, 100cqi - 64px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frow .fwhen { font-size: .875rem; color: var(--muted); flex: 0 1 auto; min-inline-size: 0; white-space: normal; }
+.frow .fdate { display: inline-block; }
+/* Alone on its line in a very narrow row, "Show answer" may take two lines rather than run past the row. */
+.frow .fgo { color: var(--acc); font-weight: 600; font-size: .90625rem; flex: 0 1 auto; min-inline-size: 0; white-space: normal; }
 .older { justify-self: start; width: auto; }
 /* The owner's reply sits inside the thread it follows, on the surface ground of "You asked", so his words and a session's differ by ground. */
 .askc .thread .myreply { display: grid; gap: 4px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); min-width: 0; }
@@ -884,7 +888,6 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.folded .fwait > .g { margin-top: 5px; }
 .askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .askc.folded .fwait .astate { grid-column: 2; }
-@media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
 /* Dismiss: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
 .replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
 .replyend .endrow > .btn { min-height: 44px; }
@@ -892,64 +895,50 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .btn.dismiss[aria-disabled="true"] { border: 1.5px dashed var(--faint); color: var(--muted); cursor: default; }
 .endrow .dwhy { font-size: .875rem; color: var(--muted); min-width: 0; }
 /* A folded row with a side press: the row button and Dismiss (or Restore) are siblings, never one inside the other. */
-.askc.folded.withd { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 4px; padding-inline-end: 8px; }
-.askc.folded.withd > .fwait { grid-column: 1 / -1; }
-.askc.folded.withd > .sline, .askc.folded > .sline.dline { grid-column: 1 / -1; padding: 0 16px 8px; }
+/* The press drops under the text only when the row button would go under its own minimum: 8rem of title plus the button's padding and glyph.
+   --lead is where a dropped press starts: Dismiss (quiet) lines its label up with the title, Restore (outlined) its edge. The card pads its
+   start by --lead and the row button, the reply line and the done line pull back by the same, so a press beside the text sits at the card's edge. */
+.askc.folded.withd { --lead: 28px; display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; row-gap: 0; padding-inline: var(--lead) 8px; }
+.askc.folded.withd:has(> .btn.restore) { --lead: 40px; }
+.askc.folded.withd > .frow { flex: 1 1 0; margin-inline-start: calc(-1 * var(--lead)); }
+.askc.folded.withd > :is(.fwait, .sline) { flex: 1 1 100%; margin-inline-start: calc(-1 * var(--lead)); }
+.askc.folded.withd > .sline, .askc.folded > .sline.dline { padding: 0 16px 8px; }
+/* A press alone on its line may be narrower than its busy label's box ("Dismissing…", "Restoring…"), never wider than the row. */
+.askc.folded.withd > .btn { flex: 0 1 auto; min-inline-size: 0; margin: 0; }
+:is(.askc.folded.withd > .btn.fixw, .askc.dropped .sline .btn.fixw) { grid-template-columns: minmax(0, max-content); max-inline-size: 100%; }
 /* The Dismissed line keeps the row's place until the next load, at the folded row's height. */
 .askc.dropped { padding: 2px 8px 2px 16px; background: transparent; border-style: dashed; border-color: var(--faint); }
 .askc.dropped:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
-.askc.dropped .sline { min-height: 44px; }
-.askc.dropped .sline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The glyph hangs as in the row button, so Restore, when it drops, starts at the text's edge (40px). Its words take the 8rem minimum;
+   `> span:not(.g)` because the glyph is a span too. */
+.askc.dropped .sline { min-height: 44px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-inline-start: 24px; }
+.askc.dropped .sline > .g { margin: 0 0 0 -24px; }
+.askc.dropped .sline > span:not(.g) { flex: 1 1 0; width: 0; min-inline-size: min(8rem, 100cqi - 64px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.dropped .sline > .btn { flex: 0 1 auto; min-inline-size: 0; }
 .askc.dropped .sline .dt { color: var(--muted); }
 .asklist.dlist .askc.folded { background: transparent; border-style: dashed; border-color: var(--faint); }
-@media (max-width: 520px) {
-  /* With a side press, the row has no room for "Show answer" on a phone: the words stay in the row button's name, and the row is the press. */
-  .askc.folded.withd .frow { grid-template-columns: auto minmax(0, 1fr); padding-inline-end: 4px; }
-  .askc.folded.withd .frow .fwhen { grid-column: 2; grid-row: 2; }
+/* Only the look of a narrow list reads a width, and it moves no part: main's 520px rule as the list's own width in em (30.5em is the list in a
+   520px window at 100% text). Under it the title takes two lines, the row pads 8px top and bottom, and "Show answer" stays in the name of a row
+   with a press, which then pads 4px at its end. */
+@container askl (width < 30.5em) {
+  .frow { padding-block: 8px; align-items: center; }
+  .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .askc.folded.withd .frow { padding-inline-end: 4px; }
   .askc.folded.withd .frow .fgo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-  .askc.dropped .sline > span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .askc.dropped .sline .btn { grid-column: 3; grid-row: 1; }
-  .askc.dropped .sline { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .askc.dropped .sline { align-items: center; }
+  .askc.dropped .sline > span:not(.g) { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 }
 .reline { margin: 0; font-size: .90625rem; color: var(--muted); overflow-wrap: anywhere; }
-/* The ask list and the Ask box read their own width, in em, so larger text trips the change sooner. A folded row or a Dismissed line
-   with no room for its text beside the press: the press drops under the text, at the text's start. The breakpoint is 8em of text, the
-   row's own 3.6em of padding and glyph, and the widest press a fallback font gives (Restore in DejaVu Sans, 8.6em), so the column
-   never falls under 8em. Served, the narrowest phone row (360 wide, a 20.5em list) stays beside its press. */
-@container askl (width < 20.375em) {
-  /* The glyph sits on the title's first line, not on the middle of a three-line block. */
-  .frow { grid-template-columns: auto minmax(0, 1fr); padding-block: 8px; align-items: start; }
-  .frow > .g { margin-block-start: calc((1.55em - 12px) / 2); }
-  .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-  .frow .fwhen { grid-column: 2; grid-row: 2; white-space: normal; min-width: 0; }
-  .frow .fdate { display: inline-block; }
-  /* A row with no side press (a reply waits): Show answer goes under the date, at the text's start. */
-  .frow .fgo { grid-column: 2; grid-row: 3; justify-self: start; }
-  /* A row with Dismiss or Restore is one column. As on the phone row, the words "Show answer" stay in the row button's name. */
-  .askc.folded.withd { grid-template-columns: minmax(0, 1fr); padding-inline-end: 0; }
-  .askc.folded.withd .frow { padding-inline-end: 16px; }
-  .askc.folded.withd .frow .fgo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-  /* Under the text, a press may be narrower than its busy label's box, never wider than the row. */
-  :is(.askc.folded.withd > .btn.fixw, .askc.dropped .sline .btn.fixw) { grid-template-columns: minmax(0, max-content); max-inline-size: 100%; }
-  /* The glyph sits on the text's first line, as in the folded row, not on the middle of the clamped block. */
-  .askc.dropped .sline { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
-  .askc.dropped .sline > .g { margin-block-start: calc((1.55em - 12px) / 2); }
-  .askc.dropped .sline > span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-  .askc.dropped .sline .btn { grid-column: 2; grid-row: 2; justify-self: start; }
-  /* Under the text, these margins set where the Dismiss (quiet) and Restore (outlined) boxes start; each label stays centred in its box. */
-  .askc.folded.withd > .btn { justify-self: start; margin: 0 0 8px 28px; }
-  .askc.folded.withd > .btn.restore { margin-inline-start: 40px; }
-}
-/* The Ask box: Add to list and Send ask no longer fit side by side, so each gets its own line, in the same order. The hint keeps
-   three lines in em, so typing moves no button at any text size. */
-@container askf (width < 16.5em) {
-  .askrow { grid-template-columns: minmax(0, 1fr); }
-  .askrow .askhint { grid-column: 1; min-height: calc(3 * 1.55em); }
-  .askrow .btn.askadd { grid-column: 1; grid-row: 2; }
-  .askrow .btn.askgo { grid-column: 1; grid-row: 3; }
-  .askrow .slot { grid-column: 1; grid-row: 4; }
-  /* Send ask's sizer ("Send 99 asks") may wrap, so no press runs past the box. */
-  .askrow .btn { white-space: normal; max-inline-size: 100%; justify-self: start; }
+/* The Ask box. Its narrow form (the hint on its own line, Add to list at the start and Send ask at the end of the next) reads the box's own
+   width in em: 28.375em is the box in a 520px window at 100% text. In that form Send ask drops under Add to list only when the two no
+   longer fit side by side. The hint keeps three lines in em, so typing moves no button at any text size. */
+@container askf (width < 28.375em) {
+  .askform > .askrow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 12px; }
+  .askform > .askrow .askhint { flex: 1 1 100%; min-height: max(66px, 3 * 1.55em); }
+  .askform > .askrow .slot { flex: 1 1 100%; order: 1; }
+  .askform > .askrow .btn { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; white-space: normal; }
+  .askform > .askrow .btn.fixw { grid-template-columns: minmax(0, max-content); }
 }
 /* A reply form in the same box keeps the arrangement the 520px rule gives it: the hint on its own line, then Close at the start and
    Send reply at the end of one line. Where those two no longer fit side by side, Send reply takes the first line and Close the next. */
@@ -2737,7 +2726,7 @@ function askItem(t, dl) {
     // A row with a waiting reply has no Dismiss: it has no room for the reason, and Show answer leads to it.
     const side = dl ? (askDismissed(t) ? restoreBtn(t) : dismissBtns(t)[0]) : askWaitsIn(t) ? null : dismissBtns(t)[0];
     return h("li", { class: "askc folded" + (side ? " withd" : ""), id: "row-" + k }, h("button", { class: "frow", type: "button", "aria-expanded": "false", "data-ask": k, onclick: press },
-      glyph("done"), h("span", { class: "ftext" }, t.text), h("span", { class: "fwhen" }, "Answered", ...(when ? [" ", h("span", { class: "fdate" }, when)] : [])), h("span", { class: "fgo" }, "Show answer")),
+      h("span", { class: "fbody" }, glyph("done"), h("span", { class: "ftext" }, t.text), h("span", { class: "fwhen" }, "Answered", ...(when ? [" ", h("span", { class: "fdate" }, when)] : []))), h("span", { class: "fgo" }, "Show answer")),
       side, ...t.reps.map(askFoldedMine), askRowLine(t));
   }
   const head = h("div", { class: "ahead" }, glyph(askWaitsIn(t) ? "wait" : "done"), h("span", { class: "aby" }, "You asked" + (fmt(t.at) ? ", " + fmt(t.at) : "")),
