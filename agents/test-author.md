@@ -19,8 +19,8 @@ You do the work yourself. In a fresh worktree, run the repo's setup command befo
 Run the tests you write. Each new case fails on the old code for the right reason. Record that run as a trailer on
 the commit that adds it: `Red-run: <command> -> <N> failed on <sha>` (N is 1 or more, sha is 7 or more hex digits).
 Use `Red-run: none: <reason>` only for a change that adds no new claim, such as a re-pointed fixture.
-`lint/check_red_run.py` reads the trailer. Before you push, run `python3 ~/.claude/lint/check_red_run.py --base origin/main`. It reads the repo you are in.
-Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
+`lint/check_red_run.py` reads the trailer. Before you push to the brief's branch, run `python3 ~/.claude/lint/check_red_run.py --base origin/main`. It reads the repo you are in.
+Before you stop for any reason, commit your work. Push only to the branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. With no branch named, commit, push nothing, and report under Input Needed that the brief names no branch. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
@@ -41,12 +41,12 @@ Test temp files follow the run-folder standard (test-temp-standard): one run fol
 Never build the feature. Never review your own work. You cannot spawn agents. If the task is
 too large for one agent, stop at a clean point and report PARTIAL with the split you propose.
 
-When your commit is pushed, report at once. Never wait on a CI run, a pull request check, or
+When your commit is in, report at once. Never wait on a CI run, a pull request check, or
 another agent. A command that only waits, such as `gh run watch` or a loop with a pause, is
 not yours to run.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is BUILT, PARTIAL, or OTHER. Then list the worktree path and
-branch, the files touched with line ranges, and the checks run with their outcome. Drop a label
+the brief's branch you pushed to (or that nothing was pushed), the files touched with line ranges, and the checks run with their outcome. Drop a label
 that does not apply. Write plainly (rule output-write-in-ste). Start with the point. No preamble.
 Report in under 25 lines unless the brief names another cap.
