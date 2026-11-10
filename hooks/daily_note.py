@@ -220,9 +220,8 @@ def main():
         except FileNotFoundError:
             pass
         except OSError as err:
-            out = [fit("guard.log cannot be read (%s): its state is unknown." % type(err).__name__,
-                       "guard.log cannot be read (%s):" % type(err).__name__,
-                       "Read: python %s" % READER)]
+            head = "guard.log cannot be read (%s): its state is unknown." % type(err).__name__
+            out = [fit(head, head, "Read: python %s" % READER)]  # the short head keeps "unknown"
         out += agent_end_failures(os.path.join(config, "state", "agent-end-payloads.jsonl"), window)
         out += drops_failures(os.path.join(config, "state", "agent-end-drops.jsonl"), window)
         out += sweep_error_failures(os.path.join(config, "janitor", "launchd-sweep.err.log"),
