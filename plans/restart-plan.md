@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 14:59 CST.
+Last rewrite: 2026-11-10 15:05 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -23,6 +23,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    3. A review record survives a clean main merge (ruling R1).
    4. A batch closes on a limit (step batch-freeze-lane-set-enforce, already doing).
    5. Lane lint runs once per lane; batch CI fails fast (ruling R4).
+   6. One cull of guards with recorded wrong refusals (ruling R5).
 4. **Make the roadmap and triage mechanical** (direction D1, D2; not yet settled).
 5. **Express pass for prose** (direction D3; open).
 6. **Resume lanes** under the new flow. Then the rest of the queue.
@@ -67,6 +68,9 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
     CST: "b is probably fine for now, with some sorta flag that if it quickly fails that it was
     misjudged and it goes to largest current job x1.5"; 14:37 CST: "if it was just made and it then fails
     in its first run or two that's a sign it was misjudged". Replaces the stored 60 min in ci-job-caps.
+  - A job stops being new after its first green run. The nearest similar job does the same kind of work
+    (lint, test, mutation, build); with none, the largest current job x1.5. Owner 15:03 CST: "yes thats
+    fine agreed".
 
 - **R4. Lane lint runs once per lane; batch CI fails fast.** Owner 14:54 CST Nov 10: "is there no truly
   fast way that retains accuracy?"; 14:56 CST: "yes D is approved". Keep the lane lint run at hand-off
@@ -75,11 +79,19 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   A builder first confirms that CI cancels on first failure and that each red lint maps to one lane.
   Home: decision lanes-run-no-full-ci-job, rewritten in place.
 
+- **R5. One guard cull now, then notes only.** Owner 15:04 CST Nov 10: "i'd say option e works for now
+  with a revisit maybe to threshold lanes if it turns out to be problematic". One cull lane in stage 3
+  fixes or deletes each guard or check with a recorded wrong refusal (60 "false alarm" lines in
+  docs/debts/notes.md), whichever costs less. After it, wrong refusals are notes only. If they turn out
+  to be a problem again, revisit a threshold (a guard with 3 recorded wrong refusals gets its own lane).
+  Home: decision cull-rules, rewritten in place.
+
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
   The owner and an arbiter make grants and rulings. An arbiter's is marked as the arbiter's, ranks
   below the owner's, and the owner can overturn it. Today an arbiter makes rulings only
-  (decision session-tiers, Arbiter); this adds grants. Home: decision session-tiers, GLOSSARY.md.
+  (decision session-tiers, Arbiter); this adds grants. Open: whether an arbiter's grants include Opus for
+  agents in its repo (asked 15:05 CST). Home: decision session-tiers, GLOSSARY.md.
 - **G2. Session roles, the same on local and cloud: coordinator, triage, batch runner, lane, arbiter.**
   Owner 14:23 CST Nov 10: "coordinator approved", "batch runner yes agreed", "lane yes agreed but solo
   should be able to merge ideally like it can be a one stop shop sometimes", "this collapse feels good".
@@ -158,8 +170,6 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 
 - How many lanes start: the owner said in the same answer "the limit isn't the problem, it's how the limit
   batches that's the problem". Covered by stage 3.4 for now.
-- Guards with recorded false alarms: report guard 15, frozen-path 6, ask-alone 4, question-form 4,
-  builder-test-edit 4 (counts of notes, not firings).
 - About 89% of 746 open steps work on this repo's own merge, review and lint machinery (title
   inference).
 
