@@ -47,7 +47,7 @@
                             reopen: OWNER/NAME #N (replacer #R no longer names it)    in a comment, and R is closed unmerged. A Replaced note also reopens
                                                                      N when R is open and its body lost `Replaces #N`; a Carried note reopens only
                                                                      when its carrier is closed unmerged. A closed R with its own note extends the
-                                                                     chain: only the last link reopens (one PR per chain per wake), and a chain that
+                                                                     chain: only the last link reopens (one PR per chain per wake; a loop reopens each member), and a chain that
                                                                      ends at an open PR naming its link reopens none.
                           A `Replaces #N` or note line counts only at the start of a line (spaces allowed), outside a fenced code block (closed by
                           the same character, a run at least as long as the opener) and not in a `>` quote. A PR on a close line is left off the batch line. Reads added: the same comment list and compares as above, so none
