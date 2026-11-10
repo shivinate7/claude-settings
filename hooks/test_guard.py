@@ -6007,6 +6007,9 @@ sh("detached: the incident's exact command orphans to pid 1",
    "detached-launch", cwd=NOGIT)
 sh("detached: the same shape, spaced",
    "( python3 -m http.server 8000 & )", "deny", "detached-launch", cwd=NOGIT)
+# `$!` turns off the bare-background backstop, so only the subshell clause still refuses this job.
+sh("detached: a subshell background job is refused though echo $! follows it",
+   "(python3 -m http.server 8000 & ); echo $!", "deny", "detached-launch", cwd=NOGIT)
 sh("detached: nohup survives a session close, with a background job",
    "nohup python3 -m http.server 8000 &", "deny", "detached-launch", cwd=NOGIT)
 # Re-pointed (rule detached-launch, refusal-vs-rule row detached-launch): nohup with no trailing `&`

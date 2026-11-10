@@ -603,7 +603,7 @@ MUTATIONS = [
     ("detached-launch: a subshell background job no longer denies",
      '    if last == ")":\n        return tokens[-2] == "&"\n'
      '    return last.endswith(")") and last[:-1].endswith("&")',
-     '    return False', "guard", "detached: the incident's exact command orphans to pid 1"),
+     '    return False', "guard", "detached: a subshell background job is refused though echo $! follows it"),
     ("detached-launch: setsid no longer denies as a bare wrapper",
      '    if basename(word) != "setsid":\n        return ""',
      '    return ""', "guard", "detached: setsid with no -w starts its own session"),
