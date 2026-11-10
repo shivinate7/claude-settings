@@ -1032,8 +1032,11 @@ fi
 # does not have ~/.claude/bin on PATH, so a printed remedy naming wait-pid or verdict fails with rc 127.
 case "${SHELL:-}" in *zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashrc" ;; esac
 if ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
-  printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' >> "$RC"
-  log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+  if printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' >> "$RC" 2>/dev/null; then
+    log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+  else
+    log "could not write $RC; ~/.claude/bin is not on PATH"
+  fi
 fi
 
 # Runs one startup entry bounded to $1 seconds where there is no `timeout` binary (macOS). The entry and a
