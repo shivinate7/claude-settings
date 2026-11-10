@@ -2287,6 +2287,78 @@ def case_cross_repo_update_checked_with_needs_repo():
           {"repo": PAGE_REPO_NAME, "checked_with": CHECKED}, PAGE_REPO_NAME)
 
 
+# ------------------------------------------------------- judged_item_writes reads a file_path at the payload cwd
+#
+# An items write whose data is a file (`file_path`, no `data`) is read by _write_data against the cwd it is given. The
+# model review reads its writes through judged_item_writes, which must take the payload cwd as item_hit does. Each file
+# name is unique and absent from the process cwd, so a read that finds the file can only come from the cwd join.
+def judged_items(writes, cwd):
+    """judged_item_writes(writes, cwd). A build whose function takes no cwd is called with the writes alone, so its
+    relative write fails an assert, never a TypeError."""
+    if "cwd" in inspect.signature(question_form.judged_item_writes).parameters:
+        return question_form.judged_item_writes(writes, cwd)
+    return question_form.judged_item_writes(writes)
+
+
+def write_json_file(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
+def judged_folder():
+    """The payload cwd of these cases: a folder in this run's temp root, swept with the run."""
+    folder = os.path.join(tcj.ROOT, "judged-cwd")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def case_judged_relative_file_path_read_at_cwd():
+    """(judged cwd) A set whose data is a file named by a relative file_path is returned when the payload cwd holds the
+    file. On main the path is read against the process cwd, finds nothing, and the write is dropped, so no model review
+    sees it."""
+    folder, item, name = judged_folder(), tcj.good_page_item(), "judged-relative-item.json"
+    write_json_file(os.path.join(folder, name), item)
+    check("judged cwd: the file is at the payload cwd", os.path.isfile(os.path.join(folder, name)), folder)
+    check("judged cwd: no file of that name at the process cwd, so only a join to the payload cwd finds it",
+          not os.path.exists(name), os.getcwd())
+    got = judged_items([("set", {"collection": tcj.PAGE_ITEMS, "doc_id": "p1", "file_path": name})], folder)
+    check("judged cwd: the relative write is returned, its data read from the payload cwd",
+          len(got) == 1 and got[0].get("doc_id") == "p1" and got[0].get("data") == item,
+          "got %r: the path was read against the process cwd, so the write was dropped" % (got,))
+
+
+def case_judged_absolute_and_empty_are_unchanged():
+    """(judged cwd, control) An absolute file_path is read and returned with no cwd, as on main, and no writes
+    judge to an empty list. Green before and after the fix."""
+    folder, item = judged_folder(), tcj.good_page_item()
+    path = os.path.join(folder, "judged-absolute-item.json")
+    write_json_file(path, item)
+    check("judged absolute: the file is at its absolute path", os.path.isabs(path) and os.path.isfile(path), path)
+    got = question_form.judged_item_writes([("set", {"collection": tcj.PAGE_ITEMS, "doc_id": "p2", "file_path": path})])
+    check("judged absolute: the write is returned, its data read from the absolute path",
+          len(got) == 1 and got[0].get("doc_id") == "p2" and got[0].get("data") == item, got)
+    empty = judged_items([], folder)
+    check("judged empty: no writes judge to an empty list", empty == [], empty)
+
+
+def case_judged_mixed_writes_all_returned():
+    """(judged cwd, full list) An inline write, a relative file_path and an absolute file_path come back together, in
+    order, from one call. On main the relative write, p4, is the one dropped."""
+    folder, item = judged_folder(), tcj.good_page_item()
+    name, abs_path = "judged-mixed-relative.json", os.path.join(folder, "judged-mixed-absolute.json")
+    write_json_file(os.path.join(folder, name), item)
+    write_json_file(abs_path, item)
+    check("judged mixed: no file of the relative name at the process cwd", not os.path.exists(name), os.getcwd())
+    c = tcj.PAGE_ITEMS
+    writes = [("set", {"collection": c, "doc_id": "p3", "data": item}),
+              ("set", {"collection": c, "doc_id": "p4", "file_path": name}),
+              ("set", {"collection": c, "doc_id": "p5", "file_path": abs_path})]
+    ids = [w.get("doc_id") for w in judged_items(writes, folder)]
+    check("judged mixed: the inline, relative and absolute writes all come back, in order",
+          ids == ["p3", "p4", "p5"],
+          "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
@@ -2324,7 +2396,9 @@ def main():
                  case_cross_repo_malformed_repo_is_a_format_refusal, case_cross_repo_malformed_repo_controls,
                  case_cross_repo_writer_session_is_not_the_checker, case_cross_repo_writer_session_controls,
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
-                 case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo):
+                 case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
+                 case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
+                 case_judged_mixed_writes_all_returned):
         try:
             case()
         except Exception as exc:
