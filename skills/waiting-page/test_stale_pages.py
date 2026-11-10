@@ -1778,10 +1778,11 @@ class ParkedStale(FolderCase):
 # exit 1: `answer-unread <id> (item <n>, owner <owner>, answered <at>, before wake <woke>)`, with `before wake: none recorded`
 # as the last field when there is no woke, and `?` for a missing n or owner. With none, `unread: clean` and exit 0. A file
 # missing or of the wrong shape, an unreadable `woke`, an unreadable `at`, or an unreadable `read` of a receipt that is
-# compared prints `unknown: <what>` and exits 2: the mode never calls such a thing clean or listed. Times are ISO strings
-# with a Z, as the store writes them. The mode reads no clock: what it lists depends on the saved files alone.
+# compared prints `unknown: <what>` and exits 2: the mode never calls such a thing clean or listed. Receipt times are ISO
+# UTC with a trailing Z by the skill's rule (SKILL.md, the receipts entry); the fixtures use that form.
+# The mode reads no clock: what it lists depends on the saved files alone.
 WOKE = "2026-11-05T13:10:00Z"
-EARLY = "2026-11-05T02:40:00Z"  # 10.5 hours before WOKE: the shape of item 143's answer, which stayed unread that long
+EARLY = "2026-11-05T02:40:00Z"  # long before WOKE: the incident shape, an answer that stayed unread that long
 UNREAD_LINE = re.compile(r"answer-unread \S+ \(|unread: clean$|unknown: ")  # the mode's own line shapes
 
 
@@ -1854,7 +1855,7 @@ class UnreadStale(FolderCase):
                 error = repr(err)
         return code, out.getvalue(), starts, error
 
-    def test_the_item_143_style_answer_is_listed_with_its_exact_line_and_exits_1(self):
+    def test_an_answer_long_before_the_wake_with_no_receipt_is_listed_with_its_exact_line_and_exits_1(self):
         self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
         rc, out = self.run_unread()
         self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "the old answer with no receipt was not listed: " + out)
@@ -1890,14 +1891,22 @@ class UnreadStale(FolderCase):
         rc, out = self.run_unread()
         self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "a receipt with only filed cleared the answer: " + out)
 
-    # Deliberate: a receipt read at or after the answer clears it, whatever older receipts for the same answer sit beside it.
-    # Pins the code as it stands: the older receipt is neither an unknown nor a block.
-    def test_a_receipt_read_before_the_answer_beside_one_read_after_it_clears_it_by_design(self):
+    # The store keeps one receipt per id (receipts/<id>), so two receipts for one answer never occur there: these two cases
+    # pin the code only. The code reads every receipt of an answer and clears it on any read at or after the answer. Both
+    # orders are pinned, since a check that reads only the last receipt in the list passes one order and fails the other.
+    def test_a_receipt_read_before_the_answer_beside_one_read_after_it_clears_it(self):
         self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", EARLY)],
                    receipts=[receipt_entry("colour-pick", read="2026-11-05T02:00:00Z"), receipt_entry("colour-pick", read="2026-11-05T13:00:00Z")])
         rc, out = self.run_unread(codes=(0,))
         self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
                          "a receipt read before the answer, beside one read after it, kept the answer unread: " + out)
+
+    def test_a_receipt_read_after_the_answer_beside_one_read_before_it_clears_it(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", read="2026-11-05T13:00:00Z"), receipt_entry("colour-pick", read="2026-11-05T02:00:00Z")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
+                         "a receipt read after the answer, beside one read before it, kept the answer unread: " + out)
 
     def test_with_no_wake_every_answer_with_no_receipt_read_back_is_listed(self):
         items = [item_entry("recent", "open", n=1, owner="ops"), item_entry("old", "open", n=2, owner="ops"), item_entry("read", "open", n=3, owner="ops")]
