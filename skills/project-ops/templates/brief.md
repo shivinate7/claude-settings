@@ -1,10 +1,13 @@
+Grant: <owner words>, <time>
 Lane brief: <step-slug>. Topic: <topic-slug>. <Plain name of the step>.
+
+The lane treats the Grant line as the owner's grant. It checks the grant against the coordinator's chat only when the act cannot be undone.
 
 <Who runs it: a cloud lane, or a lane on a named local machine.> The coordinator
 starts it with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
 The coordinator also tags the lane `cs-topic:<topic slug>`, its one topic. The step slug is the step id.
-The guard reads the Topic on the first line and refuses a brief whose Topic differs from that tag (rule `lane-one-topic`), so keep this line first.
-The start names `model` (the lane row's) and `source_url` (the repo). The start prompt is `/effort medium` alone. This brief follows with `send_message` (`agent-model-cap`, the lane effort pin).
+Rule `lane-one-topic` reads the Topic on the first non-blank line of a brief sent by `send_message`. It reads a lane start prompt the same way, after its Grant line. So such a brief opens with the `Lane brief:` line.
+The start names `model` (the lane row's), `source_url` (the repo) and effort `medium`. The start prompt is this whole brief, and it opens with the Grant line (`agent-model-cap`, the lane effort pin).
 Never rebase onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
 Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before the first Opus spawn and after triage writes a step grant. The guard reads only that local ref. A plain fetch does not write it in a shallow clone.
 

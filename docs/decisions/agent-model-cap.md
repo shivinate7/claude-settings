@@ -57,7 +57,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`, `create_session`) | main model unless the owner names one | default |
-| lane session (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | medium, the owner's ruling of 2026-10-30 15:11 CDT; set by the start prompt, below |
+| lane session (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | medium, the owner's ruling of 2026-11-10 13:19 CST; set by the start's effort field, below |
 | arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
@@ -101,12 +101,20 @@ Cost: one read of this record per spawn. A spawn with no model adds one read of 
 
 Incident one: briefs named sonnet for haiku-row roles until 13:59 CDT on 2026-10-30. Incident two: the round-2 builder of PR 872 named no model. The cloud CLI had no `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/builder.md` has no pin, so it inherited the lane's Opus (note `nao-builder-ran-opus`).
 
-**The lane effort pin.** A lane session runs at medium effort (owner, 2026-10-30 15:11 CDT). The
-coordinator starts a lane with a `create_session` prompt that is exactly `/effort medium`, then sends
-the brief with `send_message`. A slash command runs only when it is the whole prompt (coordinator
-probe, 2026-10-30 15:26 CDT: that prompt set `effort_level` medium; the same line with text after it
-set none). Guard rule `lane-effort-pin` (likely risk, landed 2026-10-30) refuses a `create_session`
-call tagged `cs-build:lane` with any other prompt. A lane started with no such tag is unseen; the
+**The lane effort pin.** A lane session runs at medium effort (owner, 2026-11-10 13:19 CST, "B is good").
+The coordinator starts a lane with `create_session` set to effort `medium`, with `model` (the lane row's)
+and `source_url` (the repo), and with its whole brief as the first prompt. The brief opens with a Grant
+line, `Grant: <owner words>, <time>`. The lane treats it as the owner's grant. It checks the grant against
+the coordinator's chat only when the act cannot be undone (coordinator, 2026-11-10 13:18 CST). The effort
+comes from the field, because a slash command runs only as the whole prompt (measured by the
+coordinator's probe, 2026-10-30 15:26 CDT: that prompt set `effort_level` medium; the same line with text
+after it set none). Guard rule `lane-effort-pin` (likely risk, first landed 2026-10-30) refuses a `create_session`
+call tagged `cs-build:lane` unless its `effort` is `medium` and its prompt's first non-blank line is a Grant line
+with owner words after it. Owner words hold a letter or digit and no `<`, so a placeholder Grant such as
+`<owner words>` is refused. Rule `lane-one-topic` also reads a lane `create_session` prompt. When the prompt's
+`Lane brief:` line follows the Grant line, its Topic must match the call's `cs-topic` tag. A `send_message`
+brief follows the same rule (owner chat, 2026-11-10 13:19 CST, "B is good", page item 495 a). A lane
+started with no `cs-build:lane` tag is unseen; the
 tag is the coordinator's rule in `session-tiers`. An owner override lifts it; it is not one of the role and model guards
 that `owner-override` keeps beyond every override (owner, 2026-10-30 16:25 CDT, in chat to lane-effort-medium (session_013NEJL28Sky6HBLLehmziKH), pick a: liftable). `LANE_EFFORT` in `hooks/guard.py` is the one
 value; `lint/check_agent_models.py` fails when the lane row's effort cell does not start with it.

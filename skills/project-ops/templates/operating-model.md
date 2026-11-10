@@ -8,8 +8,10 @@ from `roster.md`.
 Every session that starts agents spawns its own agents. A session's roles are the hats it wears.
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
-  triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane in roadmap order with `model` (the lane row's), `source_url` (the repo), the tags `cs-repo`, `cs-build:lane`, `cs-step`, `cs-topic`, and the prompt `/effort medium` alone and then sends its brief, and talks with the owner. On a local session, the load
+  triage and the batch runner together, as a trio, before any lane session. It holds lane state
+  and writes each lane brief. It starts each lane in roadmap order, with `model` (the lane row's),
+  `source_url` (the repo) and effort `medium`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
+  and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
