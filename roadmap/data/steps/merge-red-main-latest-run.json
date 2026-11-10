@@ -5,7 +5,7 @@
   "order": 942,
   "owner": "coordinator",
   "why": "Degen gap 4. Owner 20:25 CST Nov 9: queue each of Degen's eight claude-settings gaps as a step or debt, with its incident (via the coordinator 20:30 CST). Incident: the merge tool read an older red main run over a newer green one (claude-settings run 42610317325 vs 42669400649); Degen batches 22b and 22c also needed base-red-ok while main was green.",
-  "note": "The owner believed this was already queued under this slug; no such step existed (coordinator). Step base-red-reads-gate is a different question. Fix: read the latest completed main run for the head the merge compares against. Filed 20:27 CST Nov 9. Lane session_013NEJL18oZSggg3BpqSJqPJ (coordinator 20:36-20:41 CST Nov 9).",
-  "updatedAt": "2026-11-09T20:34:00-06:00",
+  "note": "The owner believed this was already queued under this slug; no such step existed (coordinator). Step base-red-reads-gate is a different question. Fix: read the latest completed main run for the head the merge compares against. Filed 20:27 CST Nov 9. Lane session_013NEJL18oZSggg3BpqSJqPJ (coordinator 20:36-20:41 CST Nov 9). Finding (outbox health-check-nov-9, Mac session session_01MVD32PAogT8n3cVKkpkwUn, measured 20:50 CST Nov 9): the main push runs after batch 69 (624dcc18) and the Degen notes batch (ddaa393c) both ended cancelled, so no completed run covers main's head. The last completed main run, batch 68 (8bc28980, 11:55 CST Nov 9), was green; the two before it were red. Batches 67k, 68i and the Degen notes batch merged with --base-red-ok. Fix: a cancelled main push run reads as unknown, and the next merge waits on a completed main run. Related: capped-job-hides-red.",
+  "updatedAt": "2026-11-09T20:54:00-06:00",
   "lane": "session_013NEJL18oZSggg3BpqSJqPJ"
 }
