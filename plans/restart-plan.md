@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 16:49 CST.
+the history. Last rewrite: 2026-11-10 17:00 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -336,13 +336,34 @@ After 3.11, because its third part uses the same owner grant route.
   is the right spot right? but for rn it only make senses that it is read". A check, run when triage
   reports status, lists each owner ruling in the outbox and whether its home on main holds its words.
   Whether the outbox stays the place for rulings is open. Home: decision owner-feedback-inbox.
-- **D2. What a page Send wakes, and how words are passed along (open).** Owner 16:46 CST Nov 10: "I do
-  think the process of what's being woken, and how to pass words along / relays needs to be vastly
-  improved as the current process is broken/flawed". Today (skill waiting-page, "Read the answers"): a
-  Send posts one comment that wakes every session watching the page, the writer and each session that
-  owns an open item; only the asker routes its item; a peer passes only the page URL, item id and act
-  (decision relayed-grant-read-from-page). Open: which failures the owner has seen; the coordinator's
-  record of wake and relay failures.
+- **R18. One home and one wake per answer; a relay is easy and checked for carelessness.** Owner 16:46
+  CST Nov 10: "I do think the process of what's being woken, and how to pass words along / relays needs
+  to be vastly improved as the current process is broken/flawed"; 16:54 CST: "too many sessions seem too
+  tapped in to the artifact like they'll be woken for any change to the artifact not just an update to
+  their specific question"; 16:55 CST: "relayed grants need to come in more easily and more intuitively
+  ... we never protect against maliciousness only carelessness/negligence", points 1-4 agreed; 16:57
+  CST: "agreed yes -- but it should also be known by sessions how to carry my grant so that way it's not
+  like problematic or a cause of pain".
+  1. Only triage watches the page; a Send wakes triage alone.
+  2. Each item names who wakes for it: the asker, plus any party it lists. Triage sends exactly those
+     sessions one message (page link, item id, the pick); each reads its answer from the page.
+  3. Each answer has one home, the page. A question goes only to the page; the chat holds one line, "on
+     the page, item N". A hook moves a question with options from a reply onto the page and leaves that
+     line, so it does not rest on the session remembering. An answer typed in chat goes onto the page at
+     once.
+  4. Never reply in a page comment thread; the item is rewritten instead (questions-go-to-owner, owner
+     2026-10-28 02:44 CDT). A hook enforces it over the platform's own suggestion.
+  5. A relay counts when it carries the owner's exact words, their time, and the one act they cover, in
+     one form every session knows: `Grant: "<exact words>" (owner, <time>) covers <act>`. A guard in the
+     sending session checks the words are in its own feedback log (catches a paraphrase, a widened act or
+     a wrong item); the receiver acts with no page round-trip. A relay in another shape is refused with
+     that form as the remedy. The page route stays. Per guard-guards-mistakes-only, no check assumes an
+     attacker.
+  Evidence (coordinator, 16:49 CST): 9 page comments today each carried two clashing relay
+  instructions; a chat answer reached the page 4-9 min late and the notes hook refused 8 turns meanwhile;
+  every owner question was sent twice and the copies drift; the H1 grant reached the coordinator only by
+  a chat relay. Cost: one hop through triage before the asker wakes (unmeasured). Home: skill
+  waiting-page; decision relayed-grant-read-from-page, rewritten in place.
 
 ## Stage 5. Express pass for prose
 
