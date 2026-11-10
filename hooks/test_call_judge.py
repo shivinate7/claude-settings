@@ -52,8 +52,9 @@ Interface the hook must match:
   set or update whose data has non-empty `options`, and never otherwise, never on AskUserQuestion or Agent. question_form.WIDENS_KEY
   is the one home of the mark's key, "widens", and WIDENING_RULE contains it. The cases read both with load_file_module, never a
   copy, and a missing name fails its checks with a named cause, never a crash.
-- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
-  above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
+- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` and the Mac data names
+  (shared_names.MAC_DATA_TOOLS) runs call_judge.py with a timeout above the longest model call (60 s). No `prompt`
+  or `agent` hook is left on any of those tools.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
   records and the `roadmap` step rulings that question_form.past_rulings finds, and an eighth item that refuses a
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
@@ -75,6 +76,7 @@ GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings.json")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
+from shared_names import MAC_DATA_TOOLS  # noqa: E402  the one home of the Mac data names (the call_judge matcher names them)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
@@ -1295,8 +1297,8 @@ def case_settings_row():
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
+    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the Mac data names",
+          matcher == {"Agent", "AskUserQuestion", "ArtifactData", *MAC_DATA_TOOLS}, entry.get("matcher"))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
