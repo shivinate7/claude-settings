@@ -23,9 +23,11 @@ DUO_FOLD_TOLERANCE="0.5"
 # The whole reading: optional blanks around one plain decimal number (sign allowed), no other text.
 DUO_FOLD_ANGLE_RE='^[[:blank:]]*(-?[0-9]+(\.[0-9]+)?)[[:blank:]]*$'
 # The last refusal's reason, for a caller that wants it in its own failure line.
+# shellcheck disable=SC2034  # set for a sourcing caller to read
 DUO_FOLD_REASON=""
 
 # Sets DUO_FOLD_REASON, prints it on stderr, returns 1.
+# shellcheck disable=SC2034  # set for a sourcing caller to read
 _duo_fold_refuse() {
   DUO_FOLD_REASON="$*"
   echo "duo-fold: $*" >&2
