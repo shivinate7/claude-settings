@@ -11,6 +11,13 @@ import json
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # a runner other than `python agent_brief.py` still finds guard_core
+try:
+    from guard_core import REFUTER_ROLE  # noqa: E402  the one home of the refuter role's name
+except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE need the name, so stop here with exit 0
+    print(f"agent_brief: {e}", file=sys.stderr)
+    sys.exit(0)
+
 # Each line carries a flag: True = every type, False = only types that commit and push.
 COMMON = [
     (True, "Standing rules for this agent:"),
@@ -24,10 +31,10 @@ COMMON = [
     (False, "- Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees)."),
     (False, "- Before you end, stop each server you started, by the $! from the same call or through the harness."),
 ]
-READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"}
+READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer", REFUTER_ROLE}
 
 SCOPE = {
-    "builder": "Scope: builder. Never edit tests or test config. Add mutants to hooks/mutate_guard.py when the brief asks. Report a test change you need.",
+    "builder": "Scope: builder. Never edit tests or test config. A mutant goes to a test-author. Report a test change you need.",
     "test-author": "Scope: test-author. Edit tests and test config only. Never edit product code.",
     "reviewer": "Scope: reviewer. Never edit, write, stage, commit, or push. Read and run checks only.",
     "Explore": "Scope: Explore. Never edit. Read and search only.",
@@ -36,6 +43,7 @@ SCOPE = {
                  "Your brief names your designer kind: blind, informed or directed. In a blind designer, never read "
                  "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens."),
     "design-reviewer": "Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
+    REFUTER_ROLE: "Scope: refuter. Never edit, write, stage, commit, or push. Read only.",
 }
 GENERAL = ("Scope: do only what your brief names. A builder never edits tests; "
            "a test-author never edits product code; a reviewer and Explore never edit; "
