@@ -12,7 +12,9 @@
   later. The branch check has no time bound and no commit-count floor.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the merge base. It
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
-  commit added on the branch alone is the branch's, except to the lane undo read.
+  commit added on the branch alone is the branch's, except to the lane undo read. A merge of three or more parents is not read, and the
+  check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
+  carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
 - **Lane undo.** A commit of the branch drops work that an earlier commit E of the same branch added,
   and head still lacks it. The read covers every non-merge commit of the branch, also under a merge. It
   flags two shapes. One is a whole file put back to its text before E, whatever the file held just
@@ -35,12 +37,25 @@
   2026-11-02, such as 3297d8fa, which undid 091c8708, and df25a68d, which dropped 49 test lines. Each
   cost a review round. Builders now edit in place, and a round 2 or 3 brief has a `Keep:` line
   (`agents/builder.md`, `roles-brief-contents`).
+- **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
+  (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
+  A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
+  (debt `silent-undo-rebase-no-merge`).
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
 nothing. Each use prints `ALLOWED <path>: <reason>`. A junk reason passes, so the reviewer reads every
 reason. No switch turns the check off. The lane undo read takes the same line: one excuse line, and
 no second name (owner, 2026-11-02 10:52 CST, page item 165, pick a).
+
+A deleted debt file has a second escape: a `Retire-run: <slug> -- <run URL>` in the PR body's last paragraph
+that the debt-close check accepts (decision `debt-close-runs-retire`). It excuses only that debt's path, never
+another file, and only a whole delete, not a rename out of `docs/debts/`. Merge tool only: the CLI and CI pass
+no PR body, as with a `Drops-lines` line in the body; CI's way out is a `Drops-lines` commit trailer. With no
+run reader, or a read that fails, the finding stays. Cost: it runs only in the merge tool, when the scan has a
+finding and the body holds a cite. For each flagged cited debt, it runs the debt-close judgment: git reads,
+each Retire test in a temporary worktree, and at most one run read. A test proves that
+an unflagged close gets no run read. It starts no long-lived process.
 
 - **Body rule.** Drop fenced blocks and `<!-- -->` comments. Skip closing paragraphs that hold only the
   Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
@@ -86,7 +101,7 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
   Numbers may differ only when both sides changed the base line (a third value).
 
 **Unknown is red in CI.** No upstream, a shallow clone, a merge of three or more parents, an old git, or a
-failed git read prints UNKNOWN. Locally it exits 0. With env `CI` or `--strict` it exits 1
+failed git read prints UNKNOWN. Locally it exits 0 unless the UNKNOWN carries a finding. With env `CI` or `--strict` it exits 1
 (ci-unknown-is-red). `merge.py` refuses on unknown, because its merge cannot be taken back. The
 way out that does not depend on the check is the reason flag
 `merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. Claude may type it, with a reason (owner

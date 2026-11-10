@@ -5,15 +5,21 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases: a squash that carries the pre-deletion copy of a file (a revert nobody wrote), and a
 merge that drops a parent's added line.
 """
-import contextlib, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, contextlib, inspect, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+import check_debt_retire as D  # noqa: E402  the debt-close check: the scope each Retire-run case is read against
+from test_check_debt_retire import PROSE, RUN_URL, Runs, debt  # noqa: E402  one home of the debt shape and the fake run reader
 sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import check_silent_undo as C  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+
+RUN = os.path.realpath(_test_temp.run_folder())  # every temp repo of this run lives under it, removed at exit
+atexit.register(shutil.rmtree, RUN, True)
 
 ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
@@ -43,7 +49,7 @@ def without_opt_out(env):
 class Repo:
     def __init__(self):
         self.signs = False  # a case that signs on purpose sets this, and its git runs without the opt-out
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN)
         REPOS.append(self)
         self.dir = os.path.join(self.tmp.name, "w")
         origin = os.path.join(self.tmp.name, "o.git")
@@ -1556,8 +1562,8 @@ def probes(calls):
 
 
 class CallBound(unittest.TestCase):
-    """branch_only ran one `git log -G` per lost line, up to OWN_LOOKUPS per file. A merge that drops
-    20 lines of one file must cost a fixed number of git calls, not one per line."""
+    """The check reads every lost line of a file in one `git log -p`, never one `git log -G` per line. A merge
+    that drops 20 lines of one file must cost a fixed number of git calls, not one per line."""
 
     def lost(self, lines, own=False):
         r, m = drop_merge(lines, own)
@@ -1612,6 +1618,145 @@ class Scanner(unittest.TestCase):
         self.assertEqual(C.lost_lines(r.dir, m, ["origin/main"]), [])  # the lost-line reading: none of the lines is lost
         self.assertEqual(r.verdict(), [])
         self.assertEqual(r.notes, [OWN_NOTE])
+
+
+# ------------------------------------------------ own lines past position 25
+
+
+OWN30 = ["own line %02d" % i for i in range(1, 31)]  # more than 25: a per-file cap of 25 would leave own lines unread
+MAIN30 = ["main line %02d" % i for i in range(1, 31)]
+TAIL = ["main tail %d" % i for i in range(1, 4)]  # lost after the 30 own lines, so past position 25 of the lost list
+
+
+def dropped_from_parent(r, m, n, lines):
+    """True when merge m's n-th parent holds `lines` in app.txt and m holds none of them."""
+    held = r.sh("show", "%s^%d:app.txt" % (m, n)).split("\n")
+    merged = r.sh("show", "%s:app.txt" % m).split("\n")
+    return all(l in held for l in lines) and not any(l in merged for l in lines)
+
+
+def mixed_merge():
+    """A merge that drops 30 own lines and 3 main lines of one file from its first parent, feat. feat adds the
+    own lines above `function Card`, then merges main, which adds TAIL below it. `other` branches from the base
+    and holds neither kind, so the merge base has none of them. -> (repo, merge sha)."""
+    card = "function Card() {}\n"
+    r = base_repo()
+    base = r.sh("rev-parse", "HEAD")
+    r.sh("checkout", "-q", "-b", "feat")
+    r.commit("feat adds own lines", app_txt=BODY + "".join(l + "\n" for l in OWN30) + card)
+    r.sh("checkout", "-q", "main")
+    r.commit("main adds the tail", app_txt=BODY + card + "".join(l + "\n" for l in TAIL))
+    r.push()
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-edit", "--no-ff", "main")
+    r.sh("checkout", "-q", "-b", "other", base)
+    r.commit("other", other_txt="other v2\n")
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-commit", "--no-ff", "other")
+    r.put("app.txt", BODY + card)
+    r.sh("add", "-A")
+    r.sh("commit", "-q", "-m", "Merge other, drop the lines")
+    return r, r.sh("rev-parse", "HEAD")
+
+
+class OwnLineCap(unittest.TestCase):
+    """branch_only_lines reads every lost line of one file as the branch's own or not, never a capped prefix.
+    A merge that drops more than 25 own lines of one file must not read as undone main work."""
+
+    def test_a_merge_that_drops_thirty_own_lines_of_one_file_reads_clean(self):
+        r, m = drop_merge(OWN30, own=True)
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN30), "premise: the merge drops the 30 own lines from its first parent")
+        self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines past position 25 read as lost")
+        self.assertEqual(r.verdict(), [], "own lines past position 25 read as lost")
+
+    def test_thirty_main_carried_lines_a_merge_drops_are_all_flagged(self):
+        r, m = drop_merge(MAIN30, own=False)
+        self.assertTrue(dropped_from_parent(r, m, 2, MAIN30), "premise: the merge drops the 30 main lines from its second parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), sorted(MAIN30), "main-carried lines past position 25 are not all flagged")
+        text = "\n".join(r.verdict())
+        for line in MAIN30:
+            self.assertIn(line, text, "main-carried line missing from the verdict")
+
+    def test_own_lines_past_the_cap_are_not_flagged_beside_main_lines_past_it(self):
+        r, m = mixed_merge()
+        self.assertGreater(len(OWN30), 25, "premise: the 30 own lines are more than the old 25-line cap")
+        before = r.sh("show", "%s^1:app.txt" % m).split("\n")
+        self.assertEqual([l for l in before if l in OWN30 or l in TAIL], OWN30 + TAIL, "premise: the first parent lists the own lines, then the 3 main lines")
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN30 + TAIL), "premise: the merge drops all 33 lines from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual([l for l in flagged if l in OWN30], [], "own lines past position 25 reported as lost, beside the main lines")
+        self.assertEqual(sorted(flagged), sorted(TAIL), "the flagged lines are not exactly the 3 main lines past position 25")
+        text = "\n".join(r.verdict())
+        self.assertEqual([l for l in OWN30 if l in text], [], "the verdict names own lines past position 25")
+
+    def test_thirty_own_lines_cost_the_same_git_calls_as_five(self):
+        r30, m30 = drop_merge(OWN30, own=True)
+        _, c30 = git_calls(lambda: C.lost_lines(r30.dir, m30, ("origin/main",)))
+        r5, m5 = drop_merge(OWN30[:5], own=True)
+        _, c5 = git_calls(lambda: C.lost_lines(r5.dir, m5, ("origin/main",)))
+        self.assertLessEqual(len(c30) - len(c5), 3, "git calls: N=5 %d, N=30 %d, probes at N=30 %d" % (len(c5), len(c30), len(probes(c30))))
+        self.assertLessEqual(len(probes(c30)), 3, "probes at N=30: %d of %d git calls" % (len(probes(c30)), len(c30)))
+
+
+OWN1000 = ["own line %04d" % i for i in range(1, 1001)]  # far past any per-file cap of a realistic size
+SUB_NOTE = "own note: main tail 30"  # a branch-own line that holds "main tail 30" as a substring
+TAIL30 = ["main tail %02d" % i for i in range(1, 31)]
+
+
+def note_merge(kept):
+    """feat (the older commit) adds OWN30 and SUB_NOTE above `function Card`. main (the later commit) adds TAIL30
+    below it. feat merges main, then `other` (from the base, holding neither) is merged in, and the result keeps
+    the own lines and TAIL30[:kept], dropping SUB_NOTE and the rest of the tail. -> (repo, merge sha)."""
+    card = "function Card() {}\n"
+    r = base_repo()
+    base = r.sh("rev-parse", "HEAD")
+    r.sh("checkout", "-q", "-b", "feat")
+    r.commit("feat adds own lines and a note", date="2025-12-01T10:00:00", app_txt=BODY + "".join(l + "\n" for l in OWN30 + [SUB_NOTE]) + card)
+    r.sh("checkout", "-q", "main")
+    r.commit("main adds the tail", date="2025-12-02T10:00:00", app_txt=BODY + card + "".join(l + "\n" for l in TAIL30))
+    r.push()
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-edit", "--no-ff", "main")
+    r.sh("checkout", "-q", "-b", "other", base)
+    r.commit("other", other_txt="other v2\n")
+    r.sh("checkout", "-q", "feat")
+    r.sh("merge", "-q", "--no-commit", "--no-ff", "other")
+    r.put("app.txt", BODY + "".join(l + "\n" for l in OWN30) + card + "".join(l + "\n" for l in TAIL30[:kept]))
+    r.sh("add", "-A")
+    r.sh("commit", "-q", "-m", "Merge other, drop the note and the tail")
+    return r, r.sh("rev-parse", "HEAD")
+
+
+class OwnLineScale(unittest.TestCase):
+    """A per-file cap of any realistic size is far below 1000 lines. A merge that drops 1000 own lines of one
+    file reads clean, so a cap of any size goes red here."""
+
+    def test_a_merge_that_drops_a_thousand_own_lines_of_one_file_reads_clean(self):
+        r, m = drop_merge(OWN1000, own=True)
+        self.assertTrue(dropped_from_parent(r, m, 1, OWN1000), "premise: the merge drops the 1000 own lines from its first parent")
+        self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines read as lost in a merge that drops 1000 of them")
+        self.assertEqual(r.verdict(), [], "the verdict flags own lines in a merge that drops 1000 of them")
+
+
+class OwnLineSubstring(unittest.TestCase):
+    """branch_only_lines finds a lost line's adding commit with `line in text`, a substring test over the changed
+    lines of each commit. A branch-own line that holds a main line as a substring is then taken for that main
+    line's adder, so the main line reads as own. The match must be whole lines."""
+
+    def test_a_main_line_an_own_line_holds_as_a_substring_is_flagged(self):
+        r, m = note_merge(29)
+        self.assertTrue(dropped_from_parent(r, m, 1, [SUB_NOTE, TAIL30[29]]), "premise: the merge drops the note and main tail 30 from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), [TAIL30[29]], "main tail 30 reads as own: the own note holds its text as a substring")
+        self.assertTrue(r.verdict(), "the verdict reads clean though main tail 30 was dropped")
+
+    def test_five_main_lines_dropped_beside_the_note_are_all_flagged(self):
+        r, m = note_merge(25)
+        dropped = TAIL30[25:]  # main tail 26 to 30
+        self.assertTrue(dropped_from_parent(r, m, 1, [SUB_NOTE] + dropped), "premise: the merge drops the note and main tail 26 to 30 from its first parent")
+        flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
+        self.assertEqual(sorted(flagged), sorted(dropped), "a dropped main line reads as own: the own note holds its text as a substring")
 
 
 class NulLine(unittest.TestCase):
@@ -2443,6 +2588,630 @@ class RecordsPage(unittest.TestCase):
         self.commit_all(r, "drop the debts from the records page, with the generator that drops them")
         got, notes = C.check(r.dir, "origin/main", "HEAD", tool=self.TOOL)
         self.assertTrue(any("docs/records.md" in p for p in got), (got, notes))
+
+
+NO_EXCUSE = "check() takes no run_state: a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
+
+
+class RetireCite(unittest.TestCase):
+    """A debt close is excused only by a `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph, for a run that
+    is green on the PR head or above it, and only for the debt's own path (decision debt-close-runs-retire). The green case is
+    the #1099 shape: a prose Retire and that cite. Each other case changes one input and must keep its finding. Each case first
+    reads the same PR through the debt-close check, so its kind is known before the silent-undo verdict is read."""
+
+    SLUG = "session-start-env-reaches-neon"
+    DEBT = "docs/debts/%s.md" % SLUG
+    NOTE = "docs/other/second-note.md"
+    CITE = "Summary.\n\nRetire-run: %s -- %s\n"
+    RED_RETIRE = "Delete the old helper. Check: `tests/test_fail.py`."
+    MOVED = "docs/moved.md"
+    OTHER = "docs/debts/other-debt.md"
+    OTHER_SLUG = "other-debt"
+    OTHER_RUN_URL = "https://github.com/fixture/repo/actions/runs/43"
+    NOTE_LINE = "- **Note.** Added on main after the cut.\n"
+
+    def setUp(self):
+        self.r = base_repo()
+        self.r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
+        self.r.put("tests/test_pass.py", "import sys\nsys.exit(0)\n")
+        self.r.put("tests/test_fail.py", "import sys\nsys.exit(1)\n")
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "base: the layout file and two test files")
+        self.r.push()
+
+    def land(self, paths):
+        """A merged PR that adds `paths` ({path: text}, .md only) to main: the step Red.merged_pr makes."""
+        Red.merged_pr(self, branch="landed", msg="add the files", **{p[:-3].replace("/", "__") + "_md": t for p, t in paths.items()})
+
+    def drop(self, *paths):
+        """A branch cut from main that deletes `paths`. -> its head sha."""
+        self.r.sh("checkout", "-q", "-b", "retire")
+        for p in paths:
+            self.r.sh("rm", "-q", p)
+        self.r.sh("commit", "-q", "-m", "drop the files")
+        return self.r.sh("rev-parse", "HEAD")
+
+    def assert_deleted(self, head, *paths):
+        names = self.r.sh("diff", "--name-status", "-M", "origin/main", head).splitlines()
+        for p in paths:
+            self.assertIn("D\t" + p, names, "the PR does not delete %s, so the case proves nothing" % p)
+
+    def cut_then_main_adds_the_note(self):
+        """Cut `retire` from main, then main adds NOTE_LINE to the debt, then `retire` merges main in: it holds that line."""
+        self.r.sh("checkout", "-q", "-b", "retire")
+        self.r.put("other.txt", "branch work\n")
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "branch work")
+        self.r.sh("checkout", "-q", "main")
+        self.r.put(self.DEBT, debt(PROSE) + self.NOTE_LINE)
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "main adds a line to the debt")
+        self.r.push()
+        self.r.sh("checkout", "-q", "retire")
+        self.r.sh("merge", "-q", "--no-edit", "origin/main")
+
+    def drop_note(self, path):
+        full = os.path.join(self.r.dir, path)
+        with open(full) as f:
+            text = f.read()
+        self.assertIn(self.NOTE_LINE, text, "the branch does not hold main's line, so the case proves nothing")
+        self.r.put(path, text.replace(self.NOTE_LINE, ""))
+
+    def two_cited_closes(self):
+        """Two debts. DEBT: landed by a PR, then main adds NOTE_LINE after the cut; the branch deletes it, so the delete undoes
+        main's line and has a finding with no cite. OTHER: on main with no PR, so its delete has no finding. Both are cited."""
+        self.r.put(self.OTHER, debt("Delete the other helper once nothing reads it."))
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "add the other debt on main with no PR")
+        self.r.push()
+        self.land({self.DEBT: debt(PROSE)})
+        self.cut_then_main_adds_the_note()
+        self.r.sh("rm", "-q", self.DEBT, self.OTHER)
+        self.r.sh("commit", "-q", "-m", "delete both debts")
+        head = self.r.sh("rev-parse", "HEAD")
+        self.assert_deleted(head, self.DEBT, self.OTHER)
+        body = (self.CITE % (self.SLUG, RUN_URL)) + ("Retire-run: %s -- %s\n" % (self.OTHER_SLUG, self.OTHER_RUN_URL))
+        return head, body
+
+    def scope(self, head, body, runs):
+        """(slug, kind) of each close the debt-close check gives this PR: the kind the case is about."""
+        return sorted((f.slug, f.kind) for f in D.check(self.r.dir, "origin/main", head, pr_body=body, run_state=runs))
+
+    def silent(self, head, body="", runs=None, strict=False):
+        """(problems, notes) of the silent-undo check on `head`, cited by `body` with the reader `runs`.
+        strict: the case needs the excuse, so check() must take run_state; a missing parameter is a named red.
+        Otherwise the reader is passed only when check() takes it, so on a check without the parameter the case
+        reads the finding it keeps."""
+        params = inspect.signature(C.check).parameters
+        if strict:
+            self.assertIn("run_state", params, NO_EXCUSE)
+        kw = {"run_state": runs} if "run_state" in params else {}
+        return C.check(self.r.dir, "origin/main", head, pr_body=body, **kw)
+
+    @staticmethod
+    def finding(problems, path):
+        return [p for p in problems if p.startswith(path + ":")]
+
+    @staticmethod
+    def allowed(notes):
+        return [n for n in notes if n.startswith("ALLOWED ")]
+
+    def test_green_cite_on_a_prose_retire_excuses_the_debt_delete(self):
+        """The #1099 shape: the debt's Retire names no test, and the PR body's last paragraph cites a green run on the head."""
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the debt-close check does not clear this close")
+        problems, notes = self.silent(head, body, Runs(("success", head)), strict=True)
+        self.assertEqual(problems, [], (problems, notes))
+        self.assertEqual(len(self.allowed(notes)), 1, notes)
+        self.assertTrue(self.allowed(notes)[0].startswith("ALLOWED %s:" % self.DEBT), notes)
+
+    def test_a_cite_for_another_slug_does_not_excuse_the_debt_delete(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % ("another-slug", RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [(self.SLUG, "prose")], "scope")
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_cited_run_that_failed_does_not_excuse_the_debt_delete(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("failure", head))), [(self.SLUG, "red")], "scope")
+        problems, notes = self.silent(head, body, Runs(("failure", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_green_run_below_the_pr_head_does_not_excuse_the_debt_delete(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        below = self.r.sh("rev-parse", "origin/main")  # the parent of the PR head: an ancestor, not a commit at or above it
+        self.assertEqual(self.scope(head, body, Runs(("success", below))), [(self.SLUG, "red")], "scope")
+        problems, notes = self.silent(head, body, Runs(("success", below)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_no_run_reader_excuses_nothing(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, None), [(self.SLUG, "unknown")], "scope")
+        problems, notes = self.silent(head, body, None)  # no run_state: the default, so the case passes the argument only if check() takes one
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_run_reader_that_raises_excuses_nothing(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        boom = RuntimeError("the run read failed: HTTP 502")
+        self.assertEqual(self.scope(head, body, Runs(boom)), [(self.SLUG, "unknown")], "scope")
+        problems, notes = self.silent(head, body, Runs(boom))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_green_cite_does_not_excuse_a_retire_test_that_fails(self):
+        self.land({self.DEBT: debt(self.RED_RETIRE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [(self.SLUG, "red")], "scope")
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_a_cite_matching_a_deleted_non_debt_file_does_not_excuse_it(self):
+        self.land({self.NOTE: "A note.\n"})
+        head = self.drop(self.NOTE)
+        self.assert_deleted(head, self.NOTE)
+        body = self.CITE % (os.path.basename(self.NOTE)[:-3], RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: no debt closes in this PR")
+        problems, notes = self.silent(head)  # no cite: the deletion is a finding on its own
+        self.assertTrue(self.finding(problems, self.NOTE), (problems, notes))
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.NOTE), (problems, notes))
+        self.assertEqual(self.allowed(notes), [], notes)
+
+    def test_a_cite_matching_the_deleted_debts_notes_file_does_not_excuse_it(self):
+        self.land({"docs/debts/notes.md": "# Notes\n\n- A note.\n"})
+        head = self.drop("docs/debts/notes.md")
+        self.assert_deleted(head, "docs/debts/notes.md")
+        body = self.CITE % ("notes", RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the notes file is not a debt")
+        problems, notes = self.silent(head)
+        self.assertTrue(self.finding(problems, "docs/debts/notes.md"), (problems, notes))
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, "docs/debts/notes.md"), (problems, notes))
+        self.assertEqual(self.allowed(notes), [], notes)
+
+    def test_a_cite_in_an_earlier_paragraph_does_not_excuse_the_debt_delete(self):
+        self.land({self.DEBT: debt(PROSE)})
+        head = self.drop(self.DEBT)
+        self.assert_deleted(head, self.DEBT)
+        body = "Retire-run: %s -- %s\n\nA later paragraph that cites nothing.\n" % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [(self.SLUG, "prose")], "scope")
+        problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_the_debt_delete_is_excused_and_a_second_deleted_file_stays(self):
+        self.land({self.DEBT: debt(PROSE), self.NOTE: "A note.\n"})
+        head = self.drop(self.DEBT, self.NOTE)
+        self.assert_deleted(head, self.DEBT, self.NOTE)
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the debt close is cleared")
+        problems, notes = self.silent(head, body, Runs(("success", head)), strict=True)
+        self.assertEqual(self.finding(problems, self.DEBT), [], (problems, notes))
+        self.assertTrue(self.finding(problems, self.NOTE), (problems, notes))
+        self.assertTrue(any(n.startswith("ALLOWED %s:" % self.DEBT) for n in notes), notes)
+
+    def test_a_rename_out_of_the_debts_folder_that_drops_a_main_line_keeps_its_finding(self):
+        self.land({self.DEBT: debt(PROSE)})
+        self.cut_then_main_adds_the_note()
+        self.r.sh("mv", self.DEBT, self.MOVED)
+        self.drop_note(self.MOVED)
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "rename the debt out and drop the main line")
+        head = self.r.sh("rev-parse", "HEAD")
+        names = self.r.sh("diff", "--name-status", "-M", "origin/main", head)
+        self.assertIn("\t%s\t%s" % (self.DEBT, self.MOVED), names, "the PR does not rename the debt out, so the case proves nothing")
+        body = self.CITE % (self.SLUG, RUN_URL)
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: the debt-close check clears this rename")
+        problems, notes = self.silent(head, body, Runs(("success", head)), strict=True)
+        self.assertTrue(self.finding(problems, self.DEBT), "the cite excused a rename out of docs/debts that drops a main line: "
+                        "only a whole delete is excused (problems %r, notes %r)" % (problems, notes))
+
+    def test_a_rename_out_of_the_debts_folder_that_drops_a_main_line_has_a_finding_with_no_cite(self):  # control
+        self.land({self.DEBT: debt(PROSE)})
+        self.cut_then_main_adds_the_note()
+        self.r.sh("mv", self.DEBT, self.MOVED)
+        self.drop_note(self.MOVED)
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "rename the debt out and drop the main line")
+        head = self.r.sh("rev-parse", "HEAD")
+        problems, notes = self.silent(head)
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+
+    def test_only_the_close_with_a_finding_has_its_run_read(self):
+        head, body = self.two_cited_closes()
+        self.assertEqual(self.scope(head, body, Runs(("success", head))), [], "scope: both debt closes are cleared")
+        bare, _ = self.silent(head)
+        self.assertTrue(self.finding(bare, self.DEBT), "premise: the debt's delete undoes main's line, so it has a finding with no cite")
+        self.assertEqual(self.finding(bare, self.OTHER), [], "premise: the debt main added with no PR has no finding")
+        flagged = Runs(("success", head))
+        problems, notes = self.silent(head, body, flagged, strict=True)
+        self.assertEqual(self.finding(problems, self.DEBT), [], (problems, notes))
+        self.assertEqual(flagged.urls, [RUN_URL], "run_state read a cited run for a close with no silent-undo finding")
+
+    def test_the_close_with_a_finding_still_has_its_own_run_read(self):  # control
+        head, body = self.two_cited_closes()
+        flagged = Runs(("success", head))
+        self.silent(head, body, flagged, strict=True)
+        self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
+
+
+class RevivedNote(unittest.TestCase):
+    """A note the branch deleted must not come back when a merge brings the base in. The notes file merges by union (the
+    real `.gitattributes` line), so a merge that conflicts at the file's end keeps the base's copy with no clash. Each of the
+    first six cases runs twice: with that line, and with no `.gitattributes`, where the same merge conflicts and is resolved by
+    hand. The doubled-note cases and the reworded and in-place cases run with the union line only: the doubling and the reword come from the
+    union driver, which a plain merge does not use."""
+
+    ATTRIBUTES = os.path.join(os.path.dirname(HERE), ".gitattributes")  # the real file: its union line is what is under test
+    NOTES = "docs/debts/notes.md"
+    HEADING = "# Notes: findings too unlikely to hit to be debts"
+    UNTOUCHED = "- untouched-note: a finding the branch never touches (lint/check_untouched.py)"
+    RETIRED = "- retired-note: a finding the branch retires (lint/check_retired.py)"
+    OWN = "- branch-note: a finding the branch adds (lint/check_branch.py)"
+    MAIN = "- main-note: a finding main adds after the cut (lint/check_main.py)"
+    DOUBLED = "- doubled-note: a finding a union merge doubles (lint/check_doubled.py)"
+    LATER = "- later-note: a finding main adds after the doubled note (lint/check_later.py)"
+    REWORDED = "- retired-note: a finding the branch retires, reworded (lint/check_retired.py)"
+    IN_PLACE = "an edit in place does not keep a note"  # the refusal's words, compared lowercased
+    NONSLUG = "- AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions."  # no slug: a space before the colon
+    NONSLUG_MAIN = "- a note with no slug form, appended on main (lint/check_second.py)"
+    NONSLUG_EDITED = "- AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions, reworded."
+    SIBLING = "- AskUserQuestion gain/loss rule may refuse terse real choices: keep it as it is."  # shares NONSLUG's first 40 characters
+    SIBLING_NEW = "- AskUserQuestion gain/loss rule may refuse terse real choices: a note main adds."
+
+    def text(self, *lines):
+        return "".join(line + "\n" for line in (self.HEADING,) + lines)
+
+    def notes_at(self, rev):
+        return self.r.sh("show", "%s:%s" % (rev, self.NOTES)).splitlines()
+
+    def start(self, union, retire=True, base=None, branch=None, main=None):
+        """A base whose notes hold untouched-note and retired-note, then an unrelated main commit, so the fork point is that
+        commit and not the one that added the notes. The branch deletes retired-note, or with retire False appends a line of
+        its own. Main then appends main-note after retired-note, so the two edits meet at the end of the file. `base`, `branch`
+        and `main` replace those notes lines (after the heading) for the cases that need other text. -> the branch's commit.
+        The layout file makes the notes path docs/debts/notes.md, as RetireCite does."""
+        base = (self.UNTOUCHED, self.RETIRED) if base is None else base
+        if branch is None:
+            branch = (self.UNTOUCHED,) if retire else (self.UNTOUCHED, self.RETIRED, self.OWN)
+        main = (self.UNTOUCHED, self.RETIRED, self.MAIN) if main is None else main
+        r = self.r = Repo()
+        self.union = union
+        r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
+        if union:
+            shutil.copyfile(self.ATTRIBUTES, os.path.join(r.dir, ".gitattributes"))
+        r.commit("notes", docs__debts__notes_md=self.text(*base))
+        r.commit("unrelated main commit", other_txt="other v1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat")
+        self.assertEqual(r.sh("check-attr", "merge", "--", self.NOTES).rsplit(": ", 1)[-1], "union" if union else "unspecified",
+                         "premise: this variant's driver for the notes file")
+        self.retire = None
+        edit = r.commit("the branch edits the notes", docs__debts__notes_md=self.text(*branch))
+        if retire:
+            self.retire = edit
+        r.sh("checkout", "-q", "main")
+        r.commit("main appends", docs__debts__notes_md=self.text(*main))
+        r.push()
+        r.sh("checkout", "-q", "feat")
+        return edit
+
+    def merge_main(self, final=None):
+        """Merges main into the branch and commits the result. self.merged is the file git wrote before any resolution. `final`,
+        when given, is the text the merge commit holds instead. -> the head sha."""
+        r = self.r
+        r.sh("merge", "--no-commit", "--no-ff", "main", ok=False)  # a conflict is resolved below, never left open
+        with open(os.path.join(r.dir, *self.NOTES.split("/")), encoding="utf-8") as f:
+            self.merged = f.read()
+        self.assertEqual("<<<<<<<" in self.merged, not self.union, "premise: the merge conflicts only without the union line")
+        if final is not None:
+            r.put(self.NOTES, final)
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main into the branch")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", head).split()), 3, "premise: the head is a merge commit")
+        return head
+
+    def body(self, rev):
+        """The notes lines at rev with the heading dropped: the lines a case builds the file from."""
+        return self.notes_at(rev)[1:]
+
+    def copies(self, rev):
+        """How many copies of doubled-note the notes file at rev holds."""
+        return self.body(rev).count(self.DOUBLED)
+
+    def commit_notes(self, msg, lines, on_main=False):
+        """Commits the notes file as the heading and `lines`, on the branch or on main. Main is pushed, so the check's upstream
+        holds that commit. -> the sha."""
+        if on_main:
+            self.r.sh("checkout", "-q", "main")
+        sha = self.r.commit(msg, docs__debts__notes_md=self.text(*lines))
+        if on_main:
+            self.r.push()
+            self.r.sh("checkout", "-q", "feat")
+        return sha
+
+    def drop_one_copy(self, head):
+        """The branch's commit that deletes the first copy of doubled-note at head. -> its sha."""
+        lines = self.body(head)
+        lines.remove(self.DOUBLED)
+        return self.commit_notes("delete one copy of the doubled note", lines)
+
+    def assert_refused(self, got, slug="retired-note", deleted=None):
+        """One problem line names the note and the commit that deleted it: retired-note and self.retire, unless the case names
+        another slug and commit."""
+        deleted = deleted or self.retire
+        named = [p for p in got if slug in p and deleted[:7] in p]
+        self.assertTrue(named, "%s came back through the merge, and no problem names it with %s: %r" % (slug, deleted[:7], got))
+
+    def test_union_merge_that_brings_back_a_deleted_note_is_refused(self):
+        self.start(union=True)
+        head = self.merge_main()
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the union merge brought retired-note back")
+        self.assert_refused(self.r.verdict())
+
+    def test_plain_merge_that_brings_back_a_deleted_note_is_refused(self):
+        self.start(union=False)
+        head = self.merge_main(final=self.text(self.UNTOUCHED, self.RETIRED, self.MAIN))
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the resolved plain merge brought retired-note back")
+        self.assert_refused(self.r.verdict())
+
+    def test_union_merge_that_leaves_the_deleted_note_out_passes(self):
+        self.start(union=True)
+        head = self.merge_main(final=self.text(self.UNTOUCHED, self.MAIN))
+        self.assertIn(self.RETIRED, self.merged, "premise: the union merge had brought retired-note back before the merge commit dropped it")
+        self.assertNotIn(self.RETIRED, self.notes_at(head), "premise: the merge commit leaves retired-note out")
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_plain_merge_that_leaves_the_deleted_note_out_passes(self):
+        self.start(union=False)
+        head = self.merge_main(final=self.text(self.UNTOUCHED, self.MAIN))
+        self.assertNotIn(self.RETIRED, self.notes_at(head), "premise: the resolved plain merge leaves retired-note out")
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_a_note_the_branch_never_touched_passes_with_union(self):
+        self.start(union=True, retire=False)
+        head = self.merge_main()
+        self.assertIn(self.UNTOUCHED, self.notes_at(head), "premise: untouched-note is in the head")
+        self.assertEqual(self.r.verdict(), [])
+
+    def test_a_note_the_branch_never_touched_passes_plain(self):
+        self.start(union=False, retire=False)
+        head = self.merge_main(final=self.text(self.UNTOUCHED, self.RETIRED, self.OWN, self.MAIN))
+        self.assertIn(self.UNTOUCHED, self.notes_at(head), "premise: untouched-note is in the head")
+        self.assertEqual(self.r.verdict(), [])
+
+    def start_doubled(self):
+        """The branch adds doubled-note and main adds it too, at the file's end, so the union merge of main keeps two copies."""
+        return self.start(union=True, retire=False, branch=(self.UNTOUCHED, self.RETIRED, self.DOUBLED, self.OWN),
+                          main=(self.UNTOUCHED, self.RETIRED, self.MAIN, self.DOUBLED))
+
+    def test_a_dedupe_of_a_doubled_note_passes(self):
+        self.start_doubled()
+        head = self.merge_main()
+        self.assertEqual(self.copies(head), 2, "premise: the union merge doubled doubled-note")
+        head = self.drop_one_copy(head)
+        self.assertEqual(self.copies(head), 1, "premise: the branch's own delete left one copy")
+        self.assertEqual(self.r.verdict(), [], "one copy left by a dedupe was refused, as if a merge had revived the note")
+
+    def test_a_dedupe_of_two_copies_on_main_passes_without_a_merge(self):
+        self.start(union=True, retire=False, base=(self.UNTOUCHED, self.RETIRED, self.DOUBLED, self.DOUBLED),
+                   branch=(self.UNTOUCHED, self.RETIRED, self.DOUBLED),
+                   main=(self.UNTOUCHED, self.RETIRED, self.DOUBLED, self.DOUBLED, self.MAIN))
+        self.assertEqual(self.copies("main"), 2, "premise: main holds two copies of doubled-note")
+        self.assertEqual(self.copies("HEAD"), 1, "premise: the branch's own delete left one copy")
+        self.assertEqual(self.r.verdict(), [], "a dedupe of two copies on main was refused, with no merge in the branch")
+
+    def test_a_doubled_note_deduped_then_brought_back_by_a_merge_is_refused(self):  # control
+        self.start_doubled()
+        head = self.merge_main()
+        dedupe = self.drop_one_copy(head)
+        self.assertEqual(self.copies(dedupe), 1, "premise: the dedupe left one copy")
+        self.commit_notes("main keeps two copies of the doubled note", self.body("main") + [self.DOUBLED], on_main=True)
+        head = self.merge_main()
+        self.assertEqual(self.copies(head), 2, "premise: the merge of main put the second copy back")
+        self.assert_refused(self.r.verdict(), slug="doubled-note", deleted=dedupe)
+
+    def test_a_doubled_note_deleted_whole_then_brought_back_by_a_merge_is_refused(self):  # control
+        self.start_doubled()
+        head = self.merge_main()
+        whole = self.commit_notes("delete both copies of the doubled note", [l for l in self.body(head) if l != self.DOUBLED])
+        self.assertEqual(self.copies(whole), 0, "premise: the branch's delete left no copy")
+        self.commit_notes("main adds a note after the doubled note", self.body("main") + [self.LATER], on_main=True)
+        head = self.merge_main()
+        self.assertEqual(self.copies(head), 1, "premise: the union merge re-added one copy")
+        self.assert_refused(self.r.verdict(), slug="doubled-note", deleted=whole)
+
+    def test_a_dedupe_on_a_merged_in_side_branch_passes(self):
+        self.start_doubled()
+        head = self.merge_main()
+        self.assertEqual(self.copies(head), 2, "premise: the union merge doubled doubled-note")
+        self.r.sh("checkout", "-q", "-b", "side")
+        lines = self.body(head)
+        lines.remove(self.DOUBLED)
+        self.commit_notes("side deletes one copy of the doubled note", lines)
+        self.r.sh("checkout", "-q", "feat")
+        self.r.sh("merge", "--no-ff", "-m", "Merge the side branch into the branch", "side")
+        head = self.r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 3, "premise: the head is a merge commit")
+        self.assertEqual(self.copies(head), 1, "premise: the merged side branch left one copy")
+        self.assertEqual(self.r.verdict(), [], "a dedupe on a merged-in side branch was refused as a revival")
+
+    def test_a_note_the_branch_deletes_then_re_adds_on_purpose_passes(self):  # control
+        self.start(union=True)
+        head = self.commit_notes("the branch re-adds retired-note on purpose", [self.UNTOUCHED, self.RETIRED])
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the re-add put retired-note back in the head")
+        self.assertEqual(self.r.verdict(), [], "a note the branch deleted and then re-added on purpose was refused")
+
+    def test_a_merge_brings_back_a_deleted_note_reworded_is_refused(self):  # control
+        self.start(union=True, main=(self.UNTOUCHED, self.REWORDED, self.MAIN))
+        head = self.merge_main()
+        self.assertIn(self.REWORDED, self.notes_at(head), "premise: the union merge brought retired-note back reworded")
+        self.assertNotIn(self.RETIRED, self.notes_at(head), "premise: the head holds no copy of the original text")
+        self.assert_refused(self.r.verdict())
+
+    def test_a_merge_brings_back_a_deleted_note_then_an_edit_in_place_is_refused(self):
+        self.start(union=True)
+        head = self.merge_main()
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the union merge brought retired-note back")
+        self.commit_notes("reword the revived note in place", [self.REWORDED if line == self.RETIRED else line for line in self.body(head)])
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", "HEAD").split()), 2, "premise: the reword is a non-merge commit")
+        self.assertEqual(sum(line.startswith("- retired-note:") for line in self.body("HEAD")), 1,
+                         "premise: the reword left one copy of retired-note")
+        self.assertNotIn(self.RETIRED, self.body("HEAD"), "premise: the reword replaced the original text")
+        got = self.r.verdict()
+        self.assert_refused(got)
+        named = [p for p in got if "retired-note" in p and self.retire[:7] in p]
+        self.assertIn(self.IN_PLACE, named[0].lower(), "the refusal for retired-note does not say that an edit in place does not keep a note: %r" % named)
+
+    def test_a_merge_brings_back_a_deleted_note_then_deleted_and_re_added_passes(self):  # control
+        self.start(union=True)
+        head = self.merge_main()
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the union merge brought retired-note back")
+        deleted = self.commit_notes("delete the revived note again", [line for line in self.body(head) if line != self.RETIRED])
+        self.assertNotIn(self.RETIRED, self.notes_at(deleted), "premise: the last commit deletes retired-note")
+        self.commit_notes("re-add the note on purpose", self.body(head))
+        self.assertIn(self.RETIRED, self.notes_at("HEAD"), "premise: the re-add put retired-note back in the head")
+        self.assertEqual(self.r.verdict(), [], "a note a merge brought back, then deleted and re-added on purpose, was refused")
+
+    def octopus(self):
+        """Merges two side branches into the branch in one commit, so the head has three parents. Each side is cut from the
+        branch's head and adds its own file. Neither touches the notes file, so the octopus strategy merges no content. -> the head sha."""
+        r = self.r
+        feat = r.sh("rev-parse", "HEAD")
+        for name in ("side-a", "side-b"):
+            r.sh("checkout", "-q", "-b", name, feat)
+            r.put(name + ".txt", name + "\n")
+            r.sh("add", "-A")
+            r.sh("commit", "-q", "-m", "%s adds its own file" % name)
+        r.sh("checkout", "-q", "feat")
+        r.sh("merge", "--no-ff", "-m", "Octopus merge of two side branches", "side-a", "side-b")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", head).split()), 4, "premise: the head is an octopus merge of three parents")
+        return head
+
+    def unknown_of(self, head):
+        """The Unknown that check() raises for head, or None when check() returns a verdict."""
+        try:
+            C.check(self.r.dir, "origin/main", head)
+        except C.Unknown as e:
+            return e
+        return None
+
+    def main_on(self, head, *extra):
+        """main() on the branch's repo at head, with CI unset. -> (rc, the lines it printed)."""
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(io.StringIO()) as out:
+            os.environ.pop("CI", None)
+            rc = C.main(["--repo", self.r.dir, "--upstream", "origin/main", "--head", head, *extra])
+        return rc, out.getvalue().splitlines()
+
+    def test_an_octopus_merge_does_not_hide_a_revived_note(self):
+        self.start(union=True)
+        self.merge_main()
+        head = self.octopus()
+        e = self.unknown_of(head)
+        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
+        self.assert_refused(getattr(e, "problems", None) or [])
+
+    def test_an_octopus_unknown_for_a_revived_note_carries_its_notes_as_a_list(self):
+        self.start(union=True)
+        self.merge_main()
+        head = self.octopus()
+        e = self.unknown_of(head)
+        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
+        self.assertIsInstance(getattr(e, "notes", None), list,
+                              "the UNKNOWN for the octopus merge carries no .notes list: %r" % (getattr(e, "notes", None),))
+
+    def test_main_prints_the_finding_then_unknown_and_exits_1_without_strict(self):
+        self.start(union=True)
+        self.merge_main()
+        head = self.octopus()
+        rc, lines = self.main_on(head)
+        self.assertEqual(rc, 1, "main() exits 0 on an octopus merge that hides a revived note: %r" % lines)
+        fail = [i for i, l in enumerate(lines) if "FAIL" in l and "retired-note" in l and self.retire[:7] in l]
+        unknown = [i for i, l in enumerate(lines) if "UNKNOWN" in l]
+        self.assertTrue(fail, "main() printed no FAIL line for retired-note: %r" % lines)
+        self.assertTrue(unknown, "main() printed no UNKNOWN line: %r" % lines)
+        self.assertLess(fail[0], unknown[0], "main() printed UNKNOWN before the FAIL line: %r" % lines)
+
+    def test_an_octopus_merge_with_no_finding_stays_a_plain_unknown(self):  # control
+        self.start(union=True, retire=False)
+        self.merge_main()
+        head = self.octopus()
+        e = self.unknown_of(head)
+        self.assertIsNotNone(e, "premise: check() reads the octopus merge as UNKNOWN")
+        self.assertFalse(getattr(e, "problems", None), "an octopus merge with no finding carries findings: %r" % (getattr(e, "problems", None),))
+        rc, lines = self.main_on(head)
+        self.assertEqual(rc, 0, "an UNKNOWN with no finding exits 1 without --strict: %r" % lines)
+        self.assertTrue(any("UNKNOWN" in l for l in lines), "main() printed no UNKNOWN line: %r" % lines)
+        rc, lines = self.main_on(head, "--strict")
+        self.assertEqual(rc, 1, "--strict does not exit 1 on an UNKNOWN: %r" % lines)
+
+    def test_another_unknown_from_the_history_read_carries_no_findings(self):  # control
+        self.start(union=True)
+        head = self.merge_main()
+        boom = C.Unknown("git cat-file failed on a read of the history: test")
+        with unittest.mock.patch.object(C, "lost_lines", side_effect=boom):
+            e = self.unknown_of(head)
+        self.assertIsNotNone(e, "premise: the faulted read raised")
+        self.assertEqual(str(e), str(boom), "a read that is not the octopus read changed its Unknown: %r" % str(e))
+        self.assertFalse(getattr(e, "problems", None), "a read that is not the octopus read carries findings: %r" % (getattr(e, "problems", None),))
+
+    def test_a_merge_brings_back_a_deleted_non_slug_note_is_refused(self):
+        self.start(union=True, base=(self.UNTOUCHED, self.RETIRED, self.NONSLUG), branch=(self.UNTOUCHED, self.RETIRED),
+                   main=(self.UNTOUCHED, self.RETIRED, self.NONSLUG, self.MAIN))
+        head = self.merge_main()
+        self.assertIn(self.NONSLUG, self.notes_at(head), "premise: the union merge brought the non-slug note back")
+        self.assert_refused(self.r.verdict(), slug=self.NONSLUG[2:])
+
+    def test_a_merge_brings_back_a_deleted_non_slug_note_in_a_file_of_only_such_notes_is_refused(self):
+        self.start(union=True, base=(self.NONSLUG,), branch=(), main=(self.NONSLUG, self.NONSLUG_MAIN))
+        head = self.merge_main()
+        self.assertEqual(set(self.body(head)), {self.NONSLUG, self.NONSLUG_MAIN},
+                         "premise: the head holds only non-slug notes, with the deleted one back")
+        self.assert_refused(self.r.verdict(), slug=self.NONSLUG[2:])
+
+    def test_a_non_slug_note_the_branch_deletes_then_re_adds_on_purpose_passes(self):  # control
+        self.start(union=True, base=(self.UNTOUCHED, self.NONSLUG), branch=(self.UNTOUCHED,),
+                   main=(self.UNTOUCHED, self.NONSLUG, self.MAIN))
+        head = self.commit_notes("the branch re-adds the non-slug note on purpose", [self.UNTOUCHED, self.NONSLUG])
+        self.assertIn(self.NONSLUG, self.notes_at(head), "premise: the re-add put the non-slug note back in the head")
+        self.assertEqual(self.r.verdict(), [], "a non-slug note the branch deleted and re-added on purpose was refused")
+
+    def test_an_in_place_edit_of_a_non_slug_note_is_not_a_revival(self):  # control
+        self.start(union=True, base=(self.UNTOUCHED, self.NONSLUG, self.RETIRED),
+                   branch=(self.UNTOUCHED, self.NONSLUG_EDITED, self.RETIRED),
+                   main=(self.UNTOUCHED, self.NONSLUG, self.RETIRED, self.MAIN))
+        head = self.merge_main()
+        self.assertIn(self.NONSLUG_EDITED, self.notes_at(head), "premise: the branch's in-place edit is in the head")
+        self.assertNotIn(self.NONSLUG, self.notes_at(head), "premise: the head holds no copy of the original text")
+        self.assertEqual(self.r.verdict(), [], "an in-place edit of a non-slug note was refused as a revival")
+
+    def test_a_deleted_non_slug_note_does_not_flag_a_different_note_with_the_same_start(self):  # control
+        self.start(union=True, base=(self.UNTOUCHED, self.NONSLUG, self.SIBLING), branch=(self.UNTOUCHED, self.SIBLING),
+                   main=(self.UNTOUCHED, self.NONSLUG, self.SIBLING, self.SIBLING_NEW))
+        head = self.merge_main()
+        self.assertEqual(self.body(head), [self.UNTOUCHED, self.SIBLING, self.SIBLING_NEW],
+                         "premise: the head holds the sibling and the new note, not the deleted one")
+        self.assertEqual(self.r.verdict(), [], "a deleted non-slug note flagged a different note that shares its first 40 characters")
 
 
 if __name__ == "__main__":
