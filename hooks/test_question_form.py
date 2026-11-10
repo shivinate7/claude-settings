@@ -1272,6 +1272,40 @@ def case_command_in_item_spans():
          entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
 
 
+# ------------------------------------------------------------------ a span an edit verb quotes is text, not a shell line
+
+def span_scope(name, text, body):
+    """The scope a quoted-span case judges (P7): `text` holds exactly one unfenced span, `body`. Without it a pass
+    could come from a step with no span at all."""
+    spans = call("_code_spans", text)
+    got = [(b, f) for _, b, f in spans] if isinstance(spans, list) else spans
+    check("span scope: " + name, got == [(body, False)], "want one span %r, got %r" % (body, got))
+
+
+def case_quoted_span_after_edit_verb():
+    # An edit verb before a span, with no run verb in its sentence, quotes the span: the step finds or replaces
+    # that line of a file, so the span-flag clause reads `scripts/x.py --y` as text (question_form._shell_line,
+    # `quoted`). The same span after a run verb is a command. A listed program stays a shell line when quoted, and
+    # so does a span whose sentence has both verbs: a run verb in the sentence wins (command_in_item_hit).
+    span = "scripts/x.py --y"
+    for verb in ("Find", "Locate", "Replace", "Swap", "Search for", "Look for", "Edit", "Delete", "Remove"):
+        text = "%s the line `%s` in the page" % (verb, span)
+        span_scope("%s quotes the span" % verb, text, span)
+        page("an edit-verb step (%s) quoting `%s` passes" % (verb, span), "set", entry_of(task_item([text])), None)
+    text = "Run `%s` in the page" % span
+    span_scope("run takes the same span", text, span)
+    page("the same span after run is refused as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+    text = "Find the line `git push origin x` in the page"
+    span_scope("find quotes a listed program", text, "git push origin x")
+    page("a quoted git push after find is still refused as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+    text = "Find the line and run `%s` in the page" % span
+    span_scope("find and run share one sentence", text, span)
+    page("a sentence with both find and run refuses the span as a shell line", "set", entry_of(task_item([text])),
+         ("command-in-item", "shell line"))
+
+
 # ------------------------------------------------------------------ a PowerShell string and a step's shell span
 
 def ps_task(ps, mac="git log -1"):
@@ -2495,6 +2529,7 @@ def main():
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
+                 case_quoted_span_after_edit_verb,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
