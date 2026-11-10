@@ -1475,8 +1475,8 @@ BRIEF_STEP_REASON = (
 
 
 BRIEF_GRANT_REASON = (
-    "this brief opens with a Grant line that holds no owner words: it holds a `<` or has no letter or digit after "
-    "`Grant:`. A template placeholder is no grant. Put the owner's words and the time after `Grant:`, as the "
+    "this brief opens with a Grant line that is empty or a placeholder: it holds a `<`, or no letter or digit, "
+    "after `Grant:`. A template placeholder is no grant. Put the grant and its time after `Grant:`, as the "
     "owner gave them. (decision agent-model-cap, the lane start)"
 )
 
@@ -1524,7 +1524,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if not _BRIEF_MARKER_LINE.match(first):
         return None
     if grant is not None and not grant_line_holds_words(grant):
-        return "lane brief under a Grant line with no owner words", BRIEF_GRANT_REASON
+        return "lane brief under an empty or placeholder Grant line", BRIEF_GRANT_REASON
     if tool != BRIEF_TOOL:
         return topic_hit(first, lane_tags(tool_input))
     target = tool_input.get("session_id")

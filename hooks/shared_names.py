@@ -6,7 +6,7 @@ guard or any sibling hook.
 
 import os
 import re
-from typing import Optional
+from typing import Any, Optional
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -94,7 +94,7 @@ LANE_GRANT_MARKER = "Grant:"
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 
 
-def lane_tags(tool_input) -> list:
+def lane_tags(tool_input: dict[str, Any]) -> list[Any]:
     """The `tags` of a call as a list: one string is a list of one; anything else that is not a list is empty."""
     tags = tool_input.get("tags")
     if isinstance(tags, str):
@@ -102,7 +102,7 @@ def lane_tags(tool_input) -> list:
     return tags if isinstance(tags, list) else []
 
 
-def is_lane_create_session(tool: str, tool_input) -> bool:
+def is_lane_create_session(tool: str, tool_input: dict[str, Any]) -> bool:
     """True for a create_session call that tags a lane: any tag that, stripped and casefolded, is LANE_TAG. The one
     reading of the lane tag; the lane checks and the floor's remedy choice share it."""
     return tool == CREATE_SESSION_TOOL and any(
