@@ -1,0 +1,14 @@
+{
+  "title": "A failed or refused review-record post does not count as posted",
+  "phase": "now",
+  "status": "todo",
+  "order": 958,
+  "owner": "lane",
+  "why": "A record post that failed or was refused by a hook still counts as posted, so a builder spawn is allowed with no record on the PR.",
+  "note": "From lane record-after-each-round, round 3 reviewer (sonnet) PASS on #1678, 01:34 CST Nov 10. hooks/guard_merge.py review_record_hit (~:1709, :1625): an is_error add_issue_comment with the marker, or a cloud-refused Bash gh pr comment, counts as the posted record; `failed` (~:1693) filters only reviewer spawns. Proof: scratch transcript; builder spawn allowed. Fix: skip posts whose tool_use id is in `failed`, plus a case and a mutant. Starts after #1678 merges.",
+  "updatedAt": "2026-11-10T01:35:00-06:00",
+  "lane": "",
+  "blockedBy": [
+    "record-after-each-round"
+  ]
+}

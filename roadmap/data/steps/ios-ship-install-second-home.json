@@ -5,7 +5,7 @@
   "order": 944,
   "owner": "coordinator",
   "why": "Degen gap 6. Owner 20:25 CST Nov 9: queue each of Degen's eight claude-settings gaps as a step or debt, with its incident (via the coordinator 20:30 CST). Decision ios-ship-is-one-shared-tool gives ios-ship the install job, but Degen keeps tools/phone_install.py as a second home, because the install runs on a Linux runner and ios-ship is macOS bash. Incident: Degen lane phone-direct-install, 2026-11-09 20:03 CST.",
-  "note": "Fix: record the stated reason for the second home in the decision (rule building-one-home-per-capability), or make ios-ship's install run on Linux. Related: ios-ship-export-method. Filed 20:27 CST Nov 9. Lane session_013NEJL4U9VGY1K4VRnZxKUo, shared with ios-ship-export-method (coordinator 20:36-20:41 CST Nov 9).",
-  "updatedAt": "2026-11-09T20:34:00-06:00",
+  "note": "Fix: record the stated reason for the second home in the decision (rule building-one-home-per-capability), or make ios-ship's install run on Linux. Related: ios-ship-export-method. Filed 20:27 CST Nov 9. Lane session_013NEJL4U9VGY1K4VRnZxKUo, shared with ios-ship-export-method (coordinator 20:36-20:41 CST Nov 9). From #2493 round 3 (coordinator 01:34 CST Nov 10): the 'no wrapper script' line; 'three copies drifted' fits a second install home; unknown whether Degen's runner holds the key or account values.",
+  "updatedAt": "2026-11-10T01:35:00-06:00",
   "lane": "session_013NEJL4U9VGY1K4VRnZxKUo"
 }
