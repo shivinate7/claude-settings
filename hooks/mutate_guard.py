@@ -46,7 +46,8 @@ plants each listed defect in a checkout of HEAD, installs the profile's packages
 catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
 `Known-defect-removed: <id>` trailer in REF..HEAD, else `MISSING <id>`; an entry that differs from REF's needs a
 `Known-defect-changed: <id>` trailer, else `CHANGED <id>`. Exit 1 when any defect is MISS, UNKNOWN, MISSING or CHANGED.
-`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
+`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile. A guard module
+with a family row also prints its `hooks/test_guard.py::<family>` lines beside the suites that import it.
 """
 
 import contextlib
@@ -126,6 +127,20 @@ MUTATIONS = [
     ("pointer-head: call every tree the pointer checkout",
      '    return mine == theirs',
      '    return True', "guard", 'pointer: checkout of a branch in another checkout is allowed'),
+    # RULE pointer-edit, a write into the pointer checkout's own files. Each mutant breaks one arm.
+    ("pointer-edit: the pointer's own .git is judged like a file of the checkout",
+     '                and path_is_inside(resolved, git_dir) is not True\n',
+     '', "guard", 'pointer-edit: Write into the pointer\'s own .git is not judged'),
+    ("pointer-edit: a linked worktree nested under the pointer is judged like a file of the checkout",
+     '                and path_is_inside(resolved, worktree_dir) is not True)',
+     '                and True)', "guard", 'pointer-edit: Write into a linked worktree nested under the pointer is allowed'),
+    ("pointer-edit: no write is ever judged",
+     '    pointer = pointer_checkout()\n    if not pointer:\n        return ""\n    git_dir',
+     '    return ""\n    pointer = pointer_checkout()\n    if not pointer:\n        return ""\n    git_dir', "guard", 'pointer-edit: Write of a tracked file in the pointer checkout is refused'),
+    # The gate is WRITE_TOOLS. Artifact and ArtifactData carry a file_path too, and both allow cases go red when it drops.
+    ("pointer-edit: the write-tool gate is dropped, so Artifact and ArtifactData are judged like writes",
+     '    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd) if tool in WRITE_TOOLS else ""',
+     '    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd)', "guard", 'with a pointer file as file_path is not a write and is allowed'),
     ("pointer-head: lose the exemption for a move to main",
      '    if target == PROTECTED_BASE:\n        return ""',
      '    if target == "no-such-branch":\n        return ""', "guard", 'pointer: a move back to main restores the invariant and passes'),
@@ -572,11 +587,11 @@ MUTATIONS = [
      '',
      "guard", "verdict-pipe: command -v names verdict, piped to head"),
     ("verdict-pipe: a verdict word anywhere in the segment counts, not only ahead of the command",
-     '        reach = tokens if at is None else tokens[:at + 1]',
+     '        reach = tokens if at is None else tokens[:_skip_uv_run(tokens, at) + 1]',
      '        reach = tokens',
      "guard", "verdict-pipe: grep names verdict, pipe out of grep"),
     ("verdict-pipe: a verdict run through a wrapper such as timeout or python is no longer read",
-     '        reach = tokens if at is None else tokens[:at + 1]',
+     '        reach = tokens if at is None else tokens[:_skip_uv_run(tokens, at) + 1]',
      '        reach = tokens[at:] if at is not None else tokens',
      "guard", "verdict-pipe: a timeout ahead of verdict, piped to tail"),
     ("detached-launch: the clause is never called, so the whole rule is gone",
@@ -3205,12 +3220,14 @@ MUTATIONS = [
 ]
 
 
-# REPORT MODE. File -> the suites that exercise it or name it. A suite not listed here (hooks/test_guard.py,
-# merge/test_merge.py, lint/test_ci_scope.py) is not run against that file: test_guard.py and test_merge.py
-# take minutes each per mutant, and test_ci_scope.py only passes the file's path to the scope detector.
+# REPORT MODE. File -> the suites that exercise it or name it. A suite not listed here (merge/test_merge.py,
+# lint/test_ci_scope.py) is not run against that file: test_merge.py takes minutes per mutant, and
+# test_ci_scope.py only passes the file's path to the scope detector. hooks/test_guard.py runs only as the
+# families of GUARD_MODULE_FAMILIES, or whole against REPORT_GOLD's file: a whole run takes minutes per mutant.
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
     ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
+                             "lint/test_report_guard_stamped.py",
                              "lint/test_report_guard_landing.py",
                              "lint/test_report_guard_refusal.py", "lint/test_report_guard_handoff.py",
                              "lint/test_report_guard_cannot.py",
@@ -3224,6 +3241,27 @@ REPORT_TARGETS = [
                               "janitor/test_session_end_sweep.py", "lint/test_settings_matcher.py"]),
     ("lint/check_silent_undo.py", ["lint/test_check_silent_undo.py"]),
 ]
+# hooks/guard_<x>.py -> the families of hooks/test_guard.py (FAMILIES there) that exercise it. `--tests-for` prints a row as
+# `hooks/test_guard.py::<family>` lines beside the other suites that load the module, which the engine runs with
+# GUARD_FAMILY=<family> for a family line. A mutant meets only the families that reach its module, since the whole file takes
+# minutes. A guard module is a row, REPORT_GOLD's file, or in
+# GUARD_MODULE_EXEMPT (a test checks this).
+GUARD_MODULE_FAMILIES = {
+    "hooks/guard_kill.py": ["kill", "git-env"],
+    "hooks/guard_env.py": ["env", "git-env"],
+    "hooks/guard_frozen.py": ["frozen"],
+    "hooks/guard_pointer.py": ["pointer"],
+    "hooks/guard_rm_var.py": ["rm-var"],
+    "hooks/guard_shared_tree.py": ["shared-tree"],
+    "hooks/guard_stream.py": ["stream"],
+    "hooks/guard_push_delete.py": ["push-delete"],
+    "hooks/guard_branch_worktree.py": ["branch-worktree"],
+    "hooks/guard_merge.py": ["merge"],
+    "hooks/guard_mask_script.py": ["mask-script"],
+}
+GUARD_MODULE_EXEMPT = {
+    "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
+}
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
 # one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor
 # fails the CI job), which an ast sample of other files cannot be held against.
@@ -3780,8 +3818,9 @@ def _loads_module(source: str, stem: str) -> bool:
 def tests_for_main(argv) -> int:
     """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
     suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). Any other file
-    prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
+    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A file with a row
+    in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
+    `hooks/test_guard.py`. Any other file prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
     `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     import re
@@ -3816,6 +3855,10 @@ def tests_for_main(argv) -> int:
                     continue
                 if _loads_module(source, stem):
                     names.add(item)
+        if path in GUARD_MODULE_FAMILIES:
+            # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
+            names.discard("hooks/test_guard.py")
+            names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
     for name in sorted(names):
         print(name)
     return 0

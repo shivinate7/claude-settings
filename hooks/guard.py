@@ -56,6 +56,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
+  pointer-edit         deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
+                       pointer checkout's own files. The pointer's `.git`, a linked worktree under
+                       `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
+                       missing pointer and the read tools pass. A shell write is not judged. The
+                       reason names the EnterWorktree tool. An override lifts a direct pointer path. A
+                       config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
+                       per target), so no override lifts it, as with frozen-path. It spawns no git.
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -145,11 +152,20 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  agent-no-remote-tools
+                       deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
+                       tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
+                       scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
+                       An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
+                       ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
+                       or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
+                       explicit GET and the merge tool pass. A local session skips it. An override lifts it.
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD, on the base's first-parent line, passes.
                        (records-index-at-merge)
@@ -449,7 +465,7 @@ while True:
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_head_hit,
+            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -461,8 +477,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -2728,11 +2744,16 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
-# The one home of the claude-code-remote server name. lint/check_agent_models.py reads it from here.
-REMOTE_SERVER = "mcp__claude-code-remote"
+from shared_names import REMOTE_OUTWARD_TOOLS, REMOTE_SERVER  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
+AGENT_NO_REMOTE_REASON = (
+    "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
+    "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
+    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "(decision lanes-start-as-agents, an agent is not a lane)"
+)
 from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
@@ -4379,6 +4400,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
+    # 5b. A gh write in a cloud session (rule gh-write-cloud): the GitHub MCP tools and the merge tool write there.
+    # It runs before steps 6 and 6b so a cloud pr merge or pr create gets the MCP remedy, not one that names the
+    # refused form.
+    if is_cloud():
+        for text, _in_message in _substitutions(stripped)[0]:
+            for seg in split_segments(text):
+                label = gh_write_of(seg) if seg.strip() else ""
+                if label:
+                    refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
+
     # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
     # could not run. Judged per segment from the command word, so quoted text never fires it.
     for segment in split_segments(stripped):
@@ -6016,6 +6047,39 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
+    # 0, pointer-edit. A write into the pointer checkout's own files is live for every session. An override lifts it
+    # when the target is a direct pointer path. never_lifted calls is_frozen per target, so a config-dir spelling of a
+    # pointer file is not liftable, as with frozen-path.
+    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd) if tool in WRITE_TOOLS else ""
+    if pointer_hit:
+        refuse(tool, "deny", "pointer-edit", POINTER_EDIT_REASON, "write target in the pointer checkout: " + pointer_hit)
+
+    # 8a. The rules that own an outward claude-code-remote call judge it before agent-no-remote-tools (8b), so an agent's call to
+    # one of these tools gets the specific remedy. Each reads only its own tools, so none reorders with the spawn rules below.
+    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
+    trust_transcript = payload.get("transcript_path")
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    if matched:
+        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
+
+    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
+    archive_agent = payload.get("agent_id")
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
+    if archived:
+        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
+
+    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if briefed:
+        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
+    # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
+    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
+    # agent's create_session is refused here. An override lifts it.
+    if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
+        refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
@@ -6096,24 +6160,6 @@ def judge(payload) -> None:
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
-
-    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
-    trust_transcript = payload.get("transcript_path")
-    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
-    if matched:
-        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
-
-    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archive_agent = payload.get("agent_id")
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
-                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
-    if archived:
-        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
-
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":

@@ -94,6 +94,7 @@ FAMILIES = {
     "shared-tree": "stash, reset, restore, checkout and the subject read",
     "branch-worktree": "branch delete and worktree remove/prune",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
+    "pointer-edit": "the pointer checkout's own files: a Write, Edit, MultiEdit or NotebookEdit into them is refused, naming EnterWorktree; its .git, a linked worktree, a target outside it, a stood-down pointer and the read tools pass",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "scratchpad-owner": "rule scratchpad-owner: an agent that runs a script another agent of its session wrote into the shared scratchpad is asked; the write-time record, the run forms, the passes, the reads and the cost",
     "pointer": "the pointer HEAD checkout",
@@ -147,6 +148,7 @@ FAMILIES = {
     "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -699,6 +701,8 @@ def arch_copy(archive, others=()):
 PTRCFG = os.path.join(ROOT, "ptrcfg")
 PTRMAIN = os.path.join(ROOT, "ptrmain")
 PTRWT = os.path.join(ROOT, "ptrlane")
+# A linked worktree NESTED under the pointer checkout, at the harness's `.claude/worktrees/<name>` shape.
+PTRNEST = os.path.join(PTRMAIN, ".claude", "worktrees", "ptrnest")
 PTRBADCFG = os.path.join(ROOT, "ptrbadcfg")
 PTRGONECFG = os.path.join(ROOT, "ptrgonecfg")
 PTRNOCFG = os.path.join(ROOT, "ptrnocfg")
@@ -1954,6 +1958,18 @@ def _build_pointer():
     run_vcs(PTRMAIN, "worktree", "add", "-q", PTRWT, "-b", "ptrlane")
     _require_clean(PTRWT)
     _require_pointer_branch(PTRMAIN, "main")
+    # A linked worktree NESTED under the pointer, made the way the harness makes a lane's. It has its
+    # own git directory, so a write into it is a worktree's write and not the pointer's own. The
+    # scope check stops the suite if git gave it the pointer's git directory instead.
+    nested = run_vcs(PTRMAIN, "worktree", "add", "-q", PTRNEST, "-b", "ptrnest")
+    if nested.returncode != 0:
+        sys.exit("fixture setup failed: the nested worktree at %r: %s" % (PTRNEST, nested.stderr.strip()))
+    gitdir = run_vcs(PTRNEST, "rev-parse", "--absolute-git-dir")
+    if gitdir.returncode != 0 or os.path.normcase(os.path.realpath(gitdir.stdout.strip())) == (
+            os.path.normcase(os.path.realpath(os.path.join(PTRMAIN, ".git")))):
+        sys.exit("fixture setup failed: the nested worktree at %r does not hold its own git directory: %r"
+                 % (PTRNEST, gitdir.stdout.strip()))
+    _require_clean(PTRNEST)
     _set_origin_main(PTRMAIN, "HEAD")
     # The pointer line has the same shape the installer writes and the shell readers parse.
     write(os.path.join(PTRCFG, "CLAUDE.md"), "@" + slash(PTRMAIN) + "/CLAUDE.md\n")
@@ -1980,6 +1996,10 @@ def _build_pointer():
     write(os.path.join(PTRBADCFG, "CLAUDE.md"), "rules with no pointer line\n")
     write(os.path.join(PTRGONECFG, "CLAUDE.md"),
           "@" + slash(os.path.join(ROOT, "nosuchcheckout")) + "/CLAUDE.md\n")
+    # Scope before subject: the stand-down cases need the directory PTRGONECFG names to be absent.
+    if os.path.exists(os.path.join(ROOT, "nosuchcheckout")):
+        sys.exit("fixture setup failed: the directory the gone-pointer rules name exists: %r"
+                 % os.path.join(ROOT, "nosuchcheckout"))
     os.makedirs(PTRNOCFG, exist_ok=True)
 
     make_blind_git(GITBLIND)
@@ -4196,6 +4216,14 @@ def git_reads_ancestor_shallow_case():
     return False, "branch_is_ancestor(HEAD, pin) in a shallow clone reads %r, want None (unknown)" % (got,)
 
 
+def git_reads_origin_one_segment_case():
+    """An origin path with one segment names no owner, so origin_slug reads None. A pin of the current parse."""
+    got = _load_git_reads().origin_slug("https://host/r")
+    if got is None:
+        return True, "an origin whose path has one segment, https://host/r, reads None"
+    return False, "origin_slug('https://host/r') reads %r, want None (no owner segment)" % (got,)
+
+
 def _branch_delete_in(where, branch):
     """Claude's `git branch -D <branch>` in `where`, decided by the guard under its own config folder. Returns
     (decision, reason, config folder); the folder holds the guard.log that the call wrote."""
@@ -4400,6 +4428,92 @@ sh("pointer: a pointer naming a directory that is gone fires nothing",
    VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRGONECFG)
 sh("pointer: no global rules file at all fires nothing",
    VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRNOCFG)
+
+
+# =========================================================================== 1b. the pointer's own files
+FAMILY = "pointer-edit"
+#
+# Rule pointer-edit: a Write, Edit, MultiEdit or NotebookEdit whose TARGET is one of the pointer
+# checkout's own files is refused, and the remedy names the EnterWorktree tool. Every session on this
+# machine runs its hooks, its lint and its agents out of that checkout, so a file edited in it is live
+# for all of them at once. pointer-head guards a branch switch there and nothing else.
+#
+# The rule reads the TARGET path, never the cwd. Its passes are the pointer's own `.git`, a linked
+# worktree of the same clone (nested under the pointer, or elsewhere), and any target outside the
+# pointer. A rules file that is missing, unreadable or names no pointer stands the rule down. Read,
+# Grep, Artifact and ArtifactData are never judged: the gate is WRITE_TOOLS. A shell write into the
+# pointer is out of scope: a note only.
+#
+# The targets are plain fixture files, never the pointer's CLAUDE.md or anything under hooks/, lint/ or
+# agents/. frozen-path judges those only for the config-dir spelling, or when the pointer is the live pin
+# or the main mirror, so these cases must not depend on it. TEMP_DIR is ROOT/tmp for this section, as in the
+# hand-made-worktree section below, so ROOT under the system temp is not read as temp.
+TEMP_DIR = os.path.join(ROOT, "tmp")
+PE_TARGET = os.path.join(PTRMAIN, "f.txt")                       # a tracked file of the pointer checkout
+PE_NEW = os.path.join(PTRMAIN, "docs", "brand-new.md")           # a file the pointer does not hold yet
+PE_NOTEBOOK = os.path.join(PTRMAIN, "docs", "scratch.ipynb")     # a notebook path in the pointer
+PE_TEMP = os.path.join(TEMP_DIR, "probe.txt")                    # a file in the guard's temp folder
+PE_GITDIR = os.path.join(PTRMAIN, ".git", "pointer-edit-probe")  # inside the pointer's own .git
+# Under the directory PTRGONECFG names, which the fixture never creates. Its stand-down is the only
+# thing that passes this write: with the directory taken as the pointer, the target is inside it.
+PE_GONE_TARGET = os.path.join(ROOT, "nosuchcheckout", "f.txt")
+
+# THE DENY CASES. Each names the pointer itself as cwd, except the last, from a directory that is no
+# checkout, which proves the TARGET decides. Each reason must carry the EnterWorktree tool. Each stand-
+# down case below names the same target under a stood-down config, so the pair pins the cause.
+add("pointer-edit: Write of a tracked file in the pointer checkout is refused", "deny", "pointer-edit",
+    tool="Write", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET, content="changed\n",
+    carries="EnterWorktree")
+add("pointer-edit: Edit of a tracked file in the pointer checkout is refused", "deny", "pointer-edit",
+    tool="Edit", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET, old_string="base",
+    new_string="changed", carries="EnterWorktree")
+add("pointer-edit: MultiEdit of a tracked file in the pointer checkout is refused", "deny", "pointer-edit",
+    tool="MultiEdit", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET,
+    edits=[{"old_string": "base", "new_string": "changed"}], carries="EnterWorktree")
+add("pointer-edit: NotebookEdit into the pointer checkout is refused", "deny", "pointer-edit",
+    tool="NotebookEdit", cwd=PTRMAIN, config=PTRCFG, notebook_path=PE_NOTEBOOK, new_source="x = 1\n",
+    carries="EnterWorktree")
+add("pointer-edit: Write of a new file in the pointer checkout is refused", "deny", "pointer-edit",
+    tool="Write", cwd=PTRMAIN, config=PTRCFG, file_path=PE_NEW, content="# new\n",
+    carries="EnterWorktree")
+add("pointer-edit: Write into the pointer checkout from a directory that is no checkout is refused",
+    "deny", "pointer-edit", tool="Write", cwd=NOGIT, config=PTRCFG, file_path=PE_TARGET,
+    content="changed\n", carries="EnterWorktree")
+
+# THE PASSES. Each pins a write or read the rule must let through: the pointer's own .git, a linked
+# worktree (nested or elsewhere), another checkout, the temp folder, a directory that is no checkout,
+# a stood-down rule, and the read tools. A refusal here would block a lane's own work.
+# The nested worktree's scope (its own git directory) is checked where the fixture is built.
+add("pointer-edit: Write into the pointer's own .git is not judged", "allow", tool="Write",
+    cwd=PTRMAIN, config=PTRCFG, file_path=PE_GITDIR, content="probe\n")
+add("pointer-edit: Write into a linked worktree nested under the pointer is allowed", "allow",
+    tool="Write", cwd=PTRNEST, config=PTRCFG, file_path=os.path.join(PTRNEST, "f.txt"), content="lane\n")
+add("pointer-edit: Write into a linked worktree elsewhere is allowed", "allow", tool="Write",
+    cwd=PTRWT, config=PTRCFG, file_path=os.path.join(PTRWT, "f.txt"), content="lane\n")
+add("pointer-edit: Write into another checkout is allowed", "allow", tool="Write",
+    cwd=GITMAIN, config=PTRCFG, file_path=os.path.join(GITMAIN, "notes.txt"), content="x\n")
+add("pointer-edit: Write into the temp folder is allowed, with the pointer as cwd", "allow",
+    tool="Write", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TEMP, content="x\n")
+add("pointer-edit: Write into a directory that is no checkout is allowed", "allow", tool="Write",
+    cwd=NOGIT, config=PTRCFG, file_path=os.path.join(NOGIT, "notes.txt"), content="x\n")
+add("pointer-edit: a rules file with no pointer line stands the rule down", "allow", tool="Write",
+    cwd=PTRMAIN, config=PTRBADCFG, file_path=PE_TARGET, content="changed\n")
+add("pointer-edit: a pointer naming a directory that is gone stands the rule down", "allow",
+    tool="Write", cwd=PTRMAIN, config=PTRGONECFG, file_path=PE_GONE_TARGET, content="changed\n")
+add("pointer-edit: no global rules file at all stands the rule down", "allow", tool="Write",
+    cwd=PTRMAIN, config=PTRNOCFG, file_path=PE_TARGET, content="changed\n")
+add("pointer-edit: Read of a file in the pointer checkout is never judged", "allow", tool="Read",
+    cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
+add("pointer-edit: Grep under the pointer checkout is never judged", "allow", tool="Grep",
+    cwd=PTRMAIN, config=PTRCFG, pattern="base", path=PTRMAIN)
+# The gate is WRITE_TOOLS. Artifact and ArtifactData reach the guard with a file_path too, so they
+# must be named here: a gate dropped to every tool would refuse them, and these cases go red.
+add("pointer-edit: Artifact with a pointer file as file_path is not a write and is allowed", "allow",
+    tool="Artifact", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
+add("pointer-edit: ArtifactData with a pointer file as file_path is not a write and is allowed", "allow",
+    tool="ArtifactData", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
+
+TEMP_DIR = None   # back to the system temp for the sections below
 
 
 # =========================================================================== 1c. hand-made worktree
@@ -6425,6 +6539,145 @@ add("check-tail: a roster name after a quoted #, backgrounded, is allowed", "all
 add("check-tail: a roster name in a multi-line quote, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='echo "first line\nmerge --lane-lint 1 | tail -3\nlast line"')
+# Wrapper forms (`uv run`, a versioned python, a `VAR=x` prefix) read as the bare spellings do. The
+# allow cases name calls a wider match must not refuse: a pytest run and a grep that names the script.
+add("check-tail: uv run ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run ci-job checks --lint 2>&1 | tail -20")
+add("check-tail: env VAR=x then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="env CI=1 ~/.claude/bin/ci-job checks --lint | tail -5")
+add("check-tail: python3 runs the ci-job script piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 bin/ci-job checks --lint | tail -5")
+add("check-tail: python3 -W ignore runs the ci-job script piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 -W ignore bin/ci-job checks --lint | tail -5")
+add("check-tail: uv run python -m pytest piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run python -m pytest | tail -5")
+add("check-tail: uv run grep naming the script piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='uv run grep -n "--lane-lint" merge/merge.py | tail -20')
+add("check-tail: uv run -w pytest then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run -w pytest ci-job checks --lint | tail -5")
+add("check-tail: uv run --cache-dir then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run --cache-dir /tmp/c ci-job checks --lint | tail -5")
+add("check-tail: pytest with bin/ci-job as an argument piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
+
+# Wrapper forms in the foreground: each deny reads its check through the wrapper, each allow does not.
+sh("check-tail: uv run python runs the script piped to tail in the foreground is refused",
+   "uv run python merge/merge.py --lane-lint 7 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run runs merge --lane-lint piped to tail in the foreground is refused",
+   "uv run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3.11 runs the script piped to tail in the foreground is refused",
+   "python3.11 merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: env VAR=x then merge --lane-lint piped to tail in the foreground is refused",
+   "env FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: env VAR=x then python3 runs the script piped to head in the foreground is refused",
+   "env FOO=1 python3 merge/merge.py --review-record --head 0123456789abcdef0123456789abcdef01234567 "
+   "| head -5", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a VAR=x prefix on merge --lane-lint piped to tail in the foreground is refused",
+   "FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run python -m pytest piped to tail in the foreground is allowed",
+   "uv run python -m pytest | tail -5", "allow", cwd=NOGIT)
+sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in the foreground is refused",
+   "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
+   "uv --quiet run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
+   "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+# `uv run` runs a script operand with no interpreter word, so the script is the command word. The check
+# reads only an interpreter's operand, so these uv spellings must still be refused.
+sh("check-tail: uv run merge/merge.py --lane-lint piped to tail in the foreground is refused",
+   "uv run merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run --with x merge/merge.py --review-record piped to head is refused",
+   "uv run --with x merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+# Pins: pythonw and the -X value flag are read as interpreter spellings already. Dropping pythonw from
+# SCRIPT_INTERPRETER, or -X from INTERPRETER_VALUE_FLAGS, turns the matching row red.
+sh("check-tail: pythonw runs the merge script piped to tail in the foreground is refused",
+   "pythonw merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -X dev runs the merge script piped to tail in the foreground is refused",
+   "python3 -X dev merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+# Control: a uv run of another script that names --lane-lint is not the merge script, so it is allowed.
+sh("check-tail: uv run of another script naming --lane-lint piped to tail is allowed",
+   "uv run lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+# An unquoted substitution in the script operand splits into several words, so the first word after the
+# interpreter is not the script. Each spelling below names the merge script, so each must still be refused.
+sh("check-tail: an unquoted $(git rev-parse) script path piped to tail in the foreground is refused",
+   "python3 $(git rev-parse --show-toplevel)/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: an unquoted $(dirname $0) script path piped to head in the foreground is refused",
+   "python3 $(dirname $0)/merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a backtick script path piped to tail in the foreground is refused",
+   "python3 `git rev-parse --show-toplevel`/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+# Pins: a quoted substitution and one with no space are one word already, so these pass on the current guard.
+sh("check-tail: a quoted $(git rev-parse) script path piped to tail in the foreground is refused",
+   'python3 "$(git rev-parse --show-toplevel)/merge/merge.py" --lane-lint 7 | tail -3', "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a $(pwd) script path with no space piped to tail in the foreground is refused",
+   "python3 $(pwd)/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+# Control: an unquoted substitution that names another script is not the merge script, so it is allowed.
+sh("check-tail: an unquoted $(git rev-parse) path to another script naming --lane-lint is allowed",
+   "python3 $(git rev-parse --show-toplevel)/lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+
+# A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
+# the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
+verdict_pipe("env VAR=x then verdict merge --lane-lint piped to tail is refused",
+             "env FOO=1 verdict merge --lane-lint 7 | tail -3", "deny")
+verdict_pipe("uv run verdict merge --lane-lint piped to tail is refused",
+             "uv run verdict merge --lane-lint 7 | tail -3", "deny")
+verdict_pipe("verdict piped to tail, then && commit, is refused",
+             "verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x", "deny")
+verdict_pipe("the absolute bin path piped to tail, then ;, is refused",
+             "~/.claude/bin/verdict python3 hooks/test_guard.py | tail -5; git push", "deny")
+verdict_pipe("two verdict pipes joined by ; are refused",
+             "verdict python3 lint/a.py 2>&1 | tail -3; verdict python3 lint/b.py 2>&1 | tail -3",
+             "deny")
+verdict_pipe("verdict piped to tail, then ; echo, is refused",
+             "verdict python3 lint/a.py | tail -1; echo ---", "deny")
+verdict_pipe("the relative bin path piped to head, then &&, is refused",
+             "bin/verdict make check | head -3 && echo ok", "deny")
+verdict_pipe("an env assignment before verdict piped to tail, then &&, is refused",
+             "GUARD_FAMILY=stream verdict python3 hooks/test_guard.py 2>&1 | tail -3 && git push",
+             "deny")
+verdict_pipe("the shortened incident line piped to tail, then && add and commit, is refused",
+             "~/.claude/bin/verdict python3 lint/ste_lint.py docs/decisions/x.md 2>&1 | tail -1 && "
+             "git add docs/decisions/x.md && git commit -q -m x", "deny")
+verdict_pipe("verdict piped to tail, then || echo, is refused",
+             "verdict python3 lint/check_x.py | tail -1 || echo failed", "deny")
+verdict_pipe("verdict piped to grep -q, then && push, is refused",
+             "verdict python3 lint/check_x.py 2>&1 | grep -q PASS && git push", "deny")
+verdict_pipe("verdict piped to sed -n, then && push, is refused",
+             "verdict make check | sed -n 1p && git push", "deny")
+verdict_pipe("verdict.cmd piped to tail, then && push, is refused",
+             "verdict.cmd python3 lint/check_x.py | tail -3 && git push", "deny")
+verdict_pipe("verdict piped to tail as the last pipeline is refused",
+             "verdict python3 lint/check_x.py | tail -3", "deny")
+verdict_pipe("verdict piped to grep as the last command is refused",
+             "verdict make check | grep FAIL", "deny")
+verdict_pipe("pipefail set earlier with set -o does not lift the refusal, then && commit, is refused",
+             "set -o pipefail; verdict python3 lint/check_x.py | tail -3 && git commit -m x", "deny")
+verdict_pipe("pipefail set earlier in set -euo does not lift the refusal, then && push, is refused",
+             "set -euo pipefail && verdict python3 lint/check_x.py | tail -3 && git push", "deny")
+verdict_pipe("set +o pipefail undoes an earlier set -o, then && push, is refused",
+             "set -o pipefail; set +o pipefail; verdict python3 lint/check_x.py | tail -3 && git push",
+             "deny")
+add("verdict-pipe: verdict piped to tail, then && commit, backgrounded, is refused", "deny",
+    VERDICT_PIPE, cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x")
+verdict_pipe("a bare verdict call is allowed", "verdict python3 lint/check_x.py", "allow")
+verdict_pipe("verdict then && commit, with no pipe, is allowed",
+             "verdict python3 lint/check_x.py && git commit -m x", "allow")
+verdict_pipe("a pipe with no verdict in it is allowed", "cat x.log | tail -3 && echo ok", "allow")
+verdict_pipe("verdict inside single quotes is not a call",
+             "echo 'verdict a | tail -1 && b'", "allow")
 
 # Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
 # not refused in the foreground. A verdict call piped to tail is refused by verdict-pipe; with no pipe
@@ -12171,6 +12424,135 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
 
+# =========================================================================== 5a2. gh writes in a cloud session
+# The `gh-write-cloud` rule. A cloud session is one where is_cloud() holds: CLAUDE_CODE_REMOTE is exactly
+# "true". There the Bash guard refuses a gh write made outside the merge tool: gh pr create|merge|comment|edit|close|review|ready,
+# gh issue create|comment|edit|close, and gh api with a write method (-X or --method POST, PATCH, PUT or DELETE,
+# any case, also --method=POST and -XPOST), or with -f, -F, --field, --raw-field or --input and no GET method.
+# A read stays allowed: gh pr view|list|diff|checks|status, gh issue view|list, a plain gh api route (with --jq
+# or -q), gh api with an explicit GET, gh auth, and the merge tool's `merge <pr> --confirm`.
+# Each refused write has a twin outside a cloud session, which must allow. The twin is the green control, and
+# it pins the cloud scope.
+GH_WRITE_RULE = "gh-write-cloud"
+GH_WRITE_CLOUD = {"CLAUDE_CODE_REMOTE": "true"}
+GH_WRITE_REMEDY = ("mcp__github__",)   # the remedy names a GitHub MCP tool; which one is the builder's choice
+GH_MERGE_FIXTURE = {"env_path": GHMAIN + os.pathsep + PY_PATH, "config": MERGECFG}   # a green head, as the merge rows use
+
+
+def gh_verb(command):
+    """The words a refusal must not print: the first three words of the command, such as `gh pr comment`."""
+    return " ".join(command.split()[:3])
+
+
+def gh_write_refused(name, command, **fixture):
+    """One gh write refused in a cloud session, and the same write allowed outside one."""
+    sh("gh-write-cloud: %s is refused in a cloud session" % name, command, "deny", GH_WRITE_RULE,
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(gh_verb(command),), **fixture)
+    sh("gh-write-cloud: %s is allowed outside a cloud session" % name, command, "allow", cwd=NOGIT, **fixture)
+
+
+GH_WRITES = (
+    ("pr create", "gh pr create --draft --title x --body y"),
+    ("pr comment", "gh pr comment 12 --body hi"),
+    ("pr edit", "gh pr edit 12 --title x"),
+    ("pr close", "gh pr close 12"),
+    ("pr review", "gh pr review 12 --approve"),
+    ("pr ready", "gh pr ready 12"),
+    ("issue create", "gh issue create --title x --body y"),
+    ("issue comment", "gh issue comment 3 --body hi"),
+    ("issue edit", "gh issue edit 3 --title x"),
+    ("issue close", "gh issue close 3"),
+    ("api -X POST", "gh api -X POST repos/x/y/issues -f title=x"),
+    ("api -X post, no field", "gh api -X post repos/x/y/issues"),
+    ("api --method=POST, no field", "gh api --method=POST repos/x/y/issues"),
+    ("api -XPOST", "gh api -XPOST repos/x/y/issues"),
+    ("api -X patch", "gh api -X patch repos/x/y/pulls/1 -f state=closed"),
+    ("api -X PUT", "gh api -X PUT repos/x/y/pulls/1/merge"),
+    ("api -X DELETE", "gh api -X DELETE repos/x/y/issues/comments/1"),
+    ("api with -f and no method", "gh api repos/x/y/issues -f title=x"),
+    ("api with -F and no method", "gh api repos/x/y/issues -F title=x"),
+    ("api with --field and no method", "gh api repos/x/y/issues --field title=x"),
+    ("api with --raw-field and no method", "gh api repos/x/y/issues --raw-field body=x"),
+    ("api with --input and no method", "gh api repos/x/y/issues --input body.json"),
+)
+for _name, _command in GH_WRITES:
+    gh_write_refused(_name, _command)
+gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
+
+# A write that another rule also refuses gets the gh-write-cloud verdict in a cloud session. Its remedy
+# names an MCP tool, never the refused form. Each refusal has a twin outside a cloud session.
+sh("gh-write-cloud: a pull request opened without --draft is refused in a cloud session",
+   "gh pr create --title x --body y", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr create",))
+sh("gh-write-cloud: a merge with a pending head is refused in a cloud session, not by merge-checks",
+   "gh pr merge 12", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY,
+   lacks=("pending",), env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("gh-write-cloud: a merge with a pending head is judged by merge-checks outside a cloud session",
+   "gh pr merge 12", "deny", "merge-checks", cwd=NOGIT, carries="pending",
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("gh-write-cloud: a // and a /* inside a quoted body still refuse a pr comment in a cloud session",
+   'gh pr comment 12 --body "see // and /* here"', "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr comment",))
+sh("gh-write-cloud: a // and a /* inside a quoted body are allowed outside a cloud session",
+   'gh pr comment 12 --body "see // and /* here"', "allow", cwd=NOGIT)
+sh("gh-write-cloud: gh api with -X GET then --method POST is refused in a cloud session, the last method wins",
+   "gh api -X GET repos/o/r/issues --method POST", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh api",))
+sh("gh-write-cloud: gh api with -X GET then --method POST is allowed outside a cloud session",
+   "gh api -X GET repos/o/r/issues --method POST", "allow", cwd=NOGIT)
+sh("gh-write-cloud: gh api --input with no method is refused in a cloud session",
+   "gh api repos/o/r/issues --input -", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh api",))
+sh("gh-write-cloud: gh api --input with no method is allowed outside a cloud session",
+   "gh api repos/o/r/issues --input -", "allow", cwd=NOGIT)
+
+# Forms a naive reader misses. A `#` or a lone quote inside a quoted body is text, not a comment, and a write
+# is still a write after a root repo flag, a wrapper, a command substitution, a chain, or a comment tail.
+for _name, _command, _lacks in (
+    ("a # inside a quoted body", 'gh pr comment 12 --body "fix #12"', "gh pr comment"),
+    ("a lone quote inside a quoted body", "gh issue comment 3 --body \"Don't merge\"", "gh issue comment"),
+    ("a comment tail after the write", "gh pr comment 12 --body x  # note", "gh pr comment"),
+    ("the -R root repo flag", "gh -R o/r pr comment 12 -b x", "pr comment"),
+    ("a bash -c wrapper", "bash -c 'gh pr edit 12 -t x'", "gh pr edit"),
+    ("a command substitution", "echo $(gh api -X POST repos/x/y/issues)", "gh api -X"),
+    ("a write chained after a read", "gh pr view 12 && gh pr comment 12 --body hi", "gh pr comment"),
+):
+    sh("gh-write-cloud: %s is refused in a cloud session" % _name, _command, "deny", GH_WRITE_RULE,
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(_lacks,))
+
+# Reads and the merge tool stay allowed in a cloud session.
+for _command in (
+    "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr status",
+    "gh issue view 3", "gh issue list", "gh auth status",
+    "gh api repos/x/y/pulls/1", "gh api repos/x/y/pulls/1 -q .body",
+    "gh api -X GET search/code -f q=foo", "gh api -X get search/code -f q=foo",
+    "gh api -XGET search/code -f q=foo", "gh api --method=GET search/code -f q=foo",
+    "gh api --method get search/code -f q=foo",
+    "merge 12 --confirm", "~/.claude/bin/merge 12 --confirm",
+):
+    sh("gh-write-cloud: %s is allowed in a cloud session" % _command, _command, "allow", cwd=NOGIT,
+       env=GH_WRITE_CLOUD)
+
+# False alarms: text that names a write is not a write. Each must allow in a cloud session.
+for _name, _command in (
+    ("a python heredoc that names a merge as text", "python3 - <<'PY'\nmsg = 'run gh pr merge 12 by hand'\nprint(msg)\nPY"),
+    ("a bash heredoc body with a comment line", "cat > notes.txt <<'EOF'\ngh pr comment 12 --body hi\nEOF"),
+    ("a python -c print of a merge", "python3 -c 'print(\"gh pr merge 12\")'"),
+    ("an echo of a create", 'echo "gh pr create"'),
+    ("a git commit message that names a close", 'git commit -m "gh issue close"'),
+    ("a gh api read with --jq", "gh api repos/x/y/pulls/1 --jq .body"),
+    ("a read with a comment tail that names a comment", "gh pr view 12  # then gh pr comment"),
+    ("a node template literal across lines", "node -e 'const s = `\ngh pr merge 12\n`; console.log(s)'"),
+):
+    sh("gh-write-cloud: %s is allowed in a cloud session" % _name, _command, "allow", cwd=NOGIT,
+       env=GH_WRITE_CLOUD)
+
+# Only the exact value "true" is a cloud session, so another value judges the write as a local one.
+for _value in ("TRUE", "1"):
+    sh("gh-write-cloud: CLAUDE_CODE_REMOTE=%s is not a cloud session, so pr comment is allowed" % _value,
+       "gh pr comment 12 --body hi", "allow", cwd=NOGIT, env={"CLAUDE_CODE_REMOTE": _value})
+
+
 # =========================================================================== 5b. the merge guard
 #
 # The `merge-checks` guard rule. A merge made outside the merge tool is refused while the head has
@@ -13272,6 +13654,7 @@ ARCHIVE_RULE = "lane-closes-after-records"
 ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
 ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
 ARCHIVE_OWNER = "5c2e7d1a-0000-4000-8000-00000000a7c1"  # the calling session's payload id, which an override names
+AGENT_NO_REMOTE = "agent-no-remote-tools"  # the rule id the refusal names; the agent-remote-tools section reads it too
 
 
 def fake_gh_path(folder):
@@ -13293,6 +13676,14 @@ def archive_allow(name, transcript, env_path, agent_id=None):
     """An archive_session of the target the guard lets through silently. `agent_id` as in archive_refuse."""
     add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
         transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
+
+
+def agent_archive_refuse(name, transcript, env_path, agent_id):
+    """An agent's archive_session of a target lane-closes allows, refused by agent-no-remote-tools after it. The reason
+    names that rule and none of the lane's reasons, so a refusal that came from the lane logic does not pass."""
+    add("lane-closes-after-records: " + name, "deny", rule=AGENT_NO_REMOTE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+        lacks=ARCHIVE_NAMED + ARCHIVE_OPEN_PIN + ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN, transcript=transcript,
+        env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
 
 
 # A lane whose open pull request has a head exactly equal to its step slug is its own pull request: refused.
@@ -13614,9 +14005,10 @@ def write_agent_transcripts():
 
 
 lazy_fixture([role_path(name) for name in AGENT_FIXTURES], write_agent_transcripts)
-# An agent whose own record names a non-lane target: allowed, silently, though a slug pull request is open.
-archive_allow("an agent whose own record is a non-lane target is allowed: the record is read from the agent's transcript",
-              role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# An agent whose own record names a non-lane target passes lane-closes-after-records, and agent-no-remote-tools refuses
+# it after that (decision session-tiers: no agent archives a session). The refusal names that rule, not a lane reason.
+agent_archive_refuse("an agent whose own record is a non-lane target is refused by agent-no-remote-tools",
+                     role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
 # An agent whose own record is a lane with an open records pull request: refused, for that pull request. The reason pin
 # proves the agent's record was read: a guard that missed it would refuse for having no record.
 archive_refuse("an agent whose own record is a lane with an open records pull request is refused, for the open pull request",
@@ -13629,10 +14021,10 @@ archive_refuse("an agent with no record in its own transcript or the main one is
 # An orchestrator call (no agent_id) reads the main transcript only: its lane record refuses for the open pull request.
 archive_refuse("an orchestrator call with a lane record in the main transcript is refused, for the open pull request",
                role_path("archive-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
-# An agent whose main record is non-lane, and whose own file reads clean but holds no record of the target: the main record
-# decides, so it is allowed. A fix that refused on a clean agent read with no record would turn this allow into a false alarm.
-archive_allow("an agent whose main record is non-lane is allowed though its own file holds no record of the target",
-              role_path("agent-quiet-main-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# An agent whose main record is non-lane, and whose own file reads clean but holds no record of the target: lane-closes
+# allows it, so the refusal is the agent rule's. A lane reader that refused for no record would fail this case.
+agent_archive_refuse("an agent whose main record is non-lane is refused by agent-no-remote-tools, though its own file holds no record",
+                     role_path("agent-quiet-main-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
 # The same agent file, on an orchestrator call with no agent_id: the file is not its record, so the main record decides.
 archive_allow("an orchestrator call with a non-lane main record is allowed though an agent file beside it holds a lane",
               role_path("orchestrator-agent-file"), fake_gh_path(ARCHOPEN))
@@ -13650,10 +14042,10 @@ archive_refuse("a lane in the main record is refused though the agent's own reco
 archive_refuse("a malformed agent_id reads no agent file: a non-lane record at its raw path is not read, and the call is refused for no record",
                role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="x.y",
                carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
-# No file at the agent's path, and a non-lane main record: no agent record is read, so the main record decides and the
-# archive is allowed. A reader that refused on a missing agent file would refuse every agent that has no file of its own.
-archive_allow("an agent with no file at its agent path is allowed: the main record is non-lane and decides",
-              role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# No file at the agent's path, and a non-lane main record: no agent record is read, so lane-closes allows it, and
+# agent-no-remote-tools refuses it after. A reader that refused on a missing agent file would fail this case for no record.
+agent_archive_refuse("an agent with no file at its agent path is refused by agent-no-remote-tools: the main record is non-lane",
+                     role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
 # A folder at the agent's file path, and a non-lane main record: the read fails with an error other than a missing file, so
 # the archive is refused for no record. A reader that caught every read error as a missing file would allow it.
 archive_refuse("an agent whose file path is a folder is refused, for no record: a read error is not a missing agent file",
@@ -15955,6 +16347,131 @@ sh("frozen: var2: the write comes before the assignment", 'cp a "$D"; D=' + _P, 
 sh("frozen: var2: unset clears the variable", 'D=' + _P + '; unset D; cp a "$D"', "allow",
    cwd=NOGIT)
 sh("frozen: var2: single quotes do not expand", 'D=' + _P + "; cp a '$D'", "allow", cwd=NOGIT)
+
+# ---- resolve-vars: the resolver reads each assignment as the shell does. A value is split at its quote
+# when the text after the quote is read as its own word; an apostrophe in double quotes is text; a prefix
+# assignment and a subshell's assignment reach only the text the shell gives them. MUTATE_ONLY="resolve-vars"
+# runs these verdicts and the unit checks in the frozen block beside the LOG_CHECKS_EXTRA registrations.
+_SPLIT_SUB = slash(os.path.join(ROOT, "split", "sub"))   # an ordinary folder, not frozen
+_UP_TO_CONFIG = "/../../" + os.path.basename(CFG) + "/settings.json"   # back from it into the config folder
+
+# A value cut at its quote: `"$BASE"/../...` leaves the shell one path, and the guard read the cut value.
+sh("frozen resolve-vars: a write through a value split at its quote, into the config folder, denies",
+   'BASE=' + _SPLIT_SUB + '; WT="$BASE"' + _UP_TO_CONFIG + '; echo x > "$WT"', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, the same path as one unsplit value denies",
+   'WT=' + _SPLIT_SUB + _UP_TO_CONFIG + '; echo x > "$WT"', "deny", "frozen-path", cwd=NOGIT)
+# An apostrophe in double quotes, then a second one, makes one span that swallows a later reassignment.
+sh("frozen resolve-vars: a reassignment after an apostrophe in double quotes is seen, and its write denies",
+   'D=/tmp/o; echo "don\'t"; D=' + CFG_SETTINGS + "; echo 'x'; echo x > $D", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, the same with no apostrophe in the text denies",
+   'D=/tmp/o; echo "dont"; D=' + CFG_SETTINGS + "; echo 'x'; echo x > $D", "deny", "frozen-path",
+   cwd=NOGIT)
+# A prefix assignment takes effect for its own command only, after the words expand: `"$D"` is the old value.
+sh("frozen resolve-vars: a prefix assignment does not reach the word it expands, so a write to the old value denies",
+   'D=' + CFG_SETTINGS + '; D=/tmp/o cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, the same word with no prefix assignment denies",
+   'D=' + CFG_SETTINGS + '; cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+# A subshell's assignment ends at its closing paren.
+sh("frozen resolve-vars: an assignment in a subshell ends at its paren, so a write to the old value denies",
+   'D=' + CFG_SETTINGS + '; (D=/tmp/o); echo x > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, inside the subshell the new value holds, and the write goes there",
+   'D=' + CFG_SETTINGS + '; (D=/tmp/o; echo x > $D)', "allow", cwd=NOGIT)
+# Controls: a brace group and a bare assignment before && both keep the assignment for the next command.
+sh("frozen resolve-vars: control, a brace group keeps its assignment for the next command, denies",
+   '{ D=' + CFG_SETTINGS + '; }; cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a bare assignment before && keeps it for the next command, denies",
+   'D=' + CFG_SETTINGS + ' && cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+# Scanner traps (building-scanner-respects-strings): a comment opener or a lone quote inside double
+# quotes is text, so the write after it still reaches the frozen check.
+sh("frozen resolve-vars: a # inside double quotes is text, and the write after it denies",
+   'echo "# note"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a // inside double quotes is text, and the write after it denies",
+   'echo "http://x"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a /* inside double quotes is text, and the write after it denies",
+   'echo "/* x"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a lone apostrophe inside double quotes is text, and the write after it denies",
+   'echo "it\'s"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
+# A redirect-only assignment keeps its value for the next command, as bash does: `D=... >/dev/null` sets D.
+sh("frozen resolve-vars: a redirect-only assignment with >/dev/null keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + ' >/dev/null; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a redirect-only assignment with 2>/dev/null keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + ' 2>/dev/null; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a redirect-only assignment with >/dev/null keeps its value, so a write to it denies",
+   'D=' + CFG_SETTINGS + ' >/dev/null; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a plain assignment with no redirect keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + '; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+# A function body runs in the calling shell, so an assignment in it lasts after the call.
+sh("frozen resolve-vars: an assignment in a function body lasts after the call, so a write to it denies",
+   'function f { D=' + CFG_SETTINGS + '; }; f; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, an assignment in a f() body lasts after the call, so a write to it denies",
+   'f() { D=' + CFG_SETTINGS + '; }; f; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+# A verbatim heredoc body is text: its odd quote must not pair with a quote on a later line.
+sh("frozen resolve-vars: an odd quote in a heredoc body is text, so a write after the heredoc denies",
+   "python3 - <<'EOF'\nprint(\"x)\nEOF\nD=" + CFG_SETTINGS + '; echo "y" > $D', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, a heredoc body with its quote closed is text, so a write after it denies",
+   "python3 - <<'EOF'\nprint(\"x\")\nEOF\nD=" + CFG_SETTINGS + '; echo "y" > $D', "deny", "frozen-path",
+   cwd=NOGIT)
+# The shell reads an ambiguous redirect as an error and writes nothing, so the guard should allow it.
+sh("frozen resolve-vars: an ambiguous redirect from a value with an escaped space writes nothing, so a write to it allows",
+   'D=' + CFG_SETTINGS + '\\ x; echo y > $D', "allow", cwd=NOGIT)
+# Control: the same write with a plain value is denied, so the allow above comes from the ambiguous redirect.
+sh("frozen resolve-vars: control, the same assignment with no escaped space, then a write to it, denies",
+   'D=' + CFG_SETTINGS + '; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+
+# A backslash-newline joins two lines into one. So `X=1 && \` with `D=v` on the next line is `X=1 && D=v`,
+# and `D=v \` with `&& cmd` on the next line is `D=v && cmd`: the assignment still starts its command.
+sh("frozen resolve-vars: a backslash-newline after && does not hide an assignment, so a write to it denies",
+   "X=1 && \\\n  D=" + CFG_SETTINGS + " && \\\n  echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline after ; does not hide an assignment, so a write to it denies",
+   "true;\\\nD=" + CFG_SETTINGS + "; echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline before export does not hide it, so sed -i of the assigned path denies",
+   "cd /tmp && \\\n export D=" + CFG_SETTINGS + " && \\\n sed -i s/a/b/ $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline after an assignment keeps it for the next command, so a write to it denies",
+   "D=" + CFG_SETTINGS + " \\\n  && echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a backslash-newline chain of a safe path, then a write to it, allows",
+   "X=1 && \\\n  D=/tmp/o && \\\n  echo y > $D", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, a backslash-newline after a safe assignment, then a write to it, allows",
+   "D=/tmp/o \\\n  && echo y > $D", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, the same chain on one line, denies",
+   "X=1 && D=" + CFG_SETTINGS + " && echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+
+# PowerShell reads `$D='v'` and `$D="v"` as an assignment with or without spaces around the equals.
+sh("frozen resolve-vars: PowerShell $D='path' with no spaces, then Set-Content to $D, denies",
+   "$D='" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: PowerShell $D=\"path\" with no spaces, then Set-Content to $D, denies",
+   '$D="' + CFG_SETTINGS + '"; Set-Content $D x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: PowerShell $D= 'path', a space after the equals only, then Set-Content to $D, denies",
+   "$D= '" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: control, PowerShell $D='safe path' with no spaces, then Set-Content to $D, allows",
+   "$D='/tmp/o'; Set-Content $D x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: control, PowerShell $D = 'path' with spaces, then Set-Content to $D, denies",
+   "$D = '" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+
+# A prefix assignment is in the environment of its command, and a heredoc is that command's input: the child
+# shell reads the value. `env NAME=v` gives the same environment. An export is in the environment too.
+sh("frozen resolve-vars: a prefix assignment into a bash heredoc script reaches the script, so its write denies",
+   "OUT=" + CFG_SETTINGS + " bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: an env assignment before sh with a heredoc script reaches the script, so its write denies",
+   "env OUT=" + CFG_SETTINGS + " sh <<'EOF'\necho y > $OUT\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a prefix assignment of a safe path into a heredoc script, then its write, allows",
+   "OUT=/tmp/o bash <<'EOF'\necho y > \"$OUT\"\nEOF", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, an export of the frozen path before a heredoc script, then its write, denies",
+   "export OUT=" + CFG_SETTINGS + "; bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
+
+# A run of heredoc blocks does not hide the write after it. Each closed body is read alone, on a copy of
+# the table, and the command goes on at its own depth, so the run never reaches `_NEST_LIMIT`. 20, 21 and
+# 30 blocks deny. The 21-block control with a safe path allows.
+_HEREDOC_BLOCK = "cat > f <<EOF\nline\nEOF\n"
+for _blocks in (20, 21, 30):
+    sh("frozen resolve-vars: %d heredoc blocks, then an assignment to the frozen path and a write to it, denies"
+       % _blocks, _HEREDOC_BLOCK * _blocks + "D=" + CFG_SETTINGS + "\necho y > $D", "deny", "frozen-path",
+       cwd=NOGIT)
+sh("frozen resolve-vars: control, 21 heredoc blocks, then an assignment to a safe path and a write to it, allows",
+   _HEREDOC_BLOCK * 21 + "D=/tmp/o\necho y > $D", "allow", cwd=NOGIT)
 
 # A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
 # assignments that the guard does not read. The one lift is the owner override (family
@@ -18691,6 +19208,94 @@ def _mirror_names_tie():
 LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
                          _mirror_names_tie))
 
+
+# ---- resolve-vars: `_resolve_vars` of guard_frozen, read as the shell reads each assignment. A check reads
+# the use site (the last `;` segment, double quotes removed), so a fix that rewrites an assignment's own text
+# still passes. The guard under test is loaded as every check loads it (GUARD_UNDER_TEST is honoured).
+def _resolver_under_test():
+    """`_resolve_vars` of guard_frozen as the guard under test loads it, or None when it has none."""
+    _load_guard_module()
+    return getattr(sys.modules.get("guard_frozen"), "_resolve_vars", None)
+
+
+def _use_site(text):
+    """The last `;` segment of a resolved command, with its double quotes removed."""
+    return text.split(";")[-1].strip().replace('"', "")
+
+
+def resolve_case(command, want):
+    """A check: the use site of `command`, once resolved, reads `want`."""
+    def check():
+        resolve = _resolver_under_test()
+        if resolve is None:
+            return False, "guard_frozen has no _resolve_vars"
+        got = _use_site(resolve(command))
+        if got != want:
+            return False, "%r resolves its use site to %r, want %r" % (command, got, want)
+        return True, "%r resolves its use site to %r" % (command, want)
+    FIXTURELESS_CHECKS.add(check)
+    return check
+
+
+_CHAIN = "; ".join(["A0=x"] + ["A%d=$A%d" % (n, n - 1) for n in range(1, 200)] + ["use $A199"])
+RESOLVE_CASES = (
+    # Red on the old code: each names one fault of the resolver.
+    ("frozen resolve-vars: a value split at its quote keeps the text after the quote",
+     'BASE=.claude/worktrees; WT="$BASE"/../lane; cp src $WT', "cp src .claude/worktrees/../lane"),
+    ("frozen resolve-vars: a reassignment after an apostrophe in double quotes is seen",
+     "S=a; echo \"don't\"; S=b; echo 'x'; use $S", "use b"),
+    ("frozen resolve-vars: a variable set after an apostrophe in double quotes is resolved",
+     "echo \"don't\" ; X=1; echo 'q'; echo $X", "echo 1"),
+    ("frozen resolve-vars: an assignment on the second line of a double-quoted string is text",
+     'echo "x\nS=a"; use $S', "use $S"),
+    ("frozen resolve-vars: an assignment after a # inside double quotes is text",
+     'echo "# S=a"; use $S', "use $S"),
+    ("frozen resolve-vars: a prefix assignment does not change the word its own command expands",
+     'S=x cmd "$S"', "S=x cmd $S"),
+    ("frozen resolve-vars: a prefix assignment's command expands the value before it",
+     'S=/safe; S=x cmd "$S"', "S=x cmd /safe"),
+    ("frozen resolve-vars: a prefix assignment does not reach the text after it",
+     'S=x cmd "$S"; use $S', "use $S"),
+    ("frozen resolve-vars: the value before a prefix assignment reaches the text after it",
+     'S=/safe; S=x cmd "$S"; use $S', "use /safe"),
+    ("frozen resolve-vars: a subshell's assignment does not reach the text after its paren",
+     "(S=x); echo $S", "echo $S"),
+    ("frozen resolve-vars: the value before a subshell's assignment reaches the text after it",
+     "S=/safe; (S=x); use $S", "use /safe"),
+    # Keep-green controls: the behaviour the fix must keep.
+    ("frozen resolve-vars: control, the last assignment wins",
+     "D=a; D=b; use $D", "use b"),
+    ("frozen resolve-vars: control, unset clears the variable",
+     "S=a; unset S; use $S", "use $S"),
+    ("frozen resolve-vars: control, single quotes do not expand",
+     "S=a; use '$S'", "use '$S'"),
+    ("frozen resolve-vars: control, export of two names reads both",
+     "export A=1 D=v; use $D", "use v"),
+    ("frozen resolve-vars: control, $HOME reads as ~",
+     "echo $HOME/x", "echo ~/x"),
+    ("frozen resolve-vars: control, the brief's apostrophe text with no second quote is still read",
+     "echo \"don't\"; S=a; S=b; use $S", "use b"),
+    ("frozen resolve-vars: control, the brief's second apostrophe text is still read",
+     "echo \"don't\" ; X=1; echo $X", "echo 1"),
+    ("frozen resolve-vars: control, a # inside double quotes is text, so a later reassignment is seen",
+     'echo "# note"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a // inside double quotes is text",
+     'echo "http://x"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a /* inside double quotes is text",
+     'echo "/* x"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a subshell's assignment holds inside the subshell",
+     "(S=x; use $S)", "use x)"),
+    ("frozen resolve-vars: control, a brace group keeps its assignment for the next command",
+     "{ S=x; }; use $S", "use x"),
+    ("frozen resolve-vars: control, a bare assignment before && keeps it for the next command",
+     "S=x && use $S", "S=x && use x"),
+    ("frozen resolve-vars: control, an empty command stays empty", "", ""),
+    ("frozen resolve-vars: control, a 200-link chain of assignments resolves to its first value",
+     _CHAIN, "use x"),
+)
+for _label, _command, _want in RESOLVE_CASES:
+    LOG_CHECKS_EXTRA.append((_label, resolve_case(_command, _want)))
+
 # ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
 # verb from each of them. One check per root flag form, called on gh_call_of directly.
@@ -18894,20 +19499,20 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 
 
 def archive_agent_non_lane_no_read_case():
-    """An agent's archive of a target that is no lane is allowed and makes no gh call, though its own record carries a
-    step slug that an open-list read would find."""
+    """An agent's archive of a target that is no lane is refused by agent-no-remote-tools, and makes no gh call, though
+    its own record carries a step slug that an open-list read would find. lane-closes-after-records allows it first."""
     folder = archive_counted_gh()
     gh_calls_taken(folder)
     decision, reason = archive_judged(role_path("agent-own-triage-slug"), folder, agent_id=AGENT_OWN_ID)
     calls = gh_calls_taken(folder)
-    if decision != "allow" or reason:
+    if decision != "deny" or AGENT_NO_REMOTE not in reason:
         return False, "an agent's non-lane target: %s (%r)" % (decision, reason)
     if calls:
         return False, "an agent's non-lane target made %d gh call(s): %r" % (len(calls), calls)
-    return True, "allowed, and no gh call"
+    return True, "refused by %s, and no gh call" % AGENT_NO_REMOTE
 
 
-LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive makes no gh call",
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive is refused by agent-no-remote-tools, and makes no gh call",
                          archive_agent_non_lane_no_read_case))
 
 
@@ -21686,6 +22291,7 @@ for _label, _check in (
         ("git_reads: branch_is_ancestor reads None for an unknown revision", git_reads_ancestor_unknown_rev_case),
         ("git_reads: branch_is_ancestor reads None, not False, in a shallow clone that cuts the path",
          git_reads_ancestor_shallow_case),
+        ("git_reads: origin_slug reads None for a one-segment origin (https://host/r)", git_reads_origin_one_segment_case),
         ("branch delete, shallow clone: the only copy is denied", git_reads_branch_only_copy_shallow_case),
         ("branch delete, shallow clone: the on-remote proof allows", git_reads_branch_on_remote_shallow_case)):
     FIXTURELESS_CHECKS.add(_check)
@@ -25750,6 +26356,153 @@ for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
     add("floor: create_session naming %s is allowed" % (_model,), "allow",
         tool=CREATE_SESSION_CALL, prompt="x", model=_model)
 add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
+
+# ---- An agent's outward remote tools. An agent's call to a claude-code-remote tool that acts on another
+# session, a trigger or a repo is refused. No agent role needs the server, and a general-purpose agent without an
+# agent file holds it (measured). The payload's agent_id marks the agent (AGENT_ID, hooks/guard.py).
+# The session's own call (no agent_id), an agent_type with no agent_id, and the read tools keep today's verdict.
+# The payload is built whole, not through add()'s keywords: create_trigger's input is `name`, which add() takes.
+FAMILY = "agent-remote-tools"
+REMOTE_PREFIX = "mcp__claude-code-remote__"
+AGENT_ID_VALUE = "a1b2c3d4e5f607182"  # 17 hex characters, the measured agent_id shape
+# archive_session is judged by lane-closes-after-records, which refuses a target it cannot read as a non-lane. A
+# triage target is the allowed one (archive_allow above), so the archive rows reach the agent rule on old code.
+OUTWARD_CALLS = (
+    ("create_session", {"prompt": "x"}, None),
+    ("archive_session", {"session_id": ROLE_OTHER}, role_path("archive-triage")),
+    ("send_message", {"session_id": "session_AGENTSEND01", "message": "x"}, None),
+    ("set_session_tags", {"session_ids": ["session_AGENTTAG01"], "add": ["x"]}, None),
+    ("create_trigger", {"name": "x", "prompt": "x", "initiation": "own_followup"}, None),
+)
+READ_CALLS = (
+    ("get_session", {"session_id": "session_AGENTREAD01"}),
+    ("list_sessions", {"limit": 5}),
+)
+AGENT_SHAPES = (
+    ("a general-purpose agent", AGENT_ID_VALUE, "general-purpose"),
+    ("an agent with no agent_type", AGENT_ID_VALUE, None),
+)
+
+
+def remote_call(tool, tool_input, agent_id=None, agent_type=None, transcript=None):
+    """The PreToolUse payload of one claude-code-remote call as the hook receives it. An agent's payload carries
+    agent_id and agent_type beside tool_name and tool_input. The session's own payload carries neither."""
+    body = {"tool_name": REMOTE_PREFIX + tool, "tool_input": tool_input, "cwd": NOGIT}
+    if agent_id:
+        body["agent_id"] = agent_id
+    if agent_type:
+        body["agent_type"] = agent_type
+    if transcript:
+        body["transcript_path"] = transcript
+    return json.dumps(body)
+
+
+def outward_case(name, expected, tool, tool_input, transcript, agent_id=None, agent_type=None, **kw):
+    """One case on a claude-code-remote payload. A transcript-reading call runs in ROLE_ENV, as archive_allow does."""
+    add(name, expected, raw=remote_call(tool, tool_input, agent_id, agent_type, transcript),
+        env=ROLE_ENV if transcript else None, **kw)
+
+
+for _tool, _input, _transcript in OUTWARD_CALLS:
+    for _shape, _id, _type in AGENT_SHAPES:
+        outward_case("agent-no-remote-tools: %s from %s is refused" % (_tool, _shape), "deny", _tool, _input,
+                     _transcript, _id, _type, rule=AGENT_NO_REMOTE, lacks=_tool)
+# A truthy agent_id that fails the AGENT_ID shape is still a carried agent_id: the rule keys on the field, so a
+# harness id that drifts from the measured form stays refused rather than turning the rule off.
+outward_case("agent-no-remote-tools: create_session with an agent_id that fails the AGENT_ID shape is refused", "deny",
+             "create_session", {"prompt": "x"}, None, "agent:1", "general-purpose", rule=AGENT_NO_REMOTE,
+             lacks="create_session")
+for _tool, _input, _transcript in OUTWARD_CALLS:
+    outward_case("agent-no-remote-tools: %s from the session itself keeps today's verdict" % _tool, "allow",
+                 _tool, _input, _transcript)
+    outward_case("agent-no-remote-tools: %s from an agent_type with no agent_id keeps today's verdict" % _tool,
+                 "allow", _tool, _input, _transcript, None, "general-purpose")
+for _tool, _input in READ_CALLS:
+    for _shape, _id, _type in AGENT_SHAPES:
+        add("agent-no-remote-tools: %s from %s is allowed" % (_tool, _shape), "allow", silent=True,
+            raw=remote_call(_tool, _input, _id, _type))
+# The twenty outward tools, pinned by full name. Each name gets its own deny case from a general-purpose agent, so a
+# REMOTE_OUTWARD_TOOLS that drops one name goes red on that name. The equality check holds the constant to this set.
+PINNED_OUTWARD_TOOLS = (
+    "mcp__claude-code-remote__create_session",
+    "mcp__claude-code-remote__send_message",
+    "mcp__claude-code-remote__archive_session",
+    "mcp__claude-code-remote__unarchive_session",
+    "mcp__claude-code-remote__interrupt_session",
+    "mcp__claude-code-remote__set_session_tags",
+    "mcp__claude-code-remote__set_session_title",
+    "mcp__claude-code-remote__create_trigger",
+    "mcp__claude-code-remote__update_trigger",
+    "mcp__claude-code-remote__delete_trigger",
+    "mcp__claude-code-remote__fire_trigger",
+    "mcp__claude-code-remote__send_later",
+    "mcp__claude-code-remote__watch_url",
+    "mcp__claude-code-remote__unwatch_url",
+    "mcp__claude-code-remote__subscribe_pr_activity",
+    "mcp__claude-code-remote__unsubscribe_pr_activity",
+    "mcp__claude-code-remote__add_repo",
+    "mcp__claude-code-remote__register_repo_root",
+    "mcp__claude-code-remote__confirm_repository_trust",
+    "mcp__claude-code-remote__request_computer_folder",
+)
+# Three pinned names have a main rule that answers first (judge() in guard.py: rules 8a before 8b). Each name's case on
+# the bare call expects that owner rule. A second case, on a shape the owner lets through, expects agent-no-remote-tools,
+# so the new rule is proven for each name. OUTWARD_CALLS also runs archive_session on that shape; the pinned case is the
+# one the pin set counts, so both stay.
+OWNED_PINNED = {
+    "mcp__claude-code-remote__archive_session": (ARCHIVE_RULE, {}),
+    "mcp__claude-code-remote__confirm_repository_trust": (TRUST_RULE, {}),
+    "mcp__claude-code-remote__request_computer_folder": (TRUST_RULE, {}),
+}
+# The shape each owner lets through, with the transcript it reads: a non-lane target, and an untagged own record.
+OWNER_PASSES = {
+    "mcp__claude-code-remote__archive_session": ({"session_id": ROLE_OTHER}, role_path("archive-triage")),
+    "mcp__claude-code-remote__confirm_repository_trust": (TRUST_TOOLS["mcp__claude-code-remote__confirm_repository_trust"],
+                                                          role_path("untagged")),
+    "mcp__claude-code-remote__request_computer_folder": (TRUST_TOOLS["mcp__claude-code-remote__request_computer_folder"],
+                                                         role_path("untagged")),
+}
+for _full in PINNED_OUTWARD_TOOLS:
+    _short = _full[len(REMOTE_PREFIX):]
+    if _full in OWNED_PINNED:
+        _owner, _bare_input = OWNED_PINNED[_full]
+        outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused by %s first" % (_short, _owner),
+                     "deny", _short, _bare_input, None, AGENT_ID_VALUE, "general-purpose", rule=_owner,
+                     lacks=(_short, AGENT_NO_REMOTE))
+        _pass_input, _pass_transcript = OWNER_PASSES[_full]
+        outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent on a shape %s allows is refused" % (_short, _owner),
+                     "deny", _short, _pass_input, _pass_transcript, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE,
+                     lacks=_short)
+        continue
+    outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused" % _short, "deny",
+                 _short, {}, None, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE, lacks=_short)
+
+
+def pinned_outward_check():
+    """REMOTE_OUTWARD_TOOLS in hooks/shared_names.py is the pinned set: it holds each pinned name, once, and no other.
+    It reads the copy beside this file, so a copy under test is the one checked."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("shared_names_pinned", os.path.join(HERE, "shared_names.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not hasattr(module, "REMOTE_OUTWARD_TOOLS"):
+        return False, "shared_names.py defines no REMOTE_OUTWARD_TOOLS"
+    constant = tuple(module.REMOTE_OUTWARD_TOOLS)
+    for name in PINNED_OUTWARD_TOOLS:
+        if name not in constant:
+            return False, "REMOTE_OUTWARD_TOOLS lacks %s" % name
+    for name in constant:
+        if name not in PINNED_OUTWARD_TOOLS:
+            return False, "REMOTE_OUTWARD_TOOLS holds %s, which is not pinned" % name
+    if len(set(constant)) != len(constant):
+        return False, "REMOTE_OUTWARD_TOOLS repeats a name"
+    return True, "REMOTE_OUTWARD_TOOLS holds exactly the 20 pinned names"
+
+
+FIXTURELESS_CHECKS.add(pinned_outward_check)
+LOG_CHECKS_EXTRA.append(("agent-remote-tools: REMOTE_OUTWARD_TOOLS holds exactly the pinned outward names",
+                         pinned_outward_check))
+FAMILY = "rule9"  # the family the cases below had before this section
 
 # ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
 # prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
