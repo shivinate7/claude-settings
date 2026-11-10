@@ -171,6 +171,18 @@ Text: inline, in the main check.
 
 - A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is, like "D12, short titles for records".
 
+### Closed-item guard (any reply whose Input Needed cites a page item)
+
+Text: `closed_item_problem`, rule `input-needed-closed-item` (roadmap step `input-needed-reads-page-status`).
+
+Text: facts only. It names the cited page items and says each closed one reads closed in the waiting copy at origin/<record branch>, as of the last fetch. It gives no step.
+
+- A closed item is not asked of the owner again. The refusal names each closed item, so the session sees which ones to drop.
+- A cite is the word "item", "items" or "item(s)" with each number after it on its line: a list ("214, 381 and 383", "214 or 381", "214/381"), both ends of a range ("214-216"), "**214**", "page-item 214", "**Items:** 214", and "item 1 of 3" (cites 1). "items:" at a line end, or a line that opens with a label such as "Items waiting on you:", opens a bullet or numbered list. The number after each marker is a cite, and the marker is not ("1. 214" cites 214). A PR number, "#214" alone, a date and a bare number are no cite. A bullet under "item 214" is no cite.
+- After a list separator or a marker, a number is a cite only when it is bare. A count or unit word after it ("5 others", "2 of which", "3 options", "3 more"), a glued suffix or "%" ("3rd", "24h", "5%"), a clock time ("10:30") and a fraction ("11/10") make it no cite.
+- A read of collection `items` on the page in the turn after the last incoming message (a peer's too) that shows the item open clears it. A read before that message does not.
+- A copy that cannot be read passes with a "not checked" note and no refusal. The note also rides on a block for another reason.
+
 ## Shared tails
 
 - Every refusal opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
