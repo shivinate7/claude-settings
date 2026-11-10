@@ -1243,12 +1243,11 @@ function layout(wrap, rule, up, S) {
     wrap.style.width = colW + "px";
     const g = wrap.offsetWidth - wrap.clientWidth - 2; // the gutter, plus any border past 1px; read with .scroll on
     const room = colW - 2 - g;
-    const sc0 = sc;
     sc = Math.min(mx, room / bw, phoneW / bw);
     pw = Math.min(Math.ceil(bw * sc), room); wrapH = boxH;
     wrap.style.width = pw + 2 + g + "px";
-    // A fill picture just past the box can fit it once the gutter narrows it. Then it draws whole at the full width, up to g x h / w past the box.
-    if (wrap.classList.contains("fill") && Math.ceil(bh * sc) <= boxH + 1) { scroll = false; wrap.classList.remove("scroll"); sc = sc0; }
+    // A fill picture just past the box can fit it once the gutter narrows it. Then it draws whole at this narrowed scale (the card less the gutter wide), so it is no taller than the box + 1, with no scrollbar and no cue.
+    if (wrap.classList.contains("fill") && Math.ceil(bh * sc) <= boxH + 1) { scroll = false; wrap.classList.remove("scroll"); }
   }
   if (!scroll) {
     pw = Math.min(Math.ceil(bw * sc), rule === "today" || rule === "shrink" ? Infinity : room0); wrapH = Math.ceil(bh * sc);
