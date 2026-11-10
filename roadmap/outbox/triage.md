@@ -479,3 +479,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - decision-watch-merge-tools-copy (#2513): hooks/decision_watch.py keeps its own one-entry `MERGE_TOOLS` list.
 - merge-guard-limits-gaps (#2513): the MCP file-write tools to main and the `bash -c` wrapper are not in the decision's Limits.
 - mutate-merge-substring-anchor (#2513): the mutate merge target accepts a substring anchor and does not report it.
+- agent-commit-scope-windows-paths (lane agent-commit-file-scope, #2334 round 3 limits, coordinator 04:09 CST Nov 10): no test for drive-letter or 8.3 temp paths; an 8.3 top-level folder on Windows is unhandled; `realpath` is unguarded; the `/c/Users` Git Bash path form is not named.
