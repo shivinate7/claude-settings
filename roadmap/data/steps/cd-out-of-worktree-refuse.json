@@ -1,0 +1,8 @@
+{
+ "id": "cd-out-of-worktree-refuse",
+ "title": "Refuse a cd that leaves the session's worktree",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "why": "Triage cd'd to ~/.claude/hooks twice on 2026-11-10 (16:3x and 17:08 CST). The shell reset cwd to /home/user, which broke worktree agent spawns until a cd back. A guard that refuses a cd out of the session's worktree, with the remedy to use git -C or an absolute path, stops it.",
+ "source": "triage mistake 2026-11-10 17:08 CST"
+}
