@@ -4043,6 +4043,7 @@ TEMPLATE_STEP_TEXT = json.dumps({"id": TEMPLATE_STEP, "title": "Route page comme
 PLAIN_STEP_TEXT = json.dumps({"id": PLAIN_STEP, "title": "Route page comments",
                               "text": "Answer each waiting-page comment by hand."})
 SCOPE_IN = (("verbatim", True), ("artifact", True), ("repo", True), ("writer", True))
+NOT_THE_WRITER = "session_000000000000000000000003"  # the writer a transcript names when the session is not the writer
 
 
 def claude_settings_repo():
@@ -4069,13 +4070,13 @@ def record_step(root, slug):
         return None
 
 
-def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None):
-    """Captures one page comment through the capture hook, jots its item lines, records the session as the page
-    writer, and runs the guard at its Stop. Returns the guard's Proc."""
+def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=None):
+    """Captures one page comment through the capture hook, jots its item lines, names `writer` as the page writer
+    (this session when None), and runs the guard at its Stop. Returns the guard's Proc."""
     capture(cfg, sid, PAGE_COMMENT.format(url=url, wake=wake), cwd=cwd)
     for line in items:
         add_item(cfg, sid, line)
-    write_transcript(cfg, sid, writer_records(sid))
+    write_transcript(cfg, sid, writer_records(sid if writer is None else writer))
     return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
 
 
@@ -4195,6 +4196,18 @@ def case_page_form_other_repo_passes():
     p = page_comment_run(cfg, sid, ASKED_WAKE, [NOTE_ITEM], cwd=other)
     want = (("verbatim", True), ("artifact", True), ("repo", False), ("writer", True))
     if expect_facts(name, page_comment_facts(cfg, sid, other, PAGE_CODE_URL, ASKED_WAKE), want):
+        expect_silent(name, p)
+
+
+def case_page_form_not_the_writer_passes():
+    """Green control. The same Asked comment in claude-settings, from a session that is not the page writer: the
+    transcript names another session as writer. Silent, so the rule holds only in the writer's session."""
+    cfg, sid = new_cfg(), "page-form-not-writer"
+    root = claude_settings_repo()
+    name = "page-form green: the same comment in claude-settings, from a session that is not the page writer"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, [NOTE_ITEM], cwd=root, writer=NOT_THE_WRITER)
+    want = (("verbatim", True), ("artifact", True), ("repo", True), ("writer", False))
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), want):
         expect_silent(name, p)
 
 
@@ -4387,6 +4400,7 @@ CASES = (
     case_page_form_plain_saved_wake_passes,
     case_page_form_other_artifact_passes,
     case_page_form_other_repo_passes,
+    case_page_form_not_the_writer_passes,
 )
 
 
