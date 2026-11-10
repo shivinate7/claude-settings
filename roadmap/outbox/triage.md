@@ -337,3 +337,8 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - export-refusal-unseen (21:24 CST Nov 9): the waiting-page data copy on the roadmap branch was refused for 34 h (last copy 87b2aaf26) by two closed items holding sample database URLs; no wake reported it because the copy step's `refused` line was not read. Fixed by rewording the items; copy df790e17b.
 - page-dejavu-ask-overlap (22:56 CST Nov 9, lane notes-fix-page, #2347): on main, with the DejaVu fallback font at 338-347 px wide, "Add to list" overlaps "Send ask". Note, not debt: only a fallback font at a 10 px band.
 - page-row-title-room (22:56 CST Nov 9, lane notes-fix-page, #2347): on main, at 521-640 px and 100% text, a row title beside a press has 0-6em of room.
+- (debt) stamp-tool-name-reads-write (01:10 CST Nov 10, #2480 handoff-checked-stamp, via coordinator): mcp__github__get_check_run and get_project_message_reply read as writes (the words "run" and "reply"), so a CI premise checked with get_check_run alone is denied once. Likely in normal work. Same family as debt stamp-read-false-alarms; fold there if that debt's fix covers tool names.
+- stamp-quoted-gt-write (#2480): a quoted `&gt;`, or a redirect onto a scratch log, reads as a write. Family: stamp-read-false-alarms.
+- stamp-write-forms-untested (#2480): the write forms redirect, rm, mv, cp, tee, sed -i, git add and push have no test. Family: stamp-shell-write-not-judged.
+- stamp-docstring-handoff (#2480): the guard.py docstring row says the handoff is no evidence; the code excludes only a Read of it.
+- shell-tools-two-homes (#2480): SHELL_TOOLS is declared twice, in precompact_handoff.py and guard_core.py.
