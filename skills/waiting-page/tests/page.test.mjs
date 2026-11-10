@@ -3962,22 +3962,30 @@ for (const width of [768, 1280]) {
 
 // The home pill is how a line shows its routing, and a gap shows as "No home named" (notes section 2). So its text stays whole at
 // tablet and desktop width, beside a long title. The room is the pill's box less its side padding. The text is read as a range,
-// because a cut text keeps its full width in the layout.
+// because a cut text keeps its full width in the layout. No. 77 has a long title and no home, so it shows the gap. No. 79 has a long title,
+// a New reply and a home, so it is the pill that must stay whole beside a long title. Each row's cause is its own line in the message.
 test("ask-phase-out: the home pill of a line keeps its whole text at 768 and 1280 px, beside a long title", async (t) => {
+  const causes = [];
   for (const width of [768, 1280]) {
-    const page = await open(t, { items: [AP_OPEN, AP_LONG, AP_CLOSED], viewport: { width, height: 900 } }); if (!page) return;
-    await mustHave(page, `#line-${AP_CLOSED.n} .hometag`, `the home pill of No. ${AP_CLOSED.n} at ${width} px`);
-    await mustHave(page, `#line-${AP_LONG.n} .hometag`, `the home pill of No. ${AP_LONG.n} at ${width} px`);
-    for (const n of [AP_CLOSED.n, AP_LONG.n]) {
+    const at = `at ${width} px`;
+    const page = await open(t, { items: [AP_OPEN, AP_LONG, AP_CLOSED, AP_LONG_HOME], storage: RPL_NEW, viewport: { width, height: 900 } }); if (!page) return;
+    await mustHave(page, `#line-${AP_CLOSED.n} .hometag`, `the home pill of No. ${AP_CLOSED.n} ${at}`);
+    await mustHave(page, `#line-${AP_LONG.n} .hometag`, `the home pill of No. ${AP_LONG.n} ${at}`);
+    // The scope comes first: the New reply mark and the home pill of the long-title row with a home are drawn before they are measured.
+    await mustHave(page, `#line-${AP_LONG_HOME.n} .fhead .newmark`, `the New reply mark of No. ${AP_LONG_HOME.n} ${at}`);
+    await mustHave(page, `#line-${AP_LONG_HOME.n} .hometag`, `the home pill of No. ${AP_LONG_HOME.n} ${at}`);
+    for (const n of [AP_CLOSED.n, AP_LONG.n, AP_LONG_HOME.n]) {
       const p = await page.evaluate((sel) => {
         const pill = document.querySelector(sel), cs = getComputedStyle(pill), range = document.createRange();
         range.selectNodeContents(pill.lastChild);
         return { scroll: pill.scrollWidth, client: pill.clientWidth, text: range.getBoundingClientRect().width, room: pill.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) };
       }, `#line-${n} .hometag`);
-      assert.ok(p.scroll <= p.client, `the home pill of No. ${n} is cut at ${width} px: it scrolls ${p.scroll} px in a box ${p.client} px wide`);
-      assert.ok(p.text <= p.room + 0.5, `the text of the home pill of No. ${n} is cut at ${width} px: the text is ${p.text.toFixed(1)} px wide, the room is ${p.room} px`);
+      if (p.scroll > p.client) causes.push(`${at}: the home pill of No. ${n} is cut: it scrolls ${p.scroll} px in a box ${p.client} px wide`);
+      if (p.text > p.room + 0.5) causes.push(`${at}: the text of the home pill of No. ${n} is cut: the text is ${p.text.toFixed(1)} px wide, the room is ${p.room} px`);
     }
+    await page.close();
   }
+  assert.equal(causes.length, 0, "the home pill of a line is cut beside a long title:\n" + causes.join("\n"));
 });
 
 // Below 701 px the head of a line wraps (page.html, the 701px rule). From 701 px it is one row, so the list runs to 701 px, the first one-row
