@@ -122,7 +122,7 @@ after(async () => { if (browser) await browser.close(); });
 // Fonts. The page asks Google Fonts for Atkinson Hyperlegible Next and IBM Plex Mono. The harness answers that request with the faces in
 // testing/fonts (SIL OFL 1.1, each licence beside its files), so the served run measures the page's own faces on any machine. The
 // fallback run forces DejaVu Sans, the family the ubuntu CI runner resolves system-ui to, onto every role the page sets, so a layout
-// claim also holds where the web fonts fail. Pins are absolute boxes, with one set of numbers per font (see layoutTest).
+// claim also holds where the web fonts fail. Pins are absolute boxes measured in the served run only (see layoutTest).
 const FONT_DIR = path.join(HERE, "..", "..", "..", "testing", "fonts");
 const SERVED_FONTS = [
   { family: "Atkinson Hyperlegible Next", weight: "200 800", file: "atkinsonhyperlegiblenext/AtkinsonHyperlegibleNext[wght].ttf" },
@@ -152,8 +152,8 @@ const serveRequest = (r, body) => {
 const FONT_RUN = new WeakMap();
 const runFont = (t) => FONT_RUN.get(t) || null;
 const fontName = (t) => (runFont(t) ? runFont(t).label : "served");
-// A layout case runs twice: in the served font, and in the fallback. Absolute pins (PINS, PIN_ASK) run in both, each font with its own numbers.
-// REPLY_PINS is a plain test with served numbers only, so it does not run in the fallback.
+// A layout case runs twice: in the served font, and in the fallback. Absolute pins (PINS, PIN_ASK, REPLY_PINS) are plain tests: their numbers
+// are the served font's, and a fallback run of them would measure a different page.
 const layoutTest = (name, fn) => {
   test(`${name}, served font`, (t) => { FONT_RUN.set(t, null); return fn(t); });
   test(`${name}, ${FALLBACK_FONT.label} fallback`, (t) => { FONT_RUN.set(t, FALLBACK_FONT); return fn(t); });
@@ -3297,68 +3297,40 @@ for (const kind of SIDE_KINDS) layoutTest(`folded row, side press: at 360 wide w
   assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at 360 wide with the root font size doubled, beside the ${FOLD_ROWS[kind].press} row`);
 });
 
-// Boxes the fix must keep, one set per font: served (the page's own faces) and fallback (DejaVu on every role). A box that moves fails by
-// name. Each row's box is [left, right, height] of the folded row's li; the row and press are [right, top offset from the li, height] and
-// [left, right, top offset, height]. The Ask box presses are [Add left, Add right, Send left, Send right]. Tolerance is 1 px.
-// Where main's page and the fix give the same box, the number is main's, read from main's page in that font. Where they differ, the number is
-// the fix's: at 360 wide in both fonts (docs/design/ask-folded-date-notes.md), and at 390 wide in the fallback font, where main's page does not match.
+// Served-font boxes the fix must keep. At 1440, 820 and 390 wide they equal main's boxes; at 360 wide they hold the folded-date wrap
+// (docs/design/ask-folded-date-notes.md). Each row's box is [left, right, height] of the folded row's li; the row and press are [right, top offset from the li, height] and [left, right, top offset, height]. A box that moves fails by
+// name. The Ask box presses are [Add left, Add right, Send left, Send right]. Tolerance is 1 px.
 const PINS = {
-  served: {
-    1440: {
-      dismiss: { li: [424, 1284, 50], row: [1159, 1, 48], press: [1163, 1275, 3, 44] },
-      restore: { li: [424, 1284, 50], row: [1154, 1, 48], press: [1158, 1275, 3, 44] },
-      wait: { li: [424, 1284, 128], row: [1283, 1, 48], press: [1181, 1267, 14, 22] },
-    },
-    820: {
-      dismiss: { li: [16, 804, 50], row: [679, 1, 48], press: [683, 795, 3, 44] },
-      restore: { li: [16, 804, 50], row: [674, 1, 48], press: [678, 795, 3, 44] },
-      wait: { li: [16, 804, 128], row: [803, 1, 48], press: [701, 787, 14, 22] },
-    },
-    390: {
-      dismiss: { li: [16, 374, 93], row: [249, 1, 91], press: [253, 365, 25, 44] },
-      restore: { li: [16, 374, 93], row: [244, 1, 91], press: [248, 365, 25, 44] },
-      wait: { li: [16, 374, 196], row: [373, 1, 91], press: [271, 357, 35, 22] },
-    },
-    360: {
-      dismiss: { li: [16, 344, 115], row: [219, 1, 113], press: [223, 335, 35, 44] },
-      restore: { li: [16, 344, 115], row: [214, 1, 113], press: [218, 335, 35, 44] },
-      wait: { li: [16, 344, 218], row: [343, 1, 113], press: [241, 327, 46, 22] },
-    },
+  1440: {
+    dismiss: { li: [424, 1284, 50], row: [1159, 1, 48], press: [1163, 1275, 3, 44] },
+    restore: { li: [424, 1284, 50], row: [1154, 1, 48], press: [1158, 1275, 3, 44] },
+    wait: { li: [424, 1284, 128], row: [1283, 1, 48], press: [1181, 1267, 14, 22] },
   },
-  fallback: {
-    1440: {
-      dismiss: { li: [424, 1284, 50], row: [1146, 1, 48], press: [1150, 1275, 3, 44] },
-      restore: { li: [424, 1284, 50], row: [1133, 1, 48], press: [1137, 1275, 3, 44] },
-      wait: { li: [424, 1284, 128], row: [1283, 1, 48], press: [1159, 1267, 14, 22] },
-    },
-    820: {
-      dismiss: { li: [16, 804, 50], row: [666, 1, 48], press: [670, 795, 3, 44] },
-      restore: { li: [16, 804, 50], row: [653, 1, 48], press: [657, 795, 3, 44] },
-      wait: { li: [16, 804, 128], row: [803, 1, 48], press: [679, 787, 14, 22] },
-    },
-    390: {
-      dismiss: { li: [16, 374, 115], row: [236, 1, 113], press: [240, 365, 35, 44] },
-      restore: { li: [16, 374, 115], row: [223, 1, 113], press: [227, 365, 35, 44] },
-      wait: { li: [16, 374, 218], row: [373, 1, 113], press: [249, 357, 46, 22] },
-    },
-    360: {
-      dismiss: { li: [16, 344, 115], row: [206, 1, 113], press: [210, 335, 35, 44] },
-      restore: { li: [16, 344, 115], row: [193, 1, 113], press: [197, 335, 35, 44] },
-      wait: { li: [16, 344, 218], row: [343, 1, 113], press: [219, 327, 46, 22] },
-    },
+  820: {
+    dismiss: { li: [16, 804, 50], row: [679, 1, 48], press: [683, 795, 3, 44] },
+    restore: { li: [16, 804, 50], row: [674, 1, 48], press: [678, 795, 3, 44] },
+    wait: { li: [16, 804, 128], row: [803, 1, 48], press: [701, 787, 14, 22] },
+  },
+  390: {
+    dismiss: { li: [16, 374, 93], row: [249, 1, 91], press: [253, 365, 25, 44] },
+    restore: { li: [16, 374, 93], row: [244, 1, 91], press: [248, 365, 25, 44] },
+    wait: { li: [16, 374, 196], row: [373, 1, 91], press: [271, 357, 35, 22] },
+  },
+  // At 360 the heights and tops hold the folded-date wrap per docs/design/ask-folded-date-notes.md, not main's boxes.
+  360: {
+    dismiss: { li: [16, 344, 115], row: [219, 1, 113], press: [223, 335, 35, 44] },
+    restore: { li: [16, 344, 115], row: [214, 1, 113], press: [218, 335, 35, 44] },
+    wait: { li: [16, 344, 218], row: [343, 1, 113], press: [241, 327, 46, 22] },
   },
 };
-const PIN_ASK = {
-  served: { 1440: [1012, 1123, 1135, 1267], 820: [532, 643, 655, 787], 390: [33, 143, 225, 357], 360: [33, 143, 195, 327] },
-  fallback: { 1440: [975, 1102, 1114, 1267], 820: [495, 622, 634, 787], 390: [33, 160, 204, 357], 360: [33, 160, 174, 327] },
-};
+const PIN_ASK = { 1440: [1012, 1123, 1135, 1267], 820: [532, 643, 655, 787], 390: [33, 143, 225, 357], 360: [33, 143, 195, 327] };
 const near = (got, pin) => got.length === pin.length && got.every((v, i) => Math.abs(v - pin[i]) <= 1);
 for (const width of [1440, 820, 390, 360]) for (const kind of PRESS_KINDS) for (const scheme of SCHEMES) {
-  layoutTest(`press rows, ${scheme}: at ${width} wide the ${kind} row and its press keep their boxes`, async (t) => {
+  test(`press rows, ${scheme}: at ${width} wide the ${kind} row and its press keep their boxes`, async (t) => {
     const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
     const id = FOLD_ROWS[kind].ask.id;
     foldedScope(await foldedDate(page, id), kind, width);
-    const g = await pressGeo(page, id), pin = PINS[runFont(t) ? "fallback" : "served"][width][kind];
+    const g = await pressGeo(page, id), pin = PINS[width][kind];
     const got = {
       li: [g.li.l, g.li.r, g.li.b - g.li.t],
       row: [g.row.r, g.row.t - g.li.t, g.row.b - g.row.t],
@@ -3371,11 +3343,11 @@ for (const width of [1440, 820, 390, 360]) for (const kind of PRESS_KINDS) for (
   });
 }
 for (const width of [1440, 820, 390, 360]) for (const scheme of SCHEMES) {
-  layoutTest(`press rows, ${scheme}: at ${width} wide Add to list and Send ask keep their x positions`, async (t) => {
+  test(`press rows, ${scheme}: at ${width} wide Add to list and Send ask keep their x positions`, async (t) => {
     const page = await foldedRowPage(t, "dismiss", width, scheme); if (!page) return;
     const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
-    const v = [g.add.l, g.add.r, g.send.l, g.send.r].map(Math.round), pin = PIN_ASK[runFont(t) ? "fallback" : "served"][width];
-    assert.ok(near(v, pin), `the Ask box presses are at x [${v}] at ${width} wide, not the pinned [${pin}]`);
+    const v = [g.add.l, g.add.r, g.send.l, g.send.r].map(Math.round);
+    assert.ok(near(v, PIN_ASK[width]), `the Ask box presses are at x [${v}] at ${width} wide, not the pinned [${PIN_ASK[width]}]`);
   });
 }
 
