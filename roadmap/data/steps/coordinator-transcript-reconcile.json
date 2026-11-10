@@ -1,0 +1,12 @@
+{
+  "title": "Sonnet extractors read the coordinator transcript, and one Sonnet reconciler checks what they find against main, the roadmap and the PRs",
+  "status": "doing",
+  "order": 981,
+  "why": "Rulings, asks and follow-ups that live only in the coordinator's transcript are lost unless something reads them back against the tracked homes.",
+  "note": "Owner 09:05 CST Nov 10 (relayed by the coordinator,  CST): Sonnet extractors over the coordinator transcript, one Sonnet reconciler against main, the roadmap and the PRs. First run started 09:05 CST Nov 10 by the coordinator; lane session not yet named to triage.",
+  "lane": "",
+  "blockedBy": [],
+  "updatedAt": "2026-11-10T09:11:00-06:00",
+  "owner": "claude-settings",
+  "phase": "now"
+}

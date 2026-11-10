@@ -1,0 +1,12 @@
+{
+  "title": "The GLOSSARY.md refuter row covers any agent that argues against another agent's verdict",
+  "status": "ready",
+  "order": 980,
+  "why": "Agents that argue against a verdict other than a plan have no term, so briefs name them in different words.",
+  "note": "Owner item 478 a (2026-11-10 09:06 CST, page save). Widen the GLOSSARY.md \"refuter\" row from the plan-reading agent to any agent that argues against another agent's verdict. Docs-only, a short round 1. The #2516 lane (session_013NEJKzSLUvDYuRBrsGszw6) is inactive, so the answer was not relayed there. Filed  CST Nov 10 at the coordinator's ask; the coordinator starts its lane. Related: debate-glossary-word (done, 1619cf09e).",
+  "lane": "",
+  "blockedBy": [],
+  "updatedAt": "2026-11-10T09:11:00-06:00",
+  "owner": "claude-settings",
+  "phase": "now"
+}
