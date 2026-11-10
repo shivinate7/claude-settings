@@ -17,6 +17,7 @@ import shlex
 import sys
 import time
 from datetime import datetime
+from typing import Optional
 
 # No try/except: a guard copy without git_reads.py judges nothing, so it fails closed (guard.py).
 from git_reads import (  # noqa: F401
@@ -113,6 +114,14 @@ class PowerShellScript(str):
 class PosixScript(str):
     """Text that `sh -c` or `bash -c` runs (`inline_script`): read with bash's rules, even in a
     PowerShell call. `split_segments` keeps the type on each segment, as for PowerShellScript."""
+
+
+# PowerShell reads each of these as the ASCII quote beside it: the double family
+# opens and ends a `"` string, the single family a `'` string. Bash reads them as ordinary characters.
+PS_DOUBLE_QUOTES = "\u201c\u201d\u201e"
+PS_SINGLE_QUOTES = "\u2018\u2019\u201a\u201b"
+PS_STRAIGHT_QUOTES = str.maketrans({**dict.fromkeys(map(ord, PS_DOUBLE_QUOTES), '"'),
+                                    **dict.fromkeys(map(ord, PS_SINGLE_QUOTES), "'")})
 
 
 def is_powershell(text) -> bool:
@@ -378,6 +387,7 @@ WRAPPER_VALUE_FLAGS.update({
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
+    "watch": {"-n", "--interval", "-q", "--equexit"},
 })
 # `timeout` and `python` unwrap only in their wrapper shape: `timeout [flags] DURATION cmd` (Windows
 # `timeout /t 5` is the waiter, not a wrapper) and `python bin/verdict cmd` (the repo's runner).
@@ -444,11 +454,19 @@ def segment_tokens(segment: str):
     source = ""
     if is_powershell(segment):
         segment = segment.replace("\\", "\\\\")
-        if "''" in segment or '""' in segment or "`" in segment:
-            segment = _powershell_values(segment)
-    elif "`" in segment:
-        source = segment   # bash text: shlex keeps its backtick substitutions as they stand
-    found = _segment_tokens(segment)
+        # A smart quote is a quote, so read the text with each as its ASCII twin. A text that then
+        # fails shlex (a lone `\u2019` in `don\u2019t` that PowerShell would read as a quote too) is read as it stands.
+        found = None
+        for text in dict.fromkeys((segment.translate(PS_STRAIGHT_QUOTES), segment)):
+            if "''" in text or '""' in text or "`" in text:
+                text = _powershell_values(text)
+            found = _segment_tokens(text)
+            if found is not None:
+                break
+    else:
+        if "`" in segment:
+            source = segment   # bash text: shlex keeps its backtick substitutions as they stand
+        found = _segment_tokens(segment)
     if found is None:
         return None
     tokens, quoted = found
@@ -685,7 +703,7 @@ _FED_SHELL = re.compile(
     r"(?:^|[;&|(`{])[ \t]*(?:(?:builtin|command)[ \t]+)?(?:eval|source|\.)[ \t]"
     r"[^;&|\n]*?(?:(?:\$\(|<\(|`)[^;&|)`]*?)?<<", re.M).search
 _SHELL_FIRST = _interpreter_header(_SHELLS)
-_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
+_INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node|deno"
 _INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
 
 
@@ -1164,7 +1182,7 @@ def _compound_delta(segment: str, wide: bool = False) -> int:
     return delta
 
 
-def _sets_errexit(tokens, sure: bool) -> bool | None:
+def _sets_errexit(tokens, sure: bool) -> Optional[bool]:
     """True or False when the segment holds a `set` that turns `-e` (or `-o errexit`) on or off, None
     when it holds none. A `set +e` counts wherever it stands, in a group, an `if`, a function or a
     `( ... )`, since it may run: errexit is then off, which fails closed. A `set -e` counts only when
@@ -1207,6 +1225,28 @@ def _opens_if_body(segments, at: int) -> bool:
     after = segment_tokens(segments[at + 1]) if at + 1 < len(segments) else None
     return (len(tokens) > 1 and tokens[0] == "if" and basename(tokens[1]) in CD_WORDS
             and bool(after) and after[0] == "then")
+
+
+def _dir_test_word(tokens):
+    """The folder a segment tests for, when the segment is only `[ -d T ]`, `[[ -d T ]]` or `test -d T`
+    (quotes already removed by the tokenizer), else None."""
+    shapes = {"[": 4, "[[": 4, "test": 3}
+    if not tokens or shapes.get(tokens[0]) != len(tokens) or tokens[1] != "-d":
+        return None
+    if tokens[0] != "test" and tokens[3] != {"[": "]", "[[": "]]"}[tokens[0]]:
+        return None
+    return tokens[2]
+
+
+def _never_runs(segments, ends, at: int, tokens, move) -> bool:
+    """True when the cd at `segments[at]` stands behind its own directory test joined by `&&`
+    (`[ -d M ] && cd M`) and its folder is missing at check time, so the test fails and the cd
+    never runs. The test must head its `&&` list: after a `||` or a pipe it may be skipped."""
+    if at < 1 or at > len(ends) or ends[at - 1] != "&&" or basename(tokens[0]) not in CD_WORDS:
+        return False
+    if at > 1 and ends[at - 2] in ("||", "|"):
+        return False
+    return move == _dir_test_word(segment_tokens(segments[at - 1]))
 
 
 def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
@@ -1329,6 +1369,8 @@ def _walk_segments(segments, number: int, shell_cwd: str, ends=(), failed_cd_sta
                                           and basename(tokens[0]) in CD_WORDS)
                     if end == "||" and _exits_on_failure(segments, ends, at):
                         where, stranded = None, False
+                    elif _never_runs(segments, ends, at, tokens, move):
+                        old = prev   # the test fails, so the cd neither strands nor clears
                     elif negated_if or bare_under_errexit:
                         where, stranded = None, False
                     else:
@@ -1870,6 +1912,9 @@ BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 WRITER_ROLE = "record-writer"
 DESIGNER_ROLE = "designer"
+# The read-only Opus role that argues against a plan (decision plan-refuter). The one home of its name: the guard, the
+# brief hook and the tests import it, and none types it.
+REFUTER_ROLE = "refuter"
 
 
 def agent_role(payload) -> str:
@@ -2049,17 +2094,26 @@ def ssh_remote_script(tokens) -> str:
     return " ".join(tokens[index + 1:])   # tokens[index] is the host
 
 
+# The `find` actions that run a command on a match. `guard_env` builds its own find list on this.
+FIND_EXEC_ACTIONS = ("-exec", "-execdir", "-ok", "-okdir")
+
+
 def wrapped_commands(tokens, at: int):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
-    `caffeinate`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    `caffeinate`, `watch`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as
+    `sh -c`. `watch` joins its words with spaces and hands the line to `sh -c`, so its text is that
+    line."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
+    if word == "watch":
+        index, _ = _wrapper_flags(word, rest, 0)
+        return [" ".join(rest[index:])] if rest[index:] else []
     if word == "kubectl" and "exec" in rest and "--" in rest:
         return [shlex.join(rest[rest.index("--") + 1:])]
     if word == "find":
         found = []
         for i, token in enumerate(rest):
-            if token in ("-exec", "-execdir", "-ok", "-okdir"):
+            if token in FIND_EXEC_ACTIONS:
                 end = next((j for j in range(i + 1, len(rest)) if rest[j] in (";", "+")), len(rest))
                 found.append(shlex.join(rest[i + 1:end]))
         return found
@@ -2084,7 +2138,7 @@ def wrapped_commands(tokens, at: int):
 def bare_words(segment: str):
     """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
     no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
-    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    a runner no reader names (`docker run`, `uv run`) still shows its inner command, and
     quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
     words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
     has no bare word."""
