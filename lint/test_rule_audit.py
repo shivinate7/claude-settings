@@ -2912,6 +2912,97 @@ class RefusePrintTests(unittest.TestCase):
         self.assertEqual(status_of(src, "guard:main"), ["cited"])
 
 
+RULE_HOMES = ({"alpha"}, {"anchor-one", "reports-order-of-labels"})  # the rule anchor that report_guard's block reasons end with
+UNCITED_BLOCK = '{"decision": "block", "reason": "held, see decision beta, don\'t # or /* or //"}'
+CITED_BLOCK = '{"decision": "block", "reason": "held, see decision alpha, don\'t # or /* or //"}'
+UNCITED_TERNARY = '{"decision": "block", "reason": "held, see decision beta"} if hold else None'
+CITED_TERNARY = '{"decision": "block", "reason": "held, see decision alpha"} if hold else None'
+CITED_LINES = '{"decision": "block", "reason": (\n        "held, "\n        "see decision alpha"\n    )}'
+# report_guard.main()'s finish(payload) as a closure, its body as there; `route` is a parameter of main.
+FINISH_CLOSURE = ('    def finish(payload):\n'
+                  '        if route:\n'
+                  '            payload = dict(payload or {})\n'
+                  '            payload["systemMessage"] = " ".join(filter(None, [payload.get("systemMessage"), *route]))\n'
+                  '        if payload:\n'
+                  '            print(json.dumps(payload))\n')
+EMIT_MODULE = 'def emit(p):\n    if p:\n        print(json.dumps(p))\n'  # the same print as a module-level helper
+
+
+def call_of(name, arg):
+    """One line of main's body: a call of `name` with `arg` as its argument."""
+    return "    %s(%s)\n" % (name, arg)
+
+
+def closure_src(call):
+    """report_guard.main() with its closure `finish`, and the lines `call` of main's body."""
+    return "import json\ndef main(route, hold, pick):\n" + FINISH_CLOSURE + call
+
+
+def module_src(call):
+    """The print as a module-level helper `emit`, and the lines `call` of main's body."""
+    return "import json\n" + EMIT_MODULE + "def main(route, hold, pick):\n" + call
+
+
+def call_rows(src, homes=HOMES):
+    """-> {refusal id: [status]} for one guard module's source."""
+    statuses, _ = refusal_status({"guard": src}, homes, SCOPE)
+    return {rid: [s for _, s, _ in rows] for rid, rows in statuses.items()}
+
+
+class RefuseHelperArgumentTests(unittest.TestCase):
+    """A block dict passed to a helper that prints its parameter is a refuse site, read at each call as a refuse
+    print is: its id is the caller's `module:function`, and its reason is read at the call. A helper that only
+    stores its parameter, and a dict that is not a block, are no site."""
+
+    def assertReadAtCall(self, src, status, homes=HOMES):
+        """The scope first: main is the only refusal id. Then the subject: the call's reason reads as `status`."""
+        rows = call_rows(src, homes)
+        self.assertEqual(sorted(rows), ["guard:main"], "the call is no refuse site of main")
+        self.assertEqual(rows.get("guard:main"), [status], "the call's reason does not read as %s" % status)
+
+    def test_a_closure_that_prints_a_block_dict_argument_reads_an_uncited_call(self):
+        for form, arg in (("plain", UNCITED_BLOCK), ("ternary", UNCITED_TERNARY)):
+            with self.subTest(form=form):
+                self.assertReadAtCall(closure_src(call_of("finish", arg)), "no cite")
+
+    def test_a_closure_that_prints_a_block_dict_argument_passes_a_cited_call(self):
+        for form, arg in (("plain", CITED_BLOCK), ("ternary", CITED_TERNARY), ("two lines", CITED_LINES)):
+            with self.subTest(form=form):
+                self.assertReadAtCall(closure_src(call_of("finish", arg)), "cited")
+
+    def test_a_module_helper_that_prints_a_block_dict_argument_reads_an_uncited_call(self):
+        for form, arg in (("plain", UNCITED_BLOCK), ("ternary", UNCITED_TERNARY)):
+            with self.subTest(form=form):
+                self.assertReadAtCall(module_src(call_of("emit", arg)), "no cite")
+
+    def test_a_module_helper_that_prints_a_block_dict_argument_passes_a_cited_call(self):
+        for form, arg in (("plain", CITED_BLOCK), ("ternary", CITED_TERNARY), ("two lines", CITED_LINES)):
+            with self.subTest(form=form):
+                self.assertReadAtCall(module_src(call_of("emit", arg)), "cited")
+
+    def test_a_helper_that_only_stores_a_block_dict_argument_is_no_site(self):
+        # A control: a stored argument is never printed, so no refusal is read.
+        src = ("LOG = []\ndef record(p):\n    if p:\n        LOG.append(p)\n"
+               "def main(route, hold, pick):\n" + call_of("record", UNCITED_BLOCK))
+        self.assertEqual(call_rows(src), {}, "a helper that stores its argument is read as a refusal")
+
+    def test_a_helper_that_prints_a_dict_that_is_no_block_is_no_site(self):
+        # A control: a dict that is no block is no refusal, however the helper prints it.
+        for form, arg in (("systemMessage", '{"systemMessage": "held, no cite"}'),
+                          ("approve", '{"decision": "approve", "reason": "held, no cite"}')):
+            with self.subTest(form=form):
+                self.assertEqual(call_rows(closure_src(call_of("finish", arg))), {},
+                                 "a dict that is no block is read as a refusal")
+
+    def test_a_block_reason_joined_with_a_rule_tail_reads_cited(self):
+        call = ('    reason = " ".join(pick) + " (rule reports-order-of-labels)"\n'
+                '    finish({"decision": "block", "reason": reason})\n')
+        src = closure_src(call)
+        self.assertReadAtCall(src, "cited", RULE_HOMES)
+        # The twin: the same reason, with homes that do not name the tail's anchor, reads no cite.
+        self.assertEqual(call_rows(src).get("guard:main"), ["no cite"], "the tail's rule anchor does not decide the cite")
+
+
 class SettingsScriptFormTests(unittest.TestCase):
     """The script a settings.json command runs, read from each form a command may name it by."""
 
