@@ -1,0 +1,10 @@
+{
+  "title": "A waiting-page option picture fills its card width",
+  "phase": "now",
+  "status": "todo",
+  "order": 950,
+  "owner": "coordinator",
+  "why": "Owner, 2026-11-09 20:47 CST: \"the images are so small in the artifact cockpit.\" Owner ask ask-mwa3hdpa1j (20:52 CST, from the Degen coordinator). Checked by triage 20:53 CST against skills/waiting-page/page.html on main ddaa393c0: optPic (line 1442) passes maxScale 1 and maxH 480 to fitFrame, and fitFrame (line 2861) takes sc = min(maxScale, card width / design width, 480 / design height). So a 390x844 phone mockup draws at about 0.57, near 220 px wide, and a two-page Duo mockup shrinks further.",
+  "note": "Owner's brief: fix it so a mockup fills its card width (raise the cap, or let the picture scale above 1x), and show it at phone and desktop widths, light and dark. A screen change: designer before the builder unless text-only (it is not), design reviewer after. Line 394's comment says a taller picture scrolls inside its 480px box, so the fix also decides the box height. Filed 20:53 CST Nov 9.",
+  "updatedAt": "2026-11-09T20:53:00-06:00"
+}
