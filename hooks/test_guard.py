@@ -12226,6 +12226,87 @@ for _label, _cmd in ARGV_TEXT_ALLOWED:
 for _label, _cmd in ARGV_TEXT_REFUSED:
     sh("argv: deny, text: " + _label, _cmd, "deny", "process-args", cwd=NOGIT)
 
+# The forms the rule does not read yet. Each refuse case below is allowed by the build as it stands,
+# so each is red there. Each pass control beside it is allowed too, and stays green after the fix,
+# so a fix that is too broad fails a control.
+
+# BSD `x` lists the processes with no controlling terminal. Under the BSD personality its COMMAND
+# column is the full argument list. `ps ax` is refused already, as a bare BSD operand, so it is not a
+# case here. `-a -x` split into two words is the same listing as `-ax`.
+ARGV_BSD_X_REFUSED = ("ps -x", "ps -ax", "ps -Ax", "ps -ex", "ps -xw", "ps -a -x")
+for _cmd in ARGV_BSD_X_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# An explicit -o format decides alone, even with the BSD x flag.
+ARGV_BSD_X_ALLOWED = ("ps -xo pid,comm", "ps -x -o comm=")
+for _cmd in ARGV_BSD_X_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# A read of a process's cmdline by any command, not only cat or tac. The pid is a number, a glob, a
+# variable, or a thread under one (`task/N`). A command that takes the path as an argument, or reads it
+# through `xargs -a`, is refused as cat is.
+ARGV_CMDLINE_REFUSED = (
+    "grep -a tailscale /proc/*/cmdline", "head -c 200 /proc/1/cmdline", "tail -c 200 /proc/1/cmdline",
+    "strings /proc/1/cmdline", "od -c /proc/1/cmdline", "sed -n l /proc/1/cmdline",
+    "xargs -0 -a /proc/1/cmdline echo", "cat /proc/1/task/1/cmdline", "cat /proc/$pid/task/1/cmdline",
+)
+for _cmd in ARGV_CMDLINE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# The shell's own pid and self stay, under every reader. Other proc files stay, and so does a path
+# that only names the cmdline inside text.
+ARGV_CMDLINE_ALLOWED = (
+    "cat /proc/self/cmdline", "cat /proc/$$/cmdline", "head -c 200 /proc/self/cmdline",
+    "strings /proc/$$/cmdline", "cat /proc/1/comm", "cat /proc/1/status", "echo /proc/1/cmdline",
+    'git commit -m "read /proc/1/cmdline"', "grep -n cmdline file.txt",
+)
+for _cmd in ARGV_CMDLINE_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+ARGV_CMDLINE_TEXT_ALLOWED = (
+    ("a heredoc body that names the read", "cat > notes.md <<'EOF'\nhead -c 200 /proc/1/cmdline\nEOF"),
+    ("a comment that names the read", "ls # head -c 200 /proc/1/cmdline"),
+)
+for _label, _cmd in ARGV_CMDLINE_TEXT_ALLOWED:
+    sh("argv: allow, text: " + _label, _cmd, "allow", cwd=NOGIT)
+
+# pstree prints the full command line with -a or -c, and top with -c. The default tree and the
+# default top columns stay.
+ARGV_TREE_REFUSED = ("pstree -a", "pstree -ap", "pstree -ca", "top -c -bn1", "top -bc")
+for _cmd in ARGV_TREE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+ARGV_TREE_ALLOWED = ("pstree -p", "pstree", "top -bn1", "top -b -n 1 -o %CPU")
+for _cmd in ARGV_TREE_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# The PowerShell tool reads a process's command line through CIM, WMI or wmic, as the CommandLine
+# property. The pid, name and process-table forms stay.
+ARGV_PS_REFUSED = (
+    "Get-CimInstance Win32_Process | Select CommandLine",
+    "(Get-WmiObject Win32_Process).CommandLine",
+    "wmic process get commandline",
+    "Get-Process | Select Name,CommandLine",
+)
+for _cmd in ARGV_PS_REFUSED:
+    sh("argv: deny, PowerShell, " + _cmd, _cmd, "deny", "process-args", tool="PowerShell", cwd=NOGIT)
+ARGV_PS_ALLOWED = (
+    "Get-Process", "Get-Process | Select Id,ProcessName", "Get-CimInstance Win32_Process | Select ProcessId,Name",
+)
+for _cmd in ARGV_PS_ALLOWED:
+    sh("argv: allow, PowerShell, " + _cmd, _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+sh('argv: allow, PowerShell text: a quoted Win32_Process CommandLine',
+   'Write-Output "Win32_Process CommandLine"', "allow", tool="PowerShell", cwd=NOGIT)
+
+# The remedy names no refused form of these families either. Each case is red on the build as it
+# stands (its trigger is a form the rule does not read yet), and it pins the remedy once the rule
+# reads that form.
+ARGV_NEW_FORMS_NOT_IN_REMEDY = (
+    "ps -x", "ps -ax", "ps -xw", "pstree -a", "pstree -ca", "top -c", "top -bc", "cmdline", "xargs -a",
+    "CommandLine", "wmic",
+)
+sh("argv: deny, the remedy names no refused BSD, tree or cmdline form (trigger ps -xw)", "ps -xw", "deny",
+   "process-args", cwd=NOGIT, lacks=ARGV_NEW_FORMS_NOT_IN_REMEDY)
+sh("argv: deny, the remedy names no refused PowerShell form (trigger CommandLine)",
+   "Get-Process | Select Name,CommandLine", "deny", "process-args", tool="PowerShell", cwd=NOGIT,
+   lacks=ARGV_NEW_FORMS_NOT_IN_REMEDY)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
