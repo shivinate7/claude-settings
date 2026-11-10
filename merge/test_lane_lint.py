@@ -1516,6 +1516,7 @@ class BatchLintFlags(tm.Env):
 
 BATCH_LANE = "batch-73"  # an integration branch: `batch-` and a number, so the lane lint runs the batch checks
 BATCH_DEBT = "batch-74"  # an integration branch whose head closes a debt (the fixture of tm.DebtRetire)
+LANE_SLUG = "batch-push-full-checks"  # a lane whose slug starts `batch-` but names no number: a lane, so the lane lint runs the lint route
 FULL_PASS = [("PASS", "record slugs"), ("PASS", "comment narration")]  # the batch's full checks job, green
 FULL_FAIL = [("PASS", "record slugs"), ("FAIL", "shard suite")]
 FULL_UNKNOWN = [("PASS", "record slugs"), ("unknown", "shard suite")]
@@ -1562,6 +1563,9 @@ sys.exit(2 if any(state == "unknown" for state, _name in rows) else 0)
 
 class ScriptedShard(unittest.TestCase):
     """The cases failing_cases runs: its methods are set there, one per case name, so a run names exactly the cases asked for."""
+
+
+ROUTE_LINE = re.compile(r"(?i)\b(?:lint|batch)\b.*\broute\b|\broute\b.*\b(?:lint|batch)\b")  # the one line a run prints that names its route
 
 
 def failing_cases(*names):
@@ -1649,6 +1653,27 @@ class BatchLane(LaneFixture):
         return [c.kwargs.get("timeout") for c in spy.call_args_list
                 if c.args and isinstance(c.args[0], list) and len(c.args[0]) > 1 and c.args[0][1] == self.stub]
 
+    def lint_runs(self):
+        return [r for r in self.ci_runs() if "--lint" in r["argv"]]
+
+    def route_lines(self, out):
+        """The lines of `out` that name the route the run took (ROUTE_LINE)."""
+        return [line for line in out.splitlines() if ROUTE_LINE.search(line)]
+
+    def assert_lint_route(self, out):
+        """The lint route ran: one `checks --lint` run, and none of the batch's steps (the full checks job, the Windows slice, the records rebuild)."""
+        self.assertFalse(self.full_runs(), "took the batch route: the full checks job ran\n" + out)
+        self.assertFalse(self.windows_runs(), "took the batch route: the Windows slice ran\n" + out)
+        self.assertFalse(self.rebuilds(), "took the batch route: the records page was rebuilt\n" + out)
+        self.assertEqual(len(self.lint_runs()), 1, "the lint route ran %d lint runs, want 1\n%s" % (len(self.lint_runs()), out))
+
+    def assert_batch_route(self, out):
+        """The batch route ran: the full checks job, the Windows slice and the records rebuild, and no lint run."""
+        self.assertTrue(self.full_runs(), "took the lint route: no full checks job ran\n" + out)
+        self.assertTrue(self.windows_runs(), "took the lint route: no Windows slice ran\n" + out)
+        self.assertTrue(self.rebuilds(), "took the lint route: the records page was not rebuilt\n" + out)
+        self.assertEqual(self.lint_runs(), [], "took the lint route too: a --lint run ran\n" + out)
+
     def test_a_batch_head_runs_the_full_checks_job_and_the_windows_slice(self):
         self.push_branch_of(BATCH_LANE)
         self.use_routed_ci_job(FULL_PASS)
@@ -1701,13 +1726,125 @@ class BatchLane(LaneFixture):
         self.assertTrue(any("shard suite" in line and "red on main too" in line for line in out.splitlines()),
                         "the FAIL whose case names main also has is not named 'red on main too'\n" + out)
 
-    def test_an_unknown_that_main_also_has_is_named_unknown_on_main_too_and_does_not_stop(self):
+    def test_a_fail_with_a_case_main_lacks_stops_the_batch_lint(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_FAIL, base_full=FULL_FAIL,
+                               head_cases={"shard suite": failing_cases("test_old_case", "test_new_case")},
+                               base_cases={"shard suite": failing_cases("test_old_case")})
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 1, "a FAIL with a case main lacks was excused as red on main too\n" + out)
+        self.assertTrue(any(line.startswith("FAIL") and "shard suite" in line for line in out.splitlines()), out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_fail_with_no_case_names_on_either_side_stops_the_batch_lint(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_FAIL, base_full=FULL_FAIL)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 1, "a FAIL with no case names on either side was excused as red on main too\n" + out)
+        self.assertTrue(any(line.startswith("FAIL") and "shard suite" in line for line in out.splitlines()), out)
+        self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_fail_whose_case_names_are_a_subset_of_mains_is_excused(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_FAIL, base_full=FULL_FAIL,
+                               head_cases={"shard suite": failing_cases("test_old_case")},
+                               base_cases={"shard suite": failing_cases("test_old_case", "test_other_case")})
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 0, "a FAIL whose case names main also has, and more, stopped the batch lint\n" + out)
+        self.assertTrue(any("shard suite" in line and "red on main too" in line for line in out.splitlines()),
+                        "the excused FAIL is not named 'red on main too'\n" + out)
+
+    def test_the_excuse_line_does_not_claim_the_same_fail_line(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_FAIL, base_full=FULL_FAIL,
+                               head_cases={"shard suite": failing_cases("test_old_case")},
+                               base_cases={"shard suite": failing_cases("test_old_case", "test_other_case")})
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        excused = [line for line in out.splitlines() if "shard suite" in line and "red on main too" in line]
+        self.assertTrue(excused, "no line names the excused FAIL\n" + out)
+        self.assertNotIn("the same FAIL line", excused[0],
+                         "the excuse says main gives 'the same FAIL line', but only the case names were compared: " + excused[0])
+
+    def test_a_lint_run_prints_one_line_naming_the_lint_route(self):
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", "feat")
+        self.assertEqual(rc, 0, out)
+        self.assert_lint_route(out)
+        lines = self.route_lines(out)
+        self.assertEqual(len(lines), 1, "a lint run printed %d lines naming its route, want one\n%s" % (len(lines), out))
+        self.assertRegex(lines[0], r"(?i)\blint\b", "the route line of a lint run does not name the lint route: " + lines[0])
+
+    def test_a_batch_run_prints_one_line_naming_the_batch_route(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 0, out)
+        self.assert_batch_route(out)
+        lines = self.route_lines(out)
+        self.assertEqual(len(lines), 1, "a batch run printed %d lines naming its route, want one\n%s" % (len(lines), out))
+        self.assertRegex(lines[0], r"(?i)\bbatch\b", "the route line of a batch run does not name the batch route: " + lines[0])
+
+    def test_a_lane_slug_that_starts_batch_takes_the_lint_route(self):
+        self.push_branch_of(LANE_SLUG)
+        self.assertTrue(self.head(LANE_SLUG), "the lane branch %s was not pushed" % LANE_SLUG)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", LANE_SLUG)
+        self.assertEqual(rc, 0, out)
+        self.assert_lint_route(out)
+
+    def test_an_integration_branch_named_by_number_takes_the_batch_route(self):
+        self.push_branch_of(BATCH_LANE)
+        self.assertTrue(self.head(BATCH_LANE), "the integration branch %s was not pushed" % BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE)
+        self.assertEqual(rc, 0, out)
+        self.assert_batch_route(out)
+
+    def test_a_remote_tracking_ref_of_an_integration_branch_takes_the_batch_route(self):
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", "refs/remotes/origin/" + BATCH_LANE)
+        self.assertEqual(rc, 0, out)
+        self.assert_batch_route(out)
+
+    def test_an_origin_name_of_an_integration_branch_takes_the_batch_route(self):  # the control
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", "origin/" + BATCH_LANE)
+        self.assertEqual(rc, 0, out)
+        self.assert_batch_route(out)
+
+    def test_a_bare_sha_of_an_integration_branch_takes_the_lint_route(self):  # the control
+        self.push_branch_of(BATCH_LANE)
+        sha = self.head(BATCH_LANE)
+        self.assertTrue(sha, "the integration branch %s was not pushed" % BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", sha)
+        self.assertEqual(rc, 0, out)
+        self.assert_lint_route(out)
+
+    def test_an_unknown_that_main_also_has_refuses_without_the_lint_unknown_flag(self):
+        # ruling "No silent pass" (2026-11-07 13:20 CST): an unknown refuses unless --lint-unknown-ok, on main too
         self.push_branch_of(BATCH_LANE)
         self.use_routed_ci_job(FULL_UNKNOWN, base_full=FULL_UNKNOWN)
         rc, out = self.run_lane("--lane-lint", BATCH_LANE)
-        self.assertEqual(rc, 0, "an unknown that main also has stopped the batch lint\n" + out)
+        self.assertEqual(rc, 1, "an unknown that main also has passed the batch lint without --lint-unknown-ok\n" + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertIn("--lint-unknown-ok", out, "the refusal does not name the flag that lifts it\n" + out)
         self.assertTrue(any("shard suite" in line and "unknown on main too" in line for line in out.splitlines()),
                         "the unknown that main also has is not named 'unknown on main too'\n" + out)
+
+    def test_an_unknown_that_main_also_has_passes_with_the_lint_unknown_flag_and_the_lift_is_printed(self):
+        # ruling "No silent pass" (2026-11-07 13:20 CST): the lift is logged with its reason, and no PASS line prints
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_UNKNOWN, base_full=FULL_UNKNOWN)
+        reason = "shellcheck is not on this box"
+        rc, out = self.run_lane("--lane-lint", BATCH_LANE, "--lint-unknown-ok", reason)
+        self.assertEqual(rc, 0, out)
+        logged = [line for line in out.splitlines() if reason in line]
+        self.assertEqual(len(logged), 1, "the lift of an unknown that main also has is not printed once, with its reason\n" + out)
+        self.assertIn("unknown", logged[0].lower(), "the lift line does not say the lint is unknown: " + logged[0])
+        self.assertEqual(pass_lines(out), [], "a lifted unknown read was printed as a pass\n" + out)
 
     def test_a_fail_only_the_batch_head_has_stops_the_batch_lint(self):
         self.push_branch_of(BATCH_LANE)
