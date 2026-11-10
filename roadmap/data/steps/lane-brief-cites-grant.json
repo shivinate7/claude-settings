@@ -1,12 +1,12 @@
 {
-  "title": "A lane brief opens with a Grant line naming the owner's words and time",
+  "title": "A lane starts with effort medium and its whole brief, opening with a Grant line, as its first prompt",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 1013,
   "owner": "triage",
   "why": "A lane brief sent by send_message carried no owner grant with a time, so the new lane main-merge-project-ops paused and asked the owner (13:08 CST Nov 10).",
-  "note": "Coordinator 13:10 CST Nov 10; widened by owner chat 13:10 CST via coordinator 13:18 CST (\"it needs to be mechanized either where things are placed or where things are checked\"). (placement) The coordinator starts a lane with create_session, effort set, and the whole brief as the prompt, opening with a `Grant: <owner words, time>` line, so the brief is the lane's own first turn, not a peer message; the project-ops brief template carries that line. (check) A guard refuses a create_session for a cs-build:lane session whose prompt lacks the Grant line. Incident: same brief, same model, 13:12 CST: two lanes acted, lane main-merge-project-ops paused as 'peer message, no grant'. Done when the guard goes red on a fixture.",
-  "updatedAt": "2026-11-10T13:13:00-06:00",
-  "lane": "",
+  "note": "Owner chat 13:19 CST Nov 10, \"B is good\" (page item 495 option a; relayed by coordinator 13:20 and 13:22 CST). The owner said at 13:17 CST he never ruled the exact-prompt lane effort pin. Build: drop the exact-prompt pin and guard lane-effort-pin; a cs-build:lane create_session must set effort medium and carry the whole brief as its prompt, first line `Grant: <owner words>, <time>`; the guard refuses one without either. Rewrite decision agent-model-cap 'The lane effort pin' and decision session-tiers 'Lane session effort' in place to cite owner 2026-11-10 13:19 CST, dropping the 2026-10-30 15:11 CDT cite. Project-ops brief template opens with the Grant line. Incident: 13:12 CST, lane main-merge-project-ops paused on a brief sent as a peer message. Done when the guard goes red on a fixture.",
+  "updatedAt": "2026-11-10T13:25:00-06:00",
+  "lane": "triage agents (session_013NEJL42Sv3tJkjpzY7bExj)",
   "blockedBy": []
 }
