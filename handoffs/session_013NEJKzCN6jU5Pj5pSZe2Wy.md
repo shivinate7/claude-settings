@@ -1,0 +1,7 @@
+# git-dash-c-other-checkout (session_013NEJKzCN6jU5Pj5pSZe2Wy), received 09:47 CST 2026-11-10, kind B
+
+Handoff (B), lane git-dash-c-other-checkout (session_013NEJKzCN6jU5Pj5pSZe2Wy), step 808.
+1. Work: guard refuses an agent's `git -C &lt;other checkout&gt;` file-changing verbs like the cd form. Repo shivinate7/claude-settings, PR #2323, MERGED 2026-11-09 21:13 CST (batch 69), last head ffc43bf0eb5b7a09e4b22d92eeac861d87a1a253. Nothing unpushed; lane worktree clean.
+2. Left (not started, coordinator order 2026-11-08 18:23 CST): one docs-only PR from main: in docs/debts/notes.md note (1) no row pins the git-spawn cost of the new path (`worktree_home_cross_checkout_cost_case`), note (2) two false alarms added (`git -C &lt;primary|sibling&gt; pull|merge|checkout|switch|rebase` from a lane; `git -C &lt;own recorded home&gt; commit` from the primary; workaround a lone cd); and in the decision an-agent-outside-its-home-tree-must-stop one sentence: coordinator ruling 2026-11-08 17:15 CST keeps deny on `git -C &lt;lane&gt; reset --hard` from the shared checkout (matches cd form, override lifts it). Then send the coordinator branch, head and PR number.
+3. Also unfiled: the false alarm that the harness worktree check counts "git" in a branch name as a second git call (sent to the coordinator earlier as a triage sighting).
+4. Details: handoff file /root/.claude/handoffs/a3bc0f8e-92eb-5838-9bd4-aa785d337aa5.md (in this container only), earlier-chain findings in the session scratchpad.
