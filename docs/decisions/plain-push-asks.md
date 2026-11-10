@@ -46,7 +46,7 @@ A third kind is refused, with its remedy. The owner's typed override lets each t
   `push-main`; a lane branch, `HEAD:<lane-branch>`, `archive/*` and deletes are allowed.
 - `--all` and `--branches`, to a network remote: refused from an agent checkout, and ask `push-main` from any
   other checkout. This scope is the builder's reading, recorded 2026-11-10 15:39 CST, not the owner's words.
-  Pending the owner's word on whether "Refuse it" covers them from any checkout.
+  Pending the owner's ruling on whether "Refuse it" covers them from any checkout.
 - Silent:
   - a push to the branch's own upstream, unless that name is an agent-worktree name;
   - a first push with no upstream, unless its destination is an agent-worktree name;
