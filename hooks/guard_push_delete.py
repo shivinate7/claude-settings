@@ -792,7 +792,8 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         return state["main"]
 
     if every:
-        return main()
+        # --all sends main and the checkout's own branch together, so an agent checkout's push is the agent rule's.
+        return "agent" if main() and current() and AGENT_BRANCH.fullmatch(current()) else main()
     if not plain and _push_tags_only(args):
         return ""
 
@@ -822,22 +823,24 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
         agent = bool(dest and AGENT_BRANCH.fullmatch(dest))
     else:
         agent = False
+        to_main = False
         for spec in plain:
             source, colon, target = spec.partition(":")
             if colon:
+                # A main destination does not end the scan: an agent name later in the push is refused, not asked.
                 if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():
-                    return "main"
+                    to_main = True
                 agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))
             elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:
                 # A local origin makes main() empty; the other refspecs are still read for agent and stray.
                 if main():
-                    return "main"
+                    to_main = True
             elif source in ("HEAD", "@") or (current() is not None and source == current()):
                 implied = True
                 agent = agent or bool(current() and AGENT_BRANCH.fullmatch(current()))
             else:
                 agent = agent or bool(AGENT_BRANCH.fullmatch(source.removeprefix("refs/heads/")))
-        if implied and current() in DEFAULT_BRANCH_FALLBACK and main():
+        if not agent and (to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):
             return "main"
     if agent:
         return "agent"
