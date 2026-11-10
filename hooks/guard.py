@@ -163,7 +163,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        cs-build:lane and its cs-topic tag differs from the brief's Topic, or the brief names none. A lane
                        with no cs-topic is judged by its cs-step tags: the brief's step must be one. The marker matches
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
-                       its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
+                       its record, and a marker brief with no record of the target, are refusals. A `Grant:` line before the marker
+                       that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
+                       line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
@@ -299,7 +301,8 @@ Other tools, in `judge` order:
                        role. An override lifts it. (brief-destructive-git)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
                        exactly `medium` (LANE_EFFORT), or whose prompt's first non-blank line does not
-                       start `Grant: ` (LANE_GRANT_MARKER) with the owner's words after it. The prompt is
+                       start `Grant: ` (LANE_GRANT_MARKER) with the owner's words after it: a letter or digit, and no `<`
+                       (shared_names.grant_line_holds_words). The prompt is
                        the whole brief, the Grant line first. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
                        string. A call with no lane tag passes. An override lifts it.
@@ -2807,8 +2810,9 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
-from shared_names import REMOTE_OUTWARD_TOOLS, REMOTE_SERVER  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
-CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
+from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
+    CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,
+)
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
@@ -2817,7 +2821,7 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_GRANT_MARKER, LANE_TAG  # noqa: E402  the one home of the lane tag and the Grant marker, shared with lint/report_guard.py and guard_merge
+from shared_names import LANE_GRANT_MARKER, LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant marker, shared with lint/report_guard.py and guard_merge
 LANE_EFFORT_REASON = (
     "A lane session starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <owner words>, <time>`, the owner's word that starts this lane. Set the "
@@ -2967,25 +2971,10 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
-def lane_tags(tool_input) -> list:
-    """The `tags` of a call as a list: one string is a list of one; anything else that is not a list is empty."""
-    tags = tool_input.get("tags")
-    if isinstance(tags, str):
-        return [tags]
-    return tags if isinstance(tags, list) else []
-
-
-def is_lane_create_session(tool: str, tool_input) -> bool:
-    """True for a create_session call that tags a lane: any tag that, stripped and casefolded, is LANE_TAG. The one
-    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
-    return tool == CREATE_SESSION_TOOL and any(
-        isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
-
-
 def lane_effort_hit(tool: str, tool_input) -> str:
     """What breaks the lane start of a create_session call that tags a lane, or "": the effort field when it
     is not exactly LANE_EFFORT, else the prompt's first non-blank line when it is not a Grant line
-    (LANE_GRANT_MARKER, then the owner's words). A lane tag is any tag that, stripped and casefolded, is
+    (LANE_GRANT_MARKER, then the owner's words: grant_line_holds_words). A lane tag is any tag that, stripped and casefolded, is
     LANE_TAG; `tags` may be one string. A call with no lane tag is not judged. A missing prompt has no
     Grant line."""
     if not is_lane_create_session(tool, tool_input):
@@ -2995,7 +2984,7 @@ def lane_effort_hit(tool: str, tool_input) -> str:
         return "effort: " + str(effort if effort else "(none)")
     prompt = tool_input.get("prompt")
     first = next((ln.strip() for ln in prompt.splitlines() if ln.strip()), "") if isinstance(prompt, str) else ""
-    if first.startswith(LANE_GRANT_MARKER) and first[len(LANE_GRANT_MARKER):].strip():
+    if grant_line_holds_words(first):
         return ""
     return "prompt: " + (first[:80] or "(none)")
 
