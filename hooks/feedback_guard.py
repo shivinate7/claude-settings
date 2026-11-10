@@ -83,6 +83,17 @@ a turn end in these cases:
     (GRANT_ROOT_HOMES), if some branch tracks it. A lone short message counts. Risk kind: named
     incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), same
     audit. Cost: two regexes on text already in memory;
+  - page-form-to-template (roadmap step page-feedback-to-template; ruling c164: a waiting-page comment is never
+    answered with a thread reply, the item is rewritten). In the claude-settings repo (layout.repo_name equals
+    shared_names.SETTINGS_REPO) and in the page writer's session (the transcript's newest meta/page get names the
+    hook's session id: _transcript.page_writer_id), a block that starts with the "[Artifact comment sent to
+    Claude]" banner, whose `Artifact:` url passes layout.is_waiting_page_url, and whose quoted wake is not a Saved
+    or Undone wake with no note in parentheses after `Items:`, needs one item line of two forms: `[task] -> step:<slug>`
+    whose step file at origin/<record branch> holds shared_names.TEMPLATE_DIR, or `[note] -> not-page-form`. The
+    remedy names both. Risk kind: likely risk. Incident: owner, Nov 10 09:13 CST (every page feedback goes into the
+    shared template). Cost: one regex per block plus the transcript read the guard already makes, and one
+    cat-file per step home, inside the Stop process. No process, timer or file. A repo, layout or git read that
+    fails passes the block;
   - inbox-close-needs-home. A closed note needs a home that is a file some branch tracks,
     `step:<slug>` (roadmap/data/steps/<slug>.json, resolved by ruling_home.value_resolves), `page:<n>`
     or `not-a-grant`. `noted` and `process-only` are not one. An item is closed by `[closed]` as a
@@ -102,8 +113,8 @@ a turn end in these cases:
     WAITING_COLLECTIONS, by `collection` or a `doc_id` or `path` prefix) to the waiting page
     (layout.is_waiting_page_url) whose tool_result is no error, and the newest such write is newer than the
     newest commit on origin/<record branch> that touches the waiting copy folder (waiting_copy), unless a later
-    shell run (Bash or PowerShell) of export_page.py ended with the line `same`, or with `<page id>: same`
-    under --all. No commit on the folder at all counts as older. This session is the writer when the newest
+    shell run (Bash or PowerShell) of export_page.py printed a line `same`, or `<page id>: same`
+    under --all, anywhere in its output. No commit on the folder at all counts as older. This session is the writer when the newest
     meta/page get names the hook's session id or the id the remote env names (override.remote_session_id). A
     writer named there decides alone. Only when none is named does an interpreter run of export_page.py
     (EXPORT_RUN) before the write make this session the writer. A session that is not the writer, or whose
@@ -152,7 +163,7 @@ import local_time  # noqa: E402  the one home of the inbox paths
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
-from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
+from shared_names import MACHINE_TAGS, SETTINGS_REPO, TEMPLATE_DIR  # noqa: E402  the one home of the machine notice tags, the repo, and the template dir
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
 ITEM = re.compile(r"- (fb-\S+)(?:\s+(.*))?$")
@@ -167,6 +178,7 @@ REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
 STEP_HOME = re.compile(r"step:([A-Za-z0-9_-]+)")
 STEP_PATH = override.STEP_DIR + "%s.json"  # where a `step:<slug>` home resolves, as a blob on some ref
 NOT_A_GRANT = "not-a-grant"  # the home of a [note] that says its grant word is no grant
+NOT_PAGE_FORM = "not-page-form"  # the home of a [note] that says its waiting-page comment is not page form (rule page-form-to-template)
 # A chat answer to waiting-page item n: `<n> <letter>` (a to h), an optional parenthetical, one per
 # comma or line. Letters outside a to h are no answer, so "1 y, 2 n" passes.
 _ONE_ANSWER = r"\d+[ \t]*:?[ \t]*[a-hA-H]\.?(?:[ \t]*\([^)\n]*\))?"
@@ -204,6 +216,7 @@ FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
 FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
 FAIL_OPEN_FILING = "Feedback guard: page filing not checked (%s)."
+FAIL_OPEN_FORM = "Feedback guard: page form not checked (%s)."
 FAIL_OPEN_EXPORT = "Feedback guard: waiting copy export not checked (%s)."
 EXPORT_SCRIPT = "export_page.py"
 EXPORT_SAME = "same"  # the verdict export_page.py prints when nothing differs
@@ -382,10 +395,12 @@ class Homes:
 
     def __init__(self, cwd, worked_in=None):
         self.cwd, self.skip, self.skip_closed, self.skip_filing = cwd, None, None, None
+        self.skip_form = None  # why the page-form rule stood down, for the systemMessage line
         self.worked_in = worked_in  # the folder the inbox's sidecar binds: where the session worked
         self._tops = None  # the repo tops of worked_in and cwd, read once per Stop
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
         self._top = None  # (the cwd's repo top or None,), read once per Stop
+        self._templated = {}  # (branch, slug) -> whether the step file holds TEMPLATE_DIR, read once per Stop
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
@@ -487,10 +502,10 @@ class Homes:
         return None
 
     def closed_problem(self, item_id, rest):
-        """None when a closed note's home is a page, a not-a-grant verdict, a `step:<slug>` whose step file
+        """None when a closed note's home is a page, a not-a-grant or not-page-form verdict, a `step:<slug>` whose step file
         some branch holds, or a file git tracks; else the reason text. None too when the check stood down."""
         word = home_word(rest)
-        if PAGE_HOME.fullmatch(word) or word == NOT_A_GRANT:
+        if PAGE_HOME.fullmatch(word) or word in (NOT_A_GRANT, NOT_PAGE_FORM):
             return None
         if ruling_home._unwrap(word) == ruling_home.PROCESS_ONLY:  # value_resolves accepts it; a close needs a file
             return self._closed_reason(item_id)
@@ -508,7 +523,37 @@ class Homes:
     @staticmethod
     def _closed_reason(item_id):
         return ("%s [note] is closed with no home: a closed note needs a tracked file, `step:<slug>` naming a"
-                " step file that some branch holds, `page:<n>` or `not-a-grant`" % item_id)
+                " step file that some branch holds, `page:<n>`, `not-a-grant` or `not-page-form`" % item_id)
+
+    def step_names_template(self, root, branch, slug):
+        """True when the step file `slug` at origin/<branch> holds TEMPLATE_DIR, False when it holds none. None when
+        the read fails (the ref does not resolve, or the cat-file fails): the rule stands down and `skip_form` says
+        so, as filed_numbers does. One cat-file per step, asked once."""
+        key = (branch, slug)
+        if key not in self._templated:
+            run = ruling_home._run_git(root, ["cat-file", "-p", "refs/remotes/origin/%s:%s" % (branch, STEP_PATH % slug)])
+            if run.returncode != 0:
+                self.skip_form = "no step file %s at origin/%s" % (STEP_PATH % slug, branch)
+                self._templated[key] = None
+            else:
+                self._templated[key] = TEMPLATE_DIR in run.stdout
+        return self._templated[key]
+
+    def page_form_scope(self, url):
+        """(root, branch) when the cwd is the claude-settings repo and `url` is its waiting page; else None. The
+        layout or git failing stands the rule down: None."""
+        try:
+            import layout
+        except ImportError:
+            return None
+        try:
+            root = self._cwd_root()
+            if root is None or layout.repo_name(root) != SETTINGS_REPO.lower() or not layout.is_waiting_page_url(
+                    root, url):
+                return None
+            return root, layout.record_branch(root)
+        except (layout.LayoutError, ruling_home._GitFailure):
+            return None
 
     def has_waiting_page(self):
         """(found, why): `found` is true when the repo of the session's folder names a waiting page
@@ -653,6 +698,11 @@ class Pages:
                 if text is not None:
                     self.owners.append((i, norm(text)))
         return not self.unread
+
+    def is_writer(self, session_id):
+        """True when the transcript's newest meta/page get names `session_id` as the page writer. False when it
+        names another, none, or the transcript cannot be read: the writer is not known, so the session is not it."""
+        return bool(session_id) and self._load() and _transcript.page_writer_id(self.records) == session_id
 
     def stand_down(self, label, why):
         self.skip.setdefault(label, [])
@@ -871,7 +921,46 @@ def grant_problem(b, text, items):
     return "the message at %s (%s) holds a grant word and has no home for it: add %s" % (b["stamp"], head, GRANT_HOMES)
 
 
-def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
+PAGE_BANNER = re.compile(r"\[Artifact comment sent to Claude\]\s*\nArtifact:[ \t]*(\S+)")  # a block's start, and its page
+PAGE_QUOTE = re.compile(r"^=== BEGIN ARTIFACT COMMENT (\S+) ===\n(.*?)\n=== END ARTIFACT COMMENT \1 ===", re.M | re.S)
+SAVED_WAKE = "Saved on the waiting page"
+UNDONE_WAKE = "Undone on the waiting page"  # page.html builds it with a tail, so its items carry no note
+
+
+def page_form_problem(text, items, homes, pages, session):
+    """The reason text, or None (rule page-form-to-template, in the docstring above). The cheap gates run first: the
+    banner regex, then the repo and page of the cwd, then the transcript for the page writer, then one cat-file per
+    step home."""
+    banner = PAGE_BANNER.match(text)
+    if banner is None or homes is None or pages is None:
+        return None
+    quote = PAGE_QUOTE.search(text)
+    wake = "\n".join(re.sub(r"^> ?", "", ln) for ln in quote.group(2).split("\n")) if quote else ""
+    if wake.startswith((SAVED_WAKE, UNDONE_WAKE)) and "(" not in wake.partition("Items:")[2]:
+        return None  # a plain save or an undo: no owner words to route
+    scope = homes.page_form_scope(banner.group(1))
+    if scope is None or not pages.is_writer(session):
+        return None
+    try:
+        for it in items:
+            if it is None or not it[2]:
+                continue
+            if it[1].startswith("[note]") and home_word(it[1]) == NOT_PAGE_FORM:
+                return None
+            step = step_home(it[1]) if it[1].startswith("[task]") else None
+            if step:
+                named = homes.step_names_template(scope[0], scope[1], step.group(1))
+                if named is None or named:  # None: the step read failed, so the rule stands down
+                    return None
+    except ruling_home._GitFailure:
+        return None
+    return ("this is a waiting-page comment, and a page comment is never answered with a thread reply (ruling c164):"
+            " the item is rewritten into the shared template, %s. Add `[task] -> step:<slug>` for a step whose file"
+            " on origin/%s names %s, or `[note] -> %s` when the comment is not page form (rule page-form-to-template)"
+            % (TEMPLATE_DIR, scope[1], TEMPLATE_DIR, NOT_PAGE_FORM))
+
+
+def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", session=None):
     out, seen = [], {}
     for n, b in enumerate(blocks):
         text = norm(b["text"])
@@ -880,7 +969,8 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox=""):
             out.append(no_items_problem(b, inbox, homes.homes_line() if homes is not None else ""))
         grant = is_grant(text)
         for found in (answer_problem(b, text, seen[text], homes, pages),
-                      grant_problem(b, text, [item(ln) for ln in b["items"]])):
+                      grant_problem(b, text, [item(ln) for ln in b["items"]]),
+                      page_form_problem(text, [item(ln) for ln in b["items"]], homes, pages, session)):
             if found:
                 out.append(found)
         for ln in b["items"]:
@@ -1228,12 +1318,13 @@ def _scan_transcript(records, collections):
 
 
 def _cleared(exports, results, newest, page_id):
-    """True when an export run after `newest` ended with the verdict `same`: as its last line, or, for the
-    `--all` form, as the line `<page id>: same`."""
+    """True when an export run after `newest` printed the verdict `same`: as a line of its own, or, for the `--all`
+    form, as the line `<page id>: same`. An exit 4 (a held item) prints the verdict first and its held lines after,
+    and the held lines hold the republish through the waiting-page skill's `--check` step, so an error result that holds the verdict line clears too.
+    An error result with no verdict line (a refusal, a crash) clears nothing."""
     for when, uid in exports:
-        failed, lines = results.get(uid, (True, []))
-        if when > newest and not failed and lines and (
-                lines[-1] == EXPORT_SAME or "%s: %s" % (page_id, EXPORT_SAME) in lines):
+        _, lines = results.get(uid, (True, []))
+        if when > newest and (EXPORT_SAME in lines or "%s: %s" % (page_id, EXPORT_SAME) in lines):
             return True
     return False
 
@@ -1242,8 +1333,8 @@ def export_check(cwd, transcript_path, session_id):
     """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
     when this session is the page writer and the transcript holds a successful ArtifactData write of an
     exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
-    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (verdict
-    `same`, or `<page id>: same` under --all). This session is the writer when the newest meta/page get names
+    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (a line
+    `same`, or `<page id>: same` under --all, anywhere in its output). This session is the writer when the newest meta/page get names
     `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
     alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write
     make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
@@ -1347,7 +1438,7 @@ def inbox_stop(hook):
             except OSError:
                 handoff = ""
             pages = Pages(hook.get("transcript_path"))
-            found = problems(blocks, handoff, homes, burst, pages, inbox)
+            found = problems(blocks, handoff, homes, burst, pages, inbox, hook.get("session_id"))
             reasons = found + flags
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + ([note] if note else []) + (
                 [FAIL_OPEN_SENDS % (label, "; ".join(why)) for label, why in sorted(
@@ -1356,6 +1447,8 @@ def inbox_stop(hook):
                 notes.append(FAIL_OPEN_CLOSED % homes.skip_closed)
             if homes.skip_filing:
                 notes.append(FAIL_OPEN_FILING % homes.skip_filing)
+            if homes.skip_form:
+                notes.append(FAIL_OPEN_FORM % homes.skip_form)
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:

@@ -2243,21 +2243,34 @@ class SameTurnWriter:
 
     WRITER = "session_writer1"
 
-    def call(self, name, input_, result=None, side=False):
-        """The records one tool call leaves: the call, and its result when one is given."""
+    DELIVERED = '{"status":"delivered"}'  # a cloud send_message result whose send reached its session
+    NOT_DELIVERED = '{"status":"queued"}'  # a result that reads as not delivered
+
+    def call(self, name, input_, result=None, side=False, is_error=False, tool_use_result=None):
+        """The records one tool call leaves: the call, and its result when one is given. is_error sets the
+        result's is_error flag (a failed cloud send); tool_use_result is the record's toolUseResult (a failed
+        local SendMessage says success false there, with no is_error)."""
         use_id = "toolu_%d" % next(_CALL_IDS)
         recs = [{"type": "assistant", "isSidechain": side, "message": {"role": "assistant", "content": [
             {"type": "tool_use", "id": use_id, "name": name, "input": input_}]}}]
         if result is not None:
-            recs.append({"type": "user", "isSidechain": side, "message": {"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": use_id, "content": result}]}})
+            block = {"type": "tool_result", "tool_use_id": use_id, "content": result}
+            if is_error:
+                block["is_error"] = True
+            rec = {"type": "user", "isSidechain": side, "message": {"role": "user", "content": [block]}}
+            if tool_use_result is not None:
+                rec["toolUseResult"] = tool_use_result
+            recs.append(rec)
         return recs
 
-    def send(self, session_id=None, to=None):
-        """A send: send_message names its target by session_id, SendMessage by to."""
+    def send(self, session_id=None, to=None, result=None, is_error=False, tool_use_result=None):
+        """A send: send_message names its target by session_id, SendMessage by to. `result` is the send's tool
+        result text, None when the transcript holds none. is_error and tool_use_result go to call as given."""
+        out = {"result": result, "is_error": is_error, "tool_use_result": tool_use_result}
         if to is None:
-            return self.call("mcp__claude-code-remote__send_message", {"session_id": session_id, "message": "pick"})
-        return self.call("SendMessage", {"to": to, "message": "pick"})
+            return self.call("mcp__claude-code-remote__send_message",
+                             {"session_id": session_id, "message": "pick"}, **out)
+        return self.call("SendMessage", {"to": to, "message": "pick"}, **out)
 
     def writer_read(self, writer, collection="meta", doc_id="page"):
         """An ArtifactData get whose result carries the writer id."""
@@ -2285,6 +2298,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                "A (my pick): fold the guard", "B: add a second hook", DEPARTS]
     LINKED = PICK + [PAGE]
     QUESTION = ["Close q_max #969 as replaced by #1010?"]
+    NO_KEY = object()  # make_repo's writer default: the extras file holds no "page-writer" key
 
     def setUp(self):
         self.run_dir = tempfile.mkdtemp(dir=_ISOLATION["dir"])
@@ -2295,14 +2309,25 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         os.makedirs(self.home)
         self.repo = self.make_repo("repo")
 
-    def make_repo(self, name, page=True):
+    def make_repo(self, name, page=True, writer=NO_KEY):
+        """A repo whose extras file names the waiting page (when page is true). `writer` sets its
+        "page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out."""
         repo = os.path.join(self.run_dir, name)
         os.makedirs(os.path.join(repo, ".git"))
         if page:
             os.makedirs(os.path.join(repo, ".claude"))
+            keys = {"kinds": {}, "waiting-page": self.PAGE}
+            if writer is not self.NO_KEY:
+                keys["page-writer"] = writer
             with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
-                json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
+                json.dump(keys, f)
         return repo
+
+    def extras_key(self, repo):
+        """The "page-writer" value on disk in `repo`, or NO_KEY when the file holds no such key."""
+        with open(os.path.join(repo, ".claude", "layout-extras.json")) as f:
+            keys = json.load(f)
+        return keys["page-writer"] if "page-writer" in keys else self.NO_KEY
 
     def reply(self, body):
         """A report whose Input Needed item holds the lines of `body`. Its Done line names a commit, so a
@@ -2570,6 +2595,178 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             with self.subTest(form=label):
                 out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
                 self.assert_blocked(out, "Pick guard")
+
+    # Owner-facing turn with no meta/page read: the layout's "page-writer" key is the writer.
+
+    def test_qm_layout_writer_green_send_to_the_key_id_passes(self):
+        # Catches: a send to the layout key's writer refused when the transcript holds no meta/page read, so a
+        # cloud session that never reads meta/page is blocked for a question it sent to the real writer. The send
+        # carries a delivered result, so only the key's writer id decides.
+        bare = self.make_repo("bare_key")
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED)),
+                            ("to", self.send(to=self.WRITER, result=self.DELIVERED))):
+            with self.subTest(field=label):
+                records = [human("decide"), *send, assistant_text(self.reply(self.PICK))]
+                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
+                self.assertIsNone(self.stop(records, repo=keyed), "a send to the layout key's writer id was refused")
+
+    def test_qm_layout_writer_green_ack_from_the_key_writer_keeps_the_turn(self):
+        # Catches: the layout writer's ack after a send starting a new turn, which hides the send and blocks the question.
+        bare = self.make_repo("bare_key")
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED)),
+                            ("to", self.send(to=self.WRITER, result=self.DELIVERED))):
+            with self.subTest(field=label):
+                records = [human("decide"), *send, ack, assistant_text(self.reply(["Close q_max #969?"]))]
+                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
+                self.assertIsNone(self.stop(records, repo=keyed), "the layout writer's ack after a send started a new turn")
+
+    def test_qm_layout_writer_red_send_to_another_id_blocks(self):
+        # Catches: a send to a session that is not the layout key's writer passing because the key is set.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        sends = (("session_id", self.send(session_id="session_other9")), ("to", self.send(to="session_other9")),
+                 ("no id", self.call("mcp__claude-code-remote__send_message", {"message": "pick"})))
+        for label, send in sends:
+            with self.subTest(form=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_layout_writer_red_no_send_this_turn_blocks(self):
+        # Catches: the layout key alone passing a question, or an earlier turn's send to the key id counting as this turn's.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        earlier = (("no send", []),
+                   ("send in an earlier turn", [human("first"), *self.send(session_id=self.WRITER),
+                                                assistant_text("Sent earlier.")]))
+        for label, before in earlier:
+            with self.subTest(case=label):
+                out = self.stop([*before, human("decide"), assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_layout_writer_red_no_usable_key_still_says_not_known(self):
+        # Catches: a missing, null, empty or non-string key read as a writer id, so a send to any id passes.
+        for label, value in (("no key", self.NO_KEY), ("null", None), ("empty", ""), ("number", 5),
+                             ("list", [self.WRITER])):
+            with self.subTest(key=label):
+                repo = self.make_repo("key_" + label.replace(" ", "_"), writer=value)
+                self.assertEqual(self.extras_key(repo), value, "scope: the repo's extras file does not hold the key as set")
+                out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))],
+                                repo=repo)
+                self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+
+    def test_qm_layout_writer_transcript_read_wins_over_the_key(self):
+        # Catches: the layout key taking the place of a meta/page read that names another writer.
+        keyed = self.make_repo("keyed_key", writer=self.OLDER_WRITER)
+        self.assertEqual(self.extras_key(keyed), self.OLDER_WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        reads = self.writer_read(self.WRITER)
+        out = self.stop([human("decide"), *reads, *self.send(session_id=self.OLDER_WRITER),
+                         assistant_text(self.reply(self.PICK))], repo=keyed)
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+        self.assertIsNone(self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
+                                     assistant_text(self.reply(self.PICK))], repo=keyed),
+                          "a send to the transcript's writer was refused when the layout key names another id")
+
+    def test_qm_layout_writer_red_meta_read_naming_no_writer_blocks(self):
+        # Catches: a meta/page read that names no writer read as no read, so the layout key stands in for it and a
+        # same-turn send to the key id passes. Any meta/page get in the transcript keeps the layout key out.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        page_json = json.dumps({"url": self.PAGE, "title": "Waiting page"})
+        reads = (("collection", self.call("ArtifactData", {"action": "get", "collection": "meta", "doc_id": "page",
+                                                           "url": self.PAGE}, result=page_json)),
+                 ("path", self.call("ArtifactData", {"action": "get", "path": "meta/page", "url": self.PAGE},
+                                    result=page_json)))
+        for label, read in reads:
+            for field, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+                with self.subTest(read=label, field=field):
+                    out = self.stop([human("decide"), *read, *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                    self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+
+    def test_qm_layout_writer_lane_send_to_the_key_id_is_refused(self):
+        # Catches: a lane reading the layout key, so a send to the key's writer passes where a lane's own chat never reaches the owner.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        out = self.lane(peer_msg("pick?"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK)),
+                        repo=keyed)
+        self.assert_blocked(out, "Lane pick guard")
+
+    def test_qm_layout_writer_red_key_send_errored_by_is_error_blocks(self):
+        # Catches: a send to the layout key's writer whose result has is_error counted as the send, so the question
+        # reached no one and the guard passed. The result text reads delivered, so only the error flag decides.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED, is_error=True)),
+                            ("to", self.send(to=self.WRITER, result=self.DELIVERED, is_error=True))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_red_key_send_errored_by_success_false_blocks(self):
+        # Catches: a send to the layout key's writer whose record says toolUseResult success false (a failed local
+        # SendMessage, with no is_error flag) counted as the send. The result text reads delivered, so only the
+        # success flag decides.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        failed = {"success": False, "message": "fixture: the send did not reach its session"}
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.DELIVERED,
+                                                     tool_use_result=failed)),
+                            ("to", self.send(to=self.WRITER, result=self.DELIVERED, tool_use_result=failed))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_red_key_send_without_a_result_blocks(self):
+        # Catches: a send to the layout key's writer with no result record in the transcript counted as delivered.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_red_key_send_not_delivered_blocks(self):
+        # Catches: a send to the layout key's writer whose result reads as not delivered counted as the send when no
+        # error flag is set. Only the result text decides here.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER, result=self.NOT_DELIVERED)),
+                            ("to", self.send(to=self.WRITER, result=self.NOT_DELIVERED))):
+            with self.subTest(field=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard", "the page writer is session " + self.WRITER)
+
+    def test_qm_layout_writer_green_succeeded_send_counts_past_a_later_errored_resend(self):
+        # Catches: a failed resend to the layout key's writer later in the turn hiding a delivered send to it. The
+        # sends pair by tool_use id, so the delivered one counts, and the writer's ack after them keeps the turn.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, target in (("session_id", {"session_id": self.WRITER}), ("to", {"to": self.WRITER})):
+            with self.subTest(field=label):
+                records = [human("decide"), *self.send(result=self.DELIVERED, **target),
+                           *self.send(result=self.DELIVERED, is_error=True, **target), ack,
+                           assistant_text(self.reply(["Close q_max #969?"]))]
+                self.assertIsNone(self.stop(records, repo=keyed),
+                                  "a delivered send to the layout key's writer was not counted past a later failed resend")
+
+    def test_qm_layout_writer_green_transcript_path_failed_send_keeps_main_verdict(self):
+        # Catches: the failed-send rule leaking into the transcript path. A meta/page read names the writer, so a send
+        # to it passes whatever its result, as on main. That verdict must not change.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        reads = self.writer_read(self.WRITER)
+        failed = (("is_error", self.send(session_id=self.WRITER, result=self.DELIVERED, is_error=True)),
+                  ("success false", self.send(to=self.WRITER, result=self.DELIVERED,
+                                              tool_use_result={"success": False})))
+        for label, send in failed:
+            with self.subTest(failure=label):
+                out = self.stop([human("decide"), *reads, *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assertIsNone(out, "a failed send on the transcript path was refused; that path keeps main's verdict")
 
     FRESH_QUESTION_CODE = (
         "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "

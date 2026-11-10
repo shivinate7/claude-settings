@@ -47,6 +47,7 @@ class RouteFixture(trg.SameTurnWriter):
     LANE_ID = trg.QuestionReachesPageTests.LANE_ID
     PICK = trg.QuestionReachesPageTests.PICK
     QUESTION = trg.QuestionReachesPageTests.QUESTION
+    NO_KEY = trg.QuestionReachesPageTests.NO_KEY  # make_repo's writer default; the same object, so the identity test holds
 
     setUp = trg.QuestionReachesPageTests.setUp
     make_repo = trg.QuestionReachesPageTests.make_repo
