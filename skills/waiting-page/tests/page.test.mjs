@@ -3507,6 +3507,31 @@ for (const [width, zoom, label] of DISMISSED_GLYPH_SIZES) for (const scheme of S
   });
 }
 
+// ---------------------------------------------------------------- the Ask list at 520 wide, main's two-line form
+// At 520 wide the Ask list takes main's two-line form: the title wraps to two lines, and its box is the width main gives it. The list is
+// 30.5em at 100% text, the width of main's 520px rule in em, and the list's narrow rule must include that width. The list's width is
+// checked first, so a case that misses that boundary fails by name. The widths are main's, read from main's page in each font.
+const TITLE_520 = { dismiss: { served: 317.6, fallback: 305.5 }, restore: { served: 313.4, fallback: 292.4 }, wait: { served: 331.5, fallback: 309.7 } };
+const askTitleGeo = (page, id) => page.evaluate((id) => {
+  const li = document.getElementById("row-" + id), title = li.querySelector(".frow .ftext"), list = li.closest("ol.asklist");
+  const runs = [], walk = document.createTreeWalker(title, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) { const rg = document.createRange(); rg.selectNodeContents(n); runs.push(...rg.getClientRects()); }
+  const tb = title.getBoundingClientRect();
+  return { width: tb.width, lines: new Set(runs.filter((r) => r.top < tb.bottom - 0.5).map((r) => Math.round(r.top))).size, listEm: list.getBoundingClientRect().width / parseFloat(getComputedStyle(list).fontSize) };
+}, id);
+for (const kind of Object.keys(FOLD_ROWS)) for (const scheme of SCHEMES) {
+  layoutTest(`folded answered row ${FOLD_ROWS[kind].label}, ${scheme}: at 520 wide the Ask list takes main's two-line form`, async (t) => {
+    const page = await foldedRowPage(t, kind, 520, scheme); if (!page) return;
+    const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
+    foldedScope(g, kind, 520);
+    const a = await askTitleGeo(page, FOLD_ROWS[kind].ask.id);
+    assert.ok(Math.abs(a.listEm - 30.5) <= 0.05, `the Ask list is ${a.listEm} em at 520 wide, not 30.5 em, so the case misses the list's boundary`);
+    assert.equal(a.lines, 2, `the title takes ${a.lines} line(s) in a ${a.width.toFixed(1)} px box at 520 wide, not two`);
+    const want = TITLE_520[kind][runFont(t) ? "fallback" : "served"];
+    assert.ok(Math.abs(a.width - want) <= 1, `the title box is ${a.width.toFixed(1)} px at 520 wide, not main's ${want} px`);
+  });
+}
+
 // ---------------------------------------------------------------- the tab list at narrow and mid widths
 // The tab list keeps one row and scrolls sideways on its own, so the page never scrolls sideways. The selected tab sits on the bar's
 // border, and the tabs read left to right in DOM order. Widths: 180, and 320 with the root font size doubled.
