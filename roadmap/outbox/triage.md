@@ -505,3 +505,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - cloud-bin-rc-symlink-untested (#2528 round 3, coordinator  CST Nov 10): no test case covers a symlinked rc file or a failed rc write, so a mutant that drops readlink -f passes.
 - guard-stream-bare-wait-pid (same source): hooks/guard_stream.py lines 73, 559 and 728 still print a bare `bin/wait-pid PID`.
 - cloud-bin-rc-shell-mismatch (same source): the install writes the PATH block only to the rc of $SHELL. With a zsh SHELL and a bash Bash tool, bin stays off PATH. Unmeasured.
+- (debt) stale-drafts-reads-live-steps (#2533, coordinator  CST Nov 10): stale_drafts in skills/roadmap/build.py reads only liveSteps, so the draft rows that the lane-field test makes live were not built. The stale-draft upkeep row can miss a live lane's draft or list it wrongly.
