@@ -19,6 +19,7 @@ def run(code=None, log=None, extra=None, timeout=None, launcher=None, shell=None
     env.pop("VERDICT_LOG", None)
     env.pop("VERDICT_HEARTBEAT", None)
     env.pop("STALL_WATCH_BEAT", None)  # an inherited beat file would take the beat lines of these runs
+    env.pop("VERDICT_LABEL", None)  # a ci-job step's label would rename the header of these runs; a case sets its own
     if log: env["VERDICT_LOG"] = log
     env.update(extra or {})
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
@@ -881,6 +882,57 @@ class NoTestCount(unittest.TestCase):
                 r, full = self.run_case(argv=["swift", "test", flag], shim=("swift", shim_script("AppTests.testFoo")))
                 self.assertIn("SHIM-RAN", full, "the fake never ran, so this run proves nothing")
                 self.assert_pass(r)
+
+
+class LabelHeader(unittest.TestCase):
+    """VERDICT_LABEL names the log header in place of the command (bin/ci-job sets it to each CI step's name). The verdict
+    line keeps the command, and the command does not inherit the label."""
+    HEADER = re.compile(r"^=== verdict run \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: (.*)$", re.M)  # one header per run: timestamp, then the label
+
+    def headers(self, log):
+        with open(log, encoding="utf-8", errors="replace") as f:
+            return self.HEADER.findall(f.read())
+
+    def test_label_names_the_header_and_the_verdict_line_keeps_the_command(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run("import sys\nprint('x')\nsys.exit(7)", log, extra={"VERDICT_LABEL": "Some CI step"})
+            heads = self.headers(log)
+            self.assertEqual(len(heads), 1, "the log holds %d headers, want one: %s" % (len(heads), heads))
+            self.assertEqual(heads[0], "Some CI step", "the header is not the label")
+            first = r.stdout.splitlines()[0]
+            self.assertTrue(first.startswith("FAIL ") and "fx.py" in first, "the verdict line lost the command: " + first)
+            self.assertNotIn("Some CI step", first, "the verdict line names the label, not the command: " + first)
+
+    def test_unset_label_leaves_the_header_as_the_command(self):  # the control
+        argv = [sys.executable, "-c", "print('x')"]
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run(None, log, argv=argv)
+            self.assertEqual(r.returncode, 0, r.stdout)
+            heads = self.headers(log)
+            self.assertEqual(len(heads), 1, "the log holds %d headers, want one: %s" % (len(heads), heads))
+            self.assertEqual(heads[0], " ".join(argv), "the header without a label is not the command")
+
+    def test_a_blank_label_is_the_command(self):
+        argv = [sys.executable, "-c", "print('x')"]
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run(None, log, extra={"VERDICT_LABEL": " \t "}, argv=argv)
+            self.assertEqual(r.returncode, 0, r.stdout)
+            heads = self.headers(log)
+            self.assertEqual(len(heads), 1, "the log holds %d headers, want one: %s" % (len(heads), heads))
+            self.assertEqual(heads[0], " ".join(argv), "a blank label replaced the command in the header")
+
+    def test_the_command_does_not_inherit_the_label(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            log = os.path.join(d, "v.log")
+            r = run("import os\nprint('CHILD-LABEL=' + os.environ.get('VERDICT_LABEL', '<unset>'))", log,
+                    extra={"VERDICT_LABEL": "Some CI step"})
+            self.assertEqual(r.returncode, 0, r.stdout)
+            text = open(log, encoding="utf-8").read()
+            self.assertIn("CHILD-LABEL=", text, "the command did not run: " + text)
+            self.assertIn("CHILD-LABEL=<unset>", text, "the command inherited the label")
 
 
 def tearDownModule():

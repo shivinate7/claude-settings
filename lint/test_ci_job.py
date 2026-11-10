@@ -156,6 +156,19 @@ class Steps(Job):
         self.assertFalse(os.path.exists(os.path.join(self.root, "planned.txt")))
 
 
+class StepHeaders(Job):
+    """Each CI step's log section opens with the step's name, not its command: ci-job sets VERDICT_LABEL to the name, so a reader
+    finds a step's section by name (merge.py's step_cases). One section per step, in workflow order."""
+
+    def test_each_step_section_is_headed_by_its_step_name(self):
+        rc, lines, out = self.run_job(step("Lint one", "echo ONE-OUTPUT"), step("Lint two", "echo TWO-OUTPUT"))
+        self.assertEqual(self.verdicts(lines), ["PASS", "PASS"], out)
+        with open(self.log, encoding="utf-8", errors="replace") as f:
+            heads = re.findall(r"^=== verdict run \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: (.*)$", f.read(), re.M)
+        self.assertEqual(len(heads), 2, "the log holds %d section headers, want one per step: %s" % (len(heads), heads))
+        self.assertEqual(heads, ["Lint one", "Lint two"], "a step's section is not headed by the step's name")
+
+
 class Skips(Job):
     """A step that skips tests reads SKIP, never PASS, and never hides a FAIL (plan row S8, test-ci-standard plan)."""
 
