@@ -1351,8 +1351,19 @@ def _item_fields(path):
 
 
 # A field the page lists and draws, but only the page writes: the owner's Mark read sets `dismissed` with update (step ask-phase-out).
-# A session's write that names it is refused, so no session hides an item the owner has not read.
+# A session's write that names it is refused, so no session hides an item the owner has not read. The page draws the field
+# already, so the refusal gives its own reason, not the generic one that says to draw it.
 PAGE_ONLY_ITEM_FIELDS = ("dismissed",)
+PAGE_ONLY_MARK = " (the page's Mark read writes it)"
+PAGE_ONLY_REASON = ("Only the page's Mark read writes dismissed. The owner's press sets it, and Mark unread clears it. "
+                    "A session write never names it, on any route: leave it out of the write. "
+                    "(decision item-field-rendered, a waiting item names only fields the page draws)")
+
+
+def item_field_reason(matched) -> str:
+    """The printed reason for an item-field-rendered refusal: the page-only reason when the write named a field only
+    the page writes, else the table's generic item-field reason."""
+    return PAGE_ONLY_REASON if str(matched).endswith(PAGE_ONLY_MARK) else PAGE_REASONS["item-field-rendered"]
 
 
 def item_field_hit(op, entry, data) -> str:
@@ -1364,12 +1375,12 @@ def item_field_hit(op, entry, data) -> str:
         field = entry.get("field")
         top = field.split(".", 1)[0] if isinstance(field, str) else ""
         if top in PAGE_ONLY_ITEM_FIELDS:
-            return "str_replace on " + top + " (the page's Mark read writes it)"
+            return "str_replace on " + top + PAGE_ONLY_MARK
         return "str_replace on " + top if fields is not None and top and top not in fields else ""
     if isinstance(data, dict):
         for key in data:
             if key in PAGE_ONLY_ITEM_FIELDS:
-                return "field " + str(key) + " (the page's Mark read writes it)"
+                return "field " + str(key) + PAGE_ONLY_MARK
     if fields is None or not isinstance(data, dict):
         return ""
     for key, value in data.items():

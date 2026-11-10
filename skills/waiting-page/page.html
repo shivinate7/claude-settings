@@ -2007,7 +2007,8 @@ const routedOpen = (it) => !isRuling(it) && isSunk(it) && isSaved(it) && !waitsO
 const isLine = (it) => (it.status === "closed" ? isClosedLine(it) : routedOpen(it));
 // Behind "Show N read items": a line read at load (state.hidItems, read once like the asks'), or read at load and then given a press this visit. A mark made on a line this visit leaves it in place.
 const itemAway = (it) => isLine(it) && !!state.hidItems && state.hidItems.has(it.id) && (isRead(it) || !!state.mark[it.id]);
-const itemDropped = (it) => markView(state.mark[it.id], isRead(it), false).dropped;
+// Out of the Answered count and the rail: a line drawn as "Marked read." A read item drawn as a card (taken to Change, on a lane, or with waits) counts where it is drawn.
+const itemDropped = (it) => isLine(it) && markView(state.mark[it.id], isRead(it), false).dropped;
 const itemName = (it) => "No. " + it.n + ", " + shortOf(it);
 const markItem = (it, to) => writeRead("items", it.id, to, state.mark, { read: (x) => "idis-" + x, undo: (x) => "ires-" + x, row: () => "line-" + it.n }, () => {}, render);
 const itemPress = (it, undo, quiet) => {
