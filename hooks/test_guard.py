@@ -34038,7 +34038,11 @@ for _command in ('gh pr comment 5 --body "Round 2 -> pass"',
                  'gh pr comment 5 --body "> quoted text"',
                  'gh pr comment 5 --body "CI is green (3 > 2 jobs)"'):
     cs_shell("gh_comment_body_quoted_gt_denied", "deny", _command)
-cs_shell("gh_comment_body_without_gt_allowed", "allow", 'gh pr comment 5 --body "Round 2 passes"')
+# A cloud gh write is refused by gh-write-cloud, which runs first here. The case holds that the refusal is that rule's, not coordinator-scope's.
+_gh_cfg, _gh_transcript = cs_pair("coordinator")
+add("coordinator-scope: gh_comment_body_without_gt_is_not_a_coordinator_scope_refusal, shell: gh pr comment 5 --body \"Round 2 passes\"",
+    "deny", rule=GH_WRITE_RULE, tool="Bash", command='gh pr comment 5 --body "Round 2 passes"', cwd=GITMAIN,
+    session=CS_PAYLOAD_SID, config=_gh_cfg, transcript=_gh_transcript, env=dict(CS_REMOTE), lacks=("coordinator-scope",))
 cs_shell("gh_comment_body_control_redirect_denied", "deny", "echo x > hooks/x.py", "x.py")
 
 # ---- `sed -i`: the script is code, and the file operands that follow it are what it writes. A script that holds `|`, `;`,
@@ -34542,9 +34546,9 @@ def cs_cost_check(role, tool, tool_input, cwd, env=None, agent_id=None, shut=Fal
         elif times > 1:
             problems.append("it opened the record %d times, want at most once" % times)
         if shut:
-            if [path for path in opened if slash(path).endswith("lint/layout.json")]:
+            if [path for path in rule_opens if slash(path).endswith("lint/layout.json")]:
                 problems.append("it opened lint/layout.json")
-            if pointer in opened:
+            if pointer in rule_opens:
                 problems.append("it opened the config folder's CLAUDE.md")
             if rule_opens:
                 problems.append("the rule opened %s before its gates" % [os.path.basename(path) for path in rule_opens])
