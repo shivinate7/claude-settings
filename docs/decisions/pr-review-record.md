@@ -90,7 +90,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
-- `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. When the newest earlier record holds a Fix check line, it also reads the `--head` commit, and one compare when that commit has two parents whose first is HEAD. It writes nothing.
+- `merge <pr> --review-record`: one PR read, plus one read per page of 100 changed files: two reads for a PR of 100 files or fewer. The tests `ReviewGuardCost` and `ReviewGuardHostFiles` pin them. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. When the newest earlier record holds a PASS Fix check line, it also reads the `--head` commit, and one compare when that commit has two parents whose first is HEAD. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
@@ -111,8 +111,8 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - One fix check per record. A second fix on a fixed head starts a new lane at round 1, except a merge of the base into that head. `--fix-check` checks in this order:
   - HEAD must be the Head of the newest earlier record on the PR. Otherwise it refuses (exit 2).
   - If that record has no Fix check line, it accepts the fix check.
-  - If that record has a Fix check line, the `--head` commit must have exactly two parents. Its first parent must be HEAD. Its second parent must be on the PR's base branch: the base branch contains it, so GitHub's compare reads ahead or identical. Otherwise it refuses (exit 2).
-  - The tool does not read the verdict of that earlier Fix check. A FAIL there passes the same test.
+  - If that record has a PASS Fix check line, the `--head` commit must have exactly two parents. Its first parent must be HEAD. Its second parent must be on the PR's base branch: the base branch contains it, so GitHub's compare reads ahead or identical. Otherwise it refuses (exit 2).
+  - A FAIL Fix check on that record refuses (exit 2).
   - The exception is a coordinator's ask, 2026-11-10 13:03 CST, for roadmap step `fix-check-after-main-merge` (a fix check after a merge of main). Process-only, not the owner's words.
 
 ## Lane picks
