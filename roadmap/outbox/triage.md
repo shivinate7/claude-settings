@@ -420,3 +420,9 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - pcap-budget-no-override (same lane): the 60 s check budget has no override.
 - ompr-subshell-push (#2366 octopus-merge-push-refused round 3, coordinator 01:53 CST Nov 10): a push inside `( )` passes; the decision's Not read list omits it.
 - ompr-remotes-unpinned (#2366): no test pins `--remotes=<remote>`; a mutant that always reads all remotes passes octopus-push.
+- script-spots-node-fallback-concat (#1186 cap-string-false-alarm round 3 at 2609db784, coordinator 01:54 CST Nov 10; decision cap-string-false-alarm): hooks/guard_env.py script_spots, the js whole-script fallback reads a node -e script as bare shell text, so a shell verb inside quotes is missed: `node -e "...execSync('cp /tmp/x ' + p)"` and `'tee ' + p` pass where main denies. No fix yet; the fallback should refuse more, never less. Tied to page item 473 (the #1186 one-line fix).
+- cdvar-track-variables-perf (#2379 cd-var-dir-unread round 3): _track_variables calls _variable_text, which re-resolves every known variable per plain assignment, cubic with the per-segment loop in hooks/guard.py: 100 `V=x;` segments take 2.9 s vs 0.56 s on main; 200 take 21 s vs about 0.2 s, near the 60 s hook timeout (under 40 unaffected). Hint: skip _variable_text when the value has no `$`. Debt if a long script hits it.
+- cdvar-stale-847-reason (#2379): hooks/test_dir_before_segment.py says the B="$A"/x case waits on step 847, but 847 landed; the reason misleads.
+- cdvar-command-text-redundant (#2379): _command_text looks redundant since 847 (mutant `R=B; R=A cd "$R"` still green).
+- cdvar-glob-cd-stays (#2379): `R=<dir>/h*; cd $R` under failed_cd_stays reads "stays" where bash goes to the match (same on main).
+- cdvar-stale-docstrings (#2379): stale docstrings in hooks/guard.py ("a folder that holds a variable is unknown and passes").
