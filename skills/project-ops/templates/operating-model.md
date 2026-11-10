@@ -15,7 +15,7 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane session also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
-  merges two steps, changes the work order, or closes a step. Where triage runs, only triage writes the waiting page.
+  merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a solo run the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
   `waiting-page`, "Make a repo's page").
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
