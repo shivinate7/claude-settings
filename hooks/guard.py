@@ -491,7 +491,7 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, STE_PUSH_CHAIN_REASON, STE_PUSH_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit, ste_push_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
@@ -4454,7 +4454,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     hit = ste_push_hit(stripped, cwd, record_branch_of, read_verb, ste_note)
     if hit:
-        refuse(tool, "deny", "ste-push", hit[1], hit[0])
+        ste_reason = STE_PUSH_CHAIN_REASON if hit[1] == "chain" else STE_PUSH_REASON
+        refuse(tool, "deny", "ste-push", ste_reason.format(detail=hit[2]), hit[0])
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)

@@ -1069,7 +1069,8 @@ def _ste_brought(top, base, scope, calls):
 
 
 def ste_push_hit(stripped: str, cwd: str, record_branch_of, read_verb, note):
-    """Return (matched, reason) for the first push whose lint fails, else None. `note(why)` is called once per
+    """Return (matched, kind, detail) for the first push whose lint fails, else None; kind is "push" (STE_PUSH_REASON,
+    filled with detail) or "chain" (STE_PUSH_CHAIN_REASON). guard.py picks the constant, so the audit reads its text. `note(why)` is called once per
     push the guard could not lint; the push is allowed. `record_branch_of(root)` reads the record branch
     (lint/layout.py) and `read_verb("push", args)` is guard.py's own test for a dry run."""
     try:
@@ -1151,7 +1152,7 @@ def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
                     note("the files a merge, cherry-pick or revert in this call brings could not be read")
                     continue
                 if fresh:
-                    return fresh, STE_PUSH_CHAIN_REASON
+                    return fresh, "chain", ""
             names = _git(top, "-c", "core.quotepath=off", "diff", "--name-only", "--diff-filter=AMR",
                          base + "..." + source, "--", *scope)
             if names is None or names.returncode != 0:
@@ -1171,7 +1172,7 @@ def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
 
 
 def _ste_lint(program, base, top, note, exclude=""):
-    """(matched, reason) when the lint's verdict is FAIL, else None, after one `note` for a lint that read unknown."""
+    """(matched, "push", detail) when the lint's verdict is FAIL, else None, after one `note` for a lint that read unknown."""
     result, why = guard_ste.run_lint(program, base, top, exclude=exclude)
     if result is None:
         note(why)
@@ -1193,7 +1194,7 @@ def _ste_lint(program, base, top, note, exclude=""):
     detail = "; ".join("%s%s %s" % (path, ":" + line if line else "", text) for path, line, text in rows)
     detail = detail or "the ste-lint step reported FAIL"
     return (rows[0][0] + (":" + rows[0][1] if rows[0][1] else "") if rows else "ste-lint FAIL",
-            STE_PUSH_REASON.format(detail=detail))
+            "push", detail)
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
