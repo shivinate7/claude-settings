@@ -3128,10 +3128,11 @@ const PINS = {
     restore: { li: [16, 374, 93], row: [244, 1, 91], press: [248, 365, 25, 44] },
     wait: { li: [16, 374, 196], row: [373, 1, 91], press: [271, 357, 35, 22] },
   },
+  // The 360 heights and tops follow the folded-date wrap in ask-folded-date-notes.md, so they are not main's.
   360: {
-    dismiss: { li: [16, 344, 93], row: [219, 1, 91], press: [223, 335, 25, 44] },
-    restore: { li: [16, 344, 93], row: [214, 1, 91], press: [218, 335, 25, 44] },
-    wait: { li: [16, 344, 196], row: [343, 1, 91], press: [241, 327, 35, 22] },
+    dismiss: { li: [16, 344, 115], row: [219, 1, 113], press: [223, 335, 35, 44] },
+    restore: { li: [16, 344, 115], row: [214, 1, 113], press: [218, 335, 35, 44] },
+    wait: { li: [16, 344, 218], row: [343, 1, 113], press: [241, 327, 46, 22] },
   },
 };
 const PIN_ASK = { 1440: [1012, 1123, 1135, 1267], 820: [532, 643, 655, 787], 390: [33, 143, 225, 357], 360: [33, 143, 195, 327] };
