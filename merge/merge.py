@@ -4109,7 +4109,7 @@ def main(argv, host=None, lock=None, hosts=None):
                     last, problem, remedy = source_record_problem(h, root, a, recs)
                     earlier = [last] if last else []
                     if not problem:
-                        problem, remedy = floor_problem([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
+                        problem, remedy = floor_problem([last], parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant))) or (None, remedy)
                 else:
                     last = parse_review(recs[-1]) if recs else None
                     if recs and not last:  # a posted record that does not parse is not a missing one
@@ -4124,7 +4124,7 @@ def main(argv, host=None, lock=None, hosts=None):
                         if chain >= FIX_CHAIN_CAP:
                             problem, remedy = f"the chain on this pull request already holds {chain} fix checks", FIX_CAP_REMEDY
                         else:
-                            problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
+                            problem, remedy = floor_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant))) or (None, remedy)
                         src = copy_source(earlier or [last])  # a plain copy carries no fix line, so the record it repeats still holds the FAIL or WIDE
                         if not problem and src["fix"] and src["fix"][3] != "PASS":
                             problem, remedy = fix_follow_problem(src, True)
@@ -4133,7 +4133,7 @@ def main(argv, host=None, lock=None, hosts=None):
                     problem = f"the review record on head {held['head'][:9]} has a Fix check {held['fix'][3]} after round {final_round(held)}, so a new fix check may not follow it"
                     remedy = FIX_WIDE_REMEDY if held["fix"][3] == "WIDE" else FIX_FINAL_FAIL_REMEDY
                 if not problem:
-                    problem, remedy = dropped_round_lines(last, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
+                    problem, remedy = dropped_round_lines(last, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant))) or (None, remedy)
                 if not problem and last["head"] != a.fix_check[0]:
                     problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
