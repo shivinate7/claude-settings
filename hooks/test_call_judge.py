@@ -950,8 +950,8 @@ def relative_name_precondition(repo, name):
 
 
 def case_page_relative_file_path_reaches_the_review():
-    # Red on main: judged_item_writes reads the file with no cwd, finds nothing, and drops the write. The hook
-    # then exits 0 with no model call, so the APPS ruling is never checked.
+    # A relative file_path must be read against the payload cwd. Read without it, the file is not found and the
+    # write is dropped: the hook exits 0 with no model call, so the APPS ruling is never checked.
     import question_form  # the one form check (hooks/question_form.py)
     repo, name = relative_item_repo(), "relative-item-deny.json"
     write_item_file(os.path.join(repo, name), apps_item())
@@ -971,8 +971,8 @@ def case_page_relative_file_path_reaches_the_review():
 
 
 def case_page_relative_file_path_passing_item_passes():
-    # The negative: the same shape, and the model says ok. Red on main on the one-call check only. The skip also exits 0
-    # with no output, so those two checks cannot tell a skip from a pass.
+    # The negative: the same shape, and the model says ok. Only the one-call check tells a pass from a skip,
+    # because a skipped write also exits 0 with no output.
     repo, name = relative_item_repo(), "relative-item-pass.json"
     write_item_file(os.path.join(repo, name), apps_item())
     relative_name_precondition(repo, name)
