@@ -1595,8 +1595,48 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ the Mac artifact calls (artifact-guard-matcher-names)
+#
+# A Mac session's db_write reaches call_judge.py under its own name, mcp__claude-artifacts__db_write, with `ops`
+# in place of ArtifactData's writes. Its model review must read the item the ArtifactData twin reads: the same
+# deny for a flagged item, and the same single model call for an item the judge accepts.
+MAC_DB_WRITE = "mcp__claude-artifacts__db_write"
+
+
+def mac_page_input(ops, session=SID_A):
+    """One Mac db_write call with `ops` of {op, path, data}, as the harness sends it, with the fixture repo as cwd."""
+    payload = {"session_id": session, "tool_name": MAC_DB_WRITE, "cwd": PAGE_REPO, "tool_input": {"ops": ops}}
+    return json.dumps(payload)
+
+
+def case_mac_db_write_gets_the_page_review_deny():
+    item = good_page_item()
+    twin = run_hook(page_input("set", item), answer=PAGE_FLAG)
+    check("mac twin: the ArtifactData set of the good item is denied by the judge",
+          twin.code == 0 and (twin.deny() or {}).get("permissionDecision") == "deny", detail(twin))
+    ops = [{"op": "set", "path": PAGE_ITEMS + "/p1", "data": item}]
+    mac = run_hook(mac_page_input(ops), answer=PAGE_FLAG)
+    d = mac.deny() or {}
+    check("mac page: a good item the judge rejects is denied, as its ArtifactData twin is",
+          mac.code == 0 and d.get("permissionDecision") == "deny" and "plain effect" in mac.reason(), detail(mac))
+    check("mac page: one model call on the item, as the twin makes",
+          len(mac.calls) == 1 and len(twin.calls) == 1, "mac %d call(s), twin %d" % (len(mac.calls), len(twin.calls)))
+    prompt = mac.calls[0]["prompt"] if mac.calls else ""
+    check("mac page: the model sees the item the Mac write carries", PAGE_MARK in prompt, prompt[:160])
+
+
+def case_mac_db_write_gets_the_page_review_allow():
+    item = good_page_item()
+    ops = [{"op": "set", "path": PAGE_ITEMS + "/p1", "data": item}]
+    mac = run_hook(mac_page_input(ops), answer=ALLOW)
+    check("mac page: a good item the judge accepts is allowed", mac.code == 0 and mac.deny() is None, detail(mac))
+    check("mac page: one model call on a good item, as the ArtifactData twin makes",
+          len(mac.calls) == 1, "mac %d call(s)" % len(mac.calls))
+
+
 def main():
-    for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
+    for case in (case_mac_db_write_gets_the_page_review_deny, case_mac_db_write_gets_the_page_review_allow,
+                 case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
                  case_question_departs, case_page_fixture_passes_the_form, case_page_reject_and_accept,
                  case_page_no_model_call, case_page_batch_one_call, case_page_override,
