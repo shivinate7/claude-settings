@@ -18,9 +18,9 @@ session-messaging-plan and peer-message-turn-cap.
 ## One route (owner, 2026-11-10 09:33 CST)
 
 Ruling: every message between sessions goes through the git mailbox, cloud to cloud included.
-The doorbell is open (owner unsure, 2026-11-10 09:36 CST): a cloud-only doorbell breaks "the device shouldn't matter", and no wake route is known for a local computer.
+The doorbell is open (owner unsure, 2026-11-10 09:36 CST): a cloud-only doorbell would not reach every device, and no wake route is known for a local computer.
 The mailbox is read at turn start, so it cannot wake anyone.
-The design is device-neutral: local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
+The design is device-neutral (owner, 2026-11-10 09:34 CST, "the device shouldn't matter"): local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
 Local-computer checks: measured on a Mac only; Windows unmeasured.
 
 Why:
@@ -42,8 +42,7 @@ Wake routes under study. All unmeasured.
 Home of the measurement: roadmap step `mailbox-wake-routes` (the wake-route measurement, filed by triage).
 
 State: the code still sends cloud to cloud by `send_message` until a build lands. No build is started.
-The owner froze new lanes at 09:18 CST.
-Timed check-ins: the owner has not ruled. Q4 is open (owner, 09:36 CST).
+Timed check-ins: Q4, see its bullet.
 
 ## The 10-message stop on the Mac
 
@@ -183,8 +182,8 @@ Design:
 
 - The store is the private repo shivinate7/session-mailbox. A cloud session under the owner's second
   account, ssemwal-cdc, reaches it only if that account can read and write it.
-- Done by the owner: ssemwal-cdc was invited as Write and has accepted (owner's words, 2026-11-10 10:19 CST;
-  the invite date is unknown).
+- Done by the owner. Owner's words, 2026-11-10 10:19 CST: "ssemwal-cdc long has been invited and accepted."
+  The invite date is unknown.
 - Unmeasured: whether a cloud session under ssemwal-cdc reaches the store through the git proxy.
   The proxy served the store only after `add_repo` for the measuring session; such a session needs the
   repo attached by that account's Claude GitHub connection. Measure with one `mail read`.
