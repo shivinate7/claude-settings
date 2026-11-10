@@ -117,6 +117,21 @@ STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "L
                 "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
+# The user part of a URL credential holds no quote, bracket, paren or `|`, so minified code cannot start a match. Two
+# template forms are the exceptions, since a templated user is still a user: a braced field with no quote or blank in it
+# (`{user}`, `${USER}`, `{{user}}`, `{cfg.user}`, `{user!r}`, `{cfg[user]}`, `${var.db_user}`) and a percent field
+# (`%(user)s`).
+URL_USER = r"(?:[^/?#\s@:\"'`()\[\]{}|]|\{+[^{}\"'`\s/?#@]*\}+|%\(\w+\)[sd])+"
+# A password that starts with anything but a quote or backtick is a literal, even with a `+`, `|`, bracket, paren or a
+# later quote in it (`O'Neil2020`). The `@` after it is a credential, whatever follows, a quoted or templated host
+# included (`"postgres://u:pw@" + host`, `u:pw@{db_host}`).
+URL_PLAIN_PASSWORD = r"[^/?#\s@\"'`][^/?#\s@]*"
+# A password that starts with a quote or backtick is the join of two string literals (`"http://h:"+port+"@"`), so it is
+# a credential only when a host starts after its `@`.
+URL_QUOTED_PASSWORD = r"[\"'`][^/?#\s@]*"
+# What may follow the `@` of a quote-led password: a bracketed IPv6 host (`[::1]`), or anything but a quote, bracket or
+# `|`, which is code.
+URL_HOST_START = r"(?:(?=\[[0-9A-Fa-f.]*:)|(?![\"'`()\[\]{}|]))"
 # Everyday words that end in `key`. A lookbehind on the letters before `key` in each (`mon`, `whis`) makes a `key`
 # right after them no key word, so `monkey: Banana12345` passes. The stem must start the word (string start or a
 # non-letter before it): `commonKey` and `returnKey` hold the stems `mon` and `turn` but are credential names. Any
@@ -157,9 +172,16 @@ SECRET_SHAPES = (
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
-    ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
+    # The user part holds no quote, bracket or `|`, except inside a template field: minified code runs
+    # `"https://a"})];x||y:z@` together. The password may hold them. A quote-led password is code when a quote, bracket
+    # or `|` follows the `@`, unless an IPv6 host opens there: `"http://h:"+port+"@"`. Any other password is a literal
+    # and always refuses.
+    ("url-credentials", re.compile(
+        r"://" + URL_USER + r":(?:" + URL_PLAIN_PASSWORD + r"@|" + URL_QUOTED_PASSWORD + r"@" + URL_HOST_START + r")")),
+    # The value is captured in a lookahead, so a match ends at the separator and a later password word on the same line
+    # (`password:!0};pwd=hunter2`) is a match of its own. found.end(2) is the end of the value.
     # The lookbehind takes `_` too, so a name starts at its run's first character and a long run is read once.
-    ("password", re.compile(r"(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
+    ("password", re.compile(r"(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(?=(\S+))", re.I)),
     # The lookbehind starts the local part at its run's first character only: a start at each character re-reads a long run.
     ("email", re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
@@ -175,11 +197,13 @@ SECRET_SHAPES = (
     # end the value (end of line, a closing quote, `,`, `;` or `}`) and have no camelCase hump (3 lower-case letters
     # then a capital; a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`,
     # `localStorage.getItem(` and prose such as "Token: Authorization needed" pass. A letters-only value that reads as
-    # words (letters_are_words) passes too, after a `:` only.
+    # words (letters_are_words) passes too, after a `:` only. A 2-3 letter prefix, an environment word and a digit part
+    # (`sk-live-ab12`) is a key shape, so it is refused; plain hyphen words (`automations-v3-review`) are a name, so they pass.
     ("credential-name", re.compile(
         CREDENTIAL_NAME + r"(?:"
         r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
-        r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)" + VALUE_CHARS + r"{8,}"
+        r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)"
+        r"(?P<mixed>" + VALUE_CHARS + r"{8,})"
         r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))(?P<letters>[A-Za-z_-]{12,})(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
     # A credential value longer than the lookaheads above read: refused when it has a letter and a digit anywhere.
     ("credential-name", LONG_CREDENTIAL_VALUE),
@@ -205,6 +229,13 @@ SECRET_SHAPES = (
 # then letter words, and after a `,` `;` or and/or/but/is/are only function words) may follow it on its line: another
 # word there may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
+JS_BOOLEANS = frozenset(("!0", "!1"))  # minified `true` and `false`
+# `!0` or `!1` after a password word. It is code, no value, when what follows it is code-shaped (see boolean_run_is_code).
+JS_BOOLEAN_START = re.compile(r"!(?:0|1)")
+# The next member of a minified run: a `,` or `;`, then a name and its `:` or `=`.
+JS_RUN_NEXT = re.compile(r"[,;]\s*[\"']?[A-Za-z_$][\w$]*[\"']?\s*[:=]\s*")
+# A JS keyword then `-` and a number only: code after a `case "keyup":`, not a literal value.
+JS_KEYWORD_VALUE = re.compile(r"(?:return|void|typeof|throw)(?:-\d+)?")
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
@@ -274,6 +305,29 @@ def bare_value(value):
     return value
 
 
+def boolean_run_is_code(found):
+    """True when the value after a password word is a minified boolean and everything after it on the line, up to a
+    closer (`}` `)` `]`) or the line end, is `,name:` / `;name=` members that each hold a boolean. A word after the
+    boolean (`!0,hunter2`, `!0 hunter2`) or a member with any other value (`!0,pwd:hunter2`) may be the secret, so it is
+    not code. Text after the closer is no part of this match: a later password word there is a match of its own."""
+    start = JS_BOOLEAN_START.match(found.group(2))
+    if not start:
+        return False
+    rest = found.group(2)[start.end():] + REST_OF_LINE.match(found.string, found.end(2)).group(0)
+    while True:
+        rest = rest.lstrip()
+        if not rest.strip(".,;") or rest[0] in "})]":
+            return True
+        member = JS_RUN_NEXT.match(rest)
+        if not member:
+            return False
+        rest = rest[member.end():]
+        start = JS_BOOLEAN_START.match(rest)
+        if not start:
+            return False
+        rest = rest[start.end():]
+
+
 def rest_is_prose(rest):
     """True when `rest` is plain prose after a password value and holds no second value after a separator."""
     if not PROSE_REST.fullmatch(rest):
@@ -290,14 +344,16 @@ def rest_is_prose(rest):
 
 def password_is_no_secret(found):
     """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
-    `PWD=<path>`, and nothing but blanks or plain prose follows it on its line."""
-    rest = REST_OF_LINE.match(found.string, found.end()).group(0)
+    `PWD=<path>`, or a minified boolean run is code; otherwise nothing but blanks or plain prose follows the value."""
+    if boolean_run_is_code(found):
+        return True
+    rest = REST_OF_LINE.match(found.string, found.end(2)).group(0)
     if rest.strip() and not rest_is_prose(rest):
         return False
     value = bare_value(found.group(2))
     if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
         return True
-    return (value.lower() in PLAIN_VALUES or bool(MASK_VALUE.fullmatch(value))
+    return (value.lower() in PLAIN_VALUES or value in JS_BOOLEANS or bool(MASK_VALUE.fullmatch(value))
             or bool(PLACEHOLDER_VALUE.fullmatch(value)))
 
 
@@ -346,14 +402,32 @@ def letters_are_words(value):
             and not CONSONANT_RUN.search(letters))
 
 
+# A name made of lower-case words joined by hyphens. A part holds a digit only as a version: one letter and one or two
+# digits (`automations-v3-review`). `ab12` and `abcdefgh1` read as random, so they are no part of a name.
+HYPHEN_WORDS = re.compile(r"(?:[a-z]+|[a-z]\d{1,2})(?:-(?:[a-z]+|[a-z]\d{1,2}))+")
+# A vendor-style key made of words: a 2 or 3 letter vendor prefix, an environment word, then a last part with a digit
+# (`sk-live-ab12`, `pk-test-ab12`). It is a key shape, so the hyphen-words path must not pass it.
+VENDOR_KEY = re.compile(r"[a-z]{2,3}-(?:live|test|prod|dev|stage|staging|sandbox)(?:-[a-z]+\d{0,2})*-[a-z]*\d\w*")
+VALUE_END = frozenset("\"'`,;)}] \t\r\n")
+
+
 def credential_is_no_secret(found):
     """True when `found` names no secret. A LONG_CREDENTIAL_VALUE match passes when its value lacks a letter or a
     digit. A match of the other `credential-name` shape passes when a `:` set a letters-only value that reads as
-    words; an `=` assigns, so it never passes."""
+    words (an `=` assigns, so it never passes there), or when any separator set a whole value of lower-case words
+    joined by hyphens, as a localStorage key name is."""
     if found.re is LONG_CREDENTIAL_VALUE:
         return long_value_is_no_secret(found)
     value = found.group("letters")
-    return found.group("sep") == ":" and bool(value) and letters_are_words(value)
+    if value:
+        return found.group("sep") == ":" and letters_are_words(value)
+    value = found.group("mixed")
+    if value and JS_KEYWORD_VALUE.fullmatch(value):
+        return True
+    return (bool(value) and HYPHEN_WORDS.fullmatch(value) is not None
+            and VENDOR_KEY.fullmatch(value) is None
+            and found.string[found.end():found.end() + 1] in VALUE_END | {""}
+            and letters_are_words(re.sub(r"\d", "", value)))
 
 
 # A match of these shapes can still name no secret and no person. Every other shape refuses on any match.
