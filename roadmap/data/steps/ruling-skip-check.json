@@ -4,6 +4,7 @@
   "status": "doing",
   "order": 103.3689,
   "why": "A ruling can't be stretched to an act the owner never ruled on.",
-  "note": "Owner picked b on item 284, 13:08 CST, and noted: some challengers should run Opus, not all Sonnet. Glossary word is \"refuter\" (item 282 b).\nAudit build 4, coordinator 12:57 CST. 1 Sonnet call per skip. Waits on owner item 284 b.",
-  "updatedAt": "2026-11-06T21:13:00Z"
+  "note": "Owner picked b on item 284, 13:08 CST, and noted: some challengers should run Opus, not all Sonnet. Glossary word is \"refuter\" (item 282 b).\nAudit build 4, coordinator 12:57 CST. 1 Sonnet call per skip. Waits on owner item 284 b. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1343.",
+  "updatedAt": "2026-11-10T03:45:00-06:00",
+  "lane": "open PR #1343"
 }

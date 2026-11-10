@@ -4,6 +4,7 @@
   "status": "doing",
   "order": 103.365,
   "why": "The reviewer judges the code, not the builder's story.",
-  "note": "Nov 6 12:53 CST (coordinator): lane session_013NEJL3HcTDWvQyBwmisvYG. Agents write \"challenger\" in one constant until item 282 picks the word.\nOwner picked a on item 279, 12:43 CST. Debate audit 12:40 CST. A check holds it. Cost: 0 calls. Waits on owner item 279.",
-  "updatedAt": "2026-11-06T18:56:00Z"
+  "note": "Nov 6 12:53 CST (coordinator): lane session_013NEJL3HcTDWvQyBwmisvYG. Agents write \"challenger\" in one constant until item 282 picks the word.\nOwner picked a on item 279, 12:43 CST. Debate audit 12:40 CST. A check holds it. Cost: 0 calls. Waits on owner item 279. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1366.",
+  "updatedAt": "2026-11-10T03:45:00-06:00",
+  "lane": "open PR #1366"
 }

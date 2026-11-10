@@ -1,9 +1,9 @@
 {
   "title": "Each repo's shared action pins move to one current main commit",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.337501,
   "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 10 of 12, ranked by harm avoided.",
-  "note": "Nov 6 14:40 CST (triage audit): the five per-repo CI-hygiene lane sessions tagged cs-step:tci-10-one-pin-per-repo.\nEach repo. Done when each repo has one pin. home waits on the owner's go. Ready for the rest. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state. Held: the coordinator starts one CI-hygiene lane per child repo (home waits on the owner's go) (Nov 3 16:57 CST). Per-repo CI-hygiene lanes, started by the coordinator Nov 3 17:00 CST: mailaudit session_013NEJL1FBY32ZG9cZqThvix; banchi session_013NEJKzhkRnoo46QQHr3AaZ; joyous session_013NEJL1itRXmwvFXxNWjUdw; q_max session_013NEJL2pbVwCShrQnHJDsmU; ios-adblock session_013NEJL485VByFJqzsMRBr5M. home waits on the owner's go.",
-  "updatedAt": "2026-11-06T20:40:00Z"
+  "note": "Nov 6 14:40 CST (triage audit): the five per-repo CI-hygiene lane sessions tagged cs-step:tci-10-one-pin-per-repo.\nEach repo. Done when each repo has one pin. home waits on the owner's go. Ready for the rest. Port: yes. Doing, Nov 1 18:33 CST: child-repo parts sent to each repo's roll-out lane; home held. Back to todo Nov 2 13:10 CST: its lane wound down at the owner's 12:31 CST instruction; no live lane (roadmap build upkeep). The lane's branch and handoff carry its state. Held: the coordinator starts one CI-hygiene lane per child repo (home waits on the owner's go) (Nov 3 16:57 CST). Per-repo CI-hygiene lanes, started by the coordinator Nov 3 17:00 CST: mailaudit session_013NEJL1FBY32ZG9cZqThvix; banchi session_013NEJKzhkRnoo46QQHr3AaZ; joyous session_013NEJL1itRXmwvFXxNWjUdw; q_max session_013NEJL2pbVwCShrQnHJDsmU; ios-adblock session_013NEJL485VByFJqzsMRBr5M. home waits on the owner's go. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
+  "updatedAt": "2026-11-10T03:45:00-06:00"
 }

@@ -4,6 +4,7 @@
   "status": "doing",
   "order": 103.369,
   "why": "Work can't be marked done by a check that misses the point.",
-  "note": "Owner picked c on item 284, 13:08 CST, and noted: some challengers should run Opus, not all Sonnet. Glossary word is \"refuter\" (item 282 b).\nAudit build 5, coordinator 12:57 CST. 1 Sonnet call per brief, 1 per step close. Waits on owner item 284 c.",
-  "updatedAt": "2026-11-06T21:13:00Z"
+  "note": "Owner picked c on item 284, 13:08 CST, and noted: some challengers should run Opus, not all Sonnet. Glossary word is \"refuter\" (item 282 b).\nAudit build 5, coordinator 12:57 CST. 1 Sonnet call per brief, 1 per step close. Waits on owner item 284 c. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1344.",
+  "updatedAt": "2026-11-10T03:45:00-06:00",
+  "lane": "open PR #1344"
 }

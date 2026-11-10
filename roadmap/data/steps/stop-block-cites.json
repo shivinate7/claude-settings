@@ -1,9 +1,9 @@
 {
- "title": "The cite check reads Stop-hook block prints too",
- "phase": "now",
- "status": "doing",
- "order": 485,
- "why": "Lane refusal-cite-reach's round 1 review found refusals the uncited-refusal check does not read: the block prints in hooks/ruling_home.py (line 530), hooks/precompact_handoff.py (line 587) and lint/report_guard.py (lines 661-766).",
- "note": "Widen the cite check to Stop-hook block prints, then cite or record each. Outside step refusal-cite-reach's named scope. Ready. Port: yes. Lane session_013NEJL3ap46JabaGgVufJcX, started by the coordinator Nov 3 16:57 CST.",
- "updatedAt": "2026-11-03T23:10:00Z"
+  "title": "The cite check reads Stop-hook block prints too",
+  "phase": "now",
+  "status": "ready",
+  "order": 485,
+  "why": "Lane refusal-cite-reach's round 1 review found refusals the uncited-refusal check does not read: the block prints in hooks/ruling_home.py (line 530), hooks/precompact_handoff.py (line 587) and lint/report_guard.py (lines 661-766).",
+  "note": "Widen the cite check to Stop-hook block prints, then cite or record each. Outside step refusal-cite-reach's named scope. Ready. Port: yes. Lane session_013NEJL3ap46JabaGgVufJcX, started by the coordinator Nov 3 16:57 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
+  "updatedAt": "2026-11-10T03:45:00-06:00"
 }

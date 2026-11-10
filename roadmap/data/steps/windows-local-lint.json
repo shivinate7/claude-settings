@@ -1,9 +1,9 @@
 {
   "title": "ci-job checks --lint gives a verdict on the owner's Windows PC",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.38,
   "why": "Your ask, Nov 6 11:07 CST: the commands that items give for Windows and Mac seem bugged on your machines. On Nov 6 a session on your PC ran the lint for #1293 (Relayed Grant entry) and got no verdict: `./bin/verdict ./bin/ci-job` does not start in PowerShell, and the run went past 600 s with no verdict. It then failed because ruff, mypy and shellcheck are missing, and because one step needs fcntl, which Windows lacks.",
-  "note": "Nov 6 11:11 CST (coordinator): lane started, session_013NEJL1E2M7ciXj66Y5zdLH; it builds and proves in the cloud, then hands a PowerShell block for the owner PC proof.\nNov 6 11:12 CST (triage): read from main 7975f6d8. bin/ has verdict.cmd but no ci-job.cmd. install.ps1 and install.sh install none of ruff, mypy or shellcheck; only CI does. guard_core.py and ci_wake.py already fall back to msvcrt, so the fcntl import is somewhere else (unmeasured). Done means: on Windows and on the Mac, the command an item or brief gives for a local lint starts as written, gets the tools it needs, and prints one verdict, or a lint step that cannot run there reports unknown, never a failure. The coordinator starts the lane; it needs a session on the owner's PC for the proof.",
-  "updatedAt": "2026-11-06T17:16:00Z"
+  "note": "Nov 6 11:11 CST (coordinator): lane started, session_013NEJL1E2M7ciXj66Y5zdLH; it builds and proves in the cloud, then hands a PowerShell block for the owner PC proof.\nNov 6 11:12 CST (triage): read from main 7975f6d8. bin/ has verdict.cmd but no ci-job.cmd. install.ps1 and install.sh install none of ruff, mypy or shellcheck; only CI does. guard_core.py and ci_wake.py already fall back to msvcrt, so the fcntl import is somewhere else (unmeasured). Done means: on Windows and on the Mac, the command an item or brief gives for a local lint starts as written, gets the tools it needs, and prints one verdict, or a lint step that cannot run there reports unknown, never a failure. The coordinator starts the lane; it needs a session on the owner's PC for the proof. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
+  "updatedAt": "2026-11-10T03:45:00-06:00"
 }

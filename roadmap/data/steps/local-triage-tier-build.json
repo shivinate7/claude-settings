@@ -1,10 +1,10 @@
 {
   "title": "Local triage proves its tier on Mac and Windows",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 1,
   "why": "Home triage on the owner's Mac needs his override for each roadmap push, because the guard reads cloud tags only.",
-  "note": "Doing: PR #1378 head d3b9cb5df passed review round 2; with runner 8 for batching (lane, 18:09 CST). Retires debt local-triage-tier-proof on merge.\nOwner, 2026-11-06 15:45 CST (chat, item 310 a): build it now and merge it fast. Reverses item 213 (2026-11-05 07:44 CST, build nothing yet), within its condition: works on Mac and Windows. Done when the lane's PR merges and debt local-triage-tier-proof retires.",
+  "note": "Doing: PR #1378 head d3b9cb5df passed review round 2; with runner 8 for batching (lane, 18:09 CST). Retires debt local-triage-tier-proof on merge.\nOwner, 2026-11-06 15:45 CST (chat, item 310 a): build it now and merge it fast. Reverses item 213 (2026-11-05 07:44 CST, build nothing yet), within its condition: works on Mac and Windows. Done when the lane's PR merges and debt local-triage-tier-proof retires. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T00:10:00Z"
+  "updatedAt": "2026-11-10T03:45:00-06:00"
 }

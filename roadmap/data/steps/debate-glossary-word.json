@@ -1,11 +1,11 @@
 {
   "title": "One glossary word for an agent that argues back, and a full list of where one is missing",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.3685,
   "why": "The owner wants one name for it, and the audit covered only hooks and review.",
-  "note": "Nov 6 14:40 CST (triage audit for PR #1340): paused. Waits on owner item 282 (the one word) and the coordinator's Opus audit; no lane yet.\nOwner picked b \"refuter\" on item 282, 13:08 CST.\nNov 6 12:57 CST (coordinator): part (ii) done, the audit listed verdicts with no challenger; builds 1-2 started, 3-5 on page item 284.\nNov 6 12:53 CST (coordinator): Opus audit started for (ii), the full list. (iii) the word is page item 282.\nOwner on item 279, 12:43 CST Nov 6: \"arent there way more areas to add debators? also we'll need agian to decide a uniform word for them in a glossary\". Routed to the coordinator 12:58 CST.",
-  "updatedAt": "2026-11-06T20:40:00Z",
+  "note": "Nov 6 14:40 CST (triage audit for PR #1340): paused. Waits on owner item 282 (the one word) and the coordinator's Opus audit; no lane yet.\nOwner picked b \"refuter\" on item 282, 13:08 CST.\nNov 6 12:57 CST (coordinator): part (ii) done, the audit listed verdicts with no challenger; builds 1-2 started, 3-5 on page item 284.\nNov 6 12:53 CST (coordinator): Opus audit started for (ii), the full list. (iii) the word is page item 282.\nOwner on item 279, 12:43 CST Nov 6: \"arent there way more areas to add debators? also we'll need agian to decide a uniform word for them in a glossary\". Routed to the coordinator 12:58 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
+  "updatedAt": "2026-11-10T03:45:00-06:00",
   "paused": {
     "why": "Waits on owner item 282 (the one word) and the coordinator's Opus audit; no lane yet.",
     "decides": "owner",

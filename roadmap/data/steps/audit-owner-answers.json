@@ -1,9 +1,9 @@
 {
- "title": "File the owner's audit answers (items 186, 188, 189, 190, 192) and redraft 185 and 168",
- "phase": "records",
- "status": "doing",
- "order": 531,
- "why": "Owner saved answers on the page Nov 3 18:16 CST; 185 and 168 got 'none' with questions.",
- "note": "Lane session_013NEJKzSWu5KB6pXe3Spj2Q. It names which items to close and sends the 185 and 168 rewrites to triage. Named by the coordinator Nov 3 18:19 CST.",
- "updatedAt": "2026-11-04T00:21:00Z"
+  "title": "File the owner's audit answers (items 186, 188, 189, 190, 192) and redraft 185 and 168",
+  "phase": "records",
+  "status": "ready",
+  "order": 531,
+  "why": "Owner saved answers on the page Nov 3 18:16 CST; 185 and 168 got 'none' with questions.",
+  "note": "Lane session_013NEJKzSWu5KB6pXe3Spj2Q. It names which items to close and sends the 185 and 168 rewrites to triage. Named by the coordinator Nov 3 18:19 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
+  "updatedAt": "2026-11-10T03:45:00-06:00"
 }

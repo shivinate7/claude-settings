@@ -1,9 +1,9 @@
 {
- "title": "The all-jobs-passed wiring test takes any workflow path",
- "phase": "now",
- "status": "doing",
- "order": 503,
- "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 4.",
- "note": "Promotion lane 4 of 11 (rank = work order). Child removals: mailaudit, q_max, banchi. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKzte2PoyBFotFYpFmV, started by the coordinator Nov 3.",
- "updatedAt": "2026-11-03T22:46:00Z"
+  "title": "The all-jobs-passed wiring test takes any workflow path",
+  "phase": "now",
+  "status": "ready",
+  "order": 503,
+  "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 4.",
+  "note": "Promotion lane 4 of 11 (rank = work order). Child removals: mailaudit, q_max, banchi. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKzte2PoyBFotFYpFmV, started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
+  "updatedAt": "2026-11-10T03:45:00-06:00"
 }

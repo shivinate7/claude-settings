@@ -1,10 +1,10 @@
 {
   "title": "The merge-time prose judge gets a labelled set of 20 or more stale rows, so its hit rate can be scored",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "done",
   "order": 536.1,
   "owner": "coordinator",
   "why": "Lane prose-governance-workflow (session_013NEJL32AmBg2eZnNkXRFQK), relayed by the coordinator 2026-11-07 04:15 CST: the #1404 measure of the merge judge gave 21 claims, false alarms 0/13, hits 0/4, unbacked 12/17, unknown 4. Four stale rows cannot score it.",
-  "note": "Under step prose-governance-workflow. Build a labelled set of about 20 stale rows, or rows with a backing cite, mined from past stale-prose fixes in git history. Done check: prove_route_judge.py reports a hit rate on 20 or more stale rows. Same lane as cite-line-drift-check. No owner question. Coordinator 04:59 CST Nov 7: the 38-row set is built (21 stale, mined from git).",
-  "updatedAt": "2026-11-07T10:59:00Z"
+  "note": "Under step prose-governance-workflow. Build a labelled set of about 20 stale rows, or rows with a backing cite, mined from past stale-prose fixes in git history. Done check: prove_route_judge.py reports a hit rate on 20 or more stale rows. Same lane as cite-line-drift-check. No owner question. Coordinator 04:59 CST Nov 7: the 38-row set is built (21 stale, mined from git). Triage sweep 03:45 CST Nov 10: done; PR #1404 (labelled set measure) merged.",
+  "updatedAt": "2026-11-10T03:45:00-06:00"
 }

@@ -1,9 +1,9 @@
 {
- "title": "ci-alarm reports a PR whose all-jobs-passed run never started",
- "phase": "now",
- "status": "doing",
- "order": 508,
- "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 9.",
- "note": "Promotion lane 9 of 11 (rank = work order). Child removal: banchi dropped-start-alarm.yml. Evidence: waits of 1,309 s and 4,141 s. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKyjovszSALiJjquc3r, started by the coordinator Nov 3.",
- "updatedAt": "2026-11-03T22:46:00Z"
+  "title": "ci-alarm reports a PR whose all-jobs-passed run never started",
+  "phase": "now",
+  "status": "ready",
+  "order": 508,
+  "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 9.",
+  "note": "Promotion lane 9 of 11 (rank = work order). Child removal: banchi dropped-start-alarm.yml. Evidence: waits of 1,309 s and 4,141 s. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKyjovszSALiJjquc3r, started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
+  "updatedAt": "2026-11-10T03:45:00-06:00"
 }

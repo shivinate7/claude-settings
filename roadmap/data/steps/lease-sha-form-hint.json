@@ -4,6 +4,7 @@
   "status": "doing",
   "order": 103.3691,
   "why": "Lanes learn the form the allow line covers, so rebased pushes stop being refused.",
-  "note": "Owner picked b on item 286, 13:08 CST.\nCoordinator 13:02 CST Nov 6: recommended b on page item 286 (keep the sha form). The brief and the guard's refusal message show `git push --force-with-lease=<branch>:<sha>`. 9 refused lease pushes Nov 2-4 (docs/debts/notes.md). Waits on item 286.",
-  "updatedAt": "2026-11-06T21:13:00Z"
+  "note": "Owner picked b on item 286, 13:08 CST.\nCoordinator 13:02 CST Nov 6: recommended b on page item 286 (keep the sha form). The brief and the guard's refusal message show `git push --force-with-lease=<branch>:<sha>`. 9 refused lease pushes Nov 2-4 (docs/debts/notes.md). Waits on item 286. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1324.",
+  "updatedAt": "2026-11-10T03:45:00-06:00",
+  "lane": "open PR #1324"
 }
