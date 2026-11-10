@@ -1,10 +1,11 @@
 {
   "title": "High: a guard stops a session from printing process arguments, which can hold secrets",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 945,
   "owner": "coordinator",
   "why": "Degen gap 7. Owner 20:25 CST Nov 9: queue each of Degen's eight claude-settings gaps as a step or debt, with its incident (via the coordinator 20:30 CST). Incident: the Degen coordinator printed the Tailscale auth key with a process listing (`ps`, `pgrep -a`), 2026-11-09 19:59 CST. A leaked secret cannot be undone.",
-  "note": "Priority high (coordinator). Fix: refuse or mask `ps` and `pgrep` forms that print full argv (ps -ef/aux/-o args, pgrep -a/-l -f, /proc/*/cmdline reads), with a narrow pid-and-name form allowed. Related: precommit-secrets-symlinks. Filed 20:27 CST Nov 9.",
-  "updatedAt": "2026-11-09T20:27:00-06:00"
+  "note": "Priority high (coordinator). Fix: refuse or mask `ps` and `pgrep` forms that print full argv (ps -ef/aux/-o args, pgrep -a/-l -f, /proc/*/cmdline reads), with a narrow pid-and-name form allowed. Related: precommit-secrets-symlinks. Filed 20:27 CST Nov 9. Lane session_013NEJL1A3ynZBdqa9GKtySk (coordinator 20:36-20:41 CST Nov 9).",
+  "updatedAt": "2026-11-09T20:34:00-06:00",
+  "lane": "session_013NEJL1A3ynZBdqa9GKtySk"
 }

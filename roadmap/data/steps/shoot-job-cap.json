@@ -1,11 +1,11 @@
 {
   "title": "The checks-shoot job has room for the waiting-page tests, so batch 70 is not cancelled at its cap",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 933,
   "owner": "coordinator",
   "why": "Coordinator 16:15 CST Nov 9: on batch 70 (#2470, head f2d25d149) the checks-shoot job was cancelled at its 10 min cap (.github/workflows/checks.yml) while still passing, after the batch added waiting-page tests (#2347, #2383, #2423, #2429, #2466). The same job took 8 min on 624dcc188 and 7 min on 8bc28980b.",
-  "note": "Fix: split the waiting-page suite into its own job, or raise the cap from measured runs, per decision ci-job-caps. Done check: the shoot jobs pass on a tree with batch 70's page tests, and each cap cites its measured runs. Related: ci-guard-headroom (lane session_013NEJKypwFEtaJwfYrMpZ5T). Lane session_013NEJL2Xf2CDoR4VGP4EE6P started 16:16 CST Nov 9 (coordinator). Scope widened (coordinator 16:27 CST Nov 9): three caps, checks-shoot, checks-merge-install's checkout-detection step, and shell-macos's; #2458 was a draft, so its own run skipped every job by design. Coordinator 19:48 CST Nov 9: the batch-70 cut hid 126 failing waiting-page cases (font-dependent pins), so the cap was not the only cause; see steps capped-job-hides-red and page-pins-font-dependent. Runner 8 dropped #2347, #2383, #2423, #2429 and #2466 from batch 70; it rebuilds as batch-70c.",
-  "updatedAt": "2026-11-09T19:42:00-06:00",
+  "note": "Fix: split the waiting-page suite into its own job, or raise the cap from measured runs, per decision ci-job-caps. Done check: the shoot jobs pass on a tree with batch 70's page tests, and each cap cites its measured runs. Related: ci-guard-headroom (lane session_013NEJKypwFEtaJwfYrMpZ5T). Lane session_013NEJL2Xf2CDoR4VGP4EE6P started 16:16 CST Nov 9 (coordinator). Scope widened (coordinator 16:27 CST Nov 9): three caps, checks-shoot, checks-merge-install's checkout-detection step, and shell-macos's; #2458 was a draft, so its own run skipped every job by design. Coordinator 19:48 CST Nov 9: the batch-70 cut hid 126 failing waiting-page cases (font-dependent pins), so the cap was not the only cause; see steps capped-job-hides-red and page-pins-font-dependent. Runner 8 dropped #2347, #2383, #2423, #2429 and #2466 from batch 70; it rebuilds as batch-70c. PR #2478 (branch shoot-job-cap-b: the waiting-page suite in its own CI job; install suite steps re-capped) released into batch-70c (coordinator 20:36 CST Nov 9).",
+  "updatedAt": "2026-11-09T20:34:00-06:00",
   "lane": "session_013NEJL2Xf2CDoR4VGP4EE6P"
 }
