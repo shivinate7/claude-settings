@@ -16233,6 +16233,131 @@ sh("frozen: var2: unset clears the variable", 'D=' + _P + '; unset D; cp a "$D"'
    cwd=NOGIT)
 sh("frozen: var2: single quotes do not expand", 'D=' + _P + "; cp a '$D'", "allow", cwd=NOGIT)
 
+# ---- resolve-vars: the resolver reads each assignment as the shell does. A value is split at its quote
+# when the text after the quote is read as its own word; an apostrophe in double quotes is text; a prefix
+# assignment and a subshell's assignment reach only the text the shell gives them. MUTATE_ONLY="resolve-vars"
+# runs these verdicts and the unit checks in the frozen block beside the LOG_CHECKS_EXTRA registrations.
+_SPLIT_SUB = slash(os.path.join(ROOT, "split", "sub"))   # an ordinary folder, not frozen
+_UP_TO_CONFIG = "/../../" + os.path.basename(CFG) + "/settings.json"   # back from it into the config folder
+
+# A value cut at its quote: `"$BASE"/../...` leaves the shell one path, and the guard read the cut value.
+sh("frozen resolve-vars: a write through a value split at its quote, into the config folder, denies",
+   'BASE=' + _SPLIT_SUB + '; WT="$BASE"' + _UP_TO_CONFIG + '; echo x > "$WT"', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, the same path as one unsplit value denies",
+   'WT=' + _SPLIT_SUB + _UP_TO_CONFIG + '; echo x > "$WT"', "deny", "frozen-path", cwd=NOGIT)
+# An apostrophe in double quotes, then a second one, makes one span that swallows a later reassignment.
+sh("frozen resolve-vars: a reassignment after an apostrophe in double quotes is seen, and its write denies",
+   'D=/tmp/o; echo "don\'t"; D=' + CFG_SETTINGS + "; echo 'x'; echo x > $D", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, the same with no apostrophe in the text denies",
+   'D=/tmp/o; echo "dont"; D=' + CFG_SETTINGS + "; echo 'x'; echo x > $D", "deny", "frozen-path",
+   cwd=NOGIT)
+# A prefix assignment takes effect for its own command only, after the words expand: `"$D"` is the old value.
+sh("frozen resolve-vars: a prefix assignment does not reach the word it expands, so a write to the old value denies",
+   'D=' + CFG_SETTINGS + '; D=/tmp/o cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, the same word with no prefix assignment denies",
+   'D=' + CFG_SETTINGS + '; cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+# A subshell's assignment ends at its closing paren.
+sh("frozen resolve-vars: an assignment in a subshell ends at its paren, so a write to the old value denies",
+   'D=' + CFG_SETTINGS + '; (D=/tmp/o); echo x > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, inside the subshell the new value holds, and the write goes there",
+   'D=' + CFG_SETTINGS + '; (D=/tmp/o; echo x > $D)', "allow", cwd=NOGIT)
+# Controls: a brace group and a bare assignment before && both keep the assignment for the next command.
+sh("frozen resolve-vars: control, a brace group keeps its assignment for the next command, denies",
+   '{ D=' + CFG_SETTINGS + '; }; cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a bare assignment before && keeps it for the next command, denies",
+   'D=' + CFG_SETTINGS + ' && cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+# Scanner traps (building-scanner-respects-strings): a comment opener or a lone quote inside double
+# quotes is text, so the write after it still reaches the frozen check.
+sh("frozen resolve-vars: a # inside double quotes is text, and the write after it denies",
+   'echo "# note"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a // inside double quotes is text, and the write after it denies",
+   'echo "http://x"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a /* inside double quotes is text, and the write after it denies",
+   'echo "/* x"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a lone apostrophe inside double quotes is text, and the write after it denies",
+   'echo "it\'s"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
+# A redirect-only assignment keeps its value for the next command, as bash does: `D=... >/dev/null` sets D.
+sh("frozen resolve-vars: a redirect-only assignment with >/dev/null keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + ' >/dev/null; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a redirect-only assignment with 2>/dev/null keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + ' 2>/dev/null; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a redirect-only assignment with >/dev/null keeps its value, so a write to it denies",
+   'D=' + CFG_SETTINGS + ' >/dev/null; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a plain assignment with no redirect keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + '; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+# A function body runs in the calling shell, so an assignment in it lasts after the call.
+sh("frozen resolve-vars: an assignment in a function body lasts after the call, so a write to it denies",
+   'function f { D=' + CFG_SETTINGS + '; }; f; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, an assignment in a f() body lasts after the call, so a write to it denies",
+   'f() { D=' + CFG_SETTINGS + '; }; f; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+# A verbatim heredoc body is text: its odd quote must not pair with a quote on a later line.
+sh("frozen resolve-vars: an odd quote in a heredoc body is text, so a write after the heredoc denies",
+   "python3 - <<'EOF'\nprint(\"x)\nEOF\nD=" + CFG_SETTINGS + '; echo "y" > $D', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, a heredoc body with its quote closed is text, so a write after it denies",
+   "python3 - <<'EOF'\nprint(\"x\")\nEOF\nD=" + CFG_SETTINGS + '; echo "y" > $D', "deny", "frozen-path",
+   cwd=NOGIT)
+# The shell reads an ambiguous redirect as an error and writes nothing, so the guard should allow it.
+sh("frozen resolve-vars: an ambiguous redirect from a value with an escaped space writes nothing, so a write to it allows",
+   'D=' + CFG_SETTINGS + '\\ x; echo y > $D', "allow", cwd=NOGIT)
+# Control: the same write with a plain value is denied, so the allow above comes from the ambiguous redirect.
+sh("frozen resolve-vars: control, the same assignment with no escaped space, then a write to it, denies",
+   'D=' + CFG_SETTINGS + '; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+
+# A backslash-newline joins two lines into one. So `X=1 && \` with `D=v` on the next line is `X=1 && D=v`,
+# and `D=v \` with `&& cmd` on the next line is `D=v && cmd`: the assignment still starts its command.
+sh("frozen resolve-vars: a backslash-newline after && does not hide an assignment, so a write to it denies",
+   "X=1 && \\\n  D=" + CFG_SETTINGS + " && \\\n  echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline after ; does not hide an assignment, so a write to it denies",
+   "true;\\\nD=" + CFG_SETTINGS + "; echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline before export does not hide it, so sed -i of the assigned path denies",
+   "cd /tmp && \\\n export D=" + CFG_SETTINGS + " && \\\n sed -i s/a/b/ $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline after an assignment keeps it for the next command, so a write to it denies",
+   "D=" + CFG_SETTINGS + " \\\n  && echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a backslash-newline chain of a safe path, then a write to it, allows",
+   "X=1 && \\\n  D=/tmp/o && \\\n  echo y > $D", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, a backslash-newline after a safe assignment, then a write to it, allows",
+   "D=/tmp/o \\\n  && echo y > $D", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, the same chain on one line, denies",
+   "X=1 && D=" + CFG_SETTINGS + " && echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+
+# PowerShell reads `$D='v'` and `$D="v"` as an assignment with or without spaces around the equals.
+sh("frozen resolve-vars: PowerShell $D='path' with no spaces, then Set-Content to $D, denies",
+   "$D='" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: PowerShell $D=\"path\" with no spaces, then Set-Content to $D, denies",
+   '$D="' + CFG_SETTINGS + '"; Set-Content $D x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: PowerShell $D= 'path', a space after the equals only, then Set-Content to $D, denies",
+   "$D= '" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: control, PowerShell $D='safe path' with no spaces, then Set-Content to $D, allows",
+   "$D='/tmp/o'; Set-Content $D x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: control, PowerShell $D = 'path' with spaces, then Set-Content to $D, denies",
+   "$D = '" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+
+# A prefix assignment is in the environment of its command, and a heredoc is that command's input: the child
+# shell reads the value. `env NAME=v` gives the same environment. An export is in the environment too.
+sh("frozen resolve-vars: a prefix assignment into a bash heredoc script reaches the script, so its write denies",
+   "OUT=" + CFG_SETTINGS + " bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: an env assignment before sh with a heredoc script reaches the script, so its write denies",
+   "env OUT=" + CFG_SETTINGS + " sh <<'EOF'\necho y > $OUT\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a prefix assignment of a safe path into a heredoc script, then its write, allows",
+   "OUT=/tmp/o bash <<'EOF'\necho y > \"$OUT\"\nEOF", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, an export of the frozen path before a heredoc script, then its write, denies",
+   "export OUT=" + CFG_SETTINGS + "; bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
+
+# A run of heredoc blocks does not hide the write after it. Each closed body is read alone, on a copy of
+# the table, and the command goes on at its own depth, so the run never reaches `_NEST_LIMIT`. 20, 21 and
+# 30 blocks deny. The 21-block control with a safe path allows.
+_HEREDOC_BLOCK = "cat > f <<EOF\nline\nEOF\n"
+for _blocks in (20, 21, 30):
+    sh("frozen resolve-vars: %d heredoc blocks, then an assignment to the frozen path and a write to it, denies"
+       % _blocks, _HEREDOC_BLOCK * _blocks + "D=" + CFG_SETTINGS + "\necho y > $D", "deny", "frozen-path",
+       cwd=NOGIT)
+sh("frozen resolve-vars: control, 21 heredoc blocks, then an assignment to a safe path and a write to it, allows",
+   _HEREDOC_BLOCK * 21 + "D=/tmp/o\necho y > $D", "allow", cwd=NOGIT)
+
 # A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
 # assignments that the guard does not read. The one lift is the owner override (family
 # `override`): the owner types it as a prompt, and the guard reads it from a state file.
@@ -18953,6 +19078,94 @@ def _mirror_names_tie():
 
 LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
                          _mirror_names_tie))
+
+
+# ---- resolve-vars: `_resolve_vars` of guard_frozen, read as the shell reads each assignment. A check reads
+# the use site (the last `;` segment, double quotes removed), so a fix that rewrites an assignment's own text
+# still passes. The guard under test is loaded as every check loads it (GUARD_UNDER_TEST is honoured).
+def _resolver_under_test():
+    """`_resolve_vars` of guard_frozen as the guard under test loads it, or None when it has none."""
+    _load_guard_module()
+    return getattr(sys.modules.get("guard_frozen"), "_resolve_vars", None)
+
+
+def _use_site(text):
+    """The last `;` segment of a resolved command, with its double quotes removed."""
+    return text.split(";")[-1].strip().replace('"', "")
+
+
+def resolve_case(command, want):
+    """A check: the use site of `command`, once resolved, reads `want`."""
+    def check():
+        resolve = _resolver_under_test()
+        if resolve is None:
+            return False, "guard_frozen has no _resolve_vars"
+        got = _use_site(resolve(command))
+        if got != want:
+            return False, "%r resolves its use site to %r, want %r" % (command, got, want)
+        return True, "%r resolves its use site to %r" % (command, want)
+    FIXTURELESS_CHECKS.add(check)
+    return check
+
+
+_CHAIN = "; ".join(["A0=x"] + ["A%d=$A%d" % (n, n - 1) for n in range(1, 200)] + ["use $A199"])
+RESOLVE_CASES = (
+    # Red on the old code: each names one fault of the resolver.
+    ("frozen resolve-vars: a value split at its quote keeps the text after the quote",
+     'BASE=.claude/worktrees; WT="$BASE"/../lane; cp src $WT', "cp src .claude/worktrees/../lane"),
+    ("frozen resolve-vars: a reassignment after an apostrophe in double quotes is seen",
+     "S=a; echo \"don't\"; S=b; echo 'x'; use $S", "use b"),
+    ("frozen resolve-vars: a variable set after an apostrophe in double quotes is resolved",
+     "echo \"don't\" ; X=1; echo 'q'; echo $X", "echo 1"),
+    ("frozen resolve-vars: an assignment on the second line of a double-quoted string is text",
+     'echo "x\nS=a"; use $S', "use $S"),
+    ("frozen resolve-vars: an assignment after a # inside double quotes is text",
+     'echo "# S=a"; use $S', "use $S"),
+    ("frozen resolve-vars: a prefix assignment does not change the word its own command expands",
+     'S=x cmd "$S"', "S=x cmd $S"),
+    ("frozen resolve-vars: a prefix assignment's command expands the value before it",
+     'S=/safe; S=x cmd "$S"', "S=x cmd /safe"),
+    ("frozen resolve-vars: a prefix assignment does not reach the text after it",
+     'S=x cmd "$S"; use $S', "use $S"),
+    ("frozen resolve-vars: the value before a prefix assignment reaches the text after it",
+     'S=/safe; S=x cmd "$S"; use $S', "use /safe"),
+    ("frozen resolve-vars: a subshell's assignment does not reach the text after its paren",
+     "(S=x); echo $S", "echo $S"),
+    ("frozen resolve-vars: the value before a subshell's assignment reaches the text after it",
+     "S=/safe; (S=x); use $S", "use /safe"),
+    # Keep-green controls: the behaviour the fix must keep.
+    ("frozen resolve-vars: control, the last assignment wins",
+     "D=a; D=b; use $D", "use b"),
+    ("frozen resolve-vars: control, unset clears the variable",
+     "S=a; unset S; use $S", "use $S"),
+    ("frozen resolve-vars: control, single quotes do not expand",
+     "S=a; use '$S'", "use '$S'"),
+    ("frozen resolve-vars: control, export of two names reads both",
+     "export A=1 D=v; use $D", "use v"),
+    ("frozen resolve-vars: control, $HOME reads as ~",
+     "echo $HOME/x", "echo ~/x"),
+    ("frozen resolve-vars: control, the brief's apostrophe text with no second quote is still read",
+     "echo \"don't\"; S=a; S=b; use $S", "use b"),
+    ("frozen resolve-vars: control, the brief's second apostrophe text is still read",
+     "echo \"don't\" ; X=1; echo $X", "echo 1"),
+    ("frozen resolve-vars: control, a # inside double quotes is text, so a later reassignment is seen",
+     'echo "# note"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a // inside double quotes is text",
+     'echo "http://x"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a /* inside double quotes is text",
+     'echo "/* x"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a subshell's assignment holds inside the subshell",
+     "(S=x; use $S)", "use x)"),
+    ("frozen resolve-vars: control, a brace group keeps its assignment for the next command",
+     "{ S=x; }; use $S", "use x"),
+    ("frozen resolve-vars: control, a bare assignment before && keeps it for the next command",
+     "S=x && use $S", "S=x && use x"),
+    ("frozen resolve-vars: control, an empty command stays empty", "", ""),
+    ("frozen resolve-vars: control, a 200-link chain of assignments resolves to its first value",
+     _CHAIN, "use x"),
+)
+for _label, _command, _want in RESOLVE_CASES:
+    LOG_CHECKS_EXTRA.append((_label, resolve_case(_command, _want)))
 
 # ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
