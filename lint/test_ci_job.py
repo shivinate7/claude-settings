@@ -1072,8 +1072,12 @@ class ParallelLint(Job):
                 else:
                     os.remove(path)
         for name in os.listdir(os.path.join(self.root, "lint")):
+            path = os.path.join(self.root, "lint", name)
             if name != "rv.py":
-                os.remove(os.path.join(self.root, "lint", name))
+                if os.path.isdir(path):  # a step's __pycache__ when bytecode is written
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
 
     def read(self, rel):
         try:
