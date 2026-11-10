@@ -1219,15 +1219,15 @@ def waits_on_closed_pulls(open_, work, repo=None, ref=None):
     dead = {r["number"] for r in work["landedPulls"] if r.get("merged") is False}
     dead -= {r["number"] for r in work["landedPulls"] if r.get("merged") is True}
     dead -= {p["number"] for p in work["pulls"]}
-    seen = {}
-    dead -= {r["number"] for r in work["landedPulls"]
-             if r["number"] in dead and head_on_main(repo, ref, r.get("head"), seen)}
-    out = []
+    waits = []
     for k, d in open_:
         text = " ".join(str(d.get(f) or "") for f in ("title", "why", "note"))
-        for n in sorted({int(m) for m in WAIT_ON_PULL.findall(text)} & dead):
-            out.append("%s (#%d)" % (k, n))
-    return out
+        waits.append((k, {int(m) for m in WAIT_ON_PULL.findall(text)} & dead))
+    waited = set().union(*(ns for _, ns in waits)) if waits else set()
+    seen = {}
+    dead -= {r["number"] for r in work["landedPulls"]
+             if r["number"] in waited and head_on_main(repo, ref, r.get("head"), seen)}
+    return ["%s (#%d)" % (k, n) for k, ns in waits for n in sorted(ns & dead)]
 
 
 def lane_live(work, lane, item=False):

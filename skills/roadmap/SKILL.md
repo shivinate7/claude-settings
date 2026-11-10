@@ -310,9 +310,10 @@ dated-claim row reads the notes already loaded and adds nothing.
 The red line, the stalled lines, the ready lines, the two stale-ready rows and the closed-pull wait row read the live file and steps build.py
 already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
 GitHub list call it already makes.
-The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The build runs at
-most one `git merge-base` per distinct head of an unmerged row whose branch is an open step. A row with `merged:
-true`, or with no open step, runs no git. They add no file, timer or log.
+The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The closed-pull wait row runs
+one `git merge-base` per closed unmerged PR that an open step waits on, once per build. A closed row no open step
+waits on runs no git for this row. It writes no file. The landed rows add their own `git merge-base` per distinct head of an unmerged
+row whose branch is an open step, and a row with `merged: true` runs no git. They add no file, timer or log.
 The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
 
