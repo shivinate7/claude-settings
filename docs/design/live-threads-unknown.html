@@ -98,6 +98,8 @@ body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 
 .sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
 .sv details[open] > summary::before { content: "\25BE"; }
 .rg.unk { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; border: 2px dashed var(--due); border-radius: 50%; }
+.rg { width: 16px; height: 16px; display: grid; place-items: center; }
+.rg svg { width: 14px; height: 14px; }
 .live { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
 .live summary .lh { font-weight: 700; }
@@ -142,6 +144,7 @@ body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 
 [data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
 [data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
 .live summary [data-new]::after, .live summary [data-today]::after { top: -24px; }
+.live li [data-new]::after { top: auto; bottom: -22px; }
 html.nolab [data-new], html.nolab [data-today] { outline: none; }
 html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
 </script>

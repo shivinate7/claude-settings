@@ -40,7 +40,7 @@ are the same pill in the same `--due`. So "threads unknown" reads as a thread st
    - Tokens: text `--due` (from `.unk`, weight 600, the summary's 14.5px). Ring: `.rg.unk`, 12 px,
      2 px dashed `--due`. No new token.
    - `.rg.unk` (two classes) beats the bare `.rg` rule (16 px grid) that comes later in the sheet, so
-     the ring stays 12 px. Seen in the 1440, 820 and 390 shots.
+     the ring stays 12 px. The mockup's excerpt holds both rules in the page's order; seen at 390.
    - Contrast: `--due` on `--surface` is 6.33:1 light (#8a5300 on #ffffff) and 9.19:1 dark
      (#f2b55c on #191e26). The ring is a state cue at the same ratios, over the 3:1 floor.
 
@@ -74,7 +74,7 @@ are the same pill in the same `--due`. So "threads unknown" reads as a thread st
    `<span class="tag unk">`, but there `.tag` has no border, and `.live .unk` gives bare `--warn`
    text with no fill. `.tag.st-failed` has a `--warn-soft` fill. So fill against no fill already tells
    them apart, and the design review passed it. The brief says the roadmap tag has a `--warn-soft`
-   fill; the CSS and the review's shots show no fill. Contrast: 5.1:1 light (#9a6200 on #ffffff),
+   fill; the CSS gives none (`.tag` sets no background, `.live .unk` sets colour only). Contrast: 5.1:1 light (#9a6200 on #ffffff),
    9.2:1 dark (#e9b44c on #191a1d). The roadmap page has no `.rg` ring class, so item 1's look
    there needs a new rule.
    Gain of no change: no work, no risk.
