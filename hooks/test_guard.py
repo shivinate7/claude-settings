@@ -3600,6 +3600,15 @@ sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a wo
 sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
    "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout",
    cwd=GITWT)
+# A `cd` after an `env -C` sets the folder the restore runs in, so the restore is judged in the shared
+# checkout, as the plain `cd` form is. The control is the same chain without the env wrapper, which the
+# reader already reads the way the rule needs, so it stays green.
+sh("per-file deny: env -C into the lane, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
+   "env -C " + slash(GITWT) + " " + VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
+sh("per-file deny: control, a plain status, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
+   VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
 # per-file restore in the shared checkout from the lane. env -vC is read as env -C, so other-checkout
@@ -28852,11 +28861,9 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into a variab
                          _gcx_row("allow", "home", 'env -C "$WT" git commit -m x')))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into its own home is allowed",
                          _gcx_row("allow", "home", "env -C @HOME git commit -m x")))
-def run_dir_env_c_case():
-    """_run_dir returns the folder an `env -C <dir>` names, as it returns the folder a `git -C <dir>` names.
-    The git -C form is the control and pins the reader's answer; the env -C form must match it, not the cwd.
-    guard_core loads from the folder of GUARD, so a GUARD_UNDER_TEST copy is the one read. Both folders are
-    named under ROOT, the run folder, and nothing is read or written on disk."""
+def _guard_core_under_test():
+    """The guard_core module the run-folder rows read: the folder of GUARD, loaded fresh on each call, so a
+    GUARD_UNDER_TEST copy is the one read."""
     import importlib.util
     folder = os.path.dirname(GUARD)
     if folder not in sys.path:
@@ -28864,6 +28871,15 @@ def run_dir_env_c_case():
     spec = importlib.util.spec_from_file_location("guard_core_under_test", os.path.join(folder, "guard_core.py"))
     core = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(core)
+    return core
+
+
+def run_dir_env_c_case():
+    """_run_dir returns the folder an `env -C <dir>` names, as it returns the folder a `git -C <dir>` names.
+    The git -C form is the control and pins the reader's answer; the env -C form must match it, not the cwd.
+    guard_core loads from the folder of GUARD, so a GUARD_UNDER_TEST copy is the one read. Both folders are
+    named under ROOT, the run folder, and nothing is read or written on disk."""
+    core = _guard_core_under_test()
     target = os.path.join(ROOT, "run-dir-target")
     cwd = os.path.join(ROOT, "run-dir-cwd")
     control = core._run_dir("git -C \"%s\" status" % slash(target), cwd)
@@ -28877,6 +28893,48 @@ def run_dir_env_c_case():
 
 LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads the folder an env -C names, as it reads a git -C",
                          run_dir_env_c_case))
+
+
+# THE RUN FOLDER OF A COMMAND TYPED FROM A LINKED LANE. _run_dir names the folder each spelling runs in: a
+# relative env -C joins onto the folder the earlier cd left, not the shell cwd, and a cd after an env -C sets
+# the folder over it. Each row is one spelling, so a failure names one form. Scope before subject (P7): the
+# plain cd into the primary is read first, and a row reports on its own spelling only when that cd reads right.
+RUN_DIR_PRIM = os.path.join(ROOT, "run-dir-prim")   # the primary checkout
+RUN_DIR_LANE = os.path.join(ROOT, "run-dir-lane")   # the linked lane the command is typed from
+
+
+def _run_dir_names(command, want, cause):
+    """_run_dir of `command`, typed from RUN_DIR_LANE, names `want`. `cause` is the one misreading a miss shows."""
+    core = _guard_core_under_test()
+    scope = core._run_dir("cd %s && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE)
+    if os.path.normpath(scope) != os.path.normpath(RUN_DIR_PRIM):
+        return False, "scope: a plain cd into the primary checkout reads %s, want %s" % (scope, RUN_DIR_PRIM)
+    got = core._run_dir(command, RUN_DIR_LANE)
+    if os.path.normpath(got) != os.path.normpath(want):
+        return False, "%s: _run_dir reads %s, want %s" % (cause, got, want)
+    return True, "_run_dir reads %s for: %s" % (want, command)
+
+
+def _run_dir_row(command, want, cause):
+    """One row: a zero-argument case that runs _run_dir_names on one spelling."""
+    return lambda: _run_dir_names(command, want, cause)
+
+
+_RELATIVE_ENV_C = "a relative env -C joined onto the shell cwd, not onto the folder the earlier cd left"
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir joins a relative env -C onto the folder an earlier cd left",
+                         _run_dir_row("cd %s && env -C . git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      _RELATIVE_ENV_C)))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir joins a relative env -C sub onto the folder an earlier cd left",
+                         _run_dir_row("cd %s && env -C sub git status" % slash(RUN_DIR_PRIM),
+                                      os.path.join(RUN_DIR_PRIM, "sub"), _RELATIVE_ENV_C)))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir lets a cd after an env -C decide the folder over the env -C",
+                         _run_dir_row("env -C %s git status && cd %s && git status"
+                                      % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
+                                      RUN_DIR_PRIM, "an env -C folder beat the cd after it")))
+# A guard, green on head: the env -C of the primary checkout alone is already read as the primary.
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads an env -C of the primary checkout as the primary",
+                         _run_dir_row("env -C %s git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      "an env -C of the primary checkout was read as something else")))
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
