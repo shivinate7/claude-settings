@@ -1102,6 +1102,7 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
         if merge_tool_args(segment) is None:
             continue
         try:
+            _glued_counts(segment, merge_tool_args(segment), " ".join(segments[number + 1:]))
             rest = _merge_words(segment)
             bare = _merge_words(strip_redirections(segment))
             if "--confirm" not in (rest if bare is None else bare):
@@ -1198,13 +1199,14 @@ def _command_words(args, glued=None):
     return words
 
 
-def _glued_counts(segment: str, args):
+def _glued_counts(segment: str, args, later: str = ""):
     """Per word of `args` (a tail of the segment's tokens), (how many trailing `)` or `&` it holds outside quotes and outside a `$(`,
     whether a `$(` is still open at its end), read from the quote state of walk_quotes, the one quote walk. A `$(` opened before
     the first of `args` is not counted: its `)` ends the command. Raises _FlagsUnreadable when the walk and the tokens do not split
     the segment into the same words, so the caller denies and never falls back to the unquoted reading. It also raises when a `$(`
     is still open at the segment's end and the segment holds `--confirm`: the splitter cut the substitution at a `|`, `;`, `&&`,
-    `||` or newline, so the flags after it sit in another segment and are never read."""
+    `||` or newline, so the flags after it sit in another segment and are never read. `later` is the text of the segments after
+    this one: a `--confirm` there counts too, since the splitter cut at a `|` or `;` inside the `$(` that this segment opened."""
     tokens = segment_tokens(segment)
     if tokens is None or len(args) > len(tokens):
         raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
@@ -1233,7 +1235,7 @@ def _glued_counts(segment: str, args):
         ends_open.append(depth > 0)
     if len(words) != len(tokens) or len(args) > len(words):
         raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
-    if depth > 0 and any("--confirm" in arg for arg in args):
+    if depth > 0 and ("--confirm" in later or any("--confirm" in arg for arg in args)):
         raise _FlagsUnreadable("a $( is open at the end of the segment")
     counts = []
     for word, arg, still_open in zip(words[skip:], args, ends_open[skip:]):
