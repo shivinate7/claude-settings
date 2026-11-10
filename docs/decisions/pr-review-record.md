@@ -64,9 +64,9 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 The review a changed head owes. Coordinator pick (owner session coordinator, 2026-11-08 to 2026-11-09). Process-only, not the owner's words. A lane reads it instead of asking.
 
-- A chain gets one fix check, except a merge of the base into the fixed head (see the last bullet under The limits).
+- A chain gets one fix check, except a merge of the base into the fixed head after that fix check PASSed (see the last bullet under The limits).
 - The PR gets one fresh full review at the live head when any of these holds:
-  - the newest record already holds a fix check;
+  - the newest record holds a fix check, unless it PASSed on a merge of the base into the fixed head with Guard or check `no`, which closes the review;
   - a fix check failed;
   - a round read an older head than the live one;
   - the record was made or edited by hand;
