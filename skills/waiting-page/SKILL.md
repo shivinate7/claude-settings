@@ -29,9 +29,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
 
-- `items/<id>`: one per waiting item. The database key and the `id` field must be the same
-  string. The page keys on the database key, and warns on an item whose `id` field is missing or
-  different. Fields: `id`, `n` (a stable number the owner answers by),
+- `items/<id>`: one per waiting item. The database key is the item's id. The `id` field is optional
+  and ignored: the page, the guard and the tools read the key. Fields: `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
   record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).

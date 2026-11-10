@@ -4832,7 +4832,7 @@ def page_design_hit(writes, tool_input, cwd):
     def run_one(entry):
         doc_id, data = entry
         try:
-            return _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
+            return _run_check_designs(page_file, dict(data, id=doc_id or data.get("id") or "item"))
         except Exception as err:
             return 3, type(err).__name__ + ": " + str(err)
 
