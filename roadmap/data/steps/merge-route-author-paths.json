@@ -5,7 +5,7 @@
   "order": 931,
   "owner": "coordinator",
   "why": "Coordinator 15:51 CST Nov 9: `merge_route_paths` in hooks/guard.py opens the test-author merge route only when a conflict is `is_test_rel`, but builder-test-edit also counts the mutation tests (`AUTHOR_MUTATION_TESTS`, such as hooks/mutate_guard.py) as test paths. So a merge whose conflicts are hooks/guard_merge.py and hooks/mutate_guard.py has no role that can commit it. Harm: lane merge-repo-dir-flag is blocked on #1982, and #2106 behind it.",
-  "note": "Fix: open the route when any conflict is a path the builder is refused, through one shared predicate (rule building-allow-list-is-the-constant). Done check: a test-author merge with conflicts {guard_merge.py, mutate_guard.py} is allowed; one with no author path is still refused. Related: merge-conflict-mixed-roles, mixed-merge-no-role. Lane session_013NEJL1NByCSpoZkrQEnyu8 started 15:52 CST Nov 9 (coordinator). Kept doing on: #2491 open draft (worktree-merge-route-author-paths) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10).",
+  "note": "Fix: open the route when any conflict is a path the builder is refused, through one shared predicate (rule building-allow-list-is-the-constant). Done check: a test-author merge with conflicts {guard_merge.py, mutate_guard.py} is allowed; one with no author path is still refused. Related: merge-conflict-mixed-roles, mixed-merge-no-role. Lane session_013NEJL1NByCSpoZkrQEnyu8 started 15:52 CST Nov 9 (coordinator). Kept doing on: #2491 open draft (worktree-merge-route-author-paths) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "updatedAt": "2026-11-10T06:03:00-06:00",
   "lane": "session_013NEJL1NByCSpoZkrQEnyu8"
 }
