@@ -22,7 +22,7 @@ export const boundSeamReader = () => seamReader;
 export const OPTIONAL_KEYS = Object.freeze(['screenKeys', 'modelSeam', 'workerStage', 'migrationsDir']);
 
 /** The map format this skill reads and writes. `map.config.json` holds `formatVersion`, and a missing key means version 1. Raise it with one step in `map-upgrade.mjs`. */
-export const MAP_FORMAT_VERSION = 5;
+export const MAP_FORMAT_VERSION = 6;
 
 /** The format version of a parsed config. A value that is no whole number, or a version newer than the skill, is an error. It never answers a version the skill cannot read. */
 export const readFormatVersion = (cfg) => {
