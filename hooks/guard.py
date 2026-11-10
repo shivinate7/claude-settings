@@ -2809,7 +2809,10 @@ BRIEF_LINES = 50   # the lines of a transcript read to find its first user messa
 # framework route uses (`app/[id]/page.tsx`, `routes/posts.$id.tsx`). Any other character ends a run, so a
 # lone apostrophe or a colon in the prose cannot hide a name or break the read. `clean_run` strips the
 # prose's own brackets and parens.
-BRIEF_RUN = re.compile(r"[\w.\-/*?@\\\[\]()+$]+")
+# On Windows a path starts with a drive (`C:\Users\...`) and the temp folder has an 8.3 short name
+# (`RUNNER~1`), so a run may start with a drive and hold a `~` between a word character and a digit.
+BRIEF_RUN = re.compile(r"(?:(?<!\w)[A-Za-z]:(?=[\\/]))?(?:[\w.\-/*?@\\\[\]()+$]|(?<=\w)~(?=\d))+")
+BRIEF_DRIVE = re.compile(r"[a-z]:/")
 BRIEF_LINK = re.compile(r"\]\(")   # a markdown link `[text](path)`: the path is its own run
 BRIEF_POINTER_BYTES = 64 * 1024   # the largest brief file a pointer is read from
 BRIEF_POINTER_EXT = (".md", ".txt")
@@ -3028,10 +3031,15 @@ class BriefScope:
     def add(self, token: str) -> None:
         if not re.search(r"[a-z0-9]", token):
             return
-        if token.startswith("/"):
+        drive = BRIEF_DRIVE.match(token) and os.path.splitdrive(token)[0]
+        if token.startswith("/") or drive:
             # An absolute path names a repo path only inside the checkout (`checkout_roots`). One outside it
             # (a pointer to a brief file in a scratchpad) can equal no path of the repo, so it names none.
             root = next((r for r in self.roots if token.startswith(r + "/")), None)
+            if root is None and drive:
+                # The checkout's top is a real path (long names) and the brief may spell it with 8.3 short names.
+                token = norm(os.path.realpath(token)).lower()
+                root = next((r for r in self.roots if token.startswith(r + "/")), None)
             if root is None:
                 return
             token = token[len(root) + 1:]

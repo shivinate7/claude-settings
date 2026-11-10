@@ -19,7 +19,7 @@ Basis, coordinator, 2026-11-08 16:08 CST. Two incidents. A record-writer's brief
 Limits.
 - Names match case-folded: `Src/App.py` names `src/app.py`. This fails open.
 - The `stall_watch` import that finds the agent's transcript runs at every commit and push of an agent with a role. The transcript is read at each of those whose agent has a change of its own.
-- A Windows path written `C:\...` names no path.
+- A Windows path written `C:\...` counts as its repo path only inside a checkout root, after the real path expands any 8.3 short name (`RUNNER~1`). Off Windows it names no path.
 - An absolute path behind a symlink that the checkout's root does not share names no path.
 - A bare file name (`app.py`) and a glob with no `/` match a file of that name at any depth.
 - A path the brief mentions to forbid it counts as named: "(read only)" and "do not touch `x.py`" name `x.py`.
