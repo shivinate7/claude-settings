@@ -145,6 +145,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  agent-no-remote-tools
+                       deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
+                       tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
+                       scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
+                       An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
@@ -2694,11 +2699,16 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
-# The one home of the claude-code-remote server name. lint/check_agent_models.py reads it from here.
-REMOTE_SERVER = "mcp__claude-code-remote"
+from shared_names import REMOTE_OUTWARD_TOOLS, REMOTE_SERVER  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
+AGENT_NO_REMOTE_REASON = (
+    "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
+    "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
+    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "(decision lanes-start-as-agents, an agent is not a lane)"
+)
 from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
@@ -5660,6 +5670,33 @@ def judge(payload) -> None:
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
 
+    # 8a. The rules that own an outward claude-code-remote call judge it before agent-no-remote-tools (8b), so an agent's call to
+    # one of these tools gets the specific remedy. Each reads only its own tools, so none reorders with the spawn rules below.
+    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
+    trust_transcript = payload.get("transcript_path")
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    if matched:
+        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
+
+    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
+    archive_agent = payload.get("agent_id")
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
+    if archived:
+        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
+
+    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if briefed:
+        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
+    # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
+    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
+    # agent's create_session is refused here. An override lifts it.
+    if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
+        refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
+
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
     floor_model = floor_hit(tool, tool_input)
@@ -5739,24 +5776,6 @@ def judge(payload) -> None:
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
-
-    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
-    trust_transcript = payload.get("transcript_path")
-    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
-    if matched:
-        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
-
-    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archive_agent = payload.get("agent_id")
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
-                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
-    if archived:
-        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
-
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
