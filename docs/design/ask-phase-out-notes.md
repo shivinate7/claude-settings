@@ -14,8 +14,8 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
 ## 1. One read mark, and it is the ask's Dismiss. Owner grant: yes
 
 - What: the page already has one "the owner has seen this, take it away" mechanism: Dismiss on an ask (ask-dismiss-notes 1 to 4).
-  It writes `dismissed` (ISO time) on the root ask with `update`, hides the thread, keeps the record, shows it again when a record
-  in it waits or gets a later answer, and lists it under "Show N dismissed asks" with Restore. Mark read is that mechanism, extended to items.
+  It writes `dismissed` (ISO time) on the root ask with `update`, hides the thread, and keeps the record. It shows the thread again when a record
+  in it waits or gets a later answer. It lists the thread under "Show N dismissed asks" with Restore. Mark read is that mechanism, extended to items.
 - Pick: one name for the act on asks and items: "Mark read", with "Mark unread" in place of Restore, "Marked read." in place of
   "Dismissed.", and "Show N read asks" in place of "Show N dismissed asks". The stored field keeps its name, `dismissed`.
   Gain: the owner's word, and one act with one name on the page (ux-one-plain-name). Loss: an act he learned on Nov 6 changes its words.
@@ -76,7 +76,7 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
 ## 5. Which closed items show: the flood rule. Owner grant: yes
 
 - Departs from: main (closed items leave the page) — a closed item that carries a `closed` time stays as one line in Answered until
-  the owner presses Mark read; an item closed before this ships has no `closed` time and counts as read, so none of the 485 old items comes back.
+  the owner presses Mark read. An item closed before this ships has no `closed` time and counts as read, so none of the 485 old items comes back.
 - Measured: the roadmap branch's `waiting/items/` holds 485 records; items 480 (`ask-phase-out-rule`) and 302 (`zizmor-pin-move`) are
   closed with no close time. So the page cannot tell an old close from a new one today, and a new field is needed.
 - Asks: an answered thread whose newest `answered` is before the ship time counts as read and goes behind "Show N read asks". The page
