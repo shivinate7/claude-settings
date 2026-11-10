@@ -514,16 +514,28 @@ def classify_node_tap(code, output: str, timed_out: bool) -> str:
     return "crash"
 
 
+def split_suite(name: str):
+    """A suite name is a file, or `file::family`: the file run with GUARD_FAMILY=family. Return (file, family or None)."""
+    file, _sep, family = name.partition("::")
+    return file, (family or None)
+
+
 def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=None, cwd=None):
     """Run one suite from `folder`. Return (class, seconds). By default the suite is `python3 <rel>`
     read by `classify_run`. A replay passes `argv` (the whole command), `classify` (a function of
     (code, output, timed_out)) and `cwd` (a folder inside `folder`). The child gets its own process
     group, killed whole at the timeout. Output goes to a file: a grandchild that holds a pipe open
-    would make a pipe read wait for it."""
-    env = {k: v for k, v in os.environ.items() if not k.endswith("_UNDER_TEST") and k != "MUTATE_ONLY"}
+    would make a pipe read wait for it. `rel` may be `file::family` (see `split_suite`): the child gets
+    GUARD_FAMILY=family. Any other suite runs with GUARD_FAMILY removed, since an inherited value would
+    narrow its cases."""
+    file, family = split_suite(rel)
+    env = {k: v for k, v in os.environ.items()
+           if not k.endswith("_UNDER_TEST") and k not in ("MUTATE_ONLY", "GUARD_FAMILY")}
+    if family:
+        env["GUARD_FAMILY"] = family
     # No bytecode: a mutant of the same size and second as the clean file would load the clean .pyc.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    command = argv or [sys.executable, os.path.join(folder, rel)]
+    command = argv or [sys.executable, os.path.join(folder, file)]
     started = time.time()
     code, output, timed_out = run_in_group(command, cwd or folder, timeout, env)
     return (classify or classify_run)(code, output, timed_out), time.time() - started
@@ -625,7 +637,7 @@ def score_target(root: str, target: str, tests, limit: int = 10, timeout=None, j
         row["reason"] = "parse error: %s" % error
         return row
     for rel in tests:
-        if not os.path.isfile(os.path.join(root, rel)):
+        if not os.path.isfile(os.path.join(root, split_suite(rel)[0])):
             row["unusable"][rel] = "missing"
     present = [rel for rel in tests if rel not in row["unusable"]]
     if not mutants:
@@ -1049,8 +1061,10 @@ def _head_copy(repo: str, rel: str, own: str):
 def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None):
     """The changed `suites` that the profile's `select` lists for product file `path`, run in checkout `dest`:
     (suites or None, note). None means no list: select is missing from the profile, or failed, and the note says why
-    for a failure. A suite name is a line of the output; any other line is ignored. With `suites` None, every
-    listed line that the profile's `tests` regex matches and `dest` holds is a suite, changed or not.
+    for a failure. A suite name is a line of the output; any other line is ignored. A line may be `file::family`
+    (`split_suite`): the regex and the file check read its file part. With `suites` None, every listed line that the
+    profile's `tests` regex matches and `dest` holds is a suite, changed or not. Otherwise a changed file is chosen by
+    its own line, and by each family line listed for it.
     `head(part)` serves a select argv part that has a "/" and no `{` and that `dest` lacks (a script the commit
     lacks): the absolute path of the copy at the clone's HEAD, or None. A bare command name is left to PATH.
     The run stays in `dest`."""
@@ -1068,9 +1082,15 @@ def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, 
         return None, "%s: select %s, every changed suite runs" % (path, "timed out" if timed_out else "exited %d" % code)
     listed = {line.strip() for line in output.splitlines()}
     if suites is None:
-        return sorted(name for name in listed if name and re.search(profile["tests"], name)
-                      and os.path.isfile(os.path.join(dest, name))), ""
-    return [suite for suite in suites if suite in listed], ""
+        return sorted(name for name in listed if name and re.search(profile["tests"], split_suite(name)[0])
+                      and os.path.isfile(os.path.join(dest, split_suite(name)[0]))), ""
+    chosen = []
+    for suite in suites:
+        if suite in listed:
+            chosen.append(suite)
+        # a changed file that the select lists by family: each of its `file::family` lines
+        chosen.extend(sorted(name for name in listed if split_suite(name)[1] and split_suite(name)[0] == suite))
+    return chosen, ""
 
 
 def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout, jobs, deps,
@@ -1115,6 +1135,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
     classify = CLASSIFIERS[profile["classify"]]
 
     def command(suite):
+        suite = split_suite(suite)[0]
         rel = os.path.relpath(suite, cwd_rel) if cwd_rel else suite
         return [part.replace("{suite}", rel).replace("{deps}", folder or "") for part in profile["argv"]]
 
@@ -1166,6 +1187,15 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
         if select_all:
             suites = sorted({name for path in paths for name in (changed if listed_by[path] is None
                                                                   else listed_by[path])})
+        else:
+            # A changed file that `select` lists by family runs as those family lines, not whole: a plain run of it is
+            # no suite of any file, unless some file lists it plain or has no list.
+            lines = {name for path in paths for name in (listed_by[path] or []) if split_suite(name)[1]}
+            covered = {split_suite(name)[0] for name in lines}
+            whole = {suite for suite in changed if suite not in covered
+                     or any(listed_by[path] is None or suite in listed_by[path] for path in paths)}
+            if lines:
+                suites = sorted(whole | lines)
 
         with ThreadPoolExecutor(max_workers=count) as pool:
             control = list(pool.map(lambda suite: borrow(lambda dest: run_one(dest, suite, suite_timeout)), suites))
