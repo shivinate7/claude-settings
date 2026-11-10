@@ -1,0 +1,8 @@
+{
+ "id": "review-record-extra-text",
+ "title": "merge --review-record names a record it cannot read",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "why": "On 2026-11-10 17:24 CST triage posted #1338's round 1 record with one added Finding line. merge then skipped that record as unreadable and judged an older one, so --fix-check was refused with the wrong reason (the newest record has a Fix check line). Removing the line fixed it. Guard: when the newest review-record comment does not parse, merge says so and names its id, instead of falling back to an older record.",
+ "source": "triage mistake 2026-11-10 17:24 CST"
+}

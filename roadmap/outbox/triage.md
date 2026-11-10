@@ -622,3 +622,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - (note) #2570 workflow-args guard, round 1 notes (16:33 CST): (1) hooks/guard.py:5934 WORKFLOW_ARGS_CAPS backtracks quadratically on a long [A-Z0-9_] run that ends in a lowercase letter (16k chars 1.9 s); pathological input only; fix with a plain run plus a separate capital search. (2) It also refuses DRY_RUN, PR_2560, CI_RUN_ID and __init__ as whole args values; the record names only a bare env var; name flags too, and cull if one fires in normal work. (3) <PR_NUMBER>, {PR_NUMBER}, $PR_NUMBER, bare PLACEHOLDER and nested values pass, as the record states.
 
 - 2026-11-10 17:11 CST (coordinator note): #2566 lane lint PASSED (703 s) at 3f1490636, a head that conflicts with main 2d6f67f7c in two files; main did not move. Read merge.py --lane-lint: does it merge-tree against main? If not, a debt.
+
+- 2026-11-10 17:26 CST: #2559 round 2 notes (not debts): N1 page.html:921 'Its other widths are 520px and 960px' omits the 400px rule at page.html:430; N2 page.test.mjs:3996 samples skip 651-699 px, add 663 or 664 to pin the bound.
