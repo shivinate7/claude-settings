@@ -1432,7 +1432,8 @@ def tool_use_sources(transcript_path):
         return None
     agent = _tool_use_ids(r for r in records if r.get("isSidechain"))
     orchestrator = _tool_use_ids(r for r in records if not r.get("isSidechain"))
-    folder = os.path.splitext(transcript_path)[0] + os.sep + "subagents"
+    import own_session  # the one home of the agent transcript folder
+    folder = own_session.agent_transcript_dir(transcript_path)
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith(".jsonl"))
     except OSError:
@@ -1635,13 +1636,25 @@ def success_route_flags(hook, after):
 ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
 MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
 MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
+def _forms_re(forms):
+    return r"\b(?:%s)\b" % "|".join(_clause.form_pattern(form) for form in forms)
+
+
+# The capability words both readers share: the three _clause.CANT_FORMS (the start of _clause.CANNOT_FORMS), refused,
+# denied, forbidden, no access, not allowed or permitted, unavailable, the 403 token, and blocked or not available.
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
-# The hand-off cite reads the three _clause.CANT_FORMS, the start of the cannot-claim phrases (_clause.CANNOT_FORMS).
-CAPABILITY_RE = re.compile(
-    r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b"
-    % "|".join(_clause.form_pattern(form) for form in _clause.CANT_FORMS)
-    + r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b403\b"
-    r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
+_CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS) + (
+    r"|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b"
+    r"|\bunavailable\b|\b403\b|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)")
+# The words only the hand-off cite reads: the two _clause.COULD_NOT_FORMS, the reject forms, and the 401 token.
+_CAPABILITY_CITE_ONLY = _forms_re(_clause.COULD_NOT_FORMS) + r"|\breject(?:s|ed|ing)?\b|\b401\b"
+# The hand-off cite reads both pieces: the five forms (CANT_FORMS and COULD_NOT_FORMS), the reject forms, the 401 or 403
+# token, and the other core words.
+CAPABILITY_RE = re.compile(_CAPABILITY_CORE + "|" + _CAPABILITY_CITE_ONLY, re.I)
+# cannot_lines leaves a Why yours line to the hand-off guard when it reads one of the core words. A line whose only
+# capability word is a could-not form, a reject form or 401 stays in the cannot-claim check, which asks for the check that
+# failed.
+CAPABILITY_SKIP_RE = re.compile(_CAPABILITY_CORE, re.I)
 CHOICE_RE = re.compile(
     r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"
     r"|\bthe safety rules keep\b", re.I)
@@ -2176,7 +2189,7 @@ def cannot_lines(text):
         if CANNOT_UNVETTED_RE.match(raw) or not CANNOT_RE.search(_mask(body)):
             continue
         if hand_off is None:
-            hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_RE.search(line)}
+            hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_SKIP_RE.search(line)}
         if raw in hand_off:
             continue
         mask = _mask(body)
@@ -2657,7 +2670,10 @@ def refusal_reason(tools, hold=""):
     names = ", ".join("`%s`" % tool for tool in tools)
     return (held + " " if held else "") + owner_line(
         "Refusal guard (decision refusals-reach-the-owner)",
-        "the auto-mode classifier refused %s this session, and the reply does not raise it with the owner" % names)
+        "the auto-mode classifier refused %s this session, and the reply does not raise it with the owner. "
+        "A refused tool clears when the reply names it in backticks under Input Needed, "
+        "or writes \"`<tool_name>`: refusal was right\". "
+        "An MCP tool counts by its full name, with or without backticks" % names)
 
 
 def _marker_path(hook):
