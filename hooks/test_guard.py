@@ -12777,7 +12777,7 @@ add("merge-batch: a pinned merge.requiredChecks list is the required list, so a 
 # merges pull request 1, or writes main, while GHBATCH's pull request 2 runs CI: ready on main, required check pending, head
 # pr-two-head, which does not hold pull request 1's head. A refusal names pull request 2 and its pending check, offers `override`
 # (refuse() prints that line for every refusal the veto does not stop), and keeps `merge` and `push` out of its Remedy sentence.
-# The route cases are red on main, where the route is allowed or asked. The controls pin today's allow or ask, so they are green.
+# The route cases expect a deny for a route the brake did not cover before (it was allowed or asked). The controls pin the allow or ask that stays.
 # The checks on the refusal text and on the cost of one attempt are registered with the log checks, below the archive checks.
 # The guard's temp folder for these cases is this run's, not the system's (test-temp-standard); the sections below reset it.
 TEMP_DIR = os.path.join(ROOT, "tmp")
