@@ -36552,7 +36552,7 @@ role_model_allow("role-model: Explore with no model and no Audit: marker is allo
            "Explore", None, "Find where X is defined.", env=SONNET_DEFAULT)
 role_model_allow("role-model: Explore with no model and no Audit: marker is allowed when the default is opus (its file pins haiku)",
            "Explore", None, "Find where X is defined.", env=OPUS_DEFAULT)
-# The control: a round 2 reviewer must name sonnet itself. The step-up reads the named model only, so the env value is no name.
+# The control: the reviewer step-up needs a named sonnet. It reads the named model only, so the env value is no name.
 add("role-model: reviewer Round 2 of 3 with no model is denied when the default is sonnet (the step-up reads the named model only)",
     "deny", STEP_UP, tool="Agent", config=ROLE_REAL_CFG, env=SONNET_DEFAULT,
     carries=("Reviewer round 2 runs on Sonnet.",), **role_input("reviewer", None, "Round 2 of 3. Re-check the diff."))
