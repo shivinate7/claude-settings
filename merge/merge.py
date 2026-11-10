@@ -3545,11 +3545,11 @@ def review_state(rec, head):
     The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS, or a fix check PASS counts as that round
     passing (only a sonnet one; every fix check runs on sonnet), and the last design-reviewer line (by position, across all rounds) is PASS or absent; or the final allowed round is done and Guard or check is no; or the final allowed round is done, Guard or check is yes and Net value is zero or positive; or Kind is delete-only,
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
-    final allowed round whatever the verdict, and owes the later rounds when the first fails unless a fix check PASS follows (a sonnet one), even if it only deletes. Net value negative holds the change.
+    final allowed round whatever the verdict, and owes the later rounds when the first fails, even if it only deletes. Net value negative holds the change.
+    A fix check PASS on a guard or check change leaves it open until the final round is recorded with its net value (decision hold-unsafe-after-round-3, item 402 a).
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is not a round and is read after the held rule. A FAIL is open, whatever the
-    rounds say. A PASS counts as the last recorded round passing, even when that round failed, and for a delete-only change with Guard or check yes
-    too, so a PASS before the final round owes no net-value test. The design-reviewer hold stays, and with no round recorded it is open. On the final
+    rounds say. A PASS on a guard or check no change counts as the last recorded round passing, even when that round failed. The design-reviewer hold stays, and with no round recorded it is open. On the final
     round the rules above run as written: it keeps the net value that round gave and settles none that is owed."""
     if rec is None:
         return "bad", "the newest record does not parse"
@@ -3576,6 +3576,8 @@ def review_state(rec, head):
         if rec["net"] in ("zero", "positive"):
             return "done", f"round {final} is done, net value {rec['net']}" + note
         return "open", f"round {final} is done on a guard or check change, and its net value is owed"
+    if fix and rec["guard"] == "yes":
+        return "open", f"a guard or check change owes the final round and its net value after a fix check; round {top} is recorded"
     top_pass = all(v == "PASS" for i, _, _, v in rounds if i == top)
     passed = top and (fix or top_pass)  # a fix PASS, read here, counts as round `top` passing
     # the why keeps a failed round in view, so a fix PASS never reads as a passed round
