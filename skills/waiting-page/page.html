@@ -929,10 +929,11 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.dropped .sline .dt { color: var(--muted); }
 .asklist.dlist .askc.folded { background: transparent; border-style: dashed; border-color: var(--faint); }
 /* Only the look of a narrow list reads a width, and it moves no part: main's 520px rule as the list's own width in em (30.5em is the list in a
-   520px window at 100% text). Under it the title takes two lines, the row pads 8px top and bottom, and "Show answer" stays in the name of a row
-   with a press, which then pads 4px at its end. */
-@container askl (width < 30.5em) {
+   520px window at 100% text, and main's rule includes 520). Up to it the title takes two lines, the date takes the line under the title, the row
+   pads 8px top and bottom, and "Show answer" stays in the name of a row with a press, which then pads 4px at its end. */
+@container askl (width <= 30.5em) {
   .frow { padding-block: 8px; align-items: center; }
+  .frow .fwhen { flex: 1 1 100%; }
   .frow .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .askc.folded.withd .frow { padding-inline-end: 4px; }
   .askc.folded.withd .frow .fgo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
