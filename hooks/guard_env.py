@@ -2016,15 +2016,8 @@ def _find_names_no_env(expression, runners: bool = False) -> bool:
     return all(any(names) for names in alternatives)
 
 
-def _find_type_d_bounds_all(expression, runners: bool = False) -> bool:
-    """True when an unnegated `-type d` bounds every alternative of a find expression that reaches what the
-    search is handed, so find hands over folders alone. Alternatives are the parts between two top-level `-o`.
-    With `runners` set, the ones that count hold a `-exec`, `-execdir`, `-ok` or `-okdir`, and its `-type d`
-    must come before the runner. Otherwise the ones that count hold no `-prune` (a prune branch prints only the
-    folder it stops at, which a `-type d` branch of its own prints too). The `-type d` must stand in the
-    alternative itself, not in a paren group: a group, or a runner inside one, is not read, so the answer is
-    False. One `-type d` in one alternative of an `-o` chain then does not decide the others (`-type d -o
-    -type f -exec grep K {} +` hands over files)."""
+def _find_alternatives(expression):
+    """The parts of a find expression between two `-o` or `-or` words, cut at every one whatever its paren level."""
     alternatives, current = [], []
     for word in expression:
         if word in ("-o", "-or"):
@@ -2033,8 +2026,21 @@ def _find_type_d_bounds_all(expression, runners: bool = False) -> bool:
         else:
             current.append(word)
     alternatives.append(current)
+    return alternatives
+
+
+def _find_type_d_bounds_all(expression, runners: bool = False) -> bool:
+    """True when an unnegated `-type d` bounds every alternative of a find expression that reaches what the
+    search is handed, so find hands over folders alone. Alternatives are the parts between two `-o` words, at any
+    paren level: a paren that holds an `-o` is cut in two, and neither half then reads as bounded alone, so the
+    answer is False more often and never True for a form it cannot read. With `runners` set, the ones that count hold a `-exec`, `-execdir`, `-ok` or `-okdir`, and its `-type d`
+    must come before the runner. Otherwise the ones that count hold no `-prune` (a prune branch prints only the
+    folder it stops at, which a `-type d` branch of its own prints too). The `-type d` must stand in the
+    alternative itself, not in a paren group: a group, or a runner inside one, is not read, so the answer is
+    False. One `-type d` in one alternative of an `-o` chain then does not decide the others (`-type d -o
+    -type f -exec grep K {} +` hands over files)."""
     found = False
-    for words in alternatives:
+    for words in _find_alternatives(expression):
         folders, runs, level, at = False, False, 0, 0
         while at < len(words):
             word = words[at]
@@ -2056,6 +2062,79 @@ def _find_type_d_bounds_all(expression, runners: bool = False) -> bool:
             return False
         found = found or (reaches and folders)
     return found
+
+
+def _find_runner_name_globs(expression):
+    """The (glob, ignores case) of the `-name` and `-iname` tests that narrow what find hands to its `-exec`
+    programs, or None when some alternative that runs one has no such test. A test counts when it stands in the
+    alternative itself (no paren), before its runner, with no `!` or `-not` before it. A test after the runner,
+    in a group, or negated narrows nothing the guard may rely on. Alternatives are read as in
+    `_find_type_d_bounds_all`; one with no runner hands nothing over."""
+    globs = []
+    for words in _find_alternatives(expression):
+        found, level, at, runs = False, 0, 0, False
+        while at < len(words) and not runs:
+            word = words[at]
+            if word == "(":
+                level += 1
+            elif word == ")":
+                level -= 1
+            elif word in ENV_FIND_RUNNERS:
+                runs = True
+            elif word in ENV_FIND_GLOB_NAME_TESTS and not level and at + 1 < len(words) and not (
+                    at > 0 and words[at - 1] in ("!", "-not")):
+                globs.append((words[at + 1], word == "-iname"))
+                found = True
+                at += 1
+            at += 1
+        if runs and not found:
+            return None
+    return globs
+
+
+def _find_type_d_handed(starts, here: str, expression, low: int, high):
+    """The folders a `find` bounded by `-type d` (`_find_type_d_bounds_all`) hands to a search that reads each
+    whole, or None for a start word with a variable, whose folders the guard cannot see. A folder below another
+    one handed over is read with it. `-mindepth N` of 1 or more hands over no start folder: it hands over the
+    folders at depth N below each start, which hold every folder deeper down. With `-name` globs on every
+    alternative that runs a program (`_find_runner_name_globs`), the folders handed over are the ones within
+    the depth limits whose name a glob picks, the start folder included at depth 0. A glob that could name an
+    env file, a tree past ENV_WALK_LIMIT entries, and an expression with no glob all fall back to the start
+    folder, or to the folders at depth N."""
+    globs = _find_runner_name_globs(expression)
+    narrow = bool(globs) and not any(_glob_could_name_env(pattern, fold) for pattern, fold in globs)
+
+    def picks(name: str) -> bool:
+        return not narrow or any(_glob_picks(name, name, pattern, fold, by_name=True) for pattern, fold in globs)
+
+    handed = []
+    for word, start in starts or [(".", ".")]:
+        if re.search(r"[$`]", start):
+            return None
+        target = os.path.join(here, os.path.expanduser(start))
+        expand = re.search(r"[*?\[]", start) and word == start
+        for folder in glob.glob(target) if expand else [target]:
+            if not os.path.isdir(folder):
+                continue
+            base = os.path.basename(start.rstrip("/")) or start
+            # A name glob needs the whole tree down to `high`. Otherwise the walk stops at depth `low`.
+            stop = high if narrow else low
+            picked = [folder] if low == 0 and picks(base) else []
+            seen, past_cap = 0, False
+            for top, dirs, files in os.walk(folder):
+                relative = os.path.relpath(top, folder).replace(os.sep, "/")
+                level = 0 if relative == "." else relative.count("/") + 1
+                picked += [os.path.join(top, d) for d in dirs
+                           if level + 1 >= low and (high is None or level + 1 <= high) and picks(d)
+                           and (narrow or level + 1 == low)]
+                seen += len(dirs) + len(files)
+                if seen > ENV_WALK_LIMIT:
+                    past_cap = True
+                    break
+                if stop is not None and level + 1 >= stop:
+                    dirs[:] = []
+            handed += [folder] if past_cap else picked
+    return handed
 
 
 def _find_depth_limits(expression):
@@ -2326,24 +2405,19 @@ def _feed_source(command: str, rest, here: str, reads_folders: bool = True,
         while at < len(bare) and not (bare[at].startswith("-") or bare[at] in ENV_FIND_EXPRESSION):
             starts.append((rest[at], bare[at]))
             at += 1
+        low, high = _find_depth_limits(bare[at:])
         if _find_type_d_bounds_all(bare[at:], exec_feed):
-            # A `-exec` program gets each folder find prints, and a search that reads folders reads each whole. Every
-            # folder find prints is the start folder or lies below it, so the start folders hold what is read.
-            if not exec_feed:
+            # The search, a `-exec` program or xargs, gets each folder find prints, and a search that reads folders
+            # reads each whole. The folders it gets are the ones below the start folders that the tests pick.
+            handed = _find_type_d_handed(starts, here, bare[at:], low, high)
+            if handed is None:
                 return unknown
-            folders = []
-            for word, start in starts or [(".", ".")]:
-                if re.search(r"[$`]", start):
-                    return unknown
-                target = os.path.join(here, os.path.expanduser(start))
-                expand = re.search(r"[*?\[]", start) and word == start
-                folders += [f for f in (glob.glob(target) if expand else [target]) if os.path.isdir(f)]
-            return "", False, folders
+            # Given no name, xargs runs its search once on `here`.
+            return "", runs_empty and not handed, handed
         names_no_env = _find_names_no_env(bare[at:], exec_feed)
         prints_folder, globs = _find_folder_names(bare[at:])
         # A search that reads no folder it is given reads only the files find prints.
         prints_folder = prints_folder and reads_folders
-        low, high = _find_depth_limits(bare[at:])
 
         def names_nothing():
             # Run on no names, xargs runs its search once on `here`: a find that prints nothing leaves it there.
