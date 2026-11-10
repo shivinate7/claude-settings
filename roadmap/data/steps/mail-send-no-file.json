@@ -1,0 +1,12 @@
+{
+  "title": "mail send pushes a commit with no message file and still says sent",
+  "phase": "now",
+  "status": "todo",
+  "order": 989,
+  "owner": "claude-settings",
+  "why": "A message that is lost while the sender reads \"sent\" breaks the mailbox route the owner ruled for every message (page item 482).",
+  "note": "Filed by triage 11:03 CST Nov 10 from the session-messaging topic session (11:07 CST, its clock). Evidence: on refs/heads/mail of shivinate7/session-mailbox, commit 587de9e (\"mail ea1acdfaea67\", author ssemwal-cdc, 11:00:59 CST Nov 10) has the same tree as its parent 207a2b1, and the message file for id ea1acdfaea67 is in no folder, open or done. So the login and the push worked from the owner's computer, but the send lost its file. Origin: the owner's card \"Test mailbox login on this computer\" sent one inform to cloud/session_013NEJL1YBVqsXRPBac7nRcz. Unknown: which computer (Mac or Windows), what it printed, and whether it printed \"sent\". First guess, unmeasured: a path or index problem in hooks/mail.py on that OS. Done when: the cause is found, a red test shows it, and a fix lands; a send that writes no file prints \"not sent\", never \"sent\". Freeze: a fix of an item on main (#2484 session mailbox, merged in batch 71) may run; the coordinator decides.",
+  "updatedAt": "2026-11-10T11:03:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
