@@ -48,14 +48,21 @@ def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     if not env.get("GIT_SSH_COMMAND") and not env.get("GIT_SSH"):
         run_env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=3"
     prefix = ["git", "-c", "commit.gpgsign=false"] + (["--git-dir", cache] if cache else [])
+    # Bytes in and out: text mode on Windows may rewrite "\n" to "\r\n" on the child's stdin, which would change
+    # blob bytes and put a CR in an index path.
+    data = None if input_text is None else input_text.encode("utf-8")
     try:
-        done = _nowindow.run(prefix + args, env=run_env, input=input_text, capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", timeout=timeout)
+        done = _nowindow.run(prefix + args, env=run_env, input=data, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise MailError("timeout")
     except OSError as error:
         raise MailError("git: %s" % error)
-    return done.returncode, done.stdout, done.stderr
+    return done.returncode, _text(done.stdout), _text(done.stderr)
+
+
+def _text(value):
+    """Child output as text. A str passes through: test_mail.py's SshBatchDefault patches _nowindow.run with str output."""
+    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
 
 
 def reason(stderr):
@@ -112,7 +119,7 @@ def commit_tree(env, tip, adds, removes, message):
     """One commit on `tip` (None for the first) that adds {path: bytes-as-text} and removes paths. A temp index inside the cache."""
     cache = cache_path(env)
     ensure_cache(cache)
-    index =os.path.join(cache, "mail.index.%d" % os.getpid())
+    index = os.path.join(cache, "mail.index.%d" % os.getpid())
     step = dict(env, GIT_INDEX_FILE=index)
     try:
         must(["read-tree"] + ([tip] if tip else ["--empty"]), step, cache)
@@ -123,10 +130,29 @@ def commit_tree(env, tip, adds, removes, message):
         entries += ["0 %s\t%s\n" % ("0" * 40, path) for path in removes]
         must(["update-index", "--index-info"], step, cache, input_text="".join(entries))
         tree = must(["write-tree"], step, cache).strip()
+        verify_tree(env, cache, tree, adds, removes)
         return must(["commit-tree", tree, "-m", message] + (["-p", tip] if tip else []), env, cache).strip()
     finally:
         if os.path.exists(index):
             os.remove(index)
+
+
+def blob_sha(text):
+    data = text.encode("utf-8")
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def verify_tree(env, cache, tree, adds, removes):
+    """Read the new tree back: each added path holds the blob of its text, each removed path is gone. A silent
+    update-index failure leaves the parent's tree, and a CR in an index line leaves a path ending in CR."""
+    listing = must(["ls-tree", "-r", "-z", "--full-tree", tree], env, cache)
+    held = {}
+    for row in listing.split("\0"):
+        meta, _, path = row.partition("\t")
+        if path:
+            held[path] = meta.split()[2]
+    if any(held.get(path) != blob_sha(text) for path, text in adds.items()) or any(path in held for path in removes):
+        raise MailError("message file missing from the commit")
 
 
 def push(env, commit):
