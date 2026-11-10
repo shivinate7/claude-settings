@@ -19,7 +19,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_calls, push_destinations, push_refspecs, push_target,
+    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target,
 )
 
 
@@ -655,6 +655,10 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "the guard cannot read, so it cannot be checked for conflict markers before this push sends it. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
+OCTOPUS_PUSH_REASON = (
+    "Rule (Git, octopus-push): this push would send {sha}, a merge commit of more than two parents. "
+    "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
+)
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
@@ -757,32 +761,87 @@ def _checked_range(where, source, tracking, memo):
     return None, source
 
 
-def _push_hit(segment, stripped, cwd, args):
-    """Return the first file a `git push` would send with all three conflict markers, else ''. For each
-    ref the push names, the range is the merge base with the destination's remote-tracking tip
-    (`refs/remotes/<remote>/<dest>`, the named remote else origin), else the source's upstream, else the
-    default base, up to the local source ref. A source that does not resolve (a `$(...)`, a backtick, a
-    glob, a typo) is read as HEAD. The range comes from the arguments alone: in the usual case one
-    `git diff --check`, with no read of the top folder, the source or a base first."""
+def _push_refs(segment, stripped, cwd, args, skip=()):
+    """(directory, source, destination, remote-tracking ref, remote, memo) for each ref a `git push`
+    names, except a destination in `skip`. The tracking ref is `refs/remotes/<remote>/<dest>`, the named
+    remote else origin. A source that does not resolve (a `$(...)`, a backtick, a glob, a typo) is read as
+    HEAD. Everything comes from the arguments alone, with no git read beyond the destinations."""
     named = push_refspecs(args)
     where, overrides = push_target(segment, stripped, cwd)
     if named is None or not where or not os.path.isdir(where):
-        return ""
+        return
     specs = named[1] or [""]
     dests = push_destinations(args, where, overrides)
     memo = {}
+    remote = named[0] or "origin"
     for spec, dest in zip(specs, dests):
         source, colon, _target = spec.lstrip("+").partition(":")
-        if colon and not source:
+        if (colon and not source) or dest in skip:
             continue
-        source = _plain_source(source)
-        tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
+        tracking = ("refs/remotes/%s/%s" % (remote, dest)) if dest else ""
+        yield where, _plain_source(source), dest, tracking, remote, memo
+
+
+def _push_hit(segment, stripped, cwd, args):
+    """Return the first file a `git push` would send with all three conflict markers, else ''. For each
+    ref the push names, the range is the merge base with the destination's remote-tracking tip, else the
+    source's upstream, else the default base, up to the local source ref: in the usual case one
+    `git diff --check`, with no read of the top folder, the source or a base first."""
+    for where, source, _dest, tracking, _remote, memo in _push_refs(segment, stripped, cwd, args):
         done, source = _checked_range(where, source, tracking, memo)
         if done is None:
             continue
         name = _triplet_file(_kinds_of(done, where, source))
         if name:
             return name
+    return ""
+
+
+_NOT_A_PLAIN_NAME = re.compile(r"[/:\\.~]")
+
+
+def _remote_refs(where, remote):
+    """The `git rev-list` option that selects the remote-tracking refs of `remote`. A push may name a URL
+    or a path, whose refs sit under another name, so a word with a `/`, `:`, `\\`, `.` or `~` in it reads
+    `git config --get remote.<word>.url` once, and an unconfigured one selects every remote's refs. A
+    plain word is taken as a configured name, with no read."""
+    if _NOT_A_PLAIN_NAME.search(remote):
+        done = _git(where, "config", "--get", "remote." + remote + ".url")
+        if done is None or done.returncode != 0:
+            return "--remotes"
+    return "--remotes=" + remote
+
+
+def _octopus_hit(segment, stripped, cwd, args):
+    """Return the short sha of the first merge of more than two parents that a `git push` would send,
+    else ''. The range is what the push adds to the remote: the source ref, less every ref of the pushed
+    remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
+    sent. A destination named like the default branch is skipped before any read: push-main asks about
+    that push, and a deny from here would win over the ask. One `git rev-list` for each ref, and one
+    `git config` more for a remote named by a URL or a path (`_remote_refs`)."""
+    for where, source, _dest, _tracking, remote, _memo in _push_refs(
+            segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
+        done = _git(where, "rev-list", "--merges", "--parents", source, "--not", _remote_refs(where, remote), "--")
+        if done is None or done.returncode != 0:
+            continue
+        for line in done.stdout.splitlines():
+            fields = line.split()
+            if len(fields) > 3:
+                return fields[0][:12]
+    return ""
+
+
+def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
+    """Return the short sha of the first merge of more than two parents that a `git push` in the command
+    would send, else ''. Each segment is judged from its own command word. A push whose destination is
+    unnamed reads its source's range all the same. `read_verb("push", args)` is true for a dry run, which
+    sends nothing."""
+    for segment in split_segments(stripped):
+        call = git_call_of(segment) if segment.strip() else None
+        if call is not None and call[0] == "push" and not read_verb("push", call[1]):
+            sha = _octopus_hit(segment, stripped, cwd, call[1])
+            if sha:
+                return sha
     return ""
 
 
