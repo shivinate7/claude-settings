@@ -37,7 +37,8 @@
                           new process, file or timer.
                           After the batch line, three kinds of line for the batch runner, which closes and reopens; the tool posts and closes nothing:
                             close as replaced: OWNER/NAME #N by #R   open R holds a `Replaces #N` line, N is another open PR on R's base (lowest R wins;
-                                                                     a mutual pair closes neither; a claim stands even from a PR itself replaced)
+                                                                     a loop of any length closes none, nor a claim on a PR that
+                                                                     leads back to itself; a claim stands even from a PR itself replaced)
                             close as carried: OWNER/NAME #A by #B    A is done and another open PR B on A's base holds A's head (lowest B; two PRs
                                                                      with one head close only the higher number). A PR named replaced holds nothing,
                                                                      so it carries no PR. If a compare fails, the line is
@@ -45,11 +46,13 @@
                             reopen: OWNER/NAME #N (replacer #R dropped)               N is closed with a `Replaced by #R` or `Carried by #R` line
                             reopen: OWNER/NAME #N (replacer #R no longer names it)    in a comment, and R is closed unmerged. A Replaced note also reopens
                                                                      N when R is open and its body lost `Replaces #N`; a Carried note reopens only
-                                                                     when its carrier is closed unmerged.
-                          A `Replaces #N` or note line counts only at the start of a line (spaces allowed), outside a fenced code block and not in a
-                          `>` quote. A PR on a close line is left off the batch line. Reads added: the same comment list and compares as above, so none
-                          for the close lines; the reopen lines read pulls/N for each closed PR with such a note, and pulls/R when R is not open, so two
-                          at most per candidate. A note older than every open PR is not read (the comment list starts at the oldest open PR). With no
+                                                                     when its carrier is closed unmerged. A closed R with its own note extends the
+                                                                     chain: only the last link reopens (one PR per chain per wake), and a chain that
+                                                                     ends at an open PR naming its link reopens none.
+                          A `Replaces #N` or note line counts only at the start of a line (spaces allowed), outside a fenced code block (closed by
+                          the same character, a run at least as long as the opener) and not in a `>` quote. A PR on a close line is left off the batch line. Reads added: the same comment list and compares as above, so none
+                          for the close lines; the reopen lines read pulls/N once for each closed PR with such a note, and pulls/R when R is not open,
+                          once per wake however many candidates share R. A note older than every open PR is not read (the comment list starts at the oldest open PR). With no
                           open PR the block is `no open pull requests.` and `reopen not checked (no open pull request)`, and no reopen read runs. A
                           failed reopen read prints `reopen unknown (REASON)` and exits 1. No process, file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -3452,16 +3455,21 @@ REOPEN_UNKNOWN = "reopen unknown "  # ... and when a read for a reopen line stop
 REOPEN_UNCHECKED = "reopen not checked (no open pull request)"  # ... and the one line after the empty block: no open pull request fixes no comment window
 REPLACES = re.compile(r"[ \t]*Replaces #(\d+)")  # matched with .match on one line: Replaces starts it, so `Unreplaces #N`, Closes and Fixes name nothing
 CLOSING_NOTE = re.compile(r"[ \t]*(Replaced|Carried) by #(\d+)\b")  # the line the batch runner posts when it closes a pull request
-FENCE = re.compile(r"[ \t]*(```|~~~)")
+FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})(.*)")  # group 1: the run of fence characters, group 2: the rest of the line
 
 def claim_lines(text, pattern):
     """-> the matches of `pattern` (one line, matched from its start) in the markdown `text`, in order. A line in a fenced code block or in a `>` quote
-    is skipped: it shows a claim and does not make one."""
-    found, fenced = [], False
+    is skipped: it shows a claim and does not make one. A fence closes on the same character, in a run at least as long as the opener's, with nothing
+    after it. A backtick run whose line holds another backtick (inline code such as ```x```) opens no fence."""
+    found, fence = [], None  # fence: (character, length) of the open block
     for line in (text or "").splitlines():
-        if FENCE.match(line):
-            fenced = not fenced
-        elif not fenced and not line.lstrip().startswith(">") and (m := pattern.match(line)):
+        f = FENCE.match(line)
+        if fence:
+            if f and f.group(1)[0] == fence[0] and len(f.group(1)) >= fence[1] and not f.group(2).strip():
+                fence = None
+        elif f and not (f.group(1)[0] == "`" and "`" in f.group(2)):
+            fence = (f.group(1)[0], len(f.group(1)))
+        elif not line.lstrip().startswith(">") and (m := pattern.match(line)):
             found.append(m)
     return found
 
@@ -3489,11 +3497,28 @@ def closing_notes(rows):
 def replaced_closes(pulls):
     """-> {N: R}: each open pull request N that an open pull request R on N's base names with a `Replaces #N` line (claim_lines), R the lowest-numbered
     such. Reads only the open list, so it costs nothing. A pull request never replaces itself, a number that is not open names nothing, and a mutual
-    pair (R names N and N names R) closes neither: one would be closed for a claim the other can say back. A claim stands even when its R is itself
+    pair (R names N and N names R) closes neither: one would be closed for a claim the other can say back. The same holds for a longer loop, and
+    for a claim on any N that follows its replacers back to N: a cycle has no live end, so it closes none. A claim stands even when its R is itself
     named replaced."""
     base = {d["number"]: d["base"]["ref"] for d in pulls}
     claims = {(d["number"], int(m.group(1))) for d in pulls for m in claim_lines(d.get("body"), REPLACES)}
-    claims = {(r, n) for r, n in claims if r != n and base.get(n) == base[r] and (n, r) not in claims}
+    claims = {(r, n) for r, n in claims if r != n and base.get(n) == base[r]}
+    replacers = {}
+    for r, n in claims:
+        replacers.setdefault(n, set()).add(r)
+
+    def in_cycle(n):
+        seen, todo = set(), list(replacers.get(n, ()))
+        while todo:
+            x = todo.pop()
+            if x == n:
+                return True
+            if x not in seen:
+                seen.add(x)
+                todo.extend(replacers.get(x, ()))
+        return False
+
+    claims = {(r, n) for r, n in claims if not in_cycle(n)}
     found = {}
     for r, n in sorted(claims):
         found.setdefault(n, r)
@@ -3529,21 +3554,36 @@ def pull_state(h, n):
 
 def reopen_lines(h, pulls, notes):
     """-> the `reopen:` lines for the closing notes `notes` ({N: (kind, R)}), ascending by N. A note counts only for an N that is not open and reads
-    closed and unmerged (pull_state). Its replacer R reads from the open list when R is open: a Replaced note whose R's body no longer holds
-    `Replaces #N` line reopens N, and a Carried note with R open does not. A closed, unmerged R reopens N; a merged one does not. Cost: pulls/N for each
-    candidate and pulls/R when R is not open, so two reads at most per candidate, none for an open R. A failed read raises Stop.
-    `notes` holds only comments updated since the oldest open pull request was created, so an older note is never read."""
+    closed and unmerged (pull_state). The chain from N follows each closed R's own note (a link) until it reaches an open pull request, one with no
+    note, one that is merged or not a pull request, or a link already seen. Only the last link reopens, so a wake reopens one pull request per chain,
+    the one nearest the tail: with a tail closed unmerged, `replacer #R dropped`; with an open tail, a Replaced link whose tail's body no longer holds
+    `Replaces #link` (`no longer names it`). An open tail that names its link, a Carried link with an open tail, and a merged tail reopen nothing.
+    Cost: one pull_state read per distinct number, memoized, so a replacer shared by many candidates is read once; none for an open R.
+    A failed read raises Stop. `notes` holds only comments updated since the oldest open pull request was created, so an older note is never read."""
     open_by = {d["number"]: d for d in pulls}
-    out = []
+    seen = {}
+
+    def state(x):
+        if x not in seen:
+            seen[x] = pull_state(h, x)
+        return seen[x]
+
+    last = {}  # {link: tail}: a link that reopens is named once, however many candidates reach it
     for n in sorted(notes):
-        kind, r = notes[n]
-        if n in open_by or pull_state(h, n) != "closed":
+        if n in open_by or state(n) != "closed":
             continue
-        if r in open_by:
-            if kind == "Replaced" and n not in {int(m.group(1)) for m in claim_lines(open_by[r].get("body"), REPLACES)}:
-                out.append(f"{REOPEN}{h.repo} #{n} (replacer #{r} no longer names it)")
-        elif pull_state(h, r) == "closed":
-            out.append(f"{REOPEN}{h.repo} #{n} (replacer #{r} dropped)")
+        path, tail = [n], notes[n][1]
+        while tail not in open_by and tail not in path and tail in notes and state(tail) == "closed":
+            path.append(tail)
+            tail = notes[tail][1]
+        last[path[-1]] = tail
+    out = []
+    for link, tail in sorted(last.items()):
+        if tail in open_by:
+            if notes[link][0] == "Replaced" and link not in {int(m.group(1)) for m in claim_lines(open_by[tail].get("body"), REPLACES)}:
+                out.append(f"{REOPEN}{h.repo} #{link} (replacer #{tail} no longer names it)")
+        elif state(tail) == "closed":
+            out.append(f"{REOPEN}{h.repo} #{link} (replacer #{tail} dropped)")
     return out
 
 def reviewed_read(h):
@@ -3588,7 +3628,7 @@ def reviewed_block(h):
     `reopen unknown (reason)`; a Stop in reviewed_read raises. Extra cost over reviewed_read: only when a done pull request exists on the base, the
     branch protection read and each ready pull request's check runs, statuses and workflow runs, then one compare per done pull request and other
     open pull request on the base, and one compare per done pull request against the base. The close lines read nothing more. The reopen lines
-    read pulls/N for each closed pull request with a closing note, and pulls/R when its replacer R is not open."""
+    read pulls/N once for each closed pull request with a closing note, and pulls/R once when its replacer R is not open (reopen_lines)."""
     lines, done, pulls, notes = reviewed_read(h)
     out, ok, tail = [f"repo {h.repo}:", *lines], True, []
     if not pulls:
