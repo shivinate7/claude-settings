@@ -12508,6 +12508,10 @@ sh("gh-write-cloud: gh api --input with no method is refused in a cloud session"
    carries=GH_WRITE_REMEDY, lacks=("gh api",))
 sh("gh-write-cloud: gh api --input with no method is allowed outside a cloud session",
    "gh api repos/o/r/issues --input -", "allow", cwd=NOGIT)
+# A field or input flag before the endpoint, with no method, is a write. This reader must take it as one, whichever value-flag
+# set the merge route shares with it.
+gh_write_refused("api with -f before the endpoint, no method, flag first", "gh api -f title=x repos/x/y/issues")
+gh_write_refused("api with --input before the endpoint, no method, flag first", "gh api --input body.json repos/x/y/issues")
 
 # Forms a naive reader misses. A `#` or a lone quote inside a quoted body is text, not a comment, and a write
 # is still a write after a root repo flag, a wrapper, a command substitution, a chain, or a comment tail.
@@ -12781,6 +12785,17 @@ ROUTE_DENIALS = (
     ("gh api -X PUT, placeholder repo", "Bash", GH_API_MERGE_PLACEHOLDER, None),
     ("gh api --method PUT, placeholder repo", "Bash", GH_API_METHOD_PLACEHOLDER, None),
     ("gh -R y/x api -X PUT", "Bash", "gh -R y/x api -X PUT repos/y/x/pulls/1/merge", None),
+    # A value flag before the endpoint (-f, -F, --field, --raw-field, --input) takes its value, so the endpoint is the path. The
+    # field-after-the-path row is the same call in the order the reader already takes: it is the control that the fixture denies it.
+    ("gh api -X PUT, field flag first (-f)", "Bash", "gh api -X PUT -f merge_method=squash repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, field flag first (--field)", "Bash", "gh api -X PUT --field merge_method=squash repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, field flag first (-F)", "Bash", "gh api -X PUT -F merge_method=squash repos/y/x/pulls/1/merge", None),
+    ("gh api --method PUT, field flag first (--raw-field)", "Bash",
+     "gh api --method PUT --raw-field merge_method=squash repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, input flag first (--input)", "Bash", "gh api -X PUT --input body.json repos/y/x/pulls/1/merge", None),
+    ("gh -R y/x api, field flag first (-f)", "Bash", "gh -R y/x api -f merge_method=squash -X PUT repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, the field after the path (-f), the flag first twin", "Bash",
+     "gh api -X PUT repos/y/x/pulls/1/merge -f merge_method=squash", None),
     ("enable_pr_auto_merge", MCP_AUTO, None, {"owner": "y", "repo": "x", "pullNumber": 1}),
     ("git push origin main", "Bash", VCS + " push origin main", None),
     ("git push origin HEAD:main", "Bash", VCS + " push origin HEAD:main", None),
@@ -12818,6 +12833,10 @@ for _label, _fixture, _command in (
     ("a busy pr whose head holds this head", GHBATCHCONTAIN, GH_API_MERGE),
     ("a GET of the merge endpoint, which reads and merges nothing", ROUTE_ON, "gh api repos/y/x/pulls/1/merge"),
     ("a PUT to another pull request endpoint", ROUTE_ON, "gh api -X PUT repos/y/x/pulls/1/requested_reviewers"),
+    ("a GET of the merge endpoint, flag first, which reads and merges nothing", ROUTE_ON,
+     "gh api -X GET -f per_page=1 repos/y/x/pulls/1/merge"),
+    ("a PUT to another pull request endpoint, flag first, is no merge", ROUTE_ON,
+     "gh api -X PUT -f reviewers=a repos/y/x/pulls/1/requested_reviewers"),
 ):
     sh("merge-route: gh api, %s, is allowed: %s" % (_label, _command), _command, "allow", silent=True, cwd=NOGIT,
        env_path=_fixture + os.pathsep + PY_PATH, config=MERGECFG)
@@ -19828,6 +19847,40 @@ for _label, _tool, _command, _input, _fake in (
 ):
     LOG_CHECKS_EXTRA.append(("merge-route: %s is refused by its own head, and its Remedy names no merge or push act" % _label,
                              head_remedy_case(_tool, _command, _input, _fake)))
+
+
+# Each module-level name of guard_merge.py is bound once. A second binding shadows the first at import: the merge route read the
+# later GH_API_VALUE_FLAGS, which lacked the field flags, so a field flag before the endpoint read as the endpoint.
+def guard_merge_one_binding_case():
+    """Each module-level name of hooks/guard_merge.py is bound once. The scan is the language's own parser (ast)."""
+    path = os.path.join(HERE, "guard_merge.py")
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    lines = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names = [node.target.id]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names = [node.name]
+        else:
+            continue
+        for name in names:
+            lines.setdefault(name, []).append(node.lineno)
+    for known in ("MERGE_VALUE_FLAGS", "api_merge_call_of"):   # scope first: the scan must see the names it judges
+        if known not in lines:
+            return False, "the scan of guard_merge.py found no module-level %s, so it judged no binding" % known
+    twice = sorted(name for name, at in lines.items() if len(at) > 1)
+    if twice:
+        return False, "module-level %s is bound more than once, at lines %s, so the later binding shadows the first" % (
+            twice[0], ", ".join(str(number) for number in lines[twice[0]]))
+    return True, "each of the %d module-level names of guard_merge.py is bound once" % len(lines)
+
+
+FIXTURELESS_CHECKS.add(guard_merge_one_binding_case)   # reads the source file only, no fixture
+LOG_CHECKS_EXTRA.append(("merge-route: flag first: guard_merge.py binds each module-level name once, "
+                         "so a second definition cannot shadow the first", guard_merge_one_binding_case))
 FAMILY = "lane-closes-after-records"
 
 
