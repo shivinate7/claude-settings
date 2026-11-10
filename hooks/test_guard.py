@@ -31175,9 +31175,9 @@ def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agen
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a start call meets
-    (LB_NORMAL when None). `guard` is the path of a guard copy to run instead of GUARD. `transcript`
-    is the payload's transcript_path, when the call names one. `env_path` is the PATH of this one guard
-    run (None keeps the runner's)."""
+    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's).
+    `guard` is the path of a guard copy to run instead of GUARD. `transcript` is the payload's
+    transcript_path, when the call names one."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
