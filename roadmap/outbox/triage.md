@@ -386,3 +386,14 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - mtmc-dash-docstring (#1447): the dash regex needs a space only before the dash; the docstring says both sides.
 - mtmc-limit-unit (#1447): the reason text "the limit is 1" has no unit.
 - mtmc-sendmessage-unjudged (#1447): SendMessage (agent to agent) stamps are not judged and are not listed as a known miss.
+- scm-cost-text-gaps (#2410 stack-cross-measure, coordinator 01:30 CST Nov 10; none blocks): the cost text omits the rev-parse --verify per picked PR, the two merge-base --is-ancestor reads and the shallow probe; the origin fetch also runs when the only picked PR is a stack pair.
+- scm-unshallow-once (#2410): "unshallow once" is untrue after a failed fetch (head_holds retries).
+- scm-tests-gaps (#2410): no test for the *unfetched entry in the conflict-FAIL list; no case runs cross_measure behind a lagging head (LagHost leaves pulls None).
+- scm-stray-edits (#2410): a stray spacing edit on `WAIT_LINE =` in test_lane_lint.py; a duplicate `host = host or Host()` in lane_lint (harmless).
+- scm-branch-target-skips (#2410): a branch-name target skips the cross-measure (usage names it).
+- scm-base-ignored (#2410): cross_measure ignores each PR's base, so a main PR and a release-base PR of one session may false-conflict. Debt only if a repo with release bases appears.
+- scm-session-url-regex-three-homes (#2410): the session-URL regex differs in three places (one home); a quoted URL over-matches by one merge-tree.
+- unshallow-2406-gaps (#2406, merged): no test for a failed --unshallow fetch; the cost line omits the one-time fetch; usage does not say the unreadable-read unknown is never lifted; a ref target with --base skips the check; a `base == "main"` literal.
+- tfoh-gaps (#2264 time-from-one-helper, coordinator 01:31 CST Nov 10): the tests pin only the helper path, not --iso; two section headers read "#===="; the local-time-central rule does not name now-central.
+- mrml-head-is-newest-run (#2492 merge-red-main-latest-run): "the base's head" means the newest run's commit on the page read, not the git tip; if the tip has no run yet, a re-run tests an older commit.
+- mrml-noise-and-get (#2492): a red verdict may list a re-run that does not clear it (noise); base_state reads r["event"] where r.get("event") would match the line above.
