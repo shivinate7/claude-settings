@@ -336,7 +336,8 @@ class Machine:
         self.stub_actions({})
 
     def stub_actions(self, actions, log=None):
-        """actions: {git subcommand: {"kind": "fail", "stderr": ...} | {"kind": "before", "once", "argv", "env", "record"}
+        """actions: {git subcommand: {"kind": "fail", "stderr": ...}
+        | {"kind": "before", "once", "argv", "env", "record"}
         | {"kind": "drop" | "crlf" | "drop-removal"} on update-index --index-info}.
         log: a file that gets one line per git start (its subcommand and the two prompt variables).
         Each intercepting action writes self.stub_marker, which assert_stub_intercepted reads."""
@@ -558,7 +559,8 @@ class MailCase(unittest.TestCase):
         """The stand-in git ran the update-index that its action names. Without this, a case whose stub never ran
         passes on the old code, because the real git builds the healthy tree."""
         self.assertTrue(os.path.exists(machine.stub_marker),
-                        "the stand-in git never intercepted update-index --index-info, so no update was dropped or CRLF'd")
+                        "the stand-in git never intercepted update-index --index-info, "
+                        "so no update was dropped or CRLF'd")
 
 
 class RoundTrip(MailCase):
@@ -1175,15 +1177,15 @@ class TakeRemovalDropped(MailCase):
         control = run_cli(taker, "take", "0a1b2c3d4e83")
         self.assertEqual(control.returncode, 0, "control: a healthy take exited %d: %s"
                          % (control.returncode, combined(control)))
-        self.assertIn("taken 0a1b2c3d4e83", control.stdout.splitlines(), "control: a healthy take printed no taken line: %r"
-                      % control.stdout)
+        self.assertIn("taken 0a1b2c3d4e83", control.stdout.splitlines(),
+                      "control: a healthy take printed no taken line: %r" % control.stdout)
         before = store.tip()
         taker.stub_actions({"update-index": {"kind": "drop-removal"}})
         taken = run_cli(taker, "take", "0a1b2c3d4e84")
         self.assert_stub_intercepted(taker)
         printed = [line for line in taken.stdout.splitlines() if line.startswith("taken ")]
-        self.assertEqual(printed, [], "a take whose removal line was dropped printed taken, with the old file still open: %r"
-                         % taken.stdout)
+        self.assertEqual(printed, [], "a take whose removal line was dropped printed taken, "
+                         "with the old file still open: %r" % taken.stdout)
         self.assertEqual(taken.returncode, 1, "a take whose removal line was dropped exited %d, expected 1: %s"
                          % (taken.returncode, combined(taken)))
         self.assertIn("message file missing from the commit", taken.stderr,
@@ -1196,9 +1198,10 @@ class TakeRemovalDropped(MailCase):
 
 
 class LoneSurrogateBody(MailCase):
-    """A body with one byte that is not UTF-8, piped on stdin as bin/mail reads it. The byte decodes to a lone surrogate,
-    which git()'s UTF-8 encode cannot write. The send must still land, with the byte as U+FFFD or '?', and print no
-    traceback. PYTHONIOENCODING=utf-8:surrogateescape makes that stdin decode the same on every platform."""
+    """A body with one byte that is not UTF-8, piped on stdin as bin/mail reads it. The byte decodes to a lone
+    surrogate, which git()'s UTF-8 encode cannot write. The send must still land, with the byte as U+FFFD or '?',
+    and print no traceback. PYTHONIOENCODING=utf-8:surrogateescape makes that stdin decode the same on every
+    platform."""
 
     STDIN_ENV = {"PYTHONIOENCODING": "utf-8:surrogateescape"}
     PREFIX = b"Body marker: lone-surrogate "
@@ -1227,11 +1230,13 @@ class LoneSurrogateBody(MailCase):
         sent = self.send_stdin(sender, self.PREFIX + b"\xff" + self.SUFFIX)
         self.assertEqual(sent.returncode, 0, "a send of a non-UTF-8 body on stdin exited %d, expected 0: %s"
                          % (sent.returncode, combined(sent)))
-        self.assertNotIn("Traceback", sent.stderr, "a send of a non-UTF-8 body on stdin printed a traceback: %r" % sent.stderr)
+        self.assertNotIn("Traceback", sent.stderr,
+                         "a send of a non-UTF-8 body on stdin printed a traceback: %r" % sent.stderr)
         self.assertTrue(sent.stdout.startswith("sent "), "a send of a non-UTF-8 body on stdin printed no sent line: %r"
                         % sent.stdout)
         path = "mail/cloud/sess-b/%s.md" % sent.stdout.split()[1]
-        self.assertIn(path, store.files(), "a send of a non-UTF-8 body on stdin has its message in no pushed tree: %s" % path)
+        self.assertIn(path, store.files(),
+                      "a send of a non-UTF-8 body on stdin has its message in no pushed tree: %s" % path)
         body = store.read(path, raw=True).partition(b"\n\n")[2]
         self.assertTrue(body.startswith(self.PREFIX) and body.endswith(self.SUFFIX),
                         "the pushed body lost its text around the non-UTF-8 byte: %r" % body)
