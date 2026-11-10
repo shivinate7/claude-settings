@@ -7023,6 +7023,24 @@ sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
 sh("check-tail: a verdict call with no pipe in the foreground is allowed",
    "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
+# `merge --release-check` prints one verdict line per pull request, so tail or head cuts it like a lint verdict.
+# The lane-lint row is the control: its refusal is the one these rows must match.
+sh("check-tail: merge --lane-lint 5 piped to tail -2 in the foreground is refused (control)",
+   "merge --lane-lint 5 | tail -2", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check piped to tail in the foreground is refused",
+   "merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check piped to head in the foreground is refused",
+   "merge --release-check 5 6 | head -1", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: the bin merge --release-check piped to tail in the foreground is refused",
+   "~/.claude/bin/merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check with no pipe in the foreground is allowed (control)",
+   "merge --release-check 5 6", "allow", cwd=NOGIT)
+add("check-tail: merge --release-check piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --release-check 5 6 2>&1 | tail -3")
+add("check-tail: merge --release-check with no pipe, backgrounded, is allowed (control)", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --release-check 5 6")
 
 # =========================================================================== 2c. waiter loops
 #
