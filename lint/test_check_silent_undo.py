@@ -1589,10 +1589,10 @@ class CallBound(unittest.TestCase):
 
 
 class LaneUndoCost(unittest.TestCase):
-    """The lane undo read's git calls grow with the lane's commits. Measured on this head: 37 calls at 10 commits on distinct
-    files, 57 at 20, 97 at 40. Only the 10-commit bound is pinned, at the measured 37, so one more git call per commit fails here."""
+    """The lane undo read's git calls grow with the lane's commits. Measured on this head: 41 calls at 10 commits on distinct
+    files, 61 at 20, 101 at 40. Only the 10-commit bound is pinned, at the measured 41, so one more git call per commit fails here."""
 
-    def test_ten_lane_commits_on_distinct_files_cost_at_most_37_git_calls(self):
+    def test_ten_lane_commits_on_distinct_files_cost_at_most_41_git_calls(self):
         r = base_repo()
         r.sh("checkout", "-q", "-b", "lane")
         for i in range(10):
@@ -1601,7 +1601,7 @@ class LaneUndoCost(unittest.TestCase):
         self.assertEqual(len(r.sh("rev-list", "--no-merges", "origin/main..HEAD").split()), 10)  # scope: ten lane commits
         (found, notes), calls = git_calls(lambda: C.check(r.dir, "origin/main", head))
         self.assertEqual(found, [])  # scope: the ten commits undo nothing
-        self.assertLessEqual(len(calls), 37, "git calls for 10 lane commits on distinct files: %d, the bound is 37" % len(calls))
+        self.assertLessEqual(len(calls), 41, "git calls for 10 lane commits on distinct files: %d, the bound is 41" % len(calls))
 
 
 class Scanner(unittest.TestCase):
@@ -1659,15 +1659,23 @@ def mixed_merge():
     return r, r.sh("rev-parse", "HEAD")
 
 
+def named_outside_lane_undo(got, own):
+    """The verdict lines that name an own line without the lane undo read's prefix. The read may hold its own finding on app.txt, never these."""
+    return [x for x in got if not x.startswith("lane undo, ") and any(l in x for l in own)]
+
+
 class OwnLineCap(unittest.TestCase):
     """branch_only_lines reads every lost line of one file as the branch's own or not, never a capped prefix.
     A merge that drops more than 25 own lines of one file must not read as undone main work."""
+    # A merge that puts app.txt back to its pre-feat text is the lane undo read's whole-file put-back (owner ruling, page item 167, 2026-11-03 18:16 CST).
 
     def test_a_merge_that_drops_thirty_own_lines_of_one_file_reads_clean(self):
         r, m = drop_merge(OWN30, own=True)
         self.assertTrue(dropped_from_parent(r, m, 1, OWN30), "premise: the merge drops the 30 own lines from its first parent")
         self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines past position 25 read as lost")
-        self.assertEqual(r.verdict(), [], "own lines past position 25 read as lost")
+        got = r.verdict()
+        self.assertEqual(named_outside_lane_undo(got, OWN30), [], "own lines past position 25 read as lost")
+        self.assertTrue(all(x.startswith("lane undo, app.txt: ") for x in got), "the verdict holds a finding other than the lane undo read on app.txt")
 
     def test_thirty_main_carried_lines_a_merge_drops_are_all_flagged(self):
         r, m = drop_merge(MAIN30, own=False)
@@ -1687,8 +1695,11 @@ class OwnLineCap(unittest.TestCase):
         flagged = [l for _, _, lines in C.lost_lines(r.dir, m, ("origin/main",)) for l in lines]
         self.assertEqual([l for l in flagged if l in OWN30], [], "own lines past position 25 reported as lost, beside the main lines")
         self.assertEqual(sorted(flagged), sorted(TAIL), "the flagged lines are not exactly the 3 main lines past position 25")
-        text = "\n".join(r.verdict())
-        self.assertEqual([l for l in OWN30 if l in text], [], "the verdict names own lines past position 25")
+        got = r.verdict()
+        self.assertEqual(named_outside_lane_undo(got, OWN30), [], "the verdict names own lines past position 25 outside the lane undo read")
+        text = "\n".join(got)
+        for line in TAIL:
+            self.assertIn(line, text, "main tail line missing from the verdict")
 
     def test_thirty_own_lines_cost_the_same_git_calls_as_five(self):
         r30, m30 = drop_merge(OWN30, own=True)
@@ -1731,12 +1742,15 @@ def note_merge(kept):
 class OwnLineScale(unittest.TestCase):
     """A per-file cap of any realistic size is far below 1000 lines. A merge that drops 1000 own lines of one
     file reads clean, so a cap of any size goes red here."""
+    # The same whole-file put-back as OwnLineCap: the lane undo read flags it (owner ruling, page item 167, 2026-11-03 18:16 CST).
 
     def test_a_merge_that_drops_a_thousand_own_lines_of_one_file_reads_clean(self):
         r, m = drop_merge(OWN1000, own=True)
         self.assertTrue(dropped_from_parent(r, m, 1, OWN1000), "premise: the merge drops the 1000 own lines from its first parent")
         self.assertEqual(C.lost_lines(r.dir, m, ("origin/main",)), [], "own lines read as lost in a merge that drops 1000 of them")
-        self.assertEqual(r.verdict(), [], "the verdict flags own lines in a merge that drops 1000 of them")
+        got = r.verdict()
+        self.assertEqual(named_outside_lane_undo(got, OWN1000), [], "the verdict flags own lines in a merge that drops 1000 of them")
+        self.assertTrue(all(x.startswith("lane undo, app.txt: ") for x in got), "the verdict holds a finding other than the lane undo read on app.txt")
 
 
 class OwnLineSubstring(unittest.TestCase):
