@@ -488,3 +488,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - loop-body-cd-last-item (#2123): a `cd "$f"` in a loop body unrolls, so later words are judged in the last item's folder.
 - mail-body-file-missing-raises (lane session-messaging-plan, #2519, coordinator 04:37 CST Nov 10): a missing `--body-file` path still raises FileNotFoundError (pre-existing).
 - mail-utf8-proof-linux-only (#2519): the UTF-8 proof covers Linux with PYTHONIOENCODING only.
+- draft-pr-false-alarm-forms-unpinned (lane draft-pr-guard-text-false-alarm, coordinator 04:55 CST Nov 10): no test pins the draft-pr guard's false-alarm forms (Write, Edit, python heredoc). A green pin with a mutation that goes red would guard it.
+- why-cited-red-no-fragment (lane task-names-check-line-not-truth): debt why-cited-red-no-fragment stays open.
+- prose-judge-header-stale (lane watcher-builtin-hook-survey): hooks/prose_judge.py lines 3-4 are stale; an `if` path glob filters now.
+- haiku-prompt-hook-input-stale (same lane): docs/decisions/haiku-prompt-hooks.md says a prompt hook sees only the event's input, but Stop now gets last_assistant_message.
