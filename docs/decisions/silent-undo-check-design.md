@@ -20,7 +20,7 @@
   flags two shapes. One is a whole file put back to its text before E, whatever the file held just
   before. It counts when E changed 6 or more non-blank lines in it (`BLOCK_LINES`), on any path. Within one
   non-blank line of E's parent text counts, so a copy of the old text plus one new line is no way out.
-  Not counted: E only replaced lines (each hunk takes out at least as many lines as it puts in) and the
+  Not counted: E only replaced lines (each hunk takes out lines and puts in lines, no more than it takes out; a hunk that only deletes is not a replacement) and the
   put-back is E's parent text exactly, losing only what E wrote. The lane took its own rewrite of main's
   lines back, and no line the lane or main added is gone (coordinator ruling, 2026-11-10 14:26 CST).
   The other is a net loss or a delete of E's lines on a test path (`is_test_rel` in `hooks/guard.py`):

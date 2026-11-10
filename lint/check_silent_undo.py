@@ -24,7 +24,7 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               the same branch. Only lines that no earlier lane state held count as that commit's work,
               so a restore is no undo. It flags the whole file put back, within one non-blank line,
               to its text before the earlier commit, when that commit changed BLOCK_LINES (6) lines
-              or more in it, on any path, unless that commit only replaced lines (none added net) and the put-back
+              or more in it, on any path, unless that commit only replaced lines (in each hunk, none added net and none only deleted) and the put-back
               is its parent text exactly, losing only what that commit wrote (a lane that takes its own rewrite
               of main's lines back); and a net loss of the earlier commit's lines, or a delete,
               on a test path only (hooks/guard.py is_test_rel). A move, a rename, a re-wrap and a
