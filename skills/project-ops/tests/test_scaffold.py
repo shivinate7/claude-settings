@@ -270,6 +270,13 @@ class Scaffold(TempDest):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
         self.assertIn("tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`", flat)
 
+    def test_brief_says_the_orchestrator_runs_lane_lint(self):
+        files = tree(SKILL)
+        self.assertIn("templates/brief.md", files)  # the scope first: a missing brief fails here, once
+        flat = " ".join(files["templates/brief.md"].split())
+        self.assertIn("The lane orchestrator runs `merge --lane-lint`, never an isolated builder: "
+                      "Claude Code's worktree check refuses it inside a worktree-isolated agent.", flat)
+
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
         for rel, text in tree(self.dest).items():
