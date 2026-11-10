@@ -3392,7 +3392,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 
 def step_up_reason(prompt: str, role, model) -> str:
-    model = str(model or "").lower()
+    model = spawn_model(model)[0].lower()
     for kind, n in brief_markers(prompt):
         kind = kind.lower()
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
@@ -3427,6 +3427,17 @@ from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+
+
+def spawn_model(named) -> tuple:
+    """(model, from_env) a spawn runs on: the model it names, else the value of ROLE_MODEL_ENV, else "". The env value
+    overrides an agent file's pin, so with no named model it is the model the spawn runs on (decision agent-model-cap).
+    The one home of the spawn's effective model: the step-up, the role row and the Opus ceiling all read it here."""
+    named = str(named or "").strip()
+    if named:
+        return named, False
+    env = os.environ.get(ROLE_MODEL_ENV, "").strip()
+    return env, bool(env)
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
     "field, or name the role's model%s. (decision agent-model-cap)"
@@ -3658,11 +3669,14 @@ def role_model_one(tool_input):
     if table is None:
         return "", pointer, True
     role = role_name(table, tool_input.get("subagent_type"))
-    model = str(tool_input.get("model") or "").strip()
+    model, from_env = spawn_model(tool_input.get("model"))
     if model:
         top = len(ROLE_MODEL_RANK) - 1
         named = role_model_rank(model)
         row = table.get(role)
+        if named is None and from_env:
+            # An env value the table does not rank (an alias such as `inherit`) is not guessed at: the spawn passes, as it did.
+            return "", "", False
         if named is None:
             # A model the table does not rank is above every row below the top rank. Its own rank is unruled, so none is guessed.
             named = top if row == ROLE_MODEL_RANK[top] else top + 1
@@ -3687,9 +3701,9 @@ def role_model_one(tool_input):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
             if role == "reviewer":
                 extra += ROLE_TEST_AUTHOR_NOTE if "1" in ROLE_REVIEWER_FREE_ROUNDS else ROLE_REVIEWER_FIRST_ROUND_NOTE
+            if from_env:
+                extra += ", or set " + ROLE_MODEL_ENV + " to the role's model"
             return ROLE_MODEL_REASON % extra, model, False
-        return "", "", False
-    if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
     pinned = role_has_model_pin(pointer, role)
     if pinned is None:
@@ -3912,12 +3926,12 @@ def opus_spawn_hit(tool: str, tool_input) -> tuple:
     Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
-            return str(spawn.get("model")), str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
+            return spawn_model(spawn.get("model"))[0], str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
     return "", "", False
 
 
 def opus_without_grant(tool_input) -> bool:
-    if "opus" not in str(tool_input.get("model") or "").lower():
+    if "opus" not in spawn_model(tool_input.get("model"))[0].lower():
         return False
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
     if role in OPUS_STANDING_ROLES:
