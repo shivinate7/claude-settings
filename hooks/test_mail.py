@@ -12,7 +12,9 @@ Contract the builder codes against. Each case asserts one named cause. Pinned ch
 that pass on the base commit, and why each stays.
 - bin/mail send --to <addr> --kind request|inform|reply [--re <id>] --body-file F
   The sender's address is cloud/<CLAUDE_CODE_REMOTE_SESSION_ID>. It writes mail/<addr>/<id>.md on
-  refs/heads/mail with plumbing only, never a working tree.
+  refs/heads/mail with plumbing only, never a working tree. It exits 0 only when the pushed tip's tree holds
+  that file and no path in the tree holds a CR. Otherwise it exits 1 with "not sent: <reason>", and the mail
+  ref does not move.
 - bin/mail read [<id>]  prints the open messages, or one message with its body. With no --addr, the open
   messages of the session's own folder (CLAUDE_CODE_SESSION_ID locally) are listed too.
 - bin/mail take <id>    one commit moves mail/<addr>/<id>.md to done/<addr>/<id>.md with a
@@ -39,9 +41,10 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
    patched to a fixed host. The CLI subprocess sees the real host, so the --addr cases pass the address.
 6. The sweep of old run folders is proven in hooks/test_feedback_inbox.py. Not repeated here.
 7. A stand-in git (a script named git, first on the case's PATH; POSIX only, CI runs on ubuntu) stands in
-   for the git calls of one machine. It logs each call's env, fails a named subcommand, or runs an
-   interloper once before its push, then execs the real git. ReadShowFails, PushRefusedRetry,
-   TakeBothFromOneTip and PromptEnv use it.
+   for the git calls of one machine. It logs each call's env, fails a named subcommand, drops a named
+   update-index (its stdin is read and dropped, exit 0), feeds an update-index --index-info CRLF lines
+   (the "crlf" action), or runs an interloper once before its push, then execs the real git. ReadShowFails,
+   PushRefusedRetry, TakeBothFromOneTip, PromptEnv, IndexUpdateDropped and CrlfIndexLines use it.
 8. Timeouts. Each git call of a turn start carries its own bound. The bounds of one moved turn sum to
    10 s or less: fixed per-step bounds, the worst case where every step runs its full bound. The case
    pins that shape. A shared-deadline build passes each call the time left, so its recorded bounds
@@ -56,7 +59,8 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
    PushRefusedRetry (retries set to 1: "not sent", exit 1), TakeBothFromOneTip (a lost push read as a win:
    the second taker prints taken), TakeSameSecond (the nonce removed from the Taken-by line: both takers
    print taken), SshBatchDefault (the default removed: its two default cases go red) and AgeUnknown (the
-   fallback removed: the message is not listed). TakeBothFromOneTip gives its two machines distinct git
+   fallback removed: the message is not listed), ReadBackFromTip (a CRLF blob from hash-object's stdin: its
+   body and no-CR checks go red). TakeBothFromOneTip gives its two machines distinct git
    identities. TakeSameSecond keeps one identity and one address, and pins the clock, so two takers build
    the same commit unless the Taken-by line carries a nonce.
 12. Local read. `bin/mail read` with no --addr takes its session folder from CLAUDE_CODE_SESSION_ID.
@@ -133,6 +137,13 @@ action = (conf.get("actions") or {}).get(sub)
 if action and action["kind"] == "fail":
     sys.stderr.write(action["stderr"] + "\\n")
     sys.exit(128)
+if action and action["kind"] == "drop":
+    if "--index-info" in args:
+        sys.stdin.buffer.read()
+    sys.exit(0)
+if action and action["kind"] == "crlf" and "--index-info" in args:
+    done = subprocess.run([REAL] + args, input=sys.stdin.buffer.read().replace(b"\\n", b"\\r\\n"))
+    sys.exit(done.returncode)
 if action and action["kind"] == "before" and not os.path.exists(action["once"]):
     open(action["once"], "w").close()
     done = subprocess.run(action["argv"], env=action["env"], capture_output=True, text=True)
@@ -175,12 +186,14 @@ def fixture_env(home, extra=None):
     return env
 
 
-def git(cwd, args, env, input_text=None):
+def git(cwd, args, env, input_text=None, binary=False):
+    """binary=True returns bytes. Text mode turns a lone CR into a newline, and the CRLF cases look for that CR."""
+    mode = {} if binary else {"text": True, "encoding": "utf-8", "errors": "replace"}
     result = subprocess.run(["git", *args], cwd=cwd, env=env, input=input_text,
-                            capture_output=True, text=True, encoding="utf-8", errors="replace",
-                            timeout=60)
+                            capture_output=True, timeout=60, **mode)
     if result.returncode:
-        raise RuntimeError("fixture git %s failed: %s" % (args[0], result.stderr.strip()))
+        stderr = result.stderr if isinstance(result.stderr, str) else result.stderr.decode("utf-8", "replace")
+        raise RuntimeError("fixture git %s failed: %s" % (args[0], stderr.strip()))
     return result.stdout
 
 
@@ -202,14 +215,23 @@ class Store:
                                 env=self.env, capture_output=True, text=True, timeout=60)
         return result.stdout.strip() or None
 
-    def files(self, prefix=""):
+    def files(self, prefix="", raw=False):
+        """The tip's paths that start with prefix, sorted. raw=True reads them with -z: git C-quotes a path with
+        a CR in text output, so only the raw listing shows that CR."""
         tip = self.tip()
         if tip is None:
             return []
-        listing = git(self.path, ["ls-tree", "-r", "--name-only", tip], self.env)
-        return sorted(path for path in listing.splitlines() if path.startswith(prefix))
+        if raw:
+            listing = git(self.path, ["ls-tree", "-r", "-z", "--name-only", tip], self.env, binary=True)
+            paths = [path.decode("utf-8") for path in listing.split(b"\0") if path]
+        else:
+            paths = git(self.path, ["ls-tree", "-r", "--name-only", tip], self.env).splitlines()
+        return sorted(path for path in paths if path.startswith(prefix))
 
-    def read(self, path):
+    def read(self, path, raw=False):
+        """The blob at path on the tip. raw=True returns bytes, so a CR in the content survives."""
+        if raw:
+            return git(self.path, ["cat-file", "blob", "%s:%s" % (self.tip(), path)], self.env, binary=True)
         return git(self.path, ["show", "%s:%s" % (self.tip(), path)], self.env)
 
     def seed(self, addr, mid, kind, sender, body, re_id="-"):
@@ -475,6 +497,24 @@ class MailCase(unittest.TestCase):
         if re_id is not None:
             args += ["--re", re_id]
         return run_cli(machine, *args)
+
+    def assert_send_is_honest(self, sent, store, to, before):
+        """The send contract: exit 0 only when the pushed tip's tree holds mail/<to>/<id>.md, <id> from the
+        'sent <id>' line, and no path in that tree holds a CR. Otherwise exit 1 with a 'not sent: ' line, and the
+        mail ref stays at before (None for an empty store)."""
+        if sent.returncode != 0:
+            self.assertEqual(sent.returncode, 1, "a refused send exited %d, expected 1: %s"
+                             % (sent.returncode, combined(sent)))
+            self.assertIn("not sent: ", combined(sent), "a refused send printed no 'not sent: <reason>' line: %r"
+                          % combined(sent))
+            self.assertEqual(store.tip(), before, "a refused send moved the mail ref")
+            return
+        cr = [path for path in store.files(raw=True) if "\r" in path]
+        self.assertEqual(cr, [], "a send that exited 0 pushed a path with a CR in it: %r" % cr)
+        sent_lines = [line for line in sent.stdout.splitlines() if line.startswith("sent ")]
+        self.assertTrue(sent_lines, "a send that exited 0 printed no 'sent <id>' line: %r" % combined(sent))
+        path = "mail/%s/%s.md" % (to, sent_lines[0].split()[1])
+        self.assertIn(path, store.files(raw=True), "a send that exited 0 has its message in no pushed tree: %s" % path)
 
 
 class RoundTrip(MailCase):
@@ -988,6 +1028,83 @@ class AgeUnknown(MailCase):
         listed = listed_with(lines, mid)
         self.assertEqual(len(listed), 1, "a timed-out git log hid the message from the turn start: %r" % lines)
         self.assertIn("age unknown", listed[0], "a timed-out git log did not print age unknown: %r" % listed[0])
+
+
+class IndexUpdateDropped(MailCase):
+    """A git helper drops the update-index stdin and does nothing, exiting 0. The tree write-tree then builds is the
+    parent's, so the send must not report success. Stub action: drop, on update-index."""
+
+    def test_dropped_index_update_on_a_seeded_store_is_not_sent_and_keeps_the_tip(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e51", "request", "cloud/sess-x", "Body marker: base\n")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        control = self.send(sender, "cloud/sess-b", "request", "dropped-control")
+        self.assertEqual(control.returncode, 0, "control: a healthy send exited %d: %s"
+                         % (control.returncode, combined(control)))
+        before = store.tip()
+        sender.stub_actions({"update-index": {"kind": "drop"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "dropped-send")
+        self.assert_send_is_honest(sent, store, "cloud/sess-b", before)
+
+    def test_dropped_index_update_on_an_empty_store_is_not_sent_and_creates_no_ref(self):
+        store = self.store()
+        self.assertIsNone(store.tip(), "control: the store should start with no mail ref")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        sender.stub_actions({"update-index": {"kind": "drop"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "dropped-empty")
+        self.assert_send_is_honest(sent, store, "cloud/sess-b", None)
+
+
+class CrlfIndexLines(MailCase):
+    """update-index reads each index line with a CR before its LF, as a text-mode pipe on Windows writes it. Git keeps
+    that CR in the path. Stub action: crlf, on update-index --index-info."""
+
+    def test_crlf_index_lines_never_push_a_path_with_a_cr(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e61", "request", "cloud/sess-x", "Body marker: base\n")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        control = self.send(sender, "cloud/sess-b", "request", "crlf-control")
+        self.assertEqual(control.returncode, 0, "control: a healthy send exited %d: %s"
+                         % (control.returncode, combined(control)))
+        before = store.tip()
+        sender.stub_actions({"update-index": {"kind": "crlf"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "crlf-send")
+        self.assert_send_is_honest(sent, store, "cloud/sess-b", before)
+
+
+class ReadBackFromTip(MailCase):
+    """A good send, read back from the pushed tip: mail/<to>/<id>.md holds the body file's bytes, and no path or
+    content in the tip's tree holds a CR. Green on the base commit, since Linux writes LF. A guard, not a red case:
+    the CR defects are simulated in CrlfIndexLines and IndexUpdateDropped."""
+
+    def send_and_read_back(self, store, sender, marker):
+        body_path = self.body(marker)
+        sent = run_cli(sender, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", body_path)
+        self.assertEqual(sent.returncode, 0, "a good send exited %d: %s" % (sent.returncode, combined(sent)))
+        self.assertTrue(sent.stdout.startswith("sent "), "a good send printed no 'sent <id>' line: %r" % combined(sent))
+        path = "mail/cloud/sess-b/%s.md" % sent.stdout.split()[1]
+        tree = store.files(raw=True)
+        self.assertIn(path, tree, "the pushed tip's tree holds no %s" % path)
+        cr = [entry for entry in tree if "\r" in entry]
+        self.assertEqual(cr, [], "the pushed tip's tree holds a path with a CR in it: %r" % cr)
+        with open(body_path, "rb") as handle:
+            body = handle.read()
+        content = store.read(path, raw=True)
+        self.assertNotIn(b"\r", content, "the pushed message holds a CR: %r" % content)
+        self.assertIn(b"\n\n", content, "the pushed message has no body after its header: %r" % content)
+        self.assertEqual(content.split(b"\n\n", 1)[1], body,
+                         "the pushed body is not the body file's bytes: %r" % content)
+
+    def test_good_send_into_an_empty_store_reads_back_its_body_bytes(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a")
+        self.send_and_read_back(store, sender, "read-back-empty")
+
+    def test_good_send_into_a_store_with_mail_reads_back_its_body_bytes(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e71", "request", "cloud/sess-x", "Body marker: base\n")
+        sender = self.machine("a", store, session="sess-a")
+        self.send_and_read_back(store, sender, "read-back-full")
 
 
 if __name__ == "__main__":
