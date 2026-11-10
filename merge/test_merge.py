@@ -11977,6 +11977,25 @@ class RedMainBrake(Env):
                               self.CAN_CANCELLED: [main_job("scope", "success"), main_job("checks", "success", 20), main_job("checks-macos", "success", 30)]})
         self.merged(rc, out)
 
+    # A cancelled run gets its re-run named only when its commit is the base's head: the head_sha of the newest run in the page read.
+    # Here the cancelled run's commit A is older than the newest run's commit B, so no re-run is named.
+    FA_A, FA_B = "a" * 40, "b" * 40
+
+    def test_a_cancelled_run_older_than_an_in_progress_newest_run_is_named_with_no_rerun(self):
+        rc, out, before = self.go([main_run(1502, None, status="in_progress", sha=self.FA_B), main_run(1501, "cancelled", sha=self.FA_A)],
+                                  {1501: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]})
+        self.refused(rc, out, before)
+        self.assertIn("UNKNOWN", out)
+        self.assertIn("run 1501", out)
+        self.assertNotIn("gh run rerun", out, "the cancelled run 1501 is on a commit that is not the base's head, so no re-run is named")
+
+    def test_a_cancelled_run_older_than_a_green_schedule_newest_run_is_named_with_no_rerun(self):
+        rc, out, before = self.go([main_run(1602, "success", event="schedule", sha=self.FA_B), main_run(1601, "cancelled", sha=self.FA_A)],
+                                  {1602: [main_job("scope", "success")], 1601: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]})
+        self.refused(rc, out, before)
+        self.assertIn("run 1601", out)
+        self.assertNotIn("gh run rerun 1601", out, "the cancelled run 1601 is on a commit that is not the base's head, so no re-run is named")
+
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
     def test_main_refuses_before_taking_the_lock(self):
