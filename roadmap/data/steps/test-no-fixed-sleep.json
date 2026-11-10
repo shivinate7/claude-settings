@@ -1,0 +1,10 @@
+{
+  "title": "A lint refuses a fixed sleep or wall-clock wait bound in a test",
+  "phase": "now",
+  "status": "todo",
+  "order": 938,
+  "owner": "coordinator",
+  "why": "Owner 19:25 CST Nov 9: \"against arbitrarily timed tests that have fixed values\". Decision test-practices P5 (line 75) names this lint as owed and unbuilt. Main today: about 90 time.sleep calls across 12 test files (coordinator's git grep on origin/main), and hooks/test_session_start.py's watchdog case waits up to 10 s for a `sleep 7` process.",
+  "note": "Scope: refuse a fixed sleep or a wall-clock wait bound in a test assert or wait (time.sleep(N), \"sleep N\" subprocesses, \"up to N seconds\" waits), with an exempt form for injected clocks. First lane: the lint, red on main, plus a list of offenders; re-pointing each offender is its own lane. One home: lint/find_time_pinned.py already lists fixed sleeps (step time-pinned-tests-go, #1026); extend it into the refusing lint before building a second. Related: convert-time-pinned-tests (doing, the 59 claude-settings sleeps), finder-deadline-poll (a poll in a deadline loop is not a fixed sleep: the exempt form should cover it), note session-start-watchdog-load. Filed 19:28 CST Nov 9 from the coordinator (19:27 CST). No owner question.",
+  "updatedAt": "2026-11-09T19:28:00-06:00"
+}
