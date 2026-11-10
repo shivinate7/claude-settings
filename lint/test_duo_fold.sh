@@ -96,8 +96,8 @@ setup() {
   export STUB_HINGE_SRC="$stubs/hinge-stub" HINGE="$stubs/hinge-stub" DUO_FOLD_WORK="$cdir/work"
   unset STUB_ANGLE STUB_GET_EXIT STUB_MOVE_EXIT STUB_MOVE_OUT STUB_GET_ERR STUB_GIT_RC STUB_GIT_CHECKOUT_RC DUO_FOLD_LOG
 }
-# gate: the first check of every case. With no tool file, each case fails on this line and nothing else.
-gate() { need "no tool file at $DUO_FOLD" test -f "$DUO_FOLD"; }
+# tool_present: the first check of every case. With no tool file, each case fails on this line and nothing else.
+tool_present() { need "no tool file at $DUO_FOLD" test -f "$DUO_FOLD"; }
 # run_tool ARGS...: runs the tool under the case's environment. rc is its exit code, out its stdout, err its stderr.
 run_tool() {
   out=$cdir/out
@@ -142,7 +142,7 @@ second_git_is_checkout() {
 pass_case() {
   local move=open
   if [ "$2" = folded ]; then move=close; fi
-  setup; gate
+  setup; tool_present
   export STUB_ANGLE="$3"
   run_tool "$UDID" "$2"
   need "hinge calls are not the move then the read-back" calls_are "-d $UDID $move" "-d $UDID get"
@@ -154,7 +154,7 @@ pass_case() {
 refuse_case() {
   local move=open
   if [ "$2" = folded ]; then move=close; fi
-  setup; gate
+  setup; tool_present
   export STUB_ANGLE="$3"
   run_tool "$UDID" "$2"
   need "hinge calls are not the move then the read-back" calls_are "-d $UDID $move" "-d $UDID get"
@@ -168,7 +168,7 @@ refuse_case() {
 args_case() {
   local name=$1
   shift
-  setup; gate
+  setup; tool_present
   run_tool "$@"
   need "exit is $rc, not 64" test "$rc" -eq 64
   need "hinge was called on wrong arguments" no_hinge_call
@@ -176,7 +176,7 @@ args_case() {
 }
 
 # ---- the tool is a command: it is executable, as bin/ holds it ----
-setup; gate
+setup; tool_present
 need "the tool is not executable" test -x "$DUO_FOLD"
 end_case "the tool is executable as a command"
 
@@ -203,7 +203,7 @@ refuse_case "open reads 0.0 and is refused" open 0.0 0.0
 refuse_case "open reads 179.4 and is refused" open 179.4 179.4
 
 # ---- get and move faults: a get that fails is refused; a move that fails is noted, read back, and not retried ----
-setup; gate
+setup; tool_present
 export STUB_ANGLE=0.0 STUB_GET_EXIT=1
 run_tool "$UDID" folded
 need "hinge calls are not close then get" calls_are "-d $UDID close" "-d $UDID get"
@@ -212,21 +212,21 @@ need "the refusal line does not start duo-fold:" first_refusal
 need "the refusal does not name the udid" err_has "$UDID"
 end_case "a get that exits 1 is refused"
 
-setup; gate
+setup; tool_present
 export STUB_ANGLE=0.0 STUB_MOVE_EXIT=1
 run_tool "$UDID" folded
 need "hinge calls are not close then get, with no retry" calls_are "-d $UDID close" "-d $UDID get"
 need "exit is $rc, not 0" test "$rc" -eq 0
 end_case "a close that exits 1 and reads 0.0 back passes with no retry"
 
-setup; gate
+setup; tool_present
 export STUB_ANGLE=180.0 STUB_MOVE_EXIT=1
 run_tool "$UDID" open
 need "hinge calls are not open then get, with no retry" calls_are "-d $UDID open" "-d $UDID get"
 need "exit is $rc, not 0" test "$rc" -eq 0
 end_case "an open that exits 1 and reads 180.0 back passes with no retry"
 
-setup; gate
+setup; tool_present
 export STUB_ANGLE=180.0 STUB_MOVE_EXIT=1
 run_tool "$UDID" folded
 need "hinge calls are not close then get, with no retry" calls_are "-d $UDID close" "-d $UDID get"
@@ -236,7 +236,7 @@ need "the refusal does not name the udid" err_has "$UDID"
 end_case "a close that exits 1 and reads 180.0 back is refused, naming the reading"
 
 # ---- a Mac that is not arm64 is refused before hinge is fetched or run ----
-setup; gate
+setup; tool_present
 unset HINGE
 export STUB_ARCH=x86_64
 run_tool "$UDID" folded
@@ -252,14 +252,14 @@ args_case "one argument exits 64" "$UDID"
 args_case "a posture that is not folded or open exits 64" "$UDID" half
 args_case "three arguments exit 64" "$UDID" folded extra
 
-setup; gate
+setup; tool_present
 run_tool
 need "exit is $rc, not 64" test "$rc" -eq 64
 need "the usage line does not name duo-fold <udid> <folded|open>" grep -Fq 'usage: duo-fold <udid> <folded|open>' "$err"
 end_case "the usage line names duo-fold <udid> <folded|open>"
 
 # ---- sourcing: the tool defines its functions and constants and runs nothing ----
-setup; gate
+setup; tool_present
 out=$cdir/out; err=$cdir/err
 "$BASH" -c 'source "$1"; type duo_fold >/dev/null 2>&1 && type duo_fold_fetch_hinge >/dev/null 2>&1' bash "$DUO_FOLD" < /dev/null > "$out" 2> "$err"
 rc=$?
@@ -269,13 +269,13 @@ need "sourcing called hinge" no_hinge_call
 need "sourcing fetched hinge" no_git_call
 end_case "sourcing defines duo_fold and runs nothing"
 
-setup; gate
+setup; tool_present
 need "the tool does not name a hinge repo and sha when sourced" read_pin
 need "the pinned sha is not 40 lowercase hex digits" sha_ok "$pin_sha"
 need "the pinned repo is not a github.com URL ending in /hinge" repo_ok "$pin_repo"
 end_case "the hinge pin is a github repo and a 40-hex sha"
 
-setup; gate
+setup; tool_present
 out=$cdir/out; err=$cdir/err
 export STUB_ANGLE=180.0
 "$BASH" -c 'source "$1"; duo_fold "$2" folded; echo "after=$?"' bash "$DUO_FOLD" "$UDID" < /dev/null > "$out" 2> "$err"
@@ -284,7 +284,7 @@ need "duo_fold did not return 1 to its caller" grep -Fxq 'after=1' "$out"
 end_case "a refused duo_fold returns 1 to its caller, which goes on"
 
 # ---- the fetch: with HINGE unset, the pinned hinge is cloned into DUO_FOLD_WORK, checked out and used ----
-setup; gate
+setup; tool_present
 need "the tool does not name a hinge repo and sha when sourced" read_pin
 unset HINGE
 export STUB_ANGLE=0.0
@@ -296,7 +296,7 @@ need "the second git call is not the checkout of the pinned sha" second_git_is_c
 need "hinge calls are not close then get on the fetched hinge" calls_are "-d $UDID close" "-d $UDID get"
 end_case "with HINGE unset the pinned hinge is fetched, checked out and used"
 
-setup; gate
+setup; tool_present
 need "the tool does not name a hinge repo and sha when sourced" read_pin
 unset HINGE
 export STUB_GIT_RC=1
@@ -308,7 +308,7 @@ need "the clone was not the first git call" first_git_is_clone
 need "hinge was called after a failed clone" no_hinge_call
 end_case "a failed clone is refused with exit 1 and no hinge call"
 
-setup; gate
+setup; tool_present
 need "the tool does not name a hinge repo and sha when sourced" read_pin
 unset HINGE
 export STUB_GIT_CHECKOUT_RC=1 STUB_ANGLE=0.0
@@ -320,7 +320,7 @@ need "the checkout was not the second git call" second_git_is_checkout
 need "hinge was called after a failed checkout" no_hinge_call
 end_case "a failed checkout is refused with exit 1 and no hinge call"
 
-setup; gate
+setup; tool_present
 export STUB_ANGLE=0.0
 run_tool "$UDID" folded
 need "hinge calls are not close then get" calls_are "-d $UDID close" "-d $UDID get"
@@ -329,7 +329,7 @@ need "git was called although HINGE is set" no_git_call
 end_case "a HINGE that is set is used as given, with no fetch"
 
 # ---- DUO_FOLD_LOG: hinge's output goes to the file when it is set, and to stderr when it is unset ----
-setup; gate
+setup; tool_present
 export STUB_ANGLE=0.0 STUB_MOVE_OUT=moved-marker STUB_GET_ERR=get-marker
 export DUO_FOLD_LOG="$cdir/hinge-out.log"
 : > "$DUO_FOLD_LOG"
@@ -342,7 +342,7 @@ need "hinge get output reached stderr" err_lacks get-marker
 need "hinge output reached stdout" test ! -s "$out"
 end_case "DUO_FOLD_LOG takes hinge's output"
 
-setup; gate
+setup; tool_present
 export STUB_ANGLE=0.0 STUB_MOVE_OUT=moved-marker STUB_GET_ERR=get-marker
 run_tool "$UDID" folded
 need "exit is $rc, not 0" test "$rc" -eq 0
