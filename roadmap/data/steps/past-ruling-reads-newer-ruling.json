@@ -1,11 +1,11 @@
 {
   "title": "The past-ruling guard reads a newer owner ruling before it refuses a question",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 947,
   "owner": "coordinator",
   "why": "Possible false alarm, from Degen (via the coordinator 20:30 CST Nov 9). The past-ruling guard refused a valid owner question (Degen item 179, cloud push vs box-served install), citing decision ios-mac-install-first. But the owner had ruled at 19:35 CST that the outcome matters, not the route, wanted the question asked, and picked the cloud push at 19:50 CST.",
-  "note": "Fix: the judge reads rulings newer than the cited decision (chat or page) before it refuses. Related: judge-ids-via-constants, judge-timeout-retries-once. Filed 20:27 CST Nov 9. Lane session_013NEJL2DeoKFVg6TCE2pT2F (coordinator 20:36-20:41 CST Nov 9). Related: #2485 (branch ios-install-box-first-scope, in batch-70c) narrows the cited decision ios-mac-install-first to an app with a box-served install. Not done (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10): open PR #2487 carries it; its lane session has ended.",
-  "updatedAt": "2026-11-10T04:58:00-06:00",
+  "note": "Fix: the judge reads rulings newer than the cited decision (chat or page) before it refuses. Related: judge-ids-via-constants, judge-timeout-retries-once. Filed 20:27 CST Nov 9. Lane session_013NEJL2DeoKFVg6TCE2pT2F (coordinator 20:36-20:41 CST Nov 9). Related: #2485 (branch ios-install-box-first-scope, in batch-70c) narrows the cited decision ios-mac-install-first to an app with a box-served install. Not done (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10): open PR #2487 carries it; its lane session has ended. Done: #2487 merged in batch 71 (#2510, main 6e8d6ccf9, 07:36 CST Nov 10; head checked on main by triage). #2485 merged earlier.",
+  "updatedAt": "2026-11-10T07:41:00-06:00",
   "lane": "open PR #2487"
 }
