@@ -1141,7 +1141,7 @@ def _ste_push_hit(stripped, cwd, record_branch_of, read_verb, note):
                     note("the files the commit in this call adds could not be read")
                     continue
                 if dirty:
-                    return dirty, STE_PUSH_CHAIN_REASON
+                    return dirty, "chain", ""
             base, why = _ste_base(where)
             if not base:
                 note(why)
