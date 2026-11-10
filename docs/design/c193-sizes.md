@@ -15,6 +15,7 @@ Mockups: `c193-receipt.html`, `c193-rail.html`, `c193-pics.html`, `c193-sent.htm
    - In `fit()`, set the wrap's width to w × sc in JS and centre it. Do this in both branches, the measured one and the declared-size one, so the first paint already has the capped size.
    - The mockup checks that each picture stays inside its card and ends above `.head`.
    - Option A (pick): the 480px cap. Option B: the picture fills the card, at 231.7 × 501 (three options), 367.5 × 795 (two options) and 289 × 625 (at 390). B is easier to read, but two options are 800px high.
+   - Replaced by decision `page-pic-fills-card` (an option picture fills its card), owner 2026-11-09 21:26 CST.
 4. Sent bar (`renderSent`). Move `.sent-list` into a new `.sent-what` block, under the sent line.
    - `.sent .in`: flex-wrap, padding-block 16, gap 12/16. `.sent-head` gap 16. `.sent-what` gap 8. `.sent-list` gap 8. Each `li` is 28 high with padding-inline 12. `.row` gap 8, margin-inline-start auto.
    - Bar `.in`: padding-block 12, gap 8/12 (today 10, 8/10).
