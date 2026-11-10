@@ -918,6 +918,13 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.rline .frow > .g { margin-top: 7px; }
 .frow .fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .frow .fhead .ftext { flex: 0 1 auto; }
+/* From 521px the head is one row: a long text shrinks and is cut with an ellipsis, so the number, the new mark and the home keep their place. Under it the head wraps (the phone rule below). */
+@media (min-width: 521px) {
+  .frow .fhead { flex-wrap: nowrap; }
+  .frow .fhead .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .fhead .fno, .frow .fhead .newmark { flex: none; }
+  .frow .fhead .hometag { flex: 0 1 auto; max-width: 40%; }
+}
 .frow .fno { font: 600 13.5px var(--mono); color: var(--acc); white-space: nowrap; }
 .frow .freply { grid-column: 2; grid-row: 2; min-width: 0; font-size: 14.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .askc.folded.withd.rline .frow .fgo { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
@@ -2067,13 +2074,15 @@ function readItemsEls(read) {
       h("span", { class: "uf-labels" }, h("span", { class: "uf-show" }, "Show " + read.length + " read " + (read.length === 1 ? "item" : "items")), h("span", { class: "uf-hide" }, "Hide read items"))),
     on ? h("div", { class: "asklist dlist items", id: "readItemList", role: "group", "aria-label": "Read items, newest first" }, list.map((it) => lineEl(it, true))) : null].filter(Boolean);
 }
+// The Answered section's order, newest answer first; a closed line with no answer sits at its close time. The rail's Answered row reads the same order.
+const answeredAt = (it) => (it.status === "closed" ? Date.parse((lastOf(it) || {}).at) || closedAt(it) || 0 : Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0)));
+const answeredOrder = (list) => list.slice().sort((a, b) => answeredAt(b) - answeredAt(a) || a.n - b.n);
 // The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Open on load, each card folded.
 // lines: the closed items that stay as one line, and read: the lines behind Show N read items.
 function answeredEl(items, place, lines, read) {
-  const on = state.answeredOpen, all = [...items, ...lines], at = (it) => (it.status === "closed" ? Date.parse((lastOf(it) || {}).at) || closedAt(it) || 0 : Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0)));
+  const on = state.answeredOpen, all = [...items, ...lines], at = answeredAt;
   const stamps = all.map(at).filter((t) => t > 0), body = [], done = new Set();
-  // Newest answer first; a closed line with no answer sits at its close time.
-  all.slice().sort((a, b) => at(b) - at(a) || a.n - b.n).forEach((it) => { if (it.status === "closed") body.push(lineEl(it, false)); else if (!done.has(it.id)) place(items, it, done, body); });
+  answeredOrder(all).forEach((it) => { if (it.status === "closed") body.push(lineEl(it, false)); else if (!done.has(it.id)) place(items, it, done, body); });
   if (!all.length && read.length) body.push(h("p", { class: "allread" }, "All read."));
   body.push(...readItemsEls(read));
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: all.filter((it) => !itemDropped(it)).length, open: on, listId: "ab", btnId: "b-answered", body,
@@ -2198,7 +2207,7 @@ function renderRail() {
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
   // The Answered row: the section's chips. Its count is the section's size, and a press opens a folded section before it jumps.
-  const ans = [...by.answered, ...shownLines()].filter((it) => !itemDropped(it));
+  const ans = answeredOrder([...by.answered, ...shownLines()]).filter((it) => !itemDropped(it));
   if (ans.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-answered", "aria-label": ans.length + " answered", onclick: (e) => { e.preventDefault(); state.answeredOpen = true; render(); jump("tier-answered"); } }, glyph("done"), "Answered", h("span", { class: "ct" }, String(ans.length))), chipRow(ans)));
   // One row for the rulings: no chips, so a ruling never counts as open or sent.
   if (state.rulings.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-ruled", "aria-label": state.rulings.length + (state.rulings.length === 1 ? " ruling" : " rulings") + ", Arbiter rulings", onclick: (e) => { e.preventDefault(); state.rulingsOpen = true; render(); jump("tier-ruled"); } }, glyph("ruled"), "Arbiter rulings", h("span", { class: "ct" }, String(state.rulings.length)))));
@@ -2751,7 +2760,8 @@ const markPress = (cls, id, label, verb, busy, busyWord, onclick, extra) => h("b
   h("span", {}, busy ? busyWord : verb), h("span", { class: "sz", "aria-hidden": "true" }, busyWord));
 const askPress = (cls, id, k, t, verb, busy, busyWord, onclick) => markPress(cls, id + k, askShort(t.text), verb, busy, busyWord, onclick, { "data-ask": k });
 const gonePress = (k, kind) => { const g = askState.gone[k]; return !!g && g.kind === kind && g.state === "busy"; };
-const restoreBtn = (t) => { const k = t.id; return askPress("alt restore", "res-", k, t, "Mark unread", gonePress(k, "restore"), "Unmarking…", () => restoreAsk(k)); };
+// quiet: the row is in the read list, where Mark unread draws as the item read list's does (itemPress). On a Marked read line it is the loud press.
+const restoreBtn = (t, quiet) => { const k = t.id; return askPress(quiet ? "quiet restore" : "alt restore", "res-", k, t, "Mark unread", gonePress(k, "restore"), "Unmarking…", () => restoreAsk(k)); };
 // Off while a record in the thread waits: a read thread would hide the answer the owner waits for. Off, not absent, so the reason sits beside it.
 function dismissBtns(t) {
   if (!askHasHome(t)) return [];
@@ -2803,7 +2813,7 @@ function askReplyEnd(t, dl) {
   const k = t.id;
   return h("div", { class: "replyend", "data-end": k }, askRowLine(t), repOf(k).open ? replyForm(k)
     : h("div", { class: "endrow" }, h("button", { class: "btn alt replybtn", type: "button", id: "reply-" + k, "aria-expanded": "false", "aria-controls": "rf-" + k, "data-ask": k, onclick: () => openReply(k) }, "Reply"),
-      ...(dl && askRead(t) ? [restoreBtn(t)] : dismissBtns(t))));
+      ...(dl && askRead(t) ? [restoreBtn(t, true)] : dismissBtns(t))));
 }
 // dl: the row is drawn in the read list. It stays folded until pressed, and its side press is Mark unread.
 function askItem(t, dl) {
@@ -2819,7 +2829,7 @@ function askItem(t, dl) {
     // A fold changes only at a load or a press, so a thread with replies keeps the fold it first drew, and a new answer to a reply does not unfold it.
     if (t.reps.length && !(k in s.open) && !dl) s.open[k] = false;
     // A row with a waiting reply has no Mark read: it has no room for the reason, and Show answer leads to it.
-    const side = dl ? (askRead(t) ? restoreBtn(t) : dismissBtns(t)[0] || null) : askWaitsIn(t) ? null : dismissBtns(t)[0] || null;
+    const side = dl ? (askRead(t) ? restoreBtn(t, true) : dismissBtns(t)[0] || null) : askWaitsIn(t) ? null : dismissBtns(t)[0] || null;
     // A routed ask is one line: its text, its home, a new-answer mark, and the short reply. The row is the press, and Mark read sits beside it.
     const row = routed
       ? h("button", { class: "frow", type: "button", "aria-expanded": "false", "data-ask": k, onclick: press }, glyph("done"),
