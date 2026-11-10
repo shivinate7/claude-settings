@@ -778,11 +778,10 @@ def xcodebuild_runs(text, make=False):
     """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
     ends at a COMMAND_MARKS mark or the line end. A `$(` or a backtick opens an inner command and keeps the outer group
     aside, restored at the close, so an action after a substitution in an argument stays in the run. A Make recipe
-    prefix (`@`, `-`, `+`) is no part of the name, and `${NAME:-xcodebuild}` names xcodebuild. `make` reads each line as
-    a Make recipe line."""
+    prefix (`@`, `-`, `+`) is no part of the name."""
     runs = []
 
-    def end(group):
+    def end(group):  # `${NAME:-xcodebuild}` names xcodebuild; `make` reads each line as a Make recipe line
         names = [PARAM_DEFAULT.sub(r"\1", w.lstrip(MAKE_RECIPE_PREFIXES)).rsplit("/", 1)[-1] for w in group]
         if "xcodebuild" in names and not PRINTERS & set(names[:names.index("xcodebuild")]):
             runs.append(group[names.index("xcodebuild") + 1:])
