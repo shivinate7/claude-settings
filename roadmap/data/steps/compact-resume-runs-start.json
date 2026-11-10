@@ -1,10 +1,10 @@
 {
   "title": "A session resumed after a compaction runs session_start.sh, so it learns its hooks lag main",
   "phase": "now",
-  "status": "blocked",
+  "status": "ready",
   "order": 935,
   "owner": "owner",
   "why": "Coordinator 17:17 CST Nov 9: settings.json runs hooks/session_start.sh only on the SessionStart matcher `startup|resume`. A compaction resume does not match, so #2473's hooks-lag line never prints on the path where today's stale-hook incident happened (lanes with hooks older than #1521 could not do mixed merges).",
-  "note": "Waits on the owner: page item 466 (compact-resume-matcher). Change: matcher `startup|resume` becomes `startup|resume|compact`. Cost: one extra hook run per compaction, 2 git reads and 1 bounded fetch. A settings.json edit needs the owner's word; a lane builds it and proves the pick with page_grant.py. Related: live-hooks-lag-named (#2473).",
-  "updatedAt": "2026-11-09T17:18:00-06:00"
+  "note": "Waits on the owner: page item 466 (compact-resume-matcher). Change: matcher `startup|resume` becomes `startup|resume|compact`. Cost: one extra hook run per compaction, 2 git reads and 1 bounded fetch. A settings.json edit needs the owner's word; a lane builds it and proves the pick with page_grant.py. Related: live-hooks-lag-named (#2473). Owner picked 466 a (19:22 CST Nov 9): add `compact` to the matcher. Waits for the coordinator to start a lane; item 466 stays open until that lane proves the pick with page_grant.py.",
+  "updatedAt": "2026-11-09T19:23:00-06:00"
 }
