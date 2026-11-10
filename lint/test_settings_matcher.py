@@ -583,5 +583,56 @@ class JudgeModelRows(unittest.TestCase):
         self.assertTrue(any(g.startswith("Agent: table model") for g in table_gaps(self.text, wrong)))
 
 
+# The Mac session's artifact tools carry names the guards must see as the ArtifactData call (or the Artifact page
+# call) they stand for. Pinned here from the probe of roadmap step artifact-guard-matcher-names (owner paste of
+# 12:22 CST Nov 8), never read from hooks/shared_names.py, so a renamed constant cannot hide a missing matcher.
+MAC_DATA_NAMES = tuple("mcp__claude-artifacts__" + short for short in
+                       ("db_get", "db_list", "db_query", "db_write", "db_str_replace"))
+MAC_PAGE_NAME = "mcp__claude-artifacts__publish_files"
+
+
+def page_note_matchers():
+    """The matchers of the PostToolUse entries whose command runs local_time.py in its --page-note mode."""
+    entries = json.load(open(SETTINGS))["hooks"]["PostToolUse"]
+    return [e["matcher"] for e in entries
+            if any("local_time.py" in h.get("command", "") and "--page-note" in h.get("command", "")
+                   for h in e["hooks"])]
+
+
+class MacArtifactNames(unittest.TestCase):
+    def test_every_mac_data_name_reaches_the_guard(self):
+        # The guard judges a waiting-page write (set, update, batch, str_replace) and a read of the page's data.
+        matchers = guard_matchers()
+        self.assertTrue(matchers, "no guard.py entry in settings.json PreToolUse")
+        for tool in MAC_DATA_NAMES:
+            with self.subTest(tool=tool):
+                self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                                "no guard matcher covers %s: %r" % (tool, matchers))
+
+    def test_every_mac_data_name_reaches_call_judge(self):
+        # call_judge.py reviews a waiting-page item write with the model, so its matcher must see each data name.
+        matchers = [e["matcher"] for e, _hook in call_judge_entries()]
+        self.assertTrue(matchers, "no call_judge.py entry in settings.json PreToolUse")
+        for tool in MAC_DATA_NAMES:
+            with self.subTest(tool=tool):
+                self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                                "no call_judge matcher covers %s: %r" % (tool, matchers))
+
+    def test_every_mac_data_name_reaches_the_page_note(self):
+        # local_time.py --page-note saves the owner's note on a read of an answer, so its matcher must see each data name.
+        matchers = page_note_matchers()
+        self.assertTrue(matchers, "no local_time.py --page-note entry in settings.json PostToolUse")
+        for tool in MAC_DATA_NAMES:
+            with self.subTest(tool=tool):
+                self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                                "no page-note matcher covers %s: %r" % (tool, matchers))
+
+    def test_publish_files_reaches_the_page_check(self):
+        # publish_files is the Mac name of a page publish, so the guard's page check (the Artifact arm) must see it.
+        matchers = guard_matchers()
+        self.assertTrue(any(re.fullmatch(m, MAC_PAGE_NAME) for m in matchers),
+                        "no guard matcher covers %s: %r" % (MAC_PAGE_NAME, matchers))
+
+
 if __name__ == "__main__":
     unittest.main()
