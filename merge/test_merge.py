@@ -14061,27 +14061,39 @@ class ReviewFixAfterMainMerge(ReviewEnv):
     """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
     refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose first parent is that
     head and whose second parent is on main. Only that shape gets a fix check. A plain commit on the head, a merge with a commit off main, or a
-    merge whose first parent is not the fixed head, is refused. The parents come from the commit read and the on-main test from the compare
-    read, both scripted by PullsHost."""
+    merge whose first parent is not the fixed head, is refused. The newest record's fix check must have passed: a fix check after a FAIL one
+    is refused, whatever the merge. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
 
     PRE_FIX_HEAD = "1e" * 20  # the head the newest record's fix diff started from
     MAIN_TIP = "3f" * 20  # a commit on main, the second parent of the merge
     SIDE = "7c" * 20  # a commit that is not on main
     ON_MAIN = {(MAIN_TIP, "main"): "ahead", ("main", MAIN_TIP): "behind"}  # the compares that say MAIN_TIP is on main
     OFF_MAIN = {(SIDE, "main"): "diverged", ("main", SIDE): "diverged"}
+    FAIL_ROUND = ("Round 1: reviewer, sonnet, FAIL",)  # a first round that failed, as a record line
+    FAIL_ROUND_VALUE = "1:reviewer:sonnet:FAIL"  # the same round as a --round value
 
-    def newest_record(self):
-        """The newest earlier record: its head is the fixed head, and its fix check line starts from PRE_FIX_HEAD."""
-        return review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.PRE_FIX_HEAD),)))
+    def newest_record(self, verdict="PASS", rounds=REVIEW_PASS):
+        """The newest earlier record: its head is the fixed head, and its fix check line starts from PRE_FIX_HEAD. `verdict` and `rounds` set
+        the fix check's verdict and the round lines. The defaults are the passed fix of (a) to (d)."""
+        return review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=rounds, fix=(fix_check_line(verdict=verdict, head=self.PRE_FIX_HEAD),)))
 
-    def fixed_host(self, parents, compares):
+    def fixed_host(self, parents, compares, verdict="PASS", rounds=REVIEW_PASS):
         """The pull request at REVIEW_HEAD, whose commit has `parents`, with the newest record and the compares given."""
-        return self.record_host(self.newest_record(), commits={REVIEW_HEAD: parents}, compares=compares)
+        return self.record_host(self.newest_record(verdict, rounds), commits={REVIEW_HEAD: parents}, compares=compares)
 
-    def fix_from_fixed_head(self, host):
-        """--review-record of the live head, with a fix check from the newest record's head."""
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS,
+    def fix_from_fixed_head(self, host, round_value="1:reviewer:sonnet:PASS"):
+        """--review-record of the live head, with a fix check from the newest record's head. `round_value` is the --round of the posted record."""
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS[:-1], round_value,
                              "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+
+    def assert_listed_done(self, earlier, body, why=""):
+        """`merge --reviewed` lists pull request 7 at REVIEW_HEAD as done, with a why that starts with `why`, once the posted record `body`
+        follows the `earlier` record."""
+        listed = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[earlier, review_comment(2, 7, body)])
+        rc, out, err = self.run_args("--reviewed", host=listed)
+        self.assertEqual(rc, 0, "merge --reviewed refused the listing:\n" + out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: {re.escape(why)}",
+                         "merge --reviewed does not read the new fix record as done, with that why")
 
     def test_a_fix_check_after_a_merge_of_main_is_accepted_and_reads_done(self):
         rc, out, err = self.fix_from_fixed_head(self.fixed_host([REVIEW_OLD_HEAD, self.MAIN_TIP], self.ON_MAIN))
@@ -14089,10 +14101,7 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         body = posted_body(self, out)
         self.assertEqual(parse_text(self, body)["head"], REVIEW_HEAD, "the printed record names the wrong head")
         self.assertEqual(parse_text(self, body)["fix"], REVIEW_FIX_PASS, "the printed record lacks the fix check")
-        listed = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, comments=[self.newest_record(), review_comment(2, 7, body)])
-        rc, out, err = self.run_args("--reviewed", host=listed)
-        self.assertEqual(rc, 0, "merge --reviewed refused the listing:\n" + out + err)
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "merge --reviewed does not read the new fix record as done")
+        self.assert_listed_done(self.newest_record(), body)
 
     def test_b_a_fix_check_after_a_plain_commit_on_the_fixed_head_is_refused(self):
         host = self.fixed_host([REVIEW_OLD_HEAD], {})
@@ -14123,6 +14132,27 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assertEqual(rc, 2, "a fix check after a merge of main whose first parent is not the fixed head was not refused:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
         self.assertNotIn("Traceback", err)
+
+    def test_e_a_fix_check_after_a_merge_of_main_is_refused_when_the_newest_fix_check_failed(self):
+        # the same head, parents and compares as (a): only the newest record's fix check verdict differs, so (a) is the green control
+        host = self.fixed_host([REVIEW_OLD_HEAD, self.MAIN_TIP], self.ON_MAIN, verdict="FAIL")
+        self.assertEqual(parse_text(self, host.comments[0]["body"])["fix"][3], "FAIL", "the fixture's newest fix check is not FAIL")
+        self.assertEqual(host.commits[REVIEW_HEAD], [REVIEW_OLD_HEAD, self.MAIN_TIP], "the fixture's head is not a merge of the fixed head and the main commit")
+        self.assertEqual(host.compares.get((self.MAIN_TIP, "main")), "ahead", "the fixture's second parent is not on main")
+        rc, out, err = self.fix_from_fixed_head(host)
+        self.assertEqual(rc, 2, "a fix check after a merge of main was accepted though the newest record's fix check is FAIL:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_f_a_merge_fix_check_posted_over_a_failed_round_reads_the_pr_as_done(self):
+        # the posted round failed, so only its fix check PASS makes the pull request done: no fresh full review is owed
+        earlier = self.newest_record(rounds=self.FAIL_ROUND)
+        host = self.fixed_host([REVIEW_OLD_HEAD, self.MAIN_TIP], self.ON_MAIN, rounds=self.FAIL_ROUND)
+        rc, out, err = self.fix_from_fixed_head(host, round_value=self.FAIL_ROUND_VALUE)
+        self.assertEqual(rc, 0, "a fix check after a merge of main was refused over a failed round:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["fix"], REVIEW_FIX_PASS, "the printed record lacks the passed fix check")
+        self.assert_listed_done(earlier, body, why="round 1 is FAIL, and the fix check passed")
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
