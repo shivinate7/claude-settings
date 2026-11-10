@@ -1196,6 +1196,27 @@ def stale_drafts(work):
     return out
 
 
+WAIT_ON_PULL = re.compile(r"\b(?:after|waits?\s+on|waiting\s+for|blocked\s+on|once|until|when)\s+#(\d+)\b", re.I)
+
+
+def waits_on_closed_pulls(open_, work):
+    """Entries `step (#N)` for each open step whose title, why or note waits on a pull request #N that the live file
+    shows closed and not merged (a landedPulls row with merged false, and no pulls row or merged row for N), or one
+    unknown entry. The live file holds only the closed pulls the publisher reads, so a PR closed earlier is not seen."""
+    why = pair_why(work)
+    if why:
+        return [why]
+    dead = {r["number"] for r in work["landedPulls"] if r.get("merged") is False}
+    dead -= {r["number"] for r in work["landedPulls"] if r.get("merged") is True}
+    dead -= {p["number"] for p in work["pulls"]}
+    out = []
+    for k, d in open_:
+        text = " ".join(str(d.get(f) or "") for f in ("title", "why", "note"))
+        for n in sorted({int(m) for m in WAIT_ON_PULL.findall(text)} & dead):
+            out.append("%s (#%d)" % (k, n))
+    return out
+
+
 def lane_live(work, lane, item=False):
     """True when `lane` has live work: a live session of this repo carries cs-step:<lane>, or an open pull's branch
     is `<lane>` or `lane/<lane>`. An item's lane (`item=True`, a waiting-page item's answer route) is also live on
@@ -1621,6 +1642,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", [])),
+            ("open step waits on a closed unmerged PR", waits_on_closed_pulls(open_, work)),
             ("done without check", done_without_check(steps))]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
