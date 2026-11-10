@@ -1252,9 +1252,11 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     tokenizes to `cd`/`git` as its OWN command word (via `resolve_command`, which already steps
     over wrappers and loop keywords) counts. A segment that fails to tokenize (an unmatched
     quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. The FIRST
-    segment with a `git -C` wins over every `cd` and `env -C` move, and its relative folder reads
-    against the shell cwd, not against the folder an earlier `cd` left. That first-wins reading of
-    `git -C` is kept as the owner ruled.
+    segment with a `git -C` wins over every `cd` and over an env folder (only an env folder in its
+    own segment is kept, as its base), and its relative folder reads against the shell cwd, not
+    against the folder an earlier `cd` left. Without a `git -C`, an env folder is used only when
+    every git segment carries one (below); otherwise the last `cd`, else the cwd. That first-wins
+    reading of `git -C` is kept as the owner ruled.
 
     AN `env -C` FOLDER MOVES ONLY ITS OWN PROGRAM, NOT THE SHELL: a later bare `git` in the command
     still runs in the shell's folder. So the env folder is read only when EVERY git segment carries
