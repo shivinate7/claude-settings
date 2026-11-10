@@ -1,0 +1,12 @@
+{
+  "title": "One cull lane fixes or deletes each guard or check with a recorded wrong refusal",
+  "phase": "now",
+  "status": "todo",
+  "order": 1023,
+  "owner": "triage",
+  "why": "Owner ruling R5, 15:04 CST Nov 10 (\"option e works for now with a revisit maybe to threshold lanes if it turns out to be problematic\", relayed by the retrospective session).",
+  "note": "Source: the false alarm lines in docs/debts/notes.md (about 60, retrospective count). For each guard or check, fix or delete, whichever costs less. After the cull, wrong refusals are notes only; revisit threshold lanes (3 recorded wrong refusals gets its own lane) only if they become a problem. Record: decision cull-rules (branch cull-false-alarms-once). Restart plan stage 3 step 6 sets when it runs.",
+  "updatedAt": "2026-11-10T15:08:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
