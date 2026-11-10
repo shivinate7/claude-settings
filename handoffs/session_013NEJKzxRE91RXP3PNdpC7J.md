@@ -1,0 +1,3 @@
+# lane: grant-reaches-lanes-build (session_013NEJKzxRE91RXP3PNdpC7J), received 09:52 CST 2026-11-10, kind KEEP
+
+KEEP: lane grant-reaches-lanes-build. Nothing unpushed (all 7 worktrees clean, every commit is on origin). PR #1350 (spawn grant guard, head d0927357) and stacked PR #2214 (its round-3 notes, head e896fc1e, "Merge after: #1350") both have review records posted and were released to batch runner 8 (session_013NEJL2vsmyKzJm8jUDt6za) on 2026-11-08 12:41 CST; they only wait for its merge. After the merge, the owner's test (page item 221) is left: he types `grant grant-reaches-lanes spawn 15m` in the coordinator from web and phone, and this lane reads both events with get_event.
