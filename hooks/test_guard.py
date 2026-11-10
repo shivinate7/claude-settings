@@ -25371,6 +25371,24 @@ add("rework off page: a batch with an open reworked item is denied", "deny", "re
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
     writes=[{"op": "set", "collection": "items", "doc_id": RW_DOC, "data": rw_item()}])
 
+# Roadmap step artifact-guard-matcher-names, review finding F1. A Mac db_str_replace carries its replacement text
+# under a key that shared_names does not map, so the rework phrase under that key is read by no judge. The ArtifactData
+# str_replace of the same text is the control; the Mac call under `new_str` is the second control (the key the guard
+# reads today). The `new` and `replacement` keys are the reds. A call with no text, or text that drops the phrase, is allowed.
+MAC_DB_STR_REPLACE = "mcp__claude-artifacts__db_str_replace"
+add("mac db_str_replace: rework text under key new_str is denied", "deny", "rework-off-page",
+    tool=MAC_DB_STR_REPLACE, cwd=PQ_REPO, url=PQ_URL, path="items/" + RW_DOC, field="context", new_str=RW_TEXT)
+add("mac db_str_replace: rework text under key new is denied", "deny", "rework-off-page",
+    tool=MAC_DB_STR_REPLACE, cwd=PQ_REPO, url=PQ_URL, path="items/" + RW_DOC, field="context", new=RW_TEXT)
+add("mac db_str_replace: rework text under key replacement is denied", "deny", "rework-off-page",
+    tool=MAC_DB_STR_REPLACE, cwd=PQ_REPO, url=PQ_URL, path="items/" + RW_DOC, field="context",
+    replacement=RW_TEXT)
+add("mac db_str_replace: a call with no text is allowed", "allow",
+    tool=MAC_DB_STR_REPLACE, cwd=PQ_REPO, url=PQ_URL, path="items/" + RW_DOC, field="context")
+add("mac db_str_replace: new text that drops the phrase is allowed", "allow",
+    tool=MAC_DB_STR_REPLACE, cwd=PQ_REPO, url=PQ_URL, path="items/" + RW_DOC, field="context",
+    new="Options are ready.")
+
 
 # --------------------------------------------------------------------------- the reason hygiene
 #

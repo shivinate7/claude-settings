@@ -627,6 +627,35 @@ def case_normalize_db_str_replace_takes_the_item_and_field():
         "action, collection, doc_id, field %r, want str_replace items it-1 context" % (got,))
 
 
+def case_normalize_db_str_replace_keeps_unknown_text_in_new_str():
+    # Review finding F1: a Mac db_str_replace names its replacement text under a key shared_names does not map. Every
+    # unknown top-level string value (not path, field or url) reaches new_str, conservatively, so a judge reads it. Three
+    # unknown keys are used, so the rule is pinned for any key, not only `new` or `replacement`.
+    texts = ("RWTEXT_NEW_KEY", "RWTEXT_REPLACEMENT_KEY", "RWTEXT_OTHER_KEY")
+    tool_input = {"path": "items/it-1", "field": "context", "url": "https://claude.ai/artifact/x1",
+                  "new": texts[0], "replacement": texts[1], "text": texts[2]}
+    out, note = _expect_normalised(MAC_PREFIX + "db_str_replace", dict(tool_input), "ArtifactData")
+    if out is None:
+        return False, note
+    new_str = out.get("new_str")
+    if not isinstance(new_str, str):
+        return False, "new_str is %r, want the unknown text as one string" % (new_str,)
+    missing = [t for t in texts if t not in new_str]
+    leaked = [tool_input[k] for k in ("path", "field", "url") if tool_input[k] in new_str]
+    return not missing and not leaked, (
+        "new_str %r lacks the unknown text %r and carries path, field or url text %r" % (new_str, missing, leaked))
+
+
+def case_normalize_db_str_replace_with_no_text_has_no_new_str():
+    # The control beside the case above: a call that carries no text gives no new text to judge.
+    out, note = _expect_normalised(MAC_PREFIX + "db_str_replace", {"path": "items/it-1", "field": "context"},
+                                   "ArtifactData")
+    if out is None:
+        return False, note
+    got = out.get("new_str")
+    return got in (None, ""), "new_str is %r, want none or empty for a call with no text" % (got,)
+
+
 def case_normalize_db_query_and_list_take_a_bare_collection():
     # The key that carries the bare collection is not named in item 440; `collection` is the ArtifactData key
     # the guards read, so the case pins that the collection reaches it.
@@ -678,6 +707,10 @@ MAC_CASES = [
      case_normalize_db_get_splits_the_path),
     ("(v) a db_str_replace takes its item and field as a str_replace",
      case_normalize_db_str_replace_takes_the_item_and_field),
+    ("(v2) a db_str_replace keeps every unknown top-level text in new_str, and no path, field or url text",
+     case_normalize_db_str_replace_keeps_unknown_text_in_new_str),
+    ("(v3) a db_str_replace with no text has no new_str",
+     case_normalize_db_str_replace_with_no_text_has_no_new_str),
     ("(w) db_query and db_list take a bare collection as a query and a list",
      case_normalize_db_query_and_list_take_a_bare_collection),
     ("(x) a publish_files call is the Artifact page check",
