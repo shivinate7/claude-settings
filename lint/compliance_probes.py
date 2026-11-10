@@ -776,9 +776,10 @@ def shell_words(line, make=False):
 
 def xcodebuild_runs(text, make=False):
     """The arguments of each `xcodebuild` command in `text` (comments already cut), one list per command. A command
-    ends at a COMMAND_MARKS mark or the line end. A substitution is a command of its own: the words after it join the
-    command that holds it. A Make recipe prefix (`@`, `-`, `+`) is no part of the name, and `${NAME:-xcodebuild}` names
-    xcodebuild. `make` reads each line as a Make recipe line."""
+    ends at a COMMAND_MARKS mark or the line end. A `$(` or a backtick opens an inner command and keeps the outer group
+    aside, restored at the close, so an action after a substitution in an argument stays in the run. A Make recipe
+    prefix (`@`, `-`, `+`) is no part of the name, and `${NAME:-xcodebuild}` names xcodebuild. `make` reads each line as
+    a Make recipe line."""
     runs = []
 
     def end(group):
@@ -787,22 +788,23 @@ def xcodebuild_runs(text, make=False):
             runs.append(group[names.index("xcodebuild") + 1:])
 
     for line in text.splitlines():
-        group, outer = [], []
-        for word in [] if STEP_NAME.match(line) else shell_words(line, make) + [";"]:
-            if word not in COMMAND_MARKS:
-                group.append(word)
-                continue
-            if word == "$(":
-                outer.append(group)
-            else:
+        group, outer = [], []  # `outer`: (opener, the group set aside at it), innermost last
+        for word in [] if STEP_NAME.match(line) else shell_words(line, make):
+            if word in ("$(", "(") or (word == "`" and not (outer and outer[-1][0] == "`")):
+                outer.append((word, group))
+                group = []
+            elif word in (")", "`"):
                 end(group)
-                if word == "(":
-                    outer.append(None)
-            group = []
-            if word == ")" and outer:
-                group = outer.pop() or []
-        while outer:  # a substitution left open at the line end
-            end(outer.pop() or [])
+                opener, held = outer.pop() if outer else (None, [])
+                group = held if opener in ("$(", "`") else []
+            elif word in COMMAND_MARKS:
+                end(group)
+                group = []
+            else:
+                group.append(word)
+        end(group)
+        for _opener, held in reversed(outer):  # a substitution left open at the line end
+            end(held)
     return runs
 
 

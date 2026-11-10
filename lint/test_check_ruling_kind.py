@@ -486,6 +486,24 @@ class RulingKindTests(unittest.TestCase):
                 self.assertNotEqual(rc, 0, out)
                 self.assertNotIn("Traceback", out)
 
+    def test_zero_record_run_prints_its_count_and_base(self):
+        # The change holds no record, so the diff against main is empty. A zero is still a check that ran: the run
+        # says how many records it checked and against which base, and it still exits 0, as CI needs.
+        self.commit_base()
+        rc, out = self.lint("--base", "main")
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r"\b0\b", "a zero-record run printed no count: %r" % out)
+        self.assertIn("main", out, "a zero-record run did not name its base: %r" % out)
+
+    def test_one_record_run_prints_read_one_record(self):
+        # One record in the diff against main: the count line reads 1, so the count is not only a zero.
+        self.commit_base()
+        self.put(REC, record(BUILD_OK))
+        self.commit_change()
+        rc, out = self.lint("--base", "main")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("read 1 record(s)", out, "a one-record run did not print its count: %r" % out)
+
 
 if __name__ == "__main__":
     unittest.main()
