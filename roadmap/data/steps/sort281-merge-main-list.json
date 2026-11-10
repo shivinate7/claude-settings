@@ -5,8 +5,8 @@
   "order": 1035,
   "owner": "triage",
   "why": "Owner 15:31 CST Nov 10 (chat, relayed by the coordinator): match the 281 open PRs that cite no step to steps, bundle them, and judge whether each is still wanted and makes sense to land. Coordinator 15:59 CST: one step per ledger-only bundle, plus one for the wanted merge-main list, queued for restart stage 3.",
-  "note": "Order: tmpdir #1517 then #1826; roots #1811 #1848 #1900 #1995 #2071 (check #1848's session-tiers edits against the glossary rulings); #1552 then #1789 (needs a new base for closed #1780); #2527; #2119; #2226 (its step reads done, its change is not on main); #2171 after #2052; #1618 after #1555; #1631 after #1314; #2087 after #1642 and #1713; #1632. Follow-ups ride their base PR: #1758 #2115 after #1722; #1881 after #1839; #1951 after #1892; #1938 after #1836; #2129 #2167 after #1585; #2300 after #1969. Source: triage 281 sort (Sonnet readers, 15:40-15:56 CST Nov 10; main 2d6f67f7c). Each PR conflicts with main: merge main (no rebase), then the review its diff owes.",
-  "updatedAt": "2026-11-10T15:56:00-06:00",
+  "note": "Order: tmpdir #1517 then #1826; roots #1811 #1848 #1900 #1995 #2071 (check #1848's session-tiers edits against the glossary rulings); #1552 then #1789 (needs a new base for closed #1780); #2527; #2119; #2226 (its step reads done, its change is not on main); #2171 after #2052; #1618 after #1555; #1631 after #1314; #2087 after #1642 and #1713; #1632. Follow-ups ride their base PR: #1758 #2115 after #1722; #1881 after #1839; #1951 after #1892; #1938 after #1836; #2129 #2167 after #1585; #2300 after #1969. Source: triage 281 sort (Sonnet readers, 15:40-15:56 CST Nov 10; main 2d6f67f7c). Each PR conflicts with main: merge main (no rebase), then the review its diff owes. Added 16:06 CST: #1509 then #1598 then #1647 (frozen-path script-file reads). Sonnet audit ran their tests on main 2d6f67f7c: 17 of #1598's refusals and all of #1647's glued-input cases are still allowed on main, so both are wanted; #1598 carries #1509's commits.",
+  "updatedAt": "2026-11-10T16:06:00-06:00",
   "lane": "",
   "blockedBy": []
 }
