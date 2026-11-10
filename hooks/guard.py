@@ -315,18 +315,22 @@ Other tools, in `judge` order:
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
   handoff-checked-stamp
-                       deny. A write to a session handoff (as handoff-sections judges it) that changes a premise's
-                       `Checked` value, a new line included, unless the premise has evidence in the session's
-                       transcript since its last `compact_boundary` (none: the whole transcript): a main-session
-                       tool_use whose input holds a token of the premise's `Source:` (a path, a 7+ hex hash, a
-                       backticked command, a record slug); with no token, any one read tool_use. A Read, Write or
-                       Edit of the handoff, a call that starts an agent or sends a message, and any record of an
-                       agent (isSidechain or agent_id), is no evidence. An unchanged stamp, `Checked never`, a `ruling` premise and a handoff with no
-                       premise lines pass. The reason gives one remedy line per unbacked premise, naming its token
-                       or "any read". No transcript_path, an unreadable transcript, handoff or prompt, and a failed
-                       import allow. An override lifts it. Cost: reads on demand inside this call, the transcript
-                       once and only when a stamp changed, one more small read of the prompt, and for a Write the handoff on disk; no new log, hook,
-                       file or process start. (precompact-handoff, item 15)
+                       deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
+                       that changes a premise's stamp (the line's text from its last `Checked` or `Re-checked`
+                       word, so a respelled, dropped or new stamp is a change), unless the session's transcript
+                       backs it. A premise is judged by its kind before the write; a new line by its own kind.
+                       Evidence: a successful, read-type, main-session tool_use after the last
+                       `compact_boundary` (none: the whole transcript) whose input holds a token of the
+                       premise's `Source:` (a path, a 7+ hex hash, a backticked command, a record slug); with
+                       no token, any one read-type call. No evidence: a Write or Edit of any file, an Agent
+                       call, a send or PR-write tool, a call that failed, any agent record (isSidechain or
+                       agent_id), and the handoff itself. An unchanged stamp, `Checked never`, a `ruling`
+                       premise and a handoff with no premise lines pass. The reason gives one remedy line per
+                       unbacked premise, naming its token or "any read". No transcript_path, an unreadable
+                       transcript, handoff or prompt, and a failed import allow. An override lifts it. Cost:
+                       reads on demand inside this call, the transcript once and only when a stamp changed,
+                       one more small read of the prompt, and for a Write the handoff on disk; no new log,
+                       hook, file or process start. (precompact-handoff, item 15)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
