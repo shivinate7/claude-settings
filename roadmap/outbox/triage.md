@@ -351,3 +351,8 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - pfr-fixed-not-cleared (#1538): a later plain record does not clear the Fix check flag.
 - pfr-non-head-push-refused (#1538): a delete, --tags or archive push is refused while a report is unrecorded.
 - pfr-assign-subst-create (#2359): `VAR=$(cat f) gh pr create` reads as no PR.
+- acfs-bare-name-scope (#2334 agent-commit-file-scope round 3, coordinator 01:17 CST Nov 10): a bare name with no extension (Makefile, Dockerfile), or a single-word folder with no slash, names nothing in brief scope.
+- acfs-lockfile-refused (#2334): a lockfile is not a generated page, so package.json named alone refuses package-lock.json.
+- acfs-merge-route-untested (#2334): no test pins the merge route with brief scope.
+- acfs-pointer-macos-scratch (#2334): the pointer read allows only the checkout or the temp folder; the macOS scratchpad is unchecked (fails open).
+- gh-write-repo-flag-release (#2462 gh-write-repo-flag-gap round 3): the cloud guard does not judge `gh release|repo|run -R o/r` writes (same as main).
