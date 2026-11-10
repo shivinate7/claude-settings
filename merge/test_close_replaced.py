@@ -306,9 +306,9 @@ class ReadCost(CloseEnv):
     """The gh reads a run makes, counted at the seam (PullsHost.gh_calls). A reopen candidate adds at most two reads: pulls/N, and pulls/R
     when R is closed. An open R's body is in the open list, so it adds none."""
 
-    def quiet(self, closed=(), extra_comments=()):
-        """-> the gh routes of a run over open #5 (done) and #6 (no record), with no candidate unless `closed` and `extra_comments` give one."""
-        host = closed_host("o/alpha", pulls=[named_pull(5, head_of(5)), named_pull(6, head_of(6))],
+    def quiet(self, closed=(), extra_comments=(), body6=""):
+        """-> the gh routes of a run over open #5 (done) and #6 (no record, body `body6`), with no candidate unless `closed` and `extra_comments` give one."""
+        host = closed_host("o/alpha", pulls=[named_pull(5, head_of(5)), named_pull(6, head_of(6), body=body6)],
                            comments=[record_of(5, head_of(5)), *extra_comments], closed=closed, check_rows={head_of(5): green()}, count_gh=True)
         rc, out, err = self.run_args("--reviewed", "--root", self.alpha, hosts={self.alpha: host})
         self.assertEqual(rc, 0, out + err)
@@ -320,6 +320,11 @@ class ReadCost(CloseEnv):
         cand = self.quiet(closed=[closed_pull(4, head_of(4)), closed_pull(7, head_of(7))], extra_comments=[review_comment(90, 4, "Replaced by #7")])
         self.assertEqual(cand - base, collections.Counter({"pulls/4": 1, "pulls/7": 1}),
                          "a closed candidate whose replacer is closed: want exactly two reads, pulls/4 and pulls/7")
+        # A replacement line judges N from the open list: a body naming a closed PR, or an unknown one, reads nothing more.
+        for body in ("Replaces #2", "Replaces #99"):
+            with self.subTest(body=body):
+                named = self.quiet(closed=[closed_pull(2, head_of(2))], body6=body)
+                self.assertEqual(named - base, collections.Counter(), f"a body `{body}` read a pull request by number")
 
     def test_an_open_replacer_candidate_adds_one_read(self):
         base = self.quiet()
