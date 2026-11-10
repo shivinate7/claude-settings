@@ -141,7 +141,7 @@ repo has nothing to work in. A lane with no model starts on the coordinator's mo
 passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it.
 Known gaps: a lane tag set after the start is not judged, and a lane tag sent to `start_session` is not
 judged (both inherited from the lane effort pin and the lane repo tag). The rule checks that a model is
-present, not which model.
+present, not which model. Guard rule `agent-no-remote-tools` now also refuses an agent's `start_session`; the tag guards stay `create_session`-only because `start_session` has no tags field (owner, 2026-11-10 14:36 CST).
 Kind of risk: likely. Landed 2026-11-08.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
