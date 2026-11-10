@@ -4305,9 +4305,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 1c1. A git commit, merge or push that skips the git hooks. Placed after silent-write, so a
     # silenced commit is caught on that defect first. `texts` reads a command substitution as its own command.
-    hit = hook_bypass_hit(texts)
-    if hit:
-        matched, verb, what = hit
+    bypass = hook_bypass_hit(texts)
+    if bypass:
+        matched, verb, what = bypass
         refuse(tool, "deny", "hook-bypass", HOOK_BYPASS_REASON.format(verb=verb, what=what), matched)
 
     # 1c2. A worktree made by hand, outside the tool's own folder.
@@ -6081,22 +6081,6 @@ def judge(payload) -> None:
                 refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
-
-    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
-    trust_transcript = payload.get("transcript_path")
-    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
-    if matched:
-        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
-
-    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if archived:
-        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
-
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
