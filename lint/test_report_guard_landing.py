@@ -270,5 +270,21 @@ class LandingToolTests(unittest.TestCase):
                 self.assert_quiet([("Bash", {"command": command})], command)
 
 
+    def test_lt_green_api_request_blob_copy_of_a_landing_call_passes(self):
+        # Catches: a resumed session's transcript holds `api-request-blob` records, copies of earlier calls with no
+        # timestamp. Read as this turn's calls, a copy of an old `git commit` lands a turn that ran nothing, so a quiet
+        # turn is blocked for a report. Only a real assistant record is a call.
+        self.assert_scope(WITNESS_BASH)
+        blob = {"type": "api-request-blob", "hash": "h1", "sessionId": "s1",
+                "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "old1", "name": "Bash", "input": {"command": "git commit -m x"}}]}}
+        records = [trg.human("is there any reason not to archive"), blob, trg.assistant_text(QUIET_REPLY)]
+        path = trg.write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        run = trg.run_guard(trg.REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, "the guard crashed: %s" % run.stderr[-300:])
+        self.assertEqual(run.stdout.strip(), "", "a blob copy of an old commit landed a turn that ran nothing")
+
+
 if __name__ == "__main__":
     unittest.main()
