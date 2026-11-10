@@ -1670,11 +1670,16 @@ def interpreter_may_write(raw: str) -> bool:
 _PY_DATA_FLAGS = re.compile(r"^-[BbdEIiOPqSsuvx]+$")   # no -c, -m, -W or -X: those run code or take a value
 _PY_PLAIN_WORD = re.compile(r"^[\w./\\:~+-]+$")
 _PY_RUNNING_NAMES = frozenset((
-    "system", "popen", "subprocess", "run", "call", "check_call", "check_output", "getoutput", "getstatusoutput",
+    "system", "run", "call", "check_call", "check_output", "getoutput", "getstatusoutput",
     "eval", "compile", "__import__", "importlib", "import_module", "open", "getattr", "setattr", "globals",
-    "locals", "vars", "runpy", "ctypes", "pty", "fork", "forkpty", "startfile", "__builtins__"))
-_PY_RUNNING_PREFIXES = ("exec", "spawn", "posix_spawn", "write", "copy", "rename", "replace", "move", "symlink",
-                        "link", "unlink", "remove", "rmtree")
+    "locals", "vars", "runpy", "ctypes", "pty", "fork", "forkpty", "startfile", "__builtins__", "shutil",
+    # Exact names, never a prefix: `sys.stdout.write` and `sys.executable` print, `d.copy()` copies a dict.
+    "write_text", "write_bytes", "writelines", "writefile",
+    "copy2", "copyfile", "copyfileobj", "copytree", "copymode", "copystat",
+    "exec", "execfile", "execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe"))
+_PY_RUNNING_PREFIXES = ("spawn", "posix_spawn", "rename", "replace", "move", "symlink", "link", "unlink", "remove",
+                        "rmtree")
+_PY_RUNNING_PARTS = ("subprocess", "popen", "shell")   # asyncio.create_subprocess_shell, os.popen, Popen
 
 
 def _python_data_header(header: str) -> bool:
@@ -1707,7 +1712,8 @@ def _python_body_is_data(body: str) -> bool:
         else:
             continue
         for name in map(str.lower, names):
-            if name in _PY_RUNNING_NAMES or name.startswith(_PY_RUNNING_PREFIXES):
+            if (name in _PY_RUNNING_NAMES or name.startswith(_PY_RUNNING_PREFIXES)
+                    or any(part in name for part in _PY_RUNNING_PARTS)):
                 return False
     return True
 

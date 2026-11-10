@@ -526,7 +526,7 @@ def explained_path(tool: str, tool_input, cwd: str) -> str:
         hit = guard._shell_write_hit(guard.strip_heredoc_bodies(view), cwd, guard.is_settings_file)
         if not hit:
             return ""
-        if not guard.cap_change(view):
+        if not guard.cap_change(raw):
             return ""
         return resolve(hit, cwd)
     return ""
