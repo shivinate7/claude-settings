@@ -410,3 +410,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - encoded-retry-refusal-note-10min (lane encoded-retry): hooks/refusal_note.py: a harness refusal more than 10 minutes after the first, in the same turn, may leave no fresh row (orchestrator only).
 - encoded-retry-2439-question (lane encoded-retry): #2439's open question lists no cost for Narrow (it stores command text, which may hold a secret) and no recommendation.
 - encoded-retry-empty-ruling (lane encoded-retry): its debt keeps an empty "## Ruling / None yet." section.
+- other-checkout-own-worktree-cd (lane git-dash-c-other-checkout #2494, coordinator 01:42 CST Nov 10; possible false alarm, hit in normal work, no earlier record found): the other-checkout guard refused a `cd` into the lane's own worktree. Route: EnterWorktree with path. Becomes a debt on a second sighting.
+- brief-destructive-test-text (#2494; possible false alarm, no earlier record found): brief-destructive-git refuses a brief that holds a hard-reset command as test text. Becomes a debt on a second sighting.
+- (the third #2494 sighting, a push refused for a slug with "git" twice, is folded into step branch-slug-no-git as an incident.)
