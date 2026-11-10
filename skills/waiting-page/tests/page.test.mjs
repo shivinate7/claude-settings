@@ -6530,6 +6530,35 @@ test("merged_page.py --live hands its JSON to the build as the live file", () =>
   assert.ok(b.live && Array.isArray(b.live.threads), "the build did not read the live file: " + JSON.stringify(b.live ?? null));
 });
 
+// A live file with no threads list: the read stays valid, so the Status tab shows its open pull request and the read time.
+// Only the thread count is unknown, so the page never reads "No thread is open" for it (a made-up zero).
+test("the Status tab with a live file that has no threads list shows its pull request and the read as valid", async (t) => {
+  const live = { readAt: new Date().toISOString(), pulls: [{ number: 7, title: "Lane pull seven", branch: "lane-seven" }], branches: [], sessions: [] };
+  const page = await open(t, { pageHtml: mergedPage("--live", JSON.stringify(live)) }); if (!page) return;
+  await openStatus(page);
+  // The live work line is the one whose label reads Live work: the stalled band is also a line, and it may be a not-read one.
+  const line = page.locator(".livenone").filter({ hasText: "Live work" });
+  const shown = (await line.count()) ? (await line.first().textContent()).replace(/\s+/g, " ") : "(no live work line)";
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab draws live work as not read, not its pull request: " + shown);
+  const text = (await page.locator("details.live").textContent()).replace(/\s+/g, " ");
+  assert.match(text, /1 open pull request/, "the live work does not count the open pull request: " + text);
+  assert.match(text, /#7/, "the live work does not show open pull request #7: " + text);
+  assert.match(text, /Lane pull seven/, "the live work does not show the title of open pull request #7: " + text);
+  assert.doesNotMatch(text, /not read/, "the live work reads not read with its pulls and read valid: " + text);
+  assert.doesNotMatch(text, /No thread is open/, "the live work reads no threads, a made-up zero: " + text);
+});
+
+// The control for that case: a live file with no pulls list is not read, whatever its threads list holds.
+test("control: the Status tab with a live file that has no pulls list reads live work not read", async (t) => {
+  const live = { readAt: new Date().toISOString(), threads: [], branches: [], sessions: [] };
+  const page = await open(t, { pageHtml: mergedPage("--live", JSON.stringify(live)) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("details.live").count(), 0, "the Status tab draws live work with no pulls list as a panel, not as not read");
+  const line = page.locator(".livenone").filter({ hasText: "Live work" });
+  assert.equal(await line.count(), 1, "the Status tab draws no live work line for a live file with no pulls list");
+  assert.match((await line.textContent()).replace(/\s+/g, " "), /not read/, "the live work line does not say not read");
+});
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
