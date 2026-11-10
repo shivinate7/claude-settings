@@ -531,6 +531,163 @@ def case_guard_merge_binds_tag_prefixes_to_shared_names():
     return not problems, "; ".join(problems) or "both prefixes read the shared tags"
 
 
+# ------------------------------------------------------------------ the Mac artifact calls, normalised
+#
+# Roadmap step artifact-guard-matcher-names. A Mac session calls mcp__claude-artifacts__* tools whose inputs
+# differ from ArtifactData's. shared_names.normalize_data_call(tool_name, tool_input) returns the
+# (canonical name, ArtifactData-shaped input) that the guards judge. The input shapes are the owner's answer to
+# item 440 (12:28 CST Nov 8): db_write `ops` of {op, path, data, ifVersion} with op in set/merge/update/delete,
+# db_get and db_str_replace `path` as <collection>/<id>, db_query and db_list a bare collection, publish_files
+# `files` of {as, path}. The ArtifactData batch names its entries `writes`, each {op, collection, doc_id, data}.
+# A Mac call with no recognised artifact id is judged as a waiting-page write; that is a guard case, not here.
+
+MAC_PREFIX = "mcp__claude-artifacts__"
+NOT_NORMALISED = ("hooks/shared_names.py has no normalize_data_call, so a Mac artifact call is not normalised "
+                  "and no guard reads its fields")
+
+
+def _normalised(tool_name, tool_input):
+    """(canonical name, input) from normalize_data_call, or None when the function is not there yet."""
+    fn = getattr(_shared(), "normalize_data_call", None)
+    return None if fn is None else fn(tool_name, tool_input)
+
+
+def _expect_normalised(tool_name, tool_input, want_name):
+    """The canonical name a call normalises to, or a named failure. Each case then reads the input's fields."""
+    got = _normalised(tool_name, tool_input)
+    if got is None:
+        return None, NOT_NORMALISED
+    if got[0] != want_name:
+        return None, "%s normalises to %r, want %r" % (tool_name, got[0], want_name)
+    return got[1], ""
+
+
+def _writes_of(data_input):
+    """The (op, collection, doc_id, data-or-absent) rows of a batch input's writes, in order."""
+    rows = []
+    for write in data_input.get("writes") or []:
+        rows.append((write.get("op"), write.get("collection"), write.get("doc_id"),
+                     write.get("data", "absent")))
+    return rows
+
+
+def case_normalize_db_write_batch_maps_ops_to_writes():
+    ops = [{"op": "set", "path": "items/it-1", "data": {"kind": "decision"}, "ifVersion": 3},
+           {"op": "merge", "path": "items/it-2", "data": {"status": "closed"}},
+           {"op": "delete", "path": "items/it-3"}]
+    out, note = _expect_normalised(MAC_PREFIX + "db_write", {"ops": ops}, "ArtifactData")
+    if out is None:
+        return False, note
+    rows = _writes_of(out)
+    want = [("set", "items", "it-1", {"kind": "decision"}),
+            ("update", "items", "it-2", {"status": "closed"}),
+            ("delete", "items", "it-3", "absent")]
+    ok = out.get("action") == "batch" and rows == want
+    return ok, "action %r, writes %r, want batch with set, update (from merge) and delete: %r" % (
+        out.get("action"), rows, want)
+
+
+def case_normalize_db_write_splits_every_collection():
+    ops = [{"op": "set", "path": "receipts/r-1", "data": {"amount": 1}},
+           {"op": "set", "path": "groups/g-1", "data": {"name": "a"}},
+           {"op": "update", "path": "meta/m-1", "data": {"v": 2}}]
+    out, note = _expect_normalised(MAC_PREFIX + "db_write", {"ops": ops}, "ArtifactData")
+    if out is None:
+        return False, note
+    got = [(w.get("collection"), w.get("doc_id")) for w in out.get("writes") or []]
+    want = [("receipts", "r-1"), ("groups", "g-1"), ("meta", "m-1")]
+    return got == want, "collection and doc_id per write %r, want %r" % (got, want)
+
+
+def case_normalize_db_write_one_op_is_still_a_batch():
+    ops = [{"op": "set", "path": "items/it-9", "data": {"kind": "task"}}]
+    out, note = _expect_normalised(MAC_PREFIX + "db_write", {"ops": ops}, "ArtifactData")
+    if out is None:
+        return False, note
+    return out.get("action") == "batch" and len(out.get("writes") or []) == 1, (
+        "one op normalises to action %r with %d write(s), want batch with one" % (
+            out.get("action"), len(out.get("writes") or [])))
+
+
+def case_normalize_db_get_splits_the_path():
+    out, note = _expect_normalised(MAC_PREFIX + "db_get", {"path": "answers/ans-4"}, "ArtifactData")
+    if out is None:
+        return False, note
+    got = (out.get("action"), out.get("collection"), out.get("doc_id"))
+    return got == ("get", "answers", "ans-4"), "action, collection, doc_id %r, want get answers ans-4" % (got,)
+
+
+def case_normalize_db_str_replace_takes_the_item_and_field():
+    out, note = _expect_normalised(MAC_PREFIX + "db_str_replace",
+                                   {"path": "items/it-1", "field": "context"}, "ArtifactData")
+    if out is None:
+        return False, note
+    got = (out.get("action"), out.get("collection"), out.get("doc_id"), out.get("field"))
+    return got == ("str_replace", "items", "it-1", "context"), (
+        "action, collection, doc_id, field %r, want str_replace items it-1 context" % (got,))
+
+
+def case_normalize_db_query_and_list_take_a_bare_collection():
+    # The key that carries the bare collection is not named in item 440; `collection` is the ArtifactData key
+    # the guards read, so the case pins that the collection reaches it.
+    notes = []
+    for short, action in (("db_query", "query"), ("db_list", "list")):
+        out, note = _expect_normalised(MAC_PREFIX + short, {"collection": "items"}, "ArtifactData")
+        if out is None:
+            notes.append(note)
+            continue
+        got = (out.get("action"), out.get("collection"), out.get("doc_id"))
+        if got != (action, "items", None):
+            notes.append("%s gives %r, want %s items with no doc_id" % (short, got, action))
+    return not notes, "; ".join(notes) or "db_query gives query, db_list gives list, each on items"
+
+
+def case_normalize_publish_files_is_the_page_check():
+    # The page check is the Artifact arm of guard.py (PAGE_TOOL). Which `files` entry becomes the page's
+    # file is not pinned here; the name is.
+    got = _normalised(MAC_PREFIX + "publish_files", {"files": [{"as": "index.html", "path": "out/index.html"}]})
+    if got is None:
+        return False, NOT_NORMALISED
+    return got[0] == "Artifact", "publish_files normalises to %r, want Artifact" % (got[0],)
+
+
+def case_normalize_artifactdata_passes_through():
+    tool_input = {"action": "get", "url": "https://claude.ai/artifact/x1", "collection": "items", "doc_id": "it-1"}
+    got = _normalised("ArtifactData", dict(tool_input))
+    if got is None:
+        return False, NOT_NORMALISED
+    return got == ("ArtifactData", tool_input), "ArtifactData call changed to %r" % (got,)
+
+
+def case_normalize_other_names_pass_through():
+    tool_input = {"command": "ls"}
+    got = _normalised("Bash", dict(tool_input))
+    if got is None:
+        return False, NOT_NORMALISED
+    return got == ("Bash", tool_input), "a Bash call changed to %r" % (got,)
+
+
+MAC_CASES = [
+    ("(r) a db_write batch maps ops to ArtifactData writes: set, merge as update, delete",
+     case_normalize_db_write_batch_maps_ops_to_writes),
+    ("(s) a db_write batch splits each path into its collection and doc_id, for every collection",
+     case_normalize_db_write_splits_every_collection),
+    ("(t) a db_write with one op is still an ArtifactData batch",
+     case_normalize_db_write_one_op_is_still_a_batch),
+    ("(u) a db_get path splits into a get of its collection and doc_id",
+     case_normalize_db_get_splits_the_path),
+    ("(v) a db_str_replace takes its item and field as a str_replace",
+     case_normalize_db_str_replace_takes_the_item_and_field),
+    ("(w) db_query and db_list take a bare collection as a query and a list",
+     case_normalize_db_query_and_list_take_a_bare_collection),
+    ("(x) a publish_files call is the Artifact page check",
+     case_normalize_publish_files_is_the_page_check),
+    ("(y) an ArtifactData call passes through unchanged",
+     case_normalize_artifactdata_passes_through),
+    ("(z) a call that is not an artifact data call passes through unchanged",
+     case_normalize_other_names_pass_through),
+]
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -569,6 +726,9 @@ CASES = [
     ("(q) a fallback copy whose .claude default sits in a helper is not flagged",
      case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper),
 ]
+
+
+CASES.extend(MAC_CASES)
 
 
 def main() -> int:
