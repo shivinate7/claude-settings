@@ -146,6 +146,7 @@ class StalledFixture(trg.SameTurnWriter):
     not copy it, so a change to the shared fixture reaches both files."""
 
     PAGE = trg.QuestionReachesPageTests.PAGE  # named here, not aliased at module level: an alias loads its cases too
+    NO_KEY = trg.QuestionReachesPageTests.NO_KEY  # make_repo's writer default; the same object, so the identity test holds
     setUp = trg.QuestionReachesPageTests.setUp
     make_repo = trg.QuestionReachesPageTests.make_repo
     stop = trg.QuestionReachesPageTests.stop

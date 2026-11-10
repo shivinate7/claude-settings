@@ -75,10 +75,11 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 52 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 22.8 min
-    # is 44% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
+    # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 22.8 min
+    # is 30% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
-    timeout-minutes: 52
+    # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -284,6 +285,9 @@ jobs:
       - name: Ruling home fixture suite
         run: python3 hooks/test_ruling_home.py
 
+      - name: Scratchpad owner fixture suite
+        run: python3 hooks/test_scratchpad_owner.py
+
       - name: Ruling census fixture suite
         run: python3 lint/test_ruling_census.py
 
@@ -451,8 +455,6 @@ jobs:
       - name: Waiting page splice fixture suite
         run: python3 skills/waiting-page/test_splice.py
 
-      - name: Waiting page export fixture suite
-        run: python3 skills/waiting-page/test_export_page.py
       - name: Waiting page grant check suite
         run: python3 skills/waiting-page/test_page_grant.py
       - name: Waiting page park relay prose suite
@@ -793,6 +795,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
       - name: Install the pinned Playwright and Chromium, no apt step
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         uses: $/actions/playwright-setup
@@ -803,6 +810,13 @@ jobs:
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         shell: bash
         run: NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs
+
+      # The export suite's picture cases run check_designs.mjs in Playwright. A case that cannot run fails, so
+      # this suite cannot sit in `checks`, which installs no browser. loadPlaywright reads NODE_PATH.
+      - name: Waiting page export fixture suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        run: NODE_PATH="$PWD/.github/shoot/node_modules" python3 skills/waiting-page/test_export_page.py
 
       - name: roadmap page suite
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
@@ -945,11 +959,12 @@ jobs:
   checks-macos:
     runs-on: macos-latest
     needs: scope
-    # Cap 55 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
-    # is 55% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
+    # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
+    # is 41% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
     # checks-macos and checks-macos-b. A push runs the janitor sweep mutation test and a pull request does not:
     # push median 20.5 min, pull request median 18.7 (n 13 each).
-    timeout-minutes: 55
+    # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
@@ -1366,9 +1381,10 @@ jobs:
     # Faster slow kills cut the local run 710 s to 651 s (4 jobs). Batch 7's lanes add mutants. On main, the coordinator
     # measured lane PR 1163 alone at 946 s locally (+236 s) and lane PR 1157 at 768 s (+58 s). If those add up and the
     # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound.
-    # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving, so the
-    # cap is 45, a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
-    timeout-minutes: 45
+    # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving. The cap
+    # is a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
+    # Now 75, above the 3600 s suite cap in hooks/mutate_guard.py, so the suite cap fires first (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1386,8 +1402,8 @@ jobs:
         run: python3 hooks/mutate_guard.py
 
       # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not in the guard suite, which runs in the
-      # sibling shards (checks-guard is split in two, decision ci-job-caps); this job is projected at 36% of 45 min, and this step adds 101 s locally (16 tests, about 1.7 min,
-      # so about 39%, under the 70% warn line of the merge tool; unmeasured in CI).
+      # sibling shards (checks-guard is split in two, decision ci-job-caps); this job is projected at about 16 min, 21% of its 75 min cap, and this step adds 101 s locally (16 tests, about 1.7 min,
+      # so about 24%, under the 70% warn line of the merge tool; unmeasured in CI).
       # Same `guard` scope flag as the guard mutation test above. Own 5 min cap (3x the local time), so a hang reads red here.
       - name: Guard progress beat suite
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1645,11 +1661,12 @@ jobs:
         run: python merge/test_merge.py
 
   # The janitor sweep suites, moved out of checks-windows-rest (decision ci-job-caps). Fixture suite 8.2 min slowest,
-  # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 40 min = 2x.
+  # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 75 min = 3.8x.
   checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
-    timeout-minutes: 40
+    # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request' }}
