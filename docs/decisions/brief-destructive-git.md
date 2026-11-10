@@ -16,8 +16,8 @@ Rule `brief-destructive-git` in `hooks/guard.py` refuses an Agent, Task or Workf
   - a prohibition: a negator in the same clause, within 4 words before the span; `avoid` and `without` only as the word right before it; emphasis marks stripped
   - each later span of a prohibition list, where a comma joins two spans ("Never run `a`, `b`, or `c`.")
   - a heading with a negator then a run verb within 2 words ("Never run:") covers its bullet run, across blank lines and into a fence under it
-- The override lifts it (`owner-override`).
-- Accepted limits, in `docs/debts/notes.md`. A `$ ` line under "Never run:" is denied. Gerund prohibitions ("avoid running", "instead of") are denied. An earlier negated sentence on a heading line covers an order list. An unread Workflow prompt passes. A list with an aside between spans is denied at the later span. The window crosses a colon. A `~~~` fence is not read. A case-data marker exempts the rest of its line. Claude is unlikely to write these forms by mistake (`guard-guards-mistakes-only`).
+- The override lifts it (`owner-override` (an owner override lets a refused act through)).
+- Accepted limits, in `docs/debts/notes.md`. A `$ ` line under "Never run:" is denied. Gerund prohibitions ("avoid running", "instead of") are denied. An earlier negated sentence on a heading line covers an order list. An unread Workflow prompt passes. A list with an aside between spans is denied at the later span. The window crosses a colon. A `~~~` fence is not read. A case-data marker exempts the rest of its line. Claude is unlikely to write these forms by mistake (`guard-guards-mistakes-only` (guards stop Claude's mistakes, not an attacker)).
 - By design, not a limit: an order with no backticks passes here and meets the shell guard at run time.
 - Cost: pure text work inside the guard call already running. No process start, no file written.
 

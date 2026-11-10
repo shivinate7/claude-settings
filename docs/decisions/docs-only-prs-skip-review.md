@@ -20,7 +20,7 @@ Not taken: "skip the reviewer, flag a clash"; "as today" (no round for a record 
 
 ## The cost
 
-One reviewer run per record that files an owner ruling. No new process, file or timer. Round 1 runs the reviewer's round-1 model, haiku today (the reviewer row of decision `agent-model-cap`, the model-per-role table).
+One reviewer run per record that files an owner ruling. No new process, file or timer. Round 1 runs the reviewer's round-1 model, haiku today (the reviewer row of decision `agent-model-cap` (model per agent role, Sonnet as the ceiling), the model-per-role table).
 
 Kind: process
 Home: rule:roles-solo-reviews-logic-diffs-only

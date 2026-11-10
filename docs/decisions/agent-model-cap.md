@@ -3,19 +3,19 @@
 ## The ruling
 
 Each agent role runs the model and effort of its row in the table below. Sonnet is the ceiling.
-Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents`), and the builder's third try by standing grant,
-and the owner watches that cost. The refuter runs Opus too (owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d; decision `plan-refuter`). An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
+Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer (owner, 2026-10-26, waiting-page item 15, "b"; decision `design-agents` (design agents for lanes that touch a screen)), and the builder's third try by standing grant,
+and the owner watches that cost. The refuter runs Opus too (owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d; decision `plan-refuter` (a plan gets a refuter that argues back)). An Explore may run Sonnet or Opus when its brief's first non-blank line carries the `Audit:` marker
 (owner, 2026-11-01 18:38 CST, waiting-page item 137, pick a). An Explore on Opus with no marker is refused, and an override lifts it; no scoped `opus explore` form exists (option b, not picked).
 The question reviewer agent hook keeps its class-level grant of 2026-10-21 (see its row). Any other spawn above its role's model, a reviewer's round 3 on Opus too, is refused. It runs only when the owner's typed override or grant names it
 (owner, 2026-11-01 17:25 CST, item 127, pick a: the same for Sonnet and Opus). A lane session or an arbiter session is a session, not an agent: it runs Opus by its row below. Round 2 stays Sonnet. Haiku runs only in Explore,
 claude-code-guide, test-author, reviewer and record-writer. The guard enforces the ceiling and the role rows. An Agent
 or Task spawn that sets model opus is refused, unless Plan, designer, design-reviewer, refuter, a builder's `Round 3 of 3` or an Explore's `Audit:` marker covers it.
-The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override`, The Opus override), or by a step grant.
+The general override lifts any refusal of a spawn above its role's row. An Opus spawn refusal is also lifted by `opus [role] <time>` (for example `opus 2h` or `opus builders 2h`), by the owner's plain Opus ask in his own typed prompt (owner, 2026-11-03 19:47 CST, chat; the override decision `owner-override` (an owner override lets a refused act through), The Opus override), or by a step grant.
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is dropped and stays dropped.
 
 The default: `env.CLAUDE_CODE_SUBAGENT_MODEL` is `sonnet` in `settings.json`,
 `env.CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` equals it, and `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is 1.
-The ask on a settings write and the expiry of a grant are in `opus-grant-expires`, an Opus grant expires.
+The ask on a settings write and the expiry of a grant are in `opus-grant-expires` (an Opus grant expires within 24 hours).
 
 **The model per role.** Reason: Haiku is cheap enough for read-only work, tests, review and
 record-writing, and the owner will measure cost and quality. Writing prose and records is not building.
@@ -57,7 +57,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`, `create_session`) | main model unless the owner names one | default |
-| lane session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | medium, the owner's ruling of 2026-10-30 15:11 CDT; set by the start prompt, below |
+| lane session (decision `session-tiers` (the session tiers and how they talk)) | opus, the owner's ruling of 2026-10-28 16:15 CDT, waiting item 50, pick b | medium, the owner's ruling of 2026-10-30 15:11 CDT; set by the start prompt, below |
 | arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
@@ -65,7 +65,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reply judge (`hooks/reply_judge.py`, Stop) | haiku, through `decision_watch.invoke_model` | xhigh |
 | report guard past-ruling check (`lint/report_guard.py`, Stop) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | feedback guard (`hooks/feedback_guard.py`, Stop; one call per Stop that has a new inbox item and an older item to compare with) | claude-haiku-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
-| question reviewer (the same script, on AskUserQuestion and on an ArtifactData write of a waiting-page item) | claude-opus-5-5, through `decision_watch.invoke_model`, by the owner's standing grant of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook`) | model default: the call passes no effort |
+| question reviewer (the same script, on AskUserQuestion and on an ArtifactData write of a waiting-page item) | claude-opus-5-5, through `decision_watch.invoke_model`, by the owner's standing grant of 2026-10-21, given at class level for this hook (decision `question-reviewer-agent-hook` (code, then one Opus call, reviews each question)) | model default: the call passes no effort |
 | SendMessage busy judge (`hooks/sendmessage_state.py`, PreToolUse; a model call only when the receiver is busy on the session board) | haiku, through `decision_watch.invoke_model` | xhigh |
 | SendMessage wording judge (the same script, one call on every send, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
 | plain-diff mod note (`mods/plain-diff/hooks/register.mjs`, `$.model.complete`, one call per file with no note) | haiku, set in the call | none set: the call passes no effort field |

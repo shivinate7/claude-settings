@@ -24,7 +24,7 @@ Risk: incident (2026-09-06). `other-checkout` landed 2026-10-28. The separate-cl
 - **No record.** An `agent_id` that never resolves to a home, with a `cwd` not in the worktree shape, is a non-isolated agent. This part allows it.
 - **Bash and PowerShell:** the payload `cwd` is not inside the recorded home. This covers a home folder that is gone. A Git Bash `cwd` in the `/c/...` form is read as `C:\...`. One exception: a lone move back into the home is allowed (`cd`, or in PowerShell `Set-Location`, `sl`, `chdir`, `pushd`), with the home path as its only argument and no separator.
 - **Write, Edit, MultiEdit and NotebookEdit:** the target is under the primary checkout but outside the recorded home. One exception: a target strictly inside the caller's own `agent-<its agent id>-<suffix>` red-run folder passes, never the folder root (see `other-checkout`, the write exemption).
-- **No override lifts it** (`owner-override`, owner 2026-10-18 18:37 CDT).
+- **No override lifts it** (`owner-override` (an owner override lets a refused act through), owner 2026-10-18 18:37 CDT).
 
 ### `other-checkout`: no session writes into, or `cd`s into, another checkout
 
@@ -67,7 +67,7 @@ Owner ask, 2026-10-29 16:49 CDT: a resumed top-level session whose worktree was 
 - **Read and Grep** are always allowed, so a session can still report (`verification-recovery-independent-of-state`).
 - **The refusal** never names the target or the home (`git-remedy-never-names-target`). The matched detail goes to the log.
 - **Unreadable is not a hit.** No git, no common directory, an unreadable record, or a `cwd` in no checkout allows (`verification-report-unknown-reads`).
-- **The predicate is the act** (`predicate-is-the-act`). The rule reads `agent_id`, `cwd` and the write target.
+- **The predicate is the act** (`predicate-is-the-act` (guards judge the act, not its spelling)). The rule reads `agent_id`, `cwd` and the write target.
 
 Kind: build
 Plan: docs/decisions/an-agent-outside-its-home-tree-must-stop.md#the-ruling (all)

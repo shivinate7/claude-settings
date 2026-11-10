@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The sweep (`the-janitor-is-one-machine-wide-sweep`, the janitor is one machine-wide sweep) reaps a local branch when the branch is an ancestor of the base, or when `git cherry <base> <branch>` prints no `+`. It keeps the branch, and names it as the only copy, when a `+` survives and no remote ref contains it.
+The sweep (`the-janitor-is-one-machine-wide-sweep` (the janitor is one machine-wide sweep)) reaps a local branch when the branch is an ancestor of the base, or when `git cherry <base> <branch>` prints no `+`. It keeps the branch, and names it as the only copy, when a `+` survives and no remote ref contains it.
 
 Why: `git merge-base --is-ancestor` reads commit ids, and a rebase writes new ids for the same patch, so ancestry holds work that nobody can lose. `git cherry` compares patch ids. The direction is safe: an altered commit prints `+` and is kept, and a false `-` needs two identical patches, so the content already sits on the base.
 

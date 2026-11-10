@@ -3,7 +3,7 @@
 ## The ruling
 
 Owner, 2026-10-11: the agent-end reap also deletes build folders. The low-disk build guard is deferred to debt
-`build-disk-guard`.
+`build-disk-guard` (a low-disk build guard, not yet built).
 
 `janitor/agent_end_reap.py` (SubagentStop) deletes build folders: `native/build`, `.build`, `DerivedData`, and each name in the
 `buildDirs` list of `.claude/janitor.json`. The three defaults always apply. `buildDirs` adds names and cannot remove a default.
@@ -45,7 +45,7 @@ deletes a folder only when each check gives a confirmed yes. Any read that canno
 Reason: native agents built the iOS app in their own worktrees. The disk filled and `native-check` failed with ENOSPC. The daily
 janitor skips registered worktrees, so this reap is the only tier that frees their build folders. Governing records: `agent-end-reap-stops-what-a-finished-agent-left` (the process reap; its checks and 60 s timeout apply here),
 `the-janitor-is-one-machine-wide-sweep` (its `huskNames` key covers unregistered folders only, so it is not reused),
-`unattended-sweep-stops-proven-orphans`.
+`unattended-sweep-stops-proven-orphans` (unattended sweeps stop only proven orphans).
 
 Kind: process
 Home: janitor/agent_end_reap.py

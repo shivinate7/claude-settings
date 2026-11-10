@@ -8,7 +8,7 @@ Governing record: `unattended-sweep-stops-proven-orphans` (a sweep stops only pr
 ## The ruling
 
 The goal: when an agent ends, each process it left under its own worktree stops. Nothing else
-stops. When the worktree is removed is in `when-a-worktree-may-be-removed`.
+stops. When the worktree is removed is in `when-a-worktree-may-be-removed` (idle limits that let a worktree be removed).
 
 ### The sweep takes the deepest checkout
 
@@ -47,7 +47,7 @@ The reaper stops each orphaned tree inside the ended agent's worktree, not only 
 only that tree (owner ruling, 2026-09-27).
 
 The guard's kill rule is separate from the reaper's reads. The guard's ownership change
-(`a-kill-by-pid-needs-an-owned-pid`) did not change them (owner ruling, 2026-10-10).
+(`a-kill-by-pid-needs-an-owned-pid` (a kill needs a pid this session started)) did not change them (owner ruling, 2026-10-10).
 
 The reap reads every process's cwd in one batch call (`sweep._read_all_cwds_macos`). A failed or empty
 read returns None, which means keep. The batch timeout stays below the hook cap (owner ruling,

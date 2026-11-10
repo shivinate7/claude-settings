@@ -15,7 +15,7 @@ the mold". Roadmap step c109 (a blind design brief cannot carry today's screen) 
 - A blind brief has no Palette section. The blind designer takes colour, type and spacing from the house
   `tokens.md` only, and `agents/designer.md` bars it from `repo-colours.json`, the rest of
   `~/.claude/docs/design/` and the repo's token files. The 4 px step and 8 px radius in `tokens.md` are
-  house defaults (`ux-house-rules`), so a blind designer may use them. A repo name in a house file is a
+  house defaults (`ux-house-rules` (shared UX rules for repos with screens)), so a blind designer may use them. A repo name in a house file is a
   credit, not a place to look.
 - An explore run keeps at least one blind designer. Each informed and directed brief says so in a
   `Blind designers: <n>` line, or carries `Blind designers: none, owner: "<the owner's words>"`.
@@ -41,7 +41,7 @@ the mold". Roadmap step c109 (a blind design brief cannot carry today's screen) 
 Why: the session that drew the Duo mockups ran no blind designer. Its one brief said "Duo layouts must keep
 that look", sent the designer to the web app first, and asked for options for each existing view. The
 designer kept today's views, so every mockup copied the current app. The prose rule of
-`design-agents` could not stop it, because nothing read the brief.
+`design-agents` (design agents for lanes that touch a screen) could not stop it, because nothing read the brief.
 
 Risk kind: incident, per `building-guard-needs-incident`: 2026-10-26 22:58 CDT, the mailaudit Duo
 mockups. Landed 2026-10-27. Second incident, the d4 Banchi phone mockups (the Palette section held a

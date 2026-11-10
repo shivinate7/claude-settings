@@ -4,7 +4,7 @@
 
 Owner, 2026-11-02 10:41 CST, ruling fb-1041-2 ("Stop rule churn and drift in the other repos"):
 
-- A child repo's `CLAUDE.md` never copies the text of a claude-settings rule, grant or record. It names the record, such as "Merge grant: claude-settings `standing-merge-grant`".
+- A child repo's `CLAUDE.md` never copies the text of a claude-settings rule, grant or record. It names the record, such as "Merge grant: claude-settings `standing-merge-grant` (the coordinator's standing grant to merge in every repo)".
 - It adds only what applies to that repo alone: its own paths, its own checks and its own exceptions.
 - When the record changes, the child line stays true, because it holds no copy.
 

@@ -7,7 +7,7 @@ Owner, 2026-10-13 23:41 CDT: "End condition at start."
 - A Bash or PowerShell call with `run_in_background` that starts a server or a watcher needs a note in its `description`: `until: <condition>`.
 - The guard rule `background-end` in `hooks/guard_stream.py` refuses the call when the note is missing or its condition is empty.
 - The Stop check (`stall_watch --stop`) shows each quiet job's note beside it. The agent judges whether the job should still run.
-- One-off builds and test runs pass without the note. `gh run watch` is refused (`ci-wait-reads-run-status`, CI waits read the run status).
+- One-off builds and test runs pass without the note. `gh run watch` is refused (`ci-wait-reads-run-status` (CI waits read the run status)).
 - The roster, as built:
   - Script runners npm, pnpm, yarn and bun: the script name counts when a part of it, split on `:` and `-`, is dev, serve, start, watch or preview. `build:watch` and `start-api` count; `build` and `build-docs` do not. A binary run through `exec`, `dlx` or `x` is not a script name. `deno task <script>` uses the same rule.
   - `--watch` or `--watch=<v>` counts on any tool except `gh`, whose watchers end with the run. `--watch=false`, `--watch=0`, `--watch false` and `--watch 0` do not count. `bun --hot` counts.

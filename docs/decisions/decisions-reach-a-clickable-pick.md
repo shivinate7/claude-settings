@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Roadmap step c118, 2026-10-27, rewritten under owner ruling 2026-11-01 23:31 CST (decision `questions-go-to-owner`, "Same turn to the page"). When the last reply's Input Needed item offers a pick with options, the stop passes only if the same turn holds a qualifying act. The act no longer depends on a clock or on words in the reply. Decision `questions-go-to-owner` and the spec `questions-reach-page` hold the full rule, including the lane route and the other questions the guard reads ("?" sentences).
+Roadmap step c118, 2026-10-27, rewritten under owner ruling 2026-11-01 23:31 CST (decision `questions-go-to-owner` (a session brings each question to the owner), "Same turn to the page"). When the last reply's Input Needed item offers a pick with options, the stop passes only if the same turn holds a qualifying act. The act no longer depends on a clock or on words in the reply. Decision `questions-go-to-owner` and the spec `questions-reach-page` hold the full rule, including the lane route and the other questions the guard reads ("?" sentences).
 
 - Owner-facing session: a send to the page writer, or an ArtifactData set, update or batch under collection `items` to this repo's page. The question box (`AskUserQuestion`, main session) passes only in a repo with no waiting page (owner, 2026-11-01 23:31 CST, pick a). A send to `@parent` reaches no one here. The guard does not re-check that nothing runs: `hooks/call_judge.py` and `questions-go-to-owner` already refuse the box while work runs.
 - Lane: a send to its parent (`@parent` counts only here) or to the page writer. A box, a page link and a promise pass nothing.

@@ -41,7 +41,7 @@ The allow applies only when the whole command acts in one place (`one_place`). T
 directory change and at most one distinct `git -C` target. Every other shape can hide the shared
 checkout behind the lane, so it keeps the ask. The ask reason names the allowed form:
 `git -C <lane> restore <file>`. The incident form, a `cd` into the worktree and then one file, asks.
-Setting `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is refused, not asked (`git-env-set-refused`,
+Setting `GIT_DIR`, `GIT_WORK_TREE` or `GIT_INDEX_FILE` is refused, not asked (`git-env-set-refused` (agent commands may not set git location variables),
 setting git env vars is refused).
 
 These discard forms join the rule: refused in a shared checkout, ask in a linked worktree.

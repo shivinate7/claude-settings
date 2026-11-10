@@ -40,7 +40,7 @@ Read form. The guard does not judge Read. It returns early for Read and Grep. Th
 
 The printed refusal names no file. It names the shape of the access (`ENV_REDIRECT_REASON`, `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_INLINE_REASON`, `ENV_CHILD_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`) and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
 
-Gaps. Each is noted in `docs/debts/notes.md` as a form only an attacker writes (`guard-guards-mistakes-only`). No fix is planned.
+Gaps. Each is noted in `docs/debts/notes.md` as a form only an attacker writes (`guard-guards-mistakes-only` (guards stop Claude's mistakes, not an attacker)). No fix is planned.
 
 - A perl, ruby or awk script read from stdin or a heredoc (`env-script-stdin-code`).
 - A quote escape inside a script's code string (`env-script-string-escape`).

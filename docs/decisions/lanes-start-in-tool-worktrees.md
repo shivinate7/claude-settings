@@ -11,7 +11,7 @@ Owner, 2026-10-21: refuse the hand-made worktree fully, and record which layer r
 - **A variable target.** A target that holds a variable (`$S`, `${S}`) is read from an assignment earlier in the same command (`S=...;`, `export S=...`), by `guard_frozen._resolve_vars`, then judged like a literal path. The `-C` folder is resolved the same way. A target that stays unreadable (a variable the command does not set, or a substitution) is refused unless the repo is a throwaway, which passes first, since the shell's value is unknown. A `-C` folder that stays unreadable is allowed, as on main (an unreadable repo allows). Limits: a segment without the literal word `worktree` is not resolved, so `git work""tree add` and `W=worktree; git $W add` are not judged; a literal `%` in a target reads as unreadable and is refused. Departs from (the target only): main allowed an unreadable target (lane pick, 2026-11-08 17:05 CST, coordinator did not object).
 - **The refusal** names the two tools, never the refused path or command (`git-remedy-never-names-target`). It tells the session, when the tool's isolation was refused, to make no tree by hand, to report which layer refused and its exact message. It also says that a path the guard cannot read is refused too: a guard refusal names its rule and holds `Rule (`; any other refusal is the harness's.
 - **The pointer remedy** (`pointer-head`) names the EnterWorktree tool, not a hand-made worktree, so the two rules never contradict.
-- **An owner override lifts it** (`owner-override`).
+- **An owner override lifts it** (`owner-override` (an owner override lets a refused act through)).
 
 Why: an agent spawned with no isolation starts in the main clone, and no hook payload field ties it to a hand-made tree, so `worktree-home` (`an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop) cannot fence it. Without the hand-made tree, the workaround has nothing to brief the agent into.
 
@@ -21,7 +21,7 @@ Named limits, each a form Claude rarely writes:
 - A `git worktree add` inside `bash -c`, `sh -c`, `eval` or `powershell -c` passes: the guard leaves those strings unparsed, a known gap.
 - A repo named only by `--git-dir` reads as unknown and passes.
 - A hand-typed read-only checkout (a review or a "before" image) is refused. EnterWorktree serves that need too.
-- A payload with `agent_type` and no `agent_id` is read as an agent with no record, as `guard.py` `judge` and decision `a-kill-by-pid-needs-an-owned-pid` do. Whether a main session started with `--agent` carries `agent_type` is unmeasured (hooks/guard_core.py). If it does, such a session's hand-made add inside the folder is refused, and EnterWorktree is the remedy.
+- A payload with `agent_type` and no `agent_id` is read as an agent with no record, as `guard.py` `judge` and decision `a-kill-by-pid-needs-an-owned-pid` (a kill needs a pid this session started) do. Whether a main session started with `--agent` carries `agent_type` is unmeasured (hooks/guard_core.py). If it does, such a session's hand-made add inside the folder is refused, and EnterWorktree is the remedy.
 
 Which layer refused on 2026-10-19, by reading, unmeasured live: the harness. That day `hooks/guard.py` judged an orchestrator's Agent call by model rules only, and each of their refusals names a model; `worktree-home` reads only an agent's call. The Agent prompt hook in `settings.json` judges brief contents, and its refusal names a rule id. This repo had no `WorktreeCreate` hook. The harness's message was not recorded. The next refusal's layer and message are still owed: the refusal text asks the session to report both.
 
@@ -45,7 +45,7 @@ Each agent runs `git diff --cached --stat` before each commit. The list names on
 - The cloud platform's Stop hook (`~/.claude/stop-hook-git-check.sh`) is written by the platform, not this repo. It checks git in the shell's current folder. A `cd` by the main session persists.
 - Incident: the hook read a worktree of base copies. It asked to commit and push them. That push would have undone a merged PR.
 - Orchestrator's call, 2026-11-01 23:39 CST: no patch to the platform's script.
-- Orchestrator's call, same time: a tree that holds only base copies can be removed. See the worktree-removal decision, `when-a-worktree-may-be-removed`.
+- Orchestrator's call, same time: a tree that holds only base copies can be removed. See the worktree-removal decision, `when-a-worktree-may-be-removed` (idle limits that let a worktree be removed).
 
 Risk kind: incident, 2026-11-01 22:41 CST, worktree of lane `merge-lock-record-drift`.
 

@@ -37,10 +37,10 @@ text-only change (owner, 2026-11-03: design reviewer only).
     style, token or layout change in a text-only change is a finding that sends the lane to a designer.
 - The blind reviewers of `skills/design-review` stay blind. They keep agentType `reviewer` and never
   see the design spec. The design reviewer reads the spec, so it runs only at that skill's compare
-  step, after the blind list is complete (`design-skills`). A second design read reuses the round-1
+  step, after the blind list is complete (`design-skills` (third-party design skills that apply to screens)). A second design read reuses the round-1
   blind list.
 - Opus is a standing grant for both roles, a class-level exception to `roles-sonnet-is-the-ceiling`,
-  with no proof run first. The model table is in `agent-model-cap`.
+  with no proof run first. The model table is in `agent-model-cap` (model per agent role, Sonnet as the ceiling).
 - Deferred: whether the designer runs Claude Code's `/design` canvas itself, or the owner runs it.
   Until the owner rules, the designer draws HTML mockups only.
 
@@ -53,7 +53,7 @@ procedure is `skills/design-explore/SKILL.md`.
 
 Guard rule `designer-scope` (`hooks/guard.py`) refuses a designer's Edit or Write on a repo path
 outside the design folder. A path in no repo, and the agent's own scratchpad, stay allowed. It
-extends the role scopes of `builders-cannot-edit-tests`, and logs a designer's diff at commit and
+extends the role scopes of `builders-cannot-edit-tests` (builders may not delete, skip or rewrite tests), and logs a designer's diff at commit and
 stop the same way (`designer-diff`). Risk: likely. A designer that writes product code becomes a
 second builder, unreviewed as one. Landed 2026-10-26.
 

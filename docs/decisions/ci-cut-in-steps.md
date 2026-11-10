@@ -4,9 +4,9 @@
 
 Owner, 2026-10-27 12:07 CDT (waiting page item 31, pick e), roadmap step c95: trust first, then cut CI in steps. Each step starts only past its measured bar. A miss sends the step back.
 
-- Step 1: the full run is trustworthy. Red means broken, not out of time. It landed in batch #725 (main 0fb91de, Oct 28). Its job caps follow `ci-job-caps`.
-- Step 2: quick checks on each branch, and the full suite on main. This is the shape of q_max's CI. Its bar is in `ci-step2-bar`. Step 2 stays off in claude-settings.
-- Step 3: milestone runs. The full suite runs at milestones, not on every merge. A milestone is a set number of app batches or a named milestone. The owner restated this on Nov 2 (closed item `swift-tests-ci`, see `swift-tests-at-milestones`). Step 3 is its own step, c95-milestone-runs, which holds its bar.
+- Step 1: the full run is trustworthy. Red means broken, not out of time. It landed in batch #725 (main 0fb91de, Oct 28). Its job caps follow `ci-job-caps` (job caps keep the slowest run under 80%).
+- Step 2: quick checks on each branch, and the full suite on main. This is the shape of q_max's CI. Its bar is in `ci-step2-bar` (step 2 judged by bugs that reach main). Step 2 stays off in claude-settings.
+- Step 3: milestone runs. The full suite runs at milestones, not on every merge. A milestone is a set number of app batches or a named milestone. The owner restated this on Nov 2 (closed item `swift-tests-ci`, see `swift-tests-at-milestones` (full iPhone and Mac tests run at milestones)). Step 3 is its own step, c95-milestone-runs, which holds its bar.
 
 Process-only (coordinator, 2026-11-01 22:25 CST): A red run blocks the next merge until it is fixed.
 

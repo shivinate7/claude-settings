@@ -8,7 +8,7 @@ Owner, 2026-10-11 and 2026-10-12: the `Monitor` tool, Claude Code's own wait-onc
 - two or more pauses in one command, the sleep-then-poll form;
 - one pause of 25 s or more;
 - `gh pr checks --watch` in the foreground;
-- `gh run watch` in the foreground or the background (`ci-wait-reads-run-status`, CI waits read the run status);
+- `gh run watch` in the foreground or the background (`ci-wait-reads-run-status` (CI waits read the run status));
 - `timeout /t`, which the ruling did not name.
 
 It allows one `sleep` or `Start-Sleep` under 25 s anywhere in a command, and a background `gh pr checks --watch`. A word inside a quoted string or a heredoc body is not a call. The remedy names the CI-wake notice that follows `gh pr ready`, or Monitor.

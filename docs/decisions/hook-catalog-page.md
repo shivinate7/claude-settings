@@ -8,7 +8,7 @@
 - An inline command names no script. Its summary sits in `lint/hook_catalog_inline.json` under the key: the label, ` #`, and the first 8 hex digits of the SHA-256 of the command text (owner ruling, undated).
 - The label is the event, then ` matcher=<m>` and ` if=<c>` when present.
 - A changed command changes its key, so `--check` fails and names the new key until a person keys the reviewed summary to the new text.
-- The cell cap is in `catalog-cells-never-cut`, catalog cells are never cut.
+- The cell cap is in `catalog-cells-never-cut` (catalog cells are never cut).
 
 Kind: build
 Plan: docs/decisions/hook-catalog-page.md#the-ruling (all)

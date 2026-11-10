@@ -29,9 +29,9 @@ Lane `notes-fix-other-2`, 2026-11-07, about 15:15 CST. The lane backgrounded `~/
 
 ## Why a named roster
 
-A rule on every `| tail` would refuse `make check 2>&1 | tail -40` and many other finished jobs. That is the guard that cries wolf (`guard-that-cries-wolf-is-spent`, a guard that cries wolf is spent). The system cannot say which commands print a verdict, so the roster names one entry per incident.
+A rule on every `| tail` would refuse `make check 2>&1 | tail -40` and many other finished jobs. That is the guard that cries wolf (`guard-that-cries-wolf-is-spent` (a guard that cries wolf is spent)). The system cannot say which commands print a verdict, so the roster names one entry per incident.
 
-The rule stops a mistake Claude made in normal work (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker). It reads no form that only an attacker would write.
+The rule stops a mistake Claude made in normal work (`guard-guards-mistakes-only` (guards stop Claude's mistakes, not an attacker)). It reads no form that only an attacker would write.
 
 ## What check-tail reads
 
