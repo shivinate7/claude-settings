@@ -100,6 +100,18 @@ class Matcher(unittest.TestCase):
                 self.assertTrue(covers(starts[0], source),
                                 "the session_start.sh SessionStart matcher %r does not cover %s" % (matcher, source))
 
+    def test_cloud_pull_session_start_entry_does_not_match_compact(self):
+        # A compaction mid-task must not run the cloud pull: it would move main and reinstall the pin under the session.
+        # The entry is found by its pin install, merge/install_from_main.sh, which only the cloud pull runs.
+        with open(SETTINGS, encoding="utf-8") as f:
+            entries = json.load(f)["hooks"]["SessionStart"]
+        pulls = [e for e in entries if any("merge/install_from_main.sh" in h.get("command", "") for h in e.get("hooks", []))]
+        self.assertEqual(len(pulls), 1, "want one SessionStart entry running merge/install_from_main.sh, found %d" % len(pulls))
+        matcher = pulls[0].get("matcher", "")
+        self.assertFalse(covers(pulls[0], "compact"), "the cloud-pull SessionStart matcher %r covers compact" % matcher)
+        self.assertTrue(covers(pulls[0], "startup"), "the cloud-pull SessionStart matcher %r does not cover startup" % matcher)
+        self.assertTrue(covers(pulls[0], "resume"), "the cloud-pull SessionStart matcher %r does not cover resume" % matcher)
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
