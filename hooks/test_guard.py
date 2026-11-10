@@ -36145,6 +36145,8 @@ EXPLORE_MARKER = "Audit:"
 UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
 SONNET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}
+OPUS_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "opus"}
+OPUS_ID_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": "claude-opus-5-5"}
 
 ROLE_TABLE_HEAD = "# Agent model cap\n\n| Point | Model | Effort |\n|---|---|---|\n"
 ROLE_TABLE_TEST_AUTHOR_HAIKU = ROLE_TABLE_HEAD + "| test-author | haiku | xhigh |\n"
@@ -36258,10 +36260,10 @@ def role_model_allow(name, role, model, prompt, tool="Agent", config=ROLE_REAL_C
     add(name, "allow", tool=tool, config=config, env=env, **role_input(role, model, prompt))
 
 
-def role_opus_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG):
+def role_opus_refuse(name, role, model, prompt, tool="Agent", config=ROLE_REAL_CFG, env=None):
     """An Opus spawn above its row is refused under agent-model-cap, not this rule. An owner override lifts it,
-    so the case is not never-lifted."""
-    add(name, "deny", "agent-model-cap", tool=tool, config=config, lacks=(ROLE_RULE,),
+    so the case is not never-lifted. `env` sets the guard's CLAUDE_CODE_SUBAGENT_MODEL for a spawn with no model."""
+    add(name, "deny", "agent-model-cap", tool=tool, config=config, env=env, lacks=(ROLE_RULE,),
         **role_input(role, model, prompt))
 
 
@@ -36517,6 +36519,20 @@ role_model_refuse("role-model: builder with no model is denied when the default 
           "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=EMPTY_DEFAULT)
 role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
            "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
+# An env value counts as the spawn's model (decision agent-model-cap). An Opus value above the builder's sonnet row is
+# refused as an explicit Opus spawn is, under agent-model-cap. A value at the row, and Plan, whose row is opus, pass.
+# The builder's third-round case is red on the old code too: the step-up rule (roles-third-round-steps-up) reads the
+# spawn's own model, never the env value, so it refuses a spawn that already runs on Opus.
+role_opus_refuse("role-model: builder with no model is denied when the default is opus, a Round 2 brief",
+                 "builder", None, "Round 2 of 3. Fix the failing case.", env=OPUS_DEFAULT)
+role_opus_refuse("role-model: builder with no model is denied when the default is claude-opus-5-5, a Round 2 brief",
+                 "builder", None, "Round 2 of 3. Fix the failing case.", env=OPUS_ID_DEFAULT)
+role_model_allow("role-model: builder with no model is allowed when the default is sonnet, a Round 2 brief",
+           "builder", None, "Round 2 of 3. Fix the failing case.", env=SONNET_DEFAULT)
+role_model_allow("role-model: builder with no model is allowed when the default is opus, a Round 3 brief",
+           "builder", None, "Round 3 of 3. Finish the fix.", env=OPUS_DEFAULT)
+role_model_allow("role-model: Plan with no model is allowed when the default is opus (its row is opus)",
+           "Plan", None, "Plan the change.", env=OPUS_DEFAULT)
 role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
            "reviewer", None, "Check the diff for typos.", env=UNSET_DEFAULT)
 role_model_allow("role-model: test-author with no model is allowed when the default is unset (its file pins haiku)",
