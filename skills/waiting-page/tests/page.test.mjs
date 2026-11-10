@@ -3106,13 +3106,16 @@ for (const width of ZOOM_WIDTHS) for (const scheme of SCHEMES) for (const kind o
     const col = g.title.r - g.title.l, need = 8 * g.rootSize;
     assert.ok(col >= need, `the text column beside the ${FOLD_ROWS[kind].press} press is ${Math.round(col)} px with the root font size at ${g.rootSize} px, not at least ${need} px (8em), at ${width} wide`);
   });
-  layoutTest(`press rows, ${scheme}: at ${width} wide with the root font size doubled, the ${FOLD_ROWS[kind].press} press does not cover "Show answer"`, async (t) => {
+  // At 200% text "Show answer" is a 1 px box at every width here, so the press is checked against the row's text, which is what it can cover.
+  layoutTest(`press rows, ${scheme}: at ${width} wide with the root font size doubled, the ${FOLD_ROWS[kind].press} press does not cover the row's text, where "Show answer" is hidden`, async (t) => {
     const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
     const id = FOLD_ROWS[kind].ask.id;
     await zoomText(page);
     foldedScope(await foldedDate(page, id), kind, width);
     const g = await pressGeo(page, id), s = await showAnswerGeo(page, id);
-    if (s.shown) assert.ok(!meets(s, g.press), `the ${FOLD_ROWS[kind].press} press at ${spanOf(g.press)} covers "Show answer" at ${spanOf(s)}, at ${width} wide with the root font size doubled`);
+    assert.ok(!s.shown, `"Show answer" is drawn ${Math.round(s.r - s.l)} px wide at ${width} wide with the root font size doubled, so the words are not hidden and this case reads the wrong thing`);
+    const hit = g.text.find((b) => meets(b, g.press));
+    assert.ok(!hit, `the ${FOLD_ROWS[kind].press} press at ${spanOf(g.press)} covers the row's text at ${hit && spanOf(hit)}, at ${width} wide with the root font size doubled`);
   });
   layoutTest(`press rows, ${scheme}: at ${width} wide with the root font size doubled, the page does not scroll sideways beside a ${kind} row`, async (t) => {
     const page = await foldedRowPage(t, kind, width, scheme); if (!page) return;
@@ -3122,21 +3125,42 @@ for (const width of ZOOM_WIDTHS) for (const scheme of SCHEMES) for (const kind o
   });
 }
 
-// At 180 wide and 100% text, an ask not sent yet keeps its Remove press inside its card, and the page does not scroll sideways. The ask
-// is typed and added to the list, so the stacked row is drawn as the owner sees it before Send.
+// The stacked ask at 180 wide: one ask typed and added to the list, so the row is drawn as the owner sees it before Send. The cases below
+// measure the card (the row's box, its dashed edge) and each press's box and its text's own runs, so a label that runs past its box still shows.
+const stackedAsk180 = async (t, zoom = false) => {
+  const page = await open(t, { viewport: { width: 180, height: 800 } }); if (!page) return null;
+  await addToList(page, "Is the archive push for lane hooks-batch done?");
+  if (zoom) await zoomText(page);
+  return page;
+};
+const stackPress = (page, act) => page.evaluate((act) => {
+  const box = (r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
+  const li = document.querySelector("ol.stack > li"), b = li && li.querySelector(`button[data-act="${act}"]`);
+  if (!li || !b) return null;
+  const rg = document.createRange(); rg.selectNodeContents(b);
+  return { card: box(li.getBoundingClientRect()), press: box(b.getBoundingClientRect()), label: b.textContent.trim(),
+    runs: [...rg.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5).map(box) };
+}, act);
+// At 180 wide and 100% text, an ask not sent yet keeps its Remove press inside its card.
 layoutTest("at 180 wide, an ask not sent yet keeps its Remove press inside its card", async (t) => {
-  const page = await open(t, { viewport: { width: 180, height: 800 } }); if (!page) return;
-  await addToList(page, "Is the archive push for lane hooks-batch done?");
-  const g = await page.evaluate(() => {
-    const li = document.querySelector("ol.stack > li"), rm = li && li.querySelector('button[data-act="rm"]');
-    return li && rm ? { card: li.getBoundingClientRect().right, press: rm.getBoundingClientRect().right } : null;
-  });
+  const page = await stackedAsk180(t); if (!page) return;
+  const g = await stackPress(page, "rm");
   assert.ok(g, "no stacked ask with a Remove press is drawn at 180 wide");
-  assert.ok(g.press <= g.card + 0.5, `Remove ends at ${Math.round(g.press)} px, past its card's edge at ${Math.round(g.card)} px, at 180 wide`);
+  assert.ok(g.press.r <= g.card.r + 0.5, `Remove ends at ${Math.round(g.press.r)} px, past its card's edge at ${Math.round(g.card.r)} px, at 180 wide`);
 });
+for (const zoom of [false, true]) for (const [act, name] of [["rm", "Remove"], ["edit", "Edit"]]) {
+  layoutTest(`at 180 wide${zoom ? " with the root font size doubled" : ""}, an ask not sent yet keeps its ${name} text inside its card`, async (t) => {
+    const page = await stackedAsk180(t, zoom); if (!page) return;
+    const g = await stackPress(page, act);
+    assert.ok(g, `no stacked ask with a ${name} press is drawn at 180 wide`);
+    assert.equal(g.label, name, `the press reads ${JSON.stringify(g.label)}, not ${name}, at 180 wide`);
+    assert.ok(g.runs.length > 0, `no text of the ${name} press is measured at 180 wide`);
+    const past = g.runs.find((r) => r.r > g.card.r + 0.5 || r.l < g.card.l - 0.5);
+    assert.ok(!past, `the ${name} text at ${past && spanOf(past)} is past its card at ${spanOf(g.card)}, at 180 wide`);
+  });
+}
 layoutTest("at 180 wide, an ask not sent yet does not make the page scroll sideways", async (t) => {
-  const page = await open(t, { viewport: { width: 180, height: 800 } }); if (!page) return;
-  await addToList(page, "Is the archive push for lane hooks-batch done?");
+  const page = await stackedAsk180(t); if (!page) return;
   const g = await page.evaluate(() => ({ scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth }));
   assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at 180 wide with an ask not sent yet`);
 });
@@ -3192,6 +3216,16 @@ for (const [width, zoom] of [[280, false], [240, false], [180, false], [320, tru
     const g = await pressGeo(page, id), s = await showAnswerGeo(page, id);
     assert.ok(s.t >= g.title.b - 1, `"Show answer" is drawn at ${Math.round(s.t)} px, beside the title that ends at ${Math.round(g.title.b)} px, at ${atWidth(width, zoom)}`);
   });
+  // A dropped "Show answer" starts at the title's start (owner item 448 a). The scope is the drop itself, so the start is read only under the title.
+  layoutTest(`folded row, waiting reply: at ${atWidth(width, zoom)}, "Show answer" starts at the title's start`, async (t) => {
+    const page = await foldedRowPage(t, "wait", width); if (!page) return;
+    const id = FOLD_ROWS.wait.ask.id;
+    if (zoom) await zoomText(page);
+    foldedScope(await foldedDate(page, id), "wait", width);
+    const g = await pressGeo(page, id), s = await showAnswerGeo(page, id);
+    assert.ok(s.t >= g.title.b - 1, `"Show answer" is drawn at ${Math.round(s.t)} px, not under the title that ends at ${Math.round(g.title.b)} px, at ${atWidth(width, zoom)}`);
+    assert.ok(Math.abs(s.l - g.title.l) <= 1, `"Show answer" starts at ${Math.round(s.l)} px, not at the title's start at ${Math.round(g.title.l)} px, at ${atWidth(width, zoom)}`);
+  });
 }
 for (const width of [240, 180]) {
   layoutTest(`folded row, waiting reply: at ${width} wide, "Show answer" stays inside its row`, async (t) => {
@@ -3214,6 +3248,19 @@ for (const [width, zoom] of [[280, false], [240, false], [180, false], [360, tru
     foldedScope(await foldedDate(page, id), kind, width);
     const g = await pressGeo(page, id);
     assert.ok(g.press.t >= g.title.b - 1, `the ${FOLD_ROWS[kind].press} press is drawn at ${Math.round(g.press.t)} px, beside the text that ends at ${Math.round(g.title.b)} px, at ${atWidth(width, zoom)}`);
+  });
+}
+// A dropped Restore press starts at the text's start (owner item 448 a): its box edge is the title's edge. The scope is the drop itself.
+// Dismiss is not pinned here: its box starts 12 px before the title, and its label starts 1 to 2 px before it (docs/design/press-row-reflow-notes.md, section 2).
+for (const [width, zoom] of [[280, false], [240, false], [180, false], [360, true]]) {
+  layoutTest(`folded row, side press: at ${atWidth(width, zoom)}, the Restore press starts at the text's start`, async (t) => {
+    const page = await foldedRowPage(t, "restore", width); if (!page) return;
+    const id = FOLD_ROWS.restore.ask.id;
+    if (zoom) await zoomText(page);
+    foldedScope(await foldedDate(page, id), "restore", width);
+    const g = await pressGeo(page, id);
+    assert.ok(g.press.t >= g.title.b - 1, `the Restore press is drawn at ${Math.round(g.press.t)} px, not under the text that ends at ${Math.round(g.title.b)} px, at ${atWidth(width, zoom)}`);
+    assert.ok(Math.abs(g.press.l - g.title.l) <= 1, `the Restore press starts at ${Math.round(g.press.l)} px, not at the text's start at ${Math.round(g.title.l)} px, at ${atWidth(width, zoom)}`);
   });
 }
 layoutTest("folded row, side press: at 240 wide, the page does not scroll sideways beside the Dismiss row", async (t) => {
@@ -3364,11 +3411,11 @@ for (const scheme of SCHEMES) {
     assert.ok(Math.abs(g.rx.t - g.rs.t) <= 1, `Close (top ${Math.round(g.rx.t)} px) and Send reply (top ${Math.round(g.rs.t)} px) are not on one line at 600 wide`);
     assert.ok(g.rx.l < g.rs.l, `Close (x ${Math.round(g.rx.l)} px) is not left of Send reply (x ${Math.round(g.rs.l)} px) at 600 wide`);
   });
-  layoutTest(`press rows, ${scheme}: at 600 wide with the root font size doubled, Close and Send reply sit on one line in that order, or stack with Send reply first`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at 600 wide with the root font size doubled, Close and Send reply sit on one line in that order`, async (t) => {
     const r = await replyFormAt(t, { width: 600, scheme, zoom: true }); if (!r) return;
     const { g } = r;
-    if (Math.abs(g.rx.t - g.rs.t) <= 1) assert.ok(g.rx.l < g.rs.l, `Close (x ${Math.round(g.rx.l)} px) is right of Send reply (x ${Math.round(g.rs.l)} px) on one line at 600 wide with the root font size doubled`);
-    else assert.ok(g.rs.t < g.rx.t, `the two presses stack with Close first (Close top ${Math.round(g.rx.t)} px, Send reply top ${Math.round(g.rs.t)} px), not Send reply first, at 600 wide with the root font size doubled`);
+    assert.ok(Math.abs(g.rx.t - g.rs.t) <= 1, `Close (top ${Math.round(g.rx.t)} px) and Send reply (top ${Math.round(g.rs.t)} px) are not on one line at 600 wide with the root font size doubled`);
+    assert.ok(g.rx.l < g.rs.l, `Close (x ${Math.round(g.rx.l)} px) is right of Send reply (x ${Math.round(g.rs.l)} px) on one line at 600 wide with the root font size doubled`);
   });
   layoutTest(`press rows, ${scheme}: at 600 wide with the root font size doubled, no press sits right of the hint while the other is below it`, async (t) => {
     const r = await replyFormAt(t, { width: 600, scheme, zoom: true }); if (!r) return;
@@ -3377,6 +3424,27 @@ for (const scheme of SCHEMES) {
     const below = (p) => p.t >= g.hint.b - 0.5;
     assert.ok(!(beside(g.rx) && below(g.rs)), `Close sits right of the hint while Send reply is below it, at 600 wide with the root font size doubled`);
     assert.ok(!(beside(g.rs) && below(g.rx)), `Send reply sits right of the hint while Close is below it, at 600 wide with the root font size doubled`);
+  });
+}
+// The reply rules in page.html stack the reply form's two presses where its box is narrow: Send reply on the first line, Close on the next.
+// Each case checks that the presses stack, then the order: screen order by top, Tab order by the buttons' DOM order. Send reply is
+// disabled while the reply is empty, and a disabled button keeps its place in DOM order.
+const replyTabOrder = (page) => page.evaluate(() => [...document.querySelectorAll("form.replyform button")].map((b) => ({ id: b.id, tabindex: b.getAttribute("tabindex") })));
+for (const scheme of SCHEMES) for (const [width, zoom] of [[180, false], [390, true]]) {
+  layoutTest(`press rows, ${scheme}: at ${atWidth(width, zoom)}, the reply form stacks Send reply above Close`, async (t) => {
+    const r = await replyFormAt(t, { width, scheme, zoom }); if (!r) return;
+    const { g } = r;
+    assert.ok(Math.abs(g.rx.t - g.rs.t) > 1, `Close and Send reply share a line at ${atWidth(width, zoom)}, so the reply form does not stack`);
+    assert.ok(g.rs.t < g.rx.t, `Close is drawn above Send reply at ${atWidth(width, zoom)} (Close top ${Math.round(g.rx.t)} px, Send reply top ${Math.round(g.rs.t)} px)`);
+  });
+  layoutTest(`press rows, ${scheme}: at ${atWidth(width, zoom)}, Tab reaches Send reply before Close`, async (t) => {
+    const r = await replyFormAt(t, { width, scheme, zoom }); if (!r) return;
+    const { g } = r;
+    assert.ok(Math.abs(g.rx.t - g.rs.t) > 1, `Close and Send reply share a line at ${atWidth(width, zoom)}, so the reply form does not stack`);
+    const order = await replyTabOrder(r.page), ids = order.map((b) => b.id);
+    assert.ok(ids.includes("rs-" + RPL_ROOT) && ids.includes("rx-" + RPL_ROOT), `the reply form's buttons are ${ids.join(", ")} at ${atWidth(width, zoom)}, not Send reply and Close`);
+    assert.ok(order.every((b) => !(Number(b.tabindex) > 0)), `a reply form button has a positive tabindex at ${atWidth(width, zoom)}`);
+    assert.ok(ids.indexOf("rs-" + RPL_ROOT) < ids.indexOf("rx-" + RPL_ROOT), `Tab reaches Close before Send reply at ${atWidth(width, zoom)} (order: ${ids.join(", ")})`);
   });
 }
 
@@ -3415,9 +3483,9 @@ for (const [width, zoom, label] of DROP_OVERLAP) for (const scheme of SCHEMES) {
   });
 }
 // The glyph sits on the middle of the Dismissed line's text block, as main draws it. At these sizes (280, 240 and 180 wide, and 360 with the
-// root font size doubled) the text takes three lines, so a glyph centred on the first line would sit a line-height off the middle.
-const DROP_STACKED = [[280, false, "280 wide"], [240, false, "240 wide"], [180, false, "180 wide"], [360, true, "360 wide with the root font size doubled"]];
-for (const [width, zoom, label] of DROP_STACKED) for (const scheme of SCHEMES) {
+// root font size doubled) the page clamps the text to two lines (the askl container rule), so a glyph centred on the first line would sit off the middle.
+const DISMISSED_GLYPH_SIZES = [[280, false, "280 wide"], [240, false, "240 wide"], [180, false, "180 wide"], [360, true, "360 wide with the root font size doubled"]];
+for (const [width, zoom, label] of DISMISSED_GLYPH_SIZES) for (const scheme of SCHEMES) {
   layoutTest(`press rows, ${scheme}: at ${label} the Dismissed line's glyph sits on the middle of the text block`, async (t) => {
     const page = await droppedPage(t, width, scheme); if (!page) return;
     if (zoom) await zoomText(page);
@@ -9323,7 +9391,7 @@ async function countLinesW(page, sel) {
 }
 // A phone width wraps the line, so the break assert below keeps the group check from passing on a line that never wraps. 360 is where
 // the nowrap rule decides: without it "1" ends one line and "paused" starts the next. 1280 does not wrap, so it has no break assert.
-for (const width of [360, 390, 1280]) test(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
+for (const width of [360, 390, 1280]) layoutTest(`the Now card's count line keeps each group whole at ${width} wide, with blocked, stalled and paused steps`, async (t) => {
   const page = await open(t, { pageHtml: barsBlockedPage(), viewport: { width, height: 900 } }); if (!page) return;
   await openStatus(page);
   const lines = await countLinesW(page, "#svNow > div:first-child > .lead");
