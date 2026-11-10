@@ -4036,6 +4036,8 @@ ASKED_WAKE = ("Asked on the waiting page. Writer: Triage (session_00000000000000
 PLAIN_SAVED_WAKE = ("Saved on the waiting page. Owners: coordinator (session_000000000000000000000002). "
                     "Items: 486 a.")
 NOTE_ITEM = "- fb-0961-1 [note] -> noted"
+SAVED_NOTE_WAKE = ("Saved on the waiting page. Owners: coordinator (session_000000000000000000000002). "
+                   "Items: 163 none of these (how can we trust the strength of the testing of our tests?), 184 a.")
 TEMPLATE_STEP = "page-form-template"  # a step file whose text names the template dir
 PLAIN_STEP = "page-form-plain"  # a step file that names waiting-page but not the template dir
 TEMPLATE_STEP_TEXT = json.dumps({"id": TEMPLATE_STEP, "title": "Route page comments",
@@ -4209,6 +4211,58 @@ def case_page_form_not_the_writer_passes():
     want = (("verbatim", True), ("artifact", True), ("repo", True), ("writer", False))
     if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), want):
         expect_silent(name, p)
+
+
+def claude_settings_no_record_repo():
+    """The claude-settings fixture with no record branch on origin: the step file sits on a lane branch, so the step
+    home resolves, but origin's record branch does not, so the template read fails."""
+    def build():
+        root = make_repo("claude-settings-no-record", tracked=("decisions/a-ruling.md",), extras=filing_extras())
+        git(root, "remote", "add", "origin", CLAUDE_SETTINGS_ORIGIN)
+        lane_file(root, "roadmap/data/steps/%s.json" % PLAIN_STEP)
+        return root
+    return shared_repo("claude-settings-no-record", build)
+
+
+def case_page_form_failed_record_read_stands_down():
+    """A failed read of origin's record branch stands the rule down: a comment the rule would block passes. The step
+    home resolves on a lane branch, so only the template read fails."""
+    cfg, sid = new_cfg(), "page-form-no-record"
+    root = claude_settings_no_record_repo()
+    name = "page-form stand-down: origin's record branch does not resolve"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-5 [task] -> step:%s" % PLAIN_STEP], cwd=root)
+    check(name + ": scope the record branch's step file does not resolve", record_step(root, PLAIN_STEP) is None,
+          record_step(root, PLAIN_STEP))
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), SCOPE_IN):
+        check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
+
+
+def case_page_form_saved_wake_with_a_note_blocks():
+    """A Saved wake whose items carry a note in parentheses is a page comment: with only a note, the Stop blocks and
+    names the rule. Its owners clause keeps its parenthesis, so only the items decide."""
+    cfg, sid = new_cfg(), "page-form-saved-note"
+    root = claude_settings_repo()
+    name = "page-form: Saved wake with a note in parentheses, [note] -> noted"
+    p = page_comment_run(cfg, sid, SAVED_NOTE_WAKE, [NOTE_ITEM], cwd=root)
+    check(name + ": scope the items carry a parenthesis", "(" in SAVED_NOTE_WAKE.split("Items: ", 1)[1],
+          SAVED_NOTE_WAKE)
+    if not expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, SAVED_NOTE_WAKE), SCOPE_IN):
+        return
+    reason = block_reason(p)
+    check(name + ": blocks", p.code == 0 and reason is not None, p.desc())
+    if reason is not None:
+        check(name + ": reason names page-form-to-template", "page-form-to-template" in reason, reason)
+
+
+def case_page_form_closed_not_page_form_passes():
+    """A closed `[note] -> not-page-form` is a closed home, as a closed not-a-grant is: the Stop does not refuse it as
+    closed with no home."""
+    cfg, sid = new_cfg(), "page-form-closed"
+    root = claude_settings_repo()
+    name = "page-form: closed [note] -> not-page-form is a closed home"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-6 [note] -> not-page-form [closed]"], cwd=root)
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), SCOPE_IN):
+        check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
 CASES = (
@@ -4401,6 +4455,9 @@ CASES = (
     case_page_form_other_artifact_passes,
     case_page_form_other_repo_passes,
     case_page_form_not_the_writer_passes,
+    case_page_form_failed_record_read_stands_down,
+    case_page_form_saved_wake_with_a_note_blocks,
+    case_page_form_closed_not_page_form_passes,
 )
 
 
