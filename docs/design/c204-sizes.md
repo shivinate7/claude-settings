@@ -2,7 +2,7 @@
 
 Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's value in a comment. Screen: `skills/waiting-page/page.html` at 1cc47f01 (`optPic`, `fitFrame`, `MIN_PIC`, `.dfitwrap`, `.opt .opic`). Owner's grant: waiting-page item 55 note, Oct 28 17:50 CDT. The mockup was measured with headless Chromium 153 at 390, 1280 and 2200, light and dark, and at 1065 (the narrowest page with three option columns). Fonts fall back offline.
 
-1. When a picture scrolls. Decision `page-pic-fills-card` (docs/decisions/page-pic-fills-card.md): sc = min(2, W / w), where W = floor(column) − 2 and w × h is the mockup (390 wide) or the focus box. The picture scrolls only when ceil(h × sc) > F + 1, where F = max(480, ceil(W × 844 / 390)). A picture that scrolls is 480 high. If the scrollbar gutter alone makes it fit, it draws whole at the narrower width.
+1. When a picture scrolls. Decision `page-pic-fills-card` (an option picture fills its card, docs/decisions/page-pic-fills-card.md): sc = min(2, W / w), where W = floor(column) − 2 and w × h is the mockup (390 wide) or the focus box. The picture scrolls only when ceil(h × sc) > F + 1, where F = max(480, ceil(W × 844 / 390)). A picture that scrolls is 480 high. If the scrollbar gutter alone makes it fit, it draws whole at the narrower width.
    - Replaced by decision `page-pic-fills-card` (an option picture fills its card), owner 2026-11-09 21:26 CST.
 2. Question 1, a focused card. Pick: 1A.
    - 1A (state `focus-in`): the card scrolls only over the focus box, and opens at the top of the box. Gain: this keeps today's rule, that the card shows only the focus element (`SKILL.md`, the `focus` bullet; `fitFrame` translates by −box). The open position is scrollTop 0, so no timing can make it wrong. A focus that fits is unchanged. Loss: the mockup above and below the focus is still only in View.
@@ -31,27 +31,27 @@ Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's 
    - The change applies only to `optPic`'s call (maxH 480). `designPreview` and `stageFrame` do not change.
    - DOM of a capped wrap: wrap > `.dtop`, `.dsizer` > iframe, `.dcue` > `.dmore`. `.dsizer` is display block, position relative, overflow hidden, and pw × ceil(bh × sc), where bh is the focus box height, else the mockup height. The iframe keeps today's position and transform inside the sizer.
    - Why a sizer: a scroller's range starts at 0, so scroll overflow cannot reach negative translate coordinates. The scroll case needs a sized inner box plus scrollTop. Also, a transformed iframe adds its whole box to the scroll range unless a box with overflow hidden clips it. With 1B, the sizer is ceil(ht × sc) high, and only x is translated.
-   - In `fit()`, compute sc as today, then set scroll = ceil(bh × sc) > maxH, and toggle `.scroll`. In the scroll case, read g = wrap.offsetWidth − wrap.clientWidth − 2 after `.scroll` is on. g is the gutter plus any border past 1px, such as the 3px left border of a `.dif` picture (measured: g 12 there). Set the wrap to (pw + 2 + g) × maxH. Do this in both branches, the measured one and the declared-size one, so the first paint is already 480 high. The declared branch then sets the height and no aspect-ratio.
-   - With 5B, the width budget is floor(column rect width) − 2 − g. A rounded clientWidth let the box pass the column by 0.17px.
+   - In `fit()`, compute sc = min(2, W / w), then set scroll = ceil(bh × sc) > F + 1, where F is as in item 1, and toggle `.scroll`. In the scroll case, read g = wrap.offsetWidth − wrap.clientWidth − 2 after `.scroll` is on. g is the gutter plus any border past 1px, such as the 3px left border of a `.dif` picture (measured: g 12 there). Then, with narrow = min(2, (W − g) / w), if ceil(bh × narrow) ≤ maxH + 1, the picture draws whole at that scale, with no scroll and no cue. Otherwise set the wrap to (pw + 2 + g) × maxH. The placed branch sets this size. The unplaced branch sets `aspect-ratio` instead, and the placed fit corrects it before the first paint.
+   - The width budget is floor(column rect width) − 2 − g (decision `page-pic-fills-card`). A rounded clientWidth let the box pass the column by 0.17px.
    - Set the first scrollTop once per wrap, never inside `fit()`, because `fit()` runs on every resize, message and repaint. With 1A, the first scrollTop is 0, so there is nothing to set. With 1B, set it after the first fit with a measured box (in the message handler), behind a per-wrap flag. When the person has scrolled, skip it.
    - The repaint merge in `syncOpts()` swaps only `.view` and keeps the wrap, so the scroll position survives a repaint. The builder confirms this.
    - A passive scroll listener on the wrap toggles `.scrolled` and `.at-end`. Call it once after each fit too.
    - The gutter: `.dfitwrap.scroll` has `scrollbar-width: thin` and `scrollbar-gutter: stable`. Headless Chromium draws a default scrollbar as an overlay (0px, measured). With `thin`, it draws a 10px classic gutter, so the measurements cover the classic case.
    - Acceptance check for a picture that fits (decision `page-pic-fills-card`): at the build head, with the same designs, its width is floor(column) wide, or 2 × its width when that is less.
-   - `SKILL.md` lines 238–239 and 247–248 become false, so the builder rewrites them. Grant: the owner's item 55 note. Line 239: "The page scales it to the card. A picture taller than the card's 480px box scrolls inside the box. The full mockup stays one tap away ("Open full size")." Line 248: "Either way the picture is scaled to fit the card, at most 480px high and never narrower than 120px. A picture that would pass 480px high stays 480px high and scrolls in its box, and opens at the top of what the card shows." With 1A, line 247 keeps "shows that element", and drops "whole".
+   - `SKILL.md` states the rule now, in the `drawn` step and the `focus` bullet. The `focus` bullet keeps "shows that element" (1A). Grant: the owner's item 55 note.
 8. Fixed sizes kept: 32px chips and the 44px View bar. The page has no sideways scroll. The 480 cap and the 120 floor no longer hold for a picture that fits. It now draws at the card's width, and only a picture taller than a phone scrolls in the 480 box (decision `page-pic-fills-card`, docs/decisions/page-pic-fills-card.md).
 9. Also in this lane: a task card's `ol.steps` takes `min-width: 0; overflow-wrap: anywhere;`, so an unbroken URL in a step stays inside the card at 360, 390 and 430 wide. The coordinator added it on Oct 29 at 14:45 CDT, after the tests for it went red.
 10. Measured verdicts. Each state was measured at each size, light and dark: `long`, `long-end`, `focus-in`, `focus-whole`, `fits`, `keys` and `wide`.
    - Checks per picture: whole, at most F + 1 high; scrolling, 480 high; inside its card and column, and above `.head`.
    - Scroll case: 480 high. The picture width equals the content width, so the gutter takes none of it. No sideways scroll. It opens at the right place. The cue shows before the end and hides at it. It is not a tab stop. Its width is column − 2 − gutter (decision `page-pic-fills-card`).
-   - Fit case: width, height and transform equal today's formula, computed again in the measure script apart from the mockup's code.
+   - Fit case: width, height and transform equal the formula in item 1, computed again in the measure script apart from the mockup's code.
    - Page: scrollWidth = clientWidth.
    - Each check went red on a broken copy: one without the gutter in the width, and one with a fit picture 1px wider and with no translate.
 
    | Size | Light | Dark |
    |---|---|---|
    | 390 | pass | pass |
-   | 1065 | pass | pass |
+   | 1065 | unknown | unknown |
    | 1280 | pass | pass |
    | 2200 | pass | pass |
 
