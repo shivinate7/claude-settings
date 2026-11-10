@@ -192,7 +192,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
-  frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
+  red-run              deny. A `git push` whose range (the one conflict-markers reads, minus the commits the
+                       default base holds) has a non-merge commit that adds lines to a test path and has no
+                       valid `Red-run:` line, judged by `gaps` in lint/check_red_run.py. A failed read is no
+                       hit. (red-run-trailer-on-test-commits)
+  frozen-path         deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
   agent-model-cap   ask. A write to a settings file that sets or changes
@@ -504,8 +508,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, HOOK_BYPASS_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, RED_RUN_CHAIN_REASON, RED_RUN_PUSH_REASON, ROLE_REASON,
+            conflict_markers_hit, hook_bypass_hit, red_run_parts, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
             _add_shape, _commit_shape, _is_python, own_tier_tagged,
@@ -4502,8 +4506,19 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
-    kind, matched = conflict_markers_hit(stripped, cwd)
-    if matched:
+    # A push of a test commit with no Red-run line is refused here too (rule red-run): it shares the
+    # push's range, and adds one `git log` per push. A push after a commit in the same call that amends
+    # HEAD or stages added test lines is refused as a chain (the range cannot hold that commit yet): one
+    # `git diff --numstat` per commit with a push after it, plus a `git ls-files --others` per earlier add
+    # (see RED_RUN_CHAIN_REASON's comment), none for an amend or a commit with no push after it.
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel)
+    if kind == "red-run":
+        flagged, remedy = red_run_parts(matched)
+        refuse(tool, "deny", "red-run", RED_RUN_PUSH_REASON.format(flagged=flagged, remedy=remedy),
+               cap_safe(matched[0], 120))
+    elif kind == "red-chain":
+        refuse(tool, "deny", "red-run", RED_RUN_CHAIN_REASON, matched)
+    elif matched:
         markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)

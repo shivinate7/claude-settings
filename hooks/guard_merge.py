@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -642,6 +643,23 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # one read per file with a finding). Only when the remote-tracking ref is missing does it cost more:
 # a call per base tried (upstream, then default base), one `git rev-parse` of the source after the
 # first rejection, and the default base's own reads once. Nothing is read when the command holds neither.
+# red-run (decision red-run-trailer-on-test-commits) rides the same push check: after the marker read finds
+# nothing, `check_red_run.gaps` reads the accepted base up to the source in one `git log --no-merges
+# --numstat -z`, so a push costs one more `git log` and nothing else. Only a push that carries a gap costs
+# more: the rollout's `git ls-tree` (head, then each flagged commit's parent), the default base's reads
+# (once, in `memo`), a second `git log` without the default base's commits, and, for each commit that is
+# still a gap, one `git log -n 5000 --format=%T` of its ancestors (a commit whose tree an ancestor holds is
+# no gap; 5,000 tree ids are at most 205 KB, about 0.1 s). The guard passes its own
+# `is_test_rel`, so the lazy import of check_red_run loads no second guard (the import measured 0.4 ms).
+# A push after a commit in the same call is read before that commit lands, so its range never holds it. Such
+# a commit is refused as a red-run chain (RED_RUN_CHAIN_REASON) when it is an `--amend`, or stages added lines
+# on a test path: the index, or the working tree for `-a`, a pathspec and an earlier `git add`, read the way the
+# marker read above reads them. Cost, only for a commit with a `git push` after it in the call: one `git diff
+# --numstat`, of the index, or of the working tree for `-a`, a pathspec or a whole-tree add. A whole-tree add
+# costs one `git ls-files --others`. Each earlier add with pathspecs costs one `git ls-files --others` in every
+# form, and one more numstat when the commit reads the index. An untracked test file costs a size stat. The
+# reads stop at the first test addition. An `--amend` costs none, and a commit with no push after it costs no
+# read. A failed read is no hit.
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
     "Remedy: resolve the markers in that file, re-stage it, then retry."
@@ -655,6 +673,30 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "the guard cannot read, so it cannot be checked for conflict markers before this push sends it. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
+RED_RUN_PUSH_REASON = (
+    "Rule (Git, red-run; decision red-run-trailer-on-test-commits): this push would send test commits with no "
+    "valid Red-run line: {flagged}. Remedy: {remedy}"
+)
+RED_RUN_CHAIN_REASON = (
+    "Rule (Git, red-run; decision red-run-trailer-on-test-commits): the commit in this call adds test lines or amends "
+    "HEAD, and the guard reads this push's commits before that commit lands, so it cannot check them for a Red-run "
+    "line. Remedy: run the push in a call of its own, after the commit has landed."
+)
+RED_RUN_SHOWN = 3   # flagged commits a red-run refusal lists, the rest counted
+
+
+def red_run_parts(lines):
+    """(flagged, remedy) to fill RED_RUN_PUSH_REASON from check_red_run's `lines`: the first few flagged
+    commits, and the first two lines of check_red_run's own remedy (the third names a branch switch, which a
+    refusal never names)."""
+    shown = [line.split(": ", 2)[-1] for line in lines[:RED_RUN_SHOWN]]
+    more = " and %d more" % (len(lines) - RED_RUN_SHOWN) if len(lines) > RED_RUN_SHOWN else ""
+    check_red_run = _red_run_module()
+    fix = " ".join(text[:1].upper() + text[1:] for text in
+                   (line.removeprefix("check_red_run: ") for line in check_red_run.REMEDY[:2]))
+    return cap_safe("; ".join(shown), 600) + more, fix
+
+
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
@@ -730,12 +772,12 @@ def _ref_sha(top, ref):
 
 
 def _checked_range(where, source, tracking, memo):
-    """(finished `git diff --check <base>...<source>`, source) for the first base that git accepts, else
-    (None, source). The three dots make git find the merge base itself, so no ref is read first. The
+    """(finished `git diff --check <base>...<source>`, source, base) for the first base that git accepts, else
+    (None, source, ''). The three dots make git find the merge base itself, so no ref is read first. The
     bases are the destination's remote-tracking ref, the source's upstream, then the default base (read
     once per push, in `memo`). Only a rejected base costs more. After the first rejection the source is
     read once: one that does not resolve is read as HEAD, and the same base is tried again.
-    `--check` exits 2 on a finding."""
+    `--check` exits 2 on a finding. The red-run check reads the same base, so it resolves none of its own."""
     verified = source == "HEAD"
     step = 0
     while step < 3:
@@ -745,29 +787,81 @@ def _checked_range(where, source, tracking, memo):
         if base:
             done = _diff_check(where, [base + "..." + source, "--"])
             if done is None:
-                return None, source
+                return None, source, ""
             if done.returncode in (0, 2):
-                return done, source
+                return done, source, base
             if not verified:
                 verified = True
                 if not _ref_sha(where, source):
                     source = "HEAD"
                     continue
         step += 1
-    return None, source
+    return None, source, ""
 
 
-def _push_hit(segment, stripped, cwd, args):
-    """Return the first file a `git push` would send with all three conflict markers, else ''. For each
+def _red_run_module():
+    """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
+    import. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no
+    lint folder beside it. The caller reads that as no hit."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import check_red_run
+    return check_red_run
+
+
+def _red_run_present():
+    """True when check_red_run imports, the same gate `_red_run_lines` uses for a copy with no lint folder."""
+    try:
+        _red_run_module()
+    except ImportError:
+        return False
+    return True
+
+
+def _red_run_lines(where, source, base, memo, is_test_rel):
+    """The check_red_run lines for the commits a push of `source` sends, from `base` (the one the conflict
+    check accepted), else []. `gaps` reads them in one `git log --numstat`, and reads the source's tree for
+    the rollout. `is_test_rel` is the guard's own judge of a test path, so check_red_run imports no guard
+    here. A push that carries a gap is read again without the commits the default base holds, which are not
+    the lane's: a merge or a rebase brings them in. The default base is read here only then, once per push
+    in `memo`. A default base that cannot be read is no hit, for the push would judge main's commits. So is a
+    failed read in either pass, and a copy of the hooks with no check_red_run beside it."""
+    try:
+        check_red_run = _red_run_module()
+    except ImportError:
+        return []
+    if is_test_rel is None:   # a caller with no judge of a test path reads no red-run hit
+        return []
+    try:
+        lines = check_red_run.gaps(where, base, source, is_test_rel=is_test_rel)
+        if lines:
+            if "default" not in memo:
+                memo["default"] = resolve_default_base(where) or ""
+            default = memo["default"]
+            if not default:
+                return []
+            if default != base.removeprefix("refs/remotes/"):
+                lines = check_red_run.gaps(where, base, source, default, is_test_rel=is_test_rel)
+    except (check_red_run.Unknown, OSError):
+        return []
+    return lines
+
+
+def _push_hit(segment, stripped, cwd, args, is_test_rel):
+    """Return `("push", file)` for the first file a `git push` would send with all three conflict markers,
+    else `("red-run", lines)` for the first ref that sends a test commit with no valid Red-run line (the
+    lines are check_red_run's), else `("", "")`. For each
     ref the push names, the range is the merge base with the destination's remote-tracking tip
     (`refs/remotes/<remote>/<dest>`, the named remote else origin), else the source's upstream, else the
     default base, up to the local source ref. A source that does not resolve (a `$(...)`, a backtick, a
     glob, a typo) is read as HEAD. The range comes from the arguments alone: in the usual case one
-    `git diff --check`, with no read of the top folder, the source or a base first."""
+    `git diff --check`, with no read of the top folder, the source or a base first. The red-run check
+    then adds one `git log` over the same base."""
     named = push_refspecs(args)
     where, overrides = push_target(segment, stripped, cwd)
     if named is None or not where or not os.path.isdir(where):
-        return ""
+        return "", ""
     specs = named[1] or [""]
     dests = push_destinations(args, where, overrides)
     memo = {}
@@ -777,25 +871,80 @@ def _push_hit(segment, stripped, cwd, args):
             continue
         source = _plain_source(source)
         tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
-        done, source = _checked_range(where, source, tracking, memo)
+        done, source, base = _checked_range(where, source, tracking, memo)
         if done is None:
             continue
         name = _triplet_file(_kinds_of(done, where, source))
         if name:
-            return name
-    return ""
+            return "push", name
+        lines = _red_run_lines(where, source, base, memo, is_test_rel)
+        if lines:
+            return "red-run", lines
+    return "", ""
+
+
+def _untracked_names(where, specs):
+    """The untracked, not-ignored files that `specs` name (all of them when `specs` is None), at most
+    _UNTRACKED_CAP, in git's order. A failed read gives none."""
+    done = _git(where, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard", "-z",
+                "--full-name", *(["--", *specs] if specs else []))
+    if done is None or done.returncode != 0:
+        return []
+    return [n for n in done.stdout.split("\0") if n][:_UNTRACKED_CAP]
+
+
+def _numstat_adds_test(where, diff_args, is_test_rel):
+    """True when `git diff --numstat <diff_args>` shows added lines, or a binary file, on a test path. The
+    test is check_red_run's own: a row whose added count is not 0."""
+    done = _git(where, "-c", "core.quotepath=off", "-c", "diff.relative=false", "diff", "--no-ext-diff",
+                "--no-renames", "--numstat", "-z", *diff_args)
+    if done is None or done.returncode != 0:
+        return False
+    for row in done.stdout.split("\0"):
+        parts = row.lstrip("\n").split("\t", 2)
+        if len(parts) == 3 and parts[0] != "0" and is_test_rel(parts[2]):
+            return True
+    return False
+
+
+def _untracked_adds_test(where, top, specs, is_test_rel):
+    """True when an untracked file `git add` would stage is a non-empty file on a test path."""
+    for name in _untracked_names(where, specs):
+        try:
+            if is_test_rel(name) and os.path.getsize(os.path.join(top, name)) > 0:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _commit_stages_tests(call, where, top, all_flag, specs, wholes, adds, is_test_rel):
+    """True when the commit in `call` is an `--amend`, or stages added lines on a test path. It reads the tree
+    the marker read uses: the index, else the working tree for `-a`, a pathspec, a whole-tree add (`wholes`
+    holds the tops) and the pathspecs of earlier adds (`adds`)."""
+    if "--amend" in call[1]:
+        return True
+    if specs:
+        return _numstat_adds_test(where, ["HEAD", "--", *specs], is_test_rel)
+    whole = all_flag or top in wholes
+    if _numstat_adds_test(top, ["HEAD"] if whole else ["--cached"], is_test_rel):
+        return True
+    if top in wholes and _untracked_adds_test(top, top, None, is_test_rel):
+        return True
+    # `git diff HEAD` covers an earlier add's tracked paths, but no diff form shows an untracked file, and `-a`
+    # stages none: each add's untracked paths are read in every form, as the marker read reads them.
+    return any(add_top == top and ((not whole and _numstat_adds_test(add_where, ["HEAD", "--", *add_paths],
+                                                                     is_test_rel))
+                                   or _untracked_adds_test(add_where, top, add_paths, is_test_rel))
+               for add_where, add_top, add_paths in adds)
 
 
 def _untracked_findings(where, top, specs):
     """Marker findings in the untracked files that `git add` would stage: all of them under `top` when
     `specs` is None, else those the pathspecs name. `git diff HEAD` skips an untracked file, so each is
     read against /dev/null. At most _UNTRACKED_CAP files are read, the first in git's order."""
-    done = _git(where, "-c", "core.quotepath=off", "ls-files", "--others", "--exclude-standard", "-z",
-                "--full-name", *(["--", *specs] if specs else []))
-    if done is None or done.returncode != 0:
-        return {}
     found = {}
-    for name in [n for n in done.stdout.split("\0") if n][:_UNTRACKED_CAP]:
+    for name in _untracked_names(where, specs):
         found.update(_marker_findings(top, top, ["--no-index", "--", "/dev/null", name], None))
     return found
 
@@ -841,27 +990,36 @@ def _repo_of(repos, where):
     return repos[where]
 
 
-def conflict_markers_hit(stripped: str, cwd: str):
+def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
-    guard could not judge; the file is then `git push`). Each segment is judged from its own command
-    word."""
+    guard could not judge; the file is then `git push`), or `red-chain` (a push after a commit that amends
+    HEAD or stages added test lines, which the push's range cannot hold yet). A push that carries no marker but sends a test
+    commit with no valid Red-run line returns `('red-run', lines)`, the lines being check_red_run's.
+    Each segment is judged from its own command word."""
     pending = []                        # earlier adds no commit has taken: (where, None) stages whole, (where, specs) names paths
     repos = {}                          # where -> (top, has_head), one `git rev-parse` each until the next commit
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
+    red_chain = False                   # an earlier commit amends HEAD or stages added test lines
     ends = []
     segments = split_segments(stripped, ends)
+    calls = [git_call_of(segment) if segment.strip() else None for segment in segments]
+    # A commit with no push after it lands before any push reads a range, so it needs no red-run read.
+    last_push = max((number for number, call in enumerate(calls) if call is not None and call[0] == "push"),
+                    default=-1)
     for number, segment in enumerate(segments):
         if not segment.strip():
             continue
-        call = git_call_of(segment)
+        call = calls[number]
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
-            name = _push_hit(segment, stripped, cwd, call[1])
-            if name:
-                return "push", name
+            if red_chain:
+                return "red-chain", "git push"
+            kind, found = _push_hit(segment, stripped, cwd, call[1], is_test_rel)
+            if kind:
+                return kind, found
             readable = False
             continue
         if call is None or not (call[0] in ("add", "commit") or _continues(call)):
@@ -901,6 +1059,9 @@ def conflict_markers_hit(stripped: str, cwd: str):
         all_flag, specs = _commit_shape(call[1]) if call[0] == "commit" else (False, [])
         if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
+        red_chain = red_chain or (number < last_push and is_test_rel is not None and _red_run_present()
+                                  and _commit_stages_tests(call, where, top, all_flag, specs, wholes, adds,
+                                                           is_test_rel))
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
         else:
