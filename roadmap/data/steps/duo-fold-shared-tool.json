@@ -1,11 +1,11 @@
 {
   "title": "Home's duo-fold.sh becomes a shared claude-settings tool next to sim-test and sim-lease",
   "phase": "now",
-  "status": "done",
+  "status": "blocked",
   "order": 949,
   "owner": "coordinator",
   "why": "Owner ruling, Degen item 187, 2026-11-09 20:16 CST: Home's scripts/duo-fold.sh, at e7f2b5d6, moves into claude-settings as a shared tool next to sim-test and sim-lease. Degen and Home each keep a copy until it lands (owner 20:22 CST).",
-  "note": "The coordinator starts its lane (20:30 CST Nov 9). After it lands, Degen's and Home's copies go, each by its own repo's lane. Related: skill ios-apps (fold the Duo). Filed 20:27 CST Nov 9. Lane session_013NEJL2JTGibiAkEUXng1ag started 20:26 CST (coordinator 20:36-20:41 CST Nov 9). Done: #2488 merged in batch 71 (#2510, main 6e8d6ccf9, 07:36 CST Nov 10; head checked on main by triage).",
-  "updatedAt": "2026-11-10T07:41:00-06:00",
+  "note": "The coordinator starts its lane (20:30 CST Nov 9). After it lands, Degen's and Home's copies go, each by its own repo's lane. Related: skill ios-apps (fold the Duo). Filed 20:27 CST Nov 9. Lane session_013NEJL2JTGibiAkEUXng1ag started 20:26 CST (coordinator 20:36-20:41 CST Nov 9). Done: #2488 merged in batch 71 (#2510, main 6e8d6ccf9, 07:36 CST Nov 10; head checked on main by triage). OWED hand-off to Degen and Home (coordinator 07:41 CST Nov 10): no cloud session holds their coordinators' ids. WAITS: the next Mac session in those repos. Text to send: \"claude-settings batch 71 merged to main as 6e8d6ccf9 (#2510), including #2488: bin/duo-fold <udid> <folded|open> is now a shared tool (record duo-fold-tool; skills/ios-apps names it). Your repo may switch from its own scripts/duo-fold.sh copy; keep the copy until you have run the shared one.\" Set done once both are sent.",
+  "updatedAt": "2026-11-10T07:43:00-06:00",
   "lane": "session_013NEJL2JTGibiAkEUXng1ag"
 }
