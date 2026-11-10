@@ -956,6 +956,21 @@ class DoneFormatAndCiteTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_allowed(line + ITEM_DONE)
 
+    def test_item_cite_red_line_label_before_item_blocks(self):
+        # Catches: the label "the line:" before an item number passes as if it were a gloss. The word "line" is no
+        # gloss, so the id is refused as a bare id. Red on old code: no item rule exists yet.
+        self.assert_blocked("the line: item 12." + ITEM_DONE, "'item 12' is a record id")
+
+    def test_item_cite_allowed_line_item_is_not_a_cite(self):
+        # Catches: "line item 12", a PO or budget line, is read as a waiting-page item id. Green on old code.
+        rows = [
+            "The line item 12 on the PO is paid.",
+            "Line item 12 is paid.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line + ITEM_DONE)
+
 
 class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
@@ -4878,7 +4893,9 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assert_allowed("The owner answers in chat. Answering takes a minute, and the answer is pending.")
 
     def test_an_green_landed_turn_with_a_cited_line_passes(self):
-        reply = "Item 143 answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        # Re-pointed: the bare "Item 143" is a record id with no gloss, so the cite check refuses it on a landed turn.
+        # The gloss "(clear button)" keeps the answered source and passes the cite check.
+        reply = "Item 143 (clear button) answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
         self.assert_allowed(reply, landed=True)
 
     def test_an_green_stop_hook_active_stays_quiet(self):
