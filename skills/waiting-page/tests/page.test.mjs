@@ -2313,7 +2313,8 @@ const sectionOf = (page, it) => page.evaluate((id) => { const el = document.getE
 const cardsIn = (page, sel) => page.evaluate((s) => [...document.querySelectorAll(s + " article.card")].map((c) => c.id.slice(5)), sel);
 const sectionIds = (page) => page.evaluate(() => [...document.querySelectorAll("#list > section.tier")].map((s) => s.id));
 // Each card with the section that holds it, in page order. Equal before and after a push means nothing moved.
-const layout = (page) => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.closest("section.tier")?.id ?? null, c.id]));
+// lines: also the folded line of each item in place of its card (an article with id line-<n>), so a card that folds to a line keeps its place.
+const layout = (page, lines = false) => page.evaluate((lines) => [...document.querySelectorAll(lines ? "article.card, article[id^='line-']" : "article.card")].map((c) => [c.closest("section.tier")?.id ?? null, c.id]), lines);
 // The href of the rail row that a chip sits in, or null.
 const railRowOf = (page, it) => page.evaluate((id) => { const c = document.getElementById("c-" + id); const row = c && c.closest(".ov-tier"); const a = row && row.querySelector("a.ov-head"); return a ? a.getAttribute("href") : null; }, it.id);
 
@@ -2505,7 +2506,8 @@ test("in the Answered section, a receipt that arrives after load moves no card, 
   await page.waitForFunction((id) => !!document.querySelector(`#item-${id} .receipt .read`), reads.id);
   // The filed item is one line now, in place of its card. The other cards keep their places.
   await mustHave(page, `#tier-answered #line-${filed.n}`, `the one line of No. ${filed.n} in the Answered section, in place of its card`);
-  assert.deepEqual(await layout(page), before.filter(([, id]) => id !== "item-" + filed.id), "a receipt that arrived after load moved a card");
+  // The filed card's place is the folded line's place: the same section, at the same index. The other cards keep theirs.
+  assert.deepEqual(await layout(page, true), before.map(([sec, id]) => (id === "item-" + filed.id ? [sec, "line-" + filed.n] : [sec, id])), `a receipt that arrived after load moved a card, or moved the line of No. ${filed.n} out of its place`);
   const ro = page.locator(`#tier-answered #item-${reads.id}`);
   await need(ro.locator(".ans"), `No. ${reads.n} in the Answered section has no answer pill`);
   assert.equal(await ro.locator(".ans.filed").count(), 0, `a read-only receipt marks No. ${reads.n} filed`);
@@ -2589,6 +2591,31 @@ test("Answered section: a sunk card whose saved answer has a restored draft keep
   await fold.click();
   assert.equal(await fold.getAttribute("aria-expanded"), "true", `the fold of No. ${it.n} stays shut after the press`);
   assert.equal(await c.locator(".rnote").isVisible(), true, `the fold of No. ${it.n} reads open but its note is hidden`);
+});
+
+// A closed line is in the Answered section and in no card, so a rail count that reads only the answered items misses it. The
+// section's own count holds it, so the rail's Answered row must match that count.
+test("answered-rail: with only a closed line, the rail has an Answered row that counts it, as the section does", async (t) => {
+  const open1 = mk("rail-closed-open", 1, { added: NEW_ADDED });
+  const page = await open(t, { items: [open1], rawItems: { [AP_CLOSED.id]: AP_CLOSED } }); if (!page) return;
+  await mustHave(page, `#rail #c-${open1.id}`, `the rail chip of the open No. ${open1.n}`);
+  await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `the line of the closed No. ${AP_CLOSED.n} in the Answered section`);
+  const railRow = page.locator('#rail a.ov-head[href="#tier-answered"]');
+  await need(railRow, `the rail has no Answered row, but the Answered section holds No. ${AP_CLOSED.n}`);
+  const section = (await page.locator("#tier-answered .rhead .ct").textContent()).trim();
+  assert.equal((await railRow.locator(".ct").textContent()).trim(), section, "the rail's Answered count is not the section's count, closed lines included");
+});
+
+test("answered-rail: a closed line and an answered item both count in the rail's Answered row, as in the section", async (t) => {
+  const ans = mk("rail-closed-ans", 1, { added: at(5) }), open1 = mk("rail-closed-open2", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [ans, open1], answers: answerOf(ans), rawItems: { [AP_CLOSED.id]: AP_CLOSED } }); if (!page) return;
+  await mustHave(page, `#rail #c-${open1.id}`, `the rail chip of the open No. ${open1.n}`);
+  await mustHave(page, `#tier-answered #item-${ans.id}`, `the card of the answered No. ${ans.n} in the Answered section`);
+  await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `the line of the closed No. ${AP_CLOSED.n} in the Answered section`);
+  const railRow = page.locator('#rail a.ov-head[href="#tier-answered"]');
+  await need(railRow, `the rail has no Answered row, but the Answered section holds two items`);
+  const section = (await page.locator("#tier-answered .rhead .ct").textContent()).trim();
+  assert.equal((await railRow.locator(".ct").textContent()).trim(), section, "the rail's Answered count is not the section's count, closed lines included");
 });
 
 test("Answered section: with the section folded by its head, a rail chip of a sunk item opens the section and brings the card into view", async (t) => {
@@ -3105,6 +3132,8 @@ const RPL_TEXT = "Did round 3 change the rail guard?";
 // ASK_ANSWERED is answered after RPL_NEW, so it opens as a new answer. Every answer is before RPL_SEEN, so each one folds.
 const RPL_NEW = { "waiting.askSeen": "2026-10-29T00:00:00Z" };
 const RPL_SEEN = { "waiting.askSeen": "2026-10-31T00:00:00Z" };
+// Seen after AP_ASK's answer (18:01Z, 2026-11-10), so that answer folds. RPL_SEEN is before it, so it reads the answer as new.
+const RPL_SEEN_AP = { "waiting.askSeen": "2026-11-10T19:00:00Z" };
 const RPL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 // An answer a session gave to a reply: a reply to it names this record in re, not the root ask.
 const RPL_DEEP = { id: "ask-rpl-deep", text: "Is the rail guard still unchanged?", at: "2026-10-31T08:00:00Z", re: RPL_ROOT, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "No. The rail guard is unchanged." };
@@ -3375,8 +3404,10 @@ const DIS_WAITED = { id: "ask-dis-wd", text: "Dismissed before a reply came in",
 const DIS_WAITED_REPLY = { id: "ask-dis-wd-r", text: "A new question on the dismissed ask", at: "2026-10-31T10:00:00Z", re: DIS_WAITED.id };
 // A reply to DIS_HIDDEN that comes in after the thread is restored this visit, and waits for its answer.
 const DIS_HIDDEN_REPLY = { id: "ask-dis-hid-r", text: "Does the rail guard need its own test?", at: "2026-10-31T10:00:00Z", re: DIS_HIDDEN.id };
+// The routed ask of the Mark read cases below and of the ask-phase-out block. Answered after READ_FROM, with a home: one line, with Mark read beside it.
+const AP_ASK = { id: "ask-ap-routed", text: "Which step holds the one-line rule?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-11-10T18:01:00Z", reply: "Routed to step ask-phase-out. The rest is on the Status tab.", home: "step:ask-phase-out" };
 // A reply in the thread that still waits for its answer.
-const DIS_WAIT ={ id: "ask-dis-wait", text: "Is the queue still right after the fix?", at: "2026-10-31T08:00:00Z", re: ASK_ANSWERED.id };
+const DIS_WAIT ={ id: "ask-dis-wait", text: "Is the queue still right after the fix?", at: "2026-10-31T08:00:00Z", re: AP_ASK.id };
 const dismissWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "update" && l[1] === "asks").map((l) => ({ id: l[2], body: l[3] })));
 // Waits, up to 1.5 s, for the store to hold n asks updates. The caller asserts the count, so a wait that gives up fails by name.
 const waitUpdates = (page, n) => page.waitForFunction((k) => window.__log.filter((l) => l[0] === "update" && l[1] === "asks").length >= k, n, { timeout: 1500 }).catch(() => {});
@@ -3399,8 +3430,11 @@ test("dismiss control: a thread with no dismissed field shows on load, and no Sh
 });
 
 test("dismiss: the open card's Mark read sits at the thread's end beside Reply, Reply first, and names its ask", async (t) => {
-  const root = ASK_ANSWERED.id;
-  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  const root = AP_ASK.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: AP_ASK } }, storage: RPL_NEW }); if (!page) return;
+  // A routed ask is one line until it is opened: its card, with Reply and Mark read at the end, is what this case reads.
+  await mustHave(page, `button.frow[data-ask="${root}"]`, "the one line of the routed ask");
+  await page.click(`button.frow[data-ask="${root}"]`);
   await mustHave(page, `#dis-${root}`, "Mark read on the answered ask");
   const at = await page.locator(`#dis-${root}`).evaluate((b, id) => {
     const row = b.closest(".endrow"), end = b.closest(".replyend"), reply = document.getElementById("reply-" + id);
@@ -3409,12 +3443,12 @@ test("dismiss: the open card's Mark read sits at the thread's end beside Reply, 
   assert.equal(at.tag, "BUTTON", "Mark read is a " + at.tag + ", not a button");
   assert.equal(at.inRow, true, "Mark read is not in the thread's .endrow, under .replyend");
   assert.equal(at.replyFirst, true, "Mark read does not come after Reply in the same .endrow");
-  assert.equal(at.label, "Mark read: " + ASK_ANSWERED.text, "Mark read is labelled " + JSON.stringify(at.label));
+  assert.equal(at.label, "Mark read: " + AP_ASK.text, "Mark read is labelled " + JSON.stringify(at.label));
 });
 
 test("dismiss: Mark read writes dismissed, an ISO time, on the root ask with update, never set or delete, and the owner's text and the reply survive", async (t) => {
-  const root = ASK_ANSWERED.id;
-  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  const root = AP_ASK.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: AP_ASK } }, storage: RPL_NEW }); if (!page) return;
   await pressDismiss(page, root);
   const ups = await dismissWrites(page);
   assert.equal(ups.length, 1, "Mark read made " + ups.length + " update writes on asks, not one");
@@ -3424,14 +3458,14 @@ test("dismiss: Mark read writes dismissed, an ISO time, on the root ask with upd
   const bad = await page.evaluate(() => window.__log.filter((l) => (l[0] === "set" || l[0] === "delete") && l[1] === "asks"));
   assert.deepEqual(bad, [], "Mark read made set or delete writes on asks: " + JSON.stringify(bad.map((l) => [l[0], l[2]])));
   const kept = await storedAsk(page, root);
-  assert.equal(kept && kept.text, ASK_ANSWERED.text, "the stored text is " + JSON.stringify(kept && kept.text) + ", not the owner's words");
-  assert.equal(kept && kept.reply, ASK_ANSWERED.reply, "the stored reply is " + JSON.stringify(kept && kept.reply) + ", not the session's reply");
+  assert.equal(kept && kept.text, AP_ASK.text, "the stored text is " + JSON.stringify(kept && kept.text) + ", not the owner's words");
+  assert.equal(kept && kept.reply, AP_ASK.reply, "the stored reply is " + JSON.stringify(kept && kept.reply) + ", not the session's reply");
   assert.equal(kept && kept.dismissed, ups[0].body.dismissed, "the stored dismissed is " + JSON.stringify(kept && kept.dismissed));
 });
 
 test("dismiss: the thread stays in place as a Marked read line with Mark unread and no Undo count, and focus moves to the line", async (t) => {
-  const root = ASK_ANSWERED.id;
-  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  const root = AP_ASK.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: AP_ASK } }, storage: RPL_NEW }); if (!page) return;
   // Each focus move from the press on, so a miss names where focus went and what took it.
   await page.evaluate(() => {
     const name = (e) => (e ? (e.id ? "#" + e.id : e.tagName.toLowerCase()) + (e.isConnected ? "" : "(removed)") : "none");
@@ -3443,7 +3477,7 @@ test("dismiss: the thread stays in place as a Marked read line with Mark unread 
   await mustHave(page, `li#row-${root}.askc.dropped`, "the Marked read line in the thread's place");
   // One step reads the line and focus together. A locator found in one step and read in a second can hold a line a re-render has replaced.
   const line = await page.evaluate((id) => { const r = document.getElementById("row-" + id), sl = r ? r.querySelector(":scope > p.sline:not(.dline)") : null, a = document.activeElement; return { text: r ? r.textContent.replace(/\s+/g, " ").trim() : "", tabindex: r ? r.getAttribute("tabindex") : null, liRole: r ? r.getAttribute("role") : null, lineRole: sl ? sl.getAttribute("role") : null, focused: !!r && a === r, at: a ? (a.id ? "#" + a.id : a.tagName.toLowerCase()) : "none", moves: (window.__focusMoves ? window.__focusMoves.join(", ") : "trace lost, the page reloaded") + " (document has focus: " + document.hasFocus() + ")", restore: !!r && !!r.querySelector("#res-" + id), undo: !!document.getElementById("dun-" + id) }; }, root);
-  assert.ok(line.text.startsWith("Marked read. " + ASK_ANSWERED.text), "the Marked read line reads " + JSON.stringify(line.text));
+  assert.ok(line.text.startsWith("Marked read. " + AP_ASK.text), "the Marked read line reads " + JSON.stringify(line.text));
   assert.equal(line.restore, true, "the Marked read line has no Mark unread");
   assert.equal(line.undo, false, "the Marked read line has an Undo count, not Mark unread alone");
   assert.equal(line.tabindex, "-1", "the Marked read line has tabindex " + line.tabindex + ", not -1");
@@ -3478,8 +3512,8 @@ test("dismiss: Show N read asks opens the read list, newest first, with Mark unr
 });
 
 test("dismiss: Mark unread writes dismissed null with update, the line says the thread joins the list at the next load, and it returns after a reload", async (t) => {
-  const root = ASK_ANSWERED.id;
-  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  const root = AP_ASK.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: AP_ASK } }, storage: RPL_NEW }); if (!page) return;
   await pressDismiss(page, root);
   await mustHave(page, `#res-${root}`, "Mark unread on the Marked read line");
   const before = (await dismissWrites(page)).length;
@@ -3495,7 +3529,7 @@ test("dismiss: Mark unread writes dismissed null with update, the line says the 
   assert.ok(said.includes("It joins the list at the next load."), "the line reads " + JSON.stringify(said));
   // The next load draws the thread again, and the stored record has dismissed null.
   await page.reload();
-  await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
+  await shownBox(page, AP_ASK.text, DIS_SHOWN);
   assert.equal(await page.locator("#askDismissed").count(), 0, "the restored thread is still under Show read asks after a reload");
   const kept = await storedAsk(page, root);
   assert.ok(kept && kept.dismissed === null, "the stored dismissed is " + JSON.stringify(kept && kept.dismissed) + ", not null");
@@ -3520,8 +3554,8 @@ test("dismiss: a thread dismissed at load and restored this visit shows in the m
 });
 
 test("dismiss: while a reply in the thread waits, Mark read is off and says why, and a folded row with that reply has no Mark read", async (t) => {
-  const root = ASK_ANSWERED.id;
-  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED, [DIS_WAIT.id]: DIS_WAIT } }, storage: RPL_NEW }); if (!page) return;
+  const root = AP_ASK.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: AP_ASK, [DIS_WAIT.id]: DIS_WAIT } }, storage: RPL_NEW }); if (!page) return;
   await mustHave(page, `#dis-${root}`, "Mark read on the answered ask with a reply waiting");
   assert.equal(await page.getAttribute(`#dis-${root}`, "aria-disabled"), "true", "Mark read is on while its reply waits");
   const reason = ((await page.textContent(`#dw-${root}`)) || "").trim();
@@ -3531,15 +3565,15 @@ test("dismiss: while a reply in the thread waits, Mark read is off and says why,
   await page.evaluate((id) => document.getElementById(id).click(), `dis-${root}`);
   const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "update").length);
   assert.equal(writes, 0, "a press on the off Mark read wrote " + writes + " update(s)");
-  const folded = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED, [DIS_WAIT.id]: DIS_WAIT } }, storage: RPL_SEEN }); if (!folded) return;
+  const folded = await open(t, { dbExtra: { asks: { [root]: AP_ASK, [DIS_WAIT.id]: DIS_WAIT } }, storage: RPL_SEEN_AP }); if (!folded) return;
   await mustHave(folded, `button.frow[data-ask="${root}"]`, "the folded row of the answered ask");
   await mustHave(folded, "li.askc.folded .fwait", "the waiting reply line under the folded row");
   assert.equal(await folded.locator(`[id="dis-${root}"]`).count(), 0, "a folded row with a waiting reply has a Mark read");
 });
 
 test("dismiss: on a folded answered row, Mark read sits beside the row button, never inside it, and writes dismissed", async (t) => {
-  const root = ASK_ANSWERED.id;
-  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_SEEN }); if (!page) return;
+  const root = AP_ASK.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: AP_ASK } }, storage: RPL_SEEN_AP }); if (!page) return;
   await mustHave(page, `button.frow[data-ask="${root}"]`, "folded row of the answered ask");
   await mustHave(page, `#dis-${root}`, "Mark read on the folded row");
   const at = await page.locator(`#dis-${root}`).evaluate((b) => { const li = b.closest("li.askc"), row = li && li.querySelector(".frow"); return { withd: !!li && li.classList.contains("folded") && li.classList.contains("withd"), inRow: !!row && row.contains(b), beside: !!row && b.parentElement === row.parentElement }; });
@@ -3554,13 +3588,16 @@ test("dismiss: on a folded answered row, Mark read sits beside the row button, n
 });
 
 test("dismiss: when the write is refused, the thread stays on the list, Mark read stays on, and the line says why", async (t) => {
-  const root = ASK_ANSWERED.id;
-  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW, failUpdate: true }); if (!page) return;
+  const root = AP_ASK.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: AP_ASK } }, storage: RPL_NEW, failUpdate: true }); if (!page) return;
+  // The refused line sits in the open card's reply end, so the one line is opened first.
+  await mustHave(page, `button.frow[data-ask="${root}"]`, "the one line of the routed ask");
+  await page.click(`button.frow[data-ask="${root}"]`);
   await mustHave(page, `#dis-${root}`, "Mark read on the answered ask");
   await page.click(`#dis-${root}`);
   assert.equal(await rplLineHas(page, "Not marked read (permission-denied)"), true, "the refused Mark read does not say Not marked read (permission-denied)");
   assert.equal(await rplLineHas(page, "It stays on the list."), true, "the refused Mark read does not say It stays on the list.");
-  await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
+  await shownBox(page, AP_ASK.text, DIS_SHOWN);
   assert.notEqual(await page.getAttribute(`#dis-${root}`, "aria-disabled"), "true", "Mark read is off after a refused write, so it cannot try again");
 });
 
@@ -3603,6 +3640,19 @@ test("dismiss: with no store, the list says it cannot be read and no Mark read i
   assert.equal(await page.locator('[id^="dis-"], .dismiss').count(), 0, "a Mark read is drawn with no store");
 });
 
+// Owner pick 480 a (09:14 CST Nov 10): Mark read follows the reply's home. An answered ask with no home draws no Mark read. The routed
+// ask on the same page is the control: its Mark read must be there, so the no-home check cannot pass on an empty list.
+for (const [label, storage] of [["a new answer", RPL_NEW], ["a seen answer", RPL_SEEN_AP]]) {
+  test(`ask-no-home: an answered ask with no home draws no Mark read, and the routed ask beside it does (${label})`, async (t) => {
+    const page = await open(t, { dbExtra: { asks: { [AP_ASK.id]: AP_ASK, [ASK_ANSWERED.id]: ASK_ANSWERED } }, storage }); if (!page) return;
+    await mustHave(page, `li#row-${AP_ASK.id}`, `the row of the routed ask ${AP_ASK.id}`);
+    await mustHave(page, `li#row-${ASK_ANSWERED.id}`, `the row of the ask with no home ${ASK_ANSWERED.id}`);
+    await needButton(page.locator(`li#row-${AP_ASK.id}`), /^Mark read/, `Mark read on the routed ask ${AP_ASK.id}, the control`);
+    const bare = await page.locator(`li#row-${ASK_ANSWERED.id}`).getByRole("button", { name: /^Mark read/ }).count();
+    assert.equal(bare, 0, `the ask with no home ${ASK_ANSWERED.id} draws a Mark read control, and pick 480 a draws none`);
+  });
+}
+
 // ---------------------------------------------------------------- ask-phase-out: one line, then Mark read (step ask-phase-out)
 // Contract: docs/design/ask-phase-out-notes.md, sections 2 to 5 and 7; the mockup is docs/design/ask-phase-out.html.
 // Rulings: owner pick 480 a (09:14 CST Nov 10): a routed ask or answered item shows one line, and Mark read takes it off the
@@ -3614,7 +3664,6 @@ test("dismiss: with no store, the list says it cannot be read and no Mark read i
 // READ_FROM, the ship time of the one-line rule, is 2026-11-10T18:00:00Z. AP_ASK (18:01Z) is answered after it, so it is a line;
 // AP_EARLY (17:59Z) is answered before it, so it reads as read. Both are in the past: Mark read stamps dismissed with the page's
 // clock, and an answer later than that stamp keeps the ask on the list.
-const AP_ASK = { id: "ask-ap-routed", text: "Which step holds the one-line rule?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-11-10T18:01:00Z", reply: "Routed to step ask-phase-out. The rest is on the Status tab.", home: "step:ask-phase-out" };
 const AP_EARLY = { id: "ask-ap-early", text: "Was the one-line rule routed before the ship time?", at: "2026-11-10T16:00:00Z", owner: "triage", answered: "2026-11-10T17:59:00Z", reply: "Routed to step ask-phase-out before the ship time.", home: "step:ask-phase-out" };
 const AP_CLOSED = mk("ap-closed", 70, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", reply: "Filed as step ask-phase-out. The record stays there." });
 // Closed before the ship time: no `closed` field, so it counts as read.
