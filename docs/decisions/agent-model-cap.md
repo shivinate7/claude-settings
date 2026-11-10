@@ -96,6 +96,7 @@ unless the file is a Haiku role. It also fails an `agents/*.md` body that states
 - A spawn that names no model is refused under two conditions. `CLAUDE_CODE_SUBAGENT_MODEL` is unset or empty in the guard's environment. No `agents/*.md` file in the pointer checkout names the role with a `model:` pin in its frontmatter. A spawn with no role counts as general-purpose. The remedy is "name the role's model", with the row's model beside it unless the row is haiku.
 - With no pointer checkout the rule stands down and logs nothing. A table or agents folder in the pointer checkout that cannot be read passes the spawn and logs one `agent-role-model-unread` line, which `lint/guard_log_report.py` counts as a note for that rule.
 - A reviewer on a fix check brief must name `sonnet`. Naming `haiku` is refused (owner item 444 a, 2026-11-08 15:04 CST; the coordinator's word of 2026-11-09 19:58 CST re-points the old haiku case to deny); the general override lifts that refusal. An `Agent` or `Task` reviewer that names no model is refused too, even when `CLAUDE_CODE_SUBAGENT_MODEL` is set or the agent file pins one, and no override lifts that refusal, as for the no-model refusal above. Precedence: a per-spawn model beats the agent file pin, which beats the variable, so a reviewer with no model serves Haiku (measured table below). A Workflow `agent()` with no model is not judged (known limit; the scan skips it by design). No hook rewrites an `Agent` call's input, so the guard refuses; it cannot swap the model.
+- Every agent file pins its role's model (`lint/check_agent_models.py` fails a file with no pin or an empty one; skills carry no pin), because the pin beats the env default and a per-spawn model beats the pin, so a builder's third try still sets opus per spawn.
 - The override lifts an above-row refusal (owner, 2026-11-01 17:25 CST, item 127, pick a; `never_lifted` in `hooks/guard.py` no longer reads it). No override lifts the no-model refusal (`owner-override`, the model guards).
 
 Cost: one read of this record per spawn. A spawn with no model adds one read of the agent files. No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
@@ -161,8 +162,9 @@ builder on Opus just runs, with no approval. The first-line form is case-sensiti
 when they start with the marker. A builder's old `Try 3 of 3` still counts until note `try-marker-sunset`. A round 2 reviewer runs on Sonnet. A round 3 reviewer runs Sonnet; its refusal names Sonnet only, and Opus needs the owner's override (2026-11-01 17:25 CST, item 127, pick a). A try 3 builder needs Opus.
 
 **No pin, and the ceiling is a refusal.** The variable is a true fallback: it decides only the spawns that name no
-model and whose definition names no model. `agents/builder.md` carries no `model:` key, so a builder
-spawn reads the fallback. Reason: the flag collapses Claude Code's model order onto the variable. That is
+model and whose definition names no model. Every agent file pins a model now (`agents/builder.md` pins
+`sonnet`), so only a built-in role with no file reads the fallback. The measured rows below are from
+before the builder pin. Reason: the flag collapses Claude Code's model order onto the variable. That is
 a pin, not a ceiling, and it holds Opus back exactly as hard as Haiku.
 
 **The order**, first wins: the spawn's `model` field, then the agent definition's `model:` (a built-in
