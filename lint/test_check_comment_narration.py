@@ -71,6 +71,9 @@ FLAGGED = [
     "MEASURED 40 ms", "CORRECTED from the old value", "ADDED 2026 for the batch",
     "since 2026-10-18", "dated 2025-01-03",
     "owner ruling", "Owner's order", "owner request", "Owner ask",
+    "the owner ask", "owner's ruling", "per the owner order",
+    "the repo-owner ask flow", "the repo-owner request flow", "co-owner ask for the cap",
+    "repo-owner's ruling said keep 25 lines", "sole-owner request",
     "Previously this returned None", "previously it was a list", "Changed from the old behaviour",
     "changed from a dict to a list", "Added after review by billing", "added after review",
     "formerly returned None", "the old behaviour dropped rows",
@@ -112,6 +115,7 @@ CLEAN = [
     "has been passed before the loop", "was passed before the loop",
     "true if the hash changed from the previous snapshot", "true when the file changed from the previous run",
     "changed from the old snapshot", "changed from the original snapshot",
+    "scratchpad-owner     ask. A call that writes outside the scratchpad",
 ]
 
 # Characters that str.splitlines() treats as a line break but ast and tokenize do not.
