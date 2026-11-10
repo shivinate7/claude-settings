@@ -2326,7 +2326,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
                 return ""
             if state and mine in merge_route_side_paths(state[1]):
                 written = written_text(tool_input, full)
-                if written is not None and side_picked(text_at(where, state[0], mine), written):
+                if written is not None and side_picked(text_at(where, state[0], mine), written, keep_marked=True):
                     return ""
         return target
     if role == WRITER_ROLE:
@@ -2439,43 +2439,73 @@ def merge_route_paths(conflicts):
 CONFLICT_MARK = re.compile(r"^(<{7}|\|{7}|={7}|>{7})(?: .*)?\r?\n?$")
 
 
-def side_picked(conflicted: str, result: str) -> bool:
+def marked_end(block: str, result: str, at: int):
+    """The offset where `block` (a conflict block with its markers) ends in `result` when it starts at `at`, else
+    None. The text must match line by line, but a marker line may carry another label: the merge in progress names
+    its sides `HEAD` and the branch, while `merge_tree` names the second side by its commit."""
+    for line in re.findall(r"[^\n]*\n|[^\n]+", block):
+        mark = CONFLICT_MARK.match(line)
+        if mark:
+            got = CONFLICT_MARK.match(result[at:result.find("\n", at) + 1 or len(result)])
+            if not got or got.group(1) != mark.group(1):
+                return None
+            at += got.end()
+        elif result.startswith(line, at):
+            at += len(line)
+        else:
+            return None
+    return at
+
+
+def side_picked(conflicted: str, result: str, keep_marked: bool = False) -> bool:
     """True when `result` is `conflicted` (git's merged text, conflicts left as markers) with each conflict block
     replaced by its ours side, its theirs side, ours then theirs, or theirs then ours, and all text outside the blocks
-    unchanged. A block that keeps its markers, any other text and a reordered line are not side-picked. The one home of
-    this verdict, for the write tool and the commit check."""
-    outside, blocks, ours, theirs, where = [""], [], [], [], None
+    unchanged. A block that keeps its markers, any other text and a reordered line are not side-picked, except with
+    `keep_marked`: a block left exactly as git wrote it, markers included, then counts as unchanged text. The write tool
+    sets it, so a workflow resolves one block per Edit; the commit check leaves it off, so every block must be resolved.
+    The one home of this verdict."""
+    outside, blocks, ours, theirs, raw, where = [""], [], [], [], [], None
     for line in re.findall(r"[^\n]*\n|[^\n]+", conflicted):
         mark = CONFLICT_MARK.match(line)
         kind = mark.group(1)[0] if mark else ""
         if where is None:
             if kind == "<":
-                where, ours, theirs = "ours", [], []
+                where, ours, theirs, raw = "ours", [], [], [line]
             else:
                 outside[-1] += line
         elif kind == "=" and where in ("ours", "base"):
+            raw.append(line)
             where = "theirs"
         elif kind == "|" and where == "ours":
+            raw.append(line)
             where = "base"
         elif kind == ">" and where == "theirs":
-            blocks.append(("".join(ours), "".join(theirs)))
+            raw.append(line)
+            blocks.append(("".join(ours), "".join(theirs), ("".join(raw),) if keep_marked else ()))
             outside.append("")
             where = None
         elif kind:
             return False
         elif where == "ours":
+            raw.append(line)
             ours.append(line)
         elif where == "theirs":
+            raw.append(line)
             theirs.append(line)
+        elif where == "base":
+            raw.append(line)
     if where is not None:
         return False
     # Every offset of `result` the blocks read so far can reach.
     reach = {0}
-    for index, (mine, theirs_side) in enumerate(blocks):
+    for index, (mine, theirs_side, marked) in enumerate(blocks):
+        kept = {marked_end(raw_block, result, at + len(outside[index]))
+                for at in reach if result[at:].startswith(outside[index]) for raw_block in marked} - {None}
         reach = {at + len(outside[index]) + len(pick)
                  for at in reach if result.startswith(outside[index], at)
                  for pick in (mine, theirs_side, mine + theirs_side, theirs_side + mine)
                  if result.startswith(pick, at + len(outside[index]))}
+        reach |= kept
     return any(result[at:] == outside[-1] for at in reach)
 
 
