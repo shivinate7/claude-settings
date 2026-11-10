@@ -1061,7 +1061,8 @@ class Mirror(Base):
 
     def test_an_items_doc_with_no_id_field_exports_under_its_key_unchanged(self):
         """The doc key is the item's id, so an items doc with no `id` field lands at items/<key>.json as it was fetched.
-        Green on the old code too: the export never reads an `id` field, and this stays as a guard for that."""
+        Green on the old code too. Renumber reads only an item's `n`. The page check reads `id` only for a held picture
+        with no whole-number `n`. This item has no picture, and its `n` is whole, so neither reads its `id`."""
         data = {"n": 29, "kind": "decision", "status": "open", "title": "No id field", "options": [{"key": "a", "label": "A"}]}
         fetched = self.fetch(items={"k29": data}, meta={"page": META})
         out = self.out()
@@ -1625,12 +1626,16 @@ class Rebuild(Base):
     def unnumbered(self, data):
         return {key: value for key, value in data.items() if key != "n"}
 
-    def copy_with_a_clash(self, name="copy"):
+    def copy_with_a_clash(self, name="copy", id_field=None):
         """A copy whose item-900 holds n 2, which live item-002 holds, with the item's answer. Items 001 to 003 match the
-        live page. Live holds n 1 to 3, so the highest n in either folder is 3."""
+        live page. Live holds n 1 to 3, so the highest n in either folder is 3. With `id_field`, item-900's `id` field and
+        its answer's `item` both hold that value instead of the doc key."""
+        moved, answer = item_as("item-900", 2), answer_for("item-900", 2)
+        if id_field is not None:
+            moved, answer = dict(moved, id=id_field), dict(answer, item=id_field)
         return self.copy_of({
-            "items": {"item-001": item(1), "item-002": item(2), "item-003": item(3), "item-900": item_as("item-900", 2)},
-            "answers": {"item-900": answer_for("item-900", 2)}}, name=name)
+            "items": {"item-001": item(1), "item-002": item(2), "item-003": item(3), "item-900": moved},
+            "answers": {"item-900": answer}}, name=name)
 
     def test_merge_without_its_partner_flag_is_a_usage_error_that_names_it(self):
         copy = self.copy_of({"items": {"item-001": item(1)}})
@@ -1907,6 +1912,21 @@ class Rebuild(Base):
                          "items/item-900 changed a field other than n")
         self.assertEqual(self.unnumbered(answer["data"]), self.unnumbered(answer_for("item-900", 2)),
                          "answers/item-900 changed a field other than n")
+
+    def test_a_renumbered_answer_names_its_item_by_the_doc_key_not_by_the_id_field(self):
+        live = self.fetch(items={"item-001": item(1), "item-002": item(2), "item-003": item(3)})
+        copy = self.copy_with_a_clash(id_field="other-id")
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.merge_run(copy, live, batches)
+        self.assertMergeSummary(r, 1, 2, 3, 1)
+        _, entries, _ = self.batch_entries(batches)
+        moved = self.entry_of(entries, "items", "item-900")
+        self.assertIsNotNone(moved, "items/item-900 is not in the batches: the clash did not renumber it")
+        self.assertEqual(moved["data"].get("n"), 4, "items/item-900 has n %s, not the next free n 4" % moved["data"].get("n"))
+        answer = self.entry_of(entries, "answers", "item-900")
+        self.assertIsNotNone(answer, "answers/item-900 is not in the batches: its item was renumbered, so its answer follows")
+        self.assertEqual(answer["data"].get("item"), "item-900",
+                         "answers/item-900 names item %r, not its doc key item-900" % answer["data"].get("item"))
 
     def test_copied_items_that_share_an_n_renumber_the_later_one_and_its_answer(self):
         live = self.fetch()
