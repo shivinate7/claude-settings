@@ -134,7 +134,7 @@ disagree). It prints `stalled step: <id> (resume, pause or done)`, or `stalled s
 device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` on
 a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A session whose status
 bucket is completed or failed has ended and holds no step; an idle or review ready one still does. The tag value is
-read stripped, as idle_lanes reads it. A `cs-topic:` tag never keeps a step live. The page's stalled block lists the ids.
+read stripped, as idle_lanes reads it. A `cs-topic:` tag never keeps a step live. A step's `lane` field also keeps it live when it names a session of this repo, not archived or ended, that carries `cs-build:lane`, whatever that session's `cs-step` tag says. The field may be prose around the id. The page's stalled block lists the ids.
 
 An open waiting-page item whose `lane` is a non-empty text and has no live work is stalled too. It
 prints `stalled step: item <n> (lane <slug>: re-route, close or resume)` and exits 1. The lane is live
@@ -204,7 +204,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
 - steps marked `doing` or `active` with no live lane or open PR, except a landed feel-fix with no valid
   device trial, which the row above lists. A step is live when a session that is
   not archived has the tag `cs-step:<step id>`, or an open pull request's branch equals the step
-  id or `lane/<step id>`. Both match the id exactly. A `cs-topic:` or `cs-build:` tag never keeps a step live.
+  id or `lane/<step id>`. Both match the id exactly. A `cs-topic:` or `cs-build:` tag never keeps a step live by itself; the step's `lane` field can, as the stalled step rule above says.
   The session also needs the tag `cs-repo:<owner>/<repo>` for this
   repo's GitHub name, in any case, because `list_sessions` is account-wide and step ids repeat across
   repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
