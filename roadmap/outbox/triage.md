@@ -358,3 +358,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - gh-write-repo-flag-release (#2462 gh-write-repo-flag-gap round 3): the cloud guard does not judge `gh release|repo|run -R o/r` writes (same as main).
 - docs-only-lookalike-untested (#2452 docs-only-record-checks-diff round 3, coordinator 01:18 CST Nov 10): no test for a docs-prefix look-alike path such as docs-old/x.md; a startswith("docs") mutant survives. The code is right today.
 - docs-only-notes-stale-after-2452 (#2452): after #2452 merges, rewrite the docs/debts/notes.md lines docs-only-rule-text and docs-only-non-md-docs: docs-only no longer passes CLAUDE.md or skills, and the rule is not only "not ending in .md".
+- lpfib-all-moves-silent (#2463 lane-push-frozen-in-batch round 3, coordinator 01:21 CST Nov 10): _all_moves logs nothing when git for-each-ref fails (the --all path only).
+- lpfib-push-forms-code-read (#2463): the round 3 reviewer could not probe the git -C, cd and bash -c push forms by hand (harness refusal); they are judged by code read only.
