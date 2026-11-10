@@ -1,0 +1,12 @@
+{
+  "title": "Land the granted-round-4 model guard stack that only the handoff ledger tracks",
+  "phase": "next",
+  "status": "todo",
+  "order": 1033,
+  "owner": "triage",
+  "why": "Owner 15:31 CST Nov 10 (chat, relayed by the coordinator): match the 281 open PRs that cite no step to steps, bundle them, and judge whether each is still wanted and makes sense to land. Coordinator 15:59 CST: one step per ledger-only bundle, plus one for the wanted merge-main list, queued for restart stage 3.",
+  "note": "PRs: #2095 #2168 #2181 (ledger item pr2095; merge main, re-review). Source: triage 281 sort (Sonnet readers, 15:40-15:56 CST Nov 10; main 2d6f67f7c). Each PR conflicts with main: merge main (no rebase), then the review its diff owes.",
+  "updatedAt": "2026-11-10T15:56:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
