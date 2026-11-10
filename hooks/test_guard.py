@@ -13235,10 +13235,12 @@ def gh_verb(command):
     return " ".join(command.split()[:3])
 
 
-def gh_write_refused(name, command, **fixture):
-    """One gh write refused in a cloud session, and the same write allowed outside one."""
+def gh_write_refused(name, command, lacks_verb="", **fixture):
+    """One gh write refused in a cloud session, and the same write allowed outside one. `lacks_verb` is the
+    verb the refusal must not print; it defaults to the command's first three words."""
     sh("gh-write-cloud: %s is refused in a cloud session" % name, command, "deny", GH_WRITE_RULE,
-       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(gh_verb(command),), **fixture)
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(lacks_verb or gh_verb(command),),
+       **fixture)
     sh("gh-write-cloud: %s is allowed outside a cloud session" % name, command, "allow", cwd=NOGIT, **fixture)
 
 
@@ -13269,6 +13271,46 @@ GH_WRITES = (
 for _name, _command in GH_WRITES:
     gh_write_refused(_name, _command)
 gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
+
+# A repo flag after the group word (`gh pr -R o/r comment 5`) is valid gh, and the verb comes after it. Each
+# write above is repeated with the flag in each of gh's four forms, after `pr` or `issue`. The name of each row
+# carries "after the group word", so MUTATE_ONLY="after the group word" selects these rows alone.
+GH_REPO_FLAGS = ("-R o/r", "--repo o/r", "--repo=o/r", "-Ro/r")
+GH_GROUP_WRITES = [(name, command, {}) for name, command in GH_WRITES if command.split()[1] in ("pr", "issue")]
+GH_GROUP_WRITES.append(("pr merge", "gh pr merge 12 --squash", GH_MERGE_FIXTURE))
+for _flag in GH_REPO_FLAGS:
+    for _name, _command, _fixture in GH_GROUP_WRITES:
+        _words = _command.split()
+        _flagged = " ".join(_words[:2] + _flag.split() + _words[2:])
+        gh_write_refused("%s, %s after the group word" % (_name, _flag), _flagged,
+                         lacks_verb=" ".join(_words[:3]), **_fixture)
+# A repo value that reads as a verb is a value. The verb after it is the one judged, in both directions: a read
+# verb never hides a write, and a write-looking value never makes a read a write. The reads are the controls.
+sh("gh-write-cloud: a repo value named like a read verb does not hide a comment after the group word",
+   "gh pr -R list comment 5 --body hi", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr comment",))
+for _command in ("gh pr -R o/r view 5", "gh pr -R o/r list", "gh issue --repo o/r list", "gh pr -R comment list"):
+    sh("gh-write-cloud: a read after the group word, %s, is allowed in a cloud session" % _command.split(" ", 2)[2],
+       _command, "allow", cwd=NOGIT, env=GH_WRITE_CLOUD)
+# The local verdicts outside a cloud session: a merge with a pending head is judged by merge-checks, and a
+# create without --draft is refused by draft-pr, with the flag after the group word. Each has a green twin.
+sh("merge-checks: pr merge, -R o/r after the group word, is judged, and a pending head denies",
+   "gh pr -R o/r merge 12", "deny", "merge-checks", carries="pending", cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: pr merge, -R o/r after the group word, is allowed on a green head",
+   "gh pr -R o/r merge 12", "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+# The control for the rows above: the same repo flag after the verb is already read, so this head read must answer
+# for the repo the flag names. A red on the rows above with "could not run" would mean the fake answers no read
+# for that repo.
+sh("merge-checks: pr merge 12 -R o/r, a flag after the verb, denies a pending head: the control for the "
+   "rows after the group word",
+   "gh pr merge 12 -R o/r", "deny", "merge-checks", carries="pending", cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("draft-pr: pr create, -R o/r after the group word, without --draft is refused",
+   "gh pr -R o/r create --title x --body y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY,
+   lacks=DRAFT_LACKS)
+sh("draft-pr: pr create, -R o/r after the group word, with --draft is allowed",
+   "gh pr -R o/r create --draft --title x", "allow", cwd=NOGIT)
 
 # A write that another rule also refuses gets the gh-write-cloud verdict in a cloud session. Its remedy
 # names an MCP tool, never the refused form. Each refusal has a twin outside a cloud session.
@@ -20315,7 +20357,6 @@ def _mirror_names_tie():
 LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
                          _mirror_names_tie))
 
-
 # ---- resolve-vars: `_resolve_vars` of guard_frozen, read as the shell reads each assignment. A check reads
 # the use site (the last `;` segment, double quotes removed), so a fix that rewrites an assignment's own text
 # still passes. The guard under test is loaded as every check loads it (GUARD_UNDER_TEST is honoured).
@@ -20403,21 +20444,22 @@ RESOLVE_CASES = (
 for _label, _command, _want in RESOLVE_CASES:
     LOG_CHECKS_EXTRA.append((_label, resolve_case(_command, _want)))
 
-# ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
-# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
-# verb from each of them. One check per root flag form, called on gh_call_of directly.
+# ---- merge: gh_call_of reads the pr verb past a repo flag. Its callers (merge_call_of, the draft-PR read,
+# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front of the verb,
+# or after the group word, hides the verb from each of them. One check per flag form, called on gh_call_of directly.
 FAMILY = "merge"
 
 
 def gh_root_flag_verb_check(segment, verb):
-    """True when gh_call_of's first two words are the verb, so the root flag before it is read past."""
+    """True when gh_call_of's first two words are the verb, so a repo flag in front of the verb, or after the
+    group word, is read past."""
     guard = _load_guard_module()
     rest = guard.gh_call_of(segment)
     if rest is None:
         return False, "gh_call_of reads no gh call in %r" % segment
     if rest[:2] != verb:
         return False, "gh_call_of(%r) gives %r, so its first two words are not %r" % (segment, rest, verb)
-    return True, "gh_call_of(%r) reads %r past the root flag" % (segment, verb)
+    return True, "gh_call_of(%r) reads %r past the repo flag" % (segment, verb)
 
 
 def gh_root_dash_r_check():
@@ -20432,12 +20474,104 @@ def gh_root_repo_spaced_check():
     return gh_root_flag_verb_check("gh --repo o/r pr create --fill", ["pr", "create"])
 
 
-FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check))
+# The same flag after the group word (`gh pr -R o/r merge`): gh reads it there too. Each form has a check. A repo
+# value that reads as a verb is the value, never the verb.
+def gh_group_dash_r_check():
+    return gh_root_flag_verb_check("gh pr -R o/r merge 12", ["pr", "merge"])
+
+
+def gh_group_repo_equals_check():
+    return gh_root_flag_verb_check("gh pr --repo=o/r merge 12", ["pr", "merge"])
+
+
+def gh_group_repo_spaced_check():
+    return gh_root_flag_verb_check("gh issue --repo o/r comment 3 --body x", ["issue", "comment"])
+
+
+def gh_group_joined_dash_r_check():
+    return gh_root_flag_verb_check("gh pr -Ro/r merge 12", ["pr", "merge"])
+
+
+def gh_group_value_verb_check():
+    return gh_root_flag_verb_check("gh pr -R list comment 5", ["pr", "comment"])
+
+
+FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check,
+                           gh_group_dash_r_check, gh_group_repo_equals_check, gh_group_repo_spaced_check,
+                           gh_group_joined_dash_r_check, gh_group_value_verb_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R root flag", gh_root_dash_r_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> root flag",
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R flag after the group word",
+                         gh_group_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> flag after the group word",
+                         gh_group_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the issue verb past a spaced --repo <repo> flag after the group word",
+                         gh_group_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a joined -R<repo> flag after the group word",
+                         gh_group_joined_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a repo value that looks like a verb, "
+                         "after the group word", gh_group_value_verb_check))
+
+
+# ---- merge: merge_call_of reads the repo value, not only the verb. A repo flag joined to its value (-Ro/r) gave
+# repo '', which is the working directory's repo, so the merge check read the wrong repo. The spaced and equals forms
+# are controls: they read the repo already. Each check asserts the selector (scope) before the repo (subject).
+def merge_call_repo_check(segment, want_repo):
+    """True when merge_call_of reads the pull request '12' and the repo `want_repo` from a `gh pr merge` segment."""
+    guard = _load_guard_module()
+    got = guard.merge_call_of(segment)
+    if got is None:
+        return False, "merge_call_of reads no gh pr merge in %r" % segment
+    selector, repo = got
+    if selector != "12":
+        return False, "merge_call_of(%r) gives selector %r, not '12'" % (segment, selector)
+    if repo != want_repo:
+        return False, "merge_call_of(%r) gives repo %r, not %r" % (segment, repo, want_repo)
+    return True, "merge_call_of(%r) reads repo %r" % (segment, want_repo)
+
+
+def merge_repo_joined_before_verb_check():
+    return merge_call_repo_check("gh -Ro/r pr merge 12", "o/r")
+
+
+def merge_repo_joined_after_group_check():
+    return merge_call_repo_check("gh pr -Ro/r merge 12", "o/r")
+
+
+def merge_repo_joined_after_verb_check():
+    return merge_call_repo_check("gh pr merge 12 -Ro/r", "o/r")
+
+
+def merge_repo_spaced_dash_r_check():
+    return merge_call_repo_check("gh pr merge 12 -R o/r", "o/r")
+
+
+def merge_repo_spaced_repo_check():
+    return merge_call_repo_check("gh pr merge 12 --repo o/r", "o/r")
+
+
+def merge_repo_equals_check():
+    return merge_call_repo_check("gh pr merge 12 --repo=o/r", "o/r")
+
+
+FIXTURELESS_CHECKS.update((merge_repo_joined_before_verb_check, merge_repo_joined_after_group_check,
+                           merge_repo_joined_after_verb_check, merge_repo_spaced_dash_r_check,
+                           merge_repo_spaced_repo_check, merge_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag before the verb",
+                         merge_repo_joined_before_verb_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag after the group word",
+                         merge_repo_joined_after_group_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag after the verb",
+                         merge_repo_joined_after_verb_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a spaced -R <repo> flag after the verb",
+                         merge_repo_spaced_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a spaced --repo <repo> flag after the verb",
+                         merge_repo_spaced_repo_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a --repo=<repo> flag after the verb",
+                         merge_repo_equals_check))
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
