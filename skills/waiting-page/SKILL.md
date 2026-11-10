@@ -265,14 +265,25 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
 
 1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
    A read that gives a summary, not the raw page, is `unknown`.
-2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers>`, where
-   `<items>` and `<answers>` are what `ArtifactData list items` and `ArtifactData list answers` saved. It
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers> --asks <asks>`, where
+   `<items>`, `<answers>` and `<asks>` are what `ArtifactData list items`, `list answers` and `list asks` saved. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
-   (never an open item, an arbiter ruling or a park answer). A closed item with `waits` gets a line that says it is closed with waits. The exit code stays the page's.
+   (never an open item, an arbiter ruling or a park answer). A closed item with `waits` gets a line that says it is closed with waits.
+   With `--asks`, last, one `open-ask: <id> at <time>: <text>` line per
+   ask with no `reply`. A dismissed root is not listed. With `--items` and `--answers` too, one `open-item:` line per open item
+   that still holds a kept `answers/<id>` and has no `reply`, `lane` or `waits`. An unreadable or cut-short list is `open-item: unknown`.
+   `--answers` without `--items` is `open-item: unknown` too.
+   An item with a `lane` or a `reply` is still listed when the owner answered again. The kept answer's `at` must be later than `lastAnswer.at` for a `lane`.
+   For a `reply` it must be later than `replied`. An equal, earlier, missing or unreadable time keeps the item out. With both, either one still holding keeps it out.
+   The `open-item:` lines never name the closed arbiter ruling's overturn answer. That answer is meant to stay ("Route and close").
+   An entry in the asks list that is not an object, and an asks list that cannot be read or is cut short, print `open-ask: unknown`.
+   Then one `FAIL:` line the writer cannot skip: answer each on the page ("Route an ask") before the wake ends.
+   A waiting ask makes a `current` page exit 1. On a `current` page, any unknown line makes it exit 2.
+   Without `--asks` the exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. Before any republish, check the pictures of the open items, against the file about to be published (`<out>`, the `--write` output of
@@ -295,7 +306,7 @@ repo's waiting page from a file behind main is refused, and its reason repeats s
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
+one short read-only git process, with no fetch, and one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read. With `--asks` it adds one `ArtifactData list asks` read, and no process. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo
