@@ -161,7 +161,8 @@ PATTERNS = {
     "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
     "date": DatedText(),
     "history phrase": HistoryPhrase(),
-    "owner order": re.compile(r"\bowner(?:'s)?\s+(?:ruling|order|request|ask)\b", re.I),
+    # A hyphenated "-owner" followed by 2+ spaces is a rule-table name column, so only a single space flags it.
+    "owner order": re.compile(r"(?:(?<!-)\bowner(?:'s)?\s+|(?<=-)owner(?:'s)?[ \t](?![ \t]))(?:ruling|order|request|ask)\b", re.I),
 }
 REMEDY = "say what and why; the history goes in git or the decision"
 HUNK = re.compile(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@")
