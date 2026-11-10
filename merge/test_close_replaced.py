@@ -215,14 +215,16 @@ class CloseAsReplaced(CloseEnv):
         self.assertEqual(kind_lines(block_of(self, out, "o/bravo"), REPLACED), [], "bravo's #4 was closed by alpha's replacer:\n" + out)
 
     def test_a_root_with_no_open_pulls_prints_no_close_line_beside_a_root_that_closes(self):
-        # The empty state: bravo has no open pull request, and its block is its empty line. alpha's replaced #4 is the control.
+        # The empty state: bravo has no open pull request, so its block is its empty line and, under ruling 3 (lane, 22:14 CST), the line that
+        # says the reopen was not checked. alpha's replaced #4 is the control.
         self.bravo = tm.ReviewedRoots.checkout(self, "bravo")
         hosts = {self.alpha: closed_host("o/alpha", pulls=[named_pull(4, head_of(4)), named_pull(7, head_of(7), body="Replaces #4")]),
                  self.bravo: closed_host("o/bravo")}
         rc, out, err = self.run_args("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(kind_lines(block_of(self, out, "o/alpha"), REPLACED), ["close as replaced: o/alpha #4 by #7"], out)
-        self.assertEqual(block_of(self, out, "o/bravo"), ["no open pull requests."], "an empty repo printed more than its empty line:\n" + out)
+        self.assertEqual(block_of(self, out, "o/bravo"), ["no open pull requests.", "reopen not checked (no open pull request)"],
+                         "an empty repo printed other than its empty line and the reopen-not-checked line:\n" + out)
 
 
 class CloseAsCarried(CloseEnv):
@@ -248,6 +250,16 @@ class CloseAsCarried(CloseEnv):
         block = block_of(self, self.reviewed(host), "o/alpha")
         self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #4 by #5"], "\n".join(block))
         self.assertEqual(kind_lines(block, CARRIED), [], "#3 is carried by #4, which is named replaced:\n" + "\n".join(block))
+
+    def test_a_done_pr_held_only_by_a_replaced_pr_stays_on_the_batch_line(self):
+        # Pin, ruling 2 (lane, 22:14 CST), the case the builder flagged: #4 is the only PR whose head holds #3, and #5 names #4 as replaced. #4 holds
+        # nothing for the carried check, so #3 gets no carried line and stays on the batch line.
+        pulls = [named_pull(3, head_of(3)), named_pull(4, head_of(4)), named_pull(5, head_of(5), body="Replaces #4")]
+        host = closed_host("o/alpha", pulls=pulls, comments=[record_of(3, head_of(3))], check_rows={head_of(3): green()},
+                           compares={(head_of(3), head_of(4)): "ahead"})
+        block = block_of(self, self.reviewed(host), "o/alpha")
+        self.assertEqual(kind_lines(block, CARRIED), [], "#3 is carried by #4, which is named replaced:\n" + "\n".join(block))
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #3"], "#3 left the batch line although only a replaced PR holds it:\n" + "\n".join(block))
 
     def test_an_identical_head_under_a_replaced_lower_is_not_carried(self):
         # Ruling 2 (lane, 22:14 CST): #10 is named replaced by #12. #11 has #10's head, so #10 would carry it, but #10 holds nothing.
