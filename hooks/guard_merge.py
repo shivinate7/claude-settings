@@ -1169,17 +1169,21 @@ def _command_words(args, glued=None):
     sits in, and a glued `&` sends it to the background: either ends that word and the command.
     A `)` that closes a `$(` does neither. The words of a `$( )` span join into one word, whose text
     is unknown until the shell runs it, so `$(printf origin) main` keeps its `main`.
-    `glued` is, per word, how many of its trailing `)` or `&` are unquoted (_glued_counts): a quoted one
-    is text. Without `glued` every trailing one counts."""
+    `glued` is, per word, (how many of its trailing `)` or `&` are unquoted and outside a `$(`, whether a `$(` is
+    still open at its end), read from the quotes (_glued_counts): a quoted one is text. Without `glued` every
+    trailing one counts and the `$(` spans are read from the unquoted-looking text."""
     words = []
     span = ""
     for index, arg in enumerate(args):
         arg = span + " " + arg if span else arg
         word = arg.rstrip(")&")
         if glued is not None:
-            word = arg[:len(arg) - glued[index]]
+            word = arg[:len(arg) - glued[index][0]]
         tail = arg[len(word):]
-        opened, closes = _open_substitutions(word), len(tail) - len(tail.lstrip(")"))
+        if glued is None:
+            opened, closes = _open_substitutions(word), len(tail) - len(tail.lstrip(")"))
+        else:
+            opened, closes = int(glued[index][1]), 0
         span = arg if opened > closes else ""
         if span:
             continue
@@ -1195,30 +1199,50 @@ def _command_words(args, glued=None):
 
 
 def _glued_counts(segment: str, args):
-    """Per word of `args` (a tail of the segment's tokens), how many trailing `)` or `&` it holds outside quotes, read from the quote
-    state of walk_quotes, the one quote walk. Raises _FlagsUnreadable when the walk and the tokens do not split the segment into the same
-    words, so the caller denies and never falls back to the unquoted reading."""
-    words, current = [], []
+    """Per word of `args` (a tail of the segment's tokens), (how many trailing `)` or `&` it holds outside quotes and outside a `$(`,
+    whether a `$(` is still open at its end), read from the quote state of walk_quotes, the one quote walk. A `$(` opened before
+    the first of `args` is not counted: its `)` ends the command. Raises _FlagsUnreadable when the walk and the tokens do not split
+    the segment into the same words, so the caller denies and never falls back to the unquoted reading. It also raises when a `$(`
+    is still open at the segment's end and the segment holds `--confirm`: the splitter cut the substitution at a `|`, `;`, `&&`,
+    `||` or newline, so the flags after it sit in another segment and are never read."""
+    tokens = segment_tokens(segment)
+    if tokens is None or len(args) > len(tokens):
+        raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
+    skip = len(tokens) - len(args)
+    words, ends_open, current = [], [], []
+    depth, reset, after_dollar = 0, False, False
     for index, char, quote in walk_quotes(segment):
         if not quote and char in " \t\r\n":
+            after_dollar = False
             if current:
                 words.append(current)
+                ends_open.append(depth > 0)
             current = []
-        else:
-            current.append((char, quote))
+            continue
+        if not current and not reset and len(words) == skip:
+            depth, reset = 0, True
+        inside = depth > 0
+        if not quote and char == "(" and (inside or after_dollar):
+            depth, inside = depth + 1, True
+        elif not quote and char == ")" and depth > 0:
+            depth, inside = depth - 1, True
+        after_dollar = not quote and char == "$"
+        current.append((char, quote, inside))
     if current:
         words.append(current)
-    tokens = segment_tokens(segment)
-    if tokens is None or len(words) != len(tokens) or len(args) > len(words):
+        ends_open.append(depth > 0)
+    if len(words) != len(tokens) or len(args) > len(words):
         raise _FlagsUnreadable("the quote walk and the tokens split the segment differently")
+    if depth > 0 and any("--confirm" in arg for arg in args):
+        raise _FlagsUnreadable("a $( is open at the end of the segment")
     counts = []
-    for word, arg in zip(words[len(words) - len(args):], args):
+    for word, arg, still_open in zip(words[skip:], args, ends_open[skip:]):
         run = 0
-        while run < len(word) and word[-1 - run][0] in ")&" and not word[-1 - run][1]:
+        while run < len(word) and word[-1 - run][0] in ")&" and not word[-1 - run][1] and not word[-1 - run][2]:
             run += 1
         if run > len(arg) or any(arg[len(arg) - 1 - k] != word[-1 - k][0] for k in range(run)):
             raise _FlagsUnreadable("a trailing ) or & does not match its token")
-        counts.append(run)
+        counts.append((run, still_open))
     return counts
 
 
