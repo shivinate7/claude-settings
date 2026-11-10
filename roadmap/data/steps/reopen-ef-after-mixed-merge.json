@@ -1,0 +1,14 @@
+{
+  "title": "Reopen the frozen E and F draft PRs once mixed merges have a role",
+  "phase": "now",
+  "status": "blocked",
+  "order": 1012,
+  "owner": "triage",
+  "why": "The owner chose to close the frozen E and F PRs of lane bg-tail-loses-verdict for now and reopen them later; nobody acts on a reopen unless a step holds it.",
+  "note": "Owner chat 13:02 CST Nov 10, pick a, via coordinator 13:10 CST. Reopen #2113 #2208 #2241 #2291 #2105 #2165 #2227 #2269 (heads kept at archive/other-checkout-read, archive/other-checkout-wrapper-env, archive/wrapper-flag-values, archive/wrapper-runner-list, archive/frozen-python-writes, archive/frozen-python-gaps, archive/frozen-scan-crash-closes, archive/frozen-crash-residuals), merge main, hand them to the successor of lane bg-tail-loses-verdict. Each main merge mixes test and product files, and no role may commit such a merge today, so this waits on step mixed-merge-no-role landing (its own PR #1521 was closed, not merged).",
+  "updatedAt": "2026-11-10T13:11:00-06:00",
+  "lane": "",
+  "blockedBy": [
+    "mixed-merge-no-role"
+  ]
+}

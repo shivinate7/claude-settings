@@ -1,0 +1,12 @@
+{
+  "title": "No open step waits on a pull request that closed without a merge",
+  "phase": "now",
+  "status": "doing",
+  "order": 1014,
+  "owner": "triage",
+  "why": "26 of 737 open steps (32 waits) wait in their text on a PR that GitHub shows closed and unmerged, so nobody acts on them (coordinator measure on roadmap, 13:05 CST Nov 10).",
+  "note": "Owner chat 13:09 CST Nov 10 is the ask, via coordinator 13:14 CST. (a) One-time: re-point each of the 26 at the step or PR that now carries the work, or drop the wait: batch-push-runs-full-checks, child-copies-cleanup, comment-check-scans-shell, draft-pr-unquoted-body-sq-subst, first-fix-check-net-value, fix-check-chain, idle-lane-steps-unknown, lane-lint-body-tidy, lint-config-guard-paths, merge-route-author-paths, merge-subst-paren, mixed-merge-resolver, notes-fix-guard-1, one-worktree-per-branch, pe-guard-false-alarms, pr-backlog-clear, pro-slot-udid, qform-wrapper-flags, record-claim-cites-code, record-edit-refused, review-record-parse-warn, same-pr-tree-equal-record, silent-undo-merged-main, stale009-sweep, ste-lint-run-exit-codes, time-from-one-helper. (b) Mechanical: the roadmap build (skills/roadmap) flags an open step whose text waits on a closed unmerged PR, read once per build; a step waits on a step slug (blockedBy), never a bare PR number. Matcher: (after|waits? on|waiting for|blocked on|once|until|when) #N.",
+  "updatedAt": "2026-11-10T13:11:00-06:00",
+  "lane": "triage agents (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "blockedBy": []
+}

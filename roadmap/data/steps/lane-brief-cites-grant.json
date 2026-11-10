@@ -1,0 +1,12 @@
+{
+  "title": "A lane brief opens with a Grant line naming the owner's words and time",
+  "phase": "now",
+  "status": "todo",
+  "order": 1013,
+  "owner": "triage",
+  "why": "A lane brief sent by send_message carried no owner grant with a time, so the new lane main-merge-project-ops paused and asked the owner (13:08 CST Nov 10).",
+  "note": "Coordinator 13:10 CST Nov 10. Fix: the brief template in skill project-ops opens with a `Grant:` line (owner's words and time). The coordinator adds the line to its own briefs now; this step lands it in the template.",
+  "updatedAt": "2026-11-10T13:11:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
