@@ -103,6 +103,29 @@ test("a live doing step reads In progress", async (t) => {
   assert.match(await statusLabel(page, "a"), /In progress/, "step a has a live thread but does not read In progress");
 });
 
+// ---------------------------------------------------------------- live work: a live file with no threads list (lane live-build-threads-optional)
+// The thread count reads unknown, never 0. The open pull request still shows, and still holds its step live.
+test("a live file with no threads list shows its open pull request, and the thread count reads unknown", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  const live = { readAt: new Date().toISOString(), pulls: [{ number: 7, title: "Step a pull", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  const text = (await page.locator("#live").textContent()).replace(/\s+/g, " ");
+  assert.match(text, /#7/, "the live panel does not show open pull request #7: " + text);
+  assert.match(text, /Step a pull/, "the live panel does not show the title of open pull request #7: " + text);
+  assert.match(text, /1 open pull request/, "the live panel does not count the open pull request: " + text);
+  assert.doesNotMatch(text, /No thread is open/, "the live panel reads no threads, a made-up zero: " + text);
+  assert.match(text, /unknown/, "the live panel does not read the thread count as unknown: " + text);
+});
+
+test("with no threads list, a doing step with an open pull request reads In progress, and one with none reads Stalled", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2), b: stepOf("Step b", "doing", 3) };
+  // Step a has an open pull request on its branch a, which makes it a live lane. Step b has no pull and no session.
+  const live = { readAt: new Date().toISOString(), pulls: [{ number: 7, title: "Step a pull", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  assert.match(await statusLabel(page, "a"), /In progress/, "step a has an open pull request but does not read In progress with no threads list");
+  assert.match(await statusLabel(page, "b"), /Stalled/, "step b has no open pull request and no live session but does not read Stalled with no threads list");
+});
+
 // ---------------------------------------------------------------- the plan list: a stalled step is marked at first load, with no live thread
 // The build sets the stalled read from the steps and the live file. Step b has no session and no pull request, so no live lane.
 test("a stalled step carries the Stalled tag and the Doing now mark at first load, with no live lane", async (t) => {
