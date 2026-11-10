@@ -1,11 +1,11 @@
 {
   "title": "A page task's Why-yours line accepts only route-row and dated measured cites, checked by new rule task-why-cited",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 0.23,
   "owner": "coordinator",
   "why": "Coordinator, 14:31 CST Nov 7.",
-  "note": "Coordinator picks, 14:36 CST: the Why-yours line accepts only route-row cites and dated measured cites, not a refused tool in backticks; the check ships as new rule task-why-cited. Route rows already have one reader, hooks/route_match.py, so no second reader is built. Triage sweep 04:49 CST Nov 10: back to ready. Lane session_013NEJL1UMoM1VHADdYGDUZz is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main.",
-  "lane": null,
-  "updatedAt": "2026-11-10T04:49:00-06:00"
+  "note": "Coordinator picks, 14:36 CST: the Why-yours line accepts only route-row cites and dated measured cites, not a refused tool in backticks; the check ships as new rule task-why-cited. Route rows already have one reader, hooks/route_match.py, so no second reader is built. Triage sweep 04:49 CST Nov 10: back to ready. Lane session_013NEJL1UMoM1VHADdYGDUZz is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane session_013NEJL48WnqmBbR4MbD4Unk at 04:53 CST Nov 10.",
+  "lane": "session_013NEJL48WnqmBbR4MbD4Unk",
+  "updatedAt": "2026-11-10T04:53:00-06:00"
 }
