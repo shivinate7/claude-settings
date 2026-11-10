@@ -2764,7 +2764,6 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
-    host = host or Host()
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
