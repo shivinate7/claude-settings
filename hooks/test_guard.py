@@ -35180,6 +35180,54 @@ def role_override_no_model_check():
     return True, "the no-model refusal stayed under the override, which then lifted a test-author on sonnet"
 
 
+def role_override_no_model_fix_check():
+    """A reviewer's fix check with no model is never-lifted, as the builder story above holds for a builder. Under an
+    override it is still refused and spends none, so the override that follows still lifts a test-author on sonnet.
+    Its refusal keeps ROLE_NO_MODEL_MATCH, which never_lifted reads."""
+    config, session = role_config("ov-fix-no-model", REPO), "role-ov-fix-no-model"
+    fix_check = role_input("reviewer", None, FIX_MARKER + ". Re-run the cases.")
+
+    def call(seconds, spawn, env=None):
+        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
+
+    ok, why = ov_story([("reviewer fix check with no model, no override",
+                         lambda: call(0, fix_check, ROLE_OV_UNSET), "deny", ROLE_RULE)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("reviewer fix check with no model, under the override",
+         lambda: call(60, fix_check, ROLE_OV_UNSET), "deny", ROLE_RULE),
+        ("test-author on sonnet, the override not spent by the fix check refusal",
+         lambda: call(120, ROLE_OV_TEST_AUTHOR), "allow", ROLE_RULE),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "the no-model fix check refusal stayed under the override, which then lifted a test-author on sonnet"
+
+
+def role_override_haiku_fix_check():
+    """A reviewer's fix check that names haiku is refused under agent-role-model, with ROLE_FIX_CHECK_MATCH, which the
+    general override lifts. One override lifts it once, then it refuses again."""
+    config, session = role_config("ov-fix-haiku", REPO), "role-ov-fix-haiku"
+    fix_check = role_input("reviewer", "haiku", FIX_MARKER + ". Re-run the cases.")
+
+    def call(seconds):
+        return ov_call("Agent", dict(fix_check), NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("reviewer fix check on haiku, no override", lambda: call(0), "deny", ROLE_RULE)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("reviewer fix check on haiku, under the override", lambda: call(60), "allow", ROLE_RULE),
+        ("reviewer fix check on haiku, override spent", lambda: call(120), "deny", ROLE_RULE),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "the haiku fix check refusal was lifted by one override, and refused again once it was spent"
+
+
 def role_opus_explore_lift_check():
     """`opus 2h` lifts an Explore on Opus with no Audit: marker. The refusal is the Opus ceiling's (item 137 pick a)."""
     config, session = ov_config("role-opus-explore"), "role-opus-explore"
@@ -35225,6 +35273,10 @@ ROLE_OVERRIDE_CHECKS = (
      role_override_lift_check),
     ("role-model: the no-model refusal stays under an owner override, and spends none",
      role_override_no_model_check),
+    ("role-model: the no-model fix check reviewer stays refused under an owner override, and spends none",
+     role_override_no_model_fix_check),
+    ("role-model: a haiku-named fix check reviewer is lifted by an owner override once, then refused again",
+     role_override_haiku_fix_check),
     ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
     ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
     ("role-model: the typed override lifts a Workflow builder on opus with a variable brief, once",
@@ -35735,10 +35787,10 @@ role_model_refuse("role-model: fix check: Explore on sonnet with the marker is d
 
 # ---- served model on a fix check (decision agent-model-cap, the reviewer row; owner item 444 a, 2026-11-08 15:04 CST).
 # A fix check runs Sonnet, set per spawn. Its first line is the bare marker, not a round line, so step-up does not read it
-# (step_up_reason reads rounds 2 and 3 only). With no model the row passes it: through the env default when
-# CLAUDE_CODE_SUBAGENT_MODEL is set, and through the agent file's `haiku` pin when it is not. The tag "served-model:" selects
-# these cases alone (MUTATE_ONLY). Failure classes: a false allow (a no-model fix check serves haiku); a false deny (the
-# controls below, which a fix must leave allowed).
+# (step_up_reason reads rounds 2 and 3 only). With no model it is refused even when a default model is set, since the agent
+# file's `haiku` pin beats the default; no owner override lifts that refusal. A fix check that names haiku is refused too,
+# and an owner override lifts it. The tag "served-model:" selects these cases alone (MUTATE_ONLY). Failure classes: a false
+# allow (a no-model fix check serves haiku); a false deny (the controls below, which a fix must leave allowed).
 SERVED_REMEDY = (("model sonnet", "(sonnet)"),)
 role_model_refuse("role-model: served-model: fix check, reviewer with no model is denied when the default is sonnet",
                   "reviewer", None, FIX_MARKER + ". Re-run the cases.", env=SONNET_DEFAULT, carries=SERVED_REMEDY)
