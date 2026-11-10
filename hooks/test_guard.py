@@ -21646,19 +21646,68 @@ CI_BASE = "on: push\njobs:\n  check:\n    steps:\n" + CI_LINT
 CI_FILES = {**MIXED_FILES, CI: CI_BASE}
 
 
-def _mixed_workflow_mid_merge(w):
-    """Cut at main. The lane changes the test file and the lint step's run line in ci.yml. Main changes the same two
-    (a conflict in each). The merge is left in progress with both conflicted."""
+def _path_mid_merge(w, path, lane_text, main_text, test=True):
+    """Cut at main. The lane changes `path` to `lane_text`, and main changes it to `main_text`: a conflict in `path`.
+    With `test`, the lane and main also change the test file: a second conflict. The merge is left in progress."""
     main = w + "-main"
-    _test_author_lane(w, TEST_A, LANE_TEXT, more=((CI, CI_BASE.replace("ste_lint.py", "lane_lint.py")),))
+    _test_author_lane(w, path, lane_text, more=((TEST_A, LANE_TEXT),) if test else ())
     _must(w, "reset", "-q", "--hard", "lane")
-    _put_commit(main, [(TEST_A, BASE_FILES[TEST_A] + "# main's newer case\n"),
-                       (CI, CI_BASE.replace("ste_lint.py", "main_lint.py"))], "main moves")
+    main_files = [(path, main_text)]
+    if test:
+        main_files.append((TEST_A, BASE_FILES[TEST_A] + "# main's newer case\n"))
+    _put_commit(main, main_files, "main moves")
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
-    _require_conflict(w, TEST_A)
-    _require_conflict(w, CI)
+    _require_conflict(w, path)
+    if test:
+        _require_conflict(w, TEST_A)
+
+
+def _resolve_and_commit(w, files):
+    """The merge left in progress at `w`, resolved by hand: each (path, text) of `files` is written, then committed."""
+    for rel, text in files:
+        write(os.path.join(w, rel), text)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+def _mixed_workflow_mid_merge(w):
+    """Cut at main. The lane changes the test file and the lint step's run line in ci.yml. Main changes the same two
+    (a conflict in each). The merge is left in progress with both conflicted."""
+    _path_mid_merge(w, CI, CI_BASE.replace("ste_lint.py", "lane_lint.py"), CI_BASE.replace("ste_lint.py", "main_lint.py"))
+
+
+# checks.yml. Its lint step changes on two adjacent lines on each side, so one conflict block holds two lines per side,
+# and a side can be reordered. The rows that pin "a reorder is new text" need that.
+CHECKS = ".github/workflows/checks.yml"
+CHECKS_TOP = "on: push\njobs:\n  check:\n    steps:\n      - name: Lint\n"
+CHECKS_OURS = "        run: python3 lane_lint.py\n        env: LANE=1\n"
+CHECKS_THEIRS = "        run: python3 main_lint.py\n        env: MAIN=1\n"
+CHECKS_LANE = CHECKS_TOP + CHECKS_OURS
+CHECKS_MAIN = CHECKS_TOP + CHECKS_THEIRS
+# git's merge of CHECKS_LANE and CHECKS_MAIN, as the file reads in the conflicted state: one block, ours then theirs.
+CHECKS_BLOCK = "<<<<<<< HEAD\n" + CHECKS_OURS + "=======\n" + CHECKS_THEIRS + ">>>>>>> main\n"
+CHECKS_FILES = {**MIXED_FILES, CHECKS: CHECKS_TOP + "        run: python3 lint/ste_lint.py\n        env: STE=1\n"}
+PKG = "package.json"
+PKG_BASE = '{\n  "name": "x",\n  "version": "1.0.0"\n}\n'
+PKG_LANE = PKG_BASE.replace("1.0.0", "1.1.0")
+PKG_MAIN = PKG_BASE.replace("1.0.0", "1.2.0")
+PKG_FILES = {**MIXED_FILES, PKG: PKG_BASE}
+
+
+def _checks_done(w):
+    """The mixed merge of checks.yml, resolved by a test-author: the test file takes its lane text, checks.yml takes its
+    ours side whole, and the merge is committed."""
+    _path_mid_merge(w, CHECKS, CHECKS_LANE, CHECKS_MAIN)
+    _resolve_and_commit(w, ((TEST_A, LANE_TEXT), (CHECKS, CHECKS_LANE)))
+
+
+def _pkg_done(w):
+    """The mixed merge of package.json, resolved by a test-author: the test file takes its lane text, package.json takes
+    its theirs side whole, and the merge is committed."""
+    _path_mid_merge(w, PKG, PKG_LANE, PKG_MAIN)
+    _resolve_and_commit(w, ((TEST_A, LANE_TEXT), (PKG, PKG_MAIN)))
 
 
 PROD_MID = diff_repo("ta-prod-mid", _product_mid_merge, files=MIXED_FILES)
@@ -21680,6 +21729,49 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that reso
 add("test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused", "deny", rule=TA,
     tool="Edit", file_path=os.path.join(CI_MID, CI), old_string=CI_LINT,
     new_string=CI_LINT.replace("ste_lint.py", "other_lint.py"), carries=("builder", "Report"), **AUTH_CI)
+
+# The mixed merge with a conflicted workflow or manifest (decision builders-cannot-edit-tests, owner item 420 a). A
+# test-author may write such a path only when the result is git's conflicted file with each block replaced by one whole
+# side, or by the ours side then the theirs side. Any other text is new text: refused at the write tool, logged at commit.
+CHECKS_MID = diff_repo("ta-checks-mid", lambda w: _path_mid_merge(w, CHECKS, CHECKS_LANE, CHECKS_MAIN),
+                       files=CHECKS_FILES)
+CHECKS_DONE = diff_repo("ta-checks-done", _checks_done, files=CHECKS_FILES)
+CHECKS_ONLY_MID = diff_repo("ta-checks-only-mid",
+                            lambda w: _path_mid_merge(w, CHECKS, CHECKS_LANE, CHECKS_MAIN, test=False),
+                            files=CHECKS_FILES)
+PKG_DONE = diff_repo("ta-pkg-done", _pkg_done, files=PKG_FILES)
+AUTH_CHECKS = dict(agent_id="auth1", agent_type="test-author", cwd=CHECKS_MID)
+CHECKS_PATH = os.path.join(CHECKS_MID, CHECKS)
+# Case 1 (red on main): a conflicted workflow resolved to one side whole, by an Edit that keeps ours and a Write that
+# keeps theirs.
+add("test-author: Edit of a conflicted workflow that keeps its ours side whole is allowed", "allow", tool="Edit",
+    file_path=CHECKS_PATH, old_string=CHECKS_BLOCK, new_string=CHECKS_OURS, **AUTH_CHECKS)
+add("test-author: Write of a conflicted workflow that keeps its theirs side whole is allowed", "allow", tool="Write",
+    file_path=CHECKS_PATH, content=CHECKS_TOP + CHECKS_THEIRS, **AUTH_CHECKS)
+# Case 2 (red on main): both sides kept, the ours side then the theirs side.
+add("test-author: Write of a conflicted workflow that keeps both sides, ours then theirs, is allowed", "allow",
+    tool="Write", file_path=CHECKS_PATH, content=CHECKS_TOP + CHECKS_OURS + CHECKS_THEIRS, **AUTH_CHECKS)
+# Case 3 (green pin): a line neither side holds is new text, so it is refused.
+add("test-author: Write of a conflicted workflow that adds a line neither side had is refused", "deny", rule=TA,
+    tool="Write", file_path=CHECKS_PATH, content=CHECKS_TOP + CHECKS_OURS + "        env: EXTRA=1\n",
+    carries=("builder", "Report"), **AUTH_CHECKS)
+# Case 4 (green pin): a reorder of a side's lines is new text, though every line is one a side holds.
+add("test-author: Write of a conflicted workflow that reorders a side's lines is refused", "deny", rule=TA,
+    tool="Write", file_path=CHECKS_PATH, content=CHECKS_TOP + "        env: LANE=1\n        run: python3 lane_lint.py\n",
+    carries=("builder", "Report"), **AUTH_CHECKS)
+# Case 5 (red on main): the test-author's merge commit that resolves checks.yml to its ours side logs no author-diff.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a conflicted workflow to its ours "
+                         "side logs no author-diff line",
+                         author_silent_case(CHECKS_DONE, "ta-checks-done")))
+# Case 6 (red on main): the same for package.json resolved to its theirs side. At the write tool package.json already
+# passes (`author_path_ok`, through TEST_CONFIG), so the red sits at commit, where its content check logs author-diff.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a conflicted package.json to its "
+                         "theirs side logs no author-diff line",
+                         author_silent_case(PKG_DONE, "ta-pkg-done")))
+# Case 7 (green pin): a workflow conflict in a merge with no test path conflicted is refused, so the route needs a test.
+add("test-author: Write of a conflicted workflow in a merge with no test conflict is refused", "deny", rule=TA,
+    tool="Write", file_path=os.path.join(CHECKS_ONLY_MID, CHECKS), content=CHECKS_LANE,
+    carries=("builder", "Report"), agent_id="auth1", agent_type="test-author", cwd=CHECKS_ONLY_MID)
 
 
 def refused_push_and_stop_case(label):
