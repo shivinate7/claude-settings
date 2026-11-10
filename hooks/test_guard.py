@@ -17045,7 +17045,8 @@ sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
 
 # THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
-# a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view. So is text
+# a pure printer. A heredoc body fed to an interpreter is code and stays in view, unless it is a QUOTED
+# python heredoc whose body only holds data (the python data rows below). So is text
 # piped into an interpreter: the interpreter may run it, so a pipe into one fails closed. Incident
 # 2026-10-14: a reviewer's probe piped a JSON tool-call sample holding a cap write into
 # `python hooks/guard.py`, and the owner was asked to approve a call that wrote nothing. Whether that
@@ -17072,8 +17073,56 @@ chained_ask("cap data: a multi-line quoted string naming a cat-write, piped to p
 sh("cap data: a heredoc body fed to python stdin naming a cat-write asks [r1 red, F5 call]",
    "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
    + CAP_KEY + "\"}}\nPAYLOAD", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
-sh("cap data: a python heredoc that only prints a cat-write asks [r1 red, F5 call]",
-   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
+sh("cap data: a python heredoc that only prints a cat-write allows",
+   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY", "allow", cwd=NOGIT)
+
+# THE PYTHON DATA ROWS. A quoted python heredoc (`python3 -`, `python -`, flags before the dash) whose body
+# parses as python and calls no name that runs, writes, imports or spawns is data. A cat-write named in a
+# string is not a write. Each body is built from CAP_KEY, OPUS and PROJ_LOCAL. The ask and deny rows at the
+# end of this block hold the bodies that stay in view.
+CAP_WRITE_TEXT = "cat > " + PROJ_LOCAL + " <<'J'\n" + cap_settings(compact=True) + "\nJ"
+INCIDENT_BODY = ("import sys\nsys.path.insert(0,\"hooks\")\nimport guard\ncmd = " + json.dumps(CAP_WRITE_TEXT)
+                 + "\nprint(guard.cap_change(cmd))\n")
+TOOL_WRITE = {"tool_name": "Write", "tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}}
+BASH_CAP_CALL = {"tool_name": "Bash", "tool_input": {"command": CAP_WRITE_TEXT}}
+sh("cap data: the incident shape, a quoted python heredoc whose body only holds a cat-write string, allows",
+   "python3 - <<'PYEOF'\n" + INCIDENT_BODY + "PYEOF", "allow", cwd=NOGIT)
+sh("cap data: the incident body under python3 -I with a quoted heredoc allows",
+   "python3 -I - <<'PY'\n" + INCIDENT_BODY + "PY", "allow", cwd=NOGIT)
+sh("cap data: the incident body under bare python with a quoted heredoc allows",
+   "python - <<'PY'\n" + INCIDENT_BODY + "PY", "allow", cwd=NOGIT)
+sh("cap data: a python heredoc printing a json Write payload for a settings file allows",
+   "python3 - <<'PY'\nimport json\npayload = " + json.dumps(TOOL_WRITE) + "\nprint(json.dumps(payload))\nPY",
+   "allow", cwd=NOGIT)
+sh("cap data: a python heredoc printing a json Bash payload whose command is a cat-write allows",
+   "python3 - <<'PY'\nimport json\npayload = " + json.dumps(BASH_CAP_CALL) + "\nprint(json.dumps(payload))\nPY",
+   "allow", cwd=NOGIT)
+sh("cap data: a quoted python heredoc with a comment opener inside a string allows",
+   "python3 - <<'PY'\nprint(" + json.dumps("# " + CAP_WRITE_TEXT) + ")\nPY", "allow", cwd=NOGIT)
+sh("cap data: a quoted python heredoc with a multi-line triple-quoted string allows",
+   "python3 - <<'PY'\ntext = \"\"\"\n" + CAP_WRITE_TEXT + "\n\"\"\"\nprint(text)\nPY", "allow", cwd=NOGIT)
+sh("cap data: a quoted python heredoc with a lone apostrophe inside a string allows",
+   "python3 - <<'PY'\nprint(\"don't \" + " + json.dumps(CAP_WRITE_TEXT) + ")\nPY", "allow", cwd=NOGIT)
+sh("cap data: a python heredoc whose body runs os.system on a cat-write asks",
+   "python3 - <<'PY'\nimport os\nos.system('echo " + CAP_KEY + "=" + OPUS + " > " + PROJ_LOCAL + "')\nPY",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+sh("cap data: a python heredoc whose body runs subprocess on a cat-write asks",
+   "python3 - <<'PY'\nimport subprocess\nsubprocess.run(['sh', '-c', 'echo " + CAP_KEY + "=" + OPUS + " > "
+   + PROJ_LOCAL + "'])\nPY", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+sh("cap data: an unquoted python heredoc whose body prints a cat-write asks",
+   "python3 - <<PY\nprint(" + json.dumps(CAP_WRITE_TEXT) + ")\nPY", "ask", "agent-model-cap", cwd=NOGIT,
+   carries=(CAP_KEY,))
+sh("cap data: a python heredoc with a syntax error, holding a cat-write in print(), asks",
+   "python3 - <<'PY'\nprint(" + json.dumps(CAP_WRITE_TEXT) + ")\ndef broken(:\nPY",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+sh("cap data: a python heredoc whose header redirects into a settings file asks",
+   "python3 - <<'PY' > " + PROJ_LOCAL + "\nprint(" + json.dumps(cap_settings(compact=True)) + ")\nPY",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+chained_ask("cap data: a cat-write heredoc chained with a quoted python data heredoc denies as a chained ask command",
+   "cat <<'J' > " + PROJ_LOCAL + "\n" + cap_settings(compact=True) + "\nJ\npython3 - <<'PY'\nprint('data')\nPY",
+   cwd=NOGIT, carries=("agent-model-cap",))
+sh("cap data: a python3 -c one-liner that prints a cat-write asks",
+   "python3 -c \"print('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\"",
    "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
 chained_ask("cap data: a JSON tool-call sample holding the cap write, piped to python, denies as a chained ask command "
    "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
