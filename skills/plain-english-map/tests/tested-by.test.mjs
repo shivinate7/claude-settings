@@ -6,8 +6,8 @@
 // src/retry_check.py and src/run_retry_check.py for src/retry.py. Each failing case edits its own scratch copy of the fixture, and each
 // run goes through `scripts/map-check.mjs`. The spec file for T9 (the 4 to 5 upgrade) is format-version.test.mjs, case 2d: one home for the step.
 //
-// Red on the old code. The fixture holds formatVersion 5, and the old validator refuses a newer map before any check runs. So each case
-// goes red on that refusal, and its output names it. Once the skill reads version 5, each case goes red on its own MAP11 verdict, which
+// Red on the old code. The fixture holds formatVersion 6, and the old validator refuses a newer map before any check runs. So each case
+// goes red on that refusal, and its output names it. Once the skill reads version 6, each case goes red on its own MAP11 verdict, which
 // the old code never prints. Every MAP11 failure assertion names the page, the test and the file it is about.
 //
 // Assumed. The spec names the cases but not the messages, so these read the spec's own claims:
