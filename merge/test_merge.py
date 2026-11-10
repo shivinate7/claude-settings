@@ -14060,8 +14060,9 @@ class ReviewFixBase(ReviewEnv):
 class ReviewFixAfterMainMerge(ReviewEnv):
     """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
     refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose first parent is that
-    head and whose second parent is on main. Only that shape gets a fix check. A plain commit on the head, or a merge with a commit off main, is
-    refused. The parents come from the commit read and the on-main test from the compare read, both scripted by PullsHost."""
+    head and whose second parent is on main. Only that shape gets a fix check. A plain commit on the head, a merge with a commit off main, or a
+    merge whose first parent is not the fixed head, is refused. The parents come from the commit read and the on-main test from the compare
+    read, both scripted by PullsHost."""
 
     PRE_FIX_HEAD = "1e" * 20  # the head the newest record's fix diff started from
     MAIN_TIP = "3f" * 20  # a commit on main, the second parent of the merge
@@ -14107,6 +14108,19 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assertEqual(host.compares.get((self.SIDE, "main")), "diverged", "the fixture's second parent is on main")
         rc, out, err = self.fix_from_fixed_head(host)
         self.assertEqual(rc, 2, "a fix check after a merge of a commit off main was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_d_a_fix_check_after_a_merge_of_main_whose_first_parent_is_not_the_fixed_head_is_refused(self):
+        # the merge's second parent is on main, so only the first parent can refuse it: a commit on top of the fixed head, not the record's head
+        unreviewed = "5d" * 20
+        host = self.record_host(self.newest_record(), compares=self.ON_MAIN,
+                                commits={REVIEW_HEAD: [unreviewed, self.MAIN_TIP], unreviewed: [REVIEW_OLD_HEAD]})
+        self.assertEqual(host.commits[REVIEW_HEAD], [unreviewed, self.MAIN_TIP], "the fixture's head is not a merge of the unreviewed commit and the main commit")
+        self.assertEqual(host.commits[unreviewed], [REVIEW_OLD_HEAD], "the fixture's unreviewed commit is not on top of the fixed head")
+        self.assertEqual(host.compares.get((self.MAIN_TIP, "main")), "ahead", "the fixture's second parent is not on main")
+        rc, out, err = self.fix_from_fixed_head(host)
+        self.assertEqual(rc, 2, "a fix check after a merge of main whose first parent is not the fixed head was not refused:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
         self.assertNotIn("Traceback", err)
 
