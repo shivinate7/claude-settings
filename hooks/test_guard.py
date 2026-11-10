@@ -12447,12 +12447,18 @@ def gh_verb(command):
     return " ".join(command.split()[:3])
 
 
-def gh_write_refused(name, command, **fixture):
-    """One gh write refused in a cloud session, and the same write allowed outside one."""
+def gh_write_refused(name, command, allow=None, **fixture):
+    """One gh write refused in a cloud session, and the same write allowed outside one. `allow`, when given, is the
+    allow half's fixture in place of `fixture`, for a write the batch brake judges outside a cloud session too."""
     sh("gh-write-cloud: %s is refused in a cloud session" % name, command, "deny", GH_WRITE_RULE,
        cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(gh_verb(command),), **fixture)
-    sh("gh-write-cloud: %s is allowed outside a cloud session" % name, command, "allow", cwd=NOGIT, **fixture)
+    sh("gh-write-cloud: %s is allowed outside a cloud session" % name, command, "allow", cwd=NOGIT,
+       **(fixture if allow is None else allow))
 
+
+# The merge endpoint is judged by the batch brake outside a cloud session as well, so its allow half reads a green head
+# with no busy pull request, as the merge-route controls do. Its deny half in a cloud session keeps no fixture.
+GH_WRITE_ALLOW = {"api -X PUT": GH_MERGE_FIXTURE}
 
 GH_WRITES = (
     ("pr create", "gh pr create --draft --title x --body y"),
@@ -12479,8 +12485,13 @@ GH_WRITES = (
     ("api with --input and no method", "gh api repos/x/y/issues --input body.json"),
 )
 for _name, _command in GH_WRITES:
-    gh_write_refused(_name, _command)
+    gh_write_refused(_name, _command, allow=GH_WRITE_ALLOW.get(_name))
 gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
+# The same PUT outside a cloud session, with a busy pull request on the base: the batch brake refuses it there too, so the
+# cloud rule is not the only guard on this row. The merge's own head is settled here, so the pending check on pull request 2 is the only cause.
+sh("gh-write-cloud: api -X PUT outside a cloud session is refused by merge-checks while a busy pr on the base is pending",
+   "gh api -X PUT repos/x/y/pulls/1/merge", "deny", "merge-checks", cwd=NOGIT, carries=("#2", "pending"),
+   env_path=GHBATCH + os.pathsep + PY_PATH, config=MERGECFG)
 
 # A write that another rule also refuses gets the gh-write-cloud verdict in a cloud session. Its remedy
 # names an MCP tool, never the refused form. Each refusal has a twin outside a cloud session.
