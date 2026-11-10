@@ -953,6 +953,28 @@ def _enclosing_defs(node, mod):
     return out
 
 
+def _holds(outer, node, mod):
+    """True when `node` is `outer` or sits inside it."""
+    cur = node
+    while cur is not None:
+        if cur is outer:
+            return True
+        cur = mod.parents.get(id(cur))
+    return False
+
+
+def _runs_on_every_path(at, read, mod, scope):
+    """True when the statement `at` runs on every path to `read` in `scope`: no branch, loop or handler between them
+    holds `at` and not `read`. A loop or handler that holds `at` is never every path, so its target does not count."""
+    node = at
+    while node is not None and node is not scope:
+        if isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.ExceptHandler)) \
+                and not _holds(node, read, mod):
+            return False
+        node = mod.parents.get(id(node))
+    return True
+
+
 def _reaching(entries, read, mod):
     """The bindings a read sees. Where a read runs in a lambda or a generator expression, all of them: it may run after any of them. Else
     one reaches the read when it sits in the read's own statement, or when it takes effect before the read and is not
@@ -1123,6 +1145,7 @@ class _Module:
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                 self.name_loads.setdefault(node.id, []).append(node)
         self.stops = _stop_classes(self)  # the Stop classes of this module, read below
+        self.flow_memo = {}  # the output reads of this module, once each (see _reaches_output)
 
 
 class _Reasons:
@@ -1505,9 +1528,13 @@ def _pairs(node):
 
 
 def _name_reaches(name, mod, scope, depth, returns=True):
-    """True when a read of `name` in `scope` reaches the output (see _reaches_output)."""
-    return any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
-               and _reaches_output(n, mod, scope, depth + 1, returns) for n in _own(scope))
+    """True when a read of `name` in `scope` reaches the output (see _reaches_output). Memoized like it."""
+    key = ("name", name, id(scope), depth, returns)
+    if key not in mod.flow_memo:
+        found = any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
+                    and _reaches_output(n, mod, scope, depth + 1, returns) for n in _own(scope))
+        mod.flow_memo[key] = (found, scope)
+    return mod.flow_memo[key][0]
 
 
 def _bound_reaches(target, mod, scope, depth, returns=True):
@@ -1521,14 +1548,26 @@ def _bound_reaches(target, mod, scope, depth, returns=True):
 def _reaches_output(node, mod, scope, depth=0, returns=True):
     """True when the value of `node` reaches the output of `scope`: it is printed (`print(...)`, or a `json.dumps(...)`
     or `dict(...)` that is printed), returned, passed to `name.update(...)`, or bound to a name that reaches the
-    output. An `name.update(...)` call reaches the output when its name does. `returns` false leaves out a return:
-    a printing helper prints its parameter, and a parameter that is only returned is printed by no one."""
+    output. An `name.update(...)` call reaches the output when its name does. A value that is an operand of `or`,
+    `and` or a conditional expression reaches it as that expression does. `returns` false leaves out a return: a
+    printing helper prints its parameter, and a parameter that is only returned is printed by no one. Memoized per
+    (node, scope, depth, returns), so a name that is rebound many times is read once per depth, not once per path."""
     if depth > MAX_DEPTH:
         return False
+    key = ("node", id(node), id(scope), depth, returns)
+    if key not in mod.flow_memo:
+        mod.flow_memo[key] = (_output_of(node, mod, scope, depth, returns), node, scope)
+    return mod.flow_memo[key][0]
+
+
+def _output_of(node, mod, scope, depth, returns):
+    """The uncached read behind _reaches_output."""
     target = _update_target(node)
     if target is not None and _name_reaches(target, mod, scope, depth, returns):
         return True
     parent = mod.parents.get(id(node))
+    if isinstance(parent, ast.BoolOp) or (isinstance(parent, ast.IfExp) and parent.test is not node):
+        return _reaches_output(parent, mod, scope, depth + 1, returns)  # `p or {}`, `p if p else {}`: one of its values
     if isinstance(parent, ast.Return):
         return returns
     if isinstance(parent, ast.Call) and parent.func is not node:
@@ -1898,26 +1937,27 @@ class _Helpers:
         found = set()
         for node in _own(d):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in params:
-                if _reaches_output(node, self.mod, d, 0, returns=False) and self._reads_argument(node, node.id, locs):
+                if _reaches_output(node, self.mod, d, 0, returns=False) and self._reads_argument(node, node.id, d, locs):
                     found.add(node.id)
             elif isinstance(node, ast.Call) and not any(isinstance(a, ast.Starred) for a in node.args):
                 g = self.printer(node)
                 for name, arg in (_call_args(node, g) if g is not None else []):
                     if name in self.printers[id(g)] and isinstance(arg, ast.Name) and arg.id in params \
-                            and self._reads_argument(arg, arg.id, locs):
+                            and self._reads_argument(arg, arg.id, d, locs):
                         found.add(arg.id)
         return frozenset(found)
 
-    def _reads_argument(self, read, name, locs):
-        """True when a read of parameter `name` sees its argument, or only rebindings that derive from it (the new
-        value names it). A rebinding to another value hides the argument from every read after it."""
+    def _reads_argument(self, read, name, scope, locs):
+        """True when a read of parameter `name` in `scope` sees its argument. A rebinding that runs on every path to the
+        read hides the argument, unless its value names the argument (it derives from it). A rebinding in a branch or
+        a loop that the read is not in hides nothing: the other path still holds the argument."""
         seen = _reaching(locs.get(name, []), read, self.mod)
         # `name[key] = ...` stores into the value the name holds: it rebinds nothing, so it is no rebinding.
-        rebinds = [value for value, _, at in seen if at is not None
-                   and not (isinstance(at, ast.Assign) and all(isinstance(t, ast.Subscript) for t in at.targets))]
-        derived = all(value is not None and name in {n.id for n in ast.walk(value) if isinstance(n, ast.Name)}
-                      for value in rebinds)
-        return derived and any(at is None for _, _, at in seen)
+        hiding = [value for value, _, at in seen if at is not None
+                  and not (isinstance(at, ast.Assign) and all(isinstance(t, ast.Subscript) for t in at.targets))
+                  and _runs_on_every_path(at, read, self.mod, scope)]
+        return all(value is not None and name in {n.id for n in ast.walk(value) if isinstance(n, ast.Name)}
+                   for value in hiding)
 
     def printer(self, call):
         """The printing def a call runs, read as the def the call's name refers to at the call; else None."""
@@ -3074,6 +3114,27 @@ def call_rows(src, homes=HOMES):
     return {rid: [s for _, s, _ in rows] for rid, rows in statuses.items()}
 
 
+REACH_BUDGET = 400  # calls of _reaches_output that a scan of the six-rebind fixtures may make, with room to spare
+
+
+def reach_calls(src, budget=REACH_BUDGET):
+    """-> (calls, rows): the calls a scan of `src` makes to _reaches_output, and its rows. Past `budget` a call
+    returns at once with no output, so a read that grows past it fails the count and stops there."""
+    real = _reaches_output
+    calls = [0]
+
+    def counted(node, mod, scope, depth=0, returns=True):
+        calls[0] += 1
+        return False if calls[0] > budget else real(node, mod, scope, depth, returns)
+
+    with mock.patch.object(sys.modules[__name__], "_reaches_output", counted):
+        rows = call_rows(src)
+    return calls[0], rows
+
+
+SIX_REBINDS = "".join("    out = dict(out, a%d=%d)\n" % (i, i) for i in range(1, 7))
+
+
 class RefuseHelperArgumentTests(unittest.TestCase):
     """A block dict passed to a helper that prints its parameter is a refuse site, read at each call as a refuse
     print is: its id is the caller's `module:function`, and its reason is read at the call. The dict may be a
@@ -3081,8 +3142,10 @@ class RefuseHelperArgumentTests(unittest.TestCase):
     a printing helper prints it too. A helper that only stores its parameter, a parameter rebound to another
     value, a value that is only returned, and a dict that is not a block, are no site.
 
-    Known gap, not built: a block dict bound to a name first, and then passed to a printing helper, is not read.
-    No case here covers it, and the scan reads it as no site."""
+    Known gaps, not built: a block dict bound to a name first, and then passed to a printing helper, is not read.
+    A dict literal that holds the parameter, such as `{"hookSpecificOutput": p}`, is not read. A rebinding in both
+    branches of an if/else hides nothing, so a block dict that both branches replace reads as printed (a false
+    alarm). No case here covers these."""
 
     def assertReadAtCall(self, src, status, homes=HOMES):
         """The scope first: main is the only refusal id. Then the subject: the call's reason reads as `status`."""
@@ -3175,6 +3238,37 @@ class RefuseHelperArgumentTests(unittest.TestCase):
         cycle = ("import json\ndef b(p):\n    a(p)\n    print(json.dumps(p))\n"
                  "def a(p):\n    b(p)\ndef main(route, hold, pick):\n")
         self.assertReadAtCall(cycle + call_of("a", UNCITED_BLOCK), "no cite")
+
+
+    def test_a_dict_rebound_six_times_by_a_helper_that_returns_it_is_read_in_bounded_work(self):
+        src = ("import json\ndef helper(p):\n    out = dict(p)\n" + SIX_REBINDS + "    return out\n"
+               "def main(route, hold, pick):\n" + call_of("helper", UNCITED_BLOCK))
+        calls, rows = reach_calls(src)
+        self.assertLessEqual(calls, REACH_BUDGET, "the printer read walks more paths than six rebinds need")
+        self.assertEqual(rows, {}, "a returned dict that nothing prints is read as a refusal")
+
+    def test_a_block_dict_rebound_six_times_and_only_appended_is_read_in_bounded_work(self):
+        src = ("import json\nLOG = []\ndef main(route, hold, pick):\n"
+               '    out = dict(decision="block", reason="held, no cite")\n' + SIX_REBINDS + "    LOG.append(out)\n")
+        calls, rows = reach_calls(src)
+        self.assertLessEqual(calls, REACH_BUDGET, "the refuse read of a dict walks more paths than six rebinds need")
+        self.assertEqual(rows, {}, "a block dict that nothing prints is read as a refusal")
+
+    def test_a_rebinding_inside_one_branch_hides_nothing_from_the_print(self):
+        for form, branch in (("if", "    if not p:\n        p = {\"systemMessage\": \"held, no cite\"}\n"),
+                             ("if-else", "    if not p:\n        p = {\"systemMessage\": \"held, no cite\"}\n"
+                                         "    else:\n        pass\n")):
+            with self.subTest(form=form):
+                src = ("import json\ndef finish(p):\n" + branch + "    print(json.dumps(p))\n"
+                       "def main(route, hold, pick):\n" + call_of("finish", UNCITED_BLOCK))
+                self.assertReadAtCall(src, "no cite")
+
+    def test_a_parameter_printed_through_or_or_a_conditional_expression_reads_the_call(self):
+        for form in ("json.dumps(p or {})", "json.dumps(p if p else {})"):
+            with self.subTest(form=form):
+                src = ("import json\ndef finish(p):\n    print(%s)\n" % form
+                       + "def main(route, hold, pick):\n" + call_of("finish", UNCITED_BLOCK))
+                self.assertReadAtCall(src, "no cite")
 
 
 class RefuseReasonDepthTests(unittest.TestCase):
