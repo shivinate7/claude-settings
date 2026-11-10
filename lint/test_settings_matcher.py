@@ -101,8 +101,17 @@ def flatten(value):
     return [name for part in value for name in flatten(part)]
 
 
-def judged_github_names(source):
-    """The mcp__github__ string constants in a comparison with `tool` in one source text. ast parses code only, so a
+def literal_names(side):
+    """The string constants a comparison side holds: one constant, or the constants of a tuple, list or set of them."""
+    if isinstance(side, ast.Constant) and isinstance(side.value, str):
+        return [side.value]
+    if isinstance(side, (ast.Tuple, ast.List, ast.Set)):
+        return [name for elt in side.elts for name in literal_names(elt)]
+    return []
+
+
+def compared_with_tool(source):
+    """The string constants compared with `tool` in one source text (==, !=, in, not in). ast parses code only, so a
     name inside a string or a comment is never read as a comparison."""
     found = set()
     for node in ast.walk(ast.parse(source)):
@@ -112,19 +121,24 @@ def judged_github_names(source):
         if not any(isinstance(side, ast.Name) and side.id == "tool" for side in sides):
             continue
         for side in sides:
-            for part in ast.walk(side):
-                if isinstance(part, ast.Constant) and isinstance(part.value, str) \
-                        and part.value.startswith("mcp__github__"):
-                    found.add(part.value)
+            found.update(literal_names(side))
     return found
 
 
-def judged_github_in_guard_files():
-    """Every mcp__github__ name that guard.py or a guard_*.py rule family compares with `tool`."""
+# Files where `tool` is the PreToolUse tool name, so each string compared with it is a tool name. The other guard_*.py
+# files reuse `tool` for a shell word (`pkill` in guard_kill.py, `ps` in guard_argv.py), so only their GitHub names count.
+TOOL_NAME_FILES = ("guard.py", "guard_merge.py")
+
+
+def judged_names_in_guard_files():
+    """Every tool name that guard.py or a guard_*.py rule family compares with `tool`."""
     found = set()
     for path in glob.glob(os.path.join(HOOKS, "guard*.py")):
         with open(path, encoding="utf-8") as f:
-            found |= judged_github_names(f.read())
+            names = compared_with_tool(f.read())
+        if os.path.basename(path) not in TOOL_NAME_FILES:
+            names = {name for name in names if name.startswith("mcp__github__")}
+        found |= names
     return found
 
 
@@ -147,16 +161,26 @@ class JudgedToolMatcher(unittest.TestCase):
                                 "%s has no %s: a renamed constant hides its tools from this test"
                                 % (os.path.basename(module.__file__), constant))
                 names += flatten(getattr(module, constant))
-        names += list(GITHUB_WRITE_TOOLS) + sorted(judged_github_in_guard_files())
+        names += list(GITHUB_WRITE_TOOLS) + sorted(judged_names_in_guard_files())
         return sorted(set(names))
 
     def test_guard_matcher_covers_every_judged_tool(self):
         self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
-        self.assertTrue(judged_github_in_guard_files(),
-                        "the scan found no mcp__github__ comparison in guard.py or guard_*.py: the scan is broken")
+        self.assertTrue(judged_names_in_guard_files(),
+                        "the scan found no tool name compared with `tool` in the guard files: the scan is broken")
         missed = self.unmatched(self.judged_tools())
         if missed:
             self.fail("no guard matcher covers: %s" % ", ".join(missed))
+
+    def test_guard_files_scan_leaves_out_shell_words(self):
+        # Scope first: the scan reads guard.py's string comparisons at all. Then guard_kill.py's and guard_argv.py's
+        # shell words are left out, since their `tool` is no tool name.
+        with open(GUARD_SOURCE, encoding="utf-8") as f:
+            self.assertTrue(compared_with_tool(f.read()), "guard.py has no string compared with `tool`: nothing is read")
+        found = judged_names_in_guard_files()
+        for word in ("pkill", "ps", "npm"):
+            with self.subTest(word=word):
+                self.assertNotIn(word, found, "the scan reads the shell word %r as a tool name" % word)
 
     def test_guard_matcher_covers_the_six_github_write_tools(self):
         self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
@@ -164,7 +188,7 @@ class JudgedToolMatcher(unittest.TestCase):
         if missed:
             self.fail("no guard matcher covers: %s" % ", ".join(missed))
 
-    def test_github_scan_reads_code_and_not_strings_or_comments(self):
+    def test_scan_reads_code_and_not_strings_or_comments(self):
         # Each line is a real comparison, or text that only looks like one: a comment line, a trailing comment, a
         # comment opener (#, /*, //) in a string, a multi-line string, a lone quote in text, and a comparison with
         # another name.
@@ -176,21 +200,26 @@ class JudgedToolMatcher(unittest.TestCase):
             'TEXT = "# tool == \'mcp__github__hash_in_string\'"',
             'NOTE = """',
             'if tool == "mcp__github__in_a_string": pass',
+            'if tool == "Edit": pass',
             '"""',
             'WORDS = "don\'t"',
             'OPEN, FOUND = "/*", tool == "mcp__github__after_block_opener"',
             'URL, FOUND2 = "http://x", tool == "mcp__github__after_double_slash"',
             '# if tool == "mcp__github__in_a_comment": pass',
+            '# if tool == "Bash": pass',
             'FLAG = tool == "mcp__github__before_trailing_comment"  # tool == "mcp__github__in_trailing_comment"',
             'if tool == "mcp__github__after_lone_quote": pass',
+            'if tool not in ("Skill", "ExitWorktree"): pass',
+            'if tool != "Write": pass',
         ])
-        self.assertEqual(judged_github_names(sample), {
+        self.assertEqual(compared_with_tool(sample), {
             "mcp__github__planted_eq", "mcp__github__planted_in_a", "mcp__github__planted_in_b",
             "mcp__github__after_block_opener", "mcp__github__after_double_slash",
-            "mcp__github__before_trailing_comment", "mcp__github__after_lone_quote"})
+            "mcp__github__before_trailing_comment", "mcp__github__after_lone_quote",
+            "Skill", "ExitWorktree", "Write"})
 
-    def test_github_scan_of_empty_source_finds_nothing(self):
-        self.assertEqual(judged_github_names(""), set())
+    def test_scan_of_empty_source_finds_nothing(self):
+        self.assertEqual(compared_with_tool(""), set())
 
 
 class Matcher(unittest.TestCase):
