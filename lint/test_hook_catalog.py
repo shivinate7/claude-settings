@@ -66,15 +66,18 @@ they use. Interface the generator must meet. One home: the same generator, no se
 - Merge-time rebuild. The shared merge tool (merge/merge.py,
   cases in merge/test_merge.py, class RecordsRebuild) rewrites the records page on the pull request
   head before it merges, the way it claims record numbers. So a pull request need not carry a fresh
-  page. `--check` is mode-aware, as the stamp engine's check is (onDefaultBranch): on a pull request
-  run (GITHUB_BASE_REF set, or GITHUB_REF under refs/pull/) a stale or missing docs/records.md is no
-  failure and prints nothing. On any other run (a push to the default branch, a laptop) it fails and
-  names the page. A problem (a history marker, an empty record, an unreadable file) and the catalog
-  page stay red everywhere. Why keep the check: after a merge made without the tool, or a failed
-  rebuild, main would hold a stale index and no signal. The push check on main is that signal, and the
-  next merge heals it. Why lenient on a pull request: each pull request that touches a record would
-  have to carry a regenerated page, and two of them conflict on it. R10-R13 read the committed page, so
-  they are skipped on a pull request run. The fixture cases drop the runner's variables (B6-B10 set them).
+  page. `--check` is mode-aware, as the stamp engine's check is (onDefaultBranch): on a waived run, a
+  pull request run (GITHUB_BASE_REF set, or GITHUB_REF under refs/pull/) or a dispatched run of a branch
+  other than main (GITHUB_EVENT_NAME workflow_dispatch, GITHUB_REF refs/heads/<lane>), a stale or missing
+  docs/records.md is no failure and prints nothing. On any other run (a push to the default branch, a
+  dispatch of main, a laptop) it fails and names the page. A problem (a history marker, an empty record,
+  an unreadable file) and the catalog page stay red everywhere. Why keep the check: after a merge made
+  without the tool, or a failed rebuild, main would hold a stale index and no signal. The push check on
+  main is that signal, and the next merge heals it. Why lenient on a waived run: each pull request that
+  touches a record would have to carry a regenerated page, and two of them conflict on it. A lane cannot
+  commit the page either, so its dispatched run would be red for a page only the merge writes. R10-R13
+  read the committed page, so they are skipped on a waived run (pull_request_run). The fixture cases drop
+  the runner's run variables (B6-B15 and U8 set them).
 - A root with no records at all (no record folder, no rule marker) writes no page: exit 0, nothing
   written, `--check` silent. The merge tool runs the generator on every repo it merges (D5).
 - `--root DIR` is the repo root, the same as the environment variable HOOK_CATALOG_ROOT (both work).
@@ -136,6 +139,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -151,6 +155,7 @@ LABEL = re.compile(r"^(\S+)(?: matcher=(\S+))?(?: if=(.+))?$")
 sys.path.insert(0, HERE)
 from test_settings_matcher import SETTINGS, JUDGE_TYPES, judge_hooks  # noqa: E402  one home for settings.json, the judge walk and its hook types
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
+from hook_catalog import pull_request_run  # noqa: E402  one home for the records waiver: the generator's own rule for a waived run
 
 
 def read(path, encoding="utf-8-sig"):
@@ -256,25 +261,20 @@ def model_matches(cell, want):
     return cell == want or re.match(re.escape(want) + r"[ ,(]", cell) is not None
 
 
-PR_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_EVENT_NAME")  # what Actions sets on a pull request run
-
-
-def pull_request_run():
-    """True when this test run is itself a pull request run in Actions (the stamp engine's test: onDefaultBranch)."""
-    return bool(os.environ.get("GITHUB_BASE_REF")) or os.environ.get("GITHUB_REF", "").startswith("refs/pull/")
+RUN_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REF_NAME", "GITHUB_EVENT_NAME")  # what Actions sets on a pull request or a dispatched run
 
 
 def generator(root, *args, cwd=None, flag_root=False, env=None):
     """Run lint/hook_catalog.py on root (None: the real repo). Returns (code, stdout, stderr).
     The root goes in the environment variable, or as --root DIR with flag_root. cwd: the working folder, root by default.
-    env: variables to add. A fixture run (root given) drops the runner's pull request variables first, so a fixture
-    behaves the same on a laptop and in a pull request run; the real repo (root None) keeps them."""
+    env: variables to add. A fixture run (root given) drops the runner's run variables first, so a fixture
+    behaves the same on a laptop and in a CI run; the real repo (root None) keeps them."""
     if not os.path.exists(GEN):
         raise AssertionError("lint/hook_catalog.py does not exist yet: the builder writes it")
     child = dict(os.environ)
     child.pop("HOOK_CATALOG_ROOT", None)
     if root is not None:
-        for name in PR_ENV:
+        for name in RUN_ENV:
             child.pop(name, None)
     child.update(env or {})
     env = child
@@ -1151,6 +1151,15 @@ class RecordsPage(Tree):
                              "decisions/fm-open.md": "---\nid: D-3\ntitle: Never closed\n\nSome prose.\n"})
 
 
+# A lane is named like any branch. Only refs/heads/main is main, so a lane whose name starts with main is still a lane.
+LANE_RUNS = ("retire-run-records-waiver", "fix/main", "main-fix")
+
+
+def dispatched(branch):
+    """The variables Actions sets on a workflow_dispatch run of one branch, with no base ref."""
+    return {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/" + branch, "GITHUB_REF_NAME": branch}
+
+
 class RecordsStale(Tree):
     def published(self, extra=None):
         root = self.tree(with_records(extra))
@@ -1266,6 +1275,60 @@ class RecordsStale(Tree):
         root = self.published()
         put(root, "hooks/ok.py", '"""Does another thing now."""\nprint("ok")\n')
         code, out, err = generator(root, "--check", env={"GITHUB_BASE_REF": "main"})
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/catalog.md", out + err)
+        self.assertNotIn("docs/records.md", out + err)
+
+    # A dispatched run of a lane branch waives the records page as a pull request run does. A lane cannot
+    # commit the page (the guard records-page refuses it), so its run would be red for a page only the merge writes.
+    def test_b11_on_a_dispatched_lane_run_a_stale_page_is_not_red(self):
+        for branch in LANE_RUNS:
+            with self.subTest(branch):
+                root = self.published()
+                put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+                code, out, err = generator(root, "--check", env=dispatched(branch))
+                self.assertEqual(code, 0, "a stale page is red on a dispatched run of %s:\n%s%s" % (branch, out, err))
+                self.assertEqual(out + err, "", "a waived run prints nothing: %s" % branch)
+
+    def test_b12_on_a_dispatched_lane_run_a_missing_records_page_is_not_red(self):
+        for branch in LANE_RUNS:
+            with self.subTest(branch):
+                root = self.published()
+                self.records_text(root)  # a failure, not an error, while the page is not written
+                os.remove(os.path.join(root, "docs", "records.md"))
+                code, out, err = generator(root, "--check", env=dispatched(branch))
+                self.assertEqual(code, 0, "a missing page is red on a dispatched run of %s:\n%s%s" % (branch, out, err))
+                self.assertEqual(out + err, "", "a waived run prints nothing: %s" % branch)
+
+    def test_b13_on_a_dispatch_of_main_a_stale_or_missing_page_is_red(self):
+        # main is the default branch, so the signal that a merge left it stale holds on a dispatch of main too.
+        root = self.published()
+        put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+        code, out, err = generator(root, "--check", env=dispatched("main"))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+        self.records_text(root)
+        os.remove(os.path.join(root, "docs", "records.md"))
+        code, out, err = generator(root, "--check", env=dispatched("main"))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("docs/records.md", out + err)
+
+    def test_b14_a_problem_is_red_on_a_dispatched_lane_run(self):
+        # Only a stale page is waived, as b9 pins for a pull request run.
+        root = self.published()
+        put(root, "decisions/old.md", old_decision("Superseded: x."))
+        put(root, "debts/empty.md", "\n")
+        code, out, err = generator(root, "--check", env=dispatched("fix/main"))
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("decisions/old.md:7", out + err)
+        self.assertIn("debts/empty.md", out + err)
+
+    def test_b15_on_a_dispatched_lane_run_the_catalog_page_stays_red_while_the_records_page_is_waived(self):
+        # The waiver covers the records page only, as b10 pins for a pull request run. Here both pages are stale.
+        root = self.published()
+        put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+        put(root, "hooks/ok.py", '"""Does another thing now."""\nprint("ok")\n')
+        code, out, err = generator(root, "--check", env=dispatched("retire-run-records-waiver"))
         self.assertEqual(code, 1, out + err)
         self.assertIn("docs/catalog.md", out + err)
         self.assertNotIn("docs/records.md", out + err)
@@ -1488,10 +1551,10 @@ class OtherRepos(Tree):
                 self.assertEqual(self.write(root, elsewhere, "--check"), (0, "", ""))
 
 
-@unittest.skipIf(pull_request_run(), "the merge rebuilds the records page, so a pull request need not carry a fresh one")
+@unittest.skipIf(pull_request_run(), "the merge rebuilds the records page, so a waived run (a pull request or a dispatched lane) need not carry a fresh one")
 class RealRecords(unittest.TestCase):
-    """The committed page against the real records. Skipped on a pull request run (the merge rebuilds the
-    page); run on a laptop and on a push to main."""
+    """The committed page against the real records. Skipped on a waived run, the same test as the records waiver
+    (pull_request_run); run on a laptop, on a dispatch of main and on a push to main."""
 
     def rows(self):
         if not os.path.exists(RECORDS_PAGE):
@@ -1568,6 +1631,19 @@ class Helpers(unittest.TestCase):
 
     def test_u7_line_of_counts_from_one(self):
         self.assertEqual(line_of("a\n\nb\nb\n", "b"), 3)
+
+    def test_u8_the_waiver_reads_a_dispatched_lane_run_and_not_a_dispatch_of_main(self):
+        # The waiver in --check and the skip of RealRecords read this one function. Each probe clears the
+        # runner's variables and sets only the ones it names, and the scope is asserted before the call (P7).
+        clean = {k: v for k, v in os.environ.items() if k not in RUN_ENV}
+        probes = [("no environment: a laptop run", {}, False),
+                  ("a pull request run", {"GITHUB_BASE_REF": "main"}, True),
+                  ("a dispatch of main", dispatched("main"), False)]
+        probes += [("a dispatch of lane %s" % branch, dispatched(branch), True) for branch in LANE_RUNS]
+        for name, env, want in probes:
+            with self.subTest(name), mock.patch.dict(os.environ, {**clean, **env}, clear=True):
+                self.assertEqual({k for k in RUN_ENV if k in os.environ}, set(env), "the fixture: only the probe's variables are set")
+                self.assertEqual(pull_request_run(), want, name)
 
     def test_the_guards_records_header_opens_the_generated_intro(self):
         """hooks/guard_merge.py copies the first line of RECORDS_INTRO as RECORDS_HEADER. If the intro title changes
