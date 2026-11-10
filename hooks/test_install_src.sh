@@ -2945,6 +2945,72 @@ path_case4_cloud() {
   rm -rf "$h" "$h3"
 }
 
+path_case5_top() {
+  name="path5: cloud mode puts the marked block above a guard that returns early, so sourcing ~/.bashrc puts ~/.claude/bin on PATH; non-cloud still appends at the end"
+  guard='[ -z "$PS1" ] && return'
+  rest='# rest of bashrc'
+  block=$(printf '%s\n%s' "$PATH_MARK" "$PATH_LINE")
+  # The Debian default ~/.bashrc opens with the guard: a non-interactive shell returns there, so a block
+  # appended below it never runs. The cloud block must sit above the guard.
+  # Scenario A: --cloud under SHELL=/bin/bash, on the guard and one more line, run twice. CLAUDE_CONFIG_DIR is
+  # $h/.claude so bin lands at $h/.claude/bin, the directory the block puts first on PATH.
+  h=$(new_home); cfg="$h/.claude"; co="$work/path5-checkout"
+  make_checkout "$co" "# path5 content"
+  cp "$INSTALL_SH" "$co/install.sh"
+  cp "$REPO_ROOT/bin/wait-pid" "$co/bin/wait-pid"
+  printf '%s\n%s\n' "$guard" "$rest" > "$h/.bashrc"
+  out1=$(run_path_install "$co" "$h" "$cfg" /bin/bash --cloud); rc1=$?
+  b1=$(cat "$h/.bashrc")
+  out2=$(run_path_install "$co" "$h" "$cfg" /bin/bash --cloud); rc2=$?
+  b2=$(cat "$h/.bashrc")
+  marks=$(grep -cF "$PATH_MARK" "$h/.bashrc"); lines=$(grep -cF "$PATH_LINE" "$h/.bashrc")
+  g=$(grep -nF "$guard" "$h/.bashrc" | head -n 1 | cut -d: -f1); g=${g:-1}
+  above=$(head -n $((g - 1)) "$h/.bashrc" | grep -v '^$')
+  kept=$(grep -vxF "$PATH_MARK" "$h/.bashrc" | grep -vxF "$PATH_LINE" | grep -v '^$')
+  got=$(env -i HOME="$h" PATH="$PATH" bash -c 'source "$HOME/.bashrc"; command -v wait-pid' 2>/dev/null)
+  # Scenario B: an empty home, --cloud under bash: the block is the whole file, and sourcing it still works.
+  h2=$(new_home); cfg2="$h2/.claude"
+  if [ -e "$h2/.bashrc" ]; then bad "$name" "fixture precondition failed: an empty home already holds ~/.bashrc"; rm -rf "$h" "$h2"; return; fi
+  out3=$(run_path_install "$co" "$h2" "$cfg2" /bin/bash --cloud); rc3=$?
+  m3=$(grep -cF "$PATH_MARK" "$h2/.bashrc" 2>/dev/null); l3=$(grep -cF "$PATH_LINE" "$h2/.bashrc" 2>/dev/null)
+  got3=$(env -i HOME="$h2" PATH="$PATH" bash -c 'source "$HOME/.bashrc"; command -v wait-pid' 2>/dev/null)
+  # Scenario C: a full-size rc (the guard, then 2000 lines): the block goes above the guard and no line is lost.
+  h4=$(new_home); cfg4="$h4/.claude"
+  { printf '%s\n' "$guard"; i=0; while [ $i -lt 2000 ]; do printf '# line %s\n' "$i"; i=$((i + 1)); done; } > "$h4/.bashrc"
+  orig4=$(cat "$h4/.bashrc")
+  out4=$(run_path_install "$co" "$h4" "$cfg4" /bin/bash --cloud); rc4=$?
+  g4=$(grep -nF "$guard" "$h4/.bashrc" | head -n 1 | cut -d: -f1); g4=${g4:-1}
+  above4=$(head -n $((g4 - 1)) "$h4/.bashrc" | grep -v '^$')
+  kept4=$(grep -vxF "$PATH_MARK" "$h4/.bashrc" | grep -vxF "$PATH_LINE" | grep -v '^$')
+  # Scenario D: no --cloud and CLAUDE_CODE_REMOTE unset, on the two-line rc: the block still goes at the END.
+  h5=$(new_home); cfg5="$h5/.claude"
+  printf '%s\n%s\n' "$guard" "$rest" > "$h5/.bashrc"
+  out5=$(run_path_install "$co" "$h5" "$cfg5" /bin/bash); rc5=$?
+  m5=$(grep -cF "$PATH_MARK" "$h5/.bashrc"); l5=$(grep -cF "$PATH_LINE" "$h5/.bashrc")
+  first2=$(head -n 2 "$h5/.bashrc")
+  mline=$(grep -nF "$PATH_MARK" "$h5/.bashrc" | head -n 1 | cut -d: -f1)
+  rline=$(grep -nF "$rest" "$h5/.bashrc" | head -n 1 | cut -d: -f1)
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then bad "$name" "--cloud under bash: install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ ! -x "$cfg/bin/wait-pid" ]; then bad "$name" "--cloud under bash: wait-pid did not land at $cfg/bin/wait-pid"
+  elif [ "$kept" != "$(printf '%s\n%s' "$guard" "$rest")" ]; then bad "$name" "--cloud under bash: the original ~/.bashrc lines are not kept in order"
+  elif [ "$above" != "$block" ]; then bad "$name" "--cloud under bash: the marked block is not above the guard in ~/.bashrc"
+  elif [ "$marks" != 1 ] || [ "$lines" != 1 ]; then bad "$name" "--cloud under bash: ~/.bashrc holds $marks marks and $lines export lines, expected 1 and 1"
+  elif [ "$b2" != "$b1" ]; then bad "$name" "--cloud under bash: a second run changed ~/.bashrc"
+  elif [ "${got%/wait-pid}" != "$h/.claude/bin" ]; then bad "$name" "--cloud under bash: sourcing ~/.bashrc did not put $h/.claude/bin on PATH (command -v wait-pid printed '$got')"
+  elif [ $rc3 -ne 0 ]; then bad "$name" "empty home, --cloud under bash: install.sh exited $rc3: $out3"
+  elif [ "$m3" != 1 ] || [ "$l3" != 1 ]; then bad "$name" "empty home, --cloud under bash: ~/.bashrc does not hold one marker and one export line"
+  elif [ "${got3%/wait-pid}" != "$h2/.claude/bin" ]; then bad "$name" "empty home, --cloud under bash: sourcing ~/.bashrc did not put $h2/.claude/bin on PATH"
+  elif [ $rc4 -ne 0 ]; then bad "$name" "full-size rc, --cloud under bash: install.sh exited $rc4: $out4"
+  elif [ "$kept4" != "$orig4" ]; then bad "$name" "full-size rc, --cloud under bash: lines were lost or reordered"
+  elif [ "$above4" != "$block" ]; then bad "$name" "full-size rc, --cloud under bash: the marked block is not above the guard"
+  elif [ $rc5 -ne 0 ]; then bad "$name" "non-cloud under bash: install.sh exited $rc5: $out5"
+  elif [ "$m5" != 1 ] || [ "$l5" != 1 ]; then bad "$name" "non-cloud under bash: ~/.bashrc holds $m5 marks and $l5 export lines, expected 1 and 1"
+  elif [ "$first2" != "$(printf '%s\n%s' "$guard" "$rest")" ]; then bad "$name" "non-cloud under bash: the original ~/.bashrc lines are not first"
+  elif [ "${mline:-0}" -le "${rline:-0}" ]; then bad "$name" "non-cloud under bash: the marked block is not after the original lines"
+  else ok "$name"; fi
+  rm -rf "$h" "$h2" "$h4" "$h5"
+}
+
 caseF5() {
   name="caseF5: outside a git tree with no pointer file, stays fully silent, exit 0"
   outside="$work/caseF5-not-a-repo"; cfg="$work/caseF5-cfg"
@@ -5302,6 +5368,7 @@ run path_case1
 run path_case2
 run path_case3
 run path_case4_cloud
+run path_case5_top
 run caseF1
 run caseF2
 run caseF3
