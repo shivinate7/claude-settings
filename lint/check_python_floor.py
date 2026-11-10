@@ -67,7 +67,7 @@ VERMIN_CODE = "import sys; from vermin import main; sys.exit(main())"
 OK_MARKER = ".ok"
 FLAGS = ["-t=" + TARGET, "--eval-annotations", "--no-tips", "--violations", "--quiet", "--no-make-paths-absolute"]
 CHUNK = 100  # files per vermin run, so a Windows command line stays short
-TIMEOUT = 900  # was 300 (interim, owner 12:11 CST Nov 10; ends with step time-pinned-tests-go)
+TIMEOUT = 900  # interim stopgap (owner 12:11 CST Nov 10, decision ci-job-caps; ends with step time-pinned-tests-go)
 BUILTIN_TYPES = frozenset(("int", "str", "float", "bool", "bytes", "list", "dict", "set", "tuple", "frozenset",
                            "type", "object"))
 MARKER = re.compile(r"#\s*(?:novermin|novm)\b")  # vermin's own marker words
