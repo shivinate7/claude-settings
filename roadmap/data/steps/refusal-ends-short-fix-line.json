@@ -1,0 +1,12 @@
+{
+  "title": "Every Stop-hook refusal that blocks a reply ends with one line: post only the corrected lines, never the reply again",
+  "phase": "now",
+  "status": "todo",
+  "order": 1029,
+  "owner": "triage",
+  "why": "Owner 15:44 CST Nov 10 (R10, relayed by the retrospective session): \"i never want my hook to have one spew out the whole thing again after -- as i fixed long ago in how the done deviations inputneeded hook works, that should be viewed as a best practice for other hooks that make you regurgitate output again\".",
+  "note": "Decision guard-remedy-not-to-owner already says to post only the corrected lines, but no refusal text says it, so sessions re-send whole replies. Covers the review-record, departs-from, past-ruling, cite-gloss, recovered, inbox and model-name guards. Home: decision guard-remedy-not-to-owner. Also on the guard-false-alarm-cull list.",
+  "updatedAt": "2026-11-10T15:45:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}

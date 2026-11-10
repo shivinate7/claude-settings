@@ -1,0 +1,12 @@
+{
+  "title": "The agent-model-cap role table is the one home for each role's and round's model and effort, and every reader reads it",
+  "phase": "now",
+  "status": "todo",
+  "order": 1027,
+  "owner": "triage",
+  "why": "Owner 15:44 CST Nov 10 (R8, M1 a, relayed by the retrospective session): \"on #1 -- A seems best\".",
+  "note": "The spawn guard requires the row's model and effort or fills them in (today it only permits them: guard.py:3783-3788; a no-model spawn runs reviewer.md's Haiku pin, so 17 sessions name a Haiku fix check). The merge tool checks the model that ran, not the record text. Agent frontmatter, brief markers, report_guard, check_agent_models and call_judge read the table. Each later model ruling lands in one lane that changes the table and every reader. Measured lag today 12-57 h (retrospective audit). Overlaps open lane agent-served-model-check (#2442, #2486). Home: decision agent-model-cap.",
+  "updatedAt": "2026-11-10T15:45:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
