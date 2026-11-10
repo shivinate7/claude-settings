@@ -1,11 +1,11 @@
 {
   "title": "The draft-PR guard catches a PR create inside single quotes in an unquoted heredoc",
   "why": "In an unquoted heredoc fed to an interpreter (`python3 - <<EOF`), a body line `x = '$(gh pr create)'` is allowed. Bash runs that `$(...)` while it writes the body, because single quotes do not protect inside a heredoc. Same on main d70ebd14d (lane draft-pr-guard-text-false-alarm, 01:51 CST Nov 8). Decision draft-until-reviewed.",
-  "note": "Fix: in an unquoted heredoc body, read `$(...)` and backticks as live whatever quotes surround them, and refuse a PR create found there. Red case first on the line above; control: the same line in a quoted heredoc (`<<'EOF'`) stays allowed. Built by lane draft-pr-guard-text-false-alarm (session_013NEJL232Ko7dmr4v3fmrvF) after #1775. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 01:52 CST Nov 8. Doing (lane draft-pr-guard-text-false-alarm, 05:04 CST Nov 8): branch draft-pr-unquoted-body-sq-subst, stacked on #1775.",
+  "note": "Fix: in an unquoted heredoc body, read `$(...)` and backticks as live whatever quotes surround them, and refuse a PR create found there. Red case first on the line above; control: the same line in a quoted heredoc (`<<'EOF'`) stays allowed. Built by lane draft-pr-guard-text-false-alarm (session_013NEJL232Ko7dmr4v3fmrvF) after #2087. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 01:52 CST Nov 8. Doing (lane draft-pr-guard-text-false-alarm, 05:04 CST Nov 8): branch draft-pr-unquoted-body-sq-subst, stacked on #2087. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1775 closed unmerged; #2087 replaced it.",
   "phase": "now",
   "status": "doing",
   "order": 563,
   "owner": "triage",
   "lane": "archived, handoff at handoffs/session_013NEJL232Ko7dmr4v3fmrvF.md on archive/session-handoffs-2026-11-10",
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-10T13:18:00-06:00"
 }

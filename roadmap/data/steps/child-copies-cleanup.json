@@ -4,7 +4,7 @@
   "status": "todo",
   "order": 12.5,
   "owner": "coordinator",
-  "why": "Coordinator queue, 13:18 CST Nov 7: after #1106 lands (decision child-cites-not-copies), each child repo still holds copies of claude-settings text.",
-  "note": "Waits on #1106. Then one lane per child: degen, home, joyous, mailaudit, q_max. Done: each child cites claude-settings instead of copying, and its checks pass. Waits on the merge of #1432 (coordinator, 14:31 CST Nov 7).",
-  "updatedAt": "2026-11-07T14:31:00-06:00"
+  "why": "Coordinator queue, 13:18 CST Nov 7: after #1432 lands (decision child-cites-not-copies), each child repo still holds copies of claude-settings text.",
+  "note": "Waits on #1432. Then one lane per child: degen, home, joyous, mailaudit, q_max. Done: each child cites claude-settings instead of copying, and its checks pass. Waits on the merge of #1432 (coordinator, 14:31 CST Nov 7). Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1106 closed unmerged; #1432 replaced it.",
+  "updatedAt": "2026-11-10T13:18:00-06:00"
 }

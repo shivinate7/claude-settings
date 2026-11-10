@@ -1,11 +1,11 @@
 {
   "title": "Tidy the lane-lint PR-body change: two records, one test of the temp-file removal, one tie between the env name's two homes",
-  "why": "#1932's round 3 notes (lane silent-undo-reads-retire-run, 05:25 CST Nov 8): (1) decision merge-needs-current-base:25 says the small-move check \"writes one temp file\"; with a body it writes two. (2) merge.py's removal of the temp body file has no test; a mutant that drops it stays green. (3) Decision lanes-run-no-full-ci-job lines 5-14 never say lane-lint reads the PR body. (4) CI_JOB_PR_BODY_FILE is named in merge.py and in bin/ci-job, and no test ties the two (rule building-allow-list-is-the-constant).",
-  "note": "Fix: each of the four, red cases first for (2) and (4). Branch lane-lint-body-tidy from #1932's head 5e75f57cd; its PR merges after #1932. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 05:30 CST Nov 8; red cases started (lane, 05:25 CST). Ready as draft #1940, with runner 8, `Merge after: #1932` (lane, 05:39 CST Nov 8).",
+  "why": "#1969's round 3 notes (lane silent-undo-reads-retire-run, 05:25 CST Nov 8): (1) decision merge-needs-current-base:25 says the small-move check \"writes one temp file\"; with a body it writes two. (2) merge.py's removal of the temp body file has no test; a mutant that drops it stays green. (3) Decision lanes-run-no-full-ci-job lines 5-14 never say lane-lint reads the PR body. (4) CI_JOB_PR_BODY_FILE is named in merge.py and in bin/ci-job, and no test ties the two (rule building-allow-list-is-the-constant).",
+  "note": "Fix: each of the four, red cases first for (2) and (4). Branch lane-lint-body-tidy from #1969's head 5e75f57cd; its PR merges after #1969. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 05:30 CST Nov 8; red cases started (lane, 05:25 CST). Ready as draft #1940, with runner 8, `Merge after: #1969` (lane, 05:39 CST Nov 8). Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1932 closed unmerged; #1969 replaced it.",
   "status": "ready",
   "order": 620,
   "lane": "archived, handoff at handoffs/session_013NEJL4TDRWqka4aSU2Bv7L.md on archive/session-handoffs-2026-11-10",
   "phase": "now",
   "owner": "triage",
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-10T13:18:00-06:00"
 }
