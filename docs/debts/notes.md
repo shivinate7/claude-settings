@@ -421,7 +421,7 @@
 - local-time-fixed-at-send: the time is fixed at prompt send or agent start (hooks/local_time.py). Decision: local-time-central
 - local-time-needs-install: the hook reaches a machine only after install.sh copies it to ~/.claude/hooks; until then no line shows. Decision: local-time-central
 - rm-shim-bypass-forms: shim skipped by /bin/rm, command rm, env -i rm, a shell with no rc PATH line, and find -delete (bin/rm). Decision: rm-path-wrapper
-- rm-shim-no-windows-cloud: no shim on Windows (install.ps1 skips bin/rm) (bin/rm). Decision: rm-path-wrapper
+- rm-shim-no-windows: no shim on Windows (install.ps1 skips bin/rm) (bin/rm). Decision: rm-path-wrapper
 - rm-shim-glob-passes: the shell expands globs first, so rm -rf * in the cwd arrives as a list of children and passes (bin/rm). Decision: rm-path-wrapper
 - rm-shim-flag-reading: flags read anywhere before --; macOS 'rm dir -rf' is refused though BSD rm would not run it recursive; GNU abbreviations such as --rec pass unjudged (bin/rm). Decision: rm-path-wrapper
 - rm-shim-symlink-refused: rm -r link is refused when link points at home, the cwd or a parent, though real rm removes only the link (bin/rm). Decision: rm-path-wrapper
