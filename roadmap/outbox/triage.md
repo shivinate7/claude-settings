@@ -413,3 +413,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - other-checkout-own-worktree-cd (lane git-dash-c-other-checkout #2494, coordinator 01:42 CST Nov 10; possible false alarm, hit in normal work, no earlier record found): the other-checkout guard refused a `cd` into the lane's own worktree. Route: EnterWorktree with path. Becomes a debt on a second sighting.
 - brief-destructive-test-text (#2494; possible false alarm, no earlier record found): brief-destructive-git refuses a brief that holds a hard-reset command as test text. Becomes a debt on a second sighting.
 - (the third #2494 sighting, a push refused for a slug with "git" twice, is folded into step branch-slug-no-git as an incident.)
+- scpr-powershell-undocumented (#2038 stamp-check-page-and-roadmap-r2, coordinator 01:45 CST Nov 10): the code also judges PowerShell (SHELL_TOOLS), but the decision and the docstring say Bash, and no case covers PowerShell.
+- scpr-fragment-pass-unpinned (#2038): no case pins that a behind, yesterday-late or more-than-12h-ahead fragment passes; an unsigned `% 1440` mutant of _fragment_ahead stays green.
