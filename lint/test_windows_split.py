@@ -170,6 +170,7 @@ LINUX_SUITES = {
     "python3 lint/test_check_unknown_reads_contract.py": (None, None),
     "python3 lint/check_unknown_reads_contract.py": (LINUX_CODE, None),
     "python3 lint/test_check_agent_models.py": (None, None),
+    "python3 lint/test_agent_push_form.py": (None, None),
     "python3 lint/test_check_skill_model_rows.py": (None, None),
     "python3 lint/test_no_window_spawn.py": (None, None),
     "pwsh -NoProfile -File install.test.ps1": (LINUX_CODE, None),
