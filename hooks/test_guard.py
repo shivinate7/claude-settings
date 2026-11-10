@@ -27639,6 +27639,16 @@ for _tool, _input in READ_CALLS:
     for _shape, _id, _type in AGENT_SHAPES:
         add("agent-no-remote-tools: %s from %s is allowed" % (_tool, _shape), "allow", silent=True,
             raw=remote_call(_tool, _input, _id, _type))
+# The desktop start, mcp__ccd_session__start_session, is not a claude-code-remote tool, so REMOTE_OUTWARD_TOOLS does not
+# name it. An agent's start is refused as an agent's create_session is. The session's own start keeps its verdict. Its
+# input carries no tags, so only the rules that do not read tags judge it here.
+SESSION_START_TOOL = "mcp__ccd_session__start_session"
+SESSION_START_INPUT = {"initiation": "user_asked", "prompt": "x", "model": "sonnet"}
+for _shape, _id, _type in AGENT_SHAPES:
+    add("agent-no-remote-tools: start_session from %s is refused" % _shape, "deny", rule=AGENT_NO_REMOTE,
+        tool=SESSION_START_TOOL, cwd=NOGIT, agent_id=_id, agent_type=_type, **SESSION_START_INPUT)
+add("agent-no-remote-tools: start_session from the session itself is not refused by this rule", "allow",
+    tool=SESSION_START_TOOL, cwd=NOGIT, **SESSION_START_INPUT)
 # The twenty outward tools, pinned by full name. Each name gets its own deny case from a general-purpose agent, so a
 # REMOTE_OUTWARD_TOOLS that drops one name goes red on that name. The equality check holds the constant to this set.
 PINNED_OUTWARD_TOOLS = (
