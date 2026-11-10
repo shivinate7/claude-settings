@@ -41,7 +41,7 @@ holds a qualifying act (`questions-reach-page`: every question goes to the page 
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
 starts no turn. Owner-facing session: a send to
-the page writer (the `writer` in the newest meta/page read, else the repo's extras key `waiting-page-writer`), or an ArtifactData set, update or batch under
+the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
 parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
@@ -1197,13 +1197,13 @@ def question_problem(records, turn, text, hook):
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
     Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
-    meta/page read's; with no such read at all, the layout's `waiting-page-writer` (its ack starts no turn either).
+    meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
-    turn with no counted send reads the extras file for the writer key (`layout.waiting_page_writer`) first, when the transcript
+    turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
     has no meta/page read, then for the page (`layout.waiting_page`); a send to the key writer returns after the first read."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
@@ -1224,7 +1224,7 @@ def question_problem(records, turn, text, hook):
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
     if not writer and root and not page_read_ran(records):
-        writer = layout.waiting_page_writer(root)
+        writer = layout.page_writer_key(root)
         if writer:
             acks[writer] = {writer}
             uses, sends = _turn_acts(records, turn, acks)
