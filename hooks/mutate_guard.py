@@ -919,9 +919,9 @@ MUTATIONS = [
      '        if any(f not in RESTORE_PER_FILE_FLAGS for f in flags):\n            return False',
      '        if False:\n            return False', "guard", 'per-file ask: restore -p of one file in a worktree still asks'),
     ("per-file: a second -C replaces the first, never joins onto it",
-     '            found = os.path.join(found, value) if found and value else (value or found)',
-     '            found = found or value', "guard",
-     'per-file allow: -C parent then a relative -C lane, checkout -- of one file'),
+     '    return os.path.join(base, value) if base and value else (value or base)',
+     '    return value or base', "guard",
+     'per-file deny: -C shared checkout then -C . reset --hard, from a clean worktree'),
     ("per-file: a restore operand before -- is no path",
      '        return before + after, True',
      '        return after, True', "guard",
@@ -1912,15 +1912,15 @@ MUTATIONS = [
      'return host.head_read("", nothing_is_green', "guard",
      'merge-checks: the pull request and repo of the call are the ones read'),
     ("merge-checks: the long repo flag goes unread",
-     '        elif arg.startswith("--repo="):',
-     '        elif False:', "guard", 'merge-checks: the long repo flag names the repo too'),
+     '        elif taken:',
+     '        elif taken and not arg.startswith("--repo="):', "guard", 'merge-checks: the long repo flag names the repo too'),
     ("merge-checks: a body flag's value is read as the pull request",
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body",',
      'MERGE_VALUE_FLAGS = {"-R", "--repo", "--body",', "guard",
      'merge-checks: a flag value is no pull request'),
     ("merge-checks: any word that spells gh is the command word",
-     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root = tokens[index + 1:], []',
-     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root = tokens[index + 1:], []',
+     '    index = resolve_command(tokens)\n    if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):\n        return None\n    rest, root, group = tokens[index + 1:], [], []',
+     '    index = next((i for i, t in enumerate(tokens) if basename(t) in ("gh", "gh.exe")), None)\n    if index is None:\n        return None\n    rest, root, group = tokens[index + 1:], [], []',
      "guard", 'merge-checks: the words of a merge in an echo are no merge'),
     ("merge-checks: the read has no time limit",
      '            module.SH_TIMEOUT = MERGE_READ_TIMEOUT',
@@ -2839,6 +2839,12 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # The second pass of gh_call_of's loop reads a repo flag right after the group word (`gh pr -R o/r comment`).
+    # Only that pass goes: the first pass, before the group word, still reads its flags.
+    ("gh-group-flag: a repo flag after the group word goes unread",
+     '    for _ in (0, 1):',
+     '    for _ in (0,):',
+     "guard", "after the group word"),
     # records-page: a commit of MERGE_HEAD's page is allowed on origin/<base>'s first-parent line, or for a stacked
     # lane (some best merge base of HEAD and MERGE_HEAD is off origin/<base>).
     ("records-page: MERGE_HEAD is not read against origin/<base>, so another branch's page is allowed",
@@ -3868,7 +3874,7 @@ def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=N
         result = _nowindow.run(
             # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
             [sys.executable, suite], stdout=subprocess.PIPE, stderr=errors, text=True,
-            env=env, timeout=1200,
+            env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
         )
         errors.seek(0)
         error_text = errors.read().decode("utf-8", "replace")
