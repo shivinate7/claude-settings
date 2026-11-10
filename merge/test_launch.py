@@ -143,6 +143,31 @@ class Launch(unittest.TestCase):
         self.merge()
         self.assertEqual(self.head(self.co), self.head(self.work))
 
+    def test_cloud_mirror_on_main_behind_is_not_fast_forwarded(self):
+        self.release("v2")
+        sh(self.co, "git", "config", "claude-settings.cloudMirror", "true", env=self.env)
+        # Scope first: the marker reads back and the checkout is on main, clean and behind.
+        self.assertEqual(sh(self.co, "git", "config", "--get", "claude-settings.cloudMirror", env=self.env), "true")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "--abbrev-ref", "HEAD", env=self.env), "main")
+        self.assertEqual(sh(self.co, "git", "status", "--porcelain", env=self.env), "", "fixture: checkout tree is dirty")
+        self.assertNotEqual(self.head(self.co), self.head(self.work), "fixture: checkout is not behind origin/main")
+        before = self.head(self.co)
+        rc, out, err = self.merge()
+        self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
+        self.assertEqual(self.head(self.co), before, "cloud mirror was fast-forwarded")
+        lines = [ln for ln in err.splitlines() if "left as is" in ln]
+        self.assertEqual(len(lines), 1, "expected one 'left as is' stderr line:\n" + err)
+        self.assertIn("cloud mirror", lines[0])
+
+    def test_cloud_mirror_false_still_fast_forwards(self):
+        self.release("v2")
+        sh(self.co, "git", "config", "claude-settings.cloudMirror", "false", env=self.env)
+        self.assertEqual(sh(self.co, "git", "config", "--get", "claude-settings.cloudMirror", env=self.env), "false")
+        rc, out, err = self.merge()
+        self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
+        self.assertEqual(self.head(self.co), self.head(self.work), "checkout marked false was not fast-forwarded")
+        self.assertNotIn("left as is", err, "checkout marked false was left as is")
+
     def test_clean_other_branch_left_alone(self):
         self.release("v2")
         sh(self.co, "git", "checkout", "-q", "-b", "topic", env=self.env)
