@@ -5934,7 +5934,8 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
 WORKFLOW_ARGS_CAPS = re.compile(r"[A-Z0-9_]*[A-Z][A-Z0-9_]*")
 WORKFLOW_ARGS_DUNDER = re.compile(r"__\w+__")
 WORKFLOW_ARGS_REASON = ("The Workflow call's args hold the placeholder `%s`, so its agents would check nothing. "
-                        "Replace it with the real value, then start the Workflow again.")
+                        "Replace it with the real value, then start the Workflow again. "
+                        "(decision workflow-args-shape-check, a Workflow call never runs on placeholder args)")
 
 
 def workflow_args_placeholder(value) -> bool:
