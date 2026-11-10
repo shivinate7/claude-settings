@@ -14978,6 +14978,10 @@ step_refuse("a Grant line, then a brief for topic colors to a lane on topic icon
 # text does with no Grant line. The Grant line alone is not a refusal.
 step_allow("a Grant line, then plain status text with no marker, is allowed",
            role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nStatus: PR #12 merged for icon-a.")
+# Refused: a placeholder Grant line is no grant, as on create_session. The brief's topic matches the lane, so only the
+# placeholder can refuse it.
+step_refuse("a Grant line that holds a placeholder is refused, though the brief's topic matches the lane",
+            role_path("step-topic-lane"), "Grant: <owner words>, <time>\nLane brief: icon-a. Topic: icons.")
 
 
 # =========================================================================== 5i. SendMessage to a cloud session
@@ -27826,6 +27830,26 @@ add("lane-effort-pin: a create_session with no lane tag passes unchanged, with t
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="/effort medium")
 add("lane-effort-pin: create_session with no tags is allowed", "allow",
     tool=LANE_TOOL, prompt="do the task")
+# Grant start, round 1 review. The owner ruled on 2026-11-10 13:19 CST, "B is good": a lane starts with the effort field at
+# medium and its whole brief as the prompt, opening with the Grant line. The brief's Topic must match the lane's cs-topic tag
+# at create_session, as it must at send_message (rule lane-one-topic). A Grant line with no owner words is no grant: a
+# template placeholder, or punctuation alone, is refused.
+add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic colors is denied", "deny",
+    "lane-one-topic", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
+    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: colors.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic alpha is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
+    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: alpha.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with a grant line that holds a template placeholder is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt="Grant: <owner words>, <time>\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with a grant line that is only a comma is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt="Grant: ,\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
 
 # ---- Lane repo tag. A lane call tags the repo it works on: `cs-repo:<owner>/<name>`, equal (casefolded) to
 # the calling checkout's origin repo. The origin repo is the last two segments of the origin's PATH, `.git`
