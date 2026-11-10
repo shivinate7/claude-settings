@@ -738,7 +738,7 @@ for (const width of [390]) {
   });
 }
 
-// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a focus draws at the card's width, up to 2x its own.
+// Pins decision `page-pic-fills-card`: a focus fills the card's width, up to 2x its own, so a design's focus is not shown small in the cockpit.
 // At 1440 this one-option card is wide enough for the focus to draw at 2x, so the box is the focus at that scale.
 test("a design's focus fills the card box whole, never cut, at the card's width or 2x, at 1440 wide", async (t) => {
   const mock = '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>';
@@ -846,7 +846,7 @@ test("a focus box taller than the card scrolls inside the focus box and opens at
   assert.ok(Math.abs(m.fTop + 300 * sc - m.top) <= 2, "the focus does not start at the top of the box");
 });
 
-// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a scrolling picture is the card's width less 2 and the gutter, with no width cap.
+// Pins decision `page-pic-fills-card`: a scrolling picture is as wide as its card less 2 and the gutter, with no width cap, so it fills the card.
 // The column is the .opic that holds the box, less its padding.
 const column = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
   const o = w.parentElement, cs = getComputedStyle(o);
@@ -891,7 +891,7 @@ for (const width of [1440]) {
   });
 }
 
-// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a picture under a phone's height draws at the card's width, whole.
+// Pins decision `page-pic-fills-card`: a picture under a phone's height draws whole at the card's width, with no scroll, so it fills its card.
 // 830 is under a phone's 844 and over the 480 box, so today's cap draws it smaller than the card at both widths.
 for (const width of [390, 1440]) {
   test(`a mockup under a phone's height draws at the card's width, with no scroll and no cue, at ${width} wide`, async (t) => {
@@ -935,7 +935,7 @@ for (const width of [1440]) {
   });
 }
 
-// Owner ruling, waiting-page item 470 a, 2026-11-09 21:26 CST: a scrolling picture is the card's width less 2 and the gutter, capped by its column. At 1065 wide the column is narrower than the card, so the box must sit inside the column.
+// Pins decision `page-pic-fills-card`: a scrolling picture is the card's width less 2 and the gutter, capped by its column, so at 1065 wide, where the column is narrower than the card, the box stays inside the column.
 // The column is read from its rect, not clientWidth, which rounds up. The budget is floor(rect width) less 2 and the gutter (docs/design/c204-sizes.md item 7).
 // The box sits inside the column's edges to 0.01px, and its sizer and picture fit the budget.
 const strictBox = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
@@ -1134,7 +1134,7 @@ for (const scheme of ["light", "dark"]) {
 }
 
 // Each row: name, mockup, focus, mockup height, box width and height, the focus's top in the mockup, and a declared size.
-// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: each row draws at the card's width, 2x its own at most.
+// Pins decision `page-pic-fills-card`: each row's box draws at the card's width, at most 2x its own, so every fitting picture fills its card.
 const FIT_CASES = [
   ["a focus that fits", '<body style="margin:0"><div style="height:700px"></div><div id="panel" style="width:300px;height:200px;background:#a62"></div><div style="height:500px"></div></body>', "#panel", 1400, 300, 200, 700],
   ["a mockup under a phone's height", '<body style="margin:0"><div style="height:830px;background:#2a6"></div></body>', undefined, 830, 390, 830, 0],
@@ -1194,7 +1194,7 @@ test("a tall picture that fits once the gutter narrows it draws whole at the nar
   });
 });
 
-// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a picture scrolls only when its drawn height is over F + 1,
+// Pins decision `page-pic-fills-card`: a picture scrolls only when its drawn height is over F + 1, so a phone-shaped picture draws whole.
 // F being a phone's height at the card's width, never under 480. The mockup heights come from the card's budget, read first at the same width.
 const fitOf = (room) => Math.max(480, Math.ceil((room * 844) / 390));
 // The smallest mockup height that draws `high` px tall at this budget (the picture is its 390 design width scaled to the budget).
@@ -1240,7 +1240,7 @@ test("a picture that differs from its siblings keeps its 3px border inside its b
   await settleFit(page, it.id);
   const m = await measure(page, it.id);
   assert.ok(await page.locator(boxSel(it.id)).evaluate((w) => !!w.closest(".opic.dif")), "the picture is not marked as differing");
-  // Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: the box is the card's width, within the column.
+  // Pins decision `page-pic-fills-card`: the box is the card's width, within the column, so a picture that differs from its siblings still fills its card.
   const cw = await column(page, it.id), want = cw;
   assert.ok(Math.abs(m.w - want) <= 1, `the box is ${m.w} wide, not ${want.toFixed(1)}`);
   assert.ok(m.sh - m.ch > 100 && Math.abs(m.fw - m.cw) <= 1, "the differing picture does not scroll at the content width");
@@ -5555,7 +5555,7 @@ test("a receipt wholly below the screen drops its height without moving the page
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
-// Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a phone picture draws at its card's width, whole, and stays centred.
+// Pins decision `page-pic-fills-card`: a phone picture draws whole at its card's width and stays centred, so each option's picture fills its card.
 for (const width of SIZES) test(`an option's phone picture draws at its card's width, whole, and centred, at ${width}px wide`, async (t) => {
   const it = mk("cap-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) });
   const designData = Object.fromEntries(LOOK_OPTS.map((o) => [o.design, '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>']));
