@@ -1,0 +1,12 @@
+{
+  "title": "A routed ask leaves the waiting page's Ask area by the rule the owner picks",
+  "status": "blocked",
+  "order": 983,
+  "blockedBy": [],
+  "why": "The Ask area is too crowded, and the owner rarely reads it, so asks that already have a home hide the ones that need his eyes.",
+  "note": "Owner comment on the Ask area, thread b2ff97bf (09:11 CST Nov 10, relayed by the coordinator  CST): asks must not be ephemeral; each becomes a page question or a roadmap step plus a short reply. Blocked on page item 480 (ask-phase-out-rule), which asks how an ask leaves the area.",
+  "updatedAt": "2026-11-10T09:14:00-06:00",
+  "owner": "claude-settings",
+  "phase": "now",
+  "lane": ""
+}
