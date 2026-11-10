@@ -659,16 +659,17 @@ class HandOffTests(unittest.TestCase):
                 self.assertRegex((out or {}).get("systemMessage", ""), CATCH_NOTE,
                                  "the hand-off check's exception was not reported as UNKNOWN (landed %s)" % landed)
 
-    # ---- cost: no file read beyond today's, unless a hand-off line is present
+    # ---- cost: no file read beyond today's and the stamp in hooks/guard.py, unless a hand-off line is present
 
-    def test_hd_cost_a_reply_with_no_hand_off_opens_only_the_transcript(self):
+    def test_hd_cost_a_reply_with_no_hand_off_opens_only_transcript_and_guard_py(self):
         # Catches: the hand-off check reading the rows file or the refusals file on every Stop.
         reply = report(prose=(NOT_HAND_OFF,))
         with mock.patch.dict(os.environ, {ROUTE_ROWS_ENV: self.rows}):
             out, opened, transcript = self.guard_opens(reply)
         self.assertEqual(out, "", "a reply with no hand-off was judged: %s" % out)
-        self.assertEqual(set(opened), {transcript},
-                         "a reply with no hand-off opened: %s" % sorted(set(opened) - {transcript}))
+        expected = {transcript, trg.GUARD_PY}
+        self.assertEqual(set(opened), expected,
+                         "a reply with no hand-off opened: %s" % sorted(set(opened) - expected))
 
 
 if __name__ == "__main__":
