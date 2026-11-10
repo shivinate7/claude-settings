@@ -7,9 +7,10 @@ import re
 import shlex
 
 from guard_core import (
-    basename, command_indexes, inner_commands, is_powershell, segment_tokens, split_segments, walk_quotes,
+    ENV_PATTERN_COMMANDS, basename, command_indexes, inner_commands, is_powershell, segment_tokens,
+    split_segments, walk_quotes, wrapped_commands,
 )
-from guard_env import substitution_commands
+from guard_env import _pattern_words, substitution_commands
 
 
 # ------------------------------------------------------------------ process arguments
@@ -20,7 +21,9 @@ from guard_env import substitution_commands
 #   - `pgrep` with `-a`, or with `-l` and `-f` together.
 #   - `ps -x` (BSD: no terminal, full arguments), `pstree -a`, `top -c`.
 #   - a read of `/proc/<pid>/cmdline`: any command that takes the file as an argument, or is fed it
-#     with `<`, except one that only names or measures it (`NOT_READERS`).
+#     with `<`, except one that only names or measures it (`NOT_READERS`). The pattern word of a
+#     search command (`grep /proc/1/cmdline docs`) is no file. `find` names the file and passes,
+#     unless `-exec`, `-execdir`, `-ok` or `-okdir` hands it to a reader.
 #   - PowerShell and `wmic`: a `Win32_Process` or `Get-Process` read that selects `CommandLine`.
 # A pid, a name, a parent id and a start time stay allowed (`ps -o pid,comm`, `pgrep -l x`).
 #
@@ -183,13 +186,34 @@ def _cmdline_word(word: str) -> bool:
     return bool(re.fullmatch(r"[0-9]+", middle) or re.search(r"[*?\[]", middle) or middle.startswith("$"))
 
 
+def _find_exec_reads(tokens) -> bool:
+    """True when a `find` in the segment hands its paths to a command that reads them: the command
+    after `-exec`, `-execdir`, `-ok` or `-okdir` is no `NOT_READERS` word."""
+    for at in command_indexes(tokens):
+        if basename(tokens[at]) != "find":
+            continue
+        for text in wrapped_commands(tokens, at):
+            inner = segment_tokens(text) if text.strip() else None
+            starts = command_indexes(inner) if inner else []
+            if starts and basename(inner[starts[0]]) not in NOT_READERS:
+                return True
+    return False
+
+
 def _cmdline_read(tokens) -> str:
     """The cmdline path a segment hands to a command that reads it, else ''. A segment whose every
-    command word only names or measures the file passes, unless `xargs` feeds the file on."""
-    paths = [word for word in tokens[1:] if _cmdline_word(word)]
+    command word only names or measures the file passes, unless `xargs` feeds the file on or a
+    `find` runs a reader on it. The pattern word of a search command is no file."""
+    pattern_at = set()
+    for at in command_indexes(tokens):
+        if basename(tokens[at]) in ENV_PATTERN_COMMANDS:
+            pattern_at |= _pattern_words(tokens, at, basename(tokens[at]))[0]
+    paths = [word for at, word in enumerate(tokens) if at and at not in pattern_at and _cmdline_word(word)]
     if not paths:
         return ""
     tools = [basename(tokens[at]) for at in command_indexes(tokens)]
+    if "find" in tools and _find_exec_reads(tokens):
+        return "find " + paths[0]
     if tools and all(tool in NOT_READERS for tool in tools) and "xargs" not in map(basename, tokens):
         return ""
     return (tools[0] + " " if tools else "") + paths[0]
