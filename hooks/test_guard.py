@@ -140,6 +140,7 @@ FAMILIES = {
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
+    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a && chain, -C with an absolute path, and reads pass",
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
@@ -5789,6 +5790,479 @@ sh("rm-var: a hash inside a word is no comment, the delete after a cd is refused
    "cd /tmp/w; rm -rf fix#3", "deny", "rm-after-cd", cwd=NOGIT)
 sh("rm-var: an apostrophe in a comment after the rm does not hide it",
    "cd /tmp/w; rm -rf out # the driver's shape", "deny", "rm-after-cd", cwd=NOGIT)
+
+# A GIT WRITE AFTER A CD. Decision git-after-cd-joins-with-and: once a cd is seen, a `;`, a newline
+# or `||` reopens the path a failed cd takes, so every git write after it is refused. A chain joined
+# only by `&&` passes, and so does `-C <absolute path>`; the cd's scope ends at the `)` of a subshell.
+FAMILY = "git-after-cd"
+sh("git-after-cd: the 2026-11-07 incident, a cd joined by && then ; git writes, is refused",
+   "cd /tmp/w/b-int && %s status --short; %s fetch origin; "
+   "%s checkout -B claude/int-batch-banchi-1107b origin/main; %s merge --no-ff claude/lane-a"
+   % ((VCS,) * 4), "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then a git push is refused",
+   "cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then a newline then a git merge is refused",
+   "cd /tmp/w\n%s merge claude/lane-a" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then || then a git commit is refused",
+   "cd /tmp/w || %s commit -m m" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd and && make, then ; then a git reset --soft is refused",
+   "cd /tmp/w && make; %s reset --soft HEAD~1" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd in a subshell, then ; then a git push inside it is refused",
+   "(cd /tmp/w; %s push)" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then a git branch -f is refused",
+   "cd /tmp/w; %s branch -f main HEAD" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a hash inside a word is no comment, the push after a cd is refused",
+   "cd /tmp/w; %s push origin fix#3" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: an apostrophe in a comment after the push does not hide it",
+   "cd /tmp/w; %s push # the driver's shape" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd and && then a git checkout passes",
+   "cd /tmp/w && %s checkout lane-a" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd joined by && all the way to a git push passes",
+   "cd /tmp/w && %s status && %s push" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a git push with -C an absolute path passes",
+   "%s -C /tmp/x push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then a git push with -C an absolute path passes",
+   "cd /tmp/w; %s -C /tmp/x push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then ls passes",
+   "cd /tmp/w; ls", "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git status and git log pass",
+   "cd /tmp/w; %s status; %s log" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a subshell's cd ends at its ), so the git commit after it passes",
+   "(cd /tmp/w && %s push); %s commit -m m" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git branch -l, a read, passes",
+   "cd /tmp/w; %s branch -l" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a git push after a comment opener on the cd line is in the comment and passes",
+   "cd /tmp/w # it's; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an echo of a cd then ; then git push, inside quotes, passes",
+   'echo "cd /tmp/w; %s push"' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git branch --force is refused",
+   "cd /tmp/w; %s branch --force main HEAD" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git stash list passes",
+   "cd /tmp/w; %s stash list" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git stash show passes",
+   "cd /tmp/w; %s stash show" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git clean -n, a dry run, passes",
+   "cd /tmp/w; %s clean -n" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git -C with a variable folder passes",
+   'cd /tmp/w; %s -C "$D" push' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git -C with a relative folder is refused",
+   "cd /tmp/w; %s -C rel push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git update-ref is refused",
+   "cd /tmp/w; %s update-ref refs/heads/main HEAD" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git rm is refused",
+   "cd /tmp/w; %s rm old.txt" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git mv is refused",
+   "cd /tmp/w; %s mv a.txt b.txt" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git fetch with a src:dst refspec is refused",
+   "cd /tmp/w; %s fetch origin main:main" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch -m is refused",
+   "cd /tmp/w; %s branch -m old new" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch -M is refused",
+   "cd /tmp/w; %s branch -M main" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# shared-tree refuses a named branch delete in this harness, so the delete cases use the nameless forms.
+sh("git-after-cd: a cd then ; then git branch -D is refused",
+   "cd /tmp/w; %s branch -D" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch -d is refused",
+   "cd /tmp/w; %s branch -d" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch --delete is refused",
+   "cd /tmp/w; %s branch --delete" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch --move a b is refused",
+   "cd /tmp/w; %s branch --move a b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then a bare git fetch, a read, passes",
+   "cd /tmp/w; %s fetch" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git push --dry-run passes",
+   "cd /tmp/w; %s push --dry-run" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git push -n passes",
+   "cd /tmp/w; %s push -n" % VCS, "allow", cwd=NOGIT)
+# The && skip ends at the next ; or ||. The cd after a failed cd never runs, so the shell stays in the
+# folder it started in, and the write after ; or || runs there. ROOT is the run folder: a real folder.
+sh("git-after-cd: a failed cd, then && a cd that is skipped, then ; a git push is refused",
+   "cd /tmp/w && cd %s ; %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then && a cd that is skipped, then || a git push is refused",
+   "cd /tmp/w && cd %s || %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+# A subshell's ) ends its cd, but the && chain goes on, so the git push after it is still skipped.
+sh("git-after-cd: a failed cd, then && a subshell, then && a git push passes, the chain stops at the cd",
+   "cd /tmp/w && (true) && %s push" % VCS, "allow", cwd=NOGIT)
+# The ) of the subshell puts the shell back where it was before the failed cd, so the push after ; runs in cwd.
+sh("git-after-cd: a failed cd inside ( ... ), then ; a git push after the ) passes",
+   "(cd /tmp/w; true); %s push" % VCS, "allow", cwd=NOGIT)
+# A subshell's cd ends at its `)`, so the shell after `;` is still in the folder the failed cd left. The
+# `&&` after the subshell runs the push there: the subshell's own cd does not carry out of it.
+sh("git-after-cd: a cd into a missing folder, then ; a subshell cd, then && a git push is refused",
+   "cd /tmp/w; (cd /tmp) && %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A `||` after a failed cd runs `exit`, so the push after `;` never runs in the stranded folder.
+sh("git-after-cd: a cd into a missing folder, then || exit 1, then ; a git push passes, the shell exits first",
+   "cd /tmp/w || exit 1; %s push" % VCS, "allow", cwd=NOGIT)
+# A top-level `return` does not stop bash: outside a function or a sourced script it fails and the shell
+# goes on, so the push after `;` still runs in the stranded folder. Only `exit` stops the shell here.
+sh("git-after-cd: a cd into a missing folder, then || return 1, then ; a git push is refused",
+   "cd /tmp/w || return 1; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A subshell's exit ends only the subshell, and each part of a pipeline runs in a subshell. The shell goes on
+# after the failed cd, so the push after the group still runs in the stranded folder. Real bash runs it.
+sh("git-after-cd: a cd into a missing folder, then || (exit 1), then ; a git push is refused",
+   "cd /tmp/w || (exit 1); %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then || (exit 1), then a newline and a git push is refused",
+   "cd /tmp/w || (exit 1)\n%s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# Coverage: with spaces, the exit is the second word of its ( ) group, so only the subshell reading stops it
+# from counting as the shell's exit. The unspaced form tokenizes as `(exit`, which is no exit at all.
+sh("git-after-cd: a cd into a missing folder, then || ( exit 1 ) with spaces, then ; a git push is refused",
+   "cd /tmp/w || ( exit 1 ); %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then || exit 1 | cat, then ; a git push is refused",
+   "cd /tmp/w || exit 1 | cat; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then || a braced exit 1 in a pipe, then ; a git push is refused",
+   "cd /tmp/w || { exit 1; } | cat; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# Coverage: each of these holds today. The else branch runs when the test fails, so its push runs in the stranded folder.
+sh("git-after-cd: a cd into a missing folder as an if test, then the push in the else branch is refused",
+   "if cd /tmp/w; then :; else %s push; fi" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# Coverage: a read under a failed cd, joined by ;, passes. A dry run, a listing and a value read write nothing.
+sh("git-after-cd: a cd into a missing folder, then ; git add -n . is a dry run, passes",
+   "cd /tmp/w; %s add -n ." % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd into a missing folder, then ; git tag -l is a listing, passes",
+   "cd /tmp/w; %s tag -l" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd into a missing folder, then ; git config --get user.name is a read, passes",
+   "cd /tmp/w; %s config --get user.name" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd into a missing folder, then ; git worktree list is a read, passes",
+   "cd /tmp/w; %s worktree list" % VCS, "allow", cwd=NOGIT)
+# A failed `if` test skips the then branch, so the push there never runs in the stranded folder.
+sh("git-after-cd: a cd into a missing folder as an if test, then a git push in the then branch passes",
+   "if cd /tmp/w; then %s push; fi" % VCS, "allow", cwd=NOGIT)
+# The fi of a nested if closes only that if: the push after it is still in the outer then branch.
+sh("git-after-cd: a cd into a missing folder as an if test, then a nested if and fi, then a git push in the then branch passes",
+   "if cd /tmp/w; then if true; then :; fi; %s push; fi" % VCS, "allow", cwd=NOGIT)
+# The write verbs the rule does not name yet: each runs in the stranded folder after a failed cd and ;.
+sh("git-after-cd: a cd into a missing folder, then ; git add -A is refused",
+   "cd /tmp/w; %s add -A" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then ; git tag v1 is refused",
+   "cd /tmp/w; %s tag v1" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then ; git config user.name x is refused",
+   "cd /tmp/w; %s config user.name x" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd into a missing folder, then ; git worktree add ../w is refused",
+   "cd /tmp/w; %s worktree add ../w" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A failed cd under && skips the group, loop or if body it heads: bash runs no git write in them, with the
+# folder missing and git stubbed. A `;` after the group ends reopens the stranded folder, so the push refuses.
+sh("git-after-cd: a failed cd, then && a brace group of git writes, passes",
+   "cd /tmp/w && { %s add -A; %s commit -m m; }" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a failed cd, then && a brace group of git writes across newlines, passes",
+   "cd /tmp/w && {\n%s add -A\n%s commit -m m\n}" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a failed cd, then && an if whose then branch pushes, passes",
+   "cd /tmp/w && if true; then %s push; fi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a failed cd, then && a for loop that pushes, passes",
+   "cd /tmp/w && for b in a; do %s push; done" % VCS, "allow", cwd=NOGIT)
+# `while false` never runs its body, so no push runs in any folder, and `; true` ends the call.
+sh("git-after-cd: a failed cd, then && a while loop whose body never runs, then ; true, passes",
+   "cd /tmp/w && while false; do %s push; done; true" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a failed cd, then && a brace group of git writes, then ; a git push is refused",
+   "cd /tmp/w && { %s add -A; %s commit -m m; }; %s push" % (VCS, VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+# `if !` turns the failed cd into a passing test, so exit 1 runs and the shell stops before the push.
+sh("git-after-cd: an if test that is a negated failed cd, then exit 1, then a git push, passes",
+   "if ! cd /tmp/w; then exit 1; fi; %s push" % VCS, "allow", cwd=NOGIT)
+# set -e stops the shell at the failed cd, so the push after ; never runs.
+sh("git-after-cd: set -e, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e; cd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -e on its own line, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e\ncd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+# set +e turns the exit off again, so the failed cd leaves the shell running and the push after ; runs.
+sh("git-after-cd: set -e then set +e, then a failed cd, then ; a git push is refused",
+   "set -e; set +e; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A failed cd skips the whole group, loop or nested group it heads, and the push after ; runs stranded.
+# Each command below is checked under bash with a stub git and a missing folder: the push runs.
+sh("git-after-cd: a failed cd, then && a brace group holding a for loop of git adds, then ; a git push is refused",
+   'cd /tmp/w && { for f in a; do %s add "$f"; done }; %s push' % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then && a brace group of a git add with a redirect, then ; a git push is refused",
+   "cd /tmp/w && { %s add -A; }>/dev/null; %s push" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then && a for loop with a redirect, then ; a git push is refused",
+   "cd /tmp/w && for f in a; do :; done>/dev/null; %s push" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then && nested brace groups of a git add, then ; a git push is refused",
+   "cd /tmp/w && { { %s add -A; } }; %s push" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+# A set +e inside a group or an if still turns the exit off, so the failed cd leaves the shell running.
+sh("git-after-cd: set -e, then a set +e inside an if, then a failed cd, then ; a git push is refused",
+   "set -e; if true; then set +e; fi; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, then a set +e inside a brace group, then a failed cd, then ; a git push is refused",
+   "set -e; { set +e; }; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+# A set -e in a function that is never called does not turn the exit on.
+sh("git-after-cd: a set -e in a function never called, then a failed cd, then ; a git push is refused",
+   "f() { set -e; }; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A set -e behind a test that fails never runs, so the failed cd leaves the shell running.
+sh("git-after-cd: a set -e behind a failing test, then a failed cd, then ; a git push is refused",
+   '[ -n "$CI" ] && set -e; cd /tmp/w; %s push' % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+# A set with an empty argument once raised IndexError in the errexit read, and the guard failed open.
+sh("git-after-cd: set with an empty argument, then a failed cd, then ; a git push is refused",
+   'set -- ""; cd /tmp/w; %s push' % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+# THE GROUP GATE. Under set -e a failed cd ends the shell, except in a brace group or an if body that is the
+# left side of ||: bash ignores errexit there, so the push after the cd runs in the stranded folder.
+sh("git-after-cd: set -e, then a failed cd in a brace group on the left of ||, then ; a git push is refused",
+   "set -e; { true; cd /tmp/w; %s push; } || true" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: set -e, then a failed cd in an if body on the left of ||, then ; a git push is refused",
+   "set -e; if true; then :; cd /tmp/w; %s push; fi || true" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+
+# THE CLOSER READ. A closer with an attached redirect still closes its group, so the cd after it is bare under
+# set -e and the shell exits there. Each form below is valid bash, and each shell exits before the push.
+sh("git-after-cd: set -e, then a brace group closed by an attached > redirect, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e; { true; }>/dev/null\ncd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, then a for loop closed by an attached >> redirect, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e; for f in a; do :; done>>/dev/null\ncd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, then a brace group closed by an attached &> redirect, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e; { true; }&>/dev/null\ncd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, then an if closed by fi, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e; if true; then :; fi\ncd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, then a case closed by esac, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -e; case x in x) :;; esac\ncd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+# A quoted } and a word done_x are words, not closers. Each is the command word of its segment, which is the
+# only place a closer is read, so the group stays open and the push after the failed cd runs before || true.
+sh("git-after-cd: set -e, a quoted } as a command in a brace group on the left of ||, then a failed cd, then ; a git push is refused",
+   'set -e; { true; "}"; cd /tmp/w; %s push; } || true' % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: set -e, a word done_x as a command in a brace group on the left of ||, then a failed cd, then ; a git push is refused",
+   "set -e; { true; done_x; cd /tmp/w; %s push; } || true" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+
+# A FAILED TEST, THEN A SKIPPED CD. The && cd never runs when its test fails, so the push after ; runs in the folder
+# the first failed cd left the shell in. Under set -e the cd reads as a bare failure that ends the shell, so the walk
+# clears the stranding. bash does not exit there: the && list is not the last command, so errexit ignores it.
+# Each form is checked under bash with a stub git and missing folders: the push runs in the stranded folder.
+AFTER_CD_GONE = slash(os.path.join(ROOT, "after-cd-gone"))          # a folder no fixture makes
+AFTER_CD_GONE_TWO = slash(os.path.join(ROOT, "after-cd-gone-two"))  # a second folder no fixture makes
+sh("git-after-cd: set -e, a failed cd on the left of ||, then a failed && test and a && cd to a missing folder, then ; a git push is refused",
+   "set -e; cd %s || true; [ -d %s ] && cd %s; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# The green control: without set -e the stranding carries through the skipped cd, so the push is refused too.
+sh("git-after-cd: a failed cd on the left of ||, then a failed && test and a && cd to a missing folder, then ; a git push is refused",
+   "cd %s || true; [ -d %s ] && cd %s; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# `}2` is no closer in bash: it is a command word, so the brace group stays open to the last }. The cd and the push
+# then run inside a group on the left of ||, where errexit is ignored, and the push runs in the stranded folder.
+sh("git-after-cd: set -e, a brace group closed by a }2>x word that is no closer, then a failed cd, then ; a git push inside the group on the left of || is refused",
+   "set -e; { true; }2>x; cd %s; %s push; } || true" % (AFTER_CD_GONE, VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+# A CD THAT MAY NEVER RUN. After || or && a cd runs only when the left side lets it, so the walk must not read it as
+# the shell's exit, even under set -e: the right side may be skipped, and the push after ; then runs in the stranded
+# folder. Each form starts with a failed cd, so a stranding exists. Each is checked under bash with a stub git.
+sh("git-after-cd: set -e, a failed cd on the left of ||, then a failed && test and a && cd to a second missing folder, then ; a git push is refused",
+   "set -e; cd %s || true; [ -d %s ] && cd %s; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, a failed cd on the left of ||, then a true || cd to a missing folder that is skipped, then ; a git push is refused",
+   "set -e; cd %s || true; true || cd %s; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a failed cd, then a true || if ! cd to a missing folder then exit, whose body is skipped, then ; a git push is refused",
+   "cd %s; true || if ! cd %s; then exit 1; fi; %s push" % (AFTER_CD_GONE, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
+# THE FALSE ALARM OF THE SKIPPED CD. A cd after && that its test never lets run is no stranding: the shell stays in
+# the folder the landed cd named, so the push after ; runs there. Each form is checked under bash with a stub git.
+sh("git-after-cd: a cd that lands, then a && test that fails, then a && cd to a missing folder, then ; a git push, passes, the skipped cd leaves the shell in the landed folder",
+   "cd %s && [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, a cd that lands, then a && test that fails, then a && cd to a missing folder, then ; a git push, passes, errexit ignores the && list",
+   "set -e; cd %s && [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a cd that lands, then ; a && test that fails before a && cd to a missing folder, then ; a git push, passes, the skipped cd leaves the shell in the landed folder",
+   "cd %s; [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, a cd that lands, then ; a && test that fails before a && cd to a missing folder, then ; a git push, passes, errexit ignores the && list",
+   "set -e; cd %s; [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+
+
+# THE DIRECTORY TEST BY ITS SHAPE. `[ -d M ]`, `[[ -d M ]]` and `test -d M` each joined to a cd to M by && is a test
+# that fails when M is missing, so the cd never runs and the push after ; runs where the shell is. The word matches
+# after quote removal, so `test -d "M"` counts too. Each form is checked under bash with a stub git.
+sh("git-after-cd: a [ -d M ] test that fails, then && cd to a missing folder, then ; a git push, passes, the cd never runs",
+   "[ -d %s ] && cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a [[ -d M ]] test that fails, then && cd to a missing folder, then ; a git push, passes, the cd never runs",
+   "[[ -d %s ]] && cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a test -d M that fails, then && cd to a missing folder, then ; a git push, passes, the cd never runs",
+   "test -d %s && cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+sh('git-after-cd: a quoted test word that fails, then && cd to the same word, then ; a git push, passes, the words match after quote removal',
+   'test -d "%s" && cd %s; %s push' % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS), "allow", cwd=NOGIT)
+# The test must head its && list. After && true || the test may be skipped, so the cd behind it is judged as before:
+# here the cd runs, fails, and the push after ; runs in the folder the first cd landed in.
+sh("git-after-cd: a cd that lands, then && true || a test that may be skipped, then && cd to a missing folder, then ; a git push is refused",
+   "cd %s && true || [ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
+# THE REFUSAL BRANCHES. _never_runs and _dir_test_word refuse three forms that a skipped cd could pass for. Each form
+# is refused only because one branch holds: drop that branch and the form is allowed. Each is checked under bash with
+# a stub git. A regular file for M makes -e pass and the cd fail. The push then runs in the start folder.
+sh("git-after-cd: a [ -d M ] test joined by ; to a cd to a missing folder, then ; a git push is refused",
+   "[ -d %s ]; cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a [ -e M ] test, then && cd to M, then ; a git push is refused",
+   "[ -e %s ] && cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a [ -d N ] test on a folder that exists, then && cd to a missing folder, then ; a git push is refused",
+   "[ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
+# THE WIDE READ. case, select and a function definition open a compound that errexit must see, so the cd in
+# their body is not bare. Each body is on the left of ||, so errexit is ignored there and the push runs. A select
+# body runs once its menu gets an answer, so it is judged as a body that may run.
+sh("git-after-cd: set -e, a failed cd in a case body on the left of ||, then ; a git push is refused",
+   "set -e; case x in x)\n cd /tmp/w\n %s push\n;; esac || true" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, a failed cd in a select body on the left of ||, then a git push is refused",
+   "set -e; select x in a\ndo\n cd /tmp/w\n %s push\ndone || true" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, a failed cd in a function keyword body called on the left of ||, then a git push is refused",
+   "set -e; function f {\n cd /tmp/w\n %s push\n}\nf || true" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, a failed cd in a f() body called on the left of ||, then a git push is refused",
+   "set -e; f() {\n cd /tmp/w\n %s push\n}\nf || true" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, a failed cd in a f(){ body called on the left of ||, then a git push is refused",
+   "set -e; f(){\n cd /tmp/w\n %s push\n}\nf || true" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: set -e, a failed cd in a f () body called on the left of ||, then a git push is refused",
+   "set -e; f () {\n cd /tmp/w\n %s push\n}\nf || true" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&", "-C"))
+
+# THE ERREXIT READ. `--` ends the options, so the -e after it is a word and set turns nothing on.
+sh("git-after-cd: set -- -e, then a failed cd, then ; a git push is refused",
+   "set -- -e; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# An empty word ends the options too, so the +e after it is a word: errexit stays on and the cd ends the shell.
+sh("git-after-cd: set with an empty word, then +e, then a failed cd, then ; a git push, passes, the shell exits first",
+   'set -e; set "" +e; cd /tmp/w; %s push' % VCS, "allow", cwd=NOGIT)
+# A plain word ends the options, so the -e after it is a positional word and errexit is not turned on.
+sh("git-after-cd: set with a plain word, then -e, then a failed cd, then ; a git push is refused",
+   "set bar -e; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# -o takes the next word as an option name: errexit is named by the long form, and -e after the name still counts.
+sh("git-after-cd: set -o errexit, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -o errexit; cd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -o pipefail -e, then a failed cd, then ; a git push, passes, the shell exits first",
+   "set -o pipefail -e; cd /tmp/w; %s push" % VCS, "allow", cwd=NOGIT)
+# A set is read only as the first word of its segment, so echo's argument turns nothing on.
+sh("git-after-cd: echo set -e, then a failed cd, then ; a git push is refused",
+   "echo set -e; cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A set -e inside a subshell ends with the subshell, so the shell's own errexit stays off.
+sh("git-after-cd: a set -e in a subshell, then a failed cd, then ; a git push is refused",
+   "(set -e); cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
+# A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
+# git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
+# raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
+# from the crash path. Each failure names one cause.
+GIT_AFTER_CD_CRASH_LABEL = ("git-after-cd: a crash in the cd walk reads as stranded, so the push after a cd that "
+                            "lands is refused, and the crash is logged")
+CD_WALK_TRY = "    try:\n        return _walk_segments(segments, number, shell_cwd, ends, failed_cd_stays)\n"
+CD_WALK_PLANTED = ("    try:\n        if failed_cd_stays:\n            raise RuntimeError(\"planted walk fault\")\n"
+                   "        return _walk_segments(segments, number, shell_cwd, ends, failed_cd_stays)\n")
+
+
+def planted_cd_walk_guards(folder):
+    """The shared step of the crash checks: an intact and a planted copy of the guard family under `folder`.
+    The planted copy raises at cd_walk's try on a read with failed_cd_stays, the one read a crash reads as
+    stranded. Returns (guards, "") or (None, the cause) when the try block does not occur once: no plant."""
+    guards = {}
+    for name in ("intact", "planted"):
+        hooks = os.path.join(folder, name, "hooks")
+        os.makedirs(hooks)
+        copy_guard_family(hooks)
+        guards[name] = os.path.join(hooks, "guard.py")
+    core = os.path.join(folder, "planted", "hooks", "guard_core.py")
+    with open(core, encoding="utf-8") as handle:
+        text = handle.read()
+    if text.count(CD_WALK_TRY) != 1:
+        return None, "the cd_walk try block occurs %d times in guard_core.py, want once: no plant" % text.count(CD_WALK_TRY)
+    write(core, text.replace(CD_WALK_TRY, CD_WALK_PLANTED, 1))
+    return guards, ""
+
+
+def planted_verdict(guards, folder, name, command, cwd):
+    """(decision, reason, log text) that the `name` copy gives one Bash command run from `cwd`."""
+    cfg = os.path.join(folder, name, "cfg")
+    env = dict(os.environ)
+    for var in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR",
+                "CLAUDE_CODE_REMOTE"):
+        env.pop(var, None)
+    env["CLAUDE_CONFIG_DIR"] = cfg
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}
+    run = subprocess.run([sys.executable, guards[name]], input=json.dumps(payload), capture_output=True,
+                         text=True, env=env, timeout=120)
+    out = run.stdout.strip()
+    spec = json.loads(out).get("hookSpecificOutput", {}) if out else {}
+    log = os.path.join(cfg, "guard.log")
+    logged = ""
+    if os.path.exists(log):
+        with open(log, encoding="utf-8") as handle:
+            logged = handle.read()
+    return (spec.get("permissionDecision", "allow") if out else "allow",
+            spec.get("permissionDecisionReason", ""), logged)
+
+
+def git_after_cd_crash_check():
+    folder = os.path.join(ROOT, "after-cd-crash")
+    shutil.rmtree(folder, ignore_errors=True)
+    landing = os.path.join(folder, "landing")
+    os.makedirs(landing)
+    guards, cause = planted_cd_walk_guards(folder)
+    if guards is None:
+        return False, cause
+    command = "cd %s; %s push" % (slash(landing), VCS)
+    control, _reason, _log = planted_verdict(guards, folder, "intact", command, landing)
+    if control != "allow":
+        return False, "control: the intact copy's verdict on the landing cd is %r, want allow" % control
+    decision, reason, logged = planted_verdict(guards, folder, "planted", command, landing)
+    if decision != "deny":
+        return False, "the planted copy's verdict on the landing cd is %r, want deny" % decision
+    if "git-after-cd" not in reason:
+        return False, "the planted deny is not the git-after-cd rule: %r" % reason[:90]
+    if "guard-crash" not in logged or "planted walk fault" not in logged:
+        return False, "the crash is not logged as a guard-crash line: the log ends %r" % logged[-120:]
+    return True, "a crash in the cd walk refuses the push after a landing cd as git-after-cd, and is logged"
+
+
+# THE CRASH FALLBACK OF CONFLICT-MARKERS. A crash in the cd walk gives no folder, so conflict-markers judges the
+# commit in command_root's folder, the last cd. The commit runs from a folder that is no repository, so only that
+# fallback reaches the triplet repo. The intact copy is the control. Each failure names one cause.
+CMK_CRASH_LABEL = ("conflict-markers: a crash in the cd walk falls back to the last cd, so a commit after a cd into a "
+                   "triplet repo, run from a folder that is no repository, is refused, and the crash is logged")
+
+
+def conflict_markers_crash_check():
+    folder = os.path.join(ROOT, "cmk-crash")
+    shutil.rmtree(folder, ignore_errors=True)
+    nogit = os.path.join(folder, "nogit")
+    os.makedirs(nogit)
+    guards, cause = planted_cd_walk_guards(folder)
+    if guards is None:
+        return False, cause
+    command = "cd %s; %s commit -m x" % (slash(CMK_STAGED), VCS)
+    control, reason, _log = planted_verdict(guards, folder, "intact", command, nogit)
+    if control != "deny" or CMK_RULE not in reason:
+        return False, "control: the intact copy's verdict on the triplet commit is %r, want deny by %s" % (control, CMK_RULE)
+    decision, reason, logged = planted_verdict(guards, folder, "planted", command, nogit)
+    if "guard-crash" not in logged or "planted walk fault" not in logged:
+        return False, "the plant did not fire: no guard-crash line in the log, so the fallback was not read"
+    if decision != "deny":
+        return False, "the planted copy's verdict on the triplet commit is %r, want deny" % decision
+    if CMK_RULE not in reason:
+        return False, "the planted deny is not the conflict-markers rule: %r" % reason[:90]
+    return True, "a crash in the cd walk falls back to the last cd, and the triplet commit is refused by conflict-markers"
+
+
+FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
    tool="PowerShell", cwd=NOGIT)
@@ -15634,8 +16108,27 @@ cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with 
            "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
           "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
-cmk_allow("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
-          "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+# The failed cd ends the && chain, so the later cd into the triplet repo never runs and the commit never runs.
+cmk_allow("a cd into a missing folder, then && a cd into a triplet repo, then && add -A and commit, the chain is skipped",
+          "cd " + slash(CMK_GONE) + " && cd " + slash(CMK_CLT) + " && " + VCS + " add -A && " + VCS + " commit -m x",
+          NOGIT)
+# A write after a failed cd joined by `;` is refused in any cwd repo (decision git-after-cd-joins-with-and).
+sh("git-after-cd: a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean is refused",
+   "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", "deny", "git-after-cd",
+   cwd=CMK_CL, carries=("&&", "-C"))
+# An echo the tokenizer cannot read (its ANSI-C quote holds an escaped quote) must not hide the cd before it:
+# the commit still runs in the folder that cd named, the triplet repo.
+cmk_refuse("a cd into a repo with a triplet tracked, then ; an echo the tokenizer cannot read, then add -A and commit",
+           "cd " + slash(CMK_CLT) + "; echo $'it\\'s'; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
+# A `>` inside the echo's quotes is text, not a redirect. It must not make the commit after it blind to the triplet.
+cmk_refuse("a cd into a repo with a triplet tracked, then ; an echo with a quoted greater-than, then add -A and commit",
+           "cd " + slash(CMK_CLT) + "; echo \"a > b\"; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
+# Scanner traps: an escaped quote, or a lone apostrophe, must not end the quote early and hide the redirect after it.
+# The echo then reaches the tree, so the commit after it is blind here (a push after it is refused as a chain).
+cmk_allow("a cd into a repo with a triplet tracked, then ; an echo with an escaped quote and a redirect, then add -A and commit",
+          "cd " + slash(CMK_CLT) + "; echo \"a\\\"b\" > x; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
+cmk_allow("a cd into a repo with a triplet tracked, then ; an echo with a lone apostrophe and a redirect, then add -A and commit",
+          "cd " + slash(CMK_CLT) + "; echo don't > x; " + VCS + " add -A && " + VCS + " commit -m x", NOGIT)
 
 # A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
 # `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
@@ -19063,6 +19556,13 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The git-after-cd crash check builds its own copies and reads no lazy fixture, so it is fixtureless.
+LOG_CHECKS_EXTRA.append((GIT_AFTER_CD_CRASH_LABEL, git_after_cd_crash_check))
+LOG_FAMILY[GIT_AFTER_CD_CRASH_LABEL] = "git-after-cd"
+FIXTURELESS_CHECKS.add(git_after_cd_crash_check)
+# The conflict-markers crash check reads the triplet fixture CMK_STAGED, so it is not fixtureless: the run builds it.
+LOG_CHECKS_EXTRA.append((CMK_CRASH_LABEL, conflict_markers_crash_check))
+LOG_FAMILY[CMK_CRASH_LABEL] = "conflict-markers"
 # The two unreadable-lone-operand checks. Their cases and labels sit in the shared-tree block, which runs
 # before LOG_CHECKS_EXTRA exists, so they register here and their family is set by hand, as above.
 LOG_CHECKS_EXTRA.append((UNREAD_NOGIT_LABEL, unread_lone_operand_no_git_case))

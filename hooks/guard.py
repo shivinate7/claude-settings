@@ -102,6 +102,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (rm-on-a-variable-needs-a-guard)
   rm-after-cd          deny. A recursive delete of a relative target after a cd.
                        (rm-after-cd-names-absolute-path)
+  git-after-cd         deny. A git write after a cd that `;`, a newline or `||` joins. A `&&` chain
+                       and `-C` with a full path pass. (git-after-cd-joins-with-and)
   ln-over-directory    deny. See the comment at rule 3b in judge_shell.
   destructive-delete   deny. A recursive delete, forced or not, at a root, a home, a glob, `.`,
                        the working folder (`$(pwd)` too) or a folder above it, in either shell.
@@ -449,11 +451,11 @@ while True:
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
-            _git_subcommand_index, dir_before_segment, shell_abs, walk_quotes,
+            _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            BRANCH_DELETE_DENY_REASON, BRANCH_DELETE_FLAGS, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
             worktree_remove_forced,
         )
         _loading = "guard_shared_tree"
@@ -483,8 +485,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit, interpreter_may_write,
-            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
+            FROZEN_REASON, GIT_FILE_VERBS, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit,
+            interpreter_may_write, interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -4430,6 +4432,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
+    # 6c3. A git write after a cd that `;`, a newline or `||` joins (decision git-after-cd-joins-with-and):
+    # when the cd fails the write runs in the folder the shell stayed in. Placed
+    # after conflict-markers, so a refusal that names the defect in the commit itself comes first.
+    matched = "" if POWERSHELL_CALL[0] else git_after_cd_hit(stripped, cwd)
+    if matched:
+        refuse(tool, "deny", "git-after-cd", GIT_AFTER_CD_REASON, matched)
+
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)
     if matched:
@@ -5442,7 +5451,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
 # already spends. A git verb in the primary is read off the command text with `git_calls`.
 SESSION_HOME_DIR = "session-homes"
 # The git verbs that change the primary's files or branch. A `stash` that only reads (STASH_READ_ACTIONS)
-# and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_git_hit.
+# and a `clean` that deletes nothing (no force flag, as `clean -n`) are left out in session_home_write.
 SESSION_HOME_GIT_VERBS = ("checkout", "switch", "pull", "merge", "commit", "rebase", "restore", "reset",
                           "stash", "cherry-pick", "revert", "am", "apply", "clean")
 # The verbs other-checkout refuses in another checkout or clone: the session-home verbs plus the verbs
@@ -5542,6 +5551,126 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
         pass  # an unwritable record means no refusal later, never a failed call
 
 
+GIT_AFTER_CD_REASON = (
+    "Rule (git-after-cd, decision git-after-cd-joins-with-and): a git write that follows a cd, "
+    "joined to it by `;`, a newline or `||`, runs in the working folder when the cd fails, "
+    "because the shell stays where it was. "
+    "Remedy: join the cd to the write with `&&`, so a failed cd stops the chain, or leave out the cd "
+    "and name the folder with `-C` and its full path."
+)
+
+
+# The `branch` flags that move, rename or delete a ref (a force, a move, a delete).
+GIT_BRANCH_WRITE_FLAGS = BRANCH_DELETE_FLAGS | {"-f", "--force", "-m", "-M", "--move"}
+
+
+# The writes rule git-after-cd reads beyond SESSION_HOME_GIT_VERBS. They stay out of that list because rule
+# session-home pins `worktree add` as allowed (the way a session makes its new home), and it does not
+# judge the other three. After a failed cd each of these four runs in the folder the shell stayed in.
+GIT_AFTER_CD_EXTRA_VERBS = ("add", "tag", "config", "worktree")
+# `tag` flags that list or verify tags, `config` flags that only read or only write, and the `config` flags
+# that take a value word of their own (the file, the type), which is not a key.
+GIT_TAG_READ_FLAGS = {"-l", "--list", "-v", "--verify", "--contains", "--no-contains", "--points-at",
+                      "--merged", "--no-merged", "--sort", "--format", "--column", "--no-column"}
+GIT_CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color",
+                         "--get-colorbool", "-l", "--list"}
+GIT_CONFIG_WRITE_FLAGS = {"--add", "--replace-all", "--unset", "--unset-all", "-e", "--edit",
+                          "--rename-section", "--remove-section"}
+GIT_CONFIG_VALUE_FLAGS = {"-f", "--file", "--blob", "--type", "--default", "--comment"}
+
+
+def git_config_writes(args) -> bool:
+    """True when `git config` sets, adds, unsets or edits a value. A `--get`, `--list` or a key with no
+    value (`git config user.name`) reads. The `get` and `list` subcommands read; `set`, `unset` and
+    `edit` write."""
+    words, flags, skip = [], set(), False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg.startswith("-"):
+            flags.add(arg.split("=", 1)[0])
+            skip = arg in GIT_CONFIG_VALUE_FLAGS
+        else:
+            words.append(arg)
+    if flags & GIT_CONFIG_WRITE_FLAGS:
+        return True
+    if flags & GIT_CONFIG_READ_FLAGS or words[:1] in (["get"], ["list"]):
+        return False
+    return len(words) >= 2 or words[:1] in (["set"], ["unset"], ["edit"], ["rename-section"], ["remove-section"])
+
+
+def session_home_write(verb: str, args) -> bool:
+    """True when a call of a verb of SESSION_HOME_GIT_VERBS changes the files or the branch: a
+    `stash list`, a `stash show` and a `clean` that deletes nothing only read."""
+    if verb == "stash":
+        return stash_action(args) not in STASH_READ_ACTIONS
+    if verb == "clean":
+        return clean_deletes_files(args)
+    return True
+
+
+def git_after_cd_extra_write(verb: str, args) -> bool:
+    """True when a call of a verb of GIT_AFTER_CD_EXTRA_VERBS changes the index, a ref, the config or the
+    worktree list: an `add` that is no dry run, a `tag` that names or deletes a tag, a `config` that
+    writes a value (`git_config_writes`) and `worktree add`."""
+    if verb == "add":
+        return not {"-n", "--dry-run"} & set(args)
+    if verb == "tag":
+        flags = {arg.split("=", 1)[0] for arg in args if arg.startswith("-")}
+        listing = bool(flags & GIT_TAG_READ_FLAGS) or any(LISTING.fullmatch(flag) for flag in flags)
+        return bool(args) and not listing
+    if verb == "config":
+        return git_config_writes(args)
+    return args[:1] == ["add"]
+
+
+def git_write_verb(verb: str, args) -> bool:
+    """True when a git call changes a ref, the index, the config or the files: the verbs of SESSION_HOME_GIT_VERBS
+    and of GIT_AFTER_CD_EXTRA_VERBS, `push`, `update-ref`, the file verbs of GIT_FILE_VERBS, a `fetch` that writes a branch
+    (`fetch_moves_branch`), and `branch` with a force, move or delete flag. A call whose argv names a
+    read (`read_verb`: a dry run, help), a `stash list`, a `stash show` and a `clean` that deletes
+    nothing only read."""
+    if read_verb(verb, args):
+        return False
+    if verb == "branch":
+        return any(arg in GIT_BRANCH_WRITE_FLAGS for arg in args)
+    if verb == "fetch":
+        return fetch_moves_branch(args)
+    if verb in SESSION_HOME_GIT_VERBS:
+        return session_home_write(verb, args)
+    if verb in GIT_AFTER_CD_EXTRA_VERBS:
+        return git_after_cd_extra_write(verb, args)
+    return verb in ("push", "update-ref") or verb in GIT_FILE_VERBS
+
+
+def git_after_cd_hit(command: str, cwd: str) -> str:
+    """The verb of a git write in COMMAND that runs in the folder the shell stayed in after a cd
+    into a folder that is not there (decision git-after-cd-joins-with-and), else ''. One `cd_walk`
+    that trusts a failed cd to leave the shell in place says whether the segment runs in a folder
+    the shell stayed in (`stranded`). A `&&` chain skips the write when the cd fails, a `)` ends a
+    subshell's cd, and a cd to a full path that lands moves the shell out of the stranded folder.
+    `git -C <full path>` names its own folder and passes; a `-C` that holds a variable is unknown and
+    passes; a relative `-C` is joined to the stranded folder and is refused."""
+    ends = []
+    segments = split_segments(command, ends)
+    for number, segment in enumerate(segments):
+        # a `)` or `}` that closes a group sits on the last word, so `push)` is the verb `push`
+        calls = [(verb.rstrip(")}"), args) for verb, args in git_calls(segment)]
+        verbs = [verb for verb, args in calls if git_write_verb(verb, args)]
+        if not verbs:
+            continue
+        if not cd_walk(segments, number, cwd, ends, failed_cd_stays=True).stranded:
+            continue
+        tokens = segment_tokens(segment)
+        if tokens is None:
+            continue   # a segment cut inside a quote, as an interpreter's heredoc body is: its `-C` is unread
+        named = _segment_git_c_target(tokens)
+        if named is not None and (_unexpanded(named) or shell_abs(named, None)):
+            continue
+        return verbs[0]
+    return ""
+
+
 def session_home_git_hit(command: str, where: str, in_primary, git_verbs=None) -> str:
     """The verb of a git call in COMMAND that changes files or a branch and runs in a folder that
     IN_PRIMARY accepts, else ''. GIT_VERBS names the verbs; none means SESSION_HOME_GIT_VERBS. A
@@ -5562,11 +5691,7 @@ def session_home_git_hit(command: str, where: str, in_primary, git_verbs=None) -
         if not folder:
             continue
         for verb, args in verbs:
-            if verb == "stash" and stash_action(args) in STASH_READ_ACTIONS:
-                continue
-            if verb == "clean" and not clean_deletes_files(args):
-                continue
-            if in_primary(folder, folder):
+            if session_home_write(verb, args) and in_primary(folder, folder):
                 return verb
     return ""
 

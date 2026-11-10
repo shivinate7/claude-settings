@@ -7,6 +7,7 @@ checkout, a tree's status, the default branch, a branch's proof, session livenes
 git_reads.py, shared with the janitor: a test or the janitor that patches one of them patches it
 there, on the one object that every caller reads.
 """
+import collections
 import errno
 import functools
 import json
@@ -16,6 +17,7 @@ import shlex
 import sys
 import time
 from datetime import datetime
+from typing import Optional
 
 # No try/except: a guard copy without git_reads.py judges nothing, so it fails closed (guard.py).
 from git_reads import (  # noqa: F401
@@ -1071,65 +1073,298 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
-    """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
+CdWalk = collections.namedtuple("CdWalk", "where stranded skipped")
 
-    Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
-    real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
-    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
-    where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
-    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
+
+def _head_word(segment: str) -> str:
+    """The first word of a segment, past a leading `then` or `do`, with a closing `)` cut off (`fi)`),
+    or '' when it cannot be read."""
+    tokens = segment_tokens(segment) or []
+    while tokens[:1] in (["then"], ["do"]):
+        tokens = tokens[1:]
+    return tokens[0].rstrip(")") if tokens else ""
+
+
+def _exits_on_failure(segments, ends, at: int) -> bool:
+    """True when the `||` after `segments[at]` runs a bare `exit` as its first command, or as a
+    `;`-joined step of a `{ ... }` group that is not piped: the shell stops there when the command
+    before the `||` fails, so nothing later runs in the folder it stayed in. Not read: a top-level
+    `return`, which does not stop bash; `(exit 1)` or `( exit 1 )`, which ends only a subshell; an
+    `exit` in a pipe or a piped group, which runs in a subshell; and an `exit` behind an `&&` or `||`
+    inside the group, which runs only sometimes."""
+    def end_of(number):
+        return ends[number] if number < len(ends) else ""
+
+    grouped, found = False, False
+    for number in range(at + 1, len(segments)):
+        tokens = segment_tokens(segments[number]) or []
+        if number == at + 1:
+            grouped = tokens[:1] == ["{"]
+        if grouped and tokens[:1] == ["}"]:
+            return found and end_of(number) != "|"
+        if found:
+            continue
+        index = resolve_command(tokens) if tokens else None
+        in_pipe = "|" in (end_of(number), end_of(number - 1))
+        opens = any(char == "(" and not quote for _, char, quote in walk_quotes(segments[number]))
+        if index is not None and tokens[index] == "exit" and not in_pipe and not opens:
+            if not grouped:
+                return True
+            found = True
+        elif not grouped or end_of(number) not in (";", "\n"):
+            return False
+    return False
+
+
+_COMPOUND_CLOSER = {
+    # a closing word, with a `)` that ends a subshell and an attached redirect cut off: `}>/dev/null`
+    wide: re.compile(r"(?:\}|fi|done%s)\)*(?:&?[<>].*)?" % ("|esac" if wide else ""))
+    for wide in (False, True)}
+_FUNCTION_NAME = re.compile(r"[^\s(){}]+\(\)(\{?)")   # `f()` and `f(){`
+
+
+@functools.lru_cache(maxsize=16384, typed=True)   # the walk reads each segment once per call, and a long command has thousands
+def _compound_delta(segment: str, wide: bool = False) -> int:
+    """How far a segment moves the compound nesting: +1 for each `{` group, `if`, `for`, `while` or
+    `until` it opens at its head (past a leading `then`, `do`, `else` or `elif`), -1 for each `}`,
+    `fi` or `done` that closes one, so `done }` and `} }` close two and `}>/dev/null` closes one. A
+    word counts as the shell reads it: a quoted `"done"` and a word like `done_x` are no keyword.
+    `wide` also reads `case`, `select`, `esac` and a function definition's `{`: errexit needs them,
+    since a miss there turns it on wrongly. Without it `case` is not read, so a skip ends at the next
+    `;` (it fails closed: the commands after it are judged in the stranded folder)."""
+    tokens = segment_tokens(segment) or []
+    # A word that opens inside quotes is no keyword. When `_quoted_opens` cannot line its reading up, it names none.
+    quoted = _quoted_opens(segment, len(tokens))
+    tokens = ["\0" if at in quoted else word for at, word in enumerate(tokens)]
+    delta = 0
+    while tokens:
+        word = tokens[0]
+        if word in ("then", "do", "else", "elif"):
+            tokens = tokens[1:]
+        elif word == "{":
+            delta += 1
+            tokens = tokens[1:]
+        elif word in ("if", "for", "while", "until"):
+            return delta + 1
+        elif _COMPOUND_CLOSER[wide].fullmatch(word):
+            delta -= 1
+            tokens = tokens[1:]
+        elif wide and word in ("case", "select"):
+            return delta + 1
+        elif wide and word == "function":
+            tokens = tokens[2:]
+        elif wide and _FUNCTION_NAME.fullmatch(word):
+            delta += word.endswith("{")
+            tokens = tokens[1:]
+        elif wide and tokens[1:2] == ["()"]:
+            tokens = tokens[2:]
+        else:
+            return delta
+    return delta
+
+
+def _sets_errexit(tokens, sure: bool) -> Optional[bool]:
+    """True or False when the segment holds a `set` that turns `-e` (or `-o errexit`) on or off, None
+    when it holds none. A `set +e` counts wherever it stands, in a group, an `if`, a function or a
+    `( ... )`, since it may run: errexit is then off, which fails closed. A `set -e` counts only when
+    `sure` (the caller says the segment is sure to run) and the `set` is the segment's first word.
+    Options end at the first word that is not one: `set -- -e` sets no option, and `set -- ""` ends
+    at the empty word."""
+    state = None
+    for index, head in enumerate(tokens):
+        if head.lstrip("(") != "set":
+            continue
+        at = index + 1
+        while at < len(tokens):
+            token = tokens[at].rstrip(")")
+            at += 1
+            if token[:1] not in ("-", "+") or token.startswith("--"):
+                break
+            flags = token[1:]
+            on = token[0] == "-"
+            changes = "e" in flags
+            if "o" in flags:
+                changes = changes or tokens[at:at + 1] in (["errexit"], ["errexit)"])
+                at += 1   # `-o` takes the next word as the option's name
+            if changes and not on:
+                state = False
+            elif changes and sure and index == 0:
+                state = True
+    return state
+
+
+def _opens_if_body(segments, at: int) -> bool:
+    """True when `segments[at]` is `if <cd ...>` alone as the test, and the next segment opens its `then`."""
+    tokens = segment_tokens(segments[at]) or []
+    after = segment_tokens(segments[at + 1]) if at + 1 < len(segments) else None
+    return (len(tokens) > 1 and tokens[0] == "if" and basename(tokens[1]) in CD_WORDS
+            and bool(after) and after[0] == "then")
+
+
+def _dir_test_word(tokens):
+    """The folder a segment tests for, when the segment is only `[ -d T ]`, `[[ -d T ]]` or `test -d T`
+    (quotes already removed by the tokenizer), else None."""
+    shapes = {"[": 4, "[[": 4, "test": 3}
+    if not tokens or shapes.get(tokens[0]) != len(tokens) or tokens[1] != "-d":
+        return None
+    if tokens[0] != "test" and tokens[3] != {"[": "]", "[[": "]]"}[tokens[0]]:
+        return None
+    return tokens[2]
+
+
+def _never_runs(segments, ends, at: int, tokens, move) -> bool:
+    """True when the cd at `segments[at]` stands behind its own directory test joined by `&&`
+    (`[ -d M ] && cd M`) and its folder is missing at check time, so the test fails and the cd
+    never runs. The test must head its `&&` list: after a `||` or a pipe it may be skipped."""
+    if at < 1 or at > len(ends) or ends[at - 1] != "&&" or basename(tokens[0]) not in CD_WORDS:
+        return False
+    if at > 1 and ends[at - 2] in ("||", "|"):
+        return False
+    return move == _dir_test_word(segment_tokens(segments[at - 1]))
+
+
+def cd_walk(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+    """`_walk_segments`, which holds the walk and what it reads. Read with `failed_cd_stays`, a crash
+    in the walk gives `stranded` with no folder, so git-after-cd refuses and the conflict-markers
+    read falls back to the command's root, and the crash is logged as a guard crash. The guard
+    otherwise fails open on a crash, which would let the write through. Without it the crash rises
+    to the caller, as before."""
+    try:
+        return _walk_segments(segments, number, shell_cwd, ends, failed_cd_stays)
+    except Exception as exc:
+        if not failed_cd_stays:
+            raise
+        record("Bash", "crash", "guard-crash", cap_safe("cd_walk " + type(exc).__name__ + ": " + str(exc), 200))
+        return CdWalk(None, True, False)
+
+
+def _walk_segments(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+    """What one pass over the segments ahead of `segments[number]` says about the shell when it
+    runs: a `CdWalk` of `where` (the directory the shell is in, or None when it cannot be told),
+    `stranded` and `skipped`.
+
+    Walks the segments the way `_run_dir` reads them, but keeps the state a real shell keeps:
+    `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes back, a `cd` inside
+    `( ... )` ends with the parenthesis, `popd` or a path that holds a variable is not tracked, and
+    a `cd` into a folder that does not exist is not trusted (the shell stays where it was, and a
+    `;` runs the next command there). `ends` is what `split_segments` gave: in bash each part of a
+    pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
-    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
-    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`
+    that ends it at the group the cd stands in (a `( ... )` inside the chain does not end it, and a
+    group that closes on the failed cd leaves its status a failure): the segment is `skipped`,
+    its `where` is None, and its own `cd` moves nothing. `stranded` is true when a `cd` that failed
+    ran ahead of the segment and the shell is still where it stayed: no `cd` to a full path, home
+    or `-` has moved it since, and a relative `cd` does not, because it is read against the
+    wrong folder. Off by default (`stranded` and `skipped` stay false), so a rule that fails
+    closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
-    skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    stranded = False
+    skip_depth = None   # a failed cd ended in `&&`: the group depth the skipped chain stands at
+    skip_nest = 0       # the `{`, `if` and loop compounds opened inside that skipped chain and not yet closed
+    errexit = False     # `set -e` ran before: a failed bare cd ends the shell
+    group_depth = 0     # the `{`, `if`, loop, `case` and function compounds the walk is inside
+    skip_if = None      # a failed cd was an `if` test: the `if`s nested in the skipped `then` body
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        stack.extend([(where, prev, stranded)] * marks.count("("))
         end = ends[at] if at < len(ends) else ""
+        in_then = False
+        if skip_if is not None:
+            head = _head_word(segment)
+            if skip_if == 0 and head in ("else", "elif", "fi"):
+                skip_if = None   # the `then` body is over: this segment runs in the folder the shell stayed in
+            else:
+                skip_if += (head == "if") - (head == "fi")
+                in_then = True
         if at == number:
-            return None if skipping else where
-        if skipping:
-            skipping = end in ("&&", "|")
+            if skip_depth is not None or in_then:
+                return CdWalk(None, False, True)
+            return CdWalk(where, stranded and where is not None, False)
+        tokens = segment_tokens(segment)
+        if tokens:
+            # errexit is on only for a `set -e` sure to run: not in a group, `if`, loop, function or `( )`, not after an
+            # `&&` or `||`, not piped or in the background, not in a chain a failed cd skipped. A `set +e` anywhere turns it off.
+            prev_end = ends[at - 1] if 0 < at <= len(ends) else ""
+            sure = (skip_depth is None and not in_then and not stack and not marks and not group_depth
+                    and prev_end not in ("&&", "||") and "|" not in (end, prev_end) and not segment.rstrip().endswith("&"))
+            flipped = _sets_errexit(tokens, sure)
+            errexit = errexit if flipped is None else flipped
+        if in_then:
             for _ in range(marks.count(")")):
                 if stack:
-                    where, prev = stack.pop()
-                    skipping = False
+                    where, prev, stranded = stack.pop()
             continue
-        tokens = segment_tokens(segment)
-        move = _segment_cd_move(tokens) if tokens else None
+        if skip_depth is not None:
+            for _ in range(marks.count(")")):
+                if stack:
+                    where, prev, stranded = stack.pop()
+            skip_depth = min(skip_depth, len(stack))
+            skip_nest = max(0, skip_nest + _compound_delta(segment))
+            if skip_nest:
+                continue   # inside a `{`, `if` or loop the failed `&&` skipped: a `;` or newline does not end it
+            if end not in ("&&", "|") and len(stack) <= skip_depth:
+                skip_depth = None
+            continue
+        group_depth = max(0, group_depth + _compound_delta(segment, wide=True))
+        move =_segment_cd_move(tokens) if tokens else None
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
         if tokens is None:
-            where = None
+            where, stranded = None, False
         elif move is not None:
             old = where
-            if move is CD_UNKNOWN:
-                where = None
+            if move is CD_UNKNOWN or any(mark in move for mark in "$%`"):
+                where, stranded = None, False
             elif move == "-":
-                where = prev
-            elif any(mark in move for mark in "$%`"):
-                where = None
+                where, stranded = prev, False
             else:
+                for _ in range(marks.count(")")):   # the `)` that closes a subshell is not part of the folder
+                    if move.endswith(")"):
+                        move = move[:-1]
                 target = shell_abs(move or "~", where)
                 if target and os.path.isdir(target):
+                    stranded = stranded and shell_abs(move or "~", None) is None
                     where = target
                 elif target and failed_cd_stays:
-                    skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
-                    old = prev   # a failed cd leaves the folder `cd -` goes back to alone
+                    skip_depth = len(stack) if end == "&&" else None   # the shell stays, and an `&&` chain stops
+                    skip_nest = 0
+                    if end in (";", "\n") and _opens_if_body(segments, at):
+                        skip_if = 0   # the `then` body runs only when the test passes
+                    # The shell exits on a failure: later segments follow a cd that landed. That holds for an
+                    # `|| exit`, an `if ! cd` whose then body starts with `exit`, and a bare cd under `set -e`.
+                    negated_if = prev_end not in ("&&", "||") and end in (";", "\n") and tokens[:2] == ["if", "!"] and _exits_on_failure(segments, ends, at)
+                    # Inside a group, `if` or loop the exit may not happen: `{ cd X; push; } || true` ignores errexit.
+                    bare_under_errexit = (errexit and prev_end not in ("&&", "||") and end not in ("&&", "||", "|") and not stack and not marks
+                                          and not group_depth and basename(tokens[0]) in CD_WORDS)
+                    if end == "||" and _exits_on_failure(segments, ends, at):
+                        where, stranded = None, False
+                    elif _never_runs(segments, ends, at, tokens, move):
+                        old = prev   # the test fails, so the cd neither strands nor clears
+                    elif negated_if or bare_under_errexit:
+                        where, stranded = None, False
+                    else:
+                        stranded = True
+                        old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
-                    where = None
+                    where, stranded = None, False
             prev = old
         for _ in range(marks.count(")")):
             if stack:
-                where, prev = stack.pop()
-    return where
+                where, prev, stranded = stack.pop()
+        if skip_depth is not None:
+            skip_depth = min(skip_depth, len(stack))
+    return CdWalk(where, stranded and where is not None, False)
+
+
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+    """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
+    A `cd` into a folder that does not exist is not trusted: the folder is then None (`cd_walk`
+    holds the walk, and the read that trusts it)."""
+    return cd_walk(segments, number, shell_cwd, ends).where
 
 
 def _segment_git_c_target(tokens):

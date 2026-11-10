@@ -224,6 +224,10 @@ MUTATING_COMMAND = (
 _RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
 
 
+# The git subcommands that change the files they name, as `rm` and `mv` of the shell do.
+GIT_FILE_VERBS = ("mv", "rm")
+
+
 def _mutates_as_command(command: str, words) -> bool:
     """True when the segment's own command (`command`, its resolved name) changes the files it names:
     a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
@@ -235,7 +239,7 @@ def _mutates_as_command(command: str, words) -> bool:
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
-        return any(word in ("mv", "rm") for word in rest[:2])
+        return any(word in GIT_FILE_VERBS for word in rest[:2])
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
