@@ -35,7 +35,7 @@
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
                           the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
                           new process, file or timer.
-  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
+  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
@@ -43,6 +43,20 @@
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
+                          A PR number is also checked, before the ci-job run, against each other open PR of its lane (a draft counts; a
+                          PR whose body holds a session URL the linted PR's body holds) with `git merge-tree --write-tree`. A conflict
+                          FAILs, naming each PR and file, with its remedy (--lint-unknown-ok never lifts it). PRs in one stack (one head
+                          holds the other) are skipped. Added cost: exactly one PR-list read plus one `git merge-tree --write-tree`
+                          process per other PR compared; none for a stack-skipped PR, none when there is no other PR. (A PR-list read is
+                          one `gh api` call per 100 PRs, and the PR-list read still runs when there is no other PR. When any PR is
+                          compared there is also one `git fetch` of origin's heads, which covers every origin branch, and the stack reads
+                          of `git merge-base --is-ancestor`, never a merge-tree. A shallow clone that cuts a stack read runs
+                          `git fetch --unshallow` once.) A merge-tree that cannot read is an unknown stop, never a pass. A PR whose head
+                          origin does not hold (a fork's head) is an unknown stop that names the PR: running again never clears it.
+                          --with PR,PR,...: also compare against each named open PR, one comma list (a blank or non-digit item, a PR that
+                          is not open or not found, and the linted PR itself are each a stop; a repeated number is read once). Missed
+                          case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
+                          with no session URL has no lane PRs, so only --with finds any. A commit or ref target is not cross-measured.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -904,6 +918,10 @@ class Host:
         if len(hits) != 1:
             raise Stop(f"{len(hits)} open pull requests have the head {branch}: name the pull request by its number")
         return hits[0]
+
+    def open_pulls(self):
+        """-> the open pull requests (drafts too), every page, as `GET pulls` lists them. A failed read is a Stop, never an empty list."""
+        return self.pages("pulls", fields={"state": "open"})
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
@@ -2619,6 +2637,17 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
+def head_holds(root, tip, head):
+    """True when `head` holds `tip`, False when it does not, None when git could not tell. A shallow clone that cut the answer is
+    fetched in full once and asked again; a read that still cannot say stays None, never a pass. The one home of that retry."""
+    held = ancestor(root, tip, head)
+    if held is None:
+        import git_reads  # hooks/git_reads.py: the one shallow probe
+        if git_reads.is_shallow(root) is True:
+            git(root, "fetch", "-q", "--unshallow", "origin", "+refs/heads/*:refs/remotes/origin/*")  # a failed fetch leaves the read unknown
+            held = ancestor(root, tip, head)
+    return held
+
 def refuse_unstacked_head(root, head, base):
     """A stacked PR (base other than main) whose head lacks its base's current head FAILs the lint before the long ci-job run. The caller
     has fetched origin/<base> (open_worktree). In a shallow clone that cut the answer, the check fetches the full history once and asks
@@ -2626,17 +2655,84 @@ def refuse_unstacked_head(root, head, base):
     if base == "main":
         return
     c, tip = git(root, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{base}^{{commit}}")
-    held = None if c else ancestor(root, tip, head)
-    if held is None and not c:
-        import git_reads  # hooks/git_reads.py: the one shallow probe
-        if git_reads.is_shallow(root) is True:
-            git(root, "fetch", "-q", "--unshallow", "origin", "+refs/heads/*:refs/remotes/origin/*")  # a failed fetch leaves the read unknown below
-            held = ancestor(root, tip, head)
+    held = None if c else head_holds(root, tip, head)
     if held is None:
         raise Stop(f"the stack check of {head[:9]} against {base} is unknown: git could not say whether the head holds origin/{base}. Run again. {LANE_LINT_CITE}")
     if not held:
         raise Stop(f"the lint of {head[:9]} FAILs: the head lacks {base}'s current head {tip[:9]}. "
                    f"Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again. {LANE_LINT_CITE}")
+
+LANE_SESSION = re.compile(r"claude\.ai/code/(session_[A-Za-z0-9_-]+)")  # the session URL line a lane's PR body carries: the key of "same lane"
+
+def parse_with(value, own):
+    """-> the PR numbers of a --with comma list, each once, in order. A blank or non-digit item, or the linted PR's own number, is a Stop:
+    a lenient parse would drop a named PR from the check and read as a pass."""
+    numbers = {}
+    for item in value.split(","):
+        item = item.strip()
+        if not re.fullmatch(r"[0-9]+", item):
+            raise Stop(f"--with takes a comma list of pull request numbers, and {item!r} is not one. Nothing was read. {LANE_LINT_CITE}")
+        if int(item) == own:
+            raise Stop(f"--with names PR #{own}, which is the PR being linted. Name the other PRs. Nothing was read. {LANE_LINT_CITE}")
+        numbers[int(item)] = None
+    return list(numbers)
+
+def conflicting_files(root, ours, theirs):
+    """-> (state, files) of `git merge-tree --write-tree` on two commits: "clean" (exit 0), "conflict" with the conflicted paths (exit 1),
+    or "unknown" with one line of why (any other exit: a missing object, a git older than 2.38)."""
+    c, out = sh(["git", "-C", root, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ours, theirs])
+    if c == 0:
+        return "clean", []
+    if c == 1:
+        return "conflict", [f for f in out.split("\0")[1:] if f]  # the first field is the merged tree's id
+    return "unknown", [f"git merge-tree exited {c}: {' '.join(out.split())[:200]}"]
+
+def cross_measure(root, head, n, body, host, with_prs):
+    """Check `head` of PR `n` against each other open PR of its lane (a body with the same session URL) and each PR in `with_prs`, with
+    `git merge-tree --write-tree`. One PR-list read; one merge-tree per PR compared. A PR in a stack with this head (one head holds the
+    other) is skipped before any merge-tree: its own base is not the question. A conflict FAILs, naming each PR and file. A PR that is
+    named and not open, or a read git cannot answer, is a Stop: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
+    session id is found only through --with."""
+    lane = set(LANE_SESSION.findall(body or ""))
+    rows = {d["number"]: d for d in host.open_pulls() if d["number"] != n}
+    for m in with_prs:
+        if m not in rows:
+            raise Stop(f"--with names PR #{m}, which is not an open pull request (closed, merged or not found), so its head cannot be compared: unknown, not a pass. {LANE_LINT_CITE}")
+    picked = sorted({m for m, d in rows.items() if lane & set(LANE_SESSION.findall(d.get("body") or ""))} | set(with_prs))
+    if not picked:
+        return
+    c, out = git(root, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+    if c:
+        raise Stop(f"the cross-measure of {head[:9]} is unknown: git fetch origin failed: {out} {LANE_LINT_CITE}")
+    conflicts, unknown = [], []
+    unfetched = []
+    for m in picked:
+        other = rows[m]["head"]["sha"]
+        if git(root, "rev-parse", "--verify", "-q", f"{other}^{{commit}}")[0]:  # a fork's head is not on origin, so no fetch brings it
+            unfetched.append(f"  #{m}: its head {other[:9]} could not be fetched from origin (a fork's head), so it cannot be compared")
+            continue
+        held = head_holds(root, other, head)
+        if held is False:
+            held = head_holds(root, head, other)
+        if held is None:
+            unknown.append(f"  #{m}: git could not say whether one head holds the other")
+        elif held:
+            continue  # a stack pair
+        else:
+            state, files = conflicting_files(root, head, other)
+            if state == "conflict":
+                conflicts.append(f"  #{m}: {', '.join(files) or '(no file name read)'}")
+            elif state == "unknown":
+                unknown.append(f"  #{m}: {files[0]}")
+    if conflicts:
+        raise Stop("\n".join([f"the lint of {head[:9]} FAILs: its head conflicts with another PR's head (git merge-tree), file by file:", *conflicts,
+                              *(["and these PRs could not be compared:", *unknown, *unfetched] if unknown or unfetched else []),
+                              "Merge one head into the other, or rebase one on the other, so the two stack (either way, for a PR on main or on a release base). " + LANE_LINT_REMEDY]))
+    if unfetched:  # no run clears it: the fork's owner must push the head to origin, or the lane compares it by hand
+        raise Stop("\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unfetched, *unknown,
+                              f"Ask the owner of that head to push it to origin, or compare it with this head by hand. {LANE_LINT_CITE}"]))
+    if unknown:
+        raise Stop("\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY]))
 
 def ci_job_run(wt, *args, notes=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
@@ -2663,13 +2759,15 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def lane_lint(root, target, host, base="", unknown_ok=""):
+def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
-    A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head FAILs first.
+    A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head FAILs first;
+    then cross_measure checks the head against the lane's other open PRs and `with_prs`.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
+    host = host or Host()
     if target.isdigit():
         host = host or Host()
         n = int(target)
@@ -2685,6 +2783,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         pin_notes = []
         if target.isdigit():
             refuse_unstacked_head(root, head, base)
+            cross_measure(root, head, int(target), info["body"], host, with_prs)
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
     finally:
         drop_worktree(root, tmp, wt)
@@ -3721,6 +3820,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
+    p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -3752,8 +3852,8 @@ def main(argv, host=None, lock=None, hosts=None):
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
     if not a.lane_lint:
-        if a.base or a.lint_unknown_ok:
-            p.error("--base and --lint-unknown-ok go with --lane-lint")
+        if a.base or a.lint_unknown_ok or a.with_prs is not None:
+            p.error("--base, --lint-unknown-ok and --with go with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     if a.idle_lanes:
@@ -3761,6 +3861,8 @@ def main(argv, host=None, lock=None, hosts=None):
     elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
             p.error("--lane-lint takes a pull request number, commit or ref, and stands alone")
+        if a.with_prs is not None and not a.pr.isdigit():
+            p.error("--with goes with a pull request number: only a PR has a lane to measure")
     elif a.role is not None:
         if a.pr is not None or a.confirm or a.unlock is not None or a.reviewed or a.review_record:
             p.error("--role stands alone")
@@ -3796,7 +3898,8 @@ def main(argv, host=None, lock=None, hosts=None):
             if c:
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role check and any lock: it merges and pushes nothing
+                with_prs = parse_with(a.with_prs, int(a.pr)) if a.with_prs is not None else ()  # a bad list stops before any read
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs)  # before the role check and any lock: it merges and pushes nothing
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
