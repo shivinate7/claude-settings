@@ -890,7 +890,7 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True}
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
 
-    # speak-cite-id-plus-gloss: a waiting-page item cited by number (`item <n>`, `page item <n>`)
+    # speak-cite-id-plus-gloss: a page item cited by number (`item <n>`, `page item <n>`)
     def test_item_cite_red_bare_item_number_blocks(self):
         rows = [
             # Catches: a bare item number after "Per" passes.
@@ -958,14 +958,29 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 
     def test_item_cite_red_line_word_away_from_item_blocks(self):
         # Catches: the exemption for "line item" reaches past its own two words, so "a line, item 12." passes. Only
-        # the word right before "item" is exempt. Red on old code: no item rule exists yet.
+        # the word right before "item" is exempt.
         self.assert_blocked("a line, item 12." + ITEM_DONE, "'item 12' is a record id")
 
     def test_item_cite_allowed_line_item_is_not_a_cite(self):
-        # Catches: "line item 12", a PO or budget line, is read as a waiting-page item id. Green on old code.
+        # Catches: "line item 12", a PO or budget line, is read as a page item id.
         rows = [
             "The line item 12 on the PO is paid.",
             "Line item 12 is paid.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line + ITEM_DONE)
+
+    def test_item_cite_red_bare_item_with_hash_blocks(self):
+        # Catches: a bare item number written with a "#" passes, so the "#" hides the id from the cite check.
+        self.assert_blocked("Per item #46." + ITEM_DONE, "item #46' is a record id")
+
+    def test_item_cite_allowed_item_number_as_a_count_or_interval(self):
+        # Catches: "item <n>" that counts or spaces a thing, not a page item, is read as a bare page item id.
+        rows = [
+            "Doing item 2 of 3 now.",
+            "Each item 5 minutes apart.",
+            "Item 2 of 3 done (clear button).",
         ]
         for line in rows:
             with self.subTest(line=line):
@@ -4893,8 +4908,8 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assert_allowed("The owner answers in chat. Answering takes a minute, and the answer is pending.")
 
     def test_an_green_landed_turn_with_a_cited_line_passes(self):
-        # Re-pointed: the bare "Item 143" is a record id with no gloss, so the cite check refuses it on a landed turn.
-        # The gloss "(clear button)" keeps the answered source and passes the cite check.
+        # A landed turn with a glossed page item that names its source passes. A bare "Item 143" with no gloss is
+        # refused as a record id, so the gloss "(clear button)" is what keeps the line allowed.
         reply = "Item 143 (clear button) answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
         self.assert_allowed(reply, landed=True)
 

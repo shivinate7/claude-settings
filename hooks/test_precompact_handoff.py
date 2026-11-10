@@ -1192,8 +1192,8 @@ ITEM_CITE_WANTS = (
 
 
 def case_prompt_item_cite_carries_its_name():
-    # A handoff that cites a waiting-page item by number (`item 46`) must give its short name too, as a
-    # reply does. One sentence or bullet of the prompt, with the sentence after it, must say so.
+    # A handoff that cites a page item by number (`item 46`) must give its short name too, as a reply does.
+    # One sentence or bullet of the prompt, with the sentence after it, must say so.
     with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
         text = f.read()
     check("prompt: the file has text (item-cite check)", bool(text.strip()), "empty prompt")
