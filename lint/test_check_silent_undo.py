@@ -1082,6 +1082,94 @@ class LaneUndo(unittest.TestCase):
         self.assertTrue(any("app.txt" in p and note[:9] in p for p in got),
                         "no FAIL names app.txt and main's note commit %s: %r" % (note[:9], got))
 
+    def rewrite_then_restore_test_lines(self, count):
+        """Main holds `count` card test lines. The lane rewrites all of them, then puts main's text back, byte for byte."""
+        r = self.r
+        main = "".join("card test line %d checks the title\n" % i for i in range(1, count + 1))
+        marked = "".join("card test line %d checks the title  # reviewed\n" % i for i in range(1, count + 1))
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds %d card test lines" % count, tests__card_txt=main)
+        r.push()
+        r.sh("checkout", "-q", "-B", "lane", "origin/main")  # the lane starts from the main that holds the file
+        a = r.commit("A: mark the card test lines as reviewed", tests__card_txt=marked)
+        b = r.commit("B: take the review marks out again", tests__card_txt=main)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit, and it rewrites A's lines
+        self.assertEqual(r.sh("rev-parse", b + ":tests/card.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: B puts main's blob back
+
+    def test_a_lane_that_rewrites_five_test_lines_and_then_puts_them_back_is_green(self):
+        self.rewrite_then_restore_test_lines(5)
+        self.assertEqual(self.r.verdict(), [], "a restore of the lane's own rewrite of five main lines is read as an undo")
+
+    def test_a_lane_that_rewrites_six_test_lines_and_then_puts_them_back_is_green(self):
+        self.rewrite_then_restore_test_lines(6)
+        self.assertEqual(self.r.verdict(), [], "a restore of the lane's own rewrite of six main lines is read as an undo")
+
+    def test_a_commit_that_adds_five_lines_and_rewords_a_main_line_then_restores_the_file_is_red(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:app.txt")  # the pre-lane blob
+        new = "".join("lane added line %d\n" % i for i in range(1, 6))
+        a = r.commit("A: add five lines and reword the Card line", app_txt=BODY + "function Card(props) {}\n" + new)
+        b = r.commit("B: restore app.txt to its pre-lane blob", app_txt=BODY + "function Card() {}\n")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(r.sh("rev-parse", b + ":app.txt"), pre)  # scope: B is the pre-lane blob, the whole-file read's trigger
+        assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def test_a_lane_line_grown_from_one_to_five_lines_then_restored_whole_is_red(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:app.txt")  # the pre-lane blob
+        a = r.commit("A: add one lane line", app_txt=self.CARD + "lane line\n")
+        grown = "".join("lane line %d\n" % i for i in range(1, 6))
+        b = r.commit("B: grow the lane line to five lines", app_txt=self.CARD + grown)
+        c = r.commit("C: restore app.txt to its pre-lane blob", app_txt=BODY + "function Card() {}\n")
+        self.assertEqual(self.lane(), [a, b, c])  # scope: C is the third lane commit, after the grow
+        self.assertEqual(r.sh("rev-parse", c + ":app.txt"), pre)  # scope: C is the pre-lane blob
+        assert_finding(self, r.verdict(), "app.txt", c, b)
+
+    def test_a_five_line_lane_add_then_a_whole_file_restore_is_under_the_block_size(self):
+        r = self.r
+        pre = r.sh("rev-parse", "HEAD:app.txt")  # the pre-lane blob
+        a = r.commit("A: add five lane lines", app_txt=self.CARD + "".join("lane line %d\n" % i for i in range(1, 6)))
+        b = r.commit("B: restore app.txt to its pre-lane blob", app_txt=BODY + "function Card() {}\n")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(r.sh("rev-parse", b + ":app.txt"), pre)  # scope: B is the pre-lane blob
+        self.assertEqual(r.verdict(), [], "five changed lines are under BLOCK_LINES (6): the whole-file restore must not be read as an undo")
+
+    def test_a_five_line_lane_add_to_a_test_file_then_a_whole_file_restore_is_red(self):
+        r = self.r
+        kept = "card test kept line\n"
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds a card test file", tests__card_txt=kept)
+        r.push()
+        r.sh("checkout", "-q", "-B", "lane", "origin/main")  # the lane starts from the main that holds the file
+        a = r.commit("A: add five test lines", tests__card_txt=kept + "".join("card test added line %d\n" % i for i in range(1, 6)))
+        b = r.commit("B: restore tests/card.txt to main's text", tests__card_txt=kept)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(r.sh("rev-parse", b + ":tests/card.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: B is main's blob
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+
+    def test_a_lane_that_rewrites_five_test_lines_and_also_drops_a_line_main_added_is_red(self):
+        r = self.r
+        main = "".join("card test line %d checks the title\n" % i for i in range(1, 6))
+        marked = "".join("card test line %d checks the title  # reviewed\n" % i for i in range(1, 6))
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds five card test lines", tests__card_txt=main)
+        r.push()
+        r.sh("checkout", "-q", "-B", "lane", "origin/main")  # the lane starts from the main that holds the file
+        a = r.commit("A: mark the card test lines as reviewed", tests__card_txt=marked)
+        r.sh("checkout", "-q", "main")
+        note = r.commit("main adds a note", app_txt=self.CARD + "main note\n")
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "main")  # the lane takes main's note; the lane itself never added it
+        m = r.sh("rev-parse", "HEAD")
+        c = r.commit("C: restore the test lines and drop the main note", tests__card_txt=main, app_txt=self.CARD)
+        self.assertEqual(self.lane(), [a, m, c])  # scope: A, the merge of main, then C
+        self.assertIn("main note", r.sh("show", "origin/main:app.txt"))  # scope: main holds the note
+        self.assertNotIn("main note", r.sh("show", "HEAD:app.txt"))  # scope: head lacks it
+        got = r.verdict()
+        self.assertTrue(any("app.txt" in p and note[:9] in p for p in got),
+                        "no FAIL names app.txt and main's note commit %s, the drop of a line main added: %r" % (note[:9], got))
+
 
 class IntegrationBase(unittest.TestCase):
     """This repo merges through integration branches. A PR based on `integ` is checked against
