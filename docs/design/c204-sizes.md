@@ -3,6 +3,7 @@
 Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's value in a comment. Screen: `skills/waiting-page/page.html` at 1cc47f01 (`optPic`, `fitFrame`, `MIN_PIC`, `.dfitwrap`, `.opt .opic`). Owner's grant: waiting-page item 55 note, Oct 28 17:50 CDT. The mockup was measured with headless Chromium 153 at 390, 1280 and 2200, light and dark, and at 1065 (the narrowest page with three option columns). Fonts fall back offline.
 
 1. When a picture scrolls. Today's scale decides it: sc = min(1, W / w, max(480 / h, 120 / w)), where w × h is the mockup (390 wide) or the focus box. The picture scrolls only when ceil(h × sc) > 481, so a pass of 1px or less counts as fitting and the box is min(480, ceil(h × sc)), with no scroll and no cue. That is a box more than 4 times as tall as it is wide, such as a 390-wide mockup taller than 1563px (a 1561px mockup draws 480 high; the wrap's 1px border hides up to 3px of its bottom edge). A focus box under 120 wide and over 481 high also scrolls. Every other picture draws as today: the same width and transform, and the same height up to the 480 cap.
+   - Replaced by decision `page-pic-fills-card` (an option picture fills its card), owner 2026-11-09 21:26 CST.
 2. Question 1, a focused card. Pick: 1A.
    - 1A (state `focus-in`): the card scrolls only over the focus box, and opens at the top of the box. Gain: this keeps today's rule, that the card shows only the focus element (`SKILL.md`, the `focus` bullet; `fitFrame` translates by −box). The open position is scrollTop 0, so no timing can make it wrong. A focus that fits is unchanged. Loss: the mockup above and below the focus is still only in View.
    - 1B (state `focus-whole`): the card scrolls the whole mockup in the focus column, and opens with the focus at the top (scrollTop = round(box.y × sc)). Gain: the context round the focus is in the card. Loss: the open position needs the box that the frame posts, so a cached or declared first paint opens in the wrong place. A focus narrower than the mockup cuts the columns at its sides.
@@ -30,6 +31,7 @@ Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's 
    - Whether a picture scrolls is still decided at today's scale (item 1). Only the scroll case widens. Every picture that fits keeps today's scale.
    - Not picked: 5A, today's scale, min(w, 120) wide, a 132 × 480 box.
    - Departs from: `fitFrame`'s scale and `MIN_PIC` in the scroll case.
+   - Replaced by decision `page-pic-fills-card` (an option picture fills its card), owner 2026-11-09 21:26 CST.
 7. Builder rules.
    - The change applies only to `optPic`'s call (maxH 480). `designPreview` and `stageFrame` do not change.
    - DOM of a capped wrap: wrap > `.dtop`, `.dsizer` > iframe, `.dcue` > `.dmore`. `.dsizer` is display block, position relative, overflow hidden, and pw × ceil(bh × sc), where bh is the focus box height, else the mockup height. The iframe keeps today's position and transform inside the sizer.
