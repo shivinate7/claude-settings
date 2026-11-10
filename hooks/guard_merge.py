@@ -245,12 +245,12 @@ def _rev(where: str, spec: str):
     return answer.stdout.strip() if answer is not None and answer.returncode == 0 and answer.stdout.strip() else None
 
 
-def batch_held_hit(args, where: str, overrides, tool: str) -> str:
+def batch_held_hit(args, where: str, tool: str, overrides=None) -> str:
     """The ready pull request that holds the branch a non-forced `git push` writes, as `#n (head branch)`, else ''. Rule push-batch-held
     (decision batch-freeze-lane-set): a ready pull request on the default base, from another branch, holds the
     branch's remote tip (the compare `tip...head` reads ahead or identical). The tip is the local
     `refs/remotes/<remote>/<branch>`. A push with no remote tip, or one that moves nothing, is silent. A list or
-    compare that cannot be read, or a destination name the shell fills in (`$X`), allows the push and logs one
+    compare that cannot be read, a check that raises, or a destination name the shell fills in (`$X`), allows the push and logs one
     `push-batch-unread` line. A tip the default branch already holds (merged) is silent, with no gh call. A move is
     a destination with no deletion part: `HEAD:lane :old` judges `lane`. `--all` judges each local branch that differs
     from its remote-tracking ref.
@@ -263,26 +263,29 @@ def batch_held_hit(args, where: str, overrides, tool: str) -> str:
     dry run (the caller skips it) or a read verb."""
     moves = []   # (branch, its remote tip, the default branches)
     unread = ""
-    for remote, dest, source in push_moves(args, where, overrides):
-        if "$" in dest or "`" in dest:   # a name the shell fills in: the guard cannot read it
-            unread = "the destination name %s cannot be read" % dest
-            continue
-        tip = _rev(where, "refs/remotes/%s/%s" % (remote, dest))
-        if not tip or _rev(where, source) in (None, tip):
-            continue
-        defaults = _push_default_branches(where, remote)   # read only for a push that moves a tip
-        if defaults is None or dest in defaults:
-            continue
-        # A tip the default branch already holds is merged: no pull request needs it frozen, and no gh read is made.
-        # Only a True answer counts; a read that could not tell goes on to the gh read.
-        if any(branch_is_ancestor(where, "refs/remotes/%s/%s" % (remote, name), tip) for name in defaults):
-            continue
-        moves.append((dest, tip, defaults))
-    if moves:
-        holder, failed = _batch_holder(where, moves)
-        if holder:
-            return holder
-        unread = failed or unread
+    try:
+        for remote, dest, source in push_moves(args, where, overrides):
+            if "$" in dest or "`" in dest:   # a name the shell fills in: the guard cannot read it
+                unread = "the destination name %s cannot be read" % dest
+                continue
+            tip = _rev(where, "refs/remotes/%s/%s" % (remote, dest))
+            if not tip or _rev(where, source) in (None, tip):
+                continue
+            defaults = _push_default_branches(where, remote)   # read only for a push that moves a tip
+            if defaults is None or dest in defaults:
+                continue
+            # A tip the default branch already holds is merged: no pull request needs it frozen, and no gh read is made.
+            # Only a True answer counts; a read that could not tell goes on to the gh read.
+            if any(branch_is_ancestor(where, "refs/remotes/%s/%s" % (remote, name), tip) for name in defaults):
+                continue
+            moves.append((dest, tip, defaults))
+        if moves:
+            holder, failed = _batch_holder(where, moves)
+            if holder:
+                return holder
+            unread = failed or unread
+    except Exception as exc:   # a read the check cannot make is unknown, never clear: allow, and log it
+        unread = "the push could not be read (%s)" % type(exc).__name__
     if unread:
         record(tool, "noted", "push-batch-unread", "git push " + " ".join(args) + ": " + " ".join(unread.split()))
     return ""

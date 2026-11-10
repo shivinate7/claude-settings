@@ -4379,7 +4379,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 # branch name (rule push-agent-branch), or an implied destination off the branch's
                 # upstream (rule push-stray-branch). A dry run writes nothing. A lane branch the
                 # integration PR holds is refused first, so the deny wins over the agent-branch ask (rule push-batch-held).
-                holder = batch_held_hit(args, where, overrides, tool)
+                holder = batch_held_hit(args, where, tool, overrides)
                 if holder:
                     refuse(tool, "deny", "push-batch-held", PUSH_BATCH_REASON % holder, "git push " + " ".join(args))
                 kind = push_ask_hit(args, where, overrides)
