@@ -23973,6 +23973,44 @@ sh("impeccable bash: bash -c detect is allowed", "bash -c 'npx impeccable detect
 sh("impeccable bash: the pinned script path, detect, is allowed",
    "skills/impeccable/scripts/impeccable detect src", "allow", cwd=NOGIT)
 
+# impeccable, detect after leading flags or a `--` separator. The subcommand is the first word after the
+# flags and the `--` that ends them, so a `detect` there is the same read-only call; `npm run <script> --
+# <args>` hands the `--` on to the script. The flags and the separator never let a build or a settings
+# writer through: the word after them must still be `detect`, and a `detect` later in the call is no subcommand.
+sh("impeccable bash: detect after a leading json flag is allowed",
+   "impeccable --json detect", "allow", cwd=NOGIT)
+sh("impeccable bash: detect after a leading json flag through npx is allowed",
+   "npx impeccable --json detect", "allow", cwd=NOGIT)
+sh("impeccable bash: detect after two leading flags is allowed",
+   "impeccable --json --verbose detect", "allow", cwd=NOGIT)
+sh("impeccable bash: detect after a -- separator is allowed",
+   "impeccable -- detect", "allow", cwd=NOGIT)
+sh("impeccable bash: detect after a -- separator under npm run is allowed",
+   "npm run impeccable -- detect", "allow", cwd=NOGIT)
+
+sh("impeccable bash: live-server behind a leading json flag is denied",
+   "impeccable --json live-server", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: live-server after a -- separator under npm run is denied",
+   "npm run impeccable -- live-server", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: context behind a leading json flag is denied",
+   "impeccable --json context", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: polish after a -- separator is denied",
+   "impeccable -- polish", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: a settings writer behind a leading flag is denied",
+   "npx impeccable --json hooks on", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: flags with no subcommand are denied",
+   "impeccable --json", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: a detect after a live-server subcommand is denied",
+   "impeccable live-server detect", "deny", "impeccable-review-only", cwd=NOGIT)
+# Both chains stay refused. The plain one is denied by its second segment alone, so a fix that reads
+# only the first segment fails it. The flag-led one is denied today by its first segment; it holds once
+# the flag fix lands.
+sh("impeccable bash: a detect chained before a live-server is denied",
+   "impeccable detect; impeccable live-server", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: a flag-led detect chained before a live-server is denied",
+   "impeccable --json detect; impeccable live-server", "deny", "impeccable-review-only", cwd=NOGIT)
+
+
 # impeccable, heredoc bodies. A heredoc body is text, not a run, so the shell reader must not read a
 # body line as a command. A body is KEPT (judged as shell) when an interpreter word sits on the header
 # line, or when a lone quote hides the header; then a body line that starts with the bare word is denied.
