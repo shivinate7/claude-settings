@@ -1,9 +1,10 @@
 {
   "title": "Git is every artifact's home; designer-gap fixes, scan false alarms, the 14 step links",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 523,
   "why": "Feedback fb-1456-1, fb-1458-1, fb-1458-2, fb-1512-1, fb-1509-1, fb-1510-1. The degen copy move is a follow-up. Scope from handoffs/next-coordinator-lanes.md on branch handoff/next-coordinator (coordinator, Nov 3 17:27 CST).",
-  "note": "Lane session_013NEJL4UZnwcbTxUfsYRPJa, started by the coordinator Nov 3 17:26 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
-  "updatedAt": "2026-11-10T03:45:00-06:00"
+  "note": "Lane session_013NEJL4UZnwcbTxUfsYRPJa, started by the coordinator Nov 3 17:26 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL1LjuMhUrYHFuei6Me at 03:46-03:49 CST Nov 10.",
+  "updatedAt": "2026-11-10T03:49:00-06:00",
+  "lane": "session_013NEJL1LjuMhUrYHFuei6Me"
 }

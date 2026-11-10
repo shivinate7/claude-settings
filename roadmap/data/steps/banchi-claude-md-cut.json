@@ -4,8 +4,8 @@
   "status": "ready",
   "order": 534,
   "why": "Owner asked in chat (Nov 3 19:16 CST) what in banchi's CLAUDE.md needs to govern the whole repo; triage read about 50-70 of 398 lines as repo-wide and banchi-only.",
-  "note": "Nov 6 14:40 CST (triage audit for PR #1340): paused. Lane session_013NEJKyhk9bEsEf9t5WYR65 is archived; banchi #1036 went to batch runner 9. The coordinator closes the step when #1036 merges, or restarts the lane.\nNov 6 12:51 CST (coordinator): banchi #1036 goes to batch runner 9.\nLane banchi-claude-md-cut (session_013NEJKyhk9bEsEf9t5WYR65), on banchi #1036, folds in #1005. Commands to `make explain`; folder sections to path rules with AGENTS.md links (page item 155 pick a); restated parent rules deleted. Named by the coordinator Nov 3 19:17 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
-  "updatedAt": "2026-11-10T03:45:00-06:00",
+  "note": "Nov 6 14:40 CST (triage audit for PR #1340): paused. Lane session_013NEJKyhk9bEsEf9t5WYR65 is archived; banchi #1036 went to batch runner 9. The coordinator closes the step when #1036 merges, or restarts the lane.\nNov 6 12:51 CST (coordinator): banchi #1036 goes to batch runner 9.\nLane banchi-claude-md-cut (session_013NEJKyhk9bEsEf9t5WYR65), on banchi #1036, folds in #1005. Commands to `make explain`; folder sections to path rules with AGENTS.md links (page item 155 pick a); restated parent rules deleted. Named by the coordinator Nov 3 19:17 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator 03:49 CST Nov 10: not started here; it goes to the banchi coordinator.",
+  "updatedAt": "2026-11-10T03:49:00-06:00",
   "paused": {
     "why": "Lane session_013NEJKyhk9bEsEf9t5WYR65 is archived; banchi #1036 went to batch runner 9. The coordinator closes the step when #1036 merges, or restarts the lane.",
     "decides": "coordinator",

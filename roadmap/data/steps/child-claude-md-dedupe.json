@@ -4,6 +4,6 @@
   "status": "ready",
   "order": 532,
   "why": "Owner picked a on page item 173 and asked why child repos repeat so much of the shared CLAUDE.md (Nov 3 18:16 CST).",
-  "note": "Lane session_013NEJL3kSVHoSKgF2rJbbB4, survey first. Close item 173 when the ruling lands. Named by the coordinator Nov 3 18:19 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs).",
-  "updatedAt": "2026-11-10T03:45:00-06:00"
+  "note": "Lane session_013NEJL3kSVHoSKgF2rJbbB4, survey first. Close item 173 when the ruling lands. Named by the coordinator Nov 3 18:19 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator 03:49 CST Nov 10: not started here; it goes to the child repos coordinator.",
+  "updatedAt": "2026-11-10T03:49:00-06:00"
 }
