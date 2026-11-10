@@ -452,7 +452,7 @@ while True:
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
             CD_WORDS, _git_subcommand_index, cd_walk, dir_before_segment, shell_abs, walk_quotes,
-            _compound_delta, _exits_on_failure,
+            _compound_delta, _exits_on_failure, _dir_test_word,
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
@@ -5746,7 +5746,8 @@ def git_push_after_check_hit(command: str) -> str:
             start = position
             while start > 0 and ends[start - 1] == "&&":
                 start -= 1
-            if not first and not all(_push_segment_inert(part) for part in segments[start:position + 1]):
+            if not first and not all(_push_segment_inert(part) or _dir_test_before_its_cd(segments, at)
+                                     for at, part in enumerate(segments[:position + 1]) if at >= start):
                 if start < position or not _push_stops_under_errexit(segments, ends, start):
                     return "push"
             if _opens_push_body(segments, start, number):
@@ -5764,6 +5765,15 @@ def git_push_after_check_hit(command: str) -> str:
                 break
             position, first = start - 1, False
     return ""
+
+
+def _dir_test_before_its_cd(segments, at: int) -> bool:
+    """True when `segments[at]` is a directory test (`[ -d M ]`, `[[ -d M ]]`, `test -d M`) and the next
+    segment is the cd to M that the test guards. The cd walk owns that cd (`_never_runs`), so the pair
+    hides no failure from the push."""
+    word = _dir_test_word(segment_tokens(segments[at]))
+    after = segment_tokens(segments[at + 1]) if at + 1 < len(segments) else None
+    return word is not None and bool(after) and basename(after[0]) in CD_WORDS and after[1:2] == [word]
 
 
 def _push_exit_tails(segments, ends):
