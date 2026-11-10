@@ -166,6 +166,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
                        or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
                        explicit GET and the merge tool pass. A local session skips it. An override lifts it.
+  records-page-ready   deny. Marking a pull request ready (MCP update_pull_request with draft false, or the gh ready
+                       command without --undo) while its head's records page is stale, or when that read cannot run, in
+                       a repo that uses the merge tool. A base that is not the default branch, a head holding a
+                       Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD, on the base's first-parent line, passes.
                        (records-index-at-merge)
@@ -479,7 +483,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -4058,6 +4062,15 @@ def settle_ask(tool: str, raw: str) -> None:
     refuse(tool, "ask", rule, reason, matched)
 
 
+def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> None:
+    """Rule records-page-ready, the one refuse() for both forms of the ready mark: a shell call (judge_shell) and the MCP
+    update_pull_request (judge). Marking a pull request ready while its head holds a stale records page, or while that page
+    cannot be read, is refused. A call that marks nothing ready starts no process."""
+    hit = ready_page_hit(tool, tool_input, command, where)
+    if hit:
+        refuse(tool, "deny", "records-page-ready", hit[0], hit[1])
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
                 background: bool = False, description: str = "", payload=None) -> None:
@@ -4420,6 +4433,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = records_page_hit(stripped, cwd)
     if matched:
         refuse(tool, "deny", "records-page", RECORDS_PAGE_REASON, matched)
+
+    # 6c1. A pull request marked ready while its head holds a stale records page (rule records-page-ready).
+    refuse_ready_page(tool, {}, raw, cite_where)
 
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
@@ -5939,6 +5955,10 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+
+    # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
+    if tool == "mcp__github__update_pull_request":
+        refuse_ready_page(tool, tool_input, "", cwd)
 
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:

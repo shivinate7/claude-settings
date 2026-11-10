@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import subprocess
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -383,6 +384,78 @@ def gh_write_of(segment: str) -> str:
     if len(rest) > 1 and rest[1] in GH_WRITE_VERBS.get(rest[0], ()):
         return rest[0] + " " + rest[1]
     return ""
+
+
+# ---- a ready mark on a head whose records page is stale (rule records-page-ready, decision records-index-at-merge)
+# The merge tool rebuilds the page on a draft, before the branch goes ready. Marking it ready first (MCP update_pull_request
+# draft:false, or the gh ready command) skips that step, so the ready run is not the merge run. The read is merge.ready_page_state.
+# Cost: only a call that marks a pull request ready starts anything. Per such call: the pull request's REST reads, one git fetch of the
+# base and one of the head, a temporary worktree, one run of the generator and the worktree's removal. No file stays and no
+# process outlives the call. The whole read shares READY_PAGE_TIMEOUT; the worktree's removal has its own 10 s, so the hook's
+# 60 s timeout holds. A read that cannot run, or runs out of time, refuses as unknown (decision guard-hooks-fail-closed).
+READY_PAGE_TIMEOUT = 40
+READY_PAGE_MCP_TOOL = "mcp__github__update_pull_request"
+READY_PAGE_STALE_REASON = (
+    "Rule (Git, records-index-at-merge): the records page on the head of #%s is stale, and a pull request marked ready "
+    "skips the step that rebuilds it, so the ready run would not be the merge run. Remedy: %s "
+    "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
+)
+READY_PAGE_UNKNOWN_REASON = (
+    "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
+    "unknown whether it is stale: %s. A read that cannot run refuses the ready mark. "
+    "Remedy: fix that cause and mark it ready again, or run the merge tool's records step on the draft, `merge <pr> --confirm`. "
+    "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
+)
+
+
+def ready_page_calls(tool: str, tool_input: dict, command: str):
+    """[(selector, repo)], one per call in this tool call that marks a pull request ready. The shell form is read by
+    ci_wake.triggers, the one parser of the gh ready command (quotes, heredocs, comments, -R, GH_REPO, --undo). The MCP form is
+    update_pull_request with draft false. Any other call is []: a text with no `ready` imports nothing and starts nothing."""
+    if tool == READY_PAGE_MCP_TOOL:
+        if tool_input.get("draft") is not False:
+            return []
+        owner, name = tool_input.get("owner"), tool_input.get("repo")
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        return [(str(tool_input.get("pullNumber")), repo)]
+    if "ready" not in command.lower():
+        return []
+    import ci_wake
+    return ci_wake.triggers(command, tool == "PowerShell")
+
+
+def ready_page_read(selector: str, repo: str, where: str):
+    """-> (state, detail): ("stale"/"current"/"skip", the pull request's number) or ("unknown", the one cause).
+    Never raises: an unloadable tool, a Stop, a timeout and any other failure are one unknown with its cause."""
+    module = merge_module()
+    if module is None:
+        return "unknown", "the merge tool could not be loaded"
+    selector = selector[1:] if selector[:1] == "#" and selector[1:].isdigit() else selector
+    try:
+        with module.shared_deadline(READY_PAGE_TIMEOUT):
+            host = module.Host(repo=repo or None, cwd=where)
+            number = host.pr_number(selector)
+            state = module.ready_page_state(where, number, host)
+    except subprocess.TimeoutExpired:  # its text names the resolved program path
+        return "unknown", "a read timed out after %d s" % READY_PAGE_TIMEOUT
+    except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
+        return "unknown", " ".join(str(e).split()) or type(e).__name__
+    return state, str(number)
+
+
+def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
+    """(reason, matched) when a ready mark in this call must be refused, else None. Judged only in a repo that uses the
+    merge tool. The first stale or unread head ends the scan."""
+    if not where or not uses_merge_tool(where):
+        return None
+    for selector, repo in ready_page_calls(tool, tool_input, command):
+        state, detail = ready_page_read(selector, repo, where)
+        if state == "stale":
+            remedy = merge_module().stale_page_remedy(int(detail))
+            return READY_PAGE_STALE_REASON % (detail, remedy), "ready on a stale page #" + detail
+        if state == "unknown":
+            return READY_PAGE_UNKNOWN_REASON % cap_safe(detail, 200), "ready, page read unknown"
+    return None
 
 
 # ---- a lane commit of the generated records page (decision records-index-at-merge)
