@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 14:27 CST.
+Last rewrite: 2026-11-10 14:30 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -52,8 +52,16 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   Replaces: merge/merge.py LINT_SECONDS 1200, lint/check_debt_retire.py TIMEOUT 600,
   hooks/mutate_guard.py and janitor/mutate_sweep.py 1200, lint/check_python_floor.py 300.
   Home: new decision time-limits-end-hangs-only; decision ci-job-caps rewritten to match.
-  Open: the silence window comes from measured runs; its value is not chosen. Four points from triage's
-  record-writer (coordinator 14:18 CST) wait on the owner.
+  Details, owner 14:24 CST Nov 10 (answers to triage's four points):
+  - A check that gives a verdict (lint, tests, Retire) stops on silence, reads "hung", retries once. Any
+    other background command is only reported and keeps running (decision stall-watch). ("yes that's ok")
+  - Every CI job keeps a total-time limit, computed from recent green runs by a script, generously
+    large. Local tools use the silence stop only. ("it should be generously large maybe")
+  - merge.deadlineMinutes is computed each time from the current CI limits; reaching it reads "CI still
+    running", never a refusal. ("this needs to be a moving target")
+  - The silence window is measured per tool from the longest gap between output lines in green runs.
+  - Margins multiply, never add: "+5m is not as generous as like +1.5x".
+
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
   The owner and an arbiter make grants and rulings. An arbiter's is marked as the arbiter's, ranks
