@@ -56,6 +56,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
+  pointer-edit         deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
+                       pointer checkout's own files. The pointer's `.git`, a linked worktree under
+                       `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
+                       missing pointer and the read tools pass. A shell write is not judged. The
+                       reason names the EnterWorktree tool. An override lifts a direct pointer path. A
+                       config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
+                       per target), so no override lifts it, as with frozen-path. It spawns no git.
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -145,11 +152,20 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  agent-no-remote-tools
+                       deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
+                       tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
+                       scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
+                       An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
+                       ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
+                       or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
+                       explicit GET and the merge tool pass. A local session skips it. An override lifts it.
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        A merge's own page at MERGE_HEAD, on the base's first-parent line, passes.
                        (records-index-at-merge)
@@ -214,6 +230,14 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
+  scratchpad-owner     ask. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+                       writes over one, that another agent wrote. Each such write records its agent in a
+                       sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
+                       command word; a write is a Write-family target or a shell write target. A first
+                       write, the agent's own file, a file that no longer exists, a call with no `agent_id` (its
+                       write deletes the file's record) and a read pass. The record moves before an overwrite ask.
+                       The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
+                       (scratchpad-owner)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
@@ -438,7 +462,7 @@ while True:
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
-            _segment_cd_target, _strip_heredoc_bodies_unconditionally,
+            _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
@@ -454,10 +478,11 @@ while True:
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            scratchpad_clear_writer, scratchpad_record_writer, scratchpad_writer_of,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_head_hit,
+            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -468,8 +493,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -2757,11 +2782,16 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
-# The one home of the claude-code-remote server name. lint/check_agent_models.py reads it from here.
-REMOTE_SERVER = "mcp__claude-code-remote"
+from shared_names import REMOTE_OUTWARD_TOOLS, REMOTE_SERVER  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
+AGENT_NO_REMOTE_REASON = (
+    "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
+    "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
+    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "(decision lanes-start-as-agents, an agent is not a lane)"
+)
 from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
@@ -4408,6 +4438,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
 
+    # 5b. A gh write in a cloud session (rule gh-write-cloud): the GitHub MCP tools and the merge tool write there.
+    # It runs before steps 6 and 6b so a cloud pr merge or pr create gets the MCP remedy, not one that names the
+    # refused form.
+    if is_cloud():
+        for text, _in_message in _substitutions(stripped)[0]:
+            for seg in split_segments(text):
+                label = gh_write_of(seg) if seg.strip() else ""
+                if label:
+                    refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
+
     # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
     # could not run. Judged per segment from the command word, so quoted text never fires it.
     for segment in split_segments(stripped):
@@ -5649,6 +5689,137 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ another agent's scratchpad script
+#
+# Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
+# scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
+# file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
+# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file. A call
+# with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
+# touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
+SCRATCHPAD_WORD = "scratchpad"
+SCRATCHPAD_OWNER_REASON = (
+    "Rule (scratchpad-owner): this script was written by another agent of this session, and running it "
+    "runs code you have not read. "
+    "Remedy: write your own copy of the script and run that, or ask the orchestrator to hand it to you. "
+    "(decision scratchpad-owner, an agent asks before it runs another agent's scratchpad script)"
+)
+SCRATCHPAD_OVERWRITE_REASON = (
+    "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
+    "destroys work that agent may still need. "
+    "Remedy: write your own file under a name of your own, or ask the orchestrator to hand the file to you. "
+    "(decision scratchpad-owner, an agent asks before it runs or overwrites another agent's scratchpad file)"
+)
+# Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
+SCRATCHPAD_REMOVERS = ("rm", "mv")
+SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
+
+
+def scratchpad_agent(payload) -> str:
+    """The valid `agent_id` of the call, or '' for the top-level session and a call with no valid id."""
+    agent = payload.get("agent_id") if isinstance(payload, dict) else None
+    return agent if isinstance(agent, str) and AGENT_ID.match(agent) else ""
+
+
+def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
+    """(agent, session, the scratchpad files this call writes, those of them a remover verb names): the Write
+    family's targets and the shell write targets `_shell_write_hit` reads. `agent` is '' for a call with no
+    `agent_id`. Only a call that names a scratchpad reaches the disk; any other call gets no files."""
+    agent, session = scratchpad_agent(payload), session_id_of(payload)
+    files, removed = [], set()
+    if not session:
+        return agent, session, files, removed
+    try:
+        if tool in WRITE_TOOLS:
+            for target in write_targets(tool_input):
+                full = target if os.path.isabs(target) else os.path.join(cwd, target)
+                if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session):
+                    files.append(full)
+        elif tool in SHELL_TOOLS:
+            command = str(tool_input.get("command", "") or "")
+            if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
+                return agent, session, files, removed
+            command, found = strip_heredoc_bodies(command), {}
+
+            def in_scratchpad(word, at, verb):
+                full = shell_abs(word, at)
+                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
+                    found[word] = (full, verb in SCRATCHPAD_REMOVERS)
+                    return True
+                return False
+
+            for _ in range(SCRATCHPAD_WRITE_PASSES):   # the reader names one hit a pass: exclude each as it is listed
+                hit = _shell_write_hit(command, cwd, in_scratchpad, follow_cd=True, predicate_command=True)
+                if not hit:
+                    break
+                files.append(found[hit][0])
+                if found[hit][1]:
+                    removed.add(found[hit][0])
+    except Exception:
+        pass   # a file that cannot be read is not judged and not recorded, never a failed call
+    return agent, session, files, removed
+
+
+def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
+    """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
+    file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
+    writes, and asks when a file's record named another agent. The record is written before the ask, because
+    an approval in the UI never reaches the guard again; a file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file and a file
+    that no longer exists pass (`scratchpad_writer_of`). Run once the call's other rules passed."""
+    agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
+    if not agent:
+        for full in files:
+            scratchpad_clear_writer(full, session)
+        return
+    taken = ""
+    for full in files:
+        writer = scratchpad_writer_of(full, session)
+        if writer and writer != agent and not taken:
+            taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+    for full in files:
+        if full not in removed:
+            scratchpad_record_writer(full, session, agent)
+    if taken:
+        refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON, taken)
+
+
+def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule scratchpad-owner: the log detail when an agent's shell call runs a scratchpad file that another
+    agent of the session wrote, else ''. A run is an interpreter or runner word (`_RUNNER`) with the file as
+    its first plain argument, or the file as the command word. A `cd` ahead of the run names the folder a
+    relative path is read from (`dir_before_segment`). Quoted text, comments and heredoc bodies hold no
+    run: the segments come from `split_segments` over the heredoc-stripped command, its variables read
+    as `_shell_write_hit` reads them (`_resolve_vars`)."""
+    agent, session = scratchpad_agent(payload), session_id_of(payload)
+    command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""
+    if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):
+        return ""
+    ends = []
+    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        word = tokens[index]
+        if _RUNNER(basename(word)):
+            args = list(tokens[index + 1:])
+            at = workflow_script_index(args)   # past the interpreter's flags and their values
+            # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
+            script = args[at] if at is not None and "-" not in args[:at] else ""
+        else:
+            script = word if "/" in word else ""
+        if not script:
+            continue
+        full = shell_abs(script, dir_before_segment(segments, number, cwd, ends))
+        if not full or SCRATCHPAD_WORD not in full or not under_session_scratchpad(full, session):
+            continue
+        writer = scratchpad_writer_of(full, session)
+        if writer and writer != agent:
+            return "agent %s runs a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+    return ""
+
+
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
@@ -5722,6 +5893,39 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
+    # 0, pointer-edit. A write into the pointer checkout's own files is live for every session. An override lifts it
+    # when the target is a direct pointer path. never_lifted calls is_frozen per target, so a config-dir spelling of a
+    # pointer file is not liftable, as with frozen-path.
+    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd) if tool in WRITE_TOOLS else ""
+    if pointer_hit:
+        refuse(tool, "deny", "pointer-edit", POINTER_EDIT_REASON, "write target in the pointer checkout: " + pointer_hit)
+
+    # 8a. The rules that own an outward claude-code-remote call judge it before agent-no-remote-tools (8b), so an agent's call to
+    # one of these tools gets the specific remedy. Each reads only its own tools, so none reorders with the spawn rules below.
+    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
+    trust_transcript = payload.get("transcript_path")
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    if matched:
+        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
+
+    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
+    archive_agent = payload.get("agent_id")
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
+    if archived:
+        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
+
+    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if briefed:
+        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
+    # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
+    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
+    # agent's create_session is refused here. An override lifts it.
+    if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
+        refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
@@ -5802,24 +6006,6 @@ def judge(payload) -> None:
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
-
-    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
-    trust_transcript = payload.get("transcript_path")
-    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
-    if matched:
-        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
-
-    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archive_agent = payload.get("agent_id")
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
-                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
-    if archived:
-        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
-
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
@@ -5902,6 +6088,11 @@ def judge(payload) -> None:
                     remedies.setdefault(n[0], remedy)
             if names:
                 sim_boot_refusal(tool, names, remedies)
+            # An ask, after the denies above: the shell call runs another agent's scratchpad script.
+            owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
+            if owned:
+                refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
+            scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: ask on an overwrite, else record the writer
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
@@ -5969,6 +6160,7 @@ def judge(payload) -> None:
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
+    scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: ask on an overwrite, else record the writer
 
 
 def write_targets(tool_input: dict) -> list:
