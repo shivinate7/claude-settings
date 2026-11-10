@@ -8,7 +8,8 @@ import re
 
 import guard_core
 from guard_core import (
-    GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, _absolute, _run_dir, git_calls,
+    GIT_CHECKOUT_TAKES_NAME, PATH_EXTENSION, PATH_PREFIX, _absolute, _resolved, _run_dir, git_calls,
+    path_is_inside,
 )
 
 
@@ -105,6 +106,41 @@ def pointer_checkout() -> str:
     if not os.path.isdir(target):
         return ""
     return os.path.normcase(os.path.realpath(target))
+
+
+POINTER_EDIT_REASON = (
+    "Rule (pointer-edit): this checkout is the one the owner's global rules point at. Every session "
+    "on this machine runs its hooks, its lint and its agents out of it, so a file edited here is live "
+    "for all of them at once, before any review "
+    "(decision pointer-edit, the guard refuses Edit and Write in the pointer checkout). "
+    "Remedy: call the EnterWorktree tool to make a worktree of your own on a new branch, with a `name` "
+    "and no `path`. Then make the edit inside that worktree."
+)
+
+
+def pointer_edit_hit(targets, cwd: str) -> str:
+    """Return the first target of a Write, Edit, MultiEdit or NotebookEdit call that is one of the
+    pointer checkout's own files, else ''.
+
+    The pointer's `.git` and a linked worktree nested under `.claude/worktrees` are the checkout's
+    folders but not its files, so they pass. An unknown pointer stands the rule down. The paths are
+    read by shape and a realpath, so the rule spawns no git.
+    """
+    pointer = pointer_checkout()
+    if not pointer:
+        return ""
+    git_dir = os.path.join(pointer, ".git")
+    worktree_dir = os.path.join(pointer, ".claude", "worktrees")
+    for target in targets:
+        try:
+            resolved = _resolved(target, cwd)
+        except Exception:
+            continue
+        if (path_is_inside(resolved, pointer) is True
+                and path_is_inside(resolved, git_dir) is not True
+                and path_is_inside(resolved, worktree_dir) is not True):
+            return target
+    return ""
 
 
 # `--git-dir` NAMES WHERE HEAD LIVES. From an unrelated
