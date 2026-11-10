@@ -309,8 +309,8 @@ Other tools, in `judge` order:
                        whose brief's first non-blank line starts with `Fix check` (up to Sonnet;
                        owner item 444 a) and every Opus spawn pass it. A reviewer's refusal names
                        the round forms, `Fix check`, `Round N of 3 (fix check)` and the role-model
-                       sentence. A fix-check reviewer must name its model (Sonnet), because the agent
-                       file's pin beats the env default; with no model it is refused. An unread record
+                       sentence. A fix-check reviewer must name Sonnet, because the agent file's pin
+                       beats the env default; with no model, or on Haiku, it is refused. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn; one whose model or agentType the scan
@@ -3616,12 +3616,13 @@ ROLE_NO_MODEL_REASON = (
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
     "(decision agent-model-cap)"
 )
-# A reviewer on a fix check brief that names no model is refused even with a default model set or an agent file pin:
-# the pin (haiku) beats the default, so it would serve Haiku. Unlike ROLE_NO_MODEL_MATCH, this match is liftable.
-ROLE_FIX_CHECK_NO_MODEL_MATCH = "fix check, no model, role "
-ROLE_FIX_CHECK_NO_MODEL_REASON = (
-    "Rule (configuration): this reviewer spawn is a fix check and names no model. The role's agent file pins a "
-    "model below the fix check's, and that pin beats the default model, so it would run on that pin. "
+# A reviewer on a fix check brief that names no model, or names Haiku, is refused: a fix check runs Sonnet, set per spawn.
+# With no model it is refused even with a default model set, because the agent file's pin (haiku) beats the default.
+# Unlike ROLE_NO_MODEL_MATCH, this match is liftable.
+ROLE_FIX_CHECK_MATCH = "fix check, role "
+ROLE_FIX_CHECK_REASON = (
+    "Rule (configuration): this reviewer spawn is a fix check and does not run on Sonnet: it names no model, or "
+    "Haiku. The role's agent file pins a model below the fix check's, and that pin beats the default model. "
     "Remedy: set the model on the spawn (%s), as `model: %s`. (decision agent-model-cap)"
 )
 
@@ -3828,8 +3829,8 @@ def role_model_one(tool_input):
     (FIX_CHECK_MARKER) run above the row. Pure, so never_lifted may call it too.
     An above-row refusal is liftable by the general override (decision agent-model-cap); the
     no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one. A reviewer on a
-    fix check brief with no model is refused before the env and pin passes, because the agent file's pin beats the
-    env default; that refusal (matched ROLE_FIX_CHECK_NO_MODEL_MATCH...) is liftable."""
+    fix check brief that names no model is refused before the env and pin passes, because the agent file's pin beats
+    the env default; one that names Haiku is refused too. Both refusals (matched ROLE_FIX_CHECK_MATCH...) are liftable."""
     pointer = pointer_checkout()
     if not pointer:
         return "", "", False  # no pointer checkout: nothing to read, as the pointer rules stand down
@@ -3853,6 +3854,8 @@ def role_model_one(tool_input):
                                                       for kind, n in brief_markers(tool_input.get("prompt"))):
             return "", "", False
         if role == "reviewer" and named < top and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):
+            if named < ROLE_MODEL_RANK.index("sonnet"):
+                return ROLE_FIX_CHECK_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_FIX_CHECK_MATCH + role, False
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
@@ -3869,7 +3872,7 @@ def role_model_one(tool_input):
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
     if role == "reviewer" and ("fixcheck", None) in marker_hits(tool_input.get("prompt")):
-        return ROLE_FIX_CHECK_NO_MODEL_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_FIX_CHECK_NO_MODEL_MATCH + role, False
+        return ROLE_FIX_CHECK_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_FIX_CHECK_MATCH + role, False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
         return "", "", False
     pinned = role_has_model_pin(pointer, role)
