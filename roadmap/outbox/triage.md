@@ -415,3 +415,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - (the third #2494 sighting, a push refused for a slug with "git" twice, is folded into step branch-slug-no-git as an incident.)
 - scpr-powershell-undocumented (#2038 stamp-check-page-and-roadmap-r2, coordinator 01:45 CST Nov 10): the code also judges PowerShell (SHELL_TOOLS), but the decision and the docstring say Bash, and no case covers PowerShell.
 - scpr-fragment-pass-unpinned (#2038): no case pins that a behind, yesterday-late or more-than-12h-ahead fragment passes; an unsigned `% 1440` mutant of _fragment_ahead stays green.
+- pcap-missing-check-fails-open (lane page-check-at-publish, #1367 and #2009, coordinator 01:48 CST Nov 10): the guard's _run_check_designs fails open when page_check.py is missing (partial install only).
+- pcap-republish-hold-stale (same lane): the waiting-page SKILL.md republish hold can be stale when the live page lags.
+- pcap-budget-no-override (same lane): the 60 s check budget has no override.
