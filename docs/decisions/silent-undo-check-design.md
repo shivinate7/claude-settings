@@ -29,8 +29,8 @@
   A line that head holds again in any file, as often as before, is moved, not lost (one reworded line
   per block of 6 or more, as below). A merge of main that drops the branch's own lines counts too: a
   conflict fix keeps both sides. A branch of one commit has nothing to read. Cost: the read's git calls
-  grow linearly with the lane's commits. Measured once on commits to distinct files: 37 calls at 10
-  commits, 57 at 20, 97 at 40. Test `LaneUndoCost` pins the 37 at 10. Two shapes, not any line
+  grow linearly with the lane's commits. Measured once on commits to distinct files: 41 calls at 10
+  commits, 61 at 20, 101 at 40. Test `LaneUndoCost` pins the 41 at 10. Two shapes, not any line
   a lane added (owner, 2026-11-03 18:16 CST, page item 167, no-undo-check-scope, pick a). Measured on
   the 31 batches merged 2026-10-31 to 2026-11-02: any line goes red on 22, with 84 findings; the two
   shapes go red on 16, with 62 findings (7 whole files, 55 test net losses). Incident (owner, 2026-11-02 10:41 CST, fb-1041-1): 19 restore commits from 2026-10-31 to
