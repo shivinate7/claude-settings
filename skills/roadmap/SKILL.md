@@ -85,7 +85,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
   release a lane whose draft pull is already in the default branch. `branches`: lane branches with no open pull request.
-- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull requests closed in the last 14 days, each with its head ref (`branch`), head sha
+- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull
+  requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
   (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
   `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
@@ -117,11 +118,13 @@ A step has also landed when the live file's `landedPulls` holds a row for it. Th
 `lane/<id>`, the step is open, and one more test holds. Either `merged` is JSON true, or `head` (7-64 hex) is an
 ancestor of main (`git merge-base --is-ancestor`). The row has no base field, so `merged: true` means merged into
 main. The build marks that step "Landed in #N" with the row's number. With no main ref in the checkout, nothing
-marks, `merged: true` rows included, as with the trailers. A failed git read also marks nothing. A row is counted
+marks, `merged: true` rows included, as with the trailers. A failed merge-base read marks no head-only row. A
+`merged: true` row needs no git, but still needs the main ref. A row is counted
 in `skipped` when it is not an object, its `number` is not an int, or its `branch` is not text. A row whose
 `merged` is present and not a JSON bool is skipped too. Each skipped row, and a `landedPulls` that is not a list, makes the stale-step and
 pull readings `unknown (<n> landedPulls rows skipped)`. The publisher (triage) must fill `landedPulls` from
-GitHub: the closed pull requests of the last 14 days, each with its head ref, head sha and merged flag. A merge
+GitHub. It lists the closed pull requests of the last 14 days whose base is the default branch, each with its head
+ref, head sha and merged flag. That filter makes `merged: true` mean merged into main. A merge
 that drops the `Step:` trailer, or a lane that closes its pull unmerged, then still reads right.
 
 ## Refusals
@@ -304,8 +307,11 @@ fields per session in the file. The page-ruling row adds one `ArtifactData list 
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
 The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
-already reads. They add no process, file, timer or log. The publisher adds one field, `createdAt`, per pull row.
-It comes from the GitHub list call the publisher already makes.
+already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
+GitHub list call it already makes.
+The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The build runs at
+most one `git merge-base` per distinct head of an unmerged row whose branch is an open step. A row with `merged:
+true`, or with no open step, runs no git. They add no file, timer or log.
 The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
 
