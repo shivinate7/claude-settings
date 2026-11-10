@@ -3430,14 +3430,21 @@ ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
 
 
-def spawn_model(named) -> tuple:
-    """(model, from_env) a spawn runs on: the model it names, else the value of ROLE_MODEL_ENV, else "". The env value
-    overrides an agent file's pin, so with no named model it is the model the spawn runs on (decision agent-model-cap).
-    The one home of the spawn's effective model: the step-up, the role row and the Opus ceiling all read it here."""
+def spawn_model(named, role=None) -> tuple:
+    """(model, from_env) a spawn runs on: the model it names, else the value of ROLE_MODEL_ENV, else "". A role with an
+    agent-file pin runs on its pin, which beats the env value, so a spawn that passes `role` and names no model reads no
+    env value when that role is pinned (or when the pin cannot be read, which fails open); only a role with no pin takes
+    the env value as its model (decision agent-model-cap, "No pin"). With no `role` the env value counts, as the builder
+    step-up reads it. The one home of the spawn's effective model: the step-up, the role row and the Opus ceiling read it here.
+    Cost: with the env value set and a role passed, one read of the agent files."""
     named = str(named or "").strip()
     if named:
         return named, False
     env = os.environ.get(ROLE_MODEL_ENV, "").strip()
+    if env and role is not None:
+        pointer = pointer_checkout()
+        if pointer and role_has_model_pin(pointer, role) is not False:
+            return "", False
     return env, bool(env)
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
@@ -3670,7 +3677,7 @@ def role_model_one(tool_input):
     if table is None:
         return "", pointer, True
     role = role_name(table, tool_input.get("subagent_type"))
-    model, from_env = spawn_model(tool_input.get("model"))
+    model, from_env = spawn_model(tool_input.get("model"), role)
     if model:
         top = len(ROLE_MODEL_RANK) - 1
         named = role_model_rank(model)
@@ -3905,12 +3912,14 @@ def load_full(reading) -> list:
 
 
 OPUS_SPAWN_REASON = (
-    "Rule (configuration): this spawn sets model Opus, above its role's model. Opus runs "
+    "Rule (configuration): this spawn {verb}, above its role's model. Opus runs "
     "only on the owner's typed override or grant for this spawn, except Plan, the designer, the design "
     "reviewer, the refuter, a builder's Round 3 of 3 and an Explore whose brief's first line carries the `%s` marker "
     "(decision agent-model-cap). Remedy: drop the model field, or name the role's model. A reviewer's Round 2 or "
     "Round 3 brief names sonnet."
 ) % EXPLORE_AUDIT_MARKER
+OPUS_NAMED_VERB = "sets model Opus"
+OPUS_ENV_VERB = "names no model and runs on Opus because " + ROLE_MODEL_ENV + " sets it"
 OPUS_BUILDER_REASON = (
     OPUS_SPAWN_REASON + " No `Round 3 of 3` marker was found in the brief's first line or at the start of "
     "any line. The marker applies only to a builder's third try, after review round 2 failed."
@@ -3919,20 +3928,27 @@ OPUS_STANDING_ROLES = ("Plan", "designer", "design-reviewer", REFUTER_ROLE)
 
 
 def opus_spawn_hit(tool: str, tool_input) -> tuple:
-    """(model, role, brief_unread) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
-    else ("", "", False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
+    """(model, role, brief_unread, from_env) of the first spawn in an Agent, Task or Workflow call that sets Opus with no standing grant,
+    else ("", "", False, False). `role` is the role the spawn names, "" for none. `brief_unread` is the spawn's BRIEF_UNREAD.
     A standing grant
     is the role Plan, designer, design-reviewer or refuter, a builder whose brief holds the third-round marker (the same marker
     step_up_hit reads), or an Explore whose brief's first non-blank line carries EXPLORE_AUDIT_MARKER (decision agent-model-cap).
-    Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it."""
+    Any other spawn above its role's model is refused (decision agent-model-cap), a reviewer on Opus too. The refusal is liftable by an override, so never_lifted does not read it.
+    The fourth item is true when the Opus comes from ROLE_MODEL_ENV and the spawn names no model, so the refusal says the env sets it."""
     for spawn in spawn_inputs(tool, tool_input):
         if opus_without_grant(spawn):
-            return spawn_model(spawn.get("model"))[0], str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD))
-    return "", "", False
+            model, from_env = spawn_model(spawn.get("model"), role_name_of(spawn))
+            return model, str(spawn.get("subagent_type") or ""), bool(spawn.get(BRIEF_UNREAD)), from_env
+    return "", "", False, False
+
+
+def role_name_of(tool_input) -> str:
+    """The role a spawn names, as role_key spells it; the default role for none. spawn_model reads the pin through it."""
+    return role_key(tool_input.get("subagent_type"))
 
 
 def opus_without_grant(tool_input) -> bool:
-    if "opus" not in spawn_model(tool_input.get("model"))[0].lower():
+    if "opus" not in spawn_model(tool_input.get("model"), role_name_of(tool_input))[0].lower():
         return False
     role, brief = tool_input.get("subagent_type"), tool_input.get("prompt")
     if role in OPUS_STANDING_ROLES:
@@ -5924,10 +5940,11 @@ def judge(payload) -> None:
 
     # 9d. The Opus ceiling: a spawn on Opus with no standing grant is refused (decision agent-model-cap).
     # An override, an Opus pass for the spawn's role or a step grant lifts it. A spawn with no role runs general-purpose.
-    opus_model, opus_role, opus_unread = opus_spawn_hit(tool, tool_input)
+    opus_model, opus_role, opus_unread, opus_from_env = opus_spawn_hit(tool, tool_input)
     if opus_model:
         refuse(tool, "deny", "agent-model-cap",
-               (OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
+               ((OPUS_BUILDER_REASON if opus_role == "builder" else OPUS_SPAWN_REASON)
+                .format(verb=OPUS_ENV_VERB if opus_from_env else OPUS_NAMED_VERB))
                + (" The scan could not read this brief, so it read no marker: " + BRIEF_LITERAL_REMEDY + "."
                   if opus_unread else ""),
                opus_model,
