@@ -1,0 +1,14 @@
+{
+  "title": "Lane lint picks a test suite that lists its own folder's files, such as hooks/test_checks_never_raise.py",
+  "phase": "now",
+  "status": "blocked",
+  "order": 978,
+  "owner": "claude-settings",
+  "why": "`merge --lane-lint` passed #1447 and #2463 while hooks/test_checks_never_raise.py was red on their own heads, so a lane hands over a red PR that only the batch run catches.",
+  "note": "Split out of lane-lint-hook-suites ( CST Nov 10, coordinator; that lane measured it falls outside its diff). Cause: the suite finds hook modules with os.listdir, glob and import_module, and the selector follows only named imports and path loads. At #1895's head f25da299c, a change to hooks/local_time.py or hooks/guard_merge.py picks 78 suites, not this one. The suite runs in checks.yml line 236, so it is in lane lint scope. Cost: 69 s alone on main; lint headroom is small (#1844 1100 s, #1895 1070 s, limit 1200 s); #2514's parallel lint is the relief. Suggested rule: a suite that lists its own folder's .py files, read from the syntax tree and not by regex, counts as loading each of them. Red case: a diff that touches only hooks/local_time.py picks the suite. A guard's verdict changes, so a build lane. Coordinator asked for ready; filed blocked, because it extends #1895's selector and waits for #1895 to merge. The coordinator starts the lane then.",
+  "updatedAt": "2026-11-10T08:53:00-06:00",
+  "lane": "",
+  "blockedBy": [
+    "lane-lint-hook-suites"
+  ]
+}
