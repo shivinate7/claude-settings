@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-10T08:43:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: git writes never run in the wrong checkout after a cd that fails.\nProblem (rule): a test on main expects a git commit after a failed cd to be allowed in a clean repo, and the new guard in #2099 refuses it, so only one can hold.\nBased on (measured): a batch runner's git writes ran in the main clone after its batch folder vanished, because bash runs the commands in the start folder when the cd fails.\nBased on (read): main's allow case was written for another guard's reason, a clean edit, not for this one.\nDeparts from: main's test expects allow \u2014 c refuses only a cd into a folder that is missing at check time.\nMeanwhile: #2099 and the two PRs on it are not released until you answer. You asked for a better option on Nov 10, 09:06 CST, so option c is new.",
+  "home": "PR #2099 (git writes after a failed cd)",
+  "id": "failed-cd-git-write-test",
+  "kind": "decision",
+  "n": 476,
+  "options": [
+    {
+      "gain": "Closes the exact class of the incident.",
+      "how": "Change main's test to expect the refusal.",
+      "key": "a",
+      "label": "Refuse every `;` after a cd",
+      "lose": "A `;` after a cd that fails is refused even in a clean repo."
+    },
+    {
+      "gain": "Main's test holds as written.",
+      "how": "Carve this case out of the guard.",
+      "key": "b",
+      "label": "Allow it, as main's test says",
+      "lose": "Reopens the class of the incident. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "Closes the incident, and a `;` after a cd into a folder that exists still passes.",
+      "how": "The guard refuses a git write after a cd only when the cd target is missing at check time; main's one test case is re-pointed.",
+      "key": "c",
+      "label": "Refuse only a cd into a missing folder (Recommended)",
+      "lose": "Main's one test case is re-pointed, and a folder removed between the check and the run still slips."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "c",
+  "ref": "PR #2099; main's test from commit 94f68f2fa; #2144 and #2191 sit on #2099",
+  "reply": "Reopened 09:10 CST Nov 10 with option c, at your request for a better option.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Git writes after a failed cd",
+  "status": "open",
+  "title": "Refuse git writes after a cd that fails, and change main's test to match?",
+  "why": "Recommended: c. It closes the incident, where the folder had vanished, and still lets a `;` after a cd into a folder that exists pass."
+}

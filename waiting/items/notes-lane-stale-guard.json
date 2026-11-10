@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-10T07:37:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: the notes PRs for the push-after-check guard (#2191 and the PRs above it) keep moving tonight.\nProblem (rule): the guard in the cloud session for lane notes-fix-large-3 is out of date. Its setup at session start could not fetch main, so it lacks the route that lets a test-author resolve both files of a test-and-code conflict. It refuses the merge for #2191. Re-running setup is an install write, which needs your typed words.\nBased on (measured): the installed guard.py reads the merge state in 3 places; main's reads it in 6.\nDeparts from: an old guard copy, e2703c611 \u2014 this session's guard runs main's code (0e6509a96).\nMeanwhile: the lane holds #2191 and the PRs above it, and goes on with #2144's round 3.",
+  "home": "install-stale-on-fetch-fail",
+  "id": "notes-lane-stale-guard",
+  "kind": "decision",
+  "n": 472,
+  "options": [
+    {
+      "gain": "The lane keeps its context and finishes tonight.",
+      "how": "Type `re-run the install in notes-fix-large-3`. The lane re-runs the claude-settings install from main.",
+      "key": "a",
+      "label": "Re-run setup in the lane (Recommended)",
+      "lose": "One typed answer from you."
+    },
+    {
+      "gain": "No grant needed.",
+      "how": "The coordinator starts a fresh lane session. Its setup fetches main, and the old lane hands over its branches.",
+      "key": "b",
+      "label": "Start a fresh lane",
+      "lose": "The stack's context, and a slower restart."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "PR #2191 and the PRs above it; lane notes-fix-large-3; debt install-stale-on-fetch-fail",
+  "reply": "Closed at 01:38 CST Nov 10. The coordinator took option b, process only: a fresh lane session takes the stack, since it needs no owner word and can be undone. Debt install-stale-on-fetch-fail stays open. No answer needed from you.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Stale guard in notes lane",
+  "status": "closed",
+  "title": "Re-run setup in the notes lane, or start a fresh lane?",
+  "why": "Lets the push-after-check notes PRs keep moving tonight; the lane cannot re-run setup without your typed words."
+}

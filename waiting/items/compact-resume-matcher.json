@@ -26,9 +26,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "port": false,
   "ref": "settings.json SessionStart matcher; PR #2473 (the hooks-lag line)",
-  "reply": "Picked a at 19:22 CST. Step compact-resume-runs-start is now ready (roadmap 84920f334). The item stays open until the coordinator's lane adds compact to the matcher and proves your pick with page_grant.py.",
+  "reply": "Picked a at 19:22 CST. Done 00:52 CST Nov 10: PR #2481 added compact to the matcher and merged in batch 70 (0e6509a96). Step compact-resume-runs-start is done (roadmap ebc9b0a56).",
   "repo": "shivinate7/claude-settings",
   "short": "Run start hook after compaction",
-  "status": "open",
+  "status": "closed",
   "title": "Run the session start hook after a compaction too, so a compacted session learns its hooks lag main?"
 }

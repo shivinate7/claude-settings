@@ -1,0 +1,53 @@
+{
+  "added": "2026-11-10T03:24:00Z",
+  "context": "Goal: the pictures on this page are big enough to read, as you asked at 20:47 CST (\"the images are so small\").\nProblem (rule): the fix replaces three of your earlier picks on picture size, so it needs your word.\nBased on (ruling): on Oct 28 you capped a card picture at 480 px high (ruling c193), and on Oct 29 you had a tall picture draw 221.8 px wide and scroll in its box (ruling c204).\nBased on (measured): with three options in a row the card is narrow, so the gain there is only about 3%.\nDeparts from: main caps a picture at 480 px high and draws a tall one 221.8 px wide \u2014 the picture fills its card width (up to 2x), shows whole up to a 390 by 844 phone, and scrolls in a 480 px box past that.",
+  "designs": [
+    {
+      "drawn": 300,
+      "file": "docs/design/page-pics-fill-card.html",
+      "label": "Grow to a phone",
+      "option": "a",
+      "slug": "ppfc-phone",
+      "state": "pic-phone"
+    },
+    {
+      "drawn": 300,
+      "file": "docs/design/page-pics-fill-card.html",
+      "label": "Keep today's sizes",
+      "option": "b",
+      "slug": "ppfc-today",
+      "state": "pic-today"
+    }
+  ],
+  "home": "page-pics-fill-card",
+  "id": "page-pics-fill-card",
+  "kind": "decision",
+  "look": true,
+  "n": 470,
+  "options": [
+    {
+      "design": "ppfc-phone",
+      "gain": "Pictures fill the card and read at phone size.",
+      "how": "A picture fills its card's width, up to twice its drawn size, and shows whole up to phone size. A taller one scrolls in a 480 px box.",
+      "key": "a",
+      "label": "Grow to a phone",
+      "lose": "Tall pictures scroll in a box, and your three earlier size picks are replaced."
+    },
+    {
+      "design": "ppfc-today",
+      "gain": "Your earlier size picks stay.",
+      "how": "No change: the 480 px cap and the 221.8 px width for tall pictures stay.",
+      "key": "b",
+      "label": "Keep today's sizes",
+      "lose": "Tall pictures stay 221.8 px wide, which you called too small."
+    }
+  ],
+  "owner": "lane page-pics-fill-card (session_013NEJL1GYPmzZHut7tx4d68), claude-settings branch page-pics-fill-card",
+  "pick": "a",
+  "ref": "step page-pics-fill-card; mockup docs/design/page-pics-fill-card.html on branch page-pics-fill-card at 1f381c121; your words 20:47 CST Nov 9",
+  "reply": "Answered in chat, 21:26 CST Nov 9: a, grow to a phone. Home: step page-pics-fill-card; the lane files the ruling in its PR (21:27 CST).",
+  "repo": "shivinate7/claude-settings",
+  "short": "Picture size on cards",
+  "status": "closed",
+  "title": "How big should a picture be in an option card on this page?"
+}

@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-10T09:52:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: an answered, routed item leaves the questions area.\nProblem (rule): your earlier pick closes an item at routing, but the grant reader counts an answer only on an open item, so a relayed grant on a closed item stops counting.\nBased on (read): decision relayed-grant-read-from-page, section \"What counts\", counts an answer on an open item only.\nDeparts from: main, where page_grant.py refuses every closed item \u2014 a lets one closed form count, c drops relay counting.\nMeanwhile: lane answered-leaves-page waits for your answer.",
+  "home": "decision relayed-grant-read-from-page; step answered-leaves-page",
+  "id": "answered-leaves-page",
+  "kind": "decision",
+  "n": 477,
+  "options": [
+    {
+      "gain": "Items leave the questions area, and relayed grants still work.",
+      "how": "A closed item that keeps its lane, its home and the answer whose time matches its last answer still counts.",
+      "key": "a",
+      "label": "Count one closed form",
+      "lose": "The grant reader accepts a second form. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "Relayed grants keep working with no new form.",
+      "how": "No change: a routed item stays open, as today.",
+      "key": "b",
+      "label": "Keep items open until done",
+      "lose": "Answered items stay in the questions area."
+    },
+    {
+      "gain": "Items leave the questions area, and the grant reader stays strict.",
+      "how": "Items close at routing, and a relayed grant no longer counts from the page.",
+      "key": "c",
+      "label": "Close at routing, no relay",
+      "lose": "A coordinator can no longer relay your page answer as a grant."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "decision relayed-grant-read-from-page (\"What counts\"); skills/waiting-page/page_grant.py; lane session_013NEJL1tSPqSx7QonoVwudz",
+  "reply": "Routed 09:07 CST Nov 10 to the coordinator with your note (relayed grants can just stay running). It stays open until the coordinator says which form that means, and it comes back here only if your word is needed.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Closed items and relayed grants",
+  "status": "open",
+  "title": "When an answer is routed and its item closes, should a relayed grant on it still count?",
+  "why": "Your earlier pick and the grant reader disagree, so one of them must change."
+}

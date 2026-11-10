@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-10T09:52:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: one name for an agent whose job is to argue against another agent's verdict.\nProblem (rule): the GLOSSARY.md row for \"refuter\" names only the agent that reads a plan, so agents that argue against other verdicts have no term.\nBased on (ruling): on Nov 6, 12:43 CST, you asked for one word for any agent that argues against another agent's verdict, and at 13:08 CST you picked \"refuter\".\nBased on (read): commit 1619cf09e renamed \"challenger\" to \"refuter\" on main, and GLOSSARY.md line 83 names only the plan-reading agent.\nDeparts from: main, where the row names only the plan-reading agent \u2014 a widens the row to any such agent.\nMeanwhile: a small records PR fixes the stale \"challenger\" row name and a stale Risks line in docs/plans/debate-model-tiers.md.",
+  "home": "GLOSSARY.md (refuter row); step debate-glossary-word",
+  "id": "refuter-row-scope",
+  "kind": "decision",
+  "n": 478,
+  "options": [
+    {
+      "gain": "One word for every such agent.",
+      "how": "The row covers any agent that argues against another agent's verdict; the plan refuter is one case.",
+      "key": "a",
+      "label": "Any agent that argues back",
+      "lose": "The row is broader, so each use needs its context."
+    },
+    {
+      "gain": "The word keeps one narrow meaning.",
+      "how": "No change: the row names only the agent that reads a plan.",
+      "key": "b",
+      "label": "Plan reader only",
+      "lose": "Other agents that argue back still have no term."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "GLOSSARY.md; commit 1619cf09e (challenger renamed to refuter); docs/plans/debate-model-tiers.md",
+  "reply": "Routed 09:07 CST Nov 10 to the coordinator: pick a, refuter covers any agent that argues back. Home: GLOSSARY.md refuter row, step debate-glossary-word.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Scope of the refuter word",
+  "status": "closed",
+  "title": "Should \"refuter\" cover any agent that argues against another agent's verdict?",
+  "why": "Recommended: a. One word for one job, and the plan refuter stays one case of it."
+}

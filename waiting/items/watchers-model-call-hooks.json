@@ -9,7 +9,7 @@
   "lastAnswer": {
     "at": "2026-11-06T18:19:25.015Z",
     "choice": "b",
-    "note": "Routed 12:36 CST to the coordinator: keep all six, state each one's cost, and re-check on the triggers."
+    "note": "Routed 12:36 CST Nov 6 to the coordinator: measure how often each hook fires for a week, then delete the ones that never fire. Note corrected 04:59 CST Nov 10: it had named option a. Step watcher-fire-count-week."
   },
   "n": 248,
   "options": [

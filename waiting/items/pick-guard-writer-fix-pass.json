@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-10T08:01:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: drop the pick guard's false alarm for a cloud session whose page writer is another session (#2489), without opening a hole.\nProblem (rule): #2489's round 3 found negative net value, so decision hold-unsafe-after-round-3 parks it until you decide. It opens one class: a same-turn send to the session named in the `page-writer` key passes with no page read, where main refuses. Mistake forms: a stale key after a writer rotation (no rotation step writes the key), and a send that errored still counts.\nBased on (measured): round 3 review record 6762140862 on #2489; no repo sets the key today, so live harm is near zero.\nDeparts from: main \u2014 #2489 would ship with one more fix, past its three rounds.\nMeanwhile: #2489 stays parked and its lane waits.",
+  "home": "pick-guard-cloud-writer",
+  "id": "pick-guard-writer-fix-pass",
+  "kind": "decision",
+  "n": 474,
+  "options": [
+    {
+      "gain": "The false alarm goes, and the net value turns non-negative.",
+      "how": "A send whose result errored no longer counts. A red case first, a Sonnet builder, then a Sonnet fix check and the net-value test.",
+      "key": "a",
+      "label": "Allow one fix pass (Recommended)",
+      "lose": "One more review cycle past the cap."
+    },
+    {
+      "gain": "No more spend.",
+      "how": "No more work on #2489.",
+      "key": "b",
+      "label": "Keep #2489 parked",
+      "lose": "The false alarm stays."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "PR #2489; review record 6762140862 on #2489; decision hold-unsafe-after-round-3; step pick-guard-cloud-writer-mutants",
+  "reply": "Routed 09:07 CST Nov 10 to the coordinator: pick a, one fix pass for #2489. Home: decision hold-unsafe-after-round-3.",
+  "repo": "shivinate7/claude-settings",
+  "short": "#2489 fix pass",
+  "status": "closed",
+  "title": "Let a parked PR (#2489) get one fix pass past its three review rounds?",
+  "why": "Decides whether the pick guard's false alarm for a cloud session with another page writer goes now; a held PR gets no fix lane until you decide."
+}

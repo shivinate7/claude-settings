@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-10T15:13:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: the Ask area holds only what still needs your eyes.\nProblem (goal): asks pile up and you rarely read the area, so it needs a rule for when an ask leaves, and how it leaves is your call.\nBased on (read): your comment on the Ask area (Nov 10, 09:11 CST) says it is too crowded, and that an ask must become a page question or a roadmap step with a short reply, never just vanish.\nDeparts from: main \u2014 adds a phase-out rule for asks.\nMeanwhile: asks route as today, and step ask-phase-out waits for your answer.",
+  "home": "step ask-phase-out",
+  "id": "ask-phase-out-rule",
+  "kind": "decision",
+  "n": 480,
+  "options": [
+    {
+      "gain": "A short area, and nothing is lost.",
+      "how": "Once routed, an ask folds to one line naming its home (step:<slug> or item N), and leaves after you open it.",
+      "key": "a",
+      "label": "Fold to its home once routed (Recommended)",
+      "lose": "The full text is one click away."
+    },
+    {
+      "gain": "No routing is needed.",
+      "how": "An ask over 24 h old moves to an archive tab.",
+      "key": "b",
+      "label": "Archive asks older than 24 h",
+      "lose": "An ask nobody routed can hide in the archive."
+    },
+    {
+      "gain": "Full control.",
+      "how": "An ask leaves only when you close it.",
+      "key": "c",
+      "label": "You close each ask",
+      "lose": "More presses for you."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "owner comment, Ask area thread b2ff97bf, Nov 10 09:11 CST",
+  "reply": "Routed 09:16 CST Nov 10: pick a with your read-receipt note. A routed ask or answered item shows one line (its home and the short reply); you press Mark read and it leaves; nothing is deleted. It covers the Ask area and the Answered row. Home: step ask-phase-out.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Asks leave the Ask area",
+  "status": "closed",
+  "title": "How should an ask leave the Ask area?",
+  "why": "Recommended: a. The area stays short and every ask keeps a home you can open."
+}

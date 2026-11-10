@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-10T07:55:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: drop the guard's false alarm on interpreter strings (#1186) without opening a hole.\nProblem (rule): #1186's round 3 found negative net value, so decision hold-unsafe-after-round-3 parks it until you decide. It opens two holes main refuses: a frozen path in a shell variable inside `python3 -c` or `node -e`, and a frozen path joined into a string in a node -e script (`'cp ' + p`).\nBased on (measured): the round 3 reviewer's scratch probe shows a one-line change in guard_frozen.py closes the first hole (review record 6762046224 on #1186); the second needs the js whole-script fallback to refuse when it cannot read a string join.\nBased on (read): decision hold-unsafe-after-round-3 gives a held change no fix lane until the owner decides.\nDeparts from: main \u2014 #1186 would ship with one fix pass for both holes, past its three rounds.\nMeanwhile: #1186 stays parked and its lane waits; #1668 is unstacked from it and does not wait.",
+  "home": "agent-model-cap-string-false-alarm",
+  "id": "cap-string-one-line-fix",
+  "kind": "decision",
+  "n": 473,
+  "options": [
+    {
+      "gain": "The false alarm goes, and both holes close before merge.",
+      "how": "The one-line change plus a js fallback that refuses an unread string join. A test-author writes red cases for both first, a Sonnet builder fixes, then a Sonnet fix check with the net-value test.",
+      "key": "a",
+      "label": "Allow one fix pass for both holes (Recommended)",
+      "lose": "One more review cycle past the cap, and a fix larger than one line."
+    },
+    {
+      "gain": "No more spend.",
+      "how": "No more work on #1186.",
+      "key": "b",
+      "label": "Keep #1186 parked",
+      "lose": "The false alarm stays."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "PR #1186; review record 6762046224 on #1186; decision hold-unsafe-after-round-3; #1668 moves off #1186 meanwhile",
+  "reply": "Routed 09:07 CST Nov 10 to the coordinator: pick a, one fix pass for both holes in #1186. Home: decision hold-unsafe-after-round-3 (the held change gets one fix lane).",
+  "repo": "shivinate7/claude-settings",
+  "short": "#1186 fix pass",
+  "status": "closed",
+  "title": "Let a parked PR (#1186) get one fix pass for two holes past its three review rounds?",
+  "why": "Decides whether the guard's false alarm on interpreter strings goes this week; a held PR gets no fix lane until you decide."
+}

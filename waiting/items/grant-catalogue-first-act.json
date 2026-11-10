@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-10T10:14:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: a grant typed in one session reaches the session it names.\nProblem (rule): your ruling fixes the catalogue as `merge <pr>` and self-edit, but self-edit gates nothing and the classifier still refused a merge, and only you can change your own ruling.\nBased on (ruling): decision grant-reaches-lanes, ruling 3 (Nov 3, 18:21 CST), names `merge <pr>` and self-edit as the first catalogue.\nBased on (measured): docs/plans/grant-reaches-lanes.md section 2 (Nov 6) found that self-edit gates nothing; the classifier refused `merge 1421 --confirm` on Nov 7, 13:05 CST.\nDeparts from: ruling 3's catalogue (merge <pr>, self-edit) \u2014 d swaps self-edit for the lane's agent spawn.\nYou asked on Nov 10, 09:06 CST why the order matters. It does not: \"first\" only named which acts the catalogue holds. Option d is new.\nMeanwhile: #2517 lands the plan and the decision as you signed them, and nothing past the probe is built.",
+  "home": "decision grant-reaches-lanes, ruling 3; PR #2517 (plan and decision for grants that reach lanes)",
+  "id": "grant-catalogue-first-act",
+  "kind": "decision",
+  "n": 479,
+  "options": [
+    {
+      "gain": "It covers the refused agent spawn.",
+      "how": "The catalogue holds one act: the lane's Agent spawn.",
+      "key": "a",
+      "label": "Catalogue the lane's agent spawn only",
+      "lose": "Ruling 3 as you signed it is replaced, and `merge <pr>` drops out."
+    },
+    {
+      "gain": "Your signed catalogue stands.",
+      "how": "No change: the catalogue stays `merge <pr>` and self-edit.",
+      "key": "b",
+      "label": "Keep merge and self-edit",
+      "lose": "Self-edit gates nothing, and the spawn stays uncovered."
+    },
+    {
+      "gain": "It reuses the page's grant path and adds no new store.",
+      "how": "The lane's agent-spawn grant counts through page_grant.py, the page's grant reader, with no new catalogue.",
+      "key": "c",
+      "label": "Count the spawn grant on the page",
+      "lose": "A grant then needs a save on the page, not a typed line."
+    },
+    {
+      "gain": "It covers every refused act on record.",
+      "how": "The catalogue holds the lane's agent spawn and `merge <pr>`; self-edit drops out.",
+      "key": "d",
+      "label": "Catalogue the spawn and merge, drop self-edit (Recommended)",
+      "lose": "Ruling 3's catalogue is replaced."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "d",
+  "ref": "decision grant-reaches-lanes; docs/plans/grant-reaches-lanes.md section 2; PR #2517; lane session_013NEJL3K9EJKrLHccAdQtmi",
+  "reply": "Reopened 09:10 CST Nov 10: your order question is answered in the context, and option d is new.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Acts a grant reaches",
+  "status": "open",
+  "title": "Which acts should a grant reach in a lane: the agent spawn and merge, not self-edit?",
+  "why": "Recommended: d. It covers every refused act on record with a typed line."
+}

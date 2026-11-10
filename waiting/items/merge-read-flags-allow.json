@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-10T08:38:00Z",
+  "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
+  "context": "Goal: the merge tool's read-only flags stop asking for permission.\nProblem (rule): your earlier grant covered only three merge-tool read flags, so adding three more needs your typed words.\nBased on (read): the lane for the pull request that enforces the batch lane freeze holds an unpushed diff that rewrites the settings entry \"Merge Tool Read Checks\" to six flags with new reason text.\nDeparts from: main's three-flag entry \u2014 the entry lists six flags.\nMeanwhile: nothing waits on it.",
+  "home": "batch-freeze-lane-set-enforce",
+  "id": "merge-read-flags-allow",
+  "kind": "decision",
+  "n": 475,
+  "options": [
+    {
+      "gain": "Fewer prompts on read-only merge-tool flags.",
+      "how": "The lane fixes one name in its diff and shows you the exact diff; you type the grant for it.",
+      "key": "a",
+      "label": "Allow six flags",
+      "lose": "One more settings change to read, and the allow list grows. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "Nothing changes.",
+      "how": "No change.",
+      "key": "b",
+      "label": "Keep three flags",
+      "lose": "Prompts on the other read flags stay."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "settings.json entry \"Merge Tool Read Checks\"; PR #2378's lane holds the unpushed diff; note merge-touches-not-allowed",
+  "reply": "Closed at 02:52 CST Nov 10, no answer needed. You already ruled on Nov 9 at 13:09 CST (pick a on the lane-lint comment check): the lane changes only the reason sentence of the \"Merge Tool Read Checks\" entry, and the allowed commands stay the same. So there is no six-flag widening.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Merge tool read flags",
+  "status": "closed",
+  "title": "Let six read-only merge-tool flags run without a permission prompt, up from three?",
+  "why": "A settings write needs your typed words, and your earlier grant covered three flags only."
+}

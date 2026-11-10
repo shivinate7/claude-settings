@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-10T03:45:00Z",
+  "context": "Goal: review only as much as a change needs, as you asked at 21:43 CST (\"if something passed in round 1 why does it have mandatory follow up rounds\").\nProblem (rule): open PR #2252 makes every guard or check change wait for round 3 and a net-value test, even after a round 1 PASS. That goes past your earlier ruling, so it needs your word.\nBased on (record): the review-record decision (how a PR's review is recorded) calls a round 1 or round 2 PASS done for any change.\nBased on (ruling): on Nov 8 at 06:08 CST you ruled that a guard change fixed under a fix check still gets round 3, because a fix check reads only the fix.\nDeparts from: main reads a guard change done after a round 1 or 2 PASS or a fix check PASS \u2014 only a fix check PASS waits for round 3 (a), or every guard change waits for round 3 (b).\nMeanwhile: three lanes hold their round 3; they wait on the current batch anyway.",
+  "home": "review-state-guard-needs-round-3",
+  "id": "guard-round3-after-pass",
+  "kind": "decision",
+  "n": 471,
+  "options": [
+    {
+      "gain": "A clean PASS merges with no extra round, and a fixed guard change still gets the full safety read.",
+      "how": "Narrow PR #2252 to your Nov 8 ruling: only a guard change fixed under a fix check waits for round 3.",
+      "key": "a",
+      "label": "Round 3 only after a fix check",
+      "lose": "A guard change that passes round 1 gets no net-value test."
+    },
+    {
+      "gain": "Every guard or check change gets a net-value judgement.",
+      "how": "Merge PR #2252 as built.",
+      "key": "b",
+      "label": "Every guard change waits for round 3",
+      "lose": "One extra Sonnet review round for each guard or check change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "step review-state-guard-needs-round-3; PR #2252; your chat words 21:43 CST Nov 9; lanes #2488, #2489 and #2493 hold round 3 meanwhile",
+  "reply": "Routed 23:39 CST to the coordinator: a, narrow #2252 so only a guard change fixed under a fix check waits for round 3. Your note on the net-value test went with it. Home: step review-state-guard-needs-round-3.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Round 3 after a PASS",
+  "status": "closed",
+  "title": "Should a guard or check change that passes review round 1 still wait for round 3?"
+}
