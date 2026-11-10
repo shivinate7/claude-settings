@@ -408,15 +408,28 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertNotIn("--review-record", out["reason"], "the refusal tells the lane to post a record that is already posted")
         self.assertNotIn("post the record", out["reason"], "the refusal tells the lane to post a record that is already posted")
 
-    def test_guard_yes_record_below_the_final_round_blocks_with_its_why(self):
+    def test_guard_yes_record_with_a_fix_pass_below_the_final_round_blocks_with_its_why(self):
         # Catches: a PASS claim refused with the no-record remedy, which tells the lane to post a record already on the PR.
-        # Each record reads open: below the final round, or at it with no net value.
+        # owner, page item 471 a: each record reads open. A fix check PASS below the final round leaves a guard or check change open;
+        # the final round with no net value does too.
+        fix = (OLD, "reviewer", "sonnet", "PASS")
+        cases = (([(1, "reviewer", "sonnet", "FAIL")], fix),
+                 ([(1, "reviewer", "sonnet", "PASS")], fix),
+                 ([(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL")], fix),
+                 ([(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "PASS")], None))
+        for rounds, fix_line in cases:
+            with self.subTest(rounds=rounds, fix=fix_line):
+                self.assert_open_guard_record_blocks_with_its_why(record(rounds=rounds, guard="yes", net="not owed", fix=fix_line))
+
+    def test_guard_yes_record_that_passes_before_the_final_round_with_no_fix_check_is_not_refused(self):
+        # control: owner, page item 471 a: merge reads a guard or check change whose round passed, with no fix check, as done before the
+        # final round, so the claim passes on two reads
         cases = ([(1, "reviewer", "sonnet", "PASS")],
                  [(1, "reviewer", "sonnet", "PASS"), (2, "reviewer", "sonnet", "PASS")],
-                 [(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "PASS")])
+                 [(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "PASS")])
         for rounds in cases:
             with self.subTest(rounds=rounds):
-                self.assert_open_guard_record_blocks_with_its_why(record(rounds=rounds, guard="yes", net="not owed"))
+                self.assert_record_satisfies_claim(record(rounds=rounds, guard="yes", net="not owed"))
 
     def test_no_record_keeps_the_no_record_remedy(self):
         # control: with no record for the live head, the refusal keeps the remedy that posts one
