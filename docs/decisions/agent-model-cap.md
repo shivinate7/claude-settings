@@ -108,9 +108,10 @@ line, `Grant: <owner words>, <time>`. The lane treats it as the owner's grant. I
 the coordinator's chat only when the act cannot be undone (coordinator, 2026-11-10 13:18 CST). The effort
 comes from the field, because a slash command runs only as the whole prompt (measured by the
 coordinator's probe, 2026-10-30 15:26 CDT: that prompt set `effort_level` medium; the same line with text
-after it set none). Guard rule `lane-effort-pin` (likely risk, landed 2026-10-30) refuses a `create_session`
-call tagged `cs-build:lane` unless its prompt is `/effort medium`, so the new start is refused until the
-guard changes. Target, not built: refuse a lane start with no effort `medium` or no Grant line. A lane
+after it set none). Guard rule `lane-effort-pin` (likely risk, first landed 2026-10-30) refuses a `create_session`
+call tagged `cs-build:lane` unless its `effort` is `medium` and its prompt's first non-blank line is a Grant line
+with owner words after it. Not built: a check that the start prompt's Topic matches the `cs-topic` tag, and a
+refusal of a placeholder Grant such as `<owner words>`. A lane
 started with no `cs-build:lane` tag is unseen; the
 tag is the coordinator's rule in `session-tiers`. An owner override lifts it; it is not one of the role and model guards
 that `owner-override` keeps beyond every override (owner, 2026-10-30 16:25 CDT, in chat to lane-effort-medium (session_013NEJL28Sky6HBLLehmziKH), pick a: liftable). `LANE_EFFORT` in `hooks/guard.py` is the one
