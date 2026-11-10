@@ -1551,6 +1551,10 @@ def logged_test(log, path, tail=""):
     return "# a .ps1 test: this suite never runs one on Linux\n"
 
 
+OLD_MODULE = "def value():\n    return 2\n"  # lib/old.py on main: a module whose test a lane deletes with it
+OLD_CHECK = "from old import value\nassert value() == 2, 'the old module changed'\n"  # lib/test_old.py on main: passes
+
+
 def pwsh_absent():
     """A patch under which shutil.which finds no pwsh, whatever this machine has installed. Every other name is looked up as usual."""
     real = shutil.which
@@ -1853,6 +1857,21 @@ class TouchedTests(LaneFixture):
 
 
 
+    def push_tree_change(self, branch, write=None, remove=()):
+        """Push one commit on `branch`, made from origin/main: each path of `remove` deleted with git rm, each of `write` ({path: text}) written.
+        -> the pushed sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", branch, "origin/main")
+        for path in remove:
+            tm.sh(o, "git", "rm", "-q", path)
+        for path, text in (write or {}).items():
+            tm.put(os.path.join(o, path), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", branch + ": one commit")
+        tm.sh(o, "git", "push", "-q", "origin", branch)
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
     def push_selector_override(self, lane, def_text):
         """Push `lane` whose selector is the real one plus `def_text`: a definition that overrides one of the selector's functions. The lint
         tree loads the lane's own selector, so the override is what run_touched_tests calls. The lane also touches a test that holds."""
@@ -1938,6 +1957,36 @@ class TouchedTests(LaneFixture):
     def test_a_selector_whose_reason_raises_is_unknown_not_a_traceback(self):
         self.push_selector_override("lane-r", "def reason(path, table):\n    raise RuntimeError('selector reason broke')\n")
         self.assert_unknown_then_lifted("lane-r", "a selector whose reason() raises")
+
+
+    def test_a_lane_that_deletes_a_test_and_its_module_passes_and_runs_no_deleted_path(self):
+        """A deleted test path is still a test name, so candidates() returns it, and the run of it fails "can't open file". The deleted path
+        is never selected: the lane passes, no test runs, and the PASS line counts 0 run and 0 skipped."""
+        self.push_tree_change("main", write={"lib/old.py": OLD_MODULE, "lib/test_old.py": logged_test(self.touched_log, "lib/test_old.py", OLD_CHECK)})
+        self.push_tree_change("lane-d", remove=["lib/test_old.py", "lib/old.py"])
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.flagged("--lane-lint", "lane-d", "--touched-tests")
+        self.assertEqual(rc, 0, "a lane that deletes a test and its module was refused, so the deleted test path was selected and run: rc %r: %s" % (rc, text))
+        self.assertEqual(self.ran("lib/test_old.py"), [], "the deleted test path ran in the lint tree")
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertTrue(pass_has_counts(lines[0], 0, 0), "the PASS line does not name 0 run and 0 skipped: " + lines[0])
+
+    def test_a_lane_that_renames_a_test_passes_and_runs_only_the_new_path(self):
+        """A rename is a deleted path and a new one. The deleted path is never selected: the lane passes, the renamed test runs once in the
+        lint tree, and the PASS line counts 1 run and 0 skipped."""
+        self.push_tree_change("main", write={"lib/test_moved.py": logged_test(self.touched_log, "lib/test_moved.py")})
+        self.push_tree_change("lane-e", remove=["lib/test_moved.py"], write={"lib/test_renamed.py": logged_test(self.touched_log, "lib/test_renamed.py")})
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.flagged("--lane-lint", "lane-e", "--touched-tests")
+        self.assertEqual(rc, 0, "a lane that renames a test was refused, so the deleted path was selected and run: rc %r: %s" % (rc, text))
+        self.assertEqual(self.ran("lib/test_moved.py"), [], "the renamed-away test path ran in the lint tree")
+        runs = self.ran("lib/test_renamed.py")
+        self.assertEqual(len(runs), 1, "the renamed test ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0][2], self.lint_tree(), "the renamed test did not run in the lint tree: " + "\t".join(runs[0]))
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertTrue(pass_has_counts(lines[0], 1, 0), "the PASS line does not name 1 run and 0 skipped: " + lines[0])
 
 
 def real_ci_steps():
