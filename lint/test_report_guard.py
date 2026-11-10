@@ -641,8 +641,8 @@ class ReportGuardTests(unittest.TestCase):
                              "a turn that lands nothing was asked for a report: " + run.stdout[:200])
         # Catches: a record that ends no turn and starts none, between the reply and the peer message, stops the peer
         # message from starting a new turn, so the earlier commit still counts and "nothing to land" is asked for a
-        # report. The stop summary and queue rows are green before the fix. The last-prompt, atis-latch, tools-used and
-        # hook_success rows, and the measured order from a real transcript, are red. The row with no record is the control.
+        # report. The rows below are the record kinds that end no turn, and a measured sequence from a real transcript.
+        # The row with no record is the control: a peer message right after the reply starts a new turn.
         measured = [queue_op("enqueue", 0), stop_summary(0), queue_op("remove", 0), queue_op("enqueue", 0),
                     last_prompt(), atis_latch(), queue_op("dequeue", 0)]
         ends_no_turn = [("stop_hook_summary", [stop_summary(0)]), ("queue-operation", [queue_op("enqueue", 0)]),
@@ -660,7 +660,7 @@ class ReportGuardTests(unittest.TestCase):
                 self.assertEqual(run.stdout.strip(), "",
                                  "%s between the reply and the peer message: the peer message did not start a new "
                                  "turn, so the earlier commit still counts: %s" % (label, run.stdout[:200]))
-        # Pin (green before the fix): a peer message that arrives mid-turn, after a tool result and a record that ends
+        # Pin: a peer message that arrives mid-turn, after a tool result and a record that ends
         # no turn, keeps the earlier commit in its window and the reply must still block. A fix that resets on any
         # record but a tool result passes these replies and fails here.
         for label, extra in ends_no_turn:
