@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prints "checkout <toplevel> on <branch>, <n> dirty files" at session start and resume. Fetches origin once per checkout first. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, local main differs from origin/main, more than 50 agent worktrees exist, a freshness check or the fetch could not run, the repo's waiting page was last published from another version than main's, a standing grant file differs from origin/main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
+# Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction. Fetches origin once per checkout first. On resume it says when the session's recorded worktree is gone. Names the clone to cd to when the checkout is a live pin of the claude-settings clone. Also warns when core.worktree is set in the shared git config, the global rules differ from this checkout, the claude-settings clone is off main or behind origin/main, this repo's default branch is behind origin, local main differs from origin/main, more than 50 agent worktrees exist, a freshness check or the fetch could not run, the repo's waiting page was last published from another version than main's, a standing grant file differs from origin/main's, or the SessionEnd sweep is disarmed or unknown. Prints the repo's caution level with its facts and acts, or says it is unknown.
 # Outside a git tree or when git is missing, prints only the tier line (cloud or own id). Always exits 0, nothing on stderr.
 
 input=$(cat 2>/dev/null)
@@ -363,7 +363,7 @@ fi
 # neither ref reads and a grant file exists at HEAD, one unknown line prints. Only committed blobs are compared,
 # so an uncommitted edit prints nothing. Local main is counted against origin/main with one rev-list and never
 # moved; the line prints only when they differ, and not when the default-branch check above already said behind.
-# Cost: once per session start, never per prompt (the hook is wired to SessionStart only): one git fetch of this
+# Cost: once per SessionStart event (start, resume or compaction), never per prompt (the hook is wired to SessionStart only): one git fetch of this
 # checkout (shared with the earlier freshness checks, so at most one per checkout), whose own writes are refs,
 # objects and FETCH_HEAD; one git remote read, one git cat-file --batch-check and one git rev-list, plus, only
 # when local main differs, one git config read and, when the pointer clone printed behind, two git rev-parse
