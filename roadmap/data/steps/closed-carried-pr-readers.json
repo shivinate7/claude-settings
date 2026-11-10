@@ -1,0 +1,15 @@
+{
+  "title": "Each reader handles a closed PR that another open PR carries, so any carried PR can close at once",
+  "phase": "now",
+  "status": "todo",
+  "order": 955,
+  "owner": "coordinator",
+  "why": "The owner wants every PR held by another open PR closed at once, reviewed or not (owner chat 21:27 and 21:29 CST Nov 9). Today the close-replaced-at-open lane closes only done PRs, because four readers lose a closed PR.",
+  "note": "Starts after close-replaced-at-open. Readers that lose a closed carried PR: (1) `merge --reviewed` reads open PRs only; (2) skills/roadmap/build.py `unlaned`/`lane_live` flags a doing step whose only PR is closed and whose carrier sits on an integration branch (exit 1); (3) hooks/guard_merge.py, near line 1300, refuses an archive with the wrong text until the carrier merges; (4) settings.json lines 52 and 59 match no carried close. Done check: each reader handles a closed carried PR, then the close extends to any held PR. Source: lane close-replaced-at-open 22:15 CST, relayed by the coordinator 22:16 CST.",
+  "updatedAt": "2026-11-09T22:16:00-06:00",
+  "lane": null,
+  "blockedBy": [
+    "close-replaced-at-open"
+  ],
+  "paused": null
+}
