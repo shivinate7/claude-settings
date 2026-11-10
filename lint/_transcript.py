@@ -10,7 +10,9 @@ transcript and its `content` blocks. last_reply returns the text of the last ass
 import json
 import os
 import re
+import sys
 
+HERE = os.path.dirname(os.path.abspath(__file__))
 SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
@@ -384,6 +386,19 @@ def _finds_writer(node):
     return None
 
 
+def data_call(use):
+    """(name, input) of a tool_use with a Mac artifact data tool read as the ArtifactData call it stands for
+    (shared_names.normalize_data_call, the one home of the Mac names). Any other tool_use gives its own name and input.
+    shared_names loads on the first call, not at import: the caller has put the hooks folder it wants (the installed
+    guard.d one first) on sys.path by then. The sibling hooks folder is the fallback, appended so it shadows nothing."""
+    try:
+        from shared_names import normalize_data_call
+    except ImportError:
+        sys.path.append(os.path.join(HERE, "..", "hooks"))
+        from shared_names import normalize_data_call
+    return normalize_data_call(str(use.get("name", "")), use.get("input"))
+
+
 def page_writer_id(records):
     """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None."""
     pending, writer = set(), None
@@ -391,8 +406,8 @@ def page_writer_id(records):
         if rec.get("isSidechain"):
             continue
         for use in tool_uses(rec):
-            inp = use.get("input")
-            if (str(use.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict)
+            name, inp = data_call(use)
+            if (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict)
                     and inp.get("action") == "get"
                     and (inp.get("path") == "meta/page"
                          or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):

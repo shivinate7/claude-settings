@@ -121,6 +121,9 @@ WAITING_PAGE_ASSUMED = "waiting_page_assumed"
 # The ArtifactData op a Mac db_write op stands for, where the names differ.
 _MAC_OPS = {"merge": "update"}
 _MAC_READS = {"db_get": "get", "db_list": "list", "db_query": "query"}
+# The top-level keys of a Mac db_str_replace that are not replacement text. Any other string value is taken for
+# replacement text, because which key the Mac tool puts it under is unknown.
+_MAC_STR_REPLACE_KNOWN = ("path", "field", "url", "collection", "doc_id", "action", "old_str", "new_str")
 
 
 def _split_path(path):
@@ -141,6 +144,19 @@ def _mac_write(entry):
     if isinstance(write.get("path"), str):
         write["collection"], write["doc_id"] = _split_path(write["path"])
     return write
+
+
+def _mac_ops(ops):
+    """The writes of a db_write `ops`: a list gives one write per entry, one dict gives one write."""
+    return [_mac_write(e) for e in (ops if isinstance(ops, list) else [ops])]
+
+
+def _mac_new_str(tool_input):
+    """The text a Mac db_str_replace writes: its `new_str` and every unknown top-level string value, joined, so a
+    judge reads the replacement whatever key carries it. None when the call carries no such text."""
+    parts = [v for k, v in tool_input.items()
+             if (k == "new_str" or k not in _MAC_STR_REPLACE_KNOWN) and isinstance(v, str) and v]
+    return "\n".join(parts) if parts else None
 
 
 def normalize_data_call(tool_name, tool_input):
@@ -166,8 +182,11 @@ def normalize_data_call(tool_name, tool_input):
     out = dict(tool_input)
     if short == "db_write":
         out["action"] = "batch"
-        # `ops` moves to `writes`; a value that is no list stays under `ops` so no content is dropped.
-        out["writes"] = [_mac_write(e) for e in out.pop("ops")] if isinstance(out.get("ops"), list) else []
+        # `ops` moves to `writes`: one dict is one write. Any other value stays under `ops` so no content is dropped.
+        if isinstance(out.get("ops"), (list, dict)):
+            out["writes"] = _mac_ops(out.pop("ops"))
+        else:
+            out["writes"] = []
     else:
         out["action"] = "str_replace" if short == "db_str_replace" else _MAC_READS[short]
         # A path is <collection>/<id>; db_query and db_list may carry a bare collection in `collection` or `path`.
@@ -175,6 +194,10 @@ def normalize_data_call(tool_name, tool_input):
                                                 or not isinstance(out.get("collection"), str)):
             out["collection"], out["doc_id"] = _split_path(out["path"])
         out.setdefault("doc_id", None)
+        if short == "db_str_replace":
+            new_str = _mac_new_str(tool_input)
+            if new_str is not None:
+                out["new_str"] = new_str
     if not isinstance(out.get("url"), str) or not out["url"]:
         out[WAITING_PAGE_ASSUMED] = True
     return DATA_TOOL, out

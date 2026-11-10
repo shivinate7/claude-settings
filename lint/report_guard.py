@@ -164,8 +164,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
+    ARTIFACT_DATA, SEND_TOOLS, data_call, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id,
+    peer_sender, read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
 
@@ -1223,8 +1223,8 @@ def question_problem(records, turn, text, hook):
     page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
-        inp = u.get("input")
-        if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
+        name, inp = data_call(u)
+        if (name.startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
                 and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
             return "", ""
     if here is None:
