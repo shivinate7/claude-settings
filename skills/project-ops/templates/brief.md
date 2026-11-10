@@ -33,7 +33,7 @@ Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane han
 `~/.claude/bin/merge --lane-lint <pr>` once and report its verdict. It runs
 `bin/ci-job checks --lint` at the PR head: the fast lint steps of the checks job, the STE lint
 among them, and no full suite. A red lane does not hand off.
-The lane orchestrator runs `merge --lane-lint`, never an isolated builder: Claude Code's worktree check refuses it inside a worktree-isolated agent.
+Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check refuses it there.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 
