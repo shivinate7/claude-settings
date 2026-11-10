@@ -1,0 +1,3 @@
+# lane: ios-ship-export-method (session_013NEJL4U9VGY1K4VRnZxKUo), received 11:08 CST 2026-11-10, kind KEEP
+
+KEEP (sent again; my first reply went out at about 10:06 CST and the tool said delivered): lane ios-ship-export-method. Nothing unpushed. PR #2493, head 1cdadf01c092e3ef2390e0a71c52590f38affb2c, was released by the parent coordinator to runner 8 for batch 72 at 01:34 CST. It passed `merge --lane-lint` and has its review record. It only waits for the merge. Read just now: still an open draft, not merged, mergeable_state clean, last updated 01:26 CST. I cannot read batch 72's state. If you want a handoff instead, say so and I send one.

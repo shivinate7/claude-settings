@@ -405,20 +405,20 @@ session_013NEJL4DPEKRiC91yHkQV7m	10:04 CST	11:08 CST	handoff-B	archive: archived
 session_013NEJL4E3uV2CMHXZSfo6xv	10:04 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL4ErXeDSsWmZzHBqG7	10:04 CST	11:08 CST	KEEP	
 session_013NEJL4F7fFtXaQnEzxbLmh	10:05 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL4Fy1bpdDySC3FKhf6	10:05 CST		sent	
+session_013NEJL4Fy1bpdDySC3FKhf6	10:05 CST	11:08 CST	handoff-B	
 session_013NEJL4HFe7Gz9VNMNryxaZ	10:05 CST	11:08 CST	KEEP	
-session_013NEJL4J7jxH2NTeETZEdne	10:05 CST		sent	
-session_013NEJL4JCSmBupBJbVWwRUE	10:05 CST		sent	
-session_013NEJL4KAVGBcxoZzRnGNpj	10:05 CST		sent	
+session_013NEJL4J7jxH2NTeETZEdne	10:05 CST	11:08 CST	handoff-B	
+session_013NEJL4JCSmBupBJbVWwRUE	10:05 CST	11:08 CST	handoff-B	
+session_013NEJL4KAVGBcxoZzRnGNpj	10:05 CST	11:08 CST	handoff-B	
 session_013NEJL4KjioFCNuafMd8V8Q	10:05 CST	11:08 CST	KEEP	
 session_013NEJL4PiqDj45oM8x6XYaK	10:05 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
-session_013NEJL4QVUDvL2methRX8HA	10:05 CST		sent	
-session_013NEJL4Sbj1KE96HjpE6VWN	10:05 CST		sent	
-session_013NEJL4T4kkeqmaqeHiWDLJ	10:05 CST		sent	
-session_013NEJL4TDRWqka4aSU2Bv7L	10:05 CST		sent	
-session_013NEJL4U9VGY1K4VRnZxKUo	10:05 CST		sent	
-session_013NEJL4UKALWPAbsRE1HhUo	10:05 CST		sent	
-session_013NEJL4UZnwcbTxUfsYRPJa	10:05 CST		sent	
+session_013NEJL4QVUDvL2methRX8HA	10:05 CST	11:08 CST	handoff-B	
+session_013NEJL4Sbj1KE96HjpE6VWN	10:05 CST	11:08 CST	KEEP	
+session_013NEJL4T4kkeqmaqeHiWDLJ	10:05 CST	11:08 CST	KEEP	
+session_013NEJL4TDRWqka4aSU2Bv7L	10:05 CST	11:09 CST	handoff-B	
+session_013NEJL4U9VGY1K4VRnZxKUo	10:05 CST	11:08 CST	KEEP	
+session_013NEJL4UKALWPAbsRE1HhUo	10:05 CST	11:08 CST	handoff-B	
+session_013NEJL4UZnwcbTxUfsYRPJa	10:05 CST	11:09 CST	KEEP	
 session_0144AEXiFqnP3ow1BYkrpztU	10:05 CST		sent	archive: archived unread, no handoff (owner 10:57 CST: old unrelated sessions, archive on sight; override 15m)
 session_014d4zM2pmw7Nd14cBJkxir8	10:05 CST		sent	archive: archived unread, no handoff (owner 10:57 CST: old unrelated sessions, archive on sight; override 15m)
 session_014t6xuYdftdKq28XUqfknku	10:05 CST		sent	archive: archived unread, no handoff (owner 10:57 CST: old unrelated sessions, archive on sight; override 15m)
