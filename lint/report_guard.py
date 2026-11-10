@@ -1638,11 +1638,18 @@ MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
 # The hand-off cite reads the three _clause.CANT_FORMS, the start of the cannot-claim phrases (_clause.CANNOT_FORMS), and
 # the two past forms of _clause.COULD_NOT_FORMS, as well as the words refused, rejected, denied and the status 401 or 403.
-CAPABILITY_RE = re.compile(
-    r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\brejected\b|\bforbidden\b|\bno access\b"
-    % "|".join(_clause.form_pattern(form) for form in _clause.CANT_FORMS + _clause.COULD_NOT_FORMS)
-    + r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b40[13]\b"
-    r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
+def _capability_re(forms):
+    return re.compile(
+        r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\breject(?:s|ed|ing)?\b|\bforbidden\b|\bno access\b"
+        % "|".join(_clause.form_pattern(form) for form in forms)
+        + r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b40[13]\b"
+        r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
+
+
+CAPABILITY_RE = _capability_re(_clause.CANT_FORMS + _clause.COULD_NOT_FORMS)
+# cannot_lines skips a Why yours line the hand-off guard holds. The could-not forms are read by the cannot-claim check on
+# main (the hand-off cite did not hold them), so the skip reads the set without them.
+CAPABILITY_SKIP_RE = _capability_re(_clause.CANT_FORMS)
 CHOICE_RE = re.compile(
     r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"
     r"|\bthe safety rules keep\b", re.I)
@@ -2177,7 +2184,7 @@ def cannot_lines(text):
         if CANNOT_UNVETTED_RE.match(raw) or not CANNOT_RE.search(_mask(body)):
             continue
         if hand_off is None:
-            hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_RE.search(line)}
+            hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_SKIP_RE.search(line)}
         if raw in hand_off:
             continue
         mask = _mask(body)
