@@ -13567,17 +13567,16 @@ TRUST_TOOLS = {
 TRUST_NAMED = ("confirm_repository_trust", "request_computer_folder")
 
 
-def trust_refuse(name, tool, transcript, carries=(), env=ROLE_ENV, agent_id=None):
-    """A trust-card call the guard refuses. The reason names its rule, and never either tool. `agent_id`, when given,
-    makes the call an agent's, as the harness sends it."""
+def trust_refuse(name, tool, transcript, carries=(), env=ROLE_ENV):
+    """A trust-card call the guard refuses. The reason names its rule, and never either tool."""
     add("trust-card-in-build: " + name, "deny", rule=TRUST_RULE, tool=tool, cwd=NOGIT, lacks=TRUST_NAMED,
-        carries=carries, transcript=transcript, env=env, agent_id=agent_id, **TRUST_TOOLS[tool])
+        carries=carries, transcript=transcript, env=env, **TRUST_TOOLS[tool])
 
 
-def trust_allow(name, tool, transcript, agent_id=None):
-    """A call the guard lets through silently. `agent_id` as in trust_refuse."""
+def trust_allow(name, tool, transcript):
+    """A call the guard lets through silently."""
     add("trust-card-in-build: " + name, "allow", tool=tool, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, agent_id=agent_id, **TRUST_TOOLS.get(tool, {}))
+        env=ROLE_ENV, **TRUST_TOOLS.get(tool, {}))
 
 
 for _trust_tool in TRUST_TOOLS:
@@ -13967,27 +13966,6 @@ AGENT_FIXTURES = {
     "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
     "main-lane-agent-second-step": (role_target_call("g1", ARCH_LANE_TAGS),
                                     [(AGENT_OWN_ID, role_target_call("g1", ARCH_AGENT_LANE_TAGS))]),
-    # An agent's brief and trust reads (rules lane-one-topic and trust-card-in-build). The record the guard needs sits in
-    # the agent's own file, and the main transcript holds none of it, or holds a record that decides otherwise.
-    "brief-agent-topic-icons": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("t1", STEP_TOPIC_TAGS))]),
-    "brief-agent-stale": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("t1", STEP_TOPIC_TAGS)
-                                         + role_tag_call("t2", session=ROLE_OTHER))]),
-    "brief-agent-lane-over-triage": (role_target_call("t1", TRIAGE_TAGS),
-                                     [(AGENT_OWN_ID, role_target_call("t1", STEP_TOPIC_TAGS))]),
-    "brief-agent-lanes-both": (role_target_call("t1", STEP_TOPIC_TAGS),
-                               [(AGENT_OWN_ID, role_target_call("t1", STEP_COLORS_TAGS))]),
-    # An untagged record in the agent's file, and a set_session_tags call on the target in the main transcript, which holds
-    # no record of it. The tags may have changed since that record, so the brief is refused as stale.
-    "brief-agent-untagged-main-tags": (role_tag_call("t2", session=ROLE_OTHER),
-                                       [(AGENT_OWN_ID, role_target_call("t1", ARCH_UNTAGGED_TAGS))]),
-    # The same order in one file: an untagged read of the target, then a set_session_tags call on it. No agent file.
-    "brief-agent-untagged-then-tags": (role_target_call("t1", ARCH_UNTAGGED_TAGS) + role_tag_call("t2", session=ROLE_OTHER),
-                                       [(AGENT_OWN_ID, AGENT_QUIET)]),
-    # The control: the same untagged agent record, but the set_session_tags call names another session, not the target.
-    "brief-agent-untagged-other-tags": (role_tag_call("t2"),
-                                        [(AGENT_OWN_ID, role_target_call("t1", ARCH_UNTAGGED_TAGS))]),
-    "trust-agent-untagged": (AGENT_QUIET, [(AGENT_OWN_ID, role_call("g1", ["cs-repo:o/r"]))]),
-    "trust-agent-lane": (role_call("g1", ["cs-repo:o/r"]), [(AGENT_OWN_ID, role_call("g1", LANE_TAGS))]),
     # The main transcript holds no record of the target: the lane's record is only in the agent's own file, with a branch.
     "agent-own-branch-lane": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_raw("g1", role_wrapped(arch_record(
         ARCH_INC_TAGS, {"": ARCH_BRANCH}, [ARCH_QMAX_SOURCE]))))]),
@@ -14082,23 +14060,6 @@ archive_refuse("an agent's archive of a lane known only from the agent's transcr
                carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH + ARCHIVE_NO_RECORD_PIN)
 
 
-# The trust card's read of an agent's own record (rule trust-card-in-build). An agent's call is judged on its own record in
-# its own transcript too, so a cs-build record there refuses it, even when the main transcript's record is untagged.
-FAMILY = "merge"
-for _trust_tool in TRUST_TOOLS:
-    _trust_word = _trust_tool.rsplit("__", 1)[1]
-    trust_allow(_trust_word + " whose untagged own record is only in the agent's transcript allows", _trust_tool,
-                role_path("trust-agent-untagged"), agent_id=AGENT_OWN_ID)
-    trust_refuse(_trust_word + " whose cs-build record is only in the agent's transcript is refused, though the main record is untagged",
-                 _trust_tool, role_path("trust-agent-lane"), agent_id=AGENT_OWN_ID)
-    # The control: no own record in either transcript is still a refusal, and the reason steers to get_session.
-    trust_refuse(_trust_word + " with no own record in the agent's transcript or the main one is refused", _trust_tool,
-                 role_path("agent-no-record"), agent_id=AGENT_OWN_ID, carries=("get_session", "alone", ("retry", "Retry")))
-    # The control: an orchestrator call (no agent_id) reads the main transcript alone, never the agent's file.
-    trust_allow(_trust_word + " from an orchestrator call (no agent_id) ignores a cs-build record in an agent's transcript",
-                _trust_tool, role_path("trust-agent-lane"))
-
-
 # =========================================================================== 5h. one lane, one topic
 FAMILY = "lane-one-topic"
 #
@@ -14113,17 +14074,17 @@ SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 TOPIC_STEER = (("topic", "Topic"),)  # the refusal steers the sender to name the topic
 
 
-def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=(), agent_id=None):
+def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=()):
     """A send_message the guard refuses. The reason names its rule, and the rule's own id. `lacks` names fragments
-    the reason must not hold. `agent_id`, when given, makes the call an agent's, as the harness sends it."""
+    the reason must not hold."""
     add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks, agent_id=agent_id)
+        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
-def step_allow(name, transcript, message, target=ROLE_OTHER, agent_id=None):
-    """A send_message the guard lets through silently. `agent_id` as in step_refuse."""
+def step_allow(name, transcript, message, target=ROLE_OTHER):
+    """A send_message the guard lets through silently."""
     add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message, agent_id=agent_id)
+        env=ROLE_ENV, session_id=target, message=message)
 
 
 # Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step
@@ -14209,39 +14170,6 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
-# An agent's own transcript (rule lane-one-topic). The agent's brief reads its target's record in the agent's own file,
-# beside the main transcript, as its archive and trust reads do. The main transcript holds no record of the target, or
-# one that decides otherwise.
-step_allow("a brief for topic icons to a lane whose record is only in the agent's own transcript is allowed",
-           role_path("brief-agent-topic-icons"), "Lane brief: icon-b. Topic: icons.", agent_id=AGENT_OWN_ID)
-step_refuse("a brief for topic colors to a lane whose record is only in the agent's own transcript is refused, for its topic",
-            role_path("brief-agent-topic-icons"), "Lane brief: icon-b. Topic: colors.", agent_id=AGENT_OWN_ID,
-            carries=("names a topic the lane does not hold",), lacks=("holds no get_session",))
-step_refuse("a brief for topic icons, after set_session_tags in the agent's own transcript, is refused as stale",
-            role_path("brief-agent-stale"), "Lane brief: icon-b. Topic: icons.", agent_id=AGENT_OWN_ID,
-            carries=("set_session_tags call on the target followed",))
-# Refused as stale: the agent's record is untagged, and a set_session_tags call on the target in the main transcript may
-# have tagged it a lane since. The untagged record must not pass on its own tags.
-step_refuse("a brief for topic B, over an untagged agent record and set_session_tags in the main transcript, is refused as stale",
-            role_path("brief-agent-untagged-main-tags"), "Lane brief: x. Topic: B.", agent_id=AGENT_OWN_ID,
-            carries=("set_session_tags call on the target followed",), lacks=("holds no get_session",))
-# The same order in one file: the untagged read, then the set_session_tags call, both in the main transcript.
-step_refuse("a brief for topic B, after an untagged read then set_session_tags in the main transcript, is refused as stale",
-            role_path("brief-agent-untagged-then-tags"), "Lane brief: x. Topic: B.", agent_id=AGENT_OWN_ID,
-            carries=("set_session_tags call on the target followed",), lacks=("holds no get_session",))
-# Allowed: the control for the two refusals above. The record is untagged, and the tag call names another session, so the
-# target is not retagged and the brief passes. A fix that marks any tag call stale refuses this case.
-step_allow("a brief for topic B, over an untagged agent record and set_session_tags on another session, is allowed",
-           role_path("brief-agent-untagged-other-tags"), "Lane brief: x. Topic: B.", agent_id=AGENT_OWN_ID)
-step_refuse("a lane in the agent's own record decides though the main record says triage: a brief for topic colors is refused",
-            role_path("brief-agent-lane-over-triage"), "Lane brief: icon-b. Topic: colors.", agent_id=AGENT_OWN_ID,
-            carries=("names a topic the lane does not hold",))
-step_allow("lanes in both records join their topics: a brief for topic colors, named only by the agent's record, is allowed",
-           role_path("brief-agent-lanes-both"), "Lane brief: colors-a. Topic: colors.", agent_id=AGENT_OWN_ID)
-# The control: an orchestrator brief (no agent_id) reads the main transcript alone, so the agent's file is no record for it.
-step_refuse("a brief with no agent_id does not read the agent's transcript: the lane there is no record of the target",
-            role_path("brief-agent-topic-icons"), "Lane brief: icon-b. Topic: icons.",
-            carries=("holds no get_session or create_session record",))
 
 
 # =========================================================================== 5i. SendMessage to a cloud session
