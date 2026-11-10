@@ -656,7 +656,7 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
 OCTOPUS_PUSH_REASON = (
-    "Rule (Git, octopus-push): this push would send {sha}, a merge commit of more than two parents. "
+    "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
     "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
 )
 _READ_VERBS = ("status", "diff", "log", "show")

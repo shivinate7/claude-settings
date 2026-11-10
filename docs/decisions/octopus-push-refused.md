@@ -16,6 +16,7 @@ Rule `octopus-push` in `hooks/guard.py` refuses a `git push` whose new commits h
 - Cost: per pushed ref, one `git rev-list`, and none for a dry run or a `main` or `master` destination. A URL or path remote adds one `git config` read per pushed ref. `record_push_cost_case` in `hooks/test_guard.py` pins the counts for plain-name remotes. The URL and path read is not pinned. No log, file or process.
 
 Protected by the `octopus-push` cases in `hooks/test_guard.py`, red before the rule landed, and by the remedy-text check, which went red on two mutants. The `main` skip has a case for `main` only, none for `master`.
+The refusal cite scan in `lint/test_rule_audit.py` reads the reason's `decision octopus-push-refused` cite (PR #2522, Read a block dict passed to a printing helper in the refusal cite scan).
 
 Kind: process
 Home: hooks/guard.py
