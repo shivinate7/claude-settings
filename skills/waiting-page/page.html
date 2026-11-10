@@ -821,9 +821,11 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .stack .sn { font: 600 13px/44px var(--mono); color: var(--muted); text-align: end; }
 .stack .stext { margin: 0; min-width: 0; padding-block: 10px; white-space: pre-line; overflow-wrap: anywhere; }
 .stack .stext.sedit { padding-block: 0; }
-/* Wraps, so in a column too narrow for Edit and Remove side by side the second press drops under the first, inside its card. */
+/* Wraps, so in a column too narrow for Edit and Remove side by side the second press drops under the first, inside its card. A label
+   wider than the whole column breaks inside its press. `anywhere`, since the label is the press's flex item, which never shrinks below
+   its min-content; a press that fits keeps its word whole, as the wrap is placed on each press's own max-content. */
 .stack .sacts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
-.stack .sacts .btn { min-height: 44px; min-inline-size: 0; max-inline-size: 100%; white-space: normal; }
+.stack .sacts .btn { min-height: 44px; min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
 .stack .sstate { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
 .stack .sstate.ok { color: var(--good); font-weight: 600; }
 .stack textarea, .askform textarea.copybox { width: 100%; min-height: 66px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--acc); border-radius: var(--r); background: var(--surface); font: inherit; color: var(--ink); }
@@ -911,9 +913,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.folded.withd > .frow { flex: 1 1 0; margin-inline-start: calc(-1 * var(--lead)); }
 .askc.folded.withd > :is(.fwait, .sline) { flex: 1 1 100%; margin-inline-start: calc(-1 * var(--lead)); }
 .askc.folded.withd > .sline, .askc.folded > .sline.dline { padding: 0 16px 8px; }
-/* A press alone on its line may be narrower than its busy label's box ("Dismissing…", "Restoring…"), never wider than the row. */
+/* A press alone on its line may be narrower than its busy label's box ("Dismissing…", "Restoring…"), never wider than the row. Then its
+   labels start at the box's start and run past its end (`safe center`), so the label still lines up with the title. */
 .askc.folded.withd > .btn { flex: 0 1 auto; min-inline-size: 0; margin: 0; }
-:is(.askc.folded.withd > .btn.fixw, .askc.dropped .sline .btn.fixw) { grid-template-columns: minmax(0, max-content); max-inline-size: 100%; }
+:is(.askc.folded.withd > .btn.fixw, .askc.dropped .sline .btn.fixw) { grid-template-columns: minmax(0, max-content); max-inline-size: 100%; justify-items: safe center; }
 /* The Dismissed line keeps the row's place until the next load, at the folded row's height. */
 .askc.dropped { padding: 2px 8px 2px 16px; background: transparent; border-style: dashed; border-color: var(--faint); }
 .askc.dropped:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
