@@ -28833,6 +28833,52 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a sibli
                          _gcx_row("deny", "primary", "git -C @SIB commit -m x", agent=None,
                                   session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
 
+# env -C and env --chdir set the folder the git after them runs in, so a git verb that env moves into a
+# checkout is judged there, as the git -C form is. Each row is one spelling, so a failure names one form.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into the primary checkout is refused",
+                         _gcx_row("deny", "home", "env -C @PRIMARY git commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir add in the primary checkout is refused",
+                         _gcx_row("deny", "home", "env --chdir @PRIMARY git add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir=<path> add in the primary checkout is refused",
+                         _gcx_row("deny", "home", "env --chdir=@PRIMARY git add f")))
+# Read from the agent's home, the git -C part alone stays inside the home, so only the env -C climb reaches
+# the primary checkout.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C then git -C, two relative folders that together reach "
+                         "the primary checkout, is refused",
+                         _gcx_row("deny", "home", "env -C ../../.. git -C . rm f")))
+# Green on main too: these pin the allows the fix must keep, so each is a guard, not a red case.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C status of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "env -C @PRIMARY git status")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into a variable folder is allowed",
+                         _gcx_row("allow", "home", 'env -C "$WT" git commit -m x')))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into its own home is allowed",
+                         _gcx_row("allow", "home", "env -C @HOME git commit -m x")))
+def run_dir_env_c_case():
+    """_run_dir returns the folder an `env -C <dir>` names, as it returns the folder a `git -C <dir>` names.
+    The git -C form is the control and pins the reader's answer; the env -C form must match it, not the cwd.
+    guard_core loads from the folder of GUARD, so a GUARD_UNDER_TEST copy is the one read. Both folders are
+    named under ROOT, the run folder, and nothing is read or written on disk."""
+    import importlib.util
+    folder = os.path.dirname(GUARD)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    spec = importlib.util.spec_from_file_location("guard_core_under_test", os.path.join(folder, "guard_core.py"))
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+    target = os.path.join(ROOT, "run-dir-target")
+    cwd = os.path.join(ROOT, "run-dir-cwd")
+    control = core._run_dir("git -C \"%s\" status" % slash(target), cwd)
+    if os.path.normpath(control) != os.path.normpath(target):
+        return False, "control: git -C reads %s, want %s" % (control, target)
+    got = core._run_dir("env -C \"%s\" git status" % slash(target), cwd)
+    if os.path.normpath(got) != os.path.normpath(target):
+        return False, "env -C reads %s, want %s (the cwd is %s)" % (got, target, cwd)
+    return True, "env -C and git -C both read the named folder"
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads the folder an env -C names, as it reads a git -C",
+                         run_dir_env_c_case))
+
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
