@@ -377,6 +377,13 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
+    # bin/duo-fold and its suite run in the shell-macos job only, like bin/sim-test (bash 3.2 on macOS).
+    # Named failure: without the arm, bin/duo-fold turns every flag on, and the suite turns on `code` alone.
+    def test_duo_fold_edit_turns_on_only_the_macos_shell_job(self):
+        for p in ("bin/duo-fold", "lint/test_duo_fold.sh"):
+            with self.subTest(path=p):
+                self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
     # bin/shoot's suite installs a browser, so its own paths and the browser installers turn `shoot` on. An edit sets
     # `code` and `shoot` and no other flag in true_set (checks_guard is outside ALL; the cases below pin it).
     # An unrelated code change leaves `shoot` off.
