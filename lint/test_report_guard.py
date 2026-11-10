@@ -723,10 +723,13 @@ class ReportGuardTests(unittest.TestCase):
 
     def test_73_peer_reply_does_not_move_the_turn_start_in_either_direction(self):
         rows = [
+            # Pin: a peer record before the commit never hides the commit.
             # Catches: a peer record before the commit hides the commit, so a turn with no report passes.
             ("peer before commit", [human("go"), peer_msg("Answer: ok."),
                                     tool_use_msg("Bash", {"command": "git commit -m x"}),
                                     tool_result_msg(), assistant_text("done")], "block"),
+            # Pin: a commit from an earlier turn never counts because a peer
+            # reply came after the new human message.
             # Catches: a peer reply after a new human message lets a commit from an earlier turn count, which
             # would block a turn that only reads.
             ("earlier turn commit", [human("land it"), tool_use_msg("Bash", {"command": "git commit -m a"}),
@@ -2789,6 +2792,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
     def test_ln_green_send_to_parent_in_the_turn_passes(self):
         # Catches: a lane's question sent to its parent in its turn not read as sent, in any of the three forms.
         # Both shapes must pass. A human message before the peer message must not stop the send from counting.
+        # The human-first shape pins the send after a human message. A peers-only lane is skipped before it.
         shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
         forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
                  ("to parent", self.send(to="parent")))
