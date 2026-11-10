@@ -83,6 +83,25 @@ file, a file of the wrong shape (meta not an object, items or answers not a list
 `at` prints an `unknown:` line and exits 2.
 Cost: one python process, reads 3 files, writes none, starts no git, no timer.
 
+Unread mode, run by the writer at each wake and turn start (SKILL.md, "Read the answers"):
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>
+
+<dir> holds four files the session saved from the store: meta.json (the data of meta/page, an object), items.json,
+answers.json and receipts.json (a list of {"id", "data"} entries each). One line per item answer the writer has not
+read back, in answers.json order, then exit 1:
+`answer-unread <id> (item <n>, owner <owner>, answered <at>, before wake <woke>)`
+(`?` for a missing n or owner). An answer is listed when it is an item answer (not `park.<id>`, `parked: true` or
+act `park`), its item exists (open, or closed with the answer kept), its `at` is earlier than meta `woke` (the
+writer's previous wake) and no receipt with the answer's id has a `read` at or after `at`. A receipt with only `filed`
+does not clear it. With no `woke` (absent or null) every answer with no such receipt is listed, and the last field
+reads `before wake: none recorded`. With none listed, `unread: clean` and exit 0. A missing or unreadable file, a file
+of the wrong shape (meta not an object, the others not a list), an unreadable `woke`, an answer with no readable `at`
+or a compared receipt with no readable `read` prints an `unknown:` line and exits 2.
+The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
+own optional field in meta/page. The incident: item 143's answer stayed unread for 10.5 hours.
+Cost: one python process, reads 4 files, writes none, starts no git, no timer.
+
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 extra process for --answers (it reads one more file, a folder one per answer), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
@@ -711,7 +730,70 @@ def parked_mode(argv):
     return 2 if unknown else 1 if lines else 0
 
 
+def unread_mode(argv):
+    """`--unread <dir>`: name each item answer the writer has not read back, from four saved files and no clock."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--unread", required=True)
+    args = ap.parse_args(argv)
+    try:
+        loaded = {}
+        for name in ("meta", "items", "answers", "receipts"):
+            with open(os.path.join(args.unread, name + ".json"), encoding="utf-8") as f:
+                loaded[name] = json.load(f)
+    except (OSError, ValueError) as err:
+        print("unknown: cannot read %s.json in %s (%s)" % (name, args.unread, err))
+        return 2
+    meta, items, answers, receipts = loaded["meta"], loaded["items"], loaded["answers"], loaded["receipts"]
+    for name, ok in (("meta", isinstance(meta, dict)), ("items", isinstance(items, list)),
+                     ("answers", isinstance(answers, list)), ("receipts", isinstance(receipts, list))):
+        if not ok:  # a file of the wrong shape is never read as clean or listed
+            print("unknown: %s.json is not %s" % (name, "an object" if name == "meta" else "a list"))
+            return 2
+    entries = lambda rows: [r for r in rows if isinstance(r, dict)]
+    data = lambda r: r.get("data") if isinstance(r.get("data"), dict) else {}
+    woke_text = meta.get("woke")
+    woke = parse_utc(woke_text) if woke_text is not None else None
+    if woke_text is not None and woke is None:  # an unreadable wake is never read as "no wake"
+        print("unknown: meta woke is not an ISO time (%s)" % woke_text)
+        return 2
+    item_data = {}
+    for r in entries(items):
+        item_data.setdefault(r.get("id"), data(r))
+    reads = {}
+    for r in entries(receipts):
+        reads.setdefault(r.get("id"), []).append(data(r).get("read"))
+    lines, unknown = [], []
+    for r in entries(answers):
+        key = r.get("id")
+        # A park answer is read by the --parked mode, never here: keyed park.<id>, parked: true, or act park.
+        if not isinstance(key, str) or key.startswith("park.") or data(r).get("parked") is True or data(r).get("act") == "park":
+            continue
+        if key not in item_data:
+            continue
+        at = parse_utc(data(r).get("at"))
+        if at is None:  # an unreadable time is never counted read or unread
+            unknown.append("unknown: the answer %s has no readable at" % key)
+            continue
+        if woke is not None and at >= woke:
+            continue
+        times = [parse_utc(read) for read in reads.get(key, []) if read is not None]
+        if any(t is not None and t >= at for t in times):
+            continue
+        if any(t is None for t in times):
+            unknown.append("unknown: the receipt of answer %s has no readable read" % key)
+            continue
+        item = item_data[key]
+        lines.append("answer-unread %s (item %s, owner %s, answered %s, %s)" % (
+            key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"],
+            "before wake %s" % woke_text if woke is not None else "before wake: none recorded"))
+    out = lines + unknown
+    print("\n".join(out) if out else "unread: clean")
+    return 2 if unknown else 1 if lines else 0
+
+
 def main(argv):
+    if "--unread" in argv:
+        return unread_mode(argv)
     if "--parked" in argv:
         return parked_mode(argv)
     if "--session-line" in argv:
@@ -721,7 +803,8 @@ def main(argv):
     if not argv:
         sys.exit("usage: stale_pages.py <fetched-dir> [<repo root> ...]\n"
                  "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
-                 "       stale_pages.py --parked <dir> [--now <iso>]")
+                 "       stale_pages.py --parked <dir> [--now <iso>]\n"
+                 "       stale_pages.py --unread <dir>")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
     with open(TEMPLATE, encoding="utf-8") as f:
