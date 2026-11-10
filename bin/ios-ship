@@ -13,7 +13,7 @@
 # testflight: archive each app as Release from the checkout that holds CONFIG, then upload it to TestFlight.
 #   Needs a clean tree at origin/main. --export-only skips the main check, exports instead of uploading,
 #   keeps the export in a printed folder, and deletes the .ipa of each app that has copy_in (it holds the secret).
-#   --method (only with --export-only) sets the export method: debugging or release-testing, for a development .ipa.
+#   --method (needs --export-only): debugging gives a development .ipa; release-testing a release .ipa for registered devices.
 #   Without it the method is app-store-connect, for upload and for --export-only.
 #   Prints steps and one verdict line. xcodebuild output goes to a log file. Stops at the first failing app.
 # install: build each app in its own clone and install it on the phone (devicectl). Env: REINSTALL_HOME (clones + stamps),
