@@ -1361,6 +1361,17 @@ MUTATIONS = [
      '            if named < ROLE_MODEL_RANK.index("sonnet"):',
      '            if named <= ROLE_MODEL_RANK.index("sonnet"):', "guard",
      'role-model: served-model: fix check, reviewer on sonnet with the marker is allowed, the lift is to sonnet'),
+    # THE FIX CHECK REFUSAL MATCHES (hooks/guard.py role_model_one). The no-model refusal keeps ROLE_NO_MODEL_MATCH, which
+    # never_lifted reads, so no owner override lifts it. The haiku refusal keeps ROLE_FIX_CHECK_MATCH, which the general
+    # override lifts. Each swap moves one refusal to the other match, and its named story must go red.
+    ("served-model: the no-model fix check refusal carries the liftable match, so an owner override lifts it",
+     'return ROLE_FIX_CHECK_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_NO_MODEL_MATCH + role, False',
+     'return ROLE_FIX_CHECK_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_FIX_CHECK_MATCH + role, False', "guard",
+     'role-model: the no-model fix check reviewer stays refused under an owner override, and spends none'),
+    ("served-model: the haiku fix check refusal carries the never-lifted match, so an owner override cannot lift it",
+     'return ROLE_FIX_CHECK_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_FIX_CHECK_MATCH + role, False',
+     'return ROLE_FIX_CHECK_REASON % ((ROLE_MODEL_RANK[1],) * 2), ROLE_NO_MODEL_MATCH + role, False', "guard",
+     'role-model: a haiku-named fix check reviewer is lifted by an owner override once, then refused again'),
     ("step-up: the line-start rows read the first line only, so a round line after the first line walks past",
      '            found = list(rx.finditer(brief))',
      '            found = list(rx.finditer(first))', "guard", 'floor step-up: round line after a lone quote on line two is denied'),
