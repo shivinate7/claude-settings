@@ -97,12 +97,6 @@ def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
 
 
-def label_unset_line(n):
-    """The one line `merge --lane-lint N --integration --lint-unknown-ok` prints when the lint reads unknown: the batch label is not set.
-    Its wording is pinned here alone."""
-    return "merge: the `%s` label was not set on #%d because the lint read unknown, not a pass." % (merge.BATCH_LABEL, n)
-
-
 class NoLock:
     """The lane run takes no merge lock: a lock call fails the case."""
     def acquire(self, *args, **kwargs):
@@ -161,27 +155,27 @@ class CiJobStub:
         return [c for c in calls if "--plan" not in c["argv"]]
 
 
-class LabelPost(merge.Host):
-    """A real Host whose `gh` only records. `pr` is the fake host's, so the lane is the head the case pushed. Each gh call is kept as (argv,
-    payload, lint runs seen at the call); the payload is the --input file's text, read before Host.api removes the file. A POST to a labels
-    route answers `label_error` when one is set, and succeeds otherwise. Any other call succeeds with an empty object."""
+WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")  # the HTTP methods that change GitHub; GET reads it
 
-    def __init__(self, fake, label_error=None, lint_runs=lambda: 0):
+
+class WriteRecorder(merge.Host):
+    """A real Host whose `gh` only records. `pr` is the fake host's, so the lane is the head the case pushed. Each gh call's argv is kept in
+    `calls`, and every call succeeds with an empty object. A FakeHost cannot show a write, because it never runs gh."""
+
+    def __init__(self, fake):
         super().__init__()
-        self.fake, self.label_error, self.lint_runs, self.calls = fake, label_error, lint_runs, []
+        self.fake, self.calls = fake, []
 
     def pr(self, n):
         return self.fake.pr(n)
 
     def gh(self, args, cwd=None):
-        payload = ""
-        if "--input" in args:
-            with open(args[args.index("--input") + 1], encoding="utf-8") as f:
-                payload = f.read()
-        self.calls.append((list(args), payload, self.lint_runs()))
-        if "POST" in args and "/labels" in " ".join(args):
-            return (1, self.label_error) if self.label_error else (0, "[]")
+        self.calls.append(list(args))
         return 0, "{}"
+
+    def writes(self):
+        """The recorded calls whose argv names a method that changes GitHub."""
+        return [args for args in self.calls if any(a in WRITE_METHODS for a in args)]
 
 
 WAIT_LINE = "GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
@@ -852,75 +846,15 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
 
-    def label_run(self, *argv, label_error=None):
-        """-> (rc, out, err, posts) of merge in the lane checkout, with a host that records every gh call. posts holds each REST POST to a
-        labels route as (the route under the repo, such as issues/7/labels; its argv and payload as one text; the lint runs seen when it was sent)."""
-        self.host = LabelPost(self.host, label_error=label_error, lint_runs=lambda: len(self.lint_calls()))
-        rc, out, err = self.run_main(*argv, CLAUDE_CODE_REMOTE=None)
-        posts = [(re.sub(r"^repos/[^/]+/[^/]+/", "", args[1]), " ".join(args) + payload, seen)
-                 for args, payload, seen in self.host.calls if "POST" in args and "/labels" in " ".join(args)]
-        return rc, out, err, posts
-
-    def test_integration_on_a_passing_lint_posts_one_batch_label_after_the_lint(self):
+    def test_lane_lint_on_a_pass_sends_no_write_to_github(self):
+        """Lane-lint is read-only (settings.json's read-check entry says so): a PASS sends no POST, and no other write, to GitHub."""
         self.use_ci_job(PASSING, 0)
-        rc, out, err, posts = self.label_run("--lane-lint", "7", "--integration")
-        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once with --integration:\n" + out + err)
-        self.assertEqual(len(posts), 1, "want one label POST, got %d:\n%s" % (len(posts), out + err))
-        route, text, seen = posts[0]
-        self.assertEqual(route, "issues/7/labels", "the label POST went to %s, not to #7, the pull request the lint was given: %s" % (route, text))
-        self.assertIn("batch", text, "the label POST does not name batch: " + text)
-        self.assertEqual(seen, 1, "the label POST went out before the lint ran")
-        self.assertEqual(rc, 0, out + err)
+        self.host = WriteRecorder(self.host)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
-
-    def test_integration_on_a_failing_lint_posts_no_label(self):
-        self.use_ci_job(FAILING, 1)
-        rc, out, err, posts = self.label_run("--lane-lint", "7", "--integration")
-        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once with --integration:\n" + out + err)
-        self.assertEqual(rc, 1, out + err)
-        self.assertEqual(posts, [], "a FAILing lint posted a label")
-
-    def test_without_integration_a_passing_lint_posts_no_label(self):  # a control: the label is for --integration only
-        self.use_ci_job(PASSING, 0)
-        rc, out, err, posts = self.label_run("--lane-lint", "7")
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(posts, [], "a lint with no --integration posted a label")
-
-    def test_integration_with_a_commit_ref_refuses_and_posts_nothing(self):
-        self.use_ci_job(PASSING, 0)
-        rc, out, err, posts = self.label_run("--lane-lint", self.head("feat"), "--integration")
-        self.assertEqual([old for old in tm.OLD_PARSER_ERRORS if old in err], [], "the parser does not know --integration:\n" + err)
-        self.assertNotEqual(rc, 0, out + err)
-        self.assertIn("--integration", out + err, "the refusal does not name --integration")
-        self.assertEqual(posts, [], "a commit ref was labelled")
-
-    def test_a_failed_label_post_says_the_label_is_unknown_keeps_the_pass_and_claims_no_label(self):
-        self.use_ci_job(PASSING, 0)
-        rc, out, err, posts = self.label_run("--lane-lint", "7", "--integration", label_error="HTTP 422: Validation Failed: label does not exist")
-        text = out + err
-        self.assertEqual(len(posts), 1, "no label POST was sent:\n" + text)
-        self.assertEqual(posts[0][0], "issues/7/labels", "the failed label POST went to %s, not to #7, the pull request the lint was given" % posts[0][0])
-        self.assertRegex(text, r"(?i)unknown", "the failed label POST does not say the label is unknown:\n" + text)
-        self.assertEqual(len(pass_lines(out)), 1, "the lint's PASS line was not kept:\n" + text)
-        self.assertEqual(rc, 0, text)
-        claims = [line for line in text.splitlines() if re.search(r"(?i)label", line) and re.search(r"(?i)(?<!not )\b(added|applied|set)\b", line)]
-        self.assertEqual(claims, [], "a line claims the label was set:\n" + text)
-
-    def test_integration_on_an_unknown_lint_with_a_reason_prints_one_line_that_the_label_was_not_set(self):
-        self.use_ci_job(UNKNOWN, 2)
-        rc, out, err, _ = self.label_run("--lane-lint", "7", "--integration", "--lint-unknown-ok", "shellcheck is not on this box")
-        text = out + err
-        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once with --integration:\n" + text)
-        self.assertEqual(rc, 0, text)
-        labelled = [line for line in text.splitlines() if "label" in line]
-        self.assertEqual(labelled, [label_unset_line(7)], "the unknown lint did not print one line saying the batch label was not set:\n" + text)
-
-    def test_integration_on_an_unknown_lint_with_a_reason_posts_no_label(self):  # a control: an unknown read never posts the label
-        self.use_ci_job(UNKNOWN, 2)
-        rc, out, err, posts = self.label_run("--lane-lint", "7", "--integration", "--lint-unknown-ok", "shellcheck is not on this box")
-        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once with --integration:\n" + out + err)
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(posts, [], "an unknown lint posted a label:\n" + out + err)
+        writes = [" ".join(args) for args in self.host.writes()]
+        self.assertEqual(writes, [], "a PASS lint sent a write to GitHub:\n" + out)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
