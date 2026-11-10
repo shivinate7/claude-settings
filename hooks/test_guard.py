@@ -3627,11 +3627,12 @@ sh("per-file allow: an ANSI-C commit message over two lines allows",
    VCS + " commit -m $'line one\\nline two'", "allow", cwd=GITWT)
 sh("per-file allow: an ANSI-C commit message naming git push --force as text allows",
    VCS + " commit -m $'release git push --force notes'", "allow", cwd=GITWT)
-# THE FORM THAT ASKS, PINNED. A commit message whose quote never closes does not parse, so git_calls falls
-# back to a whitespace split (guard_core.git_calls) and reads the quoted `git push --force` as a push. The
-# force-push rule then asks at its unreadable-target arm (PUSH_ASK_REASON, guard_push_delete.py).
-sh("per-file ask: a commit message whose quote never closes names git push --force, asks",
-   VCS + " commit -m \"release git push --force notes", "ask", "force-push", cwd=GITWT)
+# THE FORM THAT ALLOWS, PINNED. A commit message whose quote never closes is a bash syntax error, so the
+# shell runs nothing. push_text blanks the open quote's tail (_push_scan), so the quoted `git push --force`
+# is text, not a push, and the call reads as a plain commit. Re-pointed from ask by coordinator ruling
+# 2026-11-09 20:44 CST.
+sh("per-file allow: a commit message whose quote never closes names git push --force, allows",
+   VCS + " commit -m \"release git push --force notes", "allow", cwd=GITWT)
 
 # THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decision agent-worktree-discard-is-noted, section "Agent-owned worktree").
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
