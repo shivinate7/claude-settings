@@ -88,6 +88,18 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
 
+    def test_session_start_hook_matcher_covers_compact(self):
+        # After a compaction the start hook must run, so the session learns its hooks lag main.
+        with open(SETTINGS, encoding="utf-8") as f:
+            entries = json.load(f)["hooks"]["SessionStart"]
+        starts = [e for e in entries if any("/hooks/session_start.sh" in h.get("command", "") for h in e.get("hooks", []))]
+        self.assertEqual(len(starts), 1, "want one SessionStart entry running session_start.sh, found %d" % len(starts))
+        matcher = starts[0].get("matcher", "")
+        for source in ("startup", "resume", "compact"):
+            with self.subTest(source=source):
+                self.assertTrue(covers(starts[0], source),
+                                "the session_start.sh SessionStart matcher %r does not cover %s" % (matcher, source))
+
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
 # model only for Markdown and decision records. No prompt hook may sit on Edit or Write: it would call a
