@@ -122,7 +122,7 @@ session_013NEJKzpRGRNNVi8C4bL4wM	09:50 CST	09:50 CST	KEEP	archive: archived-idle
 session_013NEJKzpdAiMKMRoL5YWGDX	09:50 CST	09:50 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzr9wjJhiTbhubR8Hc	09:50 CST	09:50 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzr9wjJhiTbhubR8Hc.idle.md)
 session_013NEJKzsDSbaL3UN9VrRHTu	09:50 CST	09:50 CST	handoff-B	archive: archived
-session_013NEJKzsUKjkcSWJSe2tXSP	09:50 CST	09:50 CST	KEEP	archive: active-kept (late reply: round 3 reviewer + lane lint running)
+session_013NEJKzsUKjkcSWJSe2tXSP	09:50 CST	09:50 CST	KEEP	archive: archived 12:2x CST after handoff (override 4h from 12:21)
 session_013NEJKzsquF2AHqJn51qxTj	09:50 CST	09:50 CST	handoff-B	archive: archived (owner override 15m, 10:49 CST)
 session_013NEJKzstsLQzGsUXajpze5	09:50 CST	09:51 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJKzstsLQzGsUXajpze5.idle.md)
 session_013NEJKztJBZ8cbKoGJKQYgL	09:51 CST	09:50 CST	handoff-B	archive: archived
@@ -314,7 +314,7 @@ session_013NEJL3JoPTyn7Ny4jUb88L	10:00 CST	11:04 CST	handoff-B	archive: archived
 session_013NEJL3K9EJKrLHccAdQtmi	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3KYY5NYuanNGEoyjW	10:00 CST	11:04 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3KhxJ9MV6PvgDun3P	10:00 CST	11:04 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3KhxJ9MV6PvgDun3P.idle.md)
-session_013NEJL3KvrWSBxStMe8hDMw	10:00 CST	11:04 CST	handoff-B	archive: skipped: blocked on owner pick (page item 428), not archived
+session_013NEJL3KvrWSBxStMe8hDMw	10:00 CST	11:04 CST	handoff-B	archive: archived 12:2x CST (override 4h from 12:21)
 session_013NEJL3Lf166yzVq69LsAxg	10:00 CST	10:11 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3Lf166yzVq69LsAxg.idle.md)
 session_013NEJL3MgGYEmmygRpZfXzy	10:00 CST	11:04 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3NAnujQ8Pbt5dXkwP	10:00 CST	11:04 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3NAnujQ8Pbt5dXkwP.idle.md)
@@ -328,7 +328,7 @@ session_013NEJL3VS6pwMdVzvbdxQ9J	10:00 CST	11:05 CST	KEEP	archive: archived-idle
 session_013NEJL3Vfjwv16ew8kaDkSs	10:00 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3Vfjwv16ew8kaDkSs.idle.md)
 session_013NEJL3WEUbAnzxPEbgtS2X	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3WMfUf8CyoxsgvqVr	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3WQPFqTPj2r8Y7rrH	10:01 CST	11:04 CST	handoff-B	archive: skipped: status RUNNING at 11:17 CST, not archived
+session_013NEJL3WQPFqTPj2r8Y7rrH	10:01 CST	11:04 CST	handoff-B	archive: archived 12:2x CST (override 4h from 12:21)
 session_013NEJL3WizfBeubmNydf4EV	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3WkjDpDX48MYiGdbs	10:01 CST	11:05 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3WkjDpDX48MYiGdbs.idle.md)
 session_013NEJL3WwPeF1P9q883Pktu	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
@@ -407,7 +407,7 @@ session_013NEJL4ErXeDSsWmZzHBqG7	10:04 CST	11:08 CST	KEEP	archive: archived-idle
 session_013NEJL4F7fFtXaQnEzxbLmh	10:05 CST	11:08 CST	handoff-B	archive: archived CST under owner override 4h
 session_013NEJL4Fy1bpdDySC3FKhf6	10:05 CST	11:08 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL4HFe7Gz9VNMNryxaZ	10:05 CST	11:08 CST	KEEP	archive: archived-idle (late reply 11:30 CST, override 4h)
-session_013NEJL4J7jxH2NTeETZEdne	10:05 CST	11:08 CST	handoff-B	archive: skipped: blocked on owner pick (override 15m or wait), not archived
+session_013NEJL4J7jxH2NTeETZEdne	10:05 CST	11:08 CST	handoff-B	archive: archived 12:2x CST (override 4h from 12:21)
 session_013NEJL4JCSmBupBJbVWwRUE	10:05 CST	11:08 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL4KAVGBcxoZzRnGNpj	10:05 CST	11:08 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL4KjioFCNuafMd8V8Q	10:05 CST	11:08 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL4KjioFCNuafMd8V8Q.idle.md)
