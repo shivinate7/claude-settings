@@ -882,6 +882,73 @@ class LandedPulls(UpkeepFixture):
         self.assertIn("c3", listed, "control: an unlanded ready step is listed")
         self.assertNotIn("c2", listed, "a todo step that landed is not ready")
 
+    def test_merged_that_is_not_a_json_bool_skips_the_row_and_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        self.no_trailer_on_main()
+        for merged in ("true", 1):
+            with self.subTest(merged=merged):
+                self.publish(sessions=[], items=[], landed=[self.pull_row(17, "lane/c2", merged=merged),
+                                                            self.pull_row(18, "lane/c3", merged=True)])  # control
+                page, _ = self.landed_build()
+                landed, live = build_info(page)["landed"], build_info(page)["live"]
+                self.assertEqual(landed.get("c3"), ["#18"], "control: the merged row on lane/c3 marks c3")
+                self.assertNotIn("c2", landed, "a merged value that is not a JSON bool marks nothing")
+                self.assertEqual(len(live["skipped"]), 1,
+                                 "the row with a non-bool merged is counted in skipped: %r" % (live["skipped"],))
+
+    def test_a_skipped_landed_pull_row_reads_the_stale_and_pull_reasons_unknown(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(13, "lane/c2", merged=True)])  # control: nothing skipped
+        page, _ = self.landed_build()
+        live = build_info(page)["live"]
+        self.assertIsNone(live["staleWhy"], "control: a file with no skipped row reads no stale reason")
+        self.assertIsNone(live["pullWhy"], "control: a file with no skipped row reads no pull reason")
+        self.publish(sessions=[], items=[], landed=[{"number": "12", "branch": "lane/c2", "merged": True}])
+        page, _ = self.landed_build()
+        live = build_info(page)["live"]
+        self.assertEqual(live["staleWhy"], "unknown (1 landedPulls rows skipped)",
+                         "a skipped landedPulls row makes the live read unknown, as a skipped pull row does")
+        self.assertEqual(live["pullWhy"], "unknown (1 landedPulls rows skipped)",
+                         "the pull line reads the same unknown reason as the stale read")
+
+    def test_merged_row_with_no_main_ref_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(12, "lane/c2", merged=True)])
+        page, _ = self.landed_build()
+        self.assertEqual(build_info(page)["landed"], {"c2": ["#12"]}, "control: with main read, the merged row marks c2")
+        page, out = self.build_from_main("--live", str(self.live), "--main-branch", "nomain", expect=(0, 1))
+        self.assertEqual(build_info(page)["landed"], {},
+                         "with no main ref a merged row marks nothing, as the trailer path reads unknown")
+        self.assertIn("stalled step: c2 (resume, pause or done)", out.splitlines())
+
+    def test_head_with_surrounding_spaces_marks_nothing(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        behind = self.behind_main()
+        self.assertTrue(self.is_ancestor(behind, "main"), "scope: the head must be an ancestor of main")
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(19, "lane/c2", head=" %s " % behind),
+                                                    self.pull_row(20, "lane/c3", head=behind)])  # control
+        page, _ = self.landed_build()
+        landed = build_info(page)["landed"]
+        self.assertEqual(landed.get("c3"), ["#20"], "control: a clean ancestor head marks c3")
+        self.assertNotIn("c2", landed, "a head with surrounding spaces is no sha and marks nothing")
+
+    def test_branch_names_are_case_sensitive(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="doing", order=3)
+        self.no_trailer_on_main()
+        self.publish(sessions=[], items=[], landed=[self.pull_row(21, "LANE/c2", merged=True),
+                                                    self.pull_row(22, "C2", merged=True),
+                                                    self.pull_row(23, "lane/c3", merged=True)])  # control
+        page, _ = self.landed_build()
+        landed = build_info(page)["landed"]
+        self.assertEqual(landed.get("c3"), ["#23"], "control: the merged row on lane/c3 marks c3")
+        self.assertNotIn("c2", landed, "LANE/c2 and C2 are not lane/c2 or c2 and mark nothing")
+
 
 class StaleInProgress(UpkeepFixture):
     """The upkeep row for each doing or active step with no live lane and no open PR. Its entries read
