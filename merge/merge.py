@@ -46,16 +46,14 @@
                           Cost: the gh calls of one per-repo list per root; when the base has a done PR, plus the CI reads of each ready PR on
                           the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
                           new process, file or timer.
-  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--integration]
+  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
-                          and pushes nothing; any session may run it, cloud included. --integration (a PR number only; a commit
-                          or ref refuses) adds the `batch` label to the PR after a PASS, never after a FAIL or an unknown; a failed
-                          label POST says the label is unknown and keeps the lint's verdict and exit code. Cost per call: one ci-job
-                          run (about 550 s, measured once on one PR head), one worktree, and with --integration one POST to issues/N/labels.
+                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job
+                          run (about 550 s, measured once on one PR head), one worktree.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2670,28 +2668,13 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def label_batch(host, n):
-    """Add BATCH_LABEL to pull request n: one REST POST, which the ledger reads as a batch run. A failed POST (a missing label, no access, the
-    network) is said as unknown, never as a label that was set; the caller's verdict and exit code stand."""
-    try:
-        c, out = host.api(f"issues/{n}/labels", method="POST", body={"labels": [BATCH_LABEL]})
-    except Stop as e:
-        c, out = 1, str(e)
-    if c:
-        print(f"merge: whether #{n} carries the `{BATCH_LABEL}` label is unknown: the label POST failed: {out.strip()[:300]} "
-              f"The lint verdict above stands. Put the label on the pull request by hand before the ledger needs it. {LANE_LINT_CITE}", file=sys.stderr)
-    else:
-        say(f"merge: the `{BATCH_LABEL}` label is on #{n}; the ledger reads it as a batch run.")
-
-def lane_lint(root, target, host, base="", unknown_ok="", integration=False):
+def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head FAILs first.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
-    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
-    `integration` (a PR number only, so the ledger reads the pull request as a batch run): after a PASS, and only then, one REST POST adds the
-    BATCH_LABEL to the pull request. A failed POST says the label is unknown; the lint's verdict and exit code stand."""
+    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
     host = host or Host()
     if target.isdigit():
         n = int(target)
@@ -2714,15 +2697,11 @@ def lane_lint(root, target, host, base="", unknown_ok="", integration=False):
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.", *pin_notes)
-        if integration:
-            label_batch(host, int(target))
         return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
     if liftable and unknown_ok.strip():
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
-        if integration:  # the ledger reads the label as a batch run, which only a PASS earns
-            say(f"merge: the `{BATCH_LABEL}` label was not set on #{int(target)} because the lint read unknown, not a pass.")
         return 0
     head_line = f"the lint of {short} against {base} is unknown, not a pass:"
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
@@ -3836,7 +3815,6 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
-    p.add_argument("--integration", action="store_true", help="with --lane-lint <pr>: after a PASS, add the `batch` label to the integration pull request (one POST)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -3866,8 +3844,8 @@ def main(argv, host=None, lock=None, hosts=None):
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
     if not a.lane_lint:
-        if a.base or a.lint_unknown_ok or a.integration:
-            p.error("--base, --lint-unknown-ok and --integration go with --lane-lint")
+        if a.base or a.lint_unknown_ok:
+            p.error("--base and --lint-unknown-ok go with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     if a.idle_lanes:
@@ -3875,8 +3853,6 @@ def main(argv, host=None, lock=None, hosts=None):
     elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
             p.error("--lane-lint takes a pull request number, commit or ref, and stands alone")
-        if a.integration and not a.pr.isdigit():
-            p.error("--integration labels a pull request, so --lane-lint needs its number, not a commit or ref")
     elif a.role is not None:
         if a.pr is not None or a.confirm or a.unlock is not None or a.reviewed or a.review_record:
             p.error("--role stands alone")
@@ -3909,7 +3885,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if c:
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, a.integration)  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role check and any lock: it merges and pushes nothing
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")
