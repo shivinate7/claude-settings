@@ -2823,19 +2823,19 @@ AGENT_NO_REMOTE_REASON = (
 )
 from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
-    "A lane session starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
+    "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
     "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % LANE_EFFORT
 )
 # A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
 # when no repo reads.
 LANE_REPO_TAG_REASON = (
-    "A lane session carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
+    "A lane carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
     "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
 )
 # A lane start names the model and the repo it works in. The reason names both fields and says why.
 LANE_START_SETTINGS_REASON = (
-    "A lane session's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
+    "A lane's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
     "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
     "`model` (the model that row names) and `source_url` (the repo) on create_session."
 )
@@ -2849,7 +2849,7 @@ MODEL_FLOOR_REASON = (
 )
 # A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
 LANE_MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for a lane session. Start the lane with model sonnet and the source_url of its repo."
+    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -3958,7 +3958,7 @@ def running_agent_hit(payload, tool: str) -> tuple:
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
 
 
-LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane session: end your turn now and send this "
+LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane: end your turn now and send this "
                             "reading to your parent with send_message to @parent, which frees space or waits for the "
                             "load to drop. " + LOAD_LANE_CITE)
 
