@@ -1495,6 +1495,27 @@ def case_step_span_flag_after_a_determiner_is_text():
              entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
 
 
+def case_step_edit_verb_quotes_span_flag_clause():
+    # An edit verb (find, replace, ...) before a span, with no run verb in its sentence, quotes the span: the span-flag
+    # clause reads `scripts/x.py --y` as a line of a file, so it passes (question_form._shell_line, quoted). The same span
+    # after a run verb is a command and refuses. Quoting skips only that clause: a listed program or a PowerShell cmdlet
+    # quoted for an edit still refuses, and so does a sentence with a run verb before the span as well as an edit verb.
+    refused = ("command-in-item", "shell line")
+    for verb in ("Find", "Locate", "Replace", "Swap", "Search for", "Look for", "Edit", "Delete", "Remove"):
+        page("an edit-verb step, %s the line, quoting `scripts/x.py --y` passes" % verb.lower(), "set",
+             entry_of(task_item(["%s the line `scripts/x.py --y` in the hook." % verb])), None)
+    page("a step that runs `scripts/x.py --y` after the same words is refused", "set",
+         entry_of(task_item(["Run the line `scripts/x.py --y` in the hook."])), refused)
+    page("a step that finds a quoted `git push origin x` is still refused, as a listed program refuses", "set",
+         entry_of(task_item(["Find the line `git push origin x` in the hook."])), refused)
+    page("a step that replaces a quoted PowerShell cmdlet is still refused", "set",
+         entry_of(task_item(["Replace the line `Get-ChildItem -Recurse` in the hook."])), refused)
+    page("a step with find then run before the span, in one sentence, is refused", "set",
+         entry_of(task_item(["Find the line and run `scripts/x.py --y` in the hook."])), refused)
+    page("a step with run then find before the span, in one sentence, is refused", "set",
+         entry_of(task_item(["Run the check, then find `scripts/x.py --y` in the hook."])), refused)
+
+
 def case_step_folder_with_title_hyphen_is_text():
     # A folder whose last segment is Title-Hyphen (`Claude-Settings`) names a path, not a cmdlet: the word before the hyphen
     # is no approved PowerShell verb, so each passes. Main passes all four; head refuses them as a shell line.
@@ -2734,6 +2755,7 @@ def main():
                  case_powershell_bash_prefix_command_substitution,
                  case_powershell_two_deep_expansion,
                  case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_after_a_determiner_is_text,
+                 case_step_edit_verb_quotes_span_flag_clause,
                  case_step_folder_with_title_hyphen_is_text, case_step_absolute_path_cmdlet_is_refused_in_every_form,
                  case_step_verb_noun_folder_with_slash_is_text, case_step_folder_without_slash_names_the_slash_remedy,
                  case_printed_reason_names_each_fix, case_powershell_spaced_literals_are_no_bash_test,
