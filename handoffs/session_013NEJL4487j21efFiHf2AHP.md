@@ -1,0 +1,3 @@
+# Lane 854 cd-var-dir-unread (session_013NEJL4487j21efFiHf2AHP), received 11:07 CST 2026-11-10, kind KEEP
+
+KEEP (resent; my first KEEP went out 10:03 CST): lane 854 (cd-var-dir-unread, PR #2379, head eb8defabafb74055bf9024c479ca7a2da898cd08) waits on batch 72's merge, then one fix row: merge main, add hooks/test_dir_before_segment.py to the WALK_SUITES row in hooks/test_mutate_ci.py, fix check, lane lint, hand the head to my parent coordinator session_013NEJL2hB1pLZPDpzas7VgB. Runner 8 dropped it from batch 72 for that row, so it is not released to a batch now; my parent ordered this KEEP answer. Nothing unpushed, nothing new started.

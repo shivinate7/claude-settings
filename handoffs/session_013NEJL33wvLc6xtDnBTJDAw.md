@@ -1,0 +1,3 @@
+# record-claim-cites-code (session_013NEJL33wvLc6xtDnBTJDAw), received 11:03 CST 2026-11-10, kind KEEP
+
+KEEP: lane record-claim-cites-code (my first reply went out at 09:59 CST; this repeats it at 11:03 CST). All six PRs are released to batch runner 8 (session_013NEJL2vsmyKzJm8jUDt6za) and only wait for its merge. Each has a merge-tool record or the notes-only ruling, and lane lint PASS. #1893 (dead-code-cite, cf52a891f) goes first. #2063 (788ad60ca), #2108 (bb36e0647) and #2198 (ddc214385) merge after #1893. #2117 (0b9a65c8d) merges after #2063, and #2222 (d084ff139) after #2117. All heads are pushed, and nothing new is started.

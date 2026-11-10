@@ -1,0 +1,3 @@
+# lane: notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc), received 11:07 CST 2026-11-10, kind KEEP
+
+KEEP (resent; the first copy went out at 10:05 CST and showed status delivered): lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc). Both PRs are released to batch runner 8 for batch 72 and only wait for the merge: #1597 claude/mutant-crash-audit at 2d29d2ece and #2508 claude/heredoc-quote-restore at 6201185f2. Both are reviewed and lane-linted, and both merge into main 6e8d6ccf9 with no conflict. Nothing is unpushed. While the freeze holds I will not start the queued docs-only notes PR.

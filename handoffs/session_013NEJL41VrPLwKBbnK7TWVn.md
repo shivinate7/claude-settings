@@ -1,0 +1,3 @@
+# lane cost-line-pinned (session_013NEJL41VrPLwKBbnK7TWVn), received 11:07 CST 2026-11-10, kind KEEP
+
+KEEP: lane cost-line-pinned (resent; first sent 10:03 CST). Both PRs are released to batch runner 8 (session_013NEJL2vsmyKzJm8jUDt6za) and only wait for merge: #1981 "cost-line check" (branch cost-line-pinned, head cbc7f22de, review record comment 6737013137), then #1992 "cost-pins gap fixes", merge after #1981 (branch cost-pins-gaps, head 4aff3185e, record comment 6737087196). Everything is pushed, nothing is local, and nothing runs. Note: GitHub shows #1981 as dirty against main. I will merge main into both branches only if you or the runner ask.

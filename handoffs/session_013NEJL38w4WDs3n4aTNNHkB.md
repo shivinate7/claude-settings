@@ -1,0 +1,3 @@
+# Lane: option-tradeoff-pushback (session_013NEJL38w4WDs3n4aTNNHkB), received 11:03 CST 2026-11-10, kind KEEP
+
+KEEP (sent again; the first went at 10:00 CST): PR #2173, the question judge sends back a question whose every option loses something large. Branch lane/option-tradeoff-pushback, head 9309aa81d, all pushed. Handed to runner 8 (session_013NEJL2vsmyKzJm8jUDt6za) on 2026-11-08 at 12:29 CST, after review rounds 1-3 and the lane lint passed; it only waits for its merge. It is still a draft, based on main 422cbbdfe, so it may need a rebase. If runner 8 no longer holds it, take this as my handoff and archive me.

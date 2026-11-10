@@ -1,0 +1,3 @@
+# lane: merge-lock-expired-delete-race (session_013NEJL2sZ68ECc62SiwfqPk), received 11:03 CST 2026-11-10, kind KEEP
+
+KEEP (resent; first sent 2026-11-10 09:59 CST, status delivered): lane merge-lock-expired-delete-race has nothing unpushed. All six PRs are reviewed, recorded and released to batch runner 8 (session_013NEJL2vsmyKzJm8jUDt6za), and only wait for its merge: #1657 7e8ab4f00, #1708 3ccb79d42, #1729 dc72a6b05, #1781 198d78932, #2000 41268cd0a, #2148 19510dea1. One queued item waits on #1657 merging: owner item 421 a, a rewrite of the lock-break bullet in decision standing-merge-grant. If you would rather archive me, hand 421 a to another session.
