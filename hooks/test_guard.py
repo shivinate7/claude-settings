@@ -34823,6 +34823,11 @@ ROLE_UNREADABLE_CFG = role_config("unreadable", role_table("unreadable", ROLE_TA
 ROLE_LIVE_POINTER = role_table("live", ROLE_TABLE_TEST_AUTHOR_HAIKU)
 ROLE_LIVE_CFG = role_config("live", ROLE_LIVE_POINTER)
 ROLE_RULES_POINTER = role_table("rules", ROLE_TABLE_RULES)
+# A pointer checkout whose builder file has no model pin. Re-pointed under the coordinator's ruling of 20:38 CST Nov 9
+# (step builder-model-pin), which rules out a pinless builder in the repository: the no-model builder cases below read
+# this checkout, so they keep their premise and do not depend on the repository's builder pin.
+ROLE_UNPINNED_BUILDER_POINTER = role_table("unpinned-builder", ROLE_TABLE_RULES, agents=("builder",))
+ROLE_UNPINNED_BUILDER_CFG = role_config("unpinned-builder", ROLE_UNPINNED_BUILDER_POINTER)
 
 
 def role_input(role, model, prompt):
@@ -35097,8 +35102,11 @@ def workflow_opus_override_check():
     return True, "refused with no override, allowed under the typed override, refused again once spent"
 
 # ---- D: no model, and no `model:` pin in the role's agent file. The guard's default env decides it.
+# The three builder cases below are re-pointed to ROLE_UNPINNED_BUILDER_CFG (coordinator ruling, 20:38 CST Nov 9,
+# step builder-model-pin): the repository's builder now pins sonnet, so each reads an unpinned builder file.
 role_model_refuse("role-model: builder with no model is denied when the default is unset",
-          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
+          "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_BUILDER_CFG, carries=(ROLE_DEFAULT_REMEDY,),
+          env=UNSET_DEFAULT)
 role_model_refuse("role-model: general-purpose with no model is denied when the default is unset",
           "general-purpose", None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: claude with no model is denied when the default is unset",
@@ -35106,10 +35114,11 @@ role_model_refuse("role-model: claude with no model is denied when the default i
 role_model_refuse("role-model: a spawn with no role and no model is denied when the default is unset",
           None, None, "Find the file.", carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: a Task builder with no model is denied when the default is unset",
-          "builder", None, "Fix the failing case.", tool="Task", carries=(ROLE_DEFAULT_REMEDY,),
-          env=UNSET_DEFAULT)
+          "builder", None, "Fix the failing case.", tool="Task", config=ROLE_UNPINNED_BUILDER_CFG,
+          carries=(ROLE_DEFAULT_REMEDY,), env=UNSET_DEFAULT)
 role_model_refuse("role-model: builder with no model is denied when the default is empty",
-          "builder", None, "Fix the failing case.", carries=(ROLE_DEFAULT_REMEDY,), env=EMPTY_DEFAULT)
+          "builder", None, "Fix the failing case.", config=ROLE_UNPINNED_BUILDER_CFG, carries=(ROLE_DEFAULT_REMEDY,),
+          env=EMPTY_DEFAULT)
 role_model_allow("role-model: builder with no model is allowed when the default is sonnet",
            "builder", None, "Fix the failing case.", env=SONNET_DEFAULT)
 role_model_allow("role-model: reviewer with no model is allowed when the default is unset (its file pins haiku)",
@@ -35138,10 +35147,11 @@ ROLE_OV_NO_MODEL = role_input("builder", None, "Fix the failing case.")
 ROLE_OV_UNSET = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 
 
-def role_override_never_lifted_story(slug, spawn, spawn_env, what):
+def role_override_never_lifted_story(slug, spawn, spawn_env, what, pointer=REPO):
     """A refusal that no override lifts (never_lifted) stays refused under an override, and spends none, so the override
-    that follows still lifts a test-author on sonnet. `what` names the refused spawn in the story's lines."""
-    config, session = role_config(slug, REPO), "role-" + slug
+    that follows still lifts a test-author on sonnet. `what` names the refused spawn in the story's lines. `pointer` is
+    the checkout whose agent files the guard reads (the repository unless a case names one)."""
+    config, session = role_config(slug, pointer), "role-" + slug
 
     def call(seconds, tool_input, env=None):
         return ov_call("Agent", dict(tool_input), NOGIT, config, session, seconds, env=env)
@@ -35188,7 +35198,9 @@ def role_override_lift_check():
 def role_override_no_model_check():
     """The no-model refusal stays never-lifted: under an override it is still refused and spends none, so the
     override that follows still lifts a test-author on sonnet."""
-    return role_override_never_lifted_story("ov-no-model", ROLE_OV_NO_MODEL, ROLE_OV_UNSET, "a builder with no model")
+    # Re-pointed to an unpinned builder file (coordinator ruling, 20:38 CST Nov 9, step builder-model-pin).
+    return role_override_never_lifted_story("ov-no-model", ROLE_OV_NO_MODEL, ROLE_OV_UNSET, "a builder with no model",
+                                            pointer=ROLE_UNPINNED_BUILDER_POINTER)
 
 
 def role_override_no_model_fix_check():
