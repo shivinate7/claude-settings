@@ -12,7 +12,7 @@ Mockups: `c193-receipt.html`, `c193-rail.html`, `c193-pics.html`, `c193-sent.htm
    - At 390: the option card is 319px wide. Its picture size is in the picture notes, section 5.
    - Narrowest case: three options reach three columns at a 1065px page. The cards are then 230px wide. The picture size there is unknown: the picture notes do not measure 1065.
    - Scope: `optPic`'s call only (maxScale 2, maxH 480). The viewer (`stageFrame`, maxScale 2) and the front preview (`designPreview`) are unchanged.
-   - In `fit()`, set the wrap's width to the picture's width plus its border in JS, and centre it, once the column is placed. Before that, CSS gives the wrap the column's width and the picture's aspect ratio, and the placed fit corrects it before the first paint.
+   - In `fit()`, set the wrap's width to the picture's width plus its border in JS, and CSS centres it (`justify-self: center`). A box out of the page, or in a hidden part of it, has no column yet: it takes the picture's drawn width and stays pending. `render()` places a pending box once its card is in the page, in the same task, so the first frame is the placed size. Decision `page-pic-fills-card` (docs/decisions/page-pic-fills-card.md).
    - The mockup checks that each picture stays inside its card and ends above `.head`.
    - The picture fills the card's width, at most 2x. It draws whole while its drawn height is at most F + 1, where F = max(480, ceil(W × 844 / 390)). Taller, it draws 480 high and scrolls. Rule: decision `page-pic-fills-card`, owner 2026-11-09 21:26 CST.
 4. Sent bar (`renderSent`). Move `.sent-list` into a new `.sent-what` block, under the sent line.
