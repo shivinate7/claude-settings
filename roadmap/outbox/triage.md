@@ -587,3 +587,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - report-guard-commit-after-blob (#2561 round 1, 13:37 CST Nov 10): hooks/test_report_guard_landing.py has no case that a real commit after a blob still blocks.
 - transcript-line-term (#2561 round 1, 13:37 CST Nov 10): new comments say "record" for a transcript line (GLOSSARY term "transcript line").
 - own-session-no-blob-skip (#2561 round 1, 13:37 CST Nov 10): hooks/own_session.py _scan reads raw message.content with no blob skip and feeds guard_merge and report_guard; unmeasured, a note until a real wrong verdict.
+- docs/debts/notes.md line 958 cites the old "no threads or pulls list" case, which #2534 (main-merge project-ops lane) replaced; rewrite the note (coordinator 13:40 CST Nov 10).
+- Lane brief template: say "a merge that conflicts in test and product files goes to one test-author" (builders-cannot-edit-tests, merge route, item 420 a); lane main-merge-project-ops hand-assembled such a merge, and a test-author spawn naming a model and a builder spawn naming none were both refused (coordinator 13:40 CST Nov 10).
+- (debt) A bg-tail lane brief told a test-author to write product files with cp in Bash for the #2015 merge, which went around the installed guard's Edit refusal; the guard reads Edit and Write only (coordinator 13:48 CST Nov 10).
