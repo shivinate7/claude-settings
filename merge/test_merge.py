@@ -13989,11 +13989,19 @@ class ReleaseHost(PullsHost):
         return super().pull_reply(n)
 
 class ReleaseCheck(ReviewEnv):
-    """`merge --release-check N [N ...] [--lint N:VERDICT ...]`: one line per pull request given, in the order given: `#N PASS`, or `#N FAIL: `
-    and its reasons joined by `; `. Six checks, each a reason when it fails: the pull request is open; its newest review record is done at the live
-    head (review_state, as `--reviewed` reads it); the newest record is unedited; its lint verdict is PASS or UNKNOWN-AT-CAP (missing is FAIL); the
-    merge result is clean (git merge-tree); and a base that is not the default branch has its open pull request in the call, and that one passes.
-    Exit 0 only when every line is PASS. A case's pull requests sit at the feature branch's real commit, so the merge-tree check can read them."""
+    """`merge --release-check N [N ...] [--lint N@SHA:VERDICT ...]`: one line per pull request given, in the order given: `#N PASS`, or `#N FAIL: `
+    and its reasons joined by `; `. A PASS whose lint is UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`. Six checks, each a reason when it fails:
+    the pull request is open; its newest review record is done at the live head (review_state, as `--reviewed` reads it); the newest record is
+    unedited; its lint verdict is PASS or UNKNOWN-AT-CAP for the live head (missing, FAIL, or a SHA that is not the live head is a reason); the merge
+    result is clean (git merge-tree); and a base that is not the default branch has its open pull request in the call, and that one passes.
+    Exit 0 only when every line is a PASS. A case's pull requests sit at the feature branch's real commit, so the merge-tree check can read them."""
+
+    SHA_RULE = r"(?i)\bsha\b|40[- ]hex"  # a usage error for a lint in the wrong form names the sha rule
+
+    @staticmethod
+    def error_line(err):
+        """The error lines of a usage error. The usage block names every flag, so `--head SHA` in it would match SHA_RULE on any refusal."""
+        return "\n".join(line for line in err.splitlines() if "error:" in line)
 
     def live(self, n, base="main", head=None):
         """Pull request n, open, at the feature branch's real head unless `head` is given."""
@@ -14003,17 +14011,25 @@ class ReleaseCheck(ReviewEnv):
         """The review record comment of pull request n: done at the live head unless `head` is given, unedited unless `updated` is. `kw` goes to record_text."""
         return review_comment(n, n, record_text(n=n, head=head or self.head(), **kw), updated=updated)
 
-    def lints(self, numbers, verdict="PASS"):
-        """The --lint flags that give each pull request number the verdict."""
-        return [flag for n in numbers for flag in ("--lint", f"{n}:{verdict}")]
+    def lints(self, numbers, verdict="PASS", heads=None):
+        """The --lint flags that give each pull request number the verdict, bound to its head: `heads` maps a number to the sha it is bound to,
+        and a number it does not name is bound to the feature branch's head."""
+        heads, feat = heads or {}, self.head("feat")
+        return [flag for n in numbers for flag in ("--lint", f"{n}@{heads.get(n, feat)}:{verdict}")]
+
+    def assert_lint_refused(self, lint):
+        """A usage error for `--lint lint`: rc 2, and stderr names the sha rule."""
+        _, err = self.assert_usage_error("--release-check", "7", "--lint", lint)
+        self.assertRegex(self.error_line(err), self.SHA_RULE, f"the refusal of --lint {lint} does not name the sha rule: " + err)
 
     def release(self, numbers, lint=None, pulls=None, comments=None, closed=(), broken=(), gh_missing=False, **reads):
         """-> (rc, lines, err, host) of `merge --release-check numbers`. Each pull request is open, reviewed and lint-passed unless the argument
-        says otherwise: `pulls`, `comments` and `lint` (the --lint flags) replace the defaults."""
+        says otherwise: `pulls`, `comments` and `lint` (the --lint flags) replace the defaults. The default lint is bound to each pull request's head."""
         numbers = list(numbers)
         pulls = [self.live(n) for n in numbers] if pulls is None else pulls
         comments = [self.review(n) for n in numbers] if comments is None else comments
-        lint = self.lints(numbers) if lint is None else lint
+        heads = {p["number"]: p["head"]["sha"] for p in [*pulls, *closed]}
+        lint = self.lints(numbers, heads=heads) if lint is None else lint
         host = ReleaseHost(pulls, closed=closed, broken=broken, gh_missing=gh_missing, comments=list(comments), **reads)
         rc, out, err = self.run_args("--release-check", *map(str, numbers), *lint, host=host)
         self.assertIn(rc, (0, 1), f"merge refused the --release-check line (rc {rc}):\n{err}")  # the flag is accepted before any line is read
@@ -14088,9 +14104,9 @@ class ReleaseCheck(ReviewEnv):
         self.assertEqual([l.split(":", 1)[0] for l in lines], ["#7 FAIL", "#8 FAIL"], err)
 
     def test_exit_is_0_only_when_every_line_is_pass(self):
-        rc, lines, err, _ = self.release([7, 8], lint=[*self.lints([7]), "--lint", "8:UNKNOWN-AT-CAP"])
-        self.assertEqual((rc, lines), (0, ["#7 PASS", "#8 PASS"]), err)
-        rc, lines, err, _ = self.release([7, 8], lint=[*self.lints([7]), "--lint", "8:FAIL"])
+        rc, lines, err, _ = self.release([7, 8], lint=[*self.lints([7]), *self.lints([8], "UNKNOWN-AT-CAP")])
+        self.assertEqual((rc, lines), (0, ["#7 PASS", "#8 PASS (lint unknown at cap)"]), err)
+        rc, lines, err, _ = self.release([7, 8], lint=[*self.lints([7]), *self.lints([8], "FAIL")])
         self.assertEqual(rc, 1, err)
         self.assertEqual(lines[0], "#7 PASS", err)
         self.assertTrue(lines[1].startswith("#8 FAIL: "), err)
@@ -14277,19 +14293,48 @@ class ReleaseCheck(ReviewEnv):
         _, lines, err, _ = self.release([7], comments=[older, newest])
         self.assertEqual(lines, ["#7 PASS"], err)
 
-    # Check 4: the lint verdict
+    # Check 4: the lint verdict, bound to the live head
 
     def test_check_4_a_missing_or_failed_lint_fails_alone(self):
-        for name, lint in (("missing", []), ("FAIL", ["--lint", "7:FAIL"])):
+        for name, lint in (("missing", []), ("FAIL", self.lints([7], "FAIL"))):
             with self.subTest(lint=name):
                 _, lines, err, _ = self.release([7], lint=lint)
                 self.assert_fails_alone(self.line_of(lines, 7), 7, r"lint")
 
     def test_check_4_a_pass_or_unknown_at_cap_passes(self):
-        for verdict in ("PASS", "UNKNOWN-AT-CAP"):
+        for verdict, want in (("PASS", "#7 PASS"), ("UNKNOWN-AT-CAP", "#7 PASS (lint unknown at cap)")):
             with self.subTest(lint=verdict):
                 _, lines, err, _ = self.release([7], lint=self.lints([7], verdict))
-                self.assertEqual(lines, ["#7 PASS"], err)
+                self.assertEqual(lines, [want], err)
+
+    def test_check_4_the_unknown_at_cap_suffix_is_for_a_pass_only(self):
+        _, lines, err, _ = self.release([7, 8], comments=[self.review(7)], lint=self.lints([7, 8], "UNKNOWN-AT-CAP"))
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS (lint unknown at cap)", err)
+        self.assertEqual(self.line_of(lines, 8), "#8 FAIL: no review record", err)  # 8 fails its review check: no suffix on a FAIL line
+
+    def test_check_4_a_lint_for_another_head_fails_alone_and_names_both_shas(self):
+        live, other = self.head("feat"), REVIEW_OLD_HEAD  # the feature branch's head, and a sha that is not it
+        rc, out, err = self.run_args("--release-check", "7", "--lint", f"7@{other}:PASS", host=ReleaseHost([self.live(7)], comments=[self.review(7)]))
+        self.assertEqual(rc, 1, out + err)
+        line = self.line_of(out.splitlines(), 7)
+        self.assert_fails_alone(line, 7, r"live head")
+        self.assertIn(other[:9], line, "the reason does not name the lint's head: " + line)
+        self.assertIn(live[:9], line, "the reason does not name the live head: " + line)
+
+    def test_check_4_a_lint_for_the_live_head_passes_and_prints_exactly_pr_pass(self):
+        live = self.head("feat")
+        rc, out, err = self.run_args("--release-check", "7", "--lint", f"7@{live}:PASS", host=ReleaseHost([self.live(7)], comments=[self.review(7)]))
+        self.assertEqual((rc, out), (0, "#7 PASS\n"), err)
+
+    def test_check_4_the_bare_lint_form_is_a_usage_error(self):
+        # A verdict with no sha is bound to no head, so it is refused. The host has the pull request, so a parser that takes the form runs the checks.
+        rc, out, err = self.run_args("--release-check", "7", "--lint", "7:PASS", host=ReleaseHost([self.live(7)], comments=[self.review(7)]))
+        self.assertEqual((rc, out), (2, ""), err)
+        self.assertRegex(self.error_line(err), self.SHA_RULE, "the refusal of the bare form does not name the sha rule: " + err)
+
+    def test_check_4_a_lint_for_a_number_not_in_the_call_is_ignored(self):
+        _, lines, err, _ = self.release([7], lint=[*self.lints([7]), *self.lints([9], "FAIL")])
+        self.assertEqual(lines, ["#7 PASS"], err)
 
     # Check 5: the merge result is clean
 
@@ -14360,12 +14405,26 @@ class ReleaseCheck(ReviewEnv):
 
     # The usage: the flags, the lint verdicts and the numbers
 
-    def test_lint_takes_pass_fail_or_unknown_at_cap_and_nothing_else(self):
-        for bad in ("7:pass", "7:MAYBE", "7PASS", "7:"):
+    def test_lint_takes_a_full_sha_and_a_verdict_and_nothing_else(self):
+        live = self.head("feat")
+        for bad in (f"7@{live}:pass", f"7@{live}:MAYBE", f"7@{live}", f"7@{live}:", f"7{live}:PASS"):
             with self.subTest(lint=bad):
-                self.assert_usage_error("--release-check", "7", "--lint", bad)
+                self.assert_lint_refused(bad)
         _, lines, err, _ = self.release([7], lint=self.lints([7]))
         self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_a_short_or_upper_case_sha_is_a_usage_error_that_names_the_sha(self):
+        live = self.head("feat")
+        for bad in (live[:7], live[:39], live.upper()):
+            with self.subTest(sha=bad):
+                self.assert_lint_refused(f"7@{bad}:PASS")
+        _, lines, err, _ = self.release([7], lint=self.lints([7]))  # control: the full lower-case sha passes
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_two_lint_flags_for_one_pr_are_a_usage_error(self):
+        live = self.head("feat")
+        _, err = self.assert_usage_error("--release-check", "7", "--lint", f"7@{live}:PASS", "--lint", f"7@{live}:FAIL")
+        self.assertIn("more than one verdict", err, "the refusal does not say why: " + err)
 
     def test_release_check_stands_alone(self):
         for argv in (("--release-check", "7", "--confirm"), ("--release-check", "7", "--reviewed"), ("--release-check", "7", "--lane-lint"),
@@ -14379,13 +14438,15 @@ class ReleaseCheck(ReviewEnv):
 
     def test_lint_goes_with_release_check(self):
         # On main, argparse reads --lint as an abbreviation of --lint-unknown-ok, which is refused for another reason. The refusal must name --release-check.
-        for argv in (("--reviewed", "--lint", "7:PASS"), ("7", "--lint", "7:PASS")):
+        live = self.head("feat")
+        for argv in (("--reviewed", "--lint", f"7@{live}:PASS"), ("7", "--lint", f"7@{live}:PASS")):
             with self.subTest(argv=argv):
                 _out, err = self.assert_usage_error(*argv)
-                self.assertIn("--release-check", err, "the refusal does not name --release-check: " + err)
+                # The usage block names every flag, --release-check too, so only the error line can say what the refusal is for.
+                self.assertRegex(err, r"error: [^\n]*--release-check", "the refusal does not name --release-check: " + err)
 
     def test_a_pr_number_that_is_not_a_number_is_a_usage_error(self):
-        rc, out, err = self.run_args("--release-check", "seven", "--lint", "7:PASS")
+        rc, out, err = self.run_args("--release-check", "seven", "--lint", f"7@{self.head('feat')}:PASS")
         self.assertEqual(rc, 2, out + err)
         self.assertNotIn("unrecognized arguments", err, err)
 
