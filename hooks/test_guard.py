@@ -26719,10 +26719,11 @@ TX_FOLDER = role_path("unreadable")
 NO_CHECKOUT = os.path.join(ROOT, "no-such-checkout")
 
 
-def repo_case(name, expected, command, cwd, transcript, env=CLOUD_ENV):
-    """One case: `command` runs in `cwd` with the transcript and env given. A deny must name REPO_RULE."""
+def repo_case(name, expected, command, cwd, transcript, env=CLOUD_ENV, carries=()):
+    """One case: `command` runs in `cwd` with the transcript and env given. A deny must name REPO_RULE. `carries` names the
+    fragments the printed reason must hold (see sh)."""
     sh("merge-confirm-repo: " + name, command, expected, rule=REPO_RULE if expected == "deny" else None,
-       cwd=cwd, transcript=transcript, env=env)
+       cwd=cwd, transcript=transcript, env=env, carries=carries)
 
 
 # A cloud merge is denied when the checkout it names is not the repo the own record proves.
@@ -26914,8 +26915,10 @@ repo_case("an unclosed $( after --confirm is denied", "deny", f"{MERGE_SHIM} 5 -
 # which holds no merge. Only the open-`$(` raise in _merge_words denies it (decision merge-confirm-repo).
 repo_case("a $(date | cat) before -C naming another checkout is denied", "deny",
           f"{MERGE_SHIM} 5 --confirm --base-red-ok $(date | cat) -C '{REPO_B}'", REPO_A, TX_A)
-# A substitution whose text holds a `|`, a `;`, a `&&` or a quoted `(` is still one argument, so the -C after it is judged. Each deny
-# names another checkout with -C. Its control names this checkout and is allowed: the deny turns on the -C, not on the substitution.
+# A substitution whose text holds a quoted `(` or `)` is one argument, so the -C after it is judged: each such deny names another
+# checkout with -C, and its control names this checkout and is allowed. A `|`, a `;` or a `&&` inside the substitution cuts the
+# segment, so the merge's open `$(` is refused whatever -C names (fail-closed, note merge-open-subst-fails-closed). The own-checkout
+# denies after the `&&` case pin that for `|`.
 repo_case("a $(gh pr list | head -1) PR number before --confirm and -C naming another checkout is denied", "deny",
           f"{MERGE_SHIM} $(gh pr list | head -1) --confirm -C '{REPO_B}'", REPO_A, TX_A)
 repo_case("a $(date; echo 5) PR number before --confirm and -C naming another checkout is denied", "deny",
@@ -26928,7 +26931,19 @@ repo_case('a $(echo "(") after a reason, before -C naming this checkout, is allo
           f'{MERGE_SHIM} 5 --confirm --base-red-ok $(echo "(") -C \'{REPO_A}\'', REPO_A, TX_A)
 repo_case("a $(date && cat) after a reason, before -C naming another checkout, is denied", "deny",
           f"{MERGE_SHIM} 5 --confirm --base-red-ok $(date && cat) -C '{REPO_B}'", REPO_A, TX_A)
+# Own-checkout denies: a `|` in a substitution is refused in this checkout too, with no -C. The first also pins the reason: it must
+# tell the user to write the PR number as a literal.
+repo_case("a $(gh pr list | head -1) PR number with no -C, in this checkout, is denied and says to write it as a literal", "deny",
+          f"{MERGE_SHIM} $(gh pr list | head -1) --confirm", REPO_A, TX_A, carries="literal")
+repo_case("a $(date | cat) reason with no -C, in this checkout, is denied", "deny",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok $(date | cat)", REPO_A, TX_A)
 repo_case("a merge inside $(...) whose ) ends the command, naming this checkout, is allowed", "allow", f"$({MERGE_SHIM} 5 --confirm)", REPO_A, TX_A)
+# A merge inside `$( )` is judged by the -C in its own arguments: the deny names another checkout, and its control names this one and
+# is allowed. The deny is what pins the depth reset at the merge's first argument (guard_merge._glued_counts).
+repo_case("a merge inside $(...) with -C naming another checkout is denied", "deny",
+          f"$({MERGE_SHIM} 5 --confirm -C '{REPO_B}')", REPO_A, TX_A)
+repo_case("a merge inside $(...) with -C naming this checkout is allowed", "allow",
+          f"$({MERGE_SHIM} 5 --confirm -C '{REPO_A}')", REPO_A, TX_A)
 # Controls: the same forms that name this checkout are allowed.
 repo_case("a $(echo ')') PR number before -C naming this checkout is allowed", "allow",
           f"{MERGE_SHIM} -C '{REPO_A}' $(echo ')') --confirm", REPO_A, TX_A)

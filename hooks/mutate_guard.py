@@ -2665,6 +2665,12 @@ MUTATIONS = [
      '    return opener is not None and merge_tool_args(segment[:opener]) is not None',
      '    return opener is not None', "guard",
      "an apostrophe in echo text that names merge --confirm is not judged"),
+    # RULE merge-confirm-repo, the depth of a `$(` that opens before a merge's first argument (guard_merge._glued_counts). The reset
+    # at that argument is the one arm: without it a merge inside `$( )` naming another checkout is allowed.
+    ("merge-confirm-repo: the depth of a $( opened before a merge's first arg is not reset at that arg",
+     '        if not current and not reset and len(words) == skip:\n            depth, reset = 0, True',
+     '        if not current and not reset and len(words) == skip:\n            reset = True', "guard",
+     "a merge inside $(...) with -C naming another checkout is denied"),
     # RULE simulator-boot-bypass (decision sim-test-is-the-one-boot-path, ruling 4). Each mutant breaks one arm.
     ("simulator-boot-bypass: a raw simctl boot is never read",
      '        if _simctl_boot_args(word, rest) is not None:\n            return',
