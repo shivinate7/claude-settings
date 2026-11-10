@@ -85,6 +85,9 @@ GitHub, so the publisher reads them just before the build and passes one file:
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
   release a lane whose draft pull is already in the default branch. `branches`: lane branches with no open pull request.
+- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull
+  requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
+  (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
   `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
   it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
@@ -110,6 +113,20 @@ the log of `origin/main` (`--main-branch` names another). It marks each named op
 #N", where #N is the pull request whose merge put the commit on main. It never closes a step: triage
 closes it, from the upkeep list. A trailer that names no step is listed there too.
 
+A step has also landed when the live file's `landedPulls` holds a row for it. The row is
+`{"number": int, "branch": str, "head"?: sha, "merged"?: bool}`. It counts when its branch is the step id or
+`lane/<id>`, the step is open, and one more test holds. Either `merged` is JSON true, or `head` (7-64 hex) is an
+ancestor of main (`git merge-base --is-ancestor`). The row has no base field, so `merged: true` means merged into
+main. The build marks that step "Landed in #N" with the row's number. With no main ref in the checkout, nothing
+marks, `merged: true` rows included, as with the trailers. A failed merge-base read marks no head-only row. A
+`merged: true` row needs no git, but still needs the main ref. A row is counted
+in `skipped` when it is not an object, its `number` is not an int, or its `branch` is not text. A row whose
+`merged` is present and not a JSON bool is skipped too. Each skipped row, and a `landedPulls` that is not a list, makes the stale-step and
+pull readings `unknown (<n> landedPulls rows skipped)`. The publisher (triage) must fill `landedPulls` from
+GitHub. It lists the closed pull requests of the last 14 days whose base is the default branch, each with its head
+ref, head sha and merged flag. That filter makes `merged: true` mean merged into main. A merge
+that drops the `Step:` trailer, or a lane that closes its pull unmerged, then still reads right.
+
 ## Refusals
 
 - A file under `roadmap/`, `briefs/`, `plans/` or `handoffs/` on the record branch holds a git
@@ -130,10 +147,11 @@ exits 1. The printed line tells the two apart.
 build.py also exits 1 on a stalled step. A `doing` or `active` step with no live lane and no open PR is
 stalled until it has a disposition (the same test as the in-progress upkeep row, so the two never
 disagree). It prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in
-#N)` when a `Step:` trailer is on main, writes the page, then exits 1. A landed feel-fix with no valid
+#N)` when a `Step:` trailer is on main or a `landedPulls` row proves it, writes the page, then exits 1. A landed feel-fix with no valid
 device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` on
-a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A `cs-topic:` tag never
-keeps a step live. The page's stalled block lists the ids.
+a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A session whose status
+bucket is completed or failed has ended and holds no step; an idle or review ready one still does. The tag value is
+read stripped, as idle_lanes reads it. A `cs-topic:` tag never keeps a step live. The page's stalled block lists the ids.
 
 An open waiting-page item whose `lane` is a non-empty text and has no live work is stalled too. It
 prints `stalled step: item <n> (lane <slug>: re-route, close or resume)` and exits 1. The lane is live
@@ -146,10 +164,21 @@ open item row with no `lane` key reads the items unknown, so a publisher that do
 passes for zero stalled items.
 
 build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready` and
-phase `now`. The step needs no live lane (the same test as above) and no valid `paused` field. No open
-item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
-is missing or has no zone. The same list rides in the build info (`window.ROADMAP_BUILD.ready`). No page draws it yet. With no usable live read, one line
-reads `ready not started: unknown (<why>)`, never zero. These lines never change the exit code.
+phase `now`. The step needs no live lane (the same test as above), no open pull that names it (the pair line
+names the two), and no valid `paused` field. No open item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
+is missing or has no zone. The same list rides in the build info (`window.ROADMAP_BUILD.ready`). No page draws it yet.
+One function, `next_act`, gives each ready step and each stalled step `id`, `act`, `owner` and `age`. A ready
+step's act is `start lane`. The owner is the step's `owner` field, else `coordinator`.
+A ready step more than `READY_AGE_LIMIT_HOURS` (24, unmeasured) old prints
+`ready over limit: <id> (start lane; owner <owner>; age <N>h)`, and build.py exits 1, as on a stalled step. A step
+with no age is never over. A `todo` or `ready` step that has landed on main (a `Step:` trailer or a `landedPulls` row) is not listed: it has
+no lane to start, and the landed upkeep rows name it. A `todo` or `ready` step with a missing or wrongly cased phase
+prints `ready not started: unknown (<id> has no usable phase)` and is not listed. Every build prints
+`ready not started count: <N>`, zero included, or `ready not started count: unknown (<why>)` when a phase is unusable.
+With no usable live read, or main unread (no step can be shown landed), the list and the count each read
+`unknown (<why>)`, never zero, and there is no red line. A ready step inside the limit never changes the exit code.
+Unmeasured limits: age counts from the step's `updatedAt`, so a weekend or a note edit moves it; a landed doing step
+goes red, but a landed todo step is excluded.
 
 Triage disposes each stalled step by writing, on the record branch, one of three things. It sets the step
 `todo` (the lane is gone and the work is not done) or `done` (it landed). Or it adds `paused`:
@@ -198,7 +227,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
   whose status is none of `todo`, `ready`, `doing`, `active` or `done` is listed as `<id> (unknown status
   "<status>")`. Each other entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)` when
-  a `Step:` trailer is on main. Triage sets each step back. The red line prints a `stalled step:` line
+  a `Step:` trailer is on main or a `landedPulls` row proves it. Triage sets each step back. The red line prints a `stalled step:` line
   for each entry except an unknown-status one, built from the same test. The row reads one `unknown (<why>)` entry,
   never an empty list, in these cases:
   - `--live` is missing or unreadable, or has no `sessions` list;
@@ -210,7 +239,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
   needed. Each entry is the step id;
 - draft pull requests over 12 hours old with no live lane, in the row `draft PRs over 12 h with no live
   lane`. A pull's age is `createdAt` against the live file's `readAt`. A pull has a live lane when a
-  live session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). Each entry is `#N (<branch or
+  live session step equals its branch exactly (the in-progress row also counts a `lane/<id>` branch). An ended
+  session holds no draft. Each entry is `#N (<branch or
   title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
   live file the row reads one `unknown (<why>)` entry;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
@@ -243,7 +273,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
     has no bucket is never listed;
   - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
-    `Step:` trailer is on main, or its status is `done`;
+    `Step:` trailer is on main, a `landedPulls` row proves it, or its status is `done`;
   - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
     draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
     releases the lane. A ready pull always holds it. A failed git read reads as not landed;
@@ -265,7 +295,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
   a summary line. It exits 1, with no summary line, when every entry is unknown;
-- `Step:` trailers that name no step.
+- `Step:` trailers that name no step;
+- `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` The instruction is in the Triage bullet of the operating model (skill `project-ops`). A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
 
 ## Cost
 
@@ -275,9 +306,12 @@ reads. The stale-step row adds one more `list_sessions` walk inside that publish
 fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
-The red line, the stalled lines and the two stale-ready rows read the live file build.py already reads, and add no
-process, file, timer or log. The publisher adds one field, `createdAt`, per pull row, from the GitHub
-list call it already makes.
+The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
+already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
+GitHub list call it already makes.
+The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The build runs at
+most one `git merge-base` per distinct head of an unmerged row whose branch is an open step. A row with `merged:
+true`, or with no open step, runs no git. They add no file, timer or log.
 The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
 
