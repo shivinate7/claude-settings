@@ -1350,18 +1350,27 @@ def _item_fields(path):
     return fields if isinstance(fields, list) and fields and all(isinstance(x, str) for x in fields) else None
 
 
+# A field the page lists and draws, but only the page writes: the owner's Mark read sets `dismissed` with update (step ask-phase-out).
+# A session's write that names it is refused, so no session hides an item the owner has not read.
+PAGE_ONLY_ITEM_FIELDS = ("dismissed",)
+
+
 def item_field_hit(op, entry, data) -> str:
     """The matched text when this write of a waiting item names a top-level field outside the page's
     itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
     field in `field`. A page with no readable block, or an empty one, reads as unknown, and the write passes."""
     fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
-    if fields is None:
-        return ""
     if op == "str_replace":
         field = entry.get("field")
         top = field.split(".", 1)[0] if isinstance(field, str) else ""
-        return "str_replace on " + top if top and top not in fields else ""
-    if not isinstance(data, dict):
+        if top in PAGE_ONLY_ITEM_FIELDS:
+            return "str_replace on " + top + " (the page's Mark read writes it)"
+        return "str_replace on " + top if fields is not None and top and top not in fields else ""
+    if isinstance(data, dict):
+        for key in data:
+            if key in PAGE_ONLY_ITEM_FIELDS:
+                return "field " + str(key) + " (the page's Mark read writes it)"
+    if fields is None or not isinstance(data, dict):
         return ""
     for key, value in data.items():
         if key in fields or (op == "update" and isinstance(value, dict) and value.get("__delete__") is True):

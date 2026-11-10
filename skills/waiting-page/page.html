@@ -2079,6 +2079,8 @@ function answeredEl(items, place, lines, read) {
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
     sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " Each line leaves when you mark it read." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
 }
+// The closed lines that show in the Answered section: not read at load. The rail's Answered row reads the same list, so its count is the section's.
+const shownLines = () => state.lines.filter((it) => !itemAway(it));
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
   if (!state.items.length) {
@@ -2108,7 +2110,7 @@ function renderList() {
     reconcile(te.el, [te.head, ...body]);
     want.push(te.el);
   });
-  const lines = state.lines.filter((it) => !itemAway(it)), read = [...state.items.filter((it) => isSunk(it) && itemAway(it)), ...state.lines.filter(itemAway)];
+  const lines = shownLines(), read = [...state.items.filter((it) => isSunk(it) && itemAway(it)), ...state.lines.filter(itemAway)];
   if (by.answered.length || lines.length || read.length) want.push(answeredEl(by.answered, place, lines, read));
   if (state.rulings.length) want.push(rulingsEl());
   const open = new Set(answerable().map((i) => i.id));
@@ -2177,7 +2179,7 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if (isSunk(it) && !state.answeredOpen) { state.answeredOpen = true; render(); } jump($("item-" + it.id) ? "item-" + it.id : "line-" + it.n); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (it.status === "closed" ? " sent filed" : isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (it.status === "closed" ? ", closed" : isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if ((isSunk(it) || it.status === "closed") && !state.answeredOpen) { state.answeredOpen = true; render(); } jump($("item-" + it.id) ? "item-" + it.id : "line-" + it.n); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
   // The chips of a tier or of the Answered section, a group's chips side by side.
   const chipRow = (list) => {
     const row = h("div", { class: "chips-n" }), seen = new Set();
@@ -2195,7 +2197,7 @@ function renderRail() {
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
   // The Answered row: the section's chips. Its count is the section's size, and a press opens a folded section before it jumps.
-  const ans = by.answered.filter((it) => !itemDropped(it));
+  const ans = [...by.answered, ...shownLines()].filter((it) => !itemDropped(it));
   if (ans.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-answered", "aria-label": ans.length + " answered", onclick: (e) => { e.preventDefault(); state.answeredOpen = true; render(); jump("tier-answered"); } }, glyph("done"), "Answered", h("span", { class: "ct" }, String(ans.length))), chipRow(ans)));
   // One row for the rulings: no chips, so a ruling never counts as open or sent.
   if (state.rulings.length) kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-ruled", "aria-label": state.rulings.length + (state.rulings.length === 1 ? " ruling" : " rulings") + ", Arbiter rulings", onclick: (e) => { e.preventDefault(); state.rulingsOpen = true; render(); jump("tier-ruled"); } }, glyph("ruled"), "Arbiter rulings", h("span", { class: "ct" }, String(state.rulings.length)))));
@@ -2450,9 +2452,11 @@ const askMembers = (t) => [t, ...t.reps];
 const askWaitsIn = (t) => askMembers(t).some((a) => !askReply(a));
 // A thread is dismissed when its root has a valid ISO `dismissed`, no record in it waits, and no answer in it is later than the dismiss. So an answer never lands hidden.
 const askDismissed = (t) => { const d = typeof t.dismissed === "string" ? Date.parse(t.dismissed) : NaN; return !isNaN(d) && !askWaitsIn(t) && !askMembers(t).some((a) => (Date.parse(a.answered) || -Infinity) > d); };
+// Pick 480 a: Mark read shows only on an ask that has a home. An ask with no home has none, whatever else its thread holds.
+const askHasHome = (t) => typeof t.home === "string" && !!t.home.trim();
 // An ask is routed when a session answered it, wrote its home, and no record in the thread waits. A routed ask shows as one line (its home and the short reply) until the owner marks it read.
 // An ask with no home is not routed: it shows as it always did, in full when its answer is new and as a fold when seen.
-const askRouted = (t) => !!askReply(t) && typeof t.home === "string" && !!t.home.trim() && !askWaitsIn(t);
+const askRouted = (t) => !!askReply(t) && askHasHome(t) && !askWaitsIn(t);
 // A routed ask answered before READ_FROM, the time this change shipped, counts as read, so no old answer comes back as a line. A thread with a `dismissed` field, set or null, is the owner's own mark: Mark unread keeps it out of this rule.
 const READ_FROM = Date.parse("2026-11-10T18:00:00Z");
 const askTimeRead = (t) => { const l = askLatest(t), a = l ? Date.parse(l.answered) : NaN; return askRouted(t) && !("dismissed" in t) && !isNaN(a) && a < READ_FROM; };
@@ -2749,6 +2753,7 @@ const gonePress = (k, kind) => { const g = askState.gone[k]; return !!g && g.kin
 const restoreBtn = (t) => { const k = t.id; return askPress("alt restore", "res-", k, t, "Mark unread", gonePress(k, "restore"), "Unmarking…", () => restoreAsk(k)); };
 // Off while a record in the thread waits: a read thread would hide the answer the owner waits for. Off, not absent, so the reason sits beside it.
 function dismissBtns(t) {
+  if (!askHasHome(t)) return [];
   const k = t.id, off = askWaitsIn(t), b = askPress("quiet dismiss", "dis-", k, t, "Mark read", gonePress(k, "dismiss"), "Marking…", () => dismissAsk(k));
   if (off) { b.setAttribute("aria-disabled", "true"); b.setAttribute("aria-describedby", "dw-" + k); b.removeAttribute("data-ask"); }
   return off ? [b, h("span", { class: "dwhy", id: "dw-" + k }, ASK_DIS_OFF)] : [b];
@@ -2813,7 +2818,7 @@ function askItem(t, dl) {
     // A fold changes only at a load or a press, so a thread with replies keeps the fold it first drew, and a new answer to a reply does not unfold it.
     if (t.reps.length && !(k in s.open) && !dl) s.open[k] = false;
     // A row with a waiting reply has no Mark read: it has no room for the reason, and Show answer leads to it.
-    const side = dl ? (askRead(t) ? restoreBtn(t) : dismissBtns(t)[0]) : askWaitsIn(t) ? null : dismissBtns(t)[0];
+    const side = dl ? (askRead(t) ? restoreBtn(t) : dismissBtns(t)[0] || null) : askWaitsIn(t) ? null : dismissBtns(t)[0] || null;
     // A routed ask is one line: its text, its home, a new-answer mark, and the short reply. The row is the press, and Mark read sits beside it.
     const row = routed
       ? h("button", { class: "frow", type: "button", "aria-expanded": "false", "data-ask": k, onclick: press }, glyph("done"),
