@@ -3,13 +3,15 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import ast
 import os
 import re
+import textwrap
 
 import guard_core
 from guard_core import (
     HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, PowerShellScript, _expanded,
-    _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment,
+    _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, _walk_heredocs, basename, dir_before_segment,
     heredoc_delimiter, is_powershell, nested_script, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
@@ -1659,6 +1661,86 @@ def interpreter_may_write(raw: str) -> bool:
     the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
     return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
         _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
+
+
+# A quoted python heredoc whose body only HOLDS text (a string that looks like a settings write) is data: rule 8
+# (agent-model-cap) reads the body of a heredoc fed to an interpreter as code, so it asked on a probe that wrote
+# nothing. A body is data only when python cannot run, write or import anything from it. The check is a
+# whitelist on the header and a blacklist of names on the parsed body, and every doubt keeps the body in view.
+_PY_DATA_FLAGS = re.compile(r"^-[BbdEIiOPqSsuvx]+$")   # no -c, -m, -W or -X: those run code or take a value
+_PY_PLAIN_WORD = re.compile(r"^[\w./\\:~+-]+$")
+_PY_RUNNING_NAMES = frozenset((
+    "system", "popen", "subprocess", "run", "call", "check_call", "check_output", "getoutput", "getstatusoutput",
+    "eval", "compile", "__import__", "importlib", "import_module", "open", "getattr", "setattr", "globals",
+    "locals", "vars", "runpy", "ctypes", "pty", "fork", "forkpty", "startfile", "__builtins__"))
+_PY_RUNNING_PREFIXES = ("exec", "spawn", "posix_spawn", "write", "copy", "rename", "replace", "move", "symlink",
+                        "link", "unlink", "remove", "rmtree")
+
+
+def _python_data_header(header: str) -> bool:
+    """True when the header line is only a python command, plain flags, an optional `-` and one heredoc token:
+    a redirect, a pipe, a second command or a flag that runs code (`-c`, `-m`) leaves the body in view."""
+    at = header.find("<<")
+    token = guard_core.HEREDOC_HEADER.match(header, at) if at >= 0 else None
+    if not token or header[token.end():].strip():
+        return False
+    words = header[:at].split()
+    if not words or not _PY_PLAIN_WORD.match(words[0]) or not _PY_COMMAND.match(basename(words[0])):
+        return False
+    flags = words[1:-1] if words[-1] == "-" and len(words) > 1 else words[1:]
+    return all(_PY_DATA_FLAGS.match(word) for word in flags)
+
+
+def _python_body_is_data(body: str) -> bool:
+    """True when `body` parses and no name in it runs, writes, imports or spawns."""
+    for node in ast.walk(ast.parse(textwrap.dedent(body))):
+        if isinstance(node, ast.Name):
+            names = (node.id,)
+        elif isinstance(node, ast.Attribute):
+            if node.attr.startswith("__") and node.attr.endswith("__"):
+                return False   # `().__class__.__subclasses__()` reaches any class without naming it
+            names = (node.attr,)
+        elif isinstance(node, ast.alias):
+            names = tuple(node.name.split("."))
+        elif isinstance(node, ast.ImportFrom):
+            names = tuple((node.module or "").split("."))
+        else:
+            continue
+        for name in map(str.lower, names):
+            if name in _PY_RUNNING_NAMES or name.startswith(_PY_RUNNING_PREFIXES):
+                return False
+    return True
+
+
+def python_data_bodies_dropped(raw: str) -> str:
+    """`raw` with the body of each python data heredoc removed; the header line and the closing delimiter line
+    stay, so `strip_heredoc_bodies` still reads the command. Any doubt, or any error, returns `raw` unchanged."""
+    try:
+        return _python_data_bodies_dropped(raw)
+    except Exception:
+        return raw
+
+
+def _python_data_bodies_dropped(raw: str) -> str:
+    if "<<" not in raw:
+        return raw
+    walks = []
+    for reading, legacy in ((False, False), (True, False), (False, True)):   # the lane's two readings and main's
+        spans = []
+        _, bodies, unclosed = _walk_heredocs(raw, reading, legacy, body_at=spans)
+        if unclosed:
+            return raw
+        walks.append((bodies, spans))
+    if walks[1] != walks[0] or walks[2] != walks[0]:
+        return raw   # the readings disagree on where a body ends: the text is not plainly data
+    bodies, spans = walks[0]
+    dropped = set()
+    for (quote, body, header), (start, end) in zip(bodies, spans):
+        if quote and body.strip() and _python_data_header(header) and _python_body_is_data(body):
+            dropped.update(range(start, end))
+    if not dropped:
+        return raw
+    return "\n".join(line for at, line in enumerate(raw.split("\n")) if at not in dropped)
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False) -> str:

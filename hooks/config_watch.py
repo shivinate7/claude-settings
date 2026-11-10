@@ -522,11 +522,11 @@ def explained_path(tool: str, tool_input, cwd: str) -> str:
         if not isinstance(raw, str) or not raw.strip():
             return ""
         guard.POWERSHELL_CALL[0] = tool == "PowerShell"
-        stripped = guard.strip_heredoc_bodies(raw)
-        hit = guard._shell_write_hit(stripped, cwd, guard.is_settings_file)
+        view = guard.python_data_bodies_dropped(raw)
+        hit = guard._shell_write_hit(guard.strip_heredoc_bodies(view), cwd, guard.is_settings_file)
         if not hit:
             return ""
-        if not guard.cap_change(raw):
+        if not guard.cap_change(view):
             return ""
         return resolve(hit, cwd)
     return ""
