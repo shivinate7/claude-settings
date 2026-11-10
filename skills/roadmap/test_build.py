@@ -525,15 +525,6 @@ class LiveWork(Fixture):
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertEqual(self.panel(page)["read"], "unknown (the live file's readAt is not an ISO time: None)")
 
-    def test_missing_threads_or_pulls_list_reads_unknown(self):
-        self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": []})
-        page, _ = self.build_from_main("--live", str(self.live))
-        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no pulls list)")
-        self.assertNotIn("threads", build_info(page)["live"])
-        self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": None, "pulls": {}})
-        page, _ = self.build_from_main("--live", str(self.live))
-        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no threads or pulls list)")
-
     def test_missing_pulls_list_reads_unknown_whatever_threads_is(self):
         # Only the pulls list makes the whole read unknown. A threads list that is missing does not (LiveThreadsOptional).
         self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": []})
