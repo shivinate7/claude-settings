@@ -114,16 +114,21 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
-  push-main            ask. A non-forced push whose destination is literally main or master,
-                       `--all` included, to a network remote. A remote the shell has not expanded
-                       counts as one. The remote's HEAD is not read. A dry run passes.
+  push-main            ask. A non-forced push whose destination is literally main or master, to a
+                       network remote: `main` alone, `main` with a lane-named branch, and `--all` or
+                       `--branches` from a checkout that is not an agent's. An agent-named destination
+                       in the same push is push-agent-branch's, which refuses. A remote the shell has
+                       not expanded counts as one. The remote's HEAD is not read. A dry run passes.
   push-stray-branch    ask. An implied push (bare, `HEAD`, `@`, or a colon-less refspec naming the
                        current branch) that writes a name other than the branch's upstream. It is silent
                        when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
                        upstream on the pushed remote that is not main or master.
   push-agent-branch    deny. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
-                       -u. No upstream is needed. A delete, a mirror and a dry run pass.
+                       -u. No upstream is needed. It holds when `main` comes first in the same push
+                       (`main HEAD:agent-<hex>`, `main agent-<hex>`), from any checkout. It also holds
+                       for `--all` or `--branches` from an agent checkout, to a network remote, because
+                       that push sends the agent branch too. A delete, a mirror and a dry run pass.
   env-file             deny. Any read or write of an environment file.
   process-args         deny. A command that prints other processes' full arguments, which can hold a
                        secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
