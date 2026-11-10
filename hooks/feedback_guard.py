@@ -62,6 +62,13 @@ a turn end in these cases:
     Cost: one rev-parse and one `grep` of the copy's items, in the git of the Stop
     process, once per Stop that holds an open page item with a proved send and no read-back. The read-back
     uses the transcript the send check read. No file written;
+  - input-needed-closed-item (the reader lives here, the refusal in lint/report_guard.py). Homes.item_statuses gives
+    each item number's status from the same waiting copy read as filed_numbers: one `git grep`, once per Stop, never
+    a second reader. read_back_statuses gives the status that a same-turn ArtifactData read of collection `items`
+    returned, and a read-back showing the item open skips the copy for it. Incident: a coordinator listed items 214,
+    381, 383 and 222 to the owner as open, and all four were closed (roadmap step input-needed-reads-page-status).
+    Cost: no read of its own. The one git grep runs only in a Stop whose Input Needed cites a page item, in a repo
+    that names a waiting page. No file written;
   - page-chat-answer-lands. An owner block whose whole text is a chat answer to a page item
     (ANSWER: `<n> <letter>` with letters a to h, as `143 b`, `143b`, `143: b` or `143 b.`, an optional
     parenthetical, answers separated by commas or lines), in a repo whose extras name a waiting page
@@ -399,6 +406,7 @@ class Homes:
         self.worked_in = worked_in  # the folder the inbox's sidecar binds: where the session worked
         self._tops = None  # the repo tops of worked_in and cwd, read once per Stop
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
+        self._statuses = {}  # item number (digit string) -> status, filled by the same read as _filed
         self._top = None  # (the cwd's repo top or None,), read once per Stop
         self._templated = {}  # (branch, slug) -> whether the step file holds TEMPLATE_DIR, read once per Stop
 
@@ -624,7 +632,7 @@ class Homes:
             if ln.startswith(prefix):
                 path, _, text = ln[len(prefix):].partition(":")
                 files.setdefault(path, []).append(text)
-        numbers = set()
+        numbers, statuses = set(), {}
         for lines in files.values():
             try:
                 found = json.loads("\n".join(lines))
@@ -635,11 +643,24 @@ class Homes:
                 return self._filed
             v = found.get("n")
             if isinstance(v, int) and not isinstance(v, bool):
-                numbers.add(str(v))
+                key = str(v)
             elif isinstance(v, str) and v.isdigit():
-                numbers.add(str(int(v)))
+                key = str(int(v))
+            else:
+                continue
+            numbers.add(key)
+            status = found.get("status")
+            statuses[key] = status if isinstance(status, str) else "open"  # absent reads open, as the page reads it
+        self._statuses = statuses
         self._filed = (numbers, branch, folder)
         return self._filed
+
+    def item_statuses(self):
+        """(statuses, branch, folder): item number (digit string) -> status ("open", "closed") for each item the
+        waiting copy holds. The same read as filed_numbers, never a second one. `statuses` is None under the same
+        conditions as `numbers` there; `skip_filing` says why when the copy was unreadable."""
+        numbers, branch, folder = self.filed_numbers()
+        return (None if numbers is None else self._statuses), branch, folder
 
     def homes_line(self):
         """`ruling -> <homes>; task -> <homes>; question -> answered; ...` for every kind in KINDS. The file homes
@@ -782,6 +803,28 @@ def _returns_n(result, n):
     are read as the page-note capture reads them (local_time._documents)."""
     return (isinstance(result, dict) and result.get("is_error") is not True
             and any(_is_n(data.get("n"), n) for _, data in local_time._documents(result.get("content"))))
+
+
+def read_back_statuses(records, homes):
+    """{item number (digit string): status} from the ArtifactData get, list or query reads of collection `items` of
+    the waiting page (Homes.reads_waiting_page) in `records`, whose result is no error. The newest read of an item
+    wins. A document with no status field reads open. The report guard's closed-item check passes it one turn."""
+    results = {b["tool_use_id"]: b for r in records if r.get("type") == "user"
+               for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
+    found = {}
+    for r in records:
+        if r.get("type") != "assistant":
+            continue
+        for use in _transcript.tool_uses(r):
+            result = results.get(use.get("id"))
+            if (not _reads_items(use) or not isinstance(result, dict) or result.get("is_error") is True
+                    or not homes.reads_waiting_page([use["input"].get("url")])):
+                continue
+            for _, data in local_time._documents(result.get("content")):
+                n, status = data.get("n"), data.get("status")
+                if isinstance(n, int) and not isinstance(n, bool) or isinstance(n, str) and n.isdigit():
+                    found[str(int(n))] = status if isinstance(status, str) else "open"
+    return found
 
 
 def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
