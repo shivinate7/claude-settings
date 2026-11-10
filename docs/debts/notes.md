@@ -1843,3 +1843,5 @@
 - launch-cloud-mirror-marker-reads-stderr: merge/launch.py `git()` joins stderr to stdout, so a git warning on `config --get claude-settings.cloudMirror` hides the marker and the mirror is fast-forwarded. install.sh and hooks/session_start.sh read stdout only.
 - launch-cloud-mirror-hides-other-reason: a marked mirror that is also dirty or off main prints only "cloud mirror" in launch.py's left-as-is line.
 - launch-cloud-mirror-test-gaps: no case pins a dirty marked mirror or a non-literal true spelling (`yes`, `1`); the code matches install.sh's literal `true`.
+- process-args-systemctl-status: `systemctl status <unit> -l` prints the unit's process command lines and passes. Low to moderate likelihood. Not read by the rule. Decision: process-args-guard.
+- process-args-false-alarms: `ps aux | wc -l` and `ps -ef | wc -l` (count only), `ps -p $(pgrep node)` (the space inside the substitution makes `node)` a BSD operand) and PowerShell `ps node` (alias of Get-Process) are refused. Each costs one retry; the safe forms are `pgrep -c`, `ps -p <pid>` and `Get-Process node`. Decision: process-args-guard.
