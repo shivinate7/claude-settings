@@ -4,8 +4,8 @@
   "note": "Split out of step encoded-retry-after-refusal at its lane's word (08:17 CST Nov 9): that guard reads one Bash command's own text, so this gap is out of its scope. Related: steps reviewer-probe-helper (a sanctioned way to run a probe without a script file), builder-edits-mutation-tests, decision builders-cannot-edit-tests. Lane session_013NEJKzxuVkjiW6xKfSdu5G started 08:20 CST Nov 9 (coordinator). PR #2447 passed review round 3 (coordinator 10:04 CST Nov 9). Its four notes are in roadmap/outbox/triage.md (write-run-*). Done: #2447 merged in batch 69 (#2461, main 624dcc188, 2026-11-09).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJKzxuVkjiW6xKfSdu5G",
+  "lane": "archived, handoff at handoffs/session_013NEJKzxuVkjiW6xKfSdu5G.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 912,
-  "updatedAt": "2026-11-09T15:14:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

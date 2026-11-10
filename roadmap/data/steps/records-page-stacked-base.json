@@ -4,8 +4,8 @@
   "note": "Filed 09:31 CST Nov 8 (coordinator 09:30 CST, under item 410 a). records_page_hit in hooks/guard_merge.py. Red case: lane round-one-reset merged #1957's head into #2062 (stacked on #1957); `git diff origin/fix-chain-fresh-rounds -- docs/records.md` is empty, yet the commit was refused. No lane is in that code, so lane round-one-reset (session_013NEJKzZtu1sv8D47NpC3yx) takes it (coordinator). Work-around today: take main's page and let the merge tool rebuild it. Sighting (coordinator 14:59 CST Nov 8; this step owns guard rule records-page, hooks/guard_merge.py RECORDS_PAGE): on #2201 the guard did not refuse the lane's `git add ... docs/records.md && git commit`, a hand edit of the generated records page, later removed in 09b369e58. Unmeasured: reproduce before any fix. Second sighting (coordinator 18:39 CST Nov 9, from helper session_013NEJL4J7jxH2NTeETZEdne): merging base origin/cp-written-limits (under #2373) into the upper lane was refused, though the staged docs/records.md equals the base's page; decision records-index-at-merge allows it. Same work-around. Lane round-one-reset ended Nov 8; new lane session_013NEJL4AKgGnEPYfk6PZTMQ started 18:43 CST Nov 9 (coordinator). Done: #2482 merged in batch 71 (#2510, main 6e8d6ccf9, 07:36 CST Nov 10; head checked on main by triage).",
   "phase": "guards",
   "owner": "claude-settings",
-  "lane": "session_013NEJL4AKgGnEPYfk6PZTMQ",
+  "lane": "archived, handoff at handoffs/session_013NEJL4AKgGnEPYfk6PZTMQ.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 702,
-  "updatedAt": "2026-11-10T07:41:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 269.6,
   "owner": "coordinator",
-  "lane": "session_013NEJL17gMWcgUJ44gi3ZRs",
+  "lane": "archived, handoff at handoffs/session_013NEJL17gMWcgUJ44gi3ZRs.md on archive/session-handoffs-2026-11-10",
   "why": "The workflow guard misses `bash -l -c \"pytest ...\"` and `bash -eo pipefail -c \"...\"`, where options come before -c (lane notes-fix-merge-ci, 17:51 CST Nov 7).",
   "note": "Stacked on #1608. Red cases first; the guard's verdict changes.",
-  "updatedAt": "2026-11-07T17:49:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

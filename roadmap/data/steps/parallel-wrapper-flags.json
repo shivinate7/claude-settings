@@ -4,8 +4,8 @@
   "note": " Lane session_013NEJL2RYun1AZqEEhFo93w started 12:13 CST Nov 9 (coordinator). Back to todo 12:18 CST Nov 9 (coordinator): starts after #2208, #2241 and #2291 merges; its lane session_013NEJL2RYun1AZqEEhFo93w stays idle until then.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL2RYun1AZqEEhFo93w",
+  "lane": "archived, handoff at handoffs/session_013NEJL2RYun1AZqEEhFo93w.md on archive/session-handoffs-2026-11-10",
   "status": "todo",
   "order": 843,
-  "updatedAt": "2026-11-09T12:14:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

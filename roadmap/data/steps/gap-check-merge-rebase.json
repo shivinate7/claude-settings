@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "why": "A clean merge or rebase on the roadmap branch runs no pre-commit hook, and the README's pull --rebase then amend flow re-checks only roadmap.html, so a duplicate step can land unchecked (lane gap gap-check-skips-merge-rebase).",
   "note": "From lane step-names-its-gap via the coordinator, 20:53 CST Nov 7. Coordinator starts a lane on the slug. Follows #1750. Filed 20:54 CST Nov 7. Started by the coordinator, 20:55 CST Nov 7, in lane session_013NEJKzanUvmhhL9K3XCNgT, stacked on #1750. Updated 20:55 CST. Built as draft #1757 (base #1750's branch, head 22caca8): round 1 sonnet PASS. It waits on page item 383 with #1750. Follow-ups: gap-check-fetch-head, build-git-count-test (coordinator 21:13 CST; updated 21:13 CST). Doing 05:58 CST Nov 10: open PR #1757 on branch gap-check-merge-rebase (triage live build).",
-  "updatedAt": "2026-11-10T05:57:00-06:00",
-  "lane": "session_013NEJKzanUvmhhL9K3XCNgT"
+  "updatedAt": "2026-11-10T11:20:00-06:00",
+  "lane": "archived, handoff at handoffs/session_013NEJKzanUvmhhL9K3XCNgT.md on archive/session-handoffs-2026-11-10"
 }

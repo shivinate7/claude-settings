@@ -4,8 +4,8 @@
   "note": "Coordinator 11:16 CST Nov 8: lane started. Coordinator 13:00 CST Nov 8: #2231 handed. Route when closed: `sim-test --hold --for 900` through the Monitor tool; the holding line is the GO event. Mac-only proof owed (PR body): the hold line shows in Monitor, MCP launch passes, tap and screenshot work, stop or expiry cleans up. Queued for a Mac session after #2231 and the sim-tool-lease-check PR merge. Doing 05:58 CST Nov 10: open PR #2231 on branch lane-sim-hold-path (triage live build).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL2pSKbDkTpUe76U2wp",
+  "lane": "archived, handoff at handoffs/session_013NEJL2pSKbDkTpUe76U2wp.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 748,
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

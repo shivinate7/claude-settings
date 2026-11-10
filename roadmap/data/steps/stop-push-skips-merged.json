@@ -4,8 +4,8 @@
   "note": "Fix proposed by the lane: skip a branch whose head is already on origin/main. The stray branch is on step branch-cleanup's delete list. Filed 04:39 CST Nov 9. Lane session_013NEJKz3J95T7tJBtSYUXZ9 started 12:13 CST Nov 9 (coordinator). Blocked on page item 464 (stop-hook-merged-branch, 12:20 CST Nov 9): may hooks/session_start.sh patch the platform's Stop-hook script, against the recorded call in decision lanes-start-in-tool-worktrees? Incident: the script counts main's own commits as unpushed when origin/HEAD is stale, and a lane recreated a merged branch with 502 commits. Meanwhile the lane stays idle and the coordinator's briefs carry option a (fetch, then git rev-list --count origin/main..HEAD must be 0 before ending). Owner pick on the waiting page (13:09 CST Nov 9): item 464 b. session_start.sh adds a one-line skip after the platform writes its Stop-hook script, and a test goes red when the platform's script text changes. The owner chose it although it carries the label \"Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo\", so the pick is the owner's word for this act only.",
   "phase": "now",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "lane": "session_013NEJKz3J95T7tJBtSYUXZ9",
+  "lane": "archived, handoff at handoffs/session_013NEJKz3J95T7tJBtSYUXZ9.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 902,
-  "updatedAt": "2026-11-09T13:10:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

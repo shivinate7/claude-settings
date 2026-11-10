@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 644,
   "owner": "lane lane-lint-guard-suite-install",
-  "lane": "session_013NEJKzoJ3vzUKGDk62Hr6K",
+  "lane": "archived, handoff at handoffs/session_013NEJKzoJ3vzUKGDk62Hr6K.md on archive/session-handoffs-2026-11-10",
   "why": "Lane lint now runs hooks/test_guard.py with no browser download (decision playwright-install-once: one Playwright install, never from an agent). When the pinned Chromium (playwright 1.64.1, build 1248) cannot launch, the page-item-design deny cases are skipped; debt lane-lint-guard-browser-skip records that.",
   "note": "Topic lane-lint. A follow-up PR with Merge after: this lane's lane-lint-guard-suite-install PR (which merges after #1916). The lane session does the install, never an agent. A cloud box lasts one session, so once per box means once per session. The record says how a session finds the browser already installed. Filed as doing on the coordinator's word (07:18 CST Nov 8; items 386 and 410 a). Slug and title from the lane.",
-  "updatedAt": "2026-11-08T07:14:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

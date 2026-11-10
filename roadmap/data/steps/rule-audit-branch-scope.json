@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 103.5,
   "owner": "coordinator",
-  "lane": "session_013NEJL1BcjeYCubrQhUmWKz",
+  "lane": "archived, handoff at handoffs/session_013NEJL1BcjeYCubrQhUmWKz.md on archive/session-handoffs-2026-11-10",
   "why": "When one name is bound twice in judge(), the audit reads the wrong binding and reports a refusal with no reason.",
   "note": "Topic guard-coverage. In lint/test_rule_audit.py, _locals scopes each binding to the branch that reads it. From main, its own PR. Retires the debt that #1738's rename names as a bandaid. Lane mcp-tools-in-guard-matcher, on the coordinator's word; filed 20:25 CST Nov 7. Coordinator 14:45 CST Nov 8: #1738 closes as replaced.",
-  "updatedAt": "2026-11-08T14:47:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

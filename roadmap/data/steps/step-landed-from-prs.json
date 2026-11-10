@@ -4,8 +4,8 @@
   "note": "Filed 10:35 CST Nov 8. Owner ask, 10:15 CST Nov 8 (\"the batch runner isnt archiving and reviewing as well as it should ... mechanical flaw\"), coordinator audit 10:30 CST. Triage sweep 04:49 CST Nov 10: back to ready. Lane session_013NEJKzhVo8BrXKn2ZpYnYx is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane session_013NEJL2NVN5RjCgjRQFXeps at 04:53 CST Nov 10.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL2NVN5RjCgjRQFXeps",
+  "lane": "archived, handoff at handoffs/session_013NEJL2NVN5RjCgjRQFXeps.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 735,
-  "updatedAt": "2026-11-10T04:53:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

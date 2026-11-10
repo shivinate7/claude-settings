@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "why": "Degen gap 8. Owner 20:25 CST Nov 9: queue each of Degen's eight claude-settings gaps as a step or debt, with its incident (via the coordinator 20:30 CST). agents/builder.md has no model line, so a builder inherits the session model (Opus), against rule agent-model-cap. Incident: Degen lane record-suite-leg, 2026-11-09 20:17 CST.",
   "note": "Link: step agent-served-model-check (910, lane session_013NEJL3hRvWLoxZuEPVQkD2) measures which layer wins; wait on its finding before pinning. Related: report-guard-role-default-model, lanes-sonnet-trial. Filed 20:27 CST Nov 9. Folded into lane session_013NEJL3hRvWLoxZuEPVQkD2 (agent-served-model-check) (coordinator 20:36-20:41 CST Nov 9).",
-  "updatedAt": "2026-11-09T20:34:00-06:00",
-  "lane": "session_013NEJL3hRvWLoxZuEPVQkD2"
+  "updatedAt": "2026-11-10T11:20:00-06:00",
+  "lane": "archived, handoff at handoffs/session_013NEJL3hRvWLoxZuEPVQkD2.md on archive/session-handoffs-2026-11-10"
 }

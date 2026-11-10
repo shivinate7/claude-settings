@@ -4,8 +4,8 @@
   "note": "Filed 10:17 CST Nov 8 from that lane; note time-pinned-sleeps-left. Fix: a page-side signal (for example scrollend) the tests wait on. Decision test-practices P5. Goal step: time-pinned-tests-go. Lane: timing-tests (session_013NEJL1jPC89ae6X6Pa4jmf), coordinator 10:18 CST.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL1jPC89ae6X6Pa4jmf",
+  "lane": "archived, handoff at handoffs/session_013NEJL1jPC89ae6X6Pa4jmf.md on archive/session-handoffs-2026-11-10",
   "status": "todo",
   "order": 726,
-  "updatedAt": "2026-11-08T10:25:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

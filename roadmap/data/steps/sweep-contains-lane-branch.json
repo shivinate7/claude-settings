@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 103.51,
   "owner": "coordinator",
-  "lane": "session_013NEJKzyHL14AinPBcJmTJo",
+  "lane": "archived, handoff at handoffs/session_013NEJKzyHL14AinPBcJmTJo.md on archive/session-handoffs-2026-11-10",
   "why": "janitor/sweep.py (line 741) keeps a worktree unless HEAD is on a remote-tracking ref, read with `git branch -r --contains HEAD`. That also matches lane branches, the same bug #1777 fixed in the roadmap refusal. Reported by lane roadmap-push-refusal-says-fetch (coordinator, 22:45 CST Nov 7).",
   "note": "Unchecked: first check whether a lane-branch match lets the sweep remove work that is not on main or an archive. If it does, a build lane (test-author, builder, reviewer). Done check: a red test where HEAD is only on a lane branch. Slug and title by triage; no source gave one. A queue-fix lane under the item 384 hold. Kept doing on: #1786 open draft (sweep-contains-lane-branch-2) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

@@ -4,8 +4,8 @@
   "note": " Doing 05:58 CST Nov 10: open PR #2180 on branch record-variable-id-forms (triage live build).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "review-record-provenance (session_013NEJKzUe9U19voH62VbCNA)",
+  "lane": "archived (review-record-provenance), handoff at handoffs/session_013NEJKzUe9U19voH62VbCNA.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 745,
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

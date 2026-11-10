@@ -3,9 +3,9 @@
   "phase": "now",
   "status": "doing",
   "order": 270.1,
-  "lane": "session_013NEJL213WYGvCs1ZRhXX4V",
+  "lane": "archived, handoff at handoffs/session_013NEJL213WYGvCs1ZRhXX4V.md on archive/session-handoffs-2026-11-10",
   "why": "Lane notes-fix-large-1, 15:05 CST: the agent-end reaper may stop only a finished agent's own shells (owner ruling 2026-10-15 19:43 CDT, decision when-a-worktree-may-be-removed), and nothing today shows which shells are its own.",
   "note": "For example an env var or a process-group tag set by the harness or a PreToolUse hook. Unblocks debt finished-agent-shells-keep-tree. Unowned until the coordinator starts it.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T15:09:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

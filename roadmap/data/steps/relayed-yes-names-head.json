@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "why": "Coordinator, 13:55 CST Nov 7. Follows #1433.",
   "note": "Starts after #1433 merges. Idle-lane audit (triage, 03:26 CST Nov 8): lane session_013NEJKzw6Mmu5eviHC3vobt is idle; #1433 is still an open draft (head 314ac287a, round 3 PASS). Sent to the coordinator.",
-  "lane": "session_013NEJKzw6Mmu5eviHC3vobt",
-  "updatedAt": "2026-11-08T03:21:00-06:00"
+  "lane": "archived, handoff at handoffs/session_013NEJKzw6Mmu5eviHC3vobt.md on archive/session-handoffs-2026-11-10",
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

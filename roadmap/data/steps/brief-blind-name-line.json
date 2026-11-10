@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 648,
   "owner": "lane verdict-format-line",
-  "lane": "session_013NEJL1BCgLVUACYU5ujv9A",
+  "lane": "archived, handoff at handoffs/session_013NEJL1BCgLVUACYU5ujv9A.md on archive/session-handoffs-2026-11-10",
   "why": "The refusal prints a fixed reason, so on a false alarm the author guesses which line to reword (lane verdict-format-line, 07:20 CST Nov 8).",
   "note": "Done check: a test case shows the refusal text holds the matched sentence; notes verdict-quoted-label-refused and verdict-format-run-on drop their Fix step. Follow-up PR after #1968, in lane verdict-format-line (coordinator, 07:20 CST Nov 8; items 386 and 410 a).",
-  "updatedAt": "2026-11-08T07:20:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

@@ -4,8 +4,8 @@
   "note": "Sighting (coordinator 15:42 CST Nov 8): it started lane session_013NEJL33qiuVEZBa4bipxtY for step review-state-guard-needs-round-3, whose PR #2252 already existed. The check should read a step's handed PR too, not only live sessions. Sighting (coordinator 18:49 CST Nov 8): two lanes on Nov 8 could not find triage through list_sessions, though get_session shows triage tagged cs-build:triage and cs-repo:shivinate7/claude-settings. PR #2416 (coordinator, 05:13 CST Nov 9, named as step-dup-check). Notes on #2416: (1) the two-page chain accumulation of `listed` has no test; (2) an upper-case step in _live_with_step has no test; (3) _step_held_hit defaults rows and records to fail open for a future caller; (4) two test comments call controls green on the old code that were red there.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL2hXLvodLuczRGgNHP",
+  "lane": "archived, handoff at handoffs/session_013NEJL2hXLvodLuczRGgNHP.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 821,
-  "updatedAt": "2026-11-09T05:13:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

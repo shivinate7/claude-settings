@@ -4,8 +4,8 @@
   "note": "Filed by triage, Nov 8 20:28 CST. From batch 67 on (in process now): the lane set freezes at build start, late releases go to the next batch, batches run on top of each other, and a red drops one lane with no re-lint. Lane session_013NEJL1oJqBhSKif1484UZ4 writes it into skill ci-hygiene step 8 and a decision. Owner ask (chat to triage, 20:30 CST Nov 8): \"mechanically enforce this\": the frozen lane set and the one-lane drop on red must be held by the merge tool or a check, not by process or skill text alone. The tool records the lane set at build start, refuses adding a lane to a batch after that, and on red drops one lane without a re-lint. Stays prose, PR #2367. The owner's mechanize ask (20:30-20:31 CST) is its own step batch-freeze-lane-set-enforce (coordinator 20:31 CST). #2367 reviewed, with runner 8 at ddae7b9ae (coordinator 20:42 CST Nov 8). Round 2 note (1), a claim or heal commit moves the running head, went to lane batch-freeze-lane-set-enforce. #2367 re-handed at 29a76ed26, draft then lint then ready (coordinator 22:26 CST Nov 8). The lint-FAIL gap goes to lane batch-freeze-lane-set-enforce. Done: #2367 merged in batch 68 (#2449, 8bc28980b, 11:55 CST Nov 9).",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "session_013NEJL1oJqBhSKif1484UZ4",
+  "lane": "archived, handoff at handoffs/session_013NEJL1oJqBhSKif1484UZ4.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 863,
-  "updatedAt": "2026-11-09T11:59:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

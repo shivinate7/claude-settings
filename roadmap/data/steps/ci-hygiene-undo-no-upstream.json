@@ -4,8 +4,8 @@
   "note": " Lane session_013NEJL3ZzwXePsQpNjbbeKu started 12:13 CST Nov 9 (coordinator). Done: aa2a0278d, e7bfe6556, fcf888a4d on main (2026-11-09): skills/ci-hygiene/SKILL.md line 115 now names origin/<base> upstream and --strict (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL3ZzwXePsQpNjbbeKu",
+  "lane": "archived, handoff at handoffs/session_013NEJL3ZzwXePsQpNjbbeKu.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 848,
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

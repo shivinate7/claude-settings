@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "why": "Incident 14:50 CST 2026-11-07: q_max batch PR #1081 went red on map-skill-same-output.test.mjs, which a hand-picked test list missed.",
   "note": "Topic lane-checks. PR #1659 (the lane lint runs the selector suites) is with runner 8 (coordinator, 17:47 CST). Doing 05:58 CST Nov 10: open PR #1659 on branch lane-runs-tests-for-set (triage live build).",
-  "lane": "session_013NEJL2tvhNJHroYMGnVvnc",
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "lane": "archived, handoff at handoffs/session_013NEJL2tvhNJHroYMGnVvnc.md on archive/session-handoffs-2026-11-10",
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

@@ -4,8 +4,8 @@
   "note": "Filed 09:49 CST Nov 8 from the coordinator's ask of 07:56 CST. Doing in lane commit-refuses-conflict-markers as #2083; round 1 FAIL, fixes in build (lane, 09:48 CST).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJKzXJPDWrSRe3i1fGJd",
+  "lane": "archived, handoff at handoffs/session_013NEJKzXJPDWrSRe3i1fGJd.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 708,
-  "updatedAt": "2026-11-08T09:49:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

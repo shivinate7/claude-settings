@@ -4,8 +4,8 @@
   "note": "Owner item 441 (qmax-d757-retire) posted 13:15 CST Nov 8, from lane session_013NEJL1kqjrZZqdqpz3eaGB; recommended a (retire D-757, local databases seeded from data/ux-seed). Owner picked 441 b at 13:20 CST Nov 8: he makes a new shared Neon branch from production, and D-757 is rewritten to name it. The lane sends the owner task (branch name, Neon console steps) for one page item. Owner task item 442 (qmax-testers-branch) posted 13:23 CST Nov 8: make Neon branch testers from production in Q_NEON (autumn-math-12676341). Done means the D-757 rewrite PR may merge. Also: q_max debt old-wt-neon-branches may now close, since item 361 deleted every wt- branch (unverified; no session touches Neon). Blocked: owner task item 442: make Neon branch testers; D-757 rewrite PR merges after it (q_max repo) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "phase": "now",
   "owner": "q_max",
-  "lane": "session_013NEJL1kqjrZZqdqpz3eaGB",
+  "lane": "archived, handoff at handoffs/session_013NEJL1kqjrZZqdqpz3eaGB.md on archive/session-handoffs-2026-11-10",
   "status": "blocked",
   "order": 801,
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

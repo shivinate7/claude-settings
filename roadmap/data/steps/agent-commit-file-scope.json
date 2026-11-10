@@ -4,8 +4,8 @@
   "note": " Round-3 limits on #2334 (coordinator 04:18 CST Nov 9; notes, no incident): (1) only the first user message counts as the brief, so a resumed agent that names a new file is refused and no override lifts it; (2) six repo files named *brief*.md read as pointers and are refused when named for edit; (3) a path with a space is split; (4) the generated-file exemption covers only this repo, so package-lock.json is refused elsewhere; (5) one git cat-file -e runs per out-of-scope path, with no bound; (6) the record's Cost line says \"no file written\", but its imports write .pyc files. No test covers a brief-scope refusal from a subfolder cwd.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL2unJ4dLGLaDdtaezc",
+  "lane": "archived, handoff at handoffs/session_013NEJL2unJ4dLGLaDdtaezc.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 835,
-  "updatedAt": "2026-11-09T04:19:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

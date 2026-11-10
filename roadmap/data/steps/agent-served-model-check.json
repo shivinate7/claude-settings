@@ -4,8 +4,8 @@
   "note": "First find which layer swaps the model (the spawn guard's model cap, the agent file's frontmatter, or the harness). Then check the served model against the requested one at spawn or at record time. Related: step report-model-from-role (reads each agent's served model for reports) and report-guard-spawn-model (#2307). Filed 07:34 CST Nov 9. Lane session_013NEJL3hRvWLoxZuEPVQkD2 started on the owner's 19:44 CST Nov 9 message: \"we set something to sonnet but didn't change the actual model code in settings\" (coordinator 19:52 CST).",
   "phase": "now",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "lane": "session_013NEJL3hRvWLoxZuEPVQkD2",
+  "lane": "archived, handoff at handoffs/session_013NEJL3hRvWLoxZuEPVQkD2.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 910,
-  "updatedAt": "2026-11-09T19:46:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

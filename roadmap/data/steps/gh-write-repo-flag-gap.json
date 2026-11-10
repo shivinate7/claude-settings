@@ -4,8 +4,8 @@
   "note": "Fix: gh_call_of skips -R/--repo and its value before the subcommand. It changes the local verdict too, so it runs in its own lane, with a red row first. The coordinator starts the lane after batch 68 merges. Source note gh-write-repo-flag-gap in roadmap/outbox/triage.md. Batch 68 merged (#2449, 11:55 CST Nov 9): free to start. Lane session_013NEJL27bB3sjZacDv3K9e4 started 12:13 CST Nov 9 (coordinator).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL27bB3sjZacDv3K9e4",
+  "lane": "archived, handoff at handoffs/session_013NEJL27bB3sjZacDv3K9e4.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 915,
-  "updatedAt": "2026-11-09T12:11:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

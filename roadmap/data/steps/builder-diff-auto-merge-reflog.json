@@ -4,8 +4,8 @@
   "note": "Coordinator 13:56 CST Nov 8: its own lane, on Sonnet; Merge after #1904. Coordinator 14:30 CST Nov 8: #1904 adds the debt builder-diff-auto-merge-reflog; this lane retires it when its fix merges. Coordinator 14:57 CST Nov 8: #2286 with runner 8, Merge after #1904.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL3mV1216ziTuNnhQyH",
+  "lane": "archived, handoff at handoffs/session_013NEJL3mV1216ziTuNnhQyH.md on archive/session-handoffs-2026-11-10",
   "status": "ready",
   "order": 813,
-  "updatedAt": "2026-11-08T14:58:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

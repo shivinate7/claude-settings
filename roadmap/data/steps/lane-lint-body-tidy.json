@@ -4,8 +4,8 @@
   "note": "Fix: each of the four, red cases first for (2) and (4). Branch lane-lint-body-tidy from #1932's head 5e75f57cd; its PR merges after #1932. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 05:30 CST Nov 8; red cases started (lane, 05:25 CST). Ready as draft #1940, with runner 8, `Merge after: #1932` (lane, 05:39 CST Nov 8).",
   "status": "ready",
   "order": 620,
-  "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
+  "lane": "archived, handoff at handoffs/session_013NEJL4TDRWqka4aSU2Bv7L.md on archive/session-handoffs-2026-11-10",
   "phase": "now",
   "owner": "triage",
-  "updatedAt": "2026-11-08T05:40:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

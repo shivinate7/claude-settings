@@ -4,10 +4,10 @@
   "status": "done",
   "order": 957,
   "owner": "coordinator",
-  "lane": "session_013NEJL1Ro26WbnrcSPVsLuX",
+  "lane": "archived, handoff at handoffs/session_013NEJL1Ro26WbnrcSPVsLuX.md on archive/session-handoffs-2026-11-10",
   "why": "Main's nightly run is red on Windows, and push runs skip the Windows shards, so the red stayed unseen.",
   "note": "Incident (coordinator 23:25 CST Nov 9): nightly run 42610317325 on main 81a720c42 is red on checks-windows-guard-2 and -3: two brief-destructive-git cases deny where they want allow. Batch 70 merges past it with --base-red-ok naming this lane. Related: windows-brief-git-path (done; the scratch-repo path fix), windows-tests-for-touched-files (doing; Windows runs before the batch). Done 00:34 CST Nov 10 with no PR: main already held the fix (bb0985937, batch 68); the nightly ran on 81a720c42 before it. Proven on Windows by run 42766755112.",
-  "updatedAt": "2026-11-10T00:33:00-06:00",
+  "updatedAt": "2026-11-10T11:20:00-06:00",
   "blockedBy": null,
   "paused": null
 }

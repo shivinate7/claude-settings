@@ -4,8 +4,8 @@
   "status": "ready",
   "order": 60,
   "owner": "coordinator",
-  "lane": "session_013NEJL2KhBtBKhdyNpyv8c6",
+  "lane": "archived, handoff at handoffs/session_013NEJL2KhBtBKhdyNpyv8c6.md on archive/session-handoffs-2026-11-10",
   "why": "q_max CLAUDE.md lists the narrow checks as invariants, `npm run lint` and the touched tests, but `npm run lint` is `tsc --noEmit` only. The STE lint CI runs (scope changed, fail on error) is in none of them, so a lane reports lint PASS and its batch goes red: #1019 (STE013) and #1101 (five STE001) on Nov 7.",
   "note": "Fix: one narrow-check command runs the parent's ste_lint.py on changed .md files at the CI-pinned settings (see ~/.claude/bin/ste-changed). Overlaps owner item 377 (ste-lint-at-push, step lint-before-record-push): with a, a push-time lint may cover this; with b, this step is the fix. Proposed as ste-lint-in-narrow-checks by lane qmax-revive-idle (session_013NEJL2DBWxESS5TMW5cCFW), 18:57 CST Nov 7. Coordinator 18:59 CST: changes q_max's pre-hand-off checks only; item 377 stays open. Built as q_max #1109, with runner 9 (19:48 CST).",
-  "updatedAt": "2026-11-07T19:48:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

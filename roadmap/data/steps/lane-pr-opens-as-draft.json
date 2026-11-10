@@ -4,8 +4,8 @@
   "note": "Coordinator 14:51 CST Nov 8: #2284 (head 4b3efbf42) with runner 8 after rounds 1-3 plus a fix check, lint at head. Cause: the draft guard existed, but the settings.json matcher never listed create_pull_request. Debt from its own lane (#2284, via the coordinator 16:22 CST Nov 8): a `gh api` POST, or update_pull_request with draft:false, can still mark a PR ready, which goes around the draft rule. It is in the triage outbox for the debt store. Doing 05:58 CST Nov 10: open PR #2284 on branch lane-pr-opens-as-draft (triage live build).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL1TctxZavHdqbiX2y7",
+  "lane": "archived, handoff at handoffs/session_013NEJL1TctxZavHdqbiX2y7.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 814,
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

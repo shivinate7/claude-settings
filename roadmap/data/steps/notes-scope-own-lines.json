@@ -4,8 +4,8 @@
   "note": "Coordinator 16:08 CST Nov 8: scope unchanged; #2289 ships it. The wider check is step agent-commit-file-scope.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL2YQfYFx8hbZ2Nta3d",
+  "lane": "archived, handoff at handoffs/session_013NEJL2YQfYFx8hbZ2Nta3d.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 818,
-  "updatedAt": "2026-11-08T16:08:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

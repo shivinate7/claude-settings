@@ -4,8 +4,8 @@
   "note": " Lane session_013NEJL1YhjiXhaxqz8244Ge started 12:13 CST Nov 9 (coordinator). Done: b3f3d2614 and 90a46e0f1 on main (2026-11-09): report_guard reads the stamped guard.d copy first (lint/report_guard.py:182-208) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL1YhjiXhaxqz8244Ge",
+  "lane": "archived, handoff at handoffs/session_013NEJL1YhjiXhaxqz8244Ge.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 837,
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

@@ -4,8 +4,8 @@
   "note": "The lane proposed `step:lint-after-commit-in-briefs` (role files and brief template say to lint the committed head). Triage filed the check instead, per the owner's ruling of 11:27 CST Nov 8 that a habit is never a guard (decision mistake-means-missing-guard, #2183). Either fix shape is the lane's to pick: check_glossary also reads uncommitted adds, or ci-job --lint refuses or warns on a dirty tree. The coordinator routes it. Routed by the coordinator 18:27 CST Nov 8. Done: #2363 merged in batch 67 (#2397, 81a720c42, 03:37 CST Nov 9).",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "session_013NEJL1kNibiCCZ1b61YNWy",
+  "lane": "archived, handoff at handoffs/session_013NEJL1kNibiCCZ1b61YNWy.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 850,
-  "updatedAt": "2026-11-09T03:40:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

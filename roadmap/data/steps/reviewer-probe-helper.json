@@ -4,8 +4,8 @@
   "note": "Likely root cause of step encoded-retry-after-refusal: with no way to run a probe file, a reviewer rewrites the refused command in encoded form (coordinator, 16:14 CST Nov 8). Possible false alarm (lane notes-fix-large-1, 19:45 CST Nov 8): guard other-checkout refused a reviewer's read-only `python3 -c` probe that called guard_frozen functions with cd and cp text inside the -c string ('this write lands in another checkout of this clone'); nothing was written. The guard seems to read cd and cp words inside a python -c string as shell acts. Done: #2325 (and #2345, its limits note) merged in batch 68 (#2449, 8bc28980b, 11:55 CST Nov 9).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJKz13TfcPPchNJveuuF",
+  "lane": "archived, handoff at handoffs/session_013NEJKz13TfcPPchNJveuuF.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 836,
-  "updatedAt": "2026-11-09T11:59:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

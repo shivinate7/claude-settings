@@ -4,8 +4,8 @@
   "note": "Fix, if the silent-undo check misses it: a merge whose result re-adds a line the branch's own diff deleted refuses; red case first. Doing in lane lint-uses-pinned-tools (session_013NEJL1N3YkCMouc1pELXyu) as draft #1943 (coordinator, 05:15 and 05:46 CST Nov 8); lane silent-undo-reads-retire-run released its claim (05:47 CST). Queue fix (owner 13:20 CST Nov 7). Sighting 09:28 CST Nov 8 (lane timing-tests, session_013NEJL1jPC89ae6X6Pa4jmf, proposed step union-merge-revives-notes): merging #2002's head into #2081 kept an old copy of a note both sides rewrote, and revived a note #2081 had deleted; only a fix check caught it. The revived-note half matches this step; the lane confirmed at 09:30 CST, measured on #2081's union merge 7be52d15e: #1943 alone allows it (the delete commit fed30fb0d's trailer excuses the whole file); with #1973's per-slug trailers (stack revived-note-gaps, #2035) it fails. So #1973 closes it; no new step. #2081 undid the revival at 673ef05ff.",
   "status": "doing",
   "order": 625,
-  "lane": "session_013NEJL1N3YkCMouc1pELXyu",
+  "lane": "archived, handoff at handoffs/session_013NEJL1N3YkCMouc1pELXyu.md on archive/session-handoffs-2026-11-10",
   "phase": "now",
   "owner": "triage",
-  "updatedAt": "2026-11-08T09:30:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

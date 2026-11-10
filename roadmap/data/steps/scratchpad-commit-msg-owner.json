@@ -4,8 +4,8 @@
   "note": " #2271 now has lane session_013NEJL2C3ooJFEuJnsQf4yT (coordinator 03:49 CST Nov 9). Note (coordinator, 04:33 CST Nov 9): a commit run inside `bash -c '...'` is probably not judged (unmeasured), and the decision's gap list leaves it out. Sighting (lane notes-fix-large-1, #2432 builder on Sonnet, reported 08:14 CST Nov 9): the builder overwrote, then deleted, a cases.txt that another agent wrote in the session's shared scratchpad.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL2C3ooJFEuJnsQf4yT",
+  "lane": "archived, handoff at handoffs/session_013NEJL2C3ooJFEuJnsQf4yT.md on archive/session-handoffs-2026-11-10",
   "status": "doing",
   "order": 789,
-  "updatedAt": "2026-11-09T08:14:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

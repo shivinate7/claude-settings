@@ -4,8 +4,8 @@
   "note": "Lane timing-tests 12:35 CST Nov 8: round 1 of #2179 restored 4 more sleeps after mutants passed the signal waits, so the step now covers 9 page windows (head 788130b99: page.test.mjs 555, 1562, 1730, 1779, 4976, 5076, 5094, 5534, 5569). Weak case: the receipt test near 4976 measures the sticky `.rail` top, which a 40 px page move at 300 ms does not change; it needs an in-flow card measured instead.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "timing-tests (session_013NEJL1jPC89ae6X6Pa4jmf)",
+  "lane": "archived (timing-tests), handoff at handoffs/session_013NEJL1jPC89ae6X6Pa4jmf.md on archive/session-handoffs-2026-11-10",
   "status": "todo",
   "order": 763,
-  "updatedAt": "2026-11-08T12:37:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }

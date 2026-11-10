@@ -4,8 +4,8 @@
   "note": "Coordinator pick a, 04:33 CST Nov 9 (process only): the other-checkout guard treats an agent's own -red checkout as its own, through guard.py _own_red_run, because check_red_run.py expects that checkout; the refusal is a false alarm, and route b would change the red-run flow the check relies on. A build lane, started after batch 68 merges. Related: step red-checkout-restore-absolute (a restore meant for -red landed in the agent's own worktree). Batch 68 merged (#2449, 11:55 CST Nov 9): free to start. Lane session_013NEJKzWDQFGYf8UFfU8Rve started 12:13 CST Nov 9 (coordinator). Done (coordinator 12:31 CST Nov 9): _own_red_run (commit 5a202f078, batch 65g, 19:01 CST Nov 8) predates the three Nov 9 incidents, and the lane's probe on main allows all nine acts. Unmeasured: why the Nov 9 refusals happened; likely an install older than batch 65g. If the refusal comes back, reopen with the guard.log line.",
   "phase": "now",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "lane": "session_013NEJKzWDQFGYf8UFfU8Rve",
+  "lane": "archived, handoff at handoffs/session_013NEJKzWDQFGYf8UFfU8Rve.md on archive/session-handoffs-2026-11-10",
   "status": "done",
   "order": 901,
-  "updatedAt": "2026-11-09T12:19:00-06:00"
+  "updatedAt": "2026-11-10T11:20:00-06:00"
 }
