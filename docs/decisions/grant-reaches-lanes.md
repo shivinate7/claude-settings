@@ -8,7 +8,7 @@ recommended pick:
 
 1. Gate the named act in the receiving session, before the auto-mode classifier.
 2. A fixed grant word, with its act catalogue in code. No free-text grant.
-3. The first catalogue is `merge <pr>` and `self-edit`. Open for the owner's word: the plan's measurements (2026-11-06) show `self-edit` gates nothing and `merge <pr>` is covered by decision `standing-merge-grant`. The plan recommends the lane's `Agent` spawn first.
+3. The first catalogue is `merge <pr>` and `self-edit`. Open for the owner's ruling: the plan's measurements (2026-11-06) show `self-edit` gates nothing and `merge <pr>` is covered by decision `standing-merge-grant`. The plan recommends the lane's `Agent` spawn first.
 4. `self-edit` reaches the target's agents. `merge` stays with the batch runner, never its agents. Moot while `self-edit` gates nothing.
 5. Probe the `PreToolUse` hook gate first, the mod `tool.check` gate second.
 6. Design A, the server-attested pointer, only. Design B only if Design A's computer probes fail.
