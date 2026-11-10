@@ -2695,7 +2695,8 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
-    # records-page: a commit of MERGE_HEAD's page is allowed only for a commit on origin/<base>'s first-parent line.
+    # records-page: a commit of MERGE_HEAD's page is allowed on origin/<base>'s first-parent line, or for a stacked
+    # lane (some best merge base of HEAD and MERGE_HEAD is off origin/<base>).
     ("records-page: MERGE_HEAD is not read against origin/<base>, so another branch's page is allowed",
      '    return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""',
      '    return ids[1]',
@@ -2718,6 +2719,22 @@ MUTATIONS = [
      '            if not page_id or page_id != _merge_head_page(top, base):',
      '            if page_id != _merge_head_page(top, base):',
      "guard", "a commit that deletes the page, with no merge in progress"),
+    # The stacked clause of `_merge_head_page` (guard_merge.py): a lane stacked on an unmerged base passes for
+    # MERGE_HEAD's page. Each label starts "records-page: stacked clause", so that prefix selects these three.
+    ("records-page: stacked clause, an is-ancestor exit of 0 or an error passes, so a failed read is a pass",
+     "if seen is not None and seen.returncode == 1:",
+     "if seen is not None and seen.returncode != 0:",
+     "guard", "so the is-ancestor read fails"),
+    ("records-page: stacked clause, merge-base without --all reads one best base, so a criss-cross base is missed",
+     '    meet = _git(top, "merge-base", "--all", "HEAD", "MERGE_HEAD")',
+     '    meet = _git(top, "merge-base", "HEAD", "MERGE_HEAD")',
+     "guard", "a lane's merge of a criss-cross stacked base, with the base's page staged"),
+    ("records-page: stacked clause, the page passes with no is-ancestor read, so a branch cut from main passes",
+     '        seen = _git(top, "merge-base", "--is-ancestor", best, origin)\n'
+     '        if seen is not None and seen.returncode == 1:   # 1 is "not an ancestor"; 0 is one, other is a failure\n'
+     '            return ids[1]',
+     '        return ids[1]',
+     "guard", "an unrelated unmerged branch, whose merge bases are both on origin/main"),
     # Rule brief-destructive-git: the check reads no brief, so an ordered discard passes.
     ("brief-destructive-git: the check finds no ordered discard, so a brief that orders a reset passes",
      "                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",

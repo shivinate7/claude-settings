@@ -14544,6 +14544,11 @@ REC_CRISS_LANES = {name: os.path.join(RECMORE, "criss-" + name) for name in ("me
 REC_UNREL_PAGE = "# Records index\nrecords page on an unrelated unmerged branch\n"
 REC_UNREL = os.path.join(RECMORE, "unrelated")
 REC_UNREL_LANE = os.path.join(RECMORE, "unrelated-lane")
+# A repository with no origin, so no origin/main ref. The base is local `main`, and `merge-base --is-ancestor` against
+# origin/main exits 128: a failed read, not "not an ancestor". The lane merges a feature branch's page, so the staged
+# page is MERGE_HEAD's.
+REC_NOORIGIN = os.path.join(RECMORE, "noorigin")
+REC_NOORIGIN_LANE = os.path.join(RECMORE, "noorigin-lane")
 
 
 def _build_records_more():
@@ -14847,11 +14852,40 @@ def _build_records_more():
     need(run(REC_UNREL_LANE, "show", ":docs/records.md") == REC_UNREL_PAGE.strip(),
          "the unrelated fixture: the lane's staged page is not the unrelated branch's page")
 
+    make_repo(REC_NOORIGIN, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(REC_NOORIGIN, "checkout", "-q", "-b", "feat-page")
+    write(page(REC_NOORIGIN), REC_FEAT)
+    run(REC_NOORIGIN, "add", "-A")
+    _rec_run_at(REC_T0 + 1000, REC_NOORIGIN, "commit", "-q", "-m", "feature page")
+    feat = run(REC_NOORIGIN, "rev-parse", "refs/heads/feat-page")
+    run(REC_NOORIGIN, "checkout", "-q", "main")
+    run(REC_NOORIGIN, "worktree", "add", "-q", "-b", "lane-noorigin", REC_NOORIGIN_LANE, "main")
+    write(os.path.join(REC_NOORIGIN_LANE, "src", "app.py"), "x = 2\n")
+    run(REC_NOORIGIN_LANE, "add", "-A")
+    _rec_run_at(REC_T0 + 1100, REC_NOORIGIN_LANE, "commit", "-q", "-m", "lane change")
+    run_vcs(REC_NOORIGIN_LANE, *IDENT, "merge", "--no-commit", "--no-ff", "feat-page")
+    need(run_vcs(REC_NOORIGIN, "rev-parse", "--verify", "-q", "refs/remotes/origin/main").returncode != 0
+         and not run(REC_NOORIGIN, "remote"), "the noorigin fixture has an origin or an origin/main ref")
+    need(run(REC_NOORIGIN_LANE, "rev-parse", "--verify", "-q", "MERGE_HEAD") == feat,
+         "the noorigin fixture: MERGE_HEAD is not the feature branch's tip")
+    need(run(REC_NOORIGIN_LANE, "show", ":docs/records.md") == REC_FEAT.strip(),
+         "the noorigin fixture: the lane's staged page is not the feature branch's page")
+    need(run(REC_NOORIGIN_LANE, "show", "HEAD:docs/records.md") == REC_V0.strip()
+         and run(REC_NOORIGIN_LANE, "show", "main:docs/records.md") == REC_V0.strip(),
+         "the noorigin fixture: HEAD's page or the base's page is not v0")
+    bases = run(REC_NOORIGIN_LANE, "merge-base", "--all", "HEAD", "MERGE_HEAD").split()
+    need(bases and all(run_vcs(REC_NOORIGIN, "merge-base", "--is-ancestor", base, "origin/main").returncode == 128
+                       for base in bases),
+         "the noorigin fixture: a merge base's is-ancestor read against origin/main does not exit 128")
+    need(run_vcs(REC_NOORIGIN, "rev-list", "--first-parent", "origin/main").returncode != 0,
+         "the noorigin fixture: rev-list --first-parent origin/main does not fail")
+
 
 lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
               REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values(),
               REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values(),
-              REC_CRISS, *REC_CRISS_LANES.values(), REC_UNREL, REC_UNREL_LANE], _build_records_more)
+              REC_CRISS, *REC_CRISS_LANES.values(), REC_UNREL, REC_UNREL_LANE,
+              REC_NOORIGIN, REC_NOORIGIN_LANE], _build_records_more)
 
 
 def records_refuse(name, command, lane, **kw):
@@ -15040,7 +15074,7 @@ records_allow("a chain that runs the generator, then add -A and commit, where th
 # A merge of origin/main brings the page of the base tip it merged, MERGE_HEAD's page. When origin/main
 # holds a newer page, that page is neither HEAD's, the base tip's nor origin/<base>'s, and the merge commit
 # holds it. The rule allows exactly that page, and only when MERGE_HEAD is a base tip on origin/<base>'s
-# first-parent line, or when the lane shares unmerged history with its base (the merge base of HEAD and
+# first-parent line, or when the lane shares unmerged history with its base (some best merge base of HEAD and
 # MERGE_HEAD is not on origin/<base>). Any other page is refused.
 #
 # The scope is exact blob equality with MERGE_HEAD's page: a rebuilt page, the page of a branch merged off
@@ -15115,6 +15149,11 @@ records_refuse("a lane's merge of a criss-cross stacked base, with a page writte
 # off main and the branch's page is refused.
 records_refuse("a lane's merge of an unrelated unmerged branch, whose merge bases are both on origin/main",
                VCS + " commit -m x", REC_UNREL_LANE)
+# A failed is-ancestor read gives no stacked pass. origin/main is missing, so `merge-base --is-ancestor` exits 128, and
+# the first-parent read fails too. The commit is refused, though a branch's page is staged. An exit of 0 or 1 is a
+# read that answered.
+records_refuse("a lane's merge of a feature page, with no origin/main, so the is-ancestor read fails",
+               VCS + " commit -m x", REC_NOORIGIN_LANE)
 
 # =========================================================================== 5d. conflict markers
 #
