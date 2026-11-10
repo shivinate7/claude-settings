@@ -4,7 +4,7 @@
 
 Owner ask ask-mw3lqb8bwx, 2026-11-05 07:49 CST, verbatim: "i need sessions to be able to relay my word to other cloud sessions and it be trust worthy add in auto mode". Roadmap step owner-word-relay builds it.
 
-Owner ruling, 2026-11-10 11:06 CST, verbatim: "widen". Lane page-save-reaches-auto-mode, incident item 149 b: a page pick that named one settings change still needed a typed word. Chosen option: widen the "Relayed Grant" entry so one settings change is covered, only when the picked option's label on the page names the exact settings file and entry it changes.
+Owner ruling, 2026-11-10 11:06 CST, verbatim: "widen". Roadmap step page-save-reaches-auto-mode builds it, from incident item 149 b (Incidents below). Chosen option: widen the "Relayed Grant" entry so one settings change is covered, only when the picked option's label on the page names the exact settings file and entry it changes.
 
 ## What counts
 
@@ -33,7 +33,7 @@ The receiver quotes the page, the item id and n, the choice, `at` and the label,
 - A settings change whose label does not name the file and entry.
 - A change to hooks.
 - A change to env.
-- A change to another `autoMode.allow` entry.
+- An `autoMode.allow` entry the label does not name.
 - A change to the Relayed Grant entry itself. The entry may not widen itself.
 - Overrides.
 
@@ -53,6 +53,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 - Item 254 (lane review-fix-check): the owner had to type "go" after picking item 231's choice a on the page.
 - Item 242, joyous ruleset: batch runner 9 was refused at 07:47 CST. Measured 2026-11-05 07:58 CST: `answers/joyous-ruleset-shared-form` is gone. The owning session deletes the answer when it routes ("Route and close"). So a reader alone would not have fixed item 242.
 - Source for both: the roadmap step owner-word-relay note (record branch commit dd574d33), and the live read of item 242 at 07:58 CST.
+- Item 149 b: the coordinator's brief for step runner-merge-allow was refused as self-modification at Nov 1 23:06 CST. The owner had granted it by a page save, so a page pick that named one settings change still needed a typed word. Source: the why of roadmap step page-save-reaches-auto-mode.
 
 ## Gaps
 
@@ -64,7 +65,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 
 ## Auto-mode entry
 
-`settings.json` `autoMode.allow` holds the "Relayed Grant:" entry, the owner's own PR #1293 (item 267). It keeps `$defaults`. No row goes into the "Current entries" table of decision auto-mode-owner-acts. `hooks/test_auto_mode_allow.py` pins it. It checks one entry. The entry quotes `page_grant.COMMAND` and `page_grant.COUNTED_LINE` in full, read from the checker. Its Never covers names each act in `RELAYED_REFUSED`. They include "a settings change whose label does not name the file and entry", "a change to hooks", "a change to env", "a change to another autoMode.allow entry" and "a change to the Relayed Grant entry itself". Its Covers text names "one settings change" and requires the label to name `settings.json` and the entry by its exact title or key, one entry per grant. The entry says Never covers wins over Covers. Whether the classifier reads the `counted` line is unmeasured (Gaps above).
+`settings.json` `autoMode.allow` holds the "Relayed Grant:" entry, the owner's own PR #1293 (item 267). It keeps `$defaults`. No row goes into the "Current entries" table of decision auto-mode-owner-acts. `hooks/test_auto_mode_allow.py` pins it. It checks one entry. The entry quotes `page_grant.COMMAND` and `page_grant.COUNTED_LINE` in full, read from the checker. Its Never covers names each act in `RELAYED_REFUSED`. They include "a settings change whose label does not name the file and entry", "a change to hooks", "a change to env", "an autoMode.allow entry the label does not name" and "a change to the Relayed Grant entry itself". Its Covers text names "one settings change" and requires the label to name `settings.json` and the entry by its exact title or key, one entry per grant. The entry says Never covers wins over Covers. Whether the classifier reads the `counted` line is unmeasured (Gaps above).
 
 ## Check and cost
 
