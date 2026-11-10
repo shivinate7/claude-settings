@@ -1400,10 +1400,16 @@ for (const kind of Object.keys(FIRST_KINDS)) for (const width of [390, 1280]) {
 // The first painted frame. Each option's box is read in the first frame it is in the page, with no measure reported, so it holds the declared
 // size; the settled boxes are read once every frame has measured. Each first-frame box must be within 1px of its settled height. Before a box is
 // placed, its aspect is taken at the full column width, so it stands 2 x bh / bw px too tall until the placement fits it again.
+// A focus box w x h at its own declared size. Its settled box is capped at 2 x w, so a column wider than that is where the first frame can overrun.
+const SMALL_FOCUS = (id, w, h) => ({ item: (count) => ({ ...picItem(id, 88, { count }), designs: LOOK_OPTS.slice(0, count).map((o) => ({ slug: o.design, label: o.label, focus: "#panel", size: { w, h } })) }), data: SAME(FOCUS_BOX(w, h)), H: 900 + h, focus: true });
 const FIRST_FRAME_KINDS = {
   phone: { item: (count) => picItem("ff-phone", 88, { count, declared: { w: 390, h: 844 } }), data: SAME(PHONE), H: 844 },
-  focus: { item: (count) => ({ ...picItem("ff-focus", 88, { count }), designs: LOOK_OPTS.slice(0, count).map((o) => ({ slug: o.design, label: o.label, focus: "#panel", size: { w: 390, h: 700 } })) }), data: SAME(FOCUS_700), H: 1600 },
+  focus: { item: (count) => ({ ...picItem("ff-focus", 88, { count }), designs: LOOK_OPTS.slice(0, count).map((o) => ({ slug: o.design, label: o.label, focus: "#panel", size: { w: 390, h: 700 } })) }), data: SAME(FOCUS_700), H: 1600, focus: true },
   duo: { item: (count) => ({ ...picItem("ff-duo", 88, { count }), designs: LOOK_OPTS.slice(0, count).map((o) => ({ slug: o.design, label: o.label, size: { w: 800, h: 844 }, drawn: 800 })) }), data: SAME(DUO), H: 844 },
+  "small focus 100x70": SMALL_FOCUS("ff-focus-100", 100, 70),
+  "small focus 110x90": SMALL_FOCUS("ff-focus-110", 110, 90),
+  // A declared tall picture settles to the 480px scroll box. Its first frame is drawn from the declared height at the full column width.
+  "declared tall 390x2400": { item: (count) => picItem("ff-tall", 88, { count, declared: { w: 390, h: 2400 } }), data: SAME(TALL_PIC(2400)), H: 2400 },
 };
 // The viewport holds every option in view.
 const firstFrameAndSettled = async (t, kind, width, count, scheme) => {
@@ -1414,7 +1420,7 @@ const firstFrameAndSettled = async (t, kind, width, count, scheme) => {
   await held.close(); // the held page is read in full; the settled page is a separate load
   const page = await open(t, { items: [item], designData: k.data, scheme, viewport: { width, height: 2400 } }); if (!page) return null;
   await framesAt(page, count, k.H);
-  if (kind === "focus") await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(item.id));
+  if (k.focus) await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(item.id));
   await settleFit(page, item.id);
   await boxesSettled(page, item.id);
   return { first, settled: await optBoxes(page, item.id) };
