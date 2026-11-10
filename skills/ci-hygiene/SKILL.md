@@ -76,7 +76,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
      `unknown on main too` means that the step is red or unknown on main as well. The run goes on, with no
      stop. Read that line before you drop a lane for the step.
    - A FAIL only on the head stops the run. An UNKNOWN only on the head stops it, unless
-     `--lint-unknown-ok "<reason>"` is given.
+     `--lint-unknown-ok "<reason>"` is given. A timeout at the 3600 s budget is an unknown that the flag does not lift.
    - A Retire check (check_debt_retire) that times out at 600 s prints a `Retire-run:` cite remedy, and
      the run goes on. Add the cite to the PR body's last paragraph: `Retire-run: <slug> -- <run URL>`,
      where the run is a green run of that check on the PR head or a commit above it. A cite clears an

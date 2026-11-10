@@ -9,7 +9,7 @@ Batch heads: owner ruling fb-1248-1 (2026-11-10 12:48 CST, option a) covers them
 - Runs every step of the checks job through `bin/ci-job`. It also runs the guard mutation anchor check (`python3 hooks/mutate_guard.py --anchors`) and the Windows guard slice (the slice step of job `checks-windows-guard`).
 - Runs `rebuild_records` in its temp worktree before the checks, so the hook catalog step reads a fresh records page.
 - Runs `debt_check` on the head.
-- Has its own budget, `BATCH_SECONDS`, 3600 s. The lint budget, `LINT_SECONDS`, 1200 s, does not apply.
+- Has its own budget, `BATCH_SECONDS`, 3600 s. The lint budget, `LINT_SECONDS`, 1200 s, does not apply. A timeout at this budget is an unknown that `--lint-unknown-ok` does not lift, as a lint timeout is.
 - Re-runs each step that ends FAIL or UNKNOWN on `origin/<base>` in a temp worktree. Red or unknown there too gives one line, "red on main too" or "unknown on main too", and the run goes on. A FAIL only on the head stops the run. An UNKNOWN only on the head stops it, unless `--lint-unknown-ok "<reason>"` is given.
 - A Retire check (check_debt_retire) that times out at its 600 s cap prints the `Retire-run:` cite remedy, and the run goes on. A Retire check that fails stops the run.
 
