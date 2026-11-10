@@ -686,10 +686,9 @@ def distance(x, y):
 def put_back(cwd, old, new, e, path, dst, theirs, test, prior):
     """True when old->new puts the file back to its text before the earlier commit e (the lane undo read), whatever old holds: the
     result is within one line of e's parent text (the file's name there is `prior`), nearer to it than old was, and e changed
-    BLOCK_LINES or more lines in the file. A text that was never there (e made the file), or a delete, counts on a test path only.
-    A rewritten line is one changed line, so a hunk counts as its longer side, not old plus new."""
-    if not e.parent or sum(max(len(o), len(n)) for o, n in theirs) < BLOCK_LINES:
-        return False  # a file a few lines were changed in, and changed back, is an edit, not a dropped block
+    BLOCK_LINES or more lines in the file. A text that was never there (e made the file), or a delete, counts on a test path only."""
+    if not e.parent or sum(len(o) + len(n) for o, n in theirs) < BLOCK_LINES:
+        return False  # a file one or two lines were changed in, and changed back, is an edit, not a dropped block
     want, got, before = (text_counts(cwd, e.parent, prior), text_counts(cwd, new, dst or path), text_counts(cwd, old, path))
     if not test and not (want and got):
         return False
