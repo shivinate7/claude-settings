@@ -1,0 +1,6 @@
+# Mac artifact tools: the field that names the artifact is unknown
+
+- **What.** The guards cannot read which artifact a `mcp__claude-artifacts__*` call writes, because the owner's input shapes (item 440) omit that field. Until it is read, a Mac data call with no `url` counts as a waiting-page write and gets the full item checks (coordinator choice, 04:54 CST Nov 10). Cost: a Mac write to `items` on another artifact can be denied with a misleading reason. Gaps that follow: `publish_files` with no `url` skips the page-stale check; `lint/report_guard.py` and `hooks/feedback_guard.py` count a Mac call as the page's only when it carries `url`.
+- **Where.** `hooks/shared_names.py` (`normalize_data_call`, `WAITING_PAGE_ASSUMED`), `hooks/question_form.py` (`waiting_page_root`), `hooks/feedback_guard.py` (read-back and export checks), `lint/report_guard.py` (`question_problem`), `hooks/guard.py` (`page_stale_hit`).
+- **Decision.** none. The coordinator's fallback choice is recorded in the pull request that built the Mac matchers.
+- **Retire.** A session on the owner's Mac reads one redacted `db_write` input and one `publish_files` input, and the normalizer maps the artifact key to `url`. Then the fallback and the three gaps close. `hooks/test_shared_names.py` shows a Mac call that names another page's `url` is judged as that page.
