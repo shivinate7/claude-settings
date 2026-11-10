@@ -18,7 +18,7 @@ from guard_core import (
     inner_commands, is_powershell, norm, resolve_command, segment_tokens, split_segments, PowerShellScript,
     PosixScript,
 )
-from shared_names import MACHINE_TAGS, TASK_NOTIFICATION_TAG
+from shared_names import HAND_BACK_TAG, MACHINE_TAGS, TASK_NOTIFICATION_TAG
 
 
 # `-o` is read in the short-flag loop, where its value may be glued on.
@@ -1477,7 +1477,7 @@ _COMMENT_TOOL = "mcp__github__add_issue_comment"
 _AGENT_TOOL = "Agent"
 _SHELL_TOOLS = ("Bash", "PowerShell")
 # Tool names sit in call lines, the notice and hand-back tags in message lines, a gh call in its command text.
-_REVIEW_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, "agent-message",
+_REVIEW_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, HAND_BACK_TAG.lstrip("<"),
                         "gh pr create", "gh pr comment", "gh api")
 _RESULT_IDS = re.compile(r'"tool_use_id":\s*"([^"]+)"')
 _GH_POST = re.compile(r"\bgh\s+(?:pr\s+comment\b|api\b[^\n]*/comments)")
