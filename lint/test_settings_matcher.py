@@ -36,6 +36,36 @@ def guard_matchers():
             if any("guard.py" in h.get("command", "") for h in e["hooks"])]
 
 
+SHARED_NAMES = os.environ.get("SHARED_NAMES_UNDER_TEST") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "hooks", "shared_names.py")
+
+
+def remote_outward_tools():
+    """REMOTE_OUTWARD_TOOLS of hooks/shared_names.py, the one home of the claude-code-remote tools an agent may not
+    call. SHARED_NAMES_UNDER_TEST points the test at another copy (a red run on a stand-in list)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("shared_names_under_test", SHARED_NAMES)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(module.REMOTE_OUTWARD_TOOLS)
+
+
+class RemoteOutwardMatcher(unittest.TestCase):
+    def test_guard_matcher_covers_every_outward_tool(self):
+        # The guard refuses an agent's call to each outward tool, so the guard's matcher must see every one.
+        # The list is read from its one home, never copied into this file.
+        tools = remote_outward_tools()
+        self.assertTrue(tools, "REMOTE_OUTWARD_TOOLS is empty: the matcher has no outward list to check")
+        matchers = guard_matchers()
+        self.assertTrue(matchers, "no guard.py entry in settings.json PreToolUse")
+        for tool in tools:
+            with self.subTest(tool=tool):
+                self.assertTrue(tool.startswith("mcp__claude-code-remote__"),
+                                "%r is not a full claude-code-remote tool name" % tool)
+                self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                                "no guard matcher covers %s" % tool)
+
+
 class Matcher(unittest.TestCase):
     def test_guard_matcher_covers_model_floor_tools(self):
         matchers = guard_matchers()
@@ -95,6 +125,30 @@ class Matcher(unittest.TestCase):
         tool = "SendMessage"
         self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                         "no guard matcher covers %s: %r" % (tool, matchers))
+
+    def test_session_start_hook_matcher_covers_compact(self):
+        # After a compaction the start hook must run, so the session learns its hooks lag main.
+        with open(SETTINGS, encoding="utf-8") as f:
+            entries = json.load(f)["hooks"]["SessionStart"]
+        starts = [e for e in entries if any("/hooks/session_start.sh" in h.get("command", "") for h in e.get("hooks", []))]
+        self.assertEqual(len(starts), 1, "want one SessionStart entry running session_start.sh, found %d" % len(starts))
+        matcher = starts[0].get("matcher", "")
+        for source in ("startup", "resume", "compact"):
+            with self.subTest(source=source):
+                self.assertTrue(covers(starts[0], source),
+                                "the session_start.sh SessionStart matcher %r does not cover %s" % (matcher, source))
+
+    def test_cloud_pull_session_start_entry_does_not_match_compact(self):
+        # A compaction mid-task must not run the cloud pull: it would move main and reinstall the pin under the session.
+        # The entry is found by its pin install, merge/install_from_main.sh, which only the cloud pull runs.
+        with open(SETTINGS, encoding="utf-8") as f:
+            entries = json.load(f)["hooks"]["SessionStart"]
+        pulls = [e for e in entries if any("merge/install_from_main.sh" in h.get("command", "") for h in e.get("hooks", []))]
+        self.assertEqual(len(pulls), 1, "want one SessionStart entry running merge/install_from_main.sh, found %d" % len(pulls))
+        matcher = pulls[0].get("matcher", "")
+        self.assertFalse(covers(pulls[0], "compact"), "the cloud-pull SessionStart matcher %r covers compact" % matcher)
+        self.assertTrue(covers(pulls[0], "startup"), "the cloud-pull SessionStart matcher %r does not cover startup" % matcher)
+        self.assertTrue(covers(pulls[0], "resume"), "the cloud-pull SessionStart matcher %r does not cover resume" % matcher)
 
 
 # The prose judge: ONE command hook on Edit and Write. It decides by path, in code, and calls the
