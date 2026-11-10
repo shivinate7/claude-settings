@@ -23780,7 +23780,7 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None, load=None, guard=None, transcript=None, env_path=None):
+            temp=None, env=None, load=None, env_path=None, guard=None, transcript=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a start call meets
