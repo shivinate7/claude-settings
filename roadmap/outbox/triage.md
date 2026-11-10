@@ -510,3 +510,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - cite-parser-count-as-item (same source): the parser can read a count after a separator as an item when the count's unit word is not in its list.
 - closed-item-past-ruling-refused (same source): a closed item cited as the source of a past ruling is refused. That matches the step's wording.
 - waiting-copy-lags-live-page (same source): the waiting copy lags the live page, so an item closed after the last export passes.
+- local-checks-sh-timeout-child (#2536 PR body, coordinator  CST Nov 10): on a timeout, `sh` kills only its direct child, so a grandchild process can live on.
+- local-checks-deleted-source-pass (same source): a deleted source file whose test is left reads PASS.
+- local-checks-per-os-table-unread (same source): the per-OS table is not read.

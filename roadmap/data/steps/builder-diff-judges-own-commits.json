@@ -1,0 +1,11 @@
+{
+  "title": "The builder-diff guard judges only the builder's own commits, not the test-author's commits in the branch diff",
+  "phase": "now",
+  "status": "ready",
+  "order": 976,
+  "owner": "coordinator",
+  "lane": null,
+  "updatedAt": "2026-11-10T07:12:00-06:00",
+  "why": "On a lane where the test-author commits first, the guard reads the test commits in the branch diff as the builder's and refuses every builder commit. The lane then commits the builder's patches itself, which hides who wrote what.",
+  "note": "Likely false alarm, measured on #2536 (batch-local-checks-cmd), coordinator  CST Nov 10: the guard refused the builders' commits; the lane session committed the staged patches itself. Of the 7 commits, the 4 product commits touch only merge/merge.py and skills/ci-hygiene/SKILL.md; the 3 test commits touch only merge/test_lane_lint.py. The role split held. Lane's fix: judge only the builder's own commits. Red first: replay #2536's commit order. Related: builder-diff-merge-commit, builder-diff-auto-merge-reflog."
+}
