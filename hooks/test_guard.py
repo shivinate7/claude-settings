@@ -13426,7 +13426,8 @@ ARTCITE_CITE = "artifact:" + ARTCITE_ID
 ARTCITE_BARE = "https://claude.ai/artifact/" + ARTCITE_ID
 ARTCITE_CODE = "https://claude.ai/code/artifact/" + ARTCITE_ID
 ARTCITE_EXTRAS_PATH = ".claude/layout-extras.json"
-ARTCITE_EXTRAS = json.dumps({"artifacts": [{"id": ARTCITE_ID, "url": ARTCITE_BARE, "role": "waiting-page",
+ARTCITE_EXTRAS = json.dumps({"kinds": {}, "rolled-out": True,
+                             "artifacts": [{"id": ARTCITE_ID, "url": ARTCITE_BARE, "role": "waiting-page",
                                             "account": "work"}]}, indent=2) + "\n"
 # One step per branch, as (file name, text). The branch name says the shape the case needs.
 ARTCITE_STEPS = {
