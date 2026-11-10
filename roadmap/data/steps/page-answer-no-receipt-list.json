@@ -1,11 +1,11 @@
 {
   "title": "A check lists each waiting-page answer with no receipt from the item's owner session, older than one wake",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 937,
   "owner": "coordinator",
   "why": "Owner ask ask-mwa09pjosw (19:22 CST Nov 9). Incident: item 143's answer sat 10.5 h unread. A check lists each answers/<id> that has no receipt from the session that owns the item, once it is older than one wake.",
-  "note": "Owner's brief: read skills/waiting-page first; reuse its receipt fields, add no new store. Tests first, shown red on main. One lane, Sonnet builder, Sonnet reviewer, PR to claude-settings main. Related: page-one-receipt, waiting-export-receipts (receipts in the export). Lane session_013NEJL3xYkfnbekjjC4nzCL started 19:23 CST Nov 9, plan first (coordinator).",
-  "updatedAt": "2026-11-09T19:24:00-06:00",
+  "note": "Owner's brief: read skills/waiting-page first; reuse its receipt fields, add no new store. Tests first, shown red on main. One lane, Sonnet builder, Sonnet reviewer, PR to claude-settings main. Related: page-one-receipt, waiting-export-receipts (receipts in the export). Lane session_013NEJL3xYkfnbekjjC4nzCL started 19:23 CST Nov 9, plan first (coordinator). PR #2479 released to runner 8 with Sonnet reviewers in every round; the owner's override took effect 19:43 CST (coordinator 20:49 CST Nov 9). Item 467 closed.",
+  "updatedAt": "2026-11-09T20:49:00-06:00",
   "lane": "session_013NEJL3xYkfnbekjjC4nzCL"
 }
