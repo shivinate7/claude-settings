@@ -448,3 +448,10 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - mhct-summary-drops-skipped (#2443): the summary drops the tally's skipped count.
 - (debt) merge-ready-draft-unbuilt (#2378 batch-freeze-lane-set-enforce L1, coordinator 02:19 CST Nov 10; every batch hits it): skills/ci-hygiene SKILL.md step 8 and decision batch-freeze-lane-set say the merge tool marks the PR ready and returns a ready PR to draft, but Host.ready and Host.to_draft in merge/merge.py send nothing and return False, so the tool exits 1 and prints the route to do it by hand. Suggested wording: "marks it ready, or prints the route to mark it by hand".
 - bfls-on-this-lane (#2378 N2): decision batch-freeze-lane-set has a line that begins "on this lane", which refers to nothing once the PR merges.
+- (debt) msg-role-modifier-noun (#1805, lane msg-role/wt-strand, coordinator 02:49 CST Nov 10; a real false alarm seen): a modifier noun reads as an edit verb ("a one-line change to tests/x.py" refuses a builder; hooks/guard.py `_message_edit_verb`).
+- (debt) msg-role-comma-second-path (#1805): a comma-joined second path reads as the object ("Fix the case in hooks/test_guard.py, guard.py is right" refuses a test-author).
+- (debt) msg-role-from-missed (#1805): "Delete/Remove/Drop X from hooks/test_guard.py" and "Update the test hooks/test_guard.py" are missed: "from" is not in MESSAGE_LOCATIONS, so a builder passes.
+- (debt, widen) message-role-go-green (#1849): goal phrases after a test path ("make them go green / work / pass") still refuse a builder. Widen the existing debt, which cites MESSAGE_GREEN; the set is MESSAGE_GOAL_FILLERS.
+- (debt) stall-watch-ignores-isolation (#1921): `open_agents` in hooks/stall_watch.py ignores a spawn's `isolation`, so EnterWorktree may be refused while only non-isolated agents run (frequency unmeasured).
+- msg-role-single-quotes (#1805/#1849): single quotes are not masked in the message scan.
+- wt-strand-override-unpinned (#1921): the strand tests do not pin the override lift.
