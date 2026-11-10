@@ -175,10 +175,12 @@ Text: inline, in the main check.
 
 Text: `closed_item_problem`, rule `input-needed-closed-item` (roadmap step `input-needed-reads-page-status`).
 
-- Read each listed item's status from the waiting page first: an ArtifactData get or query of collection `items`.
-- Then list only the items the page shows open. A closed item is not asked of the owner again.
-- A read of the page in the same turn that shows the item open clears it. A read in an earlier turn does not.
-- A copy that cannot be read passes with a "not checked" note and no refusal.
+Text: facts only. It names the cited page items and says each closed one reads closed in the waiting copy at origin/<record branch>, as of the last fetch. It gives no step.
+
+- A closed item is not asked of the owner again. The refusal names each closed item, so the session sees which ones to drop.
+- A cite is the word "item", "items" or "item(s)" with each number after it: a list ("214, 381 and 383", "214 or 381", "214/381"), a bullet list after "items:", both ends of a range ("214-216"), "**214**", "page-item 214". A PR number, "#214" alone, a date and a bare number are no cite.
+- A read of collection `items` on the page in the turn after the last incoming message (a peer's too) that shows the item open clears it. A read before that message does not.
+- A copy that cannot be read passes with a "not checked" note and no refusal. The note also rides on a block for another reason.
 
 ## Shared tails
 

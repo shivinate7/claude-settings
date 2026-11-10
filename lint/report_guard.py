@@ -77,14 +77,18 @@ kind and incident: decision answered-needs-source. Cost: regex over the reply, n
 The closed-item check (rule `input-needed-closed-item`, roadmap step input-needed-reads-page-status; incident: a
 coordinator listed items 214, 381, 383 and 222 to the owner as open, and all four were closed): on any turn, landed or
 not, it refuses an Input Needed item that cites a waiting-page item whose status is closed. A cite is "item N", "page
-item N", "Cockpit item N", "items N, M and K" or "item N a", outside backticks and quotes; a PR number, a bare
-number and Done or Next text are no cite. The status comes from the waiting copy on
+item N", "page-item N", "Cockpit item N", "item(s) N", "item **N**" or "item N a", and every number of a list after
+the word ("items N, M and K", "N or M", "N/M", "N, M, or K", "N (closed), M", "Items: N, M", an "items:" bullet list)
+and both ends of a range ("N-M"; the middle is not read), outside backticks and quotes; a PR number, "#N" alone, a
+date ("item 2026-11-10"), a bare number and Done or Next text are no cite. The status comes from the waiting copy on
 origin/<record branch>, read through hooks/feedback_guard.py (Homes.item_statuses, the one reader, one `git grep`
-per Stop). An ArtifactData read of collection `items` in the same turn (feedback_guard.read_back_statuses) wins for its
-item: open skips the copy for that item, closed refuses. The refusal names each closed item and the page status read
-it asks for. A repo with no waiting page runs no check. An unreadable copy (no record branch ref, no items folder, an
-item file that is not a JSON object, a git error) never blocks: a systemMessage says the check was not checked. Cost:
-a regex over the Input Needed text; only on a cite, the feedback_guard import and its one git grep. No file written.
+per Stop). An ArtifactData read of collection `items` in the turn after the last incoming message
+(feedback_guard.read_back_statuses) wins for its item: open skips the copy for that item, closed refuses; a read
+before that message does not count. The refusal holds facts only: it names each closed item and says the waiting copy
+(or the page read this turn) shows it closed. A repo with no waiting page runs no check. An unreadable copy (no record
+branch ref, no items folder, an item file that is not a JSON object, a git error) never blocks on its own: a
+systemMessage says the check was not checked, and it rides on a block for any other reason too. Cost: a regex over
+the Input Needed text; only on a cite, the feedback_guard import and its one git grep. No file written.
 
 After a compaction, each report also holds a `Recovered:` line and a `Handoff gave:` line (each
 may say `none`) in the report blockquote, until one lands (`compaction-carry`, decision
@@ -3104,21 +3108,43 @@ def triage_hold(hook, records, active):
         return ""
 
 
-# The closed-item check's cite matcher: "item N", "page item N", "Cockpit item N", "items N, M and K", "item N a". A
-# second matcher beside skills/roadmap/build.py's is justified only by lists: that one cites a number right after "item"
-# and cannot read "items 214, 381 and 383".
-ITEM_CITE_RE = re.compile(r"(?<![\w-])items?\s+#?(\d+(?:\s*,\s*(?:and\s+)?#?\d+|\s+(?:and|&)\s+#?\d+|\s*&\s*#?\d+)*)(?!\d)", re.I)
+# The closed-item check's cite matcher. A cite is the word "item", "items" or "item(s)" (not glued to a word on its
+# left, so "page-item 214" counts) and the numbers after it: a list joined by comma, "and", "or", "&", "/" or a range
+# dash ("214-216": both ends count, the middle does not), an "items:" bullet list, a "(closed)" note after a number,
+# "**214**" and "#214". A number that opens a date ("2026-11-10") is no cite. A second matcher beside
+# skills/roadmap/build.py's is justified only by lists: that one cites the number right after "item".
+ITEM_HEAD_RE = re.compile(r"(?<![A-Za-z0-9_])item(?:s|\(s\))?(?![A-Za-z0-9_])(:)?\s*", re.I)
+ITEM_NUM_RE = re.compile(r"\**#?(\d+)\**")
+ITEM_DATE_TAIL_RE = re.compile(r"(?:-\d{1,2}-\d{1,2}|/\d{1,2}/\d{1,4})(?!\d)")
+ITEM_PAREN_RE = re.compile(r"[ \t]*\([^()\n]*\)")
+ITEM_BULLET_RE = re.compile(r"(?:>[ \t]*)*[-*+][ \t]+")
+ITEM_SEP = r"\s*,\s*(?:(?:and|or)\s+|&\s*)?|\s*/\s*|\s*-\s*|\s+(?:and|or)\s+|\s*&\s*"
+ITEM_SEP_RE = re.compile(ITEM_SEP, re.I)
+ITEM_BULLET_SEP_RE = re.compile(ITEM_SEP + r"|\s*\n[ \t>]*[-*+][ \t]+", re.I)
 CLOSED_ITEM_CHECK = "Closed-item guard (rule input-needed-closed-item)"
 
 
 def cited_items(text):
     """The page item numbers (digit strings, first cite first, each once) that the Input Needed item cites, with
     backtick and quote spans left out. Done, Next and the prose above the report are not read."""
+    body = QUOTED_RE.sub(" ", input_needed_section(text))
     seen = []
-    for m in ITEM_CITE_RE.finditer(QUOTED_RE.sub(" ", input_needed_section(text))):
-        for n in re.findall(r"\d+", m.group(1)):
-            if str(int(n)) not in seen:
-                seen.append(str(int(n)))
+    for head in ITEM_HEAD_RE.finditer(body):
+        pos, bulleted = head.end(), bool(head.group(1))
+        if bulleted:  # "items:" may open a bullet list, one number per line
+            lead = ITEM_BULLET_RE.match(body, pos)
+            pos = lead.end() if lead else pos
+        while True:
+            num = ITEM_NUM_RE.match(body, pos)
+            if num is None or ITEM_DATE_TAIL_RE.match(body, num.end()):
+                break
+            if str(int(num.group(1))) not in seen:
+                seen.append(str(int(num.group(1))))
+            paren = ITEM_PAREN_RE.match(body, num.end())
+            sep = (ITEM_BULLET_SEP_RE if bulleted else ITEM_SEP_RE).match(body, paren.end() if paren else num.end())
+            if sep is None:
+                break
+            pos = sep.end()
     return seen
 
 
@@ -3134,7 +3160,7 @@ def closed_item_problem(hook, turn, text):
     import feedback_guard
     homes = feedback_guard.Homes(hook.get("cwd"))
     read = {n: s for n, s in feedback_guard.read_back_statuses(turn, homes).items() if n in cites}
-    closed = {n: "the page read this turn" for n, s in read.items() if s == "closed"}
+    closed = {n: "the waiting page, read this turn," for n, s in read.items() if s == "closed"}
     rest = [n for n in cites if n not in read]
     note = ""
     if rest:
@@ -3155,9 +3181,7 @@ def closed_item_problem(hook, turn, text):
                       for src, ns in by_source.items())
     return owner_line(
         CLOSED_ITEM_CHECK,
-        "Input Needed cites %s, and %s; the page item status (an ArtifactData get or query of collection `items`) "
-        "is read before an item is listed as open" % (("item " if len(nums) == 1 else "items ") + ", ".join(nums),
-                                                       shows)), note
+        "Input Needed cites %s, and %s" % (("item " if len(nums) == 1 else "items ") + ", ".join(nums), shows)), note
 
 
 def main():
@@ -3274,6 +3298,11 @@ def main():
     except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
         review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
     note = " ".join(filter(None, [note, hand_note, review_note, closed_note]))
+
+    def block(reason):
+        # The closed-item "not checked" note rides on a block for another reason too, so the owner sees the check did not run.
+        finish({"decision": "block", "reason": reason, **({"systemMessage": closed_note} if closed_note else {})})
+
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
@@ -3316,7 +3345,7 @@ def main():
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + " (rule reports-order-of-labels)"
-                finish({"decision": "block", "reason": reason})
+                block(reason)
             else:
                 finish({"systemMessage": note} if note else None)
         except Exception:
@@ -3383,7 +3412,7 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        finish({"decision": "block", "reason": reason})
+        block(reason)
     else:
         finish({"systemMessage": note} if note else None)
 
