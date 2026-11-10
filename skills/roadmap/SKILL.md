@@ -85,6 +85,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
   release a lane whose draft pull is already in the default branch. `branches`: lane branches with no open pull request.
+- `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull requests closed in the last 14 days, each with its head ref (`branch`), head sha
+  (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
   `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
   it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
@@ -113,11 +115,14 @@ closes it, from the upkeep list. A trailer that names no step is listed there to
 A step has also landed when the live file's `landedPulls` holds a row for it. The row is
 `{"number": int, "branch": str, "head"?: sha, "merged"?: bool}`. It counts when its branch is the step id or
 `lane/<id>`, the step is open, and one more test holds. Either `merged` is JSON true, or `head` (7-64 hex) is an
-ancestor of main (`git merge-base --is-ancestor`). The build marks that step "Landed in #N" with the row's number.
-A failed git read, no main ref or a row of any other shape marks nothing; a malformed row is counted in
-`skipped`. The publisher (triage) must fill `landedPulls` from GitHub: the closed pull requests of the last 14
-days, each with its head ref, head sha and merged flag. A merge that drops the `Step:` trailer, or a lane that
-closes its pull unmerged, then still reads right.
+ancestor of main (`git merge-base --is-ancestor`). The row has no base field, so `merged: true` means merged into
+main. The build marks that step "Landed in #N" with the row's number. With no main ref in the checkout, nothing
+marks, `merged: true` rows included, as with the trailers. A failed git read also marks nothing. A row is counted
+in `skipped` when it is not an object, its `number` is not an int, or its `branch` is not text. A row whose
+`merged` is present and not a JSON bool is skipped too. Each skipped row, and a `landedPulls` that is not a list, makes the stale-step and
+pull readings `unknown (<n> landedPulls rows skipped)`. The publisher (triage) must fill `landedPulls` from
+GitHub: the closed pull requests of the last 14 days, each with its head ref, head sha and merged flag. A merge
+that drops the `Step:` trailer, or a lane that closes its pull unmerged, then still reads right.
 
 ## Refusals
 

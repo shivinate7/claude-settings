@@ -446,10 +446,11 @@ def pull_landed_marks(repo, ref, steps, work):
     """{open step: ["#N", ...]} from the live file's landedPulls rows (closed pulls the publisher read from GitHub).
 
     A row marks step S when its branch is S or lane/S (lane_head_refs), S is a known step that is not done, and the
-    pull is merged (JSON true) or its head sha is an ancestor of `ref`. A closed pull that was never merged and whose
-    head is off main marks nothing: its work did not land."""
+    pull is merged (JSON true, merged into main: the row has no base field) or its head sha is an ancestor of `ref`.
+    A closed pull that was never merged and whose head is off main marks nothing: its work did not land. With no
+    `ref` nothing marks, as landed_marks marks nothing then."""
     rows = (work or {}).get("landedPulls") or []
-    if not steps or not rows:
+    if not steps or not rows or not ref:
         return {}
     by_branch = {name: sid for sid, d in steps.items() if d.get("status") != "done" for name in lane_head_refs(sid)}
     marks, seen = {}, {}
@@ -667,9 +668,9 @@ def live_work(path, steps, slug=None):
     One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool}], the closed
     pull requests of the last 14 days (head ref, head sha, GitHub's merged flag). The publisher (triage) fills it from
     GitHub: a merged lane branch is gone from the open pulls and may leave no Step trailer on main. `landedPulls` holds
-    the kept rows, which pull_landed_marks reads. A row that is not an object, whose number is not an int or whose
-    branch is not text is counted in `skipped`; a value that is not a list adds one skipped entry; an absent key adds
-    nothing.
+    the kept rows, which pull_landed_marks reads. A row that is not an object, whose number is not an int, whose
+    branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
+    list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -709,8 +710,12 @@ def live_work(path, steps, slug=None):
                  and (r.get("branch") is None or isinstance(r["branch"], str)))
     pulls_skipped = len(skipped) - before_pulls
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
+    before_landed = len(skipped)
+    # `merged` is the JSON true or false the publisher read from GitHub; text such as "true" is a wrong shape, not a guess.
     landed_pulls = keep("landedPull", raw["landedPulls"], lambda r: type(r.get("number")) is int
-                        and isinstance(r.get("branch"), str)) if "landedPulls" in raw else []
+                        and isinstance(r.get("branch"), str)
+                        and ("merged" not in r or isinstance(r["merged"], bool))) if "landedPulls" in raw else []
+    landed_skipped = len(skipped) - before_landed
     for row in threads:
         sid = row.get("step") or None
         if sid and steps is None:
@@ -760,6 +765,10 @@ def live_work(path, steps, slug=None):
             why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
     if pulls_skipped:
         why.append("unknown (%d pull rows skipped)" % pulls_skipped)
+        pull_why = pull_why or why[-1]
+    if landed_skipped:
+        # A dropped row could be the one that proves a step landed, so the stale and pull readings go unknown.
+        why.append("unknown (%d landedPulls rows skipped)" % landed_skipped)
         pull_why = pull_why or why[-1]
     stale_why = why[0] if why else None
     page_items, items_why = None, None
