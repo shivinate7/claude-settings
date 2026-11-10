@@ -3341,7 +3341,7 @@ REVIEW_FIX_GUARD_MODEL = "sonnet"  # every fix check runs on this model, whateve
 ROUND3_PARTIAL_HOLDS = True  # owner page item 362 b: a final-round PARTIAL line holds, like a FAIL. False: it reads by the done rules
 FIX_PASS_CLEARS_ROUND3_HOLD = True  # owner page item 363 b: a fix check PASS after a final-round FAIL follows the final-round done rules. False: the hold stays
 ROUND3_DESIGN_FAIL_HOLDS = True  # coordinator pick a on page item 356: a design-reviewer FAIL in the final round holds. False: only a reviewer FAIL holds
-FIX_FAIL_AFTER_ROUND3_HOLDS = True  # the coordinator's pick (decision pr-review-record): a fix FAIL after the final round holds. False: it reads open with the fix-failed why
+FIX_FAIL_AFTER_ROUND3_HOLDS = True  # the coordinator's pick (decision pr-review-record): a fix FAIL that counts as the final round or a later one holds. False: it reads open with the fix-failed why
 
 def review_body(n, head, kind, guard, rounds, net, fix=None):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the

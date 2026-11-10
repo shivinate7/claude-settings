@@ -1845,3 +1845,5 @@
 - launch-cloud-mirror-marker-reads-stderr: merge/launch.py `git()` joins stderr to stdout, so a git warning on `config --get claude-settings.cloudMirror` hides the marker and the mirror is fast-forwarded. install.sh and hooks/session_start.sh read stdout only.
 - launch-cloud-mirror-hides-other-reason: a marked mirror that is also dirty or off main prints only "cloud mirror" in launch.py's left-as-is line.
 - launch-cloud-mirror-test-gaps: no case pins a dirty marked mirror or a non-literal true spelling (`yes`, `1`); the code matches install.sh's literal `true`.
+- fix-wide-cleared-by-hand-post: a WIDE fix check can be cleared by a hand-posted fix PASS, since `merge --reviewed` trusts a record posted by hand (merge/merge.py `round_floor`). Decision: hold-unsafe-after-round-3.
+- fix-pass-402a-unenforced-in-state: item 402 a (a fix PASS before round 3 does not end review for a guard or check change) is not enforced in `review_state`; main behaves the same (merge/merge.py `review_state`). Decision: pr-review-record.
