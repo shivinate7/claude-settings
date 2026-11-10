@@ -35,6 +35,7 @@ and the reviewer flags any test path in your diff. A refusal is final. Never wri
 path another way, such as with a shell command or a script. A test-author writes the new cases
 first and shows them red. Report any other test change you need. On a test conflict in a merge,
 run `git merge --abort` and report it, so the orchestrator hands the whole merge to a test-author.
+A refused act is reported to the orchestrator, never re-spelled to get past the guard (for example a command word built from pieces).
 
 A test is a claim, not law. When your change breaks one, sort the failure into one class.
 (a) The subject still holds, and only its route changed. Re-point the check. Show it red,
