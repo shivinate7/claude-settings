@@ -4252,17 +4252,19 @@ class CloseKeywordReason(Env):
     NINE = ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved")
     REFUSED = ([f"{word} #2390" for word in NINE]
                + ["FiXeS #2390", "CLOSED #2390", "rEsOlVeS #2390", "fixes: #2390", "fixes:#2390", "fixes#2390", "Resolves:   #2390",
-                  "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too"])
+                  "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too",
+                  "fixes   #2390", "fixes : #2390"])
     REFUSED_URL = ([f"{word} https://github.com/o/r/issues/2390" for word in NINE]
                    + ["Fixes: https://github.com/o/r/issues/2390", "resolves http://github.com/o/r/issues/2390",
                       "closed www.github.com/o/r/issues/2390", "fix https://github.com/o/r/pull/2390",
                       "fixes https://www.github.com/o/r/issues/2390", "closes:https://github.com/shivinate7/claude-settings/issues/2390",
                       "base red; this fixes https://github.com/o/r/issues/2390 too"])
     ALLOWED = ("PR #2390", "#2390", "fix the base", "fix the base, see #2390", "prefixes #2390", "cause and fix: PR 2390",
-               "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5")
+               "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5",
+               "fixtures/x#12", "prefix fixtures/x#12")
     REWORD = "cause and fix: PR 2390"  # the example the refusal gives
-    CLOSE_FORM = re.compile(r"(?i)\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b\s*:?\s*"
-                            r"(?:(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)")  # a closing keyword before an issue ref or an issue URL
+    LONG_RUN = " " * 20000  # the whitespace run the closing-form search backtracks over: one home for the timing cases
+    SEARCH_BOUND_S, RUN_BOUND_S = 1.0, 5.0  # hang guards, not speed claims: the bounds sit far above a linear search's time on these inputs
 
     def refused_each(self, flag, reasons):
         """Each refused reason, given with `flag`, stops before the host read. The PR is CLOSED, so a run that reads it stops on a CLOSED line instead."""
@@ -4275,7 +4277,7 @@ class CloseKeywordReason(Env):
                 self.assertEqual(rc, 1, out + err)
                 self.assertIn(self.REWORD, err, "the refusal does not give the reword example")
                 self.assertRegex(err, r"(?i)reword", "the refusal does not say to reword the reason")
-                self.assertIsNone(self.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref or URL")
+                self.assertIsNone(merge.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref or URL")
                 self.assertNotIn("Traceback", err)
 
     def refusal_writes_nothing(self, flag, reason="fixes #2390"):
@@ -4311,17 +4313,50 @@ class CloseKeywordReason(Env):
     def test_close_keyword_undo_check_unknown_ok_refused_issue_url_takes_no_lock_and_writes_nothing(self):
         self.refusal_writes_nothing("--undo-check-unknown-ok", "fixes https://github.com/o/r/issues/2390")
 
+    def reaches_host_read(self, *flag_reasons):
+        """A run with these flag and reason pairs is not refused, so it reaches the PR's state read. The caller sets the PR CLOSED, so the run stops on the CLOSED line. -> the seconds the run took."""
+        reads = len(self.host.pr_calls)
+        start = time.perf_counter()
+        rc, out, err = self.run_args("7", "--confirm", *flag_reasons)
+        took = time.perf_counter() - start
+        self.assertGreater(len(self.host.pr_calls), reads, "the reason was refused before the host read")
+        self.assertIn("CLOSED", err, "the run did not reach the PR's state read")
+        self.assertNotRegex(err, r"(?i)reword", "an allowed reason got the reword refusal")
+        return took
+
+    def timed_search(self, text):
+        """-> the seconds merge.CLOSE_FORM.search(text) takes. Only the search is timed: setUp and the run are not."""
+        start = time.perf_counter()
+        merge.CLOSE_FORM.search(text)
+        return time.perf_counter() - start
+
     def test_close_keyword_allowed_reasons_reach_the_host_read_for_both_flags(self):
         # the controls: a reason with no closing form before a ref is not refused, so the run goes on to read the PR, which is CLOSED here
         self.host.pr_state = "CLOSED"
         for flag in self.FLAGS:
             for reason in self.ALLOWED:
                 with self.subTest(flag=flag, reason=reason):
-                    reads = len(self.host.pr_calls)
-                    rc, out, err = self.run_args("7", "--confirm", flag, reason)
-                    self.assertGreater(len(self.host.pr_calls), reads, "the reason was refused before the host read")
-                    self.assertIn("CLOSED", err, "the run did not reach the PR's state read")
-                    self.assertNotRegex(err, r"(?i)reword", "an allowed reason got the reword refusal")
+                    self.reaches_host_read(flag, reason)
+
+    def test_close_keyword_search_finishes_in_time_on_a_long_whitespace_run(self):
+        # Why a clock here: re gives no step count, so a wall-clock bound is the only red for this backtracking. It is a hang guard, not a speed claim.
+        # The control has no keyword, so any regex searches it fast: a slow case below is the keyword's run, not the harness.
+        control = self.timed_search("prefixes" + self.LONG_RUN + "x")
+        self.assertLess(control, self.SEARCH_BOUND_S, f"the control with no keyword took {control:.2f} s, so the machine is loaded and the bound says nothing about the regex")
+        cases = (("keyword, run, no ref", "fixes" + self.LONG_RUN + "x"),
+                 ("keyword, run, #-less ref", "fixes" + self.LONG_RUN + "2390"),
+                 ("bare keyword, run", "fix" + self.LONG_RUN),
+                 ("keyword, run, colon, run, no ref", "fixes" + self.LONG_RUN[:10000] + ":" + self.LONG_RUN[:10000] + "x"))
+        for label, text in cases:
+            with self.subTest(case=label):
+                took = self.timed_search(text)
+                self.assertLess(took, self.SEARCH_BOUND_S, f"the closing-form search took {took:.2f} s on a whitespace run after a keyword")
+
+    def test_close_keyword_long_reason_for_both_flags_reaches_the_host_read_in_time(self):
+        # one run with the long reason for both flags: refuse_closing_reason searches each reason in full, before the host read
+        self.host.pr_state = "CLOSED"
+        took = self.reaches_host_read("--base-red-ok", "fixes" + self.LONG_RUN + "x", "--undo-check-unknown-ok", "fixes" + self.LONG_RUN + "x")
+        self.assertLess(took, self.RUN_BOUND_S, f"the run with a long whitespace reason for both flags took {took:.2f} s before it reached the PR's state read")
 
 class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
