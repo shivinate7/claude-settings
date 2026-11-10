@@ -37068,7 +37068,7 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
 # ---- B4: the fix check marker (owner item 444 a). A reviewer's fix check carries no round, so it
 # lifts to Sonnet on FIX_CHECK_MARKER. The marker counts only when the brief's first non-blank line starts with it, leading
 # spaces and tabs aside, and it is case-sensitive: text ahead of it on that line does not count. It lifts a reviewer on
-# Sonnet only. A reviewer on Haiku is denied too (owner item 444 a, 2026-11-08 15:04 CST: a fix check runs Sonnet, set per
+# Sonnet only. A reviewer on Haiku is denied too (owner item 444 a: a fix check runs Sonnet, set per
 # spawn). Opus stays under the ceiling, and a builder, a test-author or an Explore gets no lift. The constant is read from
 # shared_names at module load, never copied. A missing constant reads as FIX_UNBUILT, so each case fails on its assert,
 # not on an import error.
@@ -37180,7 +37180,7 @@ role_model_refuse("role-model: fix check: Explore on sonnet with the marker is d
                   "Explore", "sonnet", FIX_MARKER + ". Find where X is defined.", carries=(EXPLORE_MARKER,),
                   lacks=ROLE_LACKS + (FIX_MARKER,))
 
-# ---- served model on a fix check (decision agent-model-cap, the reviewer row; owner item 444 a, 2026-11-08 15:04 CST).
+# ---- served model on a fix check (decision agent-model-cap, the reviewer row; owner item 444 a).
 # A fix check runs Sonnet, set per spawn. Its first line is the bare marker, not a round line, so step-up does not read it
 # (step_up_reason reads rounds 2 and 3 only). With no model it is refused even when a default model is set, since the agent
 # file's `haiku` pin beats the default; no owner override lifts that refusal. A fix check that names haiku is refused too,
@@ -37194,20 +37194,19 @@ role_model_refuse("role-model: served-model: fix check, reviewer with no model i
 role_model_refuse("role-model: served-model: fix check, Round 1 of 3 after the marker, reviewer with no model is denied "
                   "when the default is sonnet", "reviewer", None, FIX_MARKER + ". Round 1 of 3 finding F1, head abc1234.",
                   env=SONNET_DEFAULT, carries=SERVED_REMEDY)
-# A fix check on Haiku is denied under agent-role-model, and the denial names Sonnet (owner item 444 a, 2026-11-08
-# 15:04 CST: a fix check runs Sonnet, set per spawn, so the reviewer's Haiku row does not hold for it).
+# A fix check on Haiku is denied under agent-role-model, and the denial names Sonnet (owner item 444 a:
+# a fix check runs Sonnet, set per spawn, so the reviewer's Haiku row does not hold for it).
 role_model_refuse("role-model: served-model: fix check, reviewer on haiku with the marker is denied under agent-role-model, "
                   "and the denial names sonnet", "reviewer", "haiku", FIX_MARKER + ". Re-run the cases.",
                   carries=SERVED_REMEDY)
-# The round form of the same ruling (owner item 444 a, 2026-11-08 15:04 CST). Its first line is a round 2 marker, so the
+# The brief form of the same ruling (owner item 444 a). Its first line is a round line, which the step-up reads, so the
 # step-up holds a reviewer on it to Sonnet, and Haiku is denied. Green on the old code by design: the step-up already denies
-# round 2 on Haiku. It is a control, not a red. It guards the form: a build that skips the step-up for a fix check would let
+# that form on Haiku. It is a control, not a red. It guards the form: a build that skips the step-up for a fix check would let
 # Haiku through here.
 add("role-model: served-model: fix check, Round 2 of 3 (fix check) on haiku is denied under the step-up, as a round 2 brief",
     "deny", STEP_UP, tool="Agent", prompt="Round 2 of 3 (fix check). Re-run the cases.", model="haiku",
     subagent_type="reviewer")
-# The Workflow form of the fix check on Haiku is denied under agent-role-model, and the denial names Sonnet (owner item 444 a,
-# 2026-11-08 15:04 CST).
+# The Workflow form of the fix check on Haiku is denied under agent-role-model, and the denial names Sonnet (owner item 444 a).
 workflow_refuse("role-model: served-model: fix check, Workflow reviewer on haiku with the marker is denied under "
                 "agent-role-model, and the denial names sonnet",
                 _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'haiku'"),
