@@ -343,33 +343,33 @@ session_013NEJL3bvXbg7UQvaKpwwq9	10:01 CST	11:05 CST	KEEP
 session_013NEJL3c8B95wK1Rg8uhD4P	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3cfg1yrBuezf45D4i	10:01 CST	11:05 CST	KEEP	
 session_013NEJL3dPpqbux58j4atEY5	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
-session_013NEJL3fy7PDPhWER5r89ep	10:01 CST	11:05 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
+session_013NEJL3fy7PDPhWER5r89ep	10:01 CST	11:05 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3gDkEvHawhJUPygWa	10:01 CST	11:05 CST	KEEP	
 session_013NEJL3gbJkES3NR7ybj7YZ	10:01 CST	11:05 CST	KEEP	
 session_013NEJL3hRvWLoxZuEPVQkD2	10:01 CST	11:05 CST	handoff-B	archive: archived 11:1x CST under owner override 4h
 session_013NEJL3ixw3qjVWMvVLFtg5	10:01 CST	11:05 CST	KEEP	
-session_013NEJL3jZu7VBFpZ1EZJZGo	10:01 CST	11:05 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
+session_013NEJL3jZu7VBFpZ1EZJZGo	10:01 CST	11:05 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3jcPCBE8pDPGuF8Ts	10:01 CST	11:06 CST	KEEP	
 session_013NEJL3kYhJPjjsWYNCApSh	10:01 CST	11:05 CST	KEEP	
-session_013NEJL3m8RA79gxYptq8LiK	10:01 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
-session_013NEJL3mV1216ziTuNnhQyH	10:02 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
-session_013NEJL3oJPK1MdV96LKjYfK	10:02 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
-session_013NEJL3oV3tarYB15cE84H6	10:02 CST	11:05 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
+session_013NEJL3m8RA79gxYptq8LiK	10:01 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
+session_013NEJL3mV1216ziTuNnhQyH	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
+session_013NEJL3oJPK1MdV96LKjYfK	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
+session_013NEJL3oV3tarYB15cE84H6	10:02 CST	11:05 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3otrRs5sCK9CN5FpB	10:02 CST	11:06 CST	KEEP	
 session_013NEJL3pjhuGumnmrJ5gvqd	10:02 CST	11:06 CST	KEEP	
 session_013NEJL3qDimXFeUC8aPbjdg	10:02 CST	11:06 CST	KEEP	
 session_013NEJL3qFTVRyGAJWFkrALJ	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3qKvwXBThPagV7fsa	10:02 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
-session_013NEJL3qSsV2LJ6R1a1HMCB	10:02 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
-session_013NEJL3qwtN2VRPNsTZMhZD	10:02 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
-session_013NEJL3r8JbyJKhCzBoC6sF	10:02 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
+session_013NEJL3qKvwXBThPagV7fsa	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
+session_013NEJL3qSsV2LJ6R1a1HMCB	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
+session_013NEJL3qwtN2VRPNsTZMhZD	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
+session_013NEJL3r8JbyJKhCzBoC6sF	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3rTtVuJHBka4oSALE	10:02 CST	11:06 CST	KEEP	
 session_013NEJL3sBYfjKAhvyn761vu	10:02 CST	11:07 CST	KEEP	
-session_013NEJL3ttjVfExjpp5nLDcz	10:02 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
+session_013NEJL3ttjVfExjpp5nLDcz	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3uzxpVTQAsNhcR9t9	10:02 CST	11:06 CST	KEEP	
 session_013NEJL3vDrEuXnStMw1crbY	10:02 CST	11:06 CST	KEEP	
 session_013NEJL3wJ76K34vkvm4cKVr	10:02 CST	11:06 CST	KEEP	
-session_013NEJL3xYkfnbekjjC4nzCL	10:02 CST	11:06 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
+session_013NEJL3xYkfnbekjjC4nzCL	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3yjhPT25wMf2PRhE2	10:02 CST	11:06 CST	KEEP	
 session_013NEJL3z5XQbr2LcTV4ejh2	10:02 CST	11:06 CST	KEEP	
 session_013NEJL3zaJYqXCK4XMrELwY	10:02 CST	11:07 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
@@ -381,9 +381,9 @@ session_013NEJL4487j21efFiHf2AHP	10:02 CST	11:07 CST	KEEP
 session_013NEJL448rTgL9ZZJPUnxU1	10:04 CST	11:07 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
 session_013NEJL44GoM1qXT1kTES4kX	10:04 CST	11:07 CST	KEEP	
 session_013NEJL44p2pd4nwYgCQXqTg	10:04 CST	10:09 CST	KEEP	
-session_013NEJL453SB7Xa11kWihGtm	10:04 CST	11:07 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
-session_013NEJL456ejBKaXgyyLuYHS	10:04 CST	11:07 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
-session_013NEJL45afxTyvacTQtAEwZ	10:04 CST	11:07 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
+session_013NEJL453SB7Xa11kWihGtm	10:04 CST	11:07 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
+session_013NEJL456ejBKaXgyyLuYHS	10:04 CST	11:07 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
+session_013NEJL45afxTyvacTQtAEwZ	10:04 CST	11:07 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL45hcvDWv3G6x2UbGB	10:04 CST	11:07 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
 session_013NEJL46S2R9TXaCJ1azufQ	10:04 CST	11:07 CST	KEEP	
 session_013NEJL47tLSmUKDXddQy9Pf	10:04 CST	11:07 CST	handoff-B	archive: not tried yet (second-ask B, needs get_session then archive; owner override expired 11:04 CST)
