@@ -48,7 +48,22 @@ DEBT_README = "debts/README.md"  # the folder's README: it describes the markers
 DEBT_NOTES = "debts/notes.md"  # the folder's notes file: it is not a debt either
 README_FEEL_TEXT = "# Debts\n\nOne debt per file.\n\n- **Feel.** a marker shown as an example, not a debt\n"
 NOTES_FEEL_TEXT = "# Notes\n\n- **Feel.** a note that is not a debt\n"
+# The whole-tree rules, check_gloss and check_links, take a repo root. Their cases build these records under the root.
+TARGET = "docs/decisions/target-rule.md"  # the decision that other records cite
+CITER = "docs/decisions/citing-record.md"  # a decision that cites the target
+TARGET_DEBT = "docs/debts/target-debt.md"  # a debt that a decision cites
+CITER_DEBT = "docs/debts/citing-debt.md"  # a debt that cites the target
+LINKED_DEBT = "docs/debts/linked-debt.md"  # a debt whose Decision part a case sets
+LIVE_DEBT = "docs/debts/live-debt.md"  # a debt that a gap section may name
+OTHER_DEBT = "docs/debts/other-debt.md"  # a debt that a gap section names
+GAP_RULE = "docs/decisions/gap-rule.md"  # a decision with a gap section
+PLAIN_RULE = "docs/decisions/plain-rule.md"  # a decision with no gap section
+GLOSS = "(the rule that sets the limit)"  # a gloss of two or more words
+LIVE_TEXT = "# Live debt\n\n**Decision.** none. Its own finding.\n"  # a debt with a valid Decision part
+LIVE_LINKED = "# Live debt\n\n**Decision.** `gap-rule` %s.\n" % GLOSS  # a debt that cites the gap decision
+REPO = os.path.dirname(HERE)  # the repo whose real records the whole-tree rules read
 
+RULES = None  # the module under test, loaded once per run by rules_module()
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
@@ -65,6 +80,16 @@ def flagged(out):
     """The paths the check named as FAIL: each FAIL line ends with its path."""
     return [line.rsplit(" ", 1)[1] for line in out.splitlines()
             if line.startswith("check_record_slugs: FAIL:")]
+
+
+def rules_module():
+    """The module under test, loaded without running its command line, as ImportTests loads it. One load per run."""
+    global RULES
+    if RULES is None:
+        spec = importlib.util.spec_from_file_location("record_slugs_rules_under_test", MODULE)
+        RULES = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(RULES)
+    return RULES
 
 
 class RecordSlugsTests(unittest.TestCase):
@@ -353,6 +378,192 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertNotIn("UNKNOWN", out)
         self.assertEqual(rc, 0, out)
+
+    # Whole-tree rules. check_gloss and check_links return problem strings for a root. Each case builds its
+    # records under the root and calls the rule on it.
+
+    def rule(self, name):
+        """The whole-tree rule `name` of the module under test. A module that lacks it fails the case by assert."""
+        fn = getattr(rules_module(), name, None)
+        self.assertIsNotNone(fn, "%s defines no %s(root)" % (os.path.basename(MODULE), name))
+        return fn
+
+    def have(self, *rels):
+        """Scope first: the fixture holds each record before the rule reads it."""
+        for rel in rels:
+            self.assertTrue(os.path.isfile(os.path.join(self.tree, *rel.split("/"))), "fixture lacks " + rel)
+
+    def assert_one_problem(self, problems, *parts):
+        """Exactly one problem, and it names each of `parts`: the file and the slug."""
+        self.assertEqual(len(problems), 1, problems)
+        for part in parts:
+            self.assertIn(part, problems[0])
+
+    def gloss_case(self, text, rel=CITER):
+        """The target record, and `rel` holding `text`. Returns check_gloss on the tree."""
+        self.put(TARGET)
+        self.put(rel, text)
+        self.have(TARGET, rel)
+        return self.rule("check_gloss")(self.tree)
+
+    def link_case(self, decision_line, rel=LINKED_DEBT):
+        """The target record, and a debt holding `decision_line`. Returns check_links on the tree."""
+        self.put(TARGET)
+        self.put(rel, "# Linked debt\n\n%s\n" % decision_line)
+        self.have(TARGET, rel)
+        return self.rule("check_links")(self.tree)
+
+    # check_gloss: the first backticked cite of another record carries a gloss of two or more words.
+
+    def test_gloss_present_passes(self):
+        self.assertEqual(self.gloss_case("See `target-rule` %s.\n" % GLOSS), [])
+
+    def test_gloss_bare_first_cite_fails(self):
+        self.assert_one_problem(self.gloss_case("See `target-rule` for the limit.\n"),
+                                "citing-record.md", "target-rule")
+
+    def test_gloss_bare_first_cite_then_glossed_second_still_fails(self):
+        text = "See `target-rule` for it. Later `target-rule` %s.\n" % GLOSS
+        self.assert_one_problem(self.gloss_case(text), "citing-record.md", "target-rule")
+
+    def test_gloss_bare_later_cite_after_glossed_first_passes(self):
+        text = "See `target-rule` %s. Again `target-rule` here.\n" % GLOSS
+        self.assertEqual(self.gloss_case(text), [])
+
+    def test_gloss_own_slug_is_exempt(self):
+        self.assertEqual(self.gloss_case("This record is `citing-record`, bare.\n"), [])
+
+    def test_gloss_backticked_non_slug_passes(self):
+        self.assertEqual(self.gloss_case("Run `npm ci` and `grep` first.\n"), [])
+
+    def test_gloss_one_word_gloss_fails(self):
+        self.assert_one_problem(self.gloss_case("See `target-rule` (x).\n"), "citing-record.md", "target-rule")
+
+    def test_gloss_debt_file_bare_cite_fails(self):
+        text = "See `target-rule` for the limit.\n"
+        self.assert_one_problem(self.gloss_case(text, CITER_DEBT), "citing-debt.md", "target-rule")
+
+    def test_gloss_decision_bare_cite_of_a_debt_slug_fails(self):
+        # A slug is a file stem in either record folder, so a debt slug cited from a decision needs a gloss too.
+        self.put(TARGET_DEBT)
+        self.put(CITER, "See `target-debt` for the limit.\n")
+        self.have(TARGET_DEBT, CITER)
+        self.assert_one_problem(self.rule("check_gloss")(self.tree), "citing-record.md", "target-debt")
+
+    def test_gloss_readme_and_notes_are_not_checked(self):
+        self.put(TARGET)
+        self.put("docs/debts/README.md", "A bare cite: `target-rule`.\n")
+        self.put("docs/debts/notes.md", "- A bare cite: `target-rule`.\n")
+        self.have(TARGET, "docs/debts/README.md", "docs/debts/notes.md")
+        self.assertEqual(self.rule("check_gloss")(self.tree), [])
+
+    def test_gloss_lone_apostrophe_does_not_hide_a_bare_cite(self):
+        self.assert_one_problem(self.gloss_case("Don't reuse `target-rule` here.\n"), "citing-record.md", "target-rule")
+
+    def test_gloss_full_size_slug_bare_cite_fails(self):
+        slug = OK[:-3]  # 32 characters, the longest slug the check allows
+        self.put("docs/decisions/" + OK)
+        self.put(CITER, "See `%s` for the limit.\n" % slug)
+        self.have("docs/decisions/" + OK, CITER)
+        self.assert_one_problem(self.rule("check_gloss")(self.tree), "citing-record.md", slug)
+
+    def test_gloss_empty_records_pass(self):
+        self.assertFalse(os.path.isdir(os.path.join(self.tree, "docs")))  # scope: the tree holds no records
+        self.assertEqual(self.rule("check_gloss")(self.tree), [])
+
+    # check_links: a debt's Decision part is `none` or names an existing decision. A gap section lists its debts.
+
+    def test_debt_decision_none_passes(self):
+        for line in ("**Decision.** none. No decision fits.", "**Decision.** `none`. No decision fits.",
+                     "- **Decision.** `none`. No decision fits."):
+            with self.subTest(line=line):
+                self.assertEqual(self.link_case(line), [])
+
+    def test_debt_decision_naming_a_decision_passes(self):
+        for line in ("**Decision.** `target-rule` %s." % GLOSS, "**Decision.** target-rule %s." % GLOSS,
+                     "- **Decision.** `target-rule` %s." % GLOSS):
+            with self.subTest(line=line):
+                self.assertEqual(self.link_case(line), [])
+
+    def test_debt_decision_naming_no_decision_fails(self):
+        self.assert_one_problem(self.link_case("**Decision.** `no-such-rule` %s." % GLOSS),
+                                "linked-debt.md", "no-such-rule")
+
+    def test_debt_decision_naming_a_debt_fails(self):
+        self.put(TARGET_DEBT)
+        self.assert_one_problem(self.link_case("**Decision.** `target-debt` %s." % GLOSS),
+                                "linked-debt.md", "target-debt")
+
+    def test_debt_decision_without_a_slug_fails(self):
+        self.assert_one_problem(self.link_case("**Decision.** Nothing names it here."), "linked-debt.md")
+
+    def test_debt_without_a_decision_part_fails(self):
+        self.put(TARGET)
+        self.put(LINKED_DEBT, "# Linked debt\n\n**What.** A finding.\n")
+        self.have(TARGET, LINKED_DEBT)
+        self.assert_one_problem(self.rule("check_links")(self.tree), "linked-debt.md")
+
+    def test_stale_debt_in_a_gap_section_fails(self):
+        for heading in ("## Safety holes, named", "## Known gaps", "## Gaps"):
+            with self.subTest(heading=heading):
+                self.put(GAP_RULE, "# Gap rule\n\n%s\n\nDebt: `vanished-debt` %s.\n" % (heading, GLOSS))
+                self.assert_one_problem(self.rule("check_links")(self.tree), "gap-rule.md", "vanished-debt")
+
+    def test_stale_debt_in_a_bullet_list_fails(self):
+        self.put(LIVE_DEBT, LIVE_TEXT)
+        self.put(GAP_RULE, "# Gap rule\n\n## Known gaps\n\nDebts:\n- `live-debt` %s.\n- `vanished-debt` %s.\n"
+                 % (GLOSS, GLOSS))
+        self.have(LIVE_DEBT, GAP_RULE)
+        self.assert_one_problem(self.rule("check_links")(self.tree), "gap-rule.md", "vanished-debt")
+
+    def test_stale_debt_behind_a_paren_label_fails(self):
+        self.put(GAP_RULE, "# Gap rule\n\n## Gaps\n\n- Reader gap (debt `vanished-debt`).\n")
+        self.assert_one_problem(self.rule("check_links")(self.tree), "gap-rule.md", "vanished-debt")
+
+    def test_note_and_unlabelled_slugs_are_not_debts(self):
+        # A note names no debt file, and a backticked slug with no debt label is not a debt listing.
+        self.put(GAP_RULE, "# Gap rule\n\n## Known gaps\n\nNote: `some-note` %s.\n\nThe check reads `code-check` too.\n"
+                 % GLOSS)
+        self.have(GAP_RULE)
+        self.assertEqual(self.rule("check_links")(self.tree), [])
+
+    def test_span_inside_a_debt_gloss_is_not_a_debt(self):
+        self.put(LIVE_DEBT, LIVE_TEXT)
+        self.put(GAP_RULE, "# Gap rule\n\n## Known gaps\n\nDebt: `live-debt` (the reader skips `vanished-thing`).\n")
+        self.have(LIVE_DEBT, GAP_RULE)
+        self.assertEqual(self.rule("check_links")(self.tree), [])
+
+    def test_stale_debt_outside_the_gap_sections_passes(self):
+        self.put(GAP_RULE, "# Gap rule\n\n## The ruling\n\nDebt: `vanished-debt` %s.\n" % GLOSS)
+        self.have(GAP_RULE)
+        self.assertEqual(self.rule("check_links")(self.tree), [])
+
+    def test_debt_citing_a_gap_decision_must_be_named_there(self):
+        self.put(LIVE_DEBT, LIVE_LINKED)
+        self.put(OTHER_DEBT, LIVE_TEXT)
+        self.put(GAP_RULE, "# Gap rule\n\n## Known gaps\n\nDebts:\n- `other-debt` %s.\n" % GLOSS)
+        self.have(LIVE_DEBT, OTHER_DEBT, GAP_RULE)
+        self.assert_one_problem(self.rule("check_links")(self.tree), "live-debt.md", "live-debt")
+
+    def test_debt_citing_a_gap_decision_that_names_it_passes(self):
+        self.put(LIVE_DEBT, LIVE_LINKED)
+        self.put(GAP_RULE, "# Gap rule\n\n## Known gaps\n\nDebts:\n- `live-debt` %s.\n" % GLOSS)
+        self.have(LIVE_DEBT, GAP_RULE)
+        self.assertEqual(self.rule("check_links")(self.tree), [])
+
+    def test_debt_citing_a_decision_with_no_gap_section_passes(self):
+        self.put(PLAIN_RULE, "# Plain rule\n\nNo gap section here.\n")
+        self.put(LINKED_DEBT, "# Linked debt\n\n**Decision.** `plain-rule` %s.\n" % GLOSS)
+        self.have(PLAIN_RULE, LINKED_DEBT)
+        self.assertEqual(self.rule("check_links")(self.tree), [])
+
+    def test_links_empty_records_pass(self):
+        self.assertFalse(os.path.isdir(os.path.join(self.tree, "docs")))  # scope: the tree holds no records
+        self.assertEqual(self.rule("check_links")(self.tree), [])
+
+    def test_real_tree_passes_gloss_and_link_rules(self):
+        problems = self.rule("check_gloss")(REPO) + self.rule("check_links")(REPO)
+        self.assertEqual(problems, [], "%d problems on the real tree, first three: %s" % (len(problems), problems[:3]))
 
 
 class ImportTests(unittest.TestCase):
