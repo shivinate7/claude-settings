@@ -61,8 +61,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the build starts, once per lane. A red lane does not join. Before it marks the integration PR
-   ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
-   head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
+   ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch> --touched-tests` on the batch
+   head: the lint, then each test file the batch touches, run once in the lint tree, so a test that only the merged
+   tree fails is caught before the CI run. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
