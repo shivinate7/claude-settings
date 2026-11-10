@@ -26199,8 +26199,10 @@ REASON_MAY_NAME = {
 def playwright_remedy_case():
     """The playwright refusal names the real check and points nowhere else.
 
-    The remedy must name the stale `__dirlock` and `pgrep -fl playwright`, the two checks that
-    find the real cause. It must not name the variable it refused, nor any path to set instead.
+    The remedy must name the stale `__dirlock` and `pgrep -f playwright`, the two checks that
+    find the real cause. `pgrep -f` prints pids only. The `-fl` form prints full process arguments,
+    which the process-args rule refuses, so the remedy must never name it. The remedy must not name
+    the variable it refused, nor any path to set instead.
     """
     got, reason = decide({
         "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
@@ -26209,13 +26211,15 @@ def playwright_remedy_case():
     })
     if got != "deny":
         return False, "expected deny, got %s" % got
-    missing = [f for f in ("__dirlock", "pgrep -fl playwright") if f not in reason]
+    if "pgrep -fl playwright" in reason:
+        return False, "the remedy still names the refused form 'pgrep -fl playwright'"
+    missing = [f for f in ("__dirlock", "pgrep -f playwright") if f not in reason]
     if missing:
         return False, "the remedy does not name %r: %s" % (missing[0], reason[:90])
     named = [f for f in ("PLAYWRIGHT_BROWSERS_PATH", "/tmp", "scratch", "C:\\") if f in reason]
     if named:
         return False, "the remedy names %r, a forbidden target or another path" % named[0]
-    return True, "refused, and the remedy names the stale __dirlock and pgrep -fl playwright"
+    return True, "refused, and the remedy names the stale __dirlock and pgrep -f playwright"
 
 
 def powershell_backslash_case():
