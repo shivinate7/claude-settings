@@ -1132,9 +1132,30 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     return where
 
 
+# The value flags of a wrapper that move the program it runs into another folder first, so `env
+# -C <dir> git ...` runs git in <dir>. `_wrapper_flags` already reads each flag's value with
+# `WRAPPER_VALUE_FLAGS`; this names which of them are a folder.
+WRAPPER_CHDIR_FLAGS = {"env": ("-C", "--chdir")}
+
+
+def _wrapper_chdir(tokens):
+    """Return the folder the command wrappers in front of a segment's command word move it into, or
+    None when none does. Each `env -C` or `env --chdir` is read through `_walk_wrappers`, the walk
+    that finds the command word, so the folder and the program come from one reading. A relative
+    folder joins onto the one before it, as `env -C a env -C b` does."""
+    found = None
+    for word, flags in _walk_wrappers(tuple(tokens))[1]:
+        for flag, value in flags:
+            if flag in WRAPPER_CHDIR_FLAGS.get(word, ()) and value:
+                found = os.path.join(found, value) if found else value
+    return found
+
+
 def _segment_git_c_target(tokens):
     """Return a tokenized segment's `git -C <path>` target, or None when it names none, or
-    when the segment's command word is not `git`.
+    when the segment's command word is not `git`. An `env -C <dir>` or `env --chdir <dir>` in
+    front of the `git` moves it first (`_wrapper_chdir`), so a `git -C` after it joins onto that
+    folder, and with no `git -C` the `env` folder alone is the target.
 
     ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
     -C/some/path status` and `git -C=/some/path status` both fail with `unknown option:
@@ -1151,7 +1172,7 @@ def _segment_git_c_target(tokens):
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
         return None
     cursor = index + 1
-    found = None
+    found = _wrapper_chdir(tokens)
     while cursor < len(tokens):
         token = tokens[cursor]
         if token == "-C":
