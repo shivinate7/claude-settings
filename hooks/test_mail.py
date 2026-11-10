@@ -1016,10 +1016,11 @@ class Cp1252Pipe(MailCase):
         return store, sender, receiver
 
     def assert_cp1252_pipe(self, machine):
-        """Scope before subject: the child runs on a cp1252 stdin and stdout, so the cases test that pipe."""
-        probe = subprocess.run([sys.executable, "-c", "import sys; print(sys.stdin.encoding, sys.stdout.encoding)"],
+        """Scope before subject: the child runs on a cp1252 stdin, stdout and stderr, so the cases test that pipe."""
+        probe = subprocess.run([sys.executable, "-c",
+                                "import sys; print(sys.stdin.encoding, sys.stdout.encoding, sys.stderr.encoding)"],
                                env=machine.env, capture_output=True, text=True, encoding="utf-8", timeout=60)
-        self.assertEqual(probe.stdout.split(), ["cp1252", "cp1252"],
+        self.assertEqual(probe.stdout.split(), ["cp1252", "cp1252", "cp1252"],
                          "control: the child does not run on a cp1252 pipe: %r" % probe.stdout)
 
     def test_stdin_body_with_arrow_is_stored_intact_and_reads_back_unchanged(self):
@@ -1053,6 +1054,17 @@ class Cp1252Pipe(MailCase):
                          "mail read under cp1252 of a --body-file message exited %d, not 0: %s"
                          % (read.returncode, combined(read)))
         self.assertIn(BODY, read.stdout, "mail read under cp1252 did not return the body unchanged: %r" % read.stdout)
+
+    def test_stderr_arrow_under_cp1252_reaches_stderr_as_utf8(self):
+        """Stderr is reconfigured with stdin and stdout. A bad-use error that echoes an arrow must reach stderr as
+        UTF-8: no UnicodeEncodeError, and no backslash escape in place of the arrow."""
+        _, sender, _ = self.pair()
+        bad = run_cli(sender, "send", "--to", "cloud/sess-b", "--kind", ARROW, "--body-file", "-")
+        self.assertEqual(bad.returncode, 2, "an unknown --kind exited %d, not 2: %s" % (bad.returncode, combined(bad)))
+        self.assertNotIn("UnicodeEncodeError", bad.stderr,
+                         "the arrow in a bad-use error raised UnicodeEncodeError on stderr: %r" % bad.stderr)
+        self.assertIn(ARROW, bad.stderr,
+                      "the arrow in a bad-use error did not reach stderr as UTF-8: %r" % bad.stderr)
 
 
 class StdinNotUtf8(MailCase):
