@@ -6,6 +6,9 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ENV = dict(os.environ, GUARD_FAMILY="scratchpad-owner")
+# A caller's shard, test or mutation knob would make test_guard.py run a subset, so the child does not read them
+# (the same list as INHERITED in hooks/test_guard_beat.py).
+INHERITED = ("GUARD_SHARD", "GUARD_TESTS", "MUTATE_ONLY")
+ENV = dict({k: v for k, v in os.environ.items() if k not in INHERITED}, GUARD_FAMILY="scratchpad-owner")
 sys.exit(subprocess.run([sys.executable, os.path.join(HERE, "test_guard.py")],
                         cwd=os.path.dirname(HERE), env=ENV).returncode)
