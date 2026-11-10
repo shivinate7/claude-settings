@@ -3044,13 +3044,17 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
         else sc = narrow;
       }
       pw = Math.min(Math.ceil(bw * sc), room0 - (scroll ? g : 0)); // ceil can pass the room by 1px from float error
-      wrap.style.width = pw + 2 + g + "px";
       sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px";
       const o = wrap.closest(".opic"); if (o) picHint(o, scroll);
       if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
-      // The height comes from the column in both the measured and the declared-size case, so the first paint has the size. A declared size gives the box's aspect, as before; a measure gives the picture's own height.
-      wrap.style.aspectRatio = ""; wrap.style.maxHeight = "";
-      wrap.style.height = (scroll ? maxH : !c && size ? Math.ceil((pw + 2) * size.h / (focus ? size.w : DW)) : Math.ceil(bh * sc)) + "px";
+      if (wrap.parentElement) {
+        // The width and height come from the column in both the measured and the declared-size case, so the first paint has the size. A declared size gives the box's aspect, as before; a measure gives the picture's own height.
+        wrap.style.width = pw + 2 + g + "px"; wrap.style.aspectRatio = ""; wrap.style.maxHeight = "";
+        wrap.style.height = (scroll ? maxH : !c && size ? Math.ceil((pw + 2) * size.h / (focus ? size.w : DW)) : Math.ceil(bh * sc)) + "px";
+      } else {
+        // Not placed yet, so the column is unknown: the box takes the column's width and the picture's aspect by CSS, and the placement fits it again before the first paint.
+        wrap.style.width = ""; wrap.style.height = ""; wrap.style.maxHeight = ""; wrap.style.aspectRatio = bw + " / " + bh;
+      }
     }
     f.style.height = ht + "px";
     f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
