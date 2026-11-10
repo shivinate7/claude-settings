@@ -62,7 +62,7 @@ body.picmode #sampleBanner, body.picmode .tool, body.picmode #stage { display: n
 <div class="sample" id="sampleBanner">Sample. No item, number, name, time or screen size on this page is real.</div>
 <header class="tool">
   <h1>Waiting page: an option's picture fills its card</h1>
-  <div class="row" id="rowS"><span>Case</span><button data-s="three-phone" data-state="three-phone">Three phones</button><button data-s="two-phone" data-state="two-phone">Two phones</button><button data-s="duo" data-state="duo">Two-page Duo</button><button data-s="focus" data-state="focus">Focus boxes</button><button data-s="tall" data-state="tall">Very tall, in a mixed row</button></div>
+  <div class="row" id="rowS"><span>Case</span><button data-s="three-phone" data-state="three-phone">Three phones</button><button data-s="two-phone" data-state="two-phone">Two phones</button><button data-s="duo" data-state="duo">Two-page Duo</button><button data-s="focus" data-state="focus">Focus boxes</button><button data-s="tall" data-state="tall">Very tall, in a mixed row</button><button data-s="two-tall" data-state="two-tall">Very tall beside a phone, two per row</button></div>
   <div class="row" id="rowR"><span>Height</span><button data-r="today">Today (480 cap)</button><button data-r="phone">Grow to a phone (pick)</button><button data-r="screen">Grow to the screen</button><button data-r="grow">Grow with no cap</button><button data-r="box">Keep the 480 box</button><button data-r="shrink">Shrink to the screen</button></div>
   <div class="row" id="rowH"><span>Hide</span><button class="hide" data-hide="phone,pic-phone" data-name="Grow to a phone">Hide Grow to a phone</button><button class="hide" data-hide="screen,pic-screen" data-name="Grow to the screen">Hide Grow to the screen</button><button class="hide" data-hide="grow,pic-grow" data-name="Grow with no cap">Hide Grow with no cap</button><button class="hide" data-hide="box,pic-box" data-name="Keep the 480 box">Hide Keep the 480 box</button><button class="hide" data-hide="shrink,pic-shrink" data-name="Shrink to the screen">Hide Shrink to the screen</button><button class="hide" data-hide="up1" data-name="No upscale">Hide No upscale</button></div>
   <div class="row" id="rowU"><span>Upscale</span><button data-up="2">Up to 2x, as the viewer (pick)</button><button data-up="1" data-upid="up1">No upscale (1x)</button></div>
@@ -75,7 +75,7 @@ body.picmode #sampleBanner, body.picmode .tool, body.picmode #stage { display: n
     <button id="labBtn">Labels on</button>
   </div>
   <p><b>What fills the card buys, measured:</b> at 390 a phone picture grows from 224 to 289 wide. Two options per row at 1280 and 2200: 224 to 367. Three per row at 1280 and 2200: only 224 to 231, because the card itself is 232 wide there: the page stays 1160 wide on any screen. A two-page Duo picture already fills its card today.</p>
-  <p>Deep links: <code>#s=three-phone|two-phone|duo|focus|tall|pic-phone|pic-screen|pic-grow|pic-box|pic-shrink</code>, <code>&amp;r=today|phone|screen|grow|box|shrink</code>, <code>&amp;up=2|1</code>, <code>&amp;w=all|390|1280|2200</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=grow,box</code>. Each frame draws a sample screen height: 390 x 844, 1280 x 800 and 2200 x 1238. The line under each frame gives each picture's measured width x height, and "scrolls" when it scrolls in its box. A press on a picture still opens View. The Duo picture is a sample shape: two 390 pages and a 20px hinge, drawn 800 wide.</p>
+  <p>Deep links: <code>#s=three-phone|two-phone|duo|focus|tall|two-tall|pic-phone|pic-screen|pic-grow|pic-box|pic-shrink</code>, <code>&amp;r=today|phone|screen|grow|box|shrink</code>, <code>&amp;up=2|1</code>, <code>&amp;w=all|390|1280|2200</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=grow,box</code>. Each frame draws a sample screen height: 390 x 844, 1280 x 800 and 2200 x 1238. The line under each frame gives each picture's measured width x height, and "scrolls" when it scrolls in its box. A press on a picture still opens View. The Duo picture is a sample shape: two 390 pages and a 20px hinge, drawn 800 wide.</p>
 </header>
 <main id="stage"></main>
 <!-- Card pictures: static markup, so the waiting page's check finds each data-state and focus id without running a script.
@@ -1139,7 +1139,7 @@ const plainBar = (st, send) => `<div class="bar" id="bar"><div class="in"><span 
 /* ---------- The step: optPic's picture fills its card ---------- */
 const STATES = [
   { id: "three-phone", label: "Three phones" }, { id: "two-phone", label: "Two phones" }, { id: "duo", label: "Two-page Duo" },
-  { id: "focus", label: "Focus boxes" }, { id: "tall", label: "Very tall, in a mixed row" },
+  { id: "focus", label: "Focus boxes" }, { id: "tall", label: "Very tall, in a mixed row" }, { id: "two-tall", label: "Very tall beside a phone" },
   { id: "pic-phone" }, { id: "pic-screen" }, { id: "pic-grow" }, { id: "pic-box" }, { id: "pic-shrink" },
 ];
 const RULES = ["today", "phone", "screen", "grow", "box", "shrink"];
@@ -1186,6 +1186,9 @@ const ITEMS = {
     O("A", "One long page", "Every setting on one page, in groups.", "Nothing hides.", "A long scroll.", "page"),
     O("B", "Tabs, one per group", "Three tabs; each holds a short list.", "Short lists.", "A setting hides behind a tab.", "tabs"),
     O("C", "List and rules on the Duo", "Both pages at once.", "Rules in reach.", "No map.", "duoList")] },
+  "two-tall": { title: "Pick the settings screen for the courier app", ctx: "One option is a long page. Press a picture to see it full screen.", opts: [
+    O("A", "One long page", "Every setting on one page, in groups.", "Nothing hides.", "A long scroll.", "page"),
+    O("B", "Tabs, one per group", "Three tabs; each holds a short list.", "Short lists.", "A setting hides behind a tab.", "tabs")] },
 };
 function screen(s) {
   const src = ITEMS[s] || ITEMS["three-phone"];

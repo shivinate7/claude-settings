@@ -2,15 +2,15 @@
 
 Mockup: `page-pics-fill-card.html`. Screen: `skills/waiting-page/page.html` at ddaa393c0 (`optPic`, `fitFrame`, `MIN_PIC`, `PHONE_H`, `.opt .opic`). Owner, 2026-11-09 20:47 CST: "the images are so small in the artifact cockpit." The mockup puts page.html's own CSS in `#pagecss`, unchanged, and only this step's notes in `#newcss`: the pick changes no CSS rule.
 
-Measured with headless Chromium (Playwright), deviceScaleFactor 1, at 390, 1280 and 2200 wide, light and dark: 210 runs (5 cases × 6 height rules × 3 sizes × 2 themes, plus the 1x upscale on the focus case). Each frame is as tall as its page, so the mockup takes its screen height from sample values: 390 × 844, 1280 × 800 and 2200 × 1238. These are not device sizes. The two-page Duo is a sample shape, drawn 800 wide (two 390 pages and a 20px hinge), because `layout.json` gives the Duo no size. Fonts fall back offline; every mockup block has a fixed height, so no size below hangs on a font. Sizes are the picture box with its 1px border, as `getBoundingClientRect` gives them.
+Measured with headless Chromium (Playwright), deviceScaleFactor 1, at 390, 1280 and 2200 wide, light and dark: 246 runs (6 cases × 6 height rules × 3 sizes × 2 themes, plus the 1x upscale on the focus case). Each frame is as tall as its page, so the mockup takes its screen height from sample values: 390 × 844, 1280 × 800 and 2200 × 1238. These are not device sizes. The two-page Duo is a sample shape, drawn 800 wide (two 390 pages and a 20px hinge), because `layout.json` gives the Duo no size. Fonts fall back offline; every mockup block has a fixed height, so no size below hangs on a font. Sizes are the picture box with its 1px border, as `getBoundingClientRect` gives them.
 
 ## 1. What filling the card buys
 
-| Size | Column | Phone picture today | Phone picture new | Gain |
-|---|---|---|---|---|
-| 390 (one option per row) | 289 | 224 × 480 | 289 × 622, whole | 1.29 x |
-| 1280 and 2200, two per row | 367.5 | 224 × 480 | 367 × 790, whole | 1.64 x |
-| 1280 and 2200, three per row | 231.7 | 224 × 480 | 231 × 496, whole | 1.03 x |
+| Size | Card | Column | Phone picture today | Phone picture new | Gain |
+|---|---|---|---|---|---|
+| 390 (one option per row) | 319 | 289 | 224 × 480 | 289 × 622, whole | 1.29 x |
+| 1280 and 2200, two per row | 397.5 | 367.5 | 224 × 480 | 367 × 790, whole | 1.64 x |
+| 1280 and 2200, three per row | 261.7 | 231.7 | 224 × 480 | 231 × 496, whole | 1.03 x |
 
 - Three options per row gain 3%. The card is the limit there, not the 480 cap: the page is at most 1160 wide on any screen, the rail takes 240, and three cards share 805. So on a 2200 screen the pictures stay as small as at 1280. See item 6.
 - A two-page Duo picture already fills its card today: 367 × 386 at two per row, 231 × 242 at three, 289 × 303 at 390. It does not change.
@@ -25,7 +25,8 @@ Each rule fills the card's width. They differ in what a tall picture does. Numbe
 
 1. **Grow to a phone (pick).** A picture draws whole while it is no taller than a 390 × 844 phone picture at the card's width: F = max(480, ceil(W × 844 / 390)). A taller one scrolls in today's 480 box, at the card's width less the scrollbar gutter.
    - Gain: every phone picture and every Duo picture draws whole, at the card's width, on every screen. A taller one scrolls in the box c204 tested, so the share of the screen that a drag scrolls stays as today: 0.68 at 390, 0.73 at 1280, 0.44 at 2200. It reads no screen height, so a window resize moves nothing.
-   - Loss: at two per row a phone picture is 790 high. On a 1280 × 800 screen (660 visible) its foot and the card's text below it need a page scroll. Height jumps at the threshold: a phone shape draws 790 high, a slightly taller page draws a 480 box.
+   - Loss: at two per row a phone picture is 790 high. On a 1280 × 800 screen (660 visible) its foot and the card's text below it need a page scroll. Height jumps at the threshold: a phone shape draws 790 high, a slightly taller page draws a 480 box beside it (case `two-tall`: 367 × 790 beside 367 × 480).
+   - Loss: a picture scrolls sooner. Today it scrolls only past about 4:1 (c204 item 1); now past a phone's 2.16:1. A 390 × 1300 focus drew whole today at 146 × 480; now it scrolls in a 480 box at the card's width (231 × 480 at three per row, 289 × 480 at 390).
 2. **Grow to the screen.** Whole up to the screen cap, max(480, screen − 56 − 96 − 32): 672 at 390, 628 at 1280, 1066 at 2200. Taller scrolls in a box that high.
    - Gain: no picture passes the screen.
    - Loss: on a 1280 × 800 screen a two-per-row phone scrolls in a 628 box. The box covers 0.95 of the visible area (0.97 at 2200), so a drag almost anywhere scrolls the picture, not the page. The size hangs on the window height, so the builder needs an `svh` probe and a refit on height change.
@@ -49,7 +50,7 @@ A focus box narrower than the card scales up until it fills, at most 2x (`stageF
 
 ## 5. Measured sizes, pick (Grow to a phone, up to 2x)
 
-Light and dark give the same sizes in all 105 pairs. In every run: View is 44 high, the picture's button (`.opic`, picture plus View) is at least 44 × 44 (smallest: 289 × 214), the picture is inside its card and column and ends above `.head`, and the page has no sideways scroll.
+Light and dark give the same sizes in all 123 pairs. In every run: View is 44 high, the picture's button (`.opic`, picture plus View) is at least 44 × 44 (smallest: 289 × 214), the picture is inside its card and column and ends above `.head`, and the page has no sideways scroll.
 
 | Case | 390 | 1280 | 2200 |
 |---|---|---|---|
@@ -59,7 +60,8 @@ Light and dark give the same sizes in all 105 pairs. In every run: View is 44 hi
 | Focus 390 × 220 | 289 × 162 (as today) | 231 × 130 | 231 × 130 |
 | Focus 180 × 120 | 289 × 192 (today 182 × 120) | 231 × 153 | 231 × 153 |
 | Focus 390 × 1300 | 289 × 480, scrolls (today 146 × 480 whole) | 231 × 480, scrolls | 231 × 480, scrolls |
-| Page 390 × 2400 | 289 × 480, scrolls (today 234 × 480) | 231 × 480, scrolls (as today) | 231 × 480, scrolls |
+| Page 390 × 2400, three per row | 289 × 480, scrolls (today 234 × 480) | 231 × 480, scrolls (as today) | 231 × 480, scrolls |
+| Page 390 × 2400 beside a phone, two per row | 289 × 480 and 289 × 622 | 367 × 480, scrolls (today 234 × 480), beside 367 × 790 | as 1280 |
 
 - At 1280 and 2200 the picture row of a three-option card grows by 16px (`.head` from 555 to 571 below the card top); of a two-option card by 310px (555 to 865).
 - The scrollbar gutter measured 10px (`scrollbar-width: thin`), so a scrolling picture is the column less 12: 277 wide at 390.
@@ -75,6 +77,7 @@ Owner grant: yes. Not drawn, and outside this lane. Filling the card does little
 
 - Departs from: `c193-sizes.md` item 3, option A (the 480 cap; option B, fill the card, is now asked). Owner grant: yes, for the pick of item 3. Not blocking.
 - Departs from: `c204-sizes.md` item 6, the 5B ruling (owner, 2026-10-30 14:45 CDT, waiting item 84 pick b): the scroll case drew min(221.8, column) wide. Now it draws the column's width less the gutter. Owner grant: yes. Not blocking.
+- Departs from: `c204-sizes.md` item 1, when a picture scrolls: past a phone's shape (2.16:1), not past 4:1. Owner grant: yes, with the pick of item 3. Not blocking.
 - Departs from: `optPic`'s maxScale 1 (c193 item 3 scope). Owner grant: yes, for item 4. Not blocking.
 
 ## 8. Builder rules
@@ -85,7 +88,7 @@ Owner grant: yes. Not drawn, and outside this lane. Filling the card does little
 - `MIN_PIC` goes: the width is always the card's. `PHONE_H` stays, in F. The 5B width cap min(221.8, …) goes.
 - In both branches, the measured one and the declared-size one, set the width and height from the column, so the first paint already has the size.
 - The c204 acceptance check ("a picture that fits looks as today") turns false by design. Re-point it: a picture that fits is floor(column) wide, or 2 × its width when that is less.
-- `SKILL.md` lines 740–741 and 755 turn false; the builder rewrites them. Line 741: "The page scales it to the card's width. A picture taller than a phone picture at that width scrolls in a 480px box." Line 755: "Either way the picture is scaled to the card's width, at most 2x. It draws whole while it is no taller than a 390 × 844 phone picture at that width; a taller one stays 480px high, scrolls in its box, and opens at the top of what the card shows."
+- `SKILL.md` lines 740–741 ("Add a design" step 1, "The page scales it to the card") and 755 (step 4, the `focus` bullet, "Either way the picture is scaled to fit the card") turn false; the builder rewrites them. Line 741: "The page scales it to the card's width. A picture taller than a phone picture at that width scrolls in a 480px box." Line 755: "Either way the picture is scaled to the card's width, at most 2x. It draws whole while it is no taller than a 390 × 844 phone picture at that width; a taller one stays 480px high, scrolls in its box, and opens at the top of what the card shows."
 
 ## 9. Card pictures for the waiting page
 
@@ -101,4 +104,4 @@ Each `pic-` state draws one figure, 300 wide, with its `data-state` and `id` in 
 
 ## 10. Deep links
 
-`#s=three-phone|two-phone|duo|focus|tall|pic-phone|pic-screen|pic-grow|pic-box|pic-shrink`, `&r=today|phone|screen|grow|box|shrink`, `&up=2|1`, `&w=all|390|1280|2200`, `&t=light|dark`, `&lab=off`, `&hide=<ids>`.
+`#s=three-phone|two-phone|duo|focus|tall|two-tall|pic-phone|pic-screen|pic-grow|pic-box|pic-shrink`, `&r=today|phone|screen|grow|box|shrink`, `&up=2|1`, `&w=all|390|1280|2200`, `&t=light|dark`, `&lab=off`, `&hide=<ids>`.
