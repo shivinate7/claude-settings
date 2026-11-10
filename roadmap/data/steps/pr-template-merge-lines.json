@@ -4,9 +4,9 @@
  "status": "todo",
  "order": 1034,
  "owner": "triage",
- "why": "Retrospective session's pick under rule parallelism-keep-going (reversible), from the owner's 16:20 CST question \"... there is no PR template ... is there something to address here?\".",
- "note": "Add .github/pull_request_template.md with Retire-run: and Drops-lines:, and ship it through skill project-ops. Stops sessions reporting 'no PR template'. Not an owner ruling.",
- "updatedAt": "2026-11-10T16:27:00-06:00",
+ "why": "Owner R15, 16:22 CST Nov 10 (relayed by the retrospective session): \"no pr template: yes that seems like a must have\".",
+ "note": "Add .github/pull_request_template.md with Retire-run: and Drops-lines:, and ship it through skill project-ops. Stops sessions reporting 'no PR template'. Home: decision debt-close-runs-retire. Plan stage 3.1, branch restart-plan commit 1e3f36f63.",
+ "updatedAt": "2026-11-10T16:34:00-06:00",
  "lane": "",
  "blockedBy": []
 }

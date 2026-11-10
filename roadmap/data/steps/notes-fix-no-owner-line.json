@@ -4,9 +4,9 @@
  "status": "todo",
  "order": 1033,
  "owner": "triage",
- "why": "Retrospective session's pick under rule parallelism-keep-going (reversible), from the owner's 16:20 CST question about sessions saying \"fixed my notes\".",
- "note": "Applies to the feedback log and the handoff. guard.log still records it. Builder first confirms a Stop can end with no text. Not an owner ruling; he may overturn it.",
- "updatedAt": "2026-11-10T16:27:00-06:00",
+ "why": "Owner R14, 16:22 CST Nov 10 (relayed by the retrospective session): \"fixed my notes question: yes\".",
+ "note": "Applies to the feedback log and the handoff. guard.log still records it. Builder first confirms a Stop can end with no text. Home: decision guard-remedy-not-to-owner. Plan stage 3.9, branch restart-plan commit 1e3f36f63.",
+ "updatedAt": "2026-11-10T16:34:00-06:00",
  "lane": "",
  "blockedBy": []
 }
