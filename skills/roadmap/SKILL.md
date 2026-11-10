@@ -185,7 +185,7 @@ Triage disposes each stalled step by writing, on the record branch, one of three
 `{"why": "<text>", "decides": "owner" | "coordinator" | "triage", "at": "<ISO time with a zone>", "by":
 "triage"}`.
 A valid `paused` field moves the step off the stalled list and into the page's Paused list. A wrong-shaped `paused` field keeps the
-step stalled and lists it as a bad pause. That means a missing or empty `why`, a `decides` outside the set, an `at`
+step stalled and lists it as a bad pause. That means that a missing or empty `why`, a `decides` outside the set, an `at`
 with no zone, or a `by` other than `triage`. Resume is not stored: a live lane makes the step not stalled.
 
 ## Mockups
@@ -296,6 +296,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
   a summary line. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step;
+- `open step waits on a closed unmerged PR`: an open step whose title, why or note waits on PR #N. A wait is a phrase in `WAIT_ON_PULL_PHRASES` in `build.py`. The word `PR` may sit before `#N`. A `#N` followed by `closed` or `merged` is history, not a wait. The row lists the step when `landedPulls` has a row for #N with `merged` false. It skips #N when `landedPulls` has a `merged` true row for #N, or when #N is an open pull. It also skips #N when the head of its `merged` false row is on main (`head_on_main`, as for the landed rows). A PR closed before the 14-day `landedPulls` window is not seen. Each entry is `<step id> (#N)`. The row reads `unknown (the live file has no landedPulls list)` when the live file has no `landedPulls` key. A live read that is unknown, such as no `--live` file, makes the row unknown too. An empty `landedPulls` list reads none. The fix is to name the step slug it waits on in the step's `blockedBy` list (owner, 2026-11-10 13:10 CST);
 - `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` The instruction is in the Triage bullet of the operating model (skill `project-ops`). A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
 
 ## Cost
@@ -309,9 +310,10 @@ dated-claim row reads the notes already loaded and adds nothing.
 The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
 already reads. They add no process, file, timer or log. The publisher's `createdAt` per pull row comes from the
 GitHub list call it already makes.
-The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The build runs at
-most one `git merge-base` per distinct head of an unmerged row whose branch is an open step. A row with `merged:
-true`, or with no open step, runs no git. They add no file, timer or log.
+The `landedPulls` rows cost the publisher one more GitHub list call (closed pulls) per publish. The closed-pull wait row runs
+one `git merge-base` per closed unmerged PR that an open step waits on, once per build. A closed row no open step
+waits on runs no git for this row. It writes no file. The landed rows add their own `git merge-base` per distinct head of an unmerged
+row whose branch is an open step, and a row with `merged: true` runs no git. They add no file, timer or log.
 The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
 
