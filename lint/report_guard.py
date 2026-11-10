@@ -629,7 +629,7 @@ def done_format_problem(text):
 
 # speak-cite-id-plus-gloss: a record id is `D<digits>`, `decision <digits>`, or a waiting-page item
 # number (`item <n>`, `page item <n>`). `line item <n>` is exempt: it is a PO or budget line, not a page
-# item. A bare `#N` is
+# item. `item 2 of 3` and `item 5 minutes` are counts, not cites. A bare `#N` is
 # NOT read as a record id: a Done line must cite PRs as `#N` (reports-done-format), so the two
 # cannot be told apart. Skipped text: fenced code, inline code, URLs, markdown links. An id
 # carries a gloss when 2 or more words follow it after a separator (`D12, short titles`,
@@ -637,7 +637,9 @@ def done_format_problem(text):
 # (`short titles (D12)`).
 CITE_ID_RE = re.compile(
     r"(?<![\w/.#:$-])(?:D\d{1,4}|[Dd]ecisions?\s+#?\d{1,4}"
-    r"|(?<![Ll]ine )(?:[Pp]age\s+)?[Ii]tems?\s+\d{1,4})(?!\w|\.\d|:[A-Z]\d)")
+    r"|(?<![Ll]ine )(?:[Pp]age\s+)?[Ii]tems?\s+#?\d{1,4}"
+    r"(?!\s+of\s+\d|\s+(?:minutes?|mins?|seconds?|secs?|hours?|days?|times?|lines?|steps?)\b))"
+    r"(?!\w|\.\d|:[A-Z]\d)")
 CITE_SKIP_RE = re.compile(r"```.*?```|`[^`\n]*`|https?://\S+|\[[^\]\n]*\]\([^)\n]*\)", re.S)
 GLOSS_AFTER_RE = re.compile(
     r"""^["')\]]*\s*(?:[,:;(=—–-]|\s-{1,2}\s)\s*\(?[A-Za-z][\w'-]*\s+[\w'-]+"""
