@@ -9,5 +9,5 @@ MERGE_OPTIONS = (
     "--help", "--confirm", "--lane-lint", "--base", "--lint-unknown-ok", "--role", "--unlock",
     "--undo-check-unknown-ok", "--base-red-ok", "--session", "--config", "--idle-lanes", "--live",
     "--reviewed", "--root", "--review-record", "--head", "--kind", "--guard", "--round", "--fix-check",
-    "--net-value",
+    "--grant", "--net-value",
 )
