@@ -600,7 +600,7 @@ def health(repo, extra, where, slug, branch):
 def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
-    Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+    Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
     "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).

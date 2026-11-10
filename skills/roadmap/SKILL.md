@@ -73,7 +73,7 @@ GitHub, so the publisher reads them just before the build and passes one file:
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --block --out FILE
 
     {"readAt": "<ISO time of the reads>",
-     "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+     "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
      "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
      "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
