@@ -5,8 +5,8 @@
  "order": 1040,
  "owner": "triage",
  "why": "Coordinator 16:50 CST Nov 10: #2413 passed the release check at 16:21 CST, then conflicted with #2382 inside batch 74.",
- "note": "Owner of the code: the coordinator's release-check script (step release-check-script).",
- "updatedAt": "2026-11-10T16:56:00-06:00",
+ "note": "Owner of the code: the coordinator's release-check script (step release-check-script). The retrospective session sent the same step at 16:59 CST as release-check-vs-batch.",
+ "updatedAt": "2026-11-10T17:04:00-06:00",
  "lane": "",
  "blockedBy": []
 }
