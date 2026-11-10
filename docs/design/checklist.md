@@ -25,12 +25,12 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-thumb-zone: On each phone layout, can a thumb reach the main input and the main action? (Phone layouts only.)
 - [ ] ux-haptics-feel-substantial: On a device with haptics, does each control that changes a value, such as a slider, stepper or toggle, give a haptic on a change? If not, does the design record say why? (Devices with haptics only.)
 - [ ] ux-works-when-script-fails: With JavaScript off, and with WebGL off, are the content and the main action reachable, or does the page say what is missing and lead on?
-- [ ] ux-lost-scene-recovers: After a forced context loss, does the canvas show words, and does the scene return on restore? (3D pages only.)
-- [ ] ux-still-scene-draws-nothing: After the first frame, while the scene rests, does the count stay 0? It counts `draw*` and `multiDraw*` calls on WebGL, and `GPUQueue.submit` calls on WebGPU. (3D pages only.)
+- [ ] ux-lost-scene-recovers: After a forced context loss, does the canvas show words, and does a WebGL scene return on restore? A WebGPU scene needs the words only. (3D pages only.)
+- [ ] ux-still-scene-draws-nothing: After the first frame, while the scene rests, does the count stay 0? It counts `draw*` and `multiDraw*` calls on WebGL, including those on the object `getExtension` returns for `WEBGL_multi_draw`, and `GPUQueue.submit` calls on WebGPU. (3D pages only.)
 - [ ] ux-canvas-has-words: Does each canvas that carries information have a name, a text equivalent and keyboard acts? Is each other canvas hidden from assistive technology, with aria-hidden="true" in the DOM?
 - [ ] ux-scroll-stays-native: Do the wheel, trackpad, Space, Page Down and arrow keys each move the page by their usual step, with no section that holds the scroll? A modal's own scroll area, kept inside it with `overscroll-behavior`, passes.
 - [ ] ux-forced-colors-hold: In forced-colors mode, do each control, edge, focus ring and state show?
-- [ ] ux-full-height-fits: Does each `vh` value in the changed CSS have an `svh` or `dvh` declaration on the same property, after the `vh` line?
+- [ ] ux-full-height-fits: Does each `vh` or `lvh` value in the changed CSS, found with `grep -E '[0-9]l?vh'`, have an `svh` or `dvh` declaration on the same property, after it?
 - [ ] ux-vitals-measured: In a mobile lab trace, are LCP, INP (or Total Blocking Time) and CLS "good"? Where field data at the 75th percentile exists, is it "good" too?
 - [ ] ux-feature-baseline-or-fallback: Does each new feature that the browser target does not cover sit behind a feature test, with a fallback seen working?
 - [ ] ux-text-zooms (guidance): At 200% zoom and a larger browser default font size, does web text grow and lose no content?
