@@ -747,8 +747,10 @@ def _resolve_into(cmd: str, table: dict, depth: int = 0):
 _PRINTERS = frozenset(("echo", "printf", "cat", "grep", "wc", "jq"))
 _QUIET = _PRINTERS | {"cd", "set-location"}
 _MESSAGE_FLAGS = {"git": ("-m", "--message", "-F"), "gh": ("--title", "--body", "-t", "-b")}
+# gh runs no shell over a comment or review body, so a `>` quoted in it is text (rule building-scanner-respects-strings).
 _GH_MESSAGE_CALLS = frozenset((
-    ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
+    ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit"),
+    ("pr", "comment"), ("issue", "comment"), ("pr", "review")))
 _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
 # PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
 _SMART_QUOTES = frozenset(PS_DOUBLE_QUOTES + PS_SINGLE_QUOTES)
