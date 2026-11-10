@@ -2915,12 +2915,15 @@ path_case4_cloud() {
   out2=$(run_path_install "$co" "$h" "$cfg" /bin/bash --cloud); rc2=$?
   b2=$(cat "$h/.bashrc"); z2=$(cat "$h/.zshrc")
   m1=$(grep -cF "$PATH_MARK" "$h/.bashrc"); l1=$(grep -cF "$PATH_LINE" "$h/.bashrc")
+  # The block now sits above the original lines, so its position is path5_top's check. Here: drop the block, keep the rest.
+  kept_b=$(grep -vxF "$PATH_MARK" "$h/.bashrc" | grep -vxF "$PATH_LINE" | grep -v '^$')
   # Scenario 2: CLAUDE_CODE_REMOTE=true under SHELL=/usr/bin/zsh, no install argument, run twice.
   out3=$(run_path_install "$co" "$h" "$cfg" /usr/bin/zsh "" CLAUDE_CODE_REMOTE=true); rc3=$?
   z3=$(cat "$h/.zshrc")
   out4=$(run_path_install "$co" "$h" "$cfg" /usr/bin/zsh "" CLAUDE_CODE_REMOTE=true); rc4=$?
   b4=$(cat "$h/.bashrc"); z4=$(cat "$h/.zshrc")
   m2=$(grep -cF "$PATH_MARK" "$h/.zshrc"); l2=$(grep -cF "$PATH_LINE" "$h/.zshrc")
+  kept_z=$(grep -vxF "$PATH_MARK" "$h/.zshrc" | grep -vxF "$PATH_LINE" | grep -v '^$')
   # Scenario 3: an empty home (no rc file yet), CLAUDE_CODE_REMOTE=true under SHELL=/usr/bin/zsh.
   h3=$(new_home); cfg3="$h3/.claude-cfg"
   if [ -e "$h3/.bashrc" ] || [ -e "$h3/.zshrc" ]; then
@@ -2931,12 +2934,12 @@ path_case4_cloud() {
   if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then bad "$name" "--cloud under bash: install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
   elif [ "$z2" != "# my zshrc" ]; then bad "$name" "--cloud under bash changed ~/.zshrc"
   elif [ "$m1" != 1 ] || [ "$l1" != 1 ]; then bad "$name" "--cloud under bash: ~/.bashrc holds $m1 marks and $l1 export lines, expected 1 and 1"
-  elif [ "$(head -1 "$h/.bashrc")" != "# my bashrc" ]; then bad "$name" "--cloud under bash: ~/.bashrc lost its existing content"
+  elif [ "$kept_b" != "# my bashrc" ]; then bad "$name" "--cloud under bash: the original ~/.bashrc lines are not kept in order"
   elif [ "$b2" != "$b1" ]; then bad "$name" "--cloud under bash: a second run changed ~/.bashrc"
   elif [ $rc3 -ne 0 ] || [ $rc4 -ne 0 ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: install.sh exited rc3=$rc3 rc4=$rc4: $out3 / $out4"
   elif [ "$b4" != "$b2" ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh changed ~/.bashrc"
   elif [ "$m2" != 1 ] || [ "$l2" != 1 ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: ~/.zshrc holds $m2 marks and $l2 export lines, expected 1 and 1"
-  elif [ "$(head -1 "$h/.zshrc")" != "# my zshrc" ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: ~/.zshrc lost its existing content"
+  elif [ "$kept_z" != "# my zshrc" ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: the original ~/.zshrc lines are not kept in order"
   elif [ "$z4" != "$z3" ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: a second run changed ~/.zshrc"
   elif [ $rc5 -ne 0 ]; then bad "$name" "empty home, CLAUDE_CODE_REMOTE=true under zsh: install.sh exited $rc5: $out5"
   elif [ -e "$h3/.bashrc" ]; then bad "$name" "empty home, CLAUDE_CODE_REMOTE=true under zsh: wrote ~/.bashrc"
