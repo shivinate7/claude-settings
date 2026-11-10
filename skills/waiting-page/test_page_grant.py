@@ -10,8 +10,8 @@ The checker reads only what a session fetched with ArtifactData (DIR/answers/<ID
 repo's extras file (its "artifacts" registry, read by lint/layout.py). Relay text is never an input. Each case builds
 its own fixture under this run's folder, so no fixture file is checked in.
 
-Verdict, one line on stdout:
-  counted item=<ID> n=<n> choice=<choice> at=<at> [note=<json string>]   exit 0
+Verdict, one line on stdout. A counted line is page_grant.COUNTED_LINE with its fields filled in, plus
+note=<json string> when the answer has a note (exit 0).
   not counted: <reason>                                                  exit 1
   unknown: <reason>                                                      exit 2 (no readable registry, a fetched file not one JSON object)
 The rules are SKILL.md "Read the answers" ("A decision answer is clear only when") and "Route and close".
@@ -231,30 +231,31 @@ class Counted(Base):
         self.assertCounted(r, verdict("overturn"))
 
     def test_open_item_with_lane_set_counted(self):
-        """The relay case: a lane took the answer, so the item is still open with its lane set. Green on the old code too."""
+        """The relay case: a lane took the answer, so the item is still open with its `lane` set. The checker counts it."""
         r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay"}), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_open_item_with_lane_and_last_answer_and_answer_kept_counted(self):
         """The answer is kept until the receiver reports done: the item is open with `lane` and `lastAnswer` set, and
-        answers/<id> is still there. Counted on the relayed pick. Green on the old code too: the checker never reads those two fields."""
+        answers/<id> is still there. Counted on the relayed pick: the checker never reads `lane` or `lastAnswer`."""
         last = {"choice": "a", "note": "", "at": AT}
         r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay", "lastAnswer": last}), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_item_with_no_status_field_counted(self):
-        """An item with no `status` field at all is open, as the page reads it. Red on a checker whose default status is closed."""
+        """An item with no `status` field at all is open, as the page reads it. A checker that read a missing status
+        as closed would refuse this answer."""
         r = self.check(self.repo(), self.pair(item_fields={"status": ABSENT}), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_closed_arbiter_ruling_overturn_counted(self):
-        """An arbiter ruling is written closed; its overturn still counts. Green on the old code too."""
+        """An arbiter ruling is written closed; its overturn still counts."""
         r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "arbiter": True},
                                               answer_fields={"choice": "overturn"}), pick="overturn")
         self.assertCounted(r, verdict("overturn"))
 
     def test_added_with_explicit_offset_counted(self):
-        """06:00 at -06:00 is 12:00Z, so the answer at 13:56Z is still later. Green on the old code too."""
+        """06:00 at -06:00 is 12:00Z, so the answer at 13:56Z is still later."""
         r = self.check(self.repo(), self.pair(item_fields={"added": "2026-11-04T06:00:00-06:00"}), pick="a")
         self.assertCounted(r, verdict("a"))
 
@@ -422,7 +423,7 @@ class NotCounted(Base):
         self.assertNotCounted(r, "decision run with no --pick", reason="pick")
 
     def test_task_with_done_not_counted(self):
-        """Re-pointed from the task-done case that counted: a task answer grants no act, done or not."""
+        """A task answer grants no act, even with done set true."""
         r = self.check(self.repo(), self.pair(item_fields={"kind": "task", "options": []},
                                               answer_fields={"choice": ABSENT, "done": True}), pick="done")
         self.assertNotCounted(r, "task answer with done true", reason="task")
