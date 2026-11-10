@@ -5,13 +5,14 @@ lint/layout.json holds the kinds. A repo adds its own kinds in its extras file (
 extra kind may not replace a layout kind. The mark that the repo has rolled out to the layout is
 its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
-("waiting-page", "waiting-page-colour", "waiting-page-icon", "kind", "caution", "visibility",
+("waiting-page", "waiting-page-colour", "waiting-page-icon", "waiting-page-writer", "kind", "caution", "visibility",
 "devices", "shared-resources", "roadmap", "record-branch", "artifacts") read whenever the file exists (`has_extras()`). The
 "artifacts" key is the registry of the claude.ai artifacts the repo holds (`artifacts()`, decision waiting-data-in-repo).
 The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page), the fallback after
 the registry entry whose role is "waiting-page";
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
-branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). The "record-branch" key
+branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). "waiting-page-writer" is the session id
+of the page's writer (`waiting_page_writer()`, read by the pick guard in lint/report_guard.py). The "record-branch" key
 names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
 `set_waiting_page()` writes the "waiting-page" key once, for triage; it never writes "rolled-out".
 
@@ -436,6 +437,14 @@ def record_branch(root):
 
 WAITING_PAGE_COLOUR = "waiting-page-colour"  # the extras key: the page's colour, #rrggbb
 WAITING_PAGE_ICON = "waiting-page-icon"  # the extras key: the page's icon file, a path inside the repo
+WAITING_PAGE_WRITER = "waiting-page-writer"  # the extras key: the session id of the page's writer
+
+
+def waiting_page_writer(root):
+    """The session id of the waiting page's writer from the extras file of `root`; None when the key is missing,
+    null, empty or not a string. A session id is a claim, not checked here."""
+    found = _repo_keys(root).get(WAITING_PAGE_WRITER)
+    return found if isinstance(found, str) and found else None
 
 
 def waiting_page_colour(root):
