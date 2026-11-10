@@ -13560,7 +13560,7 @@ class ReviewRecordRules(unittest.TestCase):
 
 class ReviewFixRules(unittest.TestCase):
     """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL counts as the next
-    round: open, with the why naming that round, and after the last allowed round held, whatever the net value. A WIDE is open with the new-lane why
+    round: open, with the why naming that round. A FAIL counted as the last allowed round holds, whatever the net value. A WIDE is open with the new-lane why
     and counts no round. A PASS counts as the round it follows passing. When that round is the first or the second allowed one, the record is done
     whatever that round's verdict, and owes no net value yet. A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the
     why names the design reviewer. On the last allowed round the fix check keeps the net value that round gave, and does not settle a net
@@ -13603,11 +13603,21 @@ class ReviewFixRules(unittest.TestCase):
         self.assertEqual(why, "the fix check failed, so it counts as round 2; the next record carries Round 2",
                          f"the why does not name round 2: {why!r}")
 
-    def test_a_fix_fail_after_round_two_names_round_three(self):
+    def test_a_fix_fail_after_round_two_counts_as_round_three_and_holds(self):
+        # a FAIL fix check that counts as round 3 holds the change, as a round-3 FAIL does (decision hold-unsafe-after-round-3)
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
-        self.assertEqual(state, "open", "a failed fix check must not read done")
-        self.assertEqual(why, "the fix check failed, so it counts as round 3; the next record carries Round 3",
-                         f"the why does not name round 3: {why!r}")
+        self.assertEqual(state, "held", f"a failed fix check that counts as round 3 must read held, not {state}: {why!r}")
+        self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held fix check is not the new-lane why: {why!r}")
+
+    def test_a_fix_fail_that_counts_as_round_three_after_a_round_two_pass_is_held(self):
+        # round 1 FAIL and round 2 PASS, then a fix check FAIL: the fix FAIL counts as round 3, so it holds whatever the guard or net value.
+        # Its control is test_a_fix_fail_after_round_one_names_round_two, the same FAIL one round earlier, which stays open
+        for guard, net in (("no", "not owed"), ("yes", "not owed"), ("yes", "zero"), ("yes", "positive")):
+            with self.subTest(guard=guard, net=net):
+                state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"),
+                                       guard=guard, net=net)
+                self.assertEqual(state, "held", f"a fix FAIL counted as round 3 (guard {guard}, net {net}) read {state}, not held: {why!r}")
+                self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held fix check is not the new-lane why: {why!r}")
 
     def test_a_wide_fix_is_open_and_says_new_lane_at_round_one(self):
         # a WIDE fix never reads done, whatever the rounds and net value say, and its why names a new lane at the first round
@@ -14055,6 +14065,31 @@ class ReviewFixBase(ReviewEnv):
                 self.assertEqual(rc, 0, f"control: the record after {label} with no fix line was refused:\n" + out + err)
                 self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS"))
 
+    def counted_round_three_chain(self):
+        """-> (earlier, failed): an earlier record that passed round 1, then the record whose round 1 FAIL and round 2 PASS sit under a fix check FAIL.
+        That fix FAIL counts as round 3, so a second fix check has no round left to count as."""
+        earlier = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        failed = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"),
+                                                  fix=(fix_check_line(verdict="FAIL", head=self.EARLIER_HEAD),)))
+        return earlier, failed
+
+    def test_a_second_fix_check_is_refused_when_the_failed_fix_check_counts_as_round_three(self):
+        # the newest earlier record's fix FAIL counts as round 3, so a second fix check is refused and names the fix line. Its control is the next case
+        earlier, failed = self.counted_round_three_chain()
+        rc, out, err = self.chain((earlier, failed), ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS", "3:reviewer:opus:FAIL"),
+                                  self.fix_arg(REVIEW_OLD_HEAD, "PASS"))
+        self.assert_refused(rc, out, err)
+        self.assertIn("Fix check line", err, f"the refusal does not name the fix line on the newest record:\n" + err)
+
+    def test_the_round_three_record_with_no_second_fix_check_prints(self):
+        # control: the same round-3 record with no fix check prints, so the refusal above is the fix check's and not the rounds'
+        earlier, failed = self.counted_round_three_chain()
+        rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no",
+                                     "--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:PASS", "--round", "3:reviewer:opus:FAIL",
+                                     host=self.record_host(earlier, failed))
+        self.assertEqual(rc, 0, "control: the round-3 record with no fix check was refused:\n" + out + err)
+        self.assertIn("Round 3: reviewer, opus, FAIL", posted_body(self, out).splitlines())
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
@@ -14307,6 +14342,29 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.pr_listing(first, record_text(rounds=self.TWO_ROUNDS_PASS + ("Round 3: reviewer, opus, FAIL",)))
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} held: {REVIEW_HELD_WHY}; CI "), out)
+
+    PROBE_SECOND_ROUNDS = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, FAIL")
+
+    def test_a_second_fix_check_after_a_counted_round_three_fail_does_not_read_done(self):
+        # the probe: the first record's fix FAIL counts as round 3, and a second record with a round-3 FAIL, a fix PASS, guard yes and a positive
+        # net value must not read done. It is posted by hand, so only the read can refuse it. Both records must parse, or the line reads bad
+        first = record_text(head=self.EARLIER_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"),
+                            fix=(fix_check_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        second = record_text(rounds=self.PROBE_SECOND_ROUNDS, guard="yes", net="positive", fix=(fix_check_line(verdict="PASS", head=self.EARLIER_HEAD),))
+        self.assertIsNotNone(review_fn(self, "parse_review")(first), "the probe's first record does not parse, so the case tests nothing")
+        self.assertIsNotNone(review_fn(self, "parse_review")(second), "the probe's second record does not parse, so the case tests nothing")
+        host, rc, out, err = self.pr_listing(first, second)
+        self.assertEqual(rc, 0, out + err)
+        self.assertFalse(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: "),
+                         f"the probe reads done: a second fix check after a counted round-3 FAIL cleared the hold:\n{out}")
+
+    def test_the_second_record_reads_done_after_a_first_with_no_failed_fix_check(self):
+        # control: the same second record after a first record with no fix check reads done, so a fix PASS after a round-3 FAIL still clears the hold
+        first = record_text(head=self.EARLIER_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))
+        second = record_text(rounds=self.PROBE_SECOND_ROUNDS, guard="yes", net="positive", fix=(fix_check_line(verdict="PASS", head=self.EARLIER_HEAD),))
+        host, rc, out, err = self.pr_listing(first, second)
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: "), f"the control did not read done:\n{out}")
 
     def test_a_failed_round_stays_failed_until_a_newer_record_reaches_a_later_round_or_passes_a_fix(self):
         # G1: an earlier record whose last round N is uncleared (a FAIL or PARTIAL line, or a fix check FAIL or WIDE, and no fix check PASS) holds
