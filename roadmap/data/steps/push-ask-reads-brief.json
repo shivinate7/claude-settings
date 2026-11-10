@@ -1,11 +1,11 @@
 {
   "title": "A test-author's or builder's push asks when its brief names no branch to push to",
   "why": "The test-author of lane comment-check-scans-shell pushed branch shell-tests-2 to origin unasked (01:19 CST Nov 8). The name is not agent-<hex>, so step push-agent-branch-asks, which keys on the name, misses it. An ask on the role alone would false-alarm on every briefed push (lane push-head-upstream-name, 01:37 CST).",
-  "note": "Fix: a push by a test-author or builder asks only when its spawn brief names no destination branch. Red case first: the shell-tests-2 push with a brief that names none; control: a push to the branch the brief names. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:42 CST Nov 8. Lane session_013NEJKzHURrN9PNYKYoXWNg started it (coordinator, 01:47 CST Nov 8). Ready as draft #1896 (d09cba6ad), stacked on #1833, with runner 8 (lane, 04:29 CST Nov 8). Open findings are notes push-unbriefed-* in docs/debts/notes.md.",
+  "note": "Fix: a push by a test-author or builder asks only when its spawn brief names no destination branch. Red case first: the shell-tests-2 push with a brief that names none; control: a push to the branch the brief names. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:42 CST Nov 8. Lane session_013NEJKzHURrN9PNYKYoXWNg started it (coordinator, 01:47 CST Nov 8). Ready as draft #1896 (d09cba6ad), stacked on #1833, with runner 8 (lane, 04:29 CST Nov 8). Open findings are notes push-unbriefed-* in docs/debts/notes.md. Doing  CST Nov 10: open PR #1896 on branch push-ask-reads-brief (triage live build).",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 560,
   "owner": "triage",
   "lane": "session_013NEJKzHURrN9PNYKYoXWNg",
-  "updatedAt": "2026-11-08T04:30:00-06:00"
+  "updatedAt": "2026-11-10T05:57:00-06:00"
 }

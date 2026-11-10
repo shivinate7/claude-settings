@@ -1,11 +1,11 @@
 {
   "title": "Lane lint checks each handed PR against every other open PR of the same lane, and fails on a conflict",
   "why": "Two PRs from one lane can each pass against their own base and still conflict with each other once a batch takes both.",
-  "note": "Coordinator, 02:23 CST Nov 9. Incident: #1923 and #2112 (lane review-record-provenance) were both released to batch 68 and conflict in 4 files; each was measured only against its own base. Home: `merge --lane-lint`, extending step lane-lint-stack-holds-base's code (git merge-tree against each other open PR of the same lane session). Starts after lane-lint-stack-holds-base. Unassigned; the coordinator queues it.",
+  "note": "Coordinator, 02:23 CST Nov 9. Incident: #1923 and #2112 (lane review-record-provenance) were both released to batch 68 and conflict in 4 files; each was measured only against its own base. Home: `merge --lane-lint`, extending step lane-lint-stack-holds-base's code (git merge-tree against each other open PR of the same lane session). Starts after lane-lint-stack-holds-base. Unassigned; the coordinator queues it. Doing  CST Nov 10: open PR #2410 on branch stack-cross-measure (triage live build).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "",
-  "status": "todo",
+  "status": "doing",
   "order": 887,
-  "updatedAt": "2026-11-09T02:22:00-06:00"
+  "updatedAt": "2026-11-10T05:57:00-06:00"
 }

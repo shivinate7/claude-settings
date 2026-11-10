@@ -2,10 +2,10 @@
   "title": "The integration-PR builder copies each lane's Retire-run and Drops-lines lines into the batch body",
   "order": 262.1,
   "why": "CI reads only the integration PR's body, and a body edit does not re-run CI, so a lane's lines that stay on its own PR are never read.",
-  "note": "Stacked on #1712 (silent-undo-ci-body). Filed from the coordinator, 19:26 CST Nov 7. Built as draft #1743 (round 2 PASS); the lane handed it to runner 8 (coordinator 20:58 CST: all of its PRs are handed off). PR mapping read from the PR titles and bodies, 20:59 CST Nov 7.",
+  "note": "Stacked on #1712 (silent-undo-ci-body). Filed from the coordinator, 19:26 CST Nov 7. Built as draft #1743 (round 2 PASS); the lane handed it to runner 8 (coordinator 20:58 CST: all of its PRs are handed off). PR mapping read from the PR titles and bodies, 20:59 CST Nov 7. Doing  CST Nov 10: open PR #1743 on branch retire-lines-to-batch-body (triage live build).",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "owner": "coordinator",
   "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
-  "updatedAt": "2026-11-07T20:59:00-06:00"
+  "updatedAt": "2026-11-10T05:57:00-06:00"
 }

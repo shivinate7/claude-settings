@@ -1,10 +1,10 @@
 {
   "title": "The owner can reply to Claude's reply on a page question",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 103.3692,
   "why": "Today he must edit his old answer to answer back.",
-  "note": "Owner on item 278, 12:58 CST Nov 6: \"there was no way to reply to ur response i had to just edit the question and my old response so that needs a fix too\". Asks have a reply box since #1248 (step ask-reply-back); items have none. Changes a screen, so a designer goes first. Pairs with step page-reply-uncollapse. Lane started 12:10 CST Nov 7 (session_013NEJL1kQxGCtbbcv6xGfeE) after page-reply-uncollapse merged. Built in #1425 (head 34b008cb4), with runner 8 to merge (coordinator, 13:57 CST Nov 7).",
-  "updatedAt": "2026-11-07T13:57:00-06:00",
+  "note": "Owner on item 278, 12:58 CST Nov 6: \"there was no way to reply to ur response i had to just edit the question and my old response so that needs a fix too\". Asks have a reply box since #1248 (step ask-reply-back); items have none. Changes a screen, so a designer goes first. Pairs with step page-reply-uncollapse. Lane started 12:10 CST Nov 7 (session_013NEJL1kQxGCtbbcv6xGfeE) after page-reply-uncollapse merged. Built in #1425 (head 34b008cb4), with runner 8 to merge (coordinator, 13:57 CST Nov 7). Doing  CST Nov 10: open PR #1425 on branch item-reply-back (triage live build).",
+  "updatedAt": "2026-11-10T05:57:00-06:00",
   "lane": "session_013NEJL1kQxGCtbbcv6xGfeE"
 }

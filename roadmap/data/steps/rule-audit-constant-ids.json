@@ -1,11 +1,11 @@
 {
   "title": "rule_audit resolves module-level string constants and scans hooks/call_judge.py",
-  "note": "PR 4 stacked on #1431. Built in #1446 (coordinator, 14:15 CST Nov 7).",
+  "note": "PR 4 stacked on #1431. Built in #1446 (coordinator, 14:15 CST Nov 7). Doing  CST Nov 10: open PR #1446 on branch rule-audit-constant-ids (triage live build).",
   "lane": "session_013NEJKzQsAzQkvsohtkLuJP",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 0.8,
   "owner": "coordinator",
   "why": "Coordinator, 13:50 CST Nov 7.",
-  "updatedAt": "2026-11-07T14:14:00-06:00"
+  "updatedAt": "2026-11-10T05:57:00-06:00"
 }

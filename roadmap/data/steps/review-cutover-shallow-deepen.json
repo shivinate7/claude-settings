@@ -1,11 +1,11 @@
 {
   "title": "The --reviewed cutover deepens a shallow clone before it stops",
   "why": "Coordinator 12:51 CST Nov 8, from #1923 round 3: a depth-50 cloud clone stops --reviewed about 4 days after #1923 merges, because the cutover commit falls out of the history. Deepen before stopping.",
-  "note": "",
+  "note": " Doing  CST Nov 10: open PR #2242 on branch review-cutover-shallow-deepen (triage live build).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKzUe9U19voH62VbCNA",
-  "status": "todo",
+  "status": "doing",
   "order": 794,
-  "updatedAt": "2026-11-08T12:51:00-06:00"
+  "updatedAt": "2026-11-10T05:57:00-06:00"
 }

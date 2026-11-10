@@ -1,10 +1,10 @@
 {
   "title": "Before create_session starts a lane, a check refuses or asks when its step or named failure overlaps an open lane",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 0.14,
   "owner": "coordinator",
   "why": "Coordinator, 14:01 CST Nov 7. Incident: lane qmax-main-map-ts (13:59 CST) duplicated lane qmax-map-format-skew (13:45 CST) on q_max's MAP1-MAP10 failures. Triage caught it by hand.",
-  "note": "Triage found no home that does this today (14:02 CST). The nearest home is the guard's lane-one-topic rule in hooks/guard.py, which already reads a lane's cs-step tags from the transcript. Extend that home rather than build a second one (rule building-one-home-per-capability). Done check: a red test where a create_session with a cs-step tag that an open lane already holds is refused.",
-  "updatedAt": "2026-11-07T14:00:00-06:00"
+  "note": "Triage found no home that does this today (14:02 CST). The nearest home is the guard's lane-one-topic rule in hooks/guard.py, which already reads a lane's cs-step tags from the transcript. Extend that home rather than build a second one (rule building-one-home-per-capability). Done check: a red test where a create_session with a cs-step tag that an open lane already holds is refused. Doing  CST Nov 10: open PR #1523 on branch lane-start-overlap-check (triage live build).",
+  "updatedAt": "2026-11-10T05:57:00-06:00"
 }

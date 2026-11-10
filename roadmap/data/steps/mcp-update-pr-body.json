@@ -1,11 +1,11 @@
 {
   "title": "The MCP update_pull_request body and title run the same checks as create",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 50,
   "owner": "coordinator",
   "lane": "session_013NEJL1BcjeYCubrQhUmWKz",
   "why": "The cite-by-id and lane-by-slug checks read a PR body and title at create only, so an MCP update_pull_request skips them.",
-  "note": "Stacked on #1680. Topic guard-coverage. From lane mcp-tools-in-guard-matcher on the coordinator's word, 18:57 CST Nov 7. Built as #1700, with runner 8; docs PRs #1693 and #1694 (coordinator 19:08 CST).",
-  "updatedAt": "2026-11-07T19:13:00-06:00"
+  "note": "Stacked on #1680. Topic guard-coverage. From lane mcp-tools-in-guard-matcher on the coordinator's word, 18:57 CST Nov 7. Built as #1700, with runner 8; docs PRs #1693 and #1694 (coordinator 19:08 CST). Doing  CST Nov 10: open PR #1700 on branch mcp-update-pr-body (triage live build).",
+  "updatedAt": "2026-11-10T05:57:00-06:00"
 }
