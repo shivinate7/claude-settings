@@ -1824,7 +1824,7 @@ class BatchLane(LaneFixture):
         self.assert_lint_route(out)
 
     def test_an_unknown_that_main_also_has_refuses_without_the_lint_unknown_flag(self):
-        # ruling "No silent pass" (2026-11-07 13:20 CST): an unknown refuses unless --lint-unknown-ok, on main too
+        # An unknown is never a silent pass: it refuses unless --lint-unknown-ok is given, even when main has the same unknown.
         self.push_branch_of(BATCH_LANE)
         self.use_routed_ci_job(FULL_UNKNOWN, base_full=FULL_UNKNOWN)
         rc, out = self.run_lane("--lane-lint", BATCH_LANE)
@@ -1835,7 +1835,7 @@ class BatchLane(LaneFixture):
                         "the unknown that main also has is not named 'unknown on main too'\n" + out)
 
     def test_an_unknown_that_main_also_has_passes_with_the_lint_unknown_flag_and_the_lift_is_printed(self):
-        # ruling "No silent pass" (2026-11-07 13:20 CST): the lift is logged with its reason, and no PASS line prints
+        # A lifted unknown is logged once with its reason, and no PASS line prints for it, so the lift never reads as a pass.
         self.push_branch_of(BATCH_LANE)
         self.use_routed_ci_job(FULL_UNKNOWN, base_full=FULL_UNKNOWN)
         reason = "shellcheck is not on this box"
