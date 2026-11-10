@@ -32,7 +32,7 @@ The upkeep list also names each step marked doing or active that has no live lan
 pull request, so triage can set it back (step roadmap-matches-lanes). A step is live when a session in
 the live file's "sessions" list is not archived (any other status counts) and carries both
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
-branch equals the step id or lane/<step id>, or when the step's own `lane` field names the id of such a live session. The step id matches exactly; the GitHub name ignores case. A session row
+branch equals the step id or lane/<step id>, or when the step's own `lane` field names the id of a live session of this repo that carries cs-build:lane. The step id matches exactly; the GitHub name ignores case. A session row
 with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
 account-wide and step ids repeat across repos. A step whose status is none of todo, ready, doing, active or
 done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
