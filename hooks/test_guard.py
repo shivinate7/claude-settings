@@ -112,7 +112,7 @@ FAMILIES = {
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
-    "records-page-ready": "a ready pull request whose head holds a stale records page is refused, on the MCP draft:false call and on gh pr ready in each form; a current, non-default, claim-holding, behind-the-base, empty, undo, draft, title-only or non-merge-tool call is allowed; a read that cannot run is refused unknown",
+    "records-page-ready": "a ready pull request whose head holds a stale records page is refused, on the MCP draft:false call and on gh pr ready in each form; a current, non-default, claim-holding, behind-the-base, empty, undo, draft, title-only or non-merge-tool call is allowed; a read that cannot run, or an ancestry unknown in a shallow clone, is refused unknown, and the unknown reason names no --confirm",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
     "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
@@ -14795,6 +14795,11 @@ GHREADY_BAD = os.path.join(RPR, "gh-bad")          # feat-bad: a record the gene
 GHREADY_HANG = os.path.join(RPR, "gh-hang")        # feat-stale, every answer delayed past any read deadline
 GHREADY_COUNT = os.path.join(RPR, "gh-count")      # feat-stale, one log line per gh call
 GHREADY_PLAIN = os.path.join(RPR, "gh-plain")      # feat-stale, for the repo that does not use the merge tool
+RPR_SHALLOW = os.path.join(RPR, "shallow")         # a shallow clone of origin: it holds main's tip and cuts feat-behind's path to it
+RPR_SHALLOW_WT = os.path.join(RPR, "shallow-wt")   # a worktree of that clone at feat-behind, for the scope read in the fixture
+GHREADY_SHALLOW = os.path.join(RPR, "gh-shallow")  # feat-behind in RPR_SHALLOW: the ancestry is unknown, so the ready mark is refused
+GHREADY_SHALLOW_NAMED = os.path.join(RPR, "gh-shallow-named")  # the same, and every call must name repos/y/x
+RPR_UNKNOWN_LACKS = ("--confirm", "merge <pr>", "merge 12")  # the unknown reason names no merge command: it says to retry, or to draft first
 
 
 def _rpr_git(where, *args):
@@ -14878,6 +14883,23 @@ def _build_ready_page():
     make_fake_gh(GHREADY_EMPTY, "main", head_sha=head("feat-empty"), head_ref="feat-empty", draft=True)
     make_fake_gh(GHREADY_BAD, "main", head_sha=head("feat-bad"), head_ref="feat-bad", draft=True)
 
+    # The unknown ancestry: a shallow clone holds main's tip and cuts the path from feat-behind to it, so the read
+    # answers None, never False (testing/shallow_clone.py, the one shallow fixture). Scope first, in the clone and in a worktree.
+    error = shallow_clone.make(RPR_ORIGIN, RPR_SHALLOW, head("main"))
+    _rpr_need(not error, "the shallow fixture could not be built: " + error)
+    _rpr_git(RPR_SHALLOW, "fetch", "origin", "+refs/heads/feat-behind:refs/remotes/origin/feat-behind")
+    behind = head("feat-behind")
+    facts = shallow_clone.facts(RPR_SHALLOW, head("main"), behind)
+    _rpr_need(facts["shallow"] and facts["pin_present"] and facts["ancestor_rc"] == 1,
+              "the shallow clone does not reach the unknown shape: %r" % (facts,))
+    _rpr_git(RPR_SHALLOW, "worktree", "add", "--detach", RPR_SHALLOW_WT, behind)
+    _rpr_need(_load_git_reads().branch_is_ancestor(RPR_SHALLOW_WT, behind, "refs/remotes/origin/main") is None,
+              "the worktree's ancestry read is not unknown")
+    _rpr_git(RPR_SHALLOW, "worktree", "remove", "--force", RPR_SHALLOW_WT)
+    behind_pr = dict(head_sha=behind, head_ref="feat-behind", draft=True)
+    make_fake_gh(GHREADY_SHALLOW, "main", **behind_pr)
+    make_fake_gh(GHREADY_SHALLOW_NAMED, "main", need=["y/x"], **behind_pr)
+
 
 lazy_fixture([RPR], _build_ready_page)
 
@@ -14892,9 +14914,9 @@ def rpr_bash(name, command, expected, fake, cwd=RPR_REPO, tool="Bash", carries=(
        env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks)
 
 
-def rpr_mcp(name, expected, fake, carries=(), lacks=(), **tool_input):
+def rpr_mcp(name, expected, fake, carries=(), lacks=(), cwd=RPR_REPO, **tool_input):
     add(name, expected, rule=RPR_RULE if expected == "deny" else None, tool="mcp__github__update_pull_request",
-        cwd=RPR_REPO, env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks, **tool_input)
+        cwd=cwd, env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks, **tool_input)
 
 
 RPR_STALE_LACKS = ("unknown",)  # a stale refusal names the page, never an unread
@@ -14915,11 +14937,18 @@ rpr_bash("records-page-ready: gh pr ready 12 -R y/x on a stale page is refused",
          GHREADY_NAMED, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
 rpr_bash("records-page-ready: a PowerShell gh pr ready 12 on a stale page is refused", "gh pr ready 12", "deny",
          GHREADY_STALE, tool="PowerShell", carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
-# Refused unknown: the read cannot run, so the rule cannot clear the head.
+# Refused unknown: the read cannot run, so the rule cannot clear the head. The unknown reason names no merge command
+# (RPR_UNKNOWN_LACKS): a ready mark that is already set would be merged by the --confirm it names.
 rpr_bash("records-page-ready: a page the generator refuses is refused unknown", "gh pr ready 12", "deny", GHREADY_BAD,
-         carries=("unknown",))
+         carries=("unknown",), lacks=RPR_UNKNOWN_LACKS)
 rpr_bash("records-page-ready: a read that never answers is refused unknown", "gh pr ready 12", "deny", GHREADY_HANG,
-         carries=("unknown",))
+         carries=("unknown",), lacks=RPR_UNKNOWN_LACKS)
+# An unknown ancestry (merge-base reads None in a shallow clone) is unknown, not off main: the ready mark is refused, on both forms.
+rpr_bash("records-page-ready: gh pr ready 12 with an unknown ancestry in a shallow clone is refused unknown", "gh pr ready 12",
+         "deny", GHREADY_SHALLOW, cwd=RPR_SHALLOW, carries=("unknown",), lacks=RPR_UNKNOWN_LACKS)
+rpr_mcp("records-page-ready: MCP draft false with an unknown ancestry in a shallow clone is refused unknown", "deny",
+        GHREADY_SHALLOW_NAMED, cwd=RPR_SHALLOW, carries=("unknown",), lacks=RPR_UNKNOWN_LACKS,
+        owner="y", repo="x", pullNumber=12, draft=False)
 # A scanner must read the call as the parser does: text in quotes, heredocs and comments is no call.
 rpr_bash("records-page-ready: a quoted # before the call does not hide it", 'echo "#" && gh pr ready 12', "deny",
          GHREADY_STALE, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
