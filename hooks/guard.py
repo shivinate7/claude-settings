@@ -164,6 +164,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  message-time-matches-clock
+                       deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
+                       then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
+                       optional `:SS`, and `CST` or `CDT` in any case, after optional markdown lead characters. The
+                       refusal fires when the zone name is not the clock's own (local_time's DST rule), whatever the
+                       minutes; when a dated stamp is more than 1 minute ahead of the clock (local_time.clock); or
+                       when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An
+                       undated stamp more than 60 minutes ahead reads as a quote from an earlier day, and passes; so
+                       does a stamp behind. The reason steers to your own label and prints the real time. No
+                       transcript, file or process; a missing clock module passes the message. An override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
                        tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
@@ -513,7 +523,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -6089,6 +6099,11 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+
+    # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
+    stamped = stamp_hit(tool, tool_input)
+    if stamped:
+        refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)

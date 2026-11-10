@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -1517,6 +1518,73 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
     return None
+
+
+# ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
+STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
+STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes
+# A header is a label of 1 to 4 words, then `,` or `:` or a dash spaced on both sides, an optional date, then
+# `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case. Anything may follow.
+_STAMP_HEADER = re.compile(
+    _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,3}(?:[,:]|\s[-\u2014\u2013])\s*"
+    r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
+    r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
+_STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
+STAMP_REASON = (
+    "this message's header stamp is wrong for the clock: {why}. "
+    "The time is {now}: re-stamp your own header with that time, then send it again. If the first line quotes "
+    "someone else's time in header form, open the message with your own label first. "
+    "If the first line names a future time, such as a deadline or an ETA, move it off the first line. "
+    "(decision local-time-central, sessions speak times in US Central)"
+)
+STAMP_AHEAD_WHY = "it is {off} minutes ahead, and the limit is " + str(STAMP_LIMIT_MINUTES)
+STAMP_ZONE_WHY = "it says {zone}, and the clock's zone now is {name}"
+
+
+def stamp_hit(tool: str, tool_input):
+    """Return (matched, reason) when this send_message opens with a header stamp that is wrong for the clock, else
+    None. Only the first non-blank line is read, and only its header stamp. Wrong means one of three things. The
+    zone name is not the clock's own (local_time's DST rule names the current zone), whatever the minutes. A dated
+    stamp is more than STAMP_LIMIT_MINUTES ahead, compared as an instant with its zone's offset, with no upper limit.
+    An undated stamp is between STAMP_LIMIT_MINUTES (exclusive) and STAMP_QUOTE_MINUTES (inclusive) ahead, as a
+    signed minute-of-day offset modulo 1440 in [-720, 720). An undated stamp further ahead is read as a quote from
+    an earlier day and passes, as does any stamp behind the clock.
+    The clock is local_time.clock(), and the reason's time comes from local_time.central_hhmm: one home of the
+    clock and its DST rule. Cost: one clock read, no transcript, no file, no process. Fails open: the stamp is
+    advice about a time, so a missing clock module or an impossible date lets the message through."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message = tool_input.get("message")
+    first = next((ln.strip() for ln in message.splitlines() if ln.strip()), "") if isinstance(message, str) else ""
+    found = _STAMP_HEADER.match(first)
+    if not found:
+        return None
+    try:
+        import local_time
+        now = local_time.clock().replace(second=0, microsecond=0)  # whole minutes: both forms compare one way
+        clock_zone = local_time.central_hhmm(now).split()[1]
+        stamp_zone = found.group("zone").upper()
+        hour, minute = int(found.group("hour")), int(found.group("minute"))
+        if hour > 23 or minute > 59:
+            return None
+        if stamp_zone != clock_zone:
+            why = STAMP_ZONE_WHY.format(zone=stamp_zone, name=clock_zone)
+        else:
+            zone = timezone(timedelta(hours=_STAMP_OFFSET_HOURS[stamp_zone]))
+            if found.group("date"):
+                stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
+                off = int((stamped - now).total_seconds() // 60)
+                late = off > STAMP_LIMIT_MINUTES
+            else:
+                there = now.astimezone(zone)
+                off = (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
+                late = STAMP_LIMIT_MINUTES < off <= STAMP_QUOTE_MINUTES
+            if not late:
+                return None
+            why = STAMP_AHEAD_WHY.format(off=off)
+        return "header stamp " + found.group(0).strip(), STAMP_REASON.format(why=why, now=local_time.central_hhmm(now))
+    except (ImportError, ValueError, OverflowError):
+        return None
 
 
 # ------------------------------------------------------------------ hook-bypass
