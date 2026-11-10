@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL19PYKPFXLekGuTmnX",
   "why": "The merge tool skips judging `merge -C /other $(echo 5) --confirm`, because the `)` that closes a `$(` cuts the args (round 3 on #1982, 91dfc65b1; the same on #1166's head; coordinator 08:26 CST Nov 8).",
-  "note": "Done check: a red test where that form is judged. Merge after #1982. Debt merge-subst-paren-closes points at it. Doing in lane merge-repo-dir-flag (session_013NEJL19PYKPFXLekGuTmnX). Filed by triage 08:27 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:27:00-06:00"
+  "note": "Done check: a red test where that form is judged. Merge after #1982. Debt merge-subst-paren-closes points at it. Doing in lane merge-repo-dir-flag (session_013NEJL19PYKPFXLekGuTmnX). Filed by triage 08:27 CST Nov 8. #2509 (merge-subst-paren-v2) released to batch 72 after #1166 and #2504 (coordinator  CST Nov 10). It retires debt merge-subst-paren-closes. Set done when #2509 merges.",
+  "updatedAt": "2026-11-10T07:30:00-06:00"
 }
