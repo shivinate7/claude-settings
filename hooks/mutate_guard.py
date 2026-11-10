@@ -2308,6 +2308,15 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # shell_run_texts (hooks/guard.py) is the one home of the texts a shell reads: check 6b and impeccable share it.
+    ("draft-pr: a quoted interpreter body with a backtick is no longer joined, split at its backticks",
+     '                texts.extend(body.split("`"))',
+     '                texts.extend([])',
+     "guard", "draft-pr: a node file with a stray backtick in a single-quoted string"),
+    ("draft-pr: check 6b reads the raw command text again, not the texts a shell runs",
+     '    for run_text in shell_run_texts(raw):\n        for text, _in_message in _substitutions(run_text)[0]:\n            if any(undrafted_pr_create',
+     '    for run_text in [stripped]:\n        for text, _in_message in _substitutions(run_text)[0]:\n            if any(undrafted_pr_create',
+     "guard", "draft-pr: a perl body whose backtick span nests $( ) with gh pr create, run from a written file"),
 ]
 
 

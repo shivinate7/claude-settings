@@ -15,7 +15,12 @@ Why: a draft run that arrives while a ready run is in progress cancels it, and a
 
 Limits:
 
-- The guard reads a heredoc body only when a shell runs it. A file written and run by python, perl, ruby or node is not read as shell lines, so a `gh pr create` line in it is allowed. The guard still reads every backtick span in such a body, with the `$(` and `<(` inside it. Perl and ruby run a span as a shell, and node runs one through `execSync` and the like (a bare node span is a template literal). So a rare false alarm exists. It covers any python, perl, ruby or node body whose backtick span names the words, such as perl `print '`gh pr create -t x`';`. The impeccable rule shares it. Under a wrapper word (`env python3 f`, `sudo python3 f`) the body stays read.
+- A heredoc body that a shell runs is read as shell lines. A file written and run by python, perl, ruby or node is not.
+- A quoted interpreter body with any backtick is read whole, split at every backtick. A `$(` or `<(` in it counts. A body with no backtick is not read.
+- An unquoted body's `$(` and backticks are read, because bash runs them while it writes the file.
+- Why split: perl and ruby run a backtick span as a shell, node runs one through `execSync`, and the text alone cannot tell a span from a stray backtick.
+- False alarm: an interpreter body that holds a backtick and the words `gh pr create` anywhere is refused, even inside a string. The impeccable rule shares it.
+- Under a wrapper word (`env python3 f`, `sudo python3 f`) the body stays read.
 - The guard does not judge a `gh api` POST to the pulls endpoint, or `hub pull-request`. Each can open a non-draft PR.
 - A short-flag cluster such as `-dt x` is refused, a rare false alarm.
 - A pull request that turns draft during the merge wait is not stopped.
