@@ -4194,6 +4194,46 @@ def run_case(case):
         RED_CASES.append(case.__name__)
 
 
+# ------------------------------------------------------------------ the Mac artifact calls (artifact-guard-matcher-names)
+#
+# A Mac session calls mcp__claude-artifacts__db_get and db_write. Each case pairs the Mac call with the ArtifactData
+# call it stands for, and the two must get the same result: a get of an answer saves its note (local_time.py
+# --page-note), and a db_write that updates item 98 proves the filing (feedback_guard.py).
+MAC_DB_GET = "mcp__claude-artifacts__db_get"
+MAC_DB_WRITE = "mcp__claude-artifacts__db_write"
+
+
+def case_page_note_mac_get_of_answers_saves_the_note():
+    twin_cfg, twin_sid = new_cfg(), "pn-mac-twin"
+    twin = page_note(twin_cfg, twin_sid, response_of([("a-7k2", answer_data())]))
+    check("page note mac get: control, the ArtifactData get of answers saves its note",
+          ran_page_note(twin) and captured_texts(twin_cfg, twin_sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+          twin.desc())
+    cfg, sid = new_cfg(), "pn-mac-get"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]), inp={"path": "answers/a-7k2"},
+                  tool_name=MAC_DB_GET)
+    check("page note mac get: the mode ran", ran_page_note(p), p.desc())
+    check("page note mac get: a db_get of answers/<id> saves its note, as the ArtifactData get does",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)], p.desc())
+
+
+def case_page_mac_db_write_n_proof_passes():
+    twin = page_run(new_cfg(), "page-mac-twin", [("98: a", (PAGE_ITEM,))],
+                    [owner_rec("98: a"),
+                     used_rec("ArtifactData", {"action": "update", "doc_id": "items/disk-cleanup", "data": {"n": 98}})])
+    expect_silent("page mac: control, an ArtifactData update of items/disk-cleanup with n 98 passes", twin)
+    p = page_run(new_cfg(), "page-mac", [("98: a", (PAGE_ITEM,))],
+                 [owner_rec("98: a"),
+                  used_rec(MAC_DB_WRITE, {"ops": [{"op": "update", "path": "items/disk-cleanup", "data": {"n": 98}}]})])
+    expect_silent("page mac: a db_write update op on items/disk-cleanup with n 98 passes, as the ArtifactData write does", p)
+
+
+CASES += (
+    case_page_note_mac_get_of_answers_saves_the_note,
+    case_page_mac_db_write_n_proof_passes,
+)
+
+
 def main():
     try:
         for case in CASES:
