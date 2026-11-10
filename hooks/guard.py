@@ -156,7 +156,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        an open or merged pull request's head. An `archive/<branch>` copy holding the tip covers. No record of the target, a lane with no cs-step or cs-repo
                        tag, and a read that fails (gh missing too) are refusals. A target with no lane tag passes.
                        An override lifts it.
-  lane-one-topic      deny. A send_message whose first non-blank line starts with the marker
+  lane-one-topic      deny. A send_message whose first non-blank line, or the first after a leading `Grant:` line
+                       (shared_names.LANE_GRANT_MARKER), starts with the marker
                        `Lane brief: <step>. Topic: <topic>.` (guard_merge.LANE_BRIEF_MARKER), when the target's newest
                        record (get_session, or the create_session that made it, read from the transcript) is tagged
                        cs-build:lane and its cs-topic tag differs from the brief's Topic, or the brief names none. A lane
@@ -296,8 +297,10 @@ Other tools, in `judge` order:
                        `Add a case:` before the span; a span with never, do not, don't or no in its own clause
                        (no `;`, `.` or `,` between) within 4 words before it. Prose with no span is not read. Any
                        role. An override lifts it. (brief-destructive-git)
-  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
-                       not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
+  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
+                       exactly `medium` (LANE_EFFORT), or whose prompt's first non-blank line does not
+                       start `Grant: ` (LANE_GRANT_MARKER) with the owner's words after it. The prompt is
+                       the whole brief, the Grant line first. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
                        string. A call with no lane tag passes. An override lifts it.
                        `session_home_keep` skips this tool. (agent-model-cap)
@@ -2814,11 +2817,11 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
+from shared_names import LANE_GRANT_MARKER, LANE_TAG  # noqa: E402  the one home of the lane tag and the Grant marker, shared with lint/report_guard.py and guard_merge
 LANE_EFFORT_REASON = (
-    "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
-    "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
-    % LANE_EFFORT
+    "A lane session starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
+    "first non-blank line is `Grant: <owner words>, <time>`, the owner's word that starts this lane. Set the "
+    "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % LANE_EFFORT
 )
 # A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
 # when no repo reads.
@@ -2980,14 +2983,21 @@ def is_lane_create_session(tool: str, tool_input) -> bool:
 
 
 def lane_effort_hit(tool: str, tool_input) -> str:
-    """The prompt of a create_session call that tags a lane and is not the effort command exactly, or "".
-    A slash command runs only as the whole prompt, so the compare is exact: no strip. A lane tag is any
-    tag that, stripped and casefolded, is LANE_TAG; `tags` may be one string. A call with no lane tag
-    is not judged. A missing prompt is not the command."""
+    """What breaks the lane start of a create_session call that tags a lane, or "": the effort field when it
+    is not exactly LANE_EFFORT, else the prompt's first non-blank line when it is not a Grant line
+    (LANE_GRANT_MARKER, then the owner's words). A lane tag is any tag that, stripped and casefolded, is
+    LANE_TAG; `tags` may be one string. A call with no lane tag is not judged. A missing prompt has no
+    Grant line."""
     if not is_lane_create_session(tool, tool_input):
         return ""
+    effort = tool_input.get("effort")
+    if effort != LANE_EFFORT:
+        return "effort: " + str(effort if effort else "(none)")
     prompt = tool_input.get("prompt")
-    return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
+    first = next((ln.strip() for ln in prompt.splitlines() if ln.strip()), "") if isinstance(prompt, str) else ""
+    if first.startswith(LANE_GRANT_MARKER) and first[len(LANE_GRANT_MARKER):].strip():
+        return ""
+    return "prompt: " + (first[:80] or "(none)")
 
 
 def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
@@ -6015,8 +6025,9 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
-    # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
+    # 9b2. The lane effort pin: a lane session starts with the effort field at medium and the whole brief as its
+    # prompt, the owner's Grant line first. An override lifts it: it is not in never_lifted, because the owner
+    # may mean another start.
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
