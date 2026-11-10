@@ -2,7 +2,7 @@
 Asserts: a tracked language with no row is red (by extension and by shebang), a planted mypy error in
 a listed module is red, a shrunk mypy list is red against the base ref, a missing listed module is red,
 a listed module renamed off the list is red, a shrink against --main (current main) is red,
-Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
+Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, a font file is not code, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
 lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
 A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
@@ -15,6 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+sys.path.insert(0, HERE)
+import code_check  # noqa: E402  the runner's classify, called in process
 RUN_FOLDER = _test_temp.run_folder()
 RUNNER = os.path.join(HERE, "code_check.py")
 STANDARD = os.path.join(HERE, "..", "..", "lint", "code_check_standard.json")
@@ -29,7 +31,8 @@ NEEDS_ASTRO = unittest.skipUnless(shutil.which("astro-check") or os.environ.get(
 NEEDS_TSC = unittest.skipUnless(shutil.which("tsc") or os.environ.get("CI"),
                                 "tsc not on PATH; npm ci --ignore-scripts --prefix actions/code-check/tools (CI does)")
 with open(STANDARD, encoding="utf-8") as f:
-    TS_PIN = json.load(f)["tools"]["typescript"]
+    STD = json.load(f)
+TS_PIN = STD["tools"]["typescript"]
 
 
 def git(cwd, *a):
@@ -110,6 +113,14 @@ class CodeCheck(unittest.TestCase):
                          "models/m.onnx": "x", "data/w.npz": "x", ".nvmrc": "20\n", ".npmrc": "save-exact=true\n"})
         self.assertEqual(rc, 0, out)
         self.assertNotIn("no row", out)
+
+    def test_font_file_is_not_code(self):
+        # A font is binary data, not code. The image is a control: its extension is already in not_code.
+        font, image = "testing/fonts/ibmplexmono/IBMPlexMono-Regular.ttf", "img/d.png"
+        found, missing = code_check.classify(HERE, [font, image], STD)
+        self.assertNotIn(image, missing, "control: a skipped image has no row")
+        self.assertEqual(found, {}, "a font file is classed as a language")
+        self.assertNotIn(font, missing, "a font file has no row in lint/code_check_standard.json")
 
     def test_unknown_shebang_with_no_row_is_red(self):
         rc, out = check({".code-check.json": config([]), "bin/tool": "#!/usr/bin/env ruby\nputs 1\n"})
