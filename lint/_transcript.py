@@ -87,7 +87,14 @@ def owner_text(rec, notice_tags=()):
     return text
 
 
+# A resumed session stores `api-request-blob` records: copies of earlier requests, with no timestamp. Their
+# calls and results are not this turn's, so neither reader yields from one.
+BLOB_TYPE = "api-request-blob"
+
+
 def tool_uses(rec):
+    if rec.get("type") == BLOB_TYPE:
+        return
     msg = rec.get("message") or {}
     content = msg.get("content")
     if not isinstance(content, list):
@@ -98,6 +105,8 @@ def tool_uses(rec):
 
 
 def tool_results(rec):
+    if rec.get("type") == BLOB_TYPE:
+        return
     msg = rec.get("message") or {}
     content = msg.get("content")
     if not isinstance(content, list):
