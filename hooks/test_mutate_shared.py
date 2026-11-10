@@ -20,6 +20,9 @@ or when MUTATE_FULL=1 asks for it.
 
 The fourth part pins the layout of a guard mutant's folder: its copy must import lint/layout.py from
 its own root, the folder beside its hooks/.
+
+The fifth part pins the family suites: a suite named `path::family` runs the file `path` with GUARD_FAMILY=family in
+its env, and the file part is what the profile's `tests` regex and the isfile check read.
 """
 import contextlib
 import io
@@ -40,6 +43,8 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 import mutate_guard  # noqa: E402
 import mutate_shared  # noqa: E402
 import mutate_sweep  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(HOOKS), "testing"))
+import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 
 REQUIRED = "case: the rule under test"
 RED_RIGHT = ["FAIL  allow (want deny) [Bash] case: the rule under test"]
@@ -146,6 +151,19 @@ class GuardTreeTests(unittest.TestCase):
         self.assertEqual(read_file(self.dest, "own_session.py"), "BROKEN\n")
         self.assertEqual(read_file(self.dest, "guard.py"), "alpha\n")
 
+    def test_a_mutant_anchored_in_shared_names_mutates_shared_names(self):
+        # The brief marker rows live in shared_names.py, the one home the guard reads them from. A mutant aimed at a row
+        # must land there and not read as STALE, so it can break the row it names. An assert, not a crash, on the old code.
+        write_files(self.src, {"shared_names.py": "names-anchor\n"})
+        mutate_shared.guard_tree(self.dest)
+        try:
+            where = os.path.basename(mutate_shared.apply_mutant(self.dest, "names-anchor", "BROKEN"))
+        except mutate_shared.StaleMutant:
+            where = None
+        self.assertEqual(where, "shared_names.py")
+        self.assertEqual(read_file(self.dest, "shared_names.py"), "BROKEN\n")
+        self.assertEqual(read_file(self.dest, "guard.py"), "alpha\n")
+
     def test_one_match_in_a_sibling_mutates_the_sibling(self):
         mutate_shared.guard_tree(self.dest)
         where = mutate_shared.apply_mutant(self.dest, "beta-anchor", "BROKEN")
@@ -193,19 +211,35 @@ class GuardTreeImportsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, module + ": " + result.stderr[-300:])
 
 
+MOCKUP_HOME_ARM = "mockup-home: the refuse arm is dropped"  # the label prefix of the mockup-home guard mutant
+ROLE_MODEL_ARM = "role-model: Explore loses its audit exemption"  # the label prefix of a role-model guard mutant
+
+
+def git_listed(folder):
+    """The paths git lists under `folder`, suites left out as tracked_tree.is_suite leaves them. The expectation
+    comes from git itself, not from tracked_tree, so it does not share the helper the fix builds the root with."""
+    done = subprocess.run(["git", "ls-files", "-z", "--", folder], cwd=tracked_tree.REPO, capture_output=True)
+    if done.returncode != 0:
+        raise RuntimeError("git ls-files failed for %s: %s" % (folder, done.stderr.decode(errors="replace")))
+    names = done.stdout.decode("utf-8", "surrogateescape").split("\0")
+    return sorted(name for name in names if name and not tracked_tree.is_suite(name))
+
+
 class GuardMutantLayoutTests(unittest.TestCase):
     """A guard mutant runs from <root>/hooks, so its ../lint is <root>/lint. guard.py reads lint/layout.py
     from there (role_model_table, record_branch_of). Without that folder the import fails, the role-model
     table reads as unread, and every role-model arm passes unjudged: a survivor that has no bearing on
-    its mutation."""
+    its mutation. The same root holds the skills/ files a guard reads, from git's own list: the mockup-home
+    check imports skills/waiting-page/stale_pages.py, and a root without it crashes that case."""
 
     def setUp(self):
         self.run = _test_temp.run_folder()
         self.addCleanup(shutil.rmtree, self.run, True)
 
-    def test_copied_guard_imports_the_lint_layout_from_its_own_root(self):
-        entry = next(e for e in mutate_guard.MUTATIONS
-                     if mutate_guard.mutation_parts(e)[0].startswith("role-model: Explore loses its audit exemption"))
+    def built_root(self, prefix):
+        """(root, copy path) of the guard mutant whose label starts with `prefix`, as run_mutant builds it. The
+        suite is stubbed out, so this builds the root and runs no case."""
+        entry = next(e for e in mutate_guard.MUTATIONS if mutate_guard.mutation_parts(e)[0].startswith(prefix))
         copies = []
 
         def record(suite, variable, copy_path, config_dir, only=None):
@@ -220,7 +254,27 @@ class GuardMutantLayoutTests(unittest.TestCase):
                 mock.patch.object(mutate_shared, "staged_suite", side_effect=one_stage):
             mutate_guard.run_mutant({}, self.run, entry)
         self.assertEqual(len(copies), 1)
-        hooks = os.path.dirname(copies[0])
+        self.assertTrue(os.path.isfile(copies[0]), "run_mutant wrote no guard.py for %s" % prefix)
+        return os.path.dirname(os.path.dirname(copies[0])), copies[0]
+
+    def stage_one(self, prefix):
+        """run_mutant on the guard mutant whose label starts with `prefix`, its suite run for real, stage 1 only:
+        the required case alone, never the full suite. Return (run_mutant's tuple, the case lines stage 1 printed)."""
+        entry = next(e for e in mutate_guard.MUTATIONS if mutate_guard.mutation_parts(e)[0].startswith(prefix))
+        lines = []
+
+        def one_stage(run, required):
+            code, red, ran = run(required)
+            lines.extend(ran)
+            return code, red
+
+        with mock.patch.object(mutate_shared, "staged_suite", side_effect=one_stage):
+            result = mutate_guard.run_mutant({}, self.run, entry)
+        return result, lines
+
+    def test_copied_guard_imports_the_lint_layout_from_its_own_root(self):
+        _root, copy_path = self.built_root(ROLE_MODEL_ARM)
+        hooks = os.path.dirname(copy_path)
         # -I drops the cwd from sys.path, so a lint/ in the working directory cannot satisfy the import.
         result = subprocess.run(
             [sys.executable, "-I", "-c",
@@ -229,6 +283,34 @@ class GuardMutantLayoutTests(unittest.TestCase):
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0,
                          "the copied guard cannot import lint/layout.py from its root: " + result.stderr[-300:])
+
+    def test_mockup_home_mutant_dies_on_its_own_case(self):
+        # One real stage-1 run serves the three claims, in order. A crashed suite's orphan sleep holds its stdout
+        # pipe, so run_suite waits that out (see its comment): this case is slow only while the crash is there.
+        (_label, _code, red, required, _skip, seen), lines = self.stage_one(MOCKUP_HOME_ARM)
+        # Scope before subject: the FAIL line below means something only if stage 1 reached its required case.
+        self.assertTrue(any(required in line for line in lines),
+                        "stage 1 printed no line for %r: the suite died before its own case" % required)
+        # run_mutant returns no stderr, so this stays green until the diagnostics carry a traceback.
+        crashed = [line for line in red + seen if "ModuleNotFoundError" in line]
+        self.assertEqual(crashed, [], "a returned line holds ModuleNotFoundError: %r" % crashed)
+        own = [line for line in red if line.startswith("FAIL") and required in line]
+        self.assertTrue(own, "the mutant did not die on its own case %r: no FAIL line names it" % required)
+
+    def test_guard_mutant_root_holds_every_tracked_waiting_page_file(self):
+        root, _copy = self.built_root(MOCKUP_HOME_ARM)
+        listed = git_listed("skills/waiting-page")
+        self.assertIn("skills/waiting-page/stale_pages.py", listed,
+                      "scope: git lists no stale_pages.py under skills/waiting-page")
+        missing = [rel for rel in listed if not os.path.isfile(os.path.join(root, *rel.split("/")))]
+        self.assertEqual(missing, [], "the mutant root lacks tracked skills/waiting-page files")
+
+    def test_guard_mutant_root_holds_the_impeccable_skill_file(self):
+        root, _copy = self.built_root(MOCKUP_HOME_ARM)
+        self.assertTrue(os.path.isfile(os.path.join(tracked_tree.REPO, "skills", "impeccable", "SKILL.md")),
+                        "scope: the checkout holds no skills/impeccable/SKILL.md")
+        self.assertTrue(os.path.isfile(os.path.join(root, "skills", "impeccable", "SKILL.md")),
+                        "the mutant root lacks skills/impeccable/SKILL.md, which guard.py reads")
 
 
 def scaffold_sources(**extra):
@@ -411,7 +493,7 @@ def verdict_seen(code, red, seen):
 
 
 class SeenNeverChangesTheVerdictTests(unittest.TestCase):
-    """Controls, green on the head. `seen` is diagnostics only: the verdict reads `red` alone, so an ERROR
+    """Pins that `seen` is diagnostics only: the verdict reads `red` alone, so an ERROR
     block that names the required case must not turn a WRONG CAUSE into a kill."""
 
     def test_an_error_in_the_required_case_with_no_fail_line_is_wrong_cause(self):
@@ -505,6 +587,86 @@ class ErrorBlockReportTests(unittest.TestCase):
                         "a FAIL line must still print under saw:, saw %r" % self.saw(lines))
         self.assertFalse(any(line.startswith("saw: ERROR:") for line in self.saw(lines)),
                          "a FAIL-only red printed an ERROR line under saw:, saw %r" % self.saw(lines))
+
+
+# The family suites of hooks/test_guard.py: a suite named `path::family` is the file `path`, run with GUARD_FAMILY=family.
+# FAMILY_SUITE prints FAIL only under family x. WIDGET_FAMILY_SUITE imports widget outside that branch, so a broken copy of
+# widget.py fails it at the import, which marks the file as loaded.
+FAMILY_SUITE = ("import os\nimport sys\n\n"
+                "if os.environ.get('GUARD_FAMILY') == 'x':\n"
+                "    print('FAIL: GUARD_FAMILY is x')\n"
+                "    sys.exit(1)\n"
+                "print('ok')\n")
+WIDGET_FAMILY_SUITE = ("import os\nimport sys\n\n"
+                       "sys.path.insert(0, os.getcwd())\n"
+                       "from widget import value\n\n"
+                       "if os.environ.get('GUARD_FAMILY') == 'x' and value() != 1:\n"
+                       "    print('FAIL: value() is not 1 under family x')\n"
+                       "    sys.exit(1)\n"
+                       "print('ok')\n")
+
+
+def make_files(root, files):
+    """write_files, with each file's folder made first."""
+    for rel in files:
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+    write_files(root, files)
+
+
+class FamilySuiteEngineTests(unittest.TestCase):
+    """A suite named `path::family` is the file `path`, run with GUARD_FAMILY=family in its env. The profile's `tests`
+    regex and the isfile check read the part before `::`. A plain suite runs with GUARD_FAMILY unset. The cases that run a
+    family suite are red on the engine without the family split; the plain cases are its green control."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        self.folder = os.path.join(self.run, "folder")
+        make_files(self.folder, {"suites/test_fam.py": FAMILY_SUITE})
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("GUARD_FAMILY", None)
+
+    def test_a_family_suite_runs_with_guard_family_set_in_its_env(self):
+        kind, _seconds = mutate_shared.run_suite_file(self.folder, "suites/test_fam.py::x", 60)
+        self.assertEqual(kind, "assert",
+                         "suites/test_fam.py::x runs with GUARD_FAMILY=x, so its FAIL line reads red, got %r" % kind)
+
+    def test_a_plain_suite_runs_with_guard_family_unset(self):
+        kind, _seconds = mutate_shared.run_suite_file(self.folder, "suites/test_fam.py", 60)
+        self.assertEqual(kind, "pass", "a plain suite sets no GUARD_FAMILY, so the same file reads green, got %r" % kind)
+
+    def test_score_target_reads_a_family_suite_by_its_path_and_kills_under_its_family(self):
+        root = os.path.join(self.run, "root")
+        make_files(root, {"widget.py": "def value():\n    return 1\n", "suites/test_fam.py": WIDGET_FAMILY_SUITE})
+        row = mutate_shared.score_target(root, "widget.py", ["suites/test_fam.py::x"], limit=10, jobs=1)
+        self.assertEqual(row["status"], "OK", "a family suite whose file exists is usable: %s" % row["reason"])
+        self.assertEqual(row["unusable"], {}, "the file part of a family suite is read, so none is unusable")
+        self.assertGreater(row["killers"]["suites/test_fam.py::x"], 0,
+                           "the family suite kills mutants under GUARD_FAMILY=x")
+
+    def test_score_target_marks_a_family_suite_whose_file_is_missing_as_missing(self):
+        root = os.path.join(self.run, "root")
+        make_files(root, {"widget.py": "def value():\n    return 1\n"})
+        row = mutate_shared.score_target(root, "widget.py", ["suites/none.py::x"], limit=10, jobs=1)
+        self.assertEqual(row["unusable"], {"suites/none.py::x": "missing"},
+                         "the file part is checked: suites/none.py is missing")
+
+    def test_select_lists_a_family_line_whose_file_matches_the_tests_regex(self):
+        dest = os.path.join(self.run, "dest")
+        make_files(dest, {"select.py": "print('suites/test_fam.py::x')\n", "suites/test_fam.py": FAMILY_SUITE})
+        profile = {"tests": r"(^|/)test_[^/]*\.py$", "select": [sys.executable, "select.py", "{path}"]}
+        names, note = mutate_shared._select_suites(profile, dest, "widget.py", None, 60)
+        self.assertEqual(names, ["suites/test_fam.py::x"],
+                         "the regex reads the file part of a family line, so it is a suite: %s" % note)
+
+    def test_select_drops_a_family_line_whose_file_is_missing(self):
+        dest = os.path.join(self.run, "dest")
+        make_files(dest, {"select.py": "print('suites/test_gone.py::x')\n"})
+        profile = {"tests": r"(^|/)test_[^/]*\.py$", "select": [sys.executable, "select.py", "{path}"]}
+        names, note = mutate_shared._select_suites(profile, dest, "widget.py", None, 60)
+        self.assertEqual(names, [], "a family line whose file is missing is no suite: %s" % note)
 
 
 if __name__ == "__main__":
