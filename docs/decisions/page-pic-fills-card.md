@@ -8,6 +8,7 @@
 - Whole: a picture draws whole while its drawn height is at most F + 1, where F = max(480, ceil(W × 844 / 390)). F is the taller of 480 and a 390 × 844 phone picture at the card's width. The 1 px is the code's tolerance: a picture 1 px over F still draws whole.
 - Tall: a picture taller than F + 1 draws 480 high and scrolls. It is as wide as the card, less the scrollbar gutter.
 - Gutter edge: a picture that would scroll only because the scrollbar gutter takes width draws whole at the narrower scale (width = card less gutter), with no scroll. Its height is then at most 481, which is within F + 1.
+- First paint: the box's first painted frame equals its settled height. Its width and height come from the column before the picture draws, and from the declared height until the mockup reports its own.
 - Unchanged: the viewer (`stageFrame`) and the front preview (`designPreview`).
 - Kept: `MIN_PIC` stays in the page. The write check, `check_designs.mjs`, reads it.
 - Still holds: waiting-page change c204, items 2 to 5 (the focus card, the cue, the touch split and the keys).

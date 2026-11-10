@@ -24,7 +24,7 @@ Measured with headless Chromium (Playwright), deviceScaleFactor 1, at 390, 1280 
 Each rule fills the card's width. They differ in what a tall picture does. Numbers: sample screens above; "visible" is the screen less the 56px header and the 96px send bar (704 at 390, 660 at 1280, 1098 at 2200).
 
 1. **Grow to a phone (pick).** A picture draws whole while it is no taller than a 390 × 844 phone picture at the card's width: F = max(480, ceil(W × 844 / 390)). A taller one scrolls in today's 480 box, at the card's width less the scrollbar gutter.
-   - Gain: every phone picture and every Duo picture draws whole, at the card's width, on every screen. A taller one scrolls in the box c204 tested, so the share of the screen that a drag scrolls stays as today: 0.68 at 390, 0.73 at 1280, 0.44 at 2200. It reads no screen height, so a window resize moves nothing.
+   - Gain: every phone picture and every Duo picture draws whole, at the card's width, on every screen. A taller one scrolls in the box that waiting-page change c204 tested, so the share of the screen that a drag scrolls stays as today: 0.68 at 390, 0.73 at 1280, 0.44 at 2200. It reads no screen height, so a window resize moves nothing.
    - Loss: at two per row a phone picture is 790 high. On a 1280 × 800 screen (660 visible) its foot and the card's text below it need a page scroll. Height jumps at the threshold: a phone shape draws 790 high, a slightly taller page draws a 480 box beside it (case `two-tall`: 367 × 790 beside 367 × 480).
    - Loss: a picture scrolls sooner. Today it scrolls only past about 4:1 (c204 item 1); now past a phone's 2.16:1. A 390 × 1300 focus drew whole today at 146 × 480; now it scrolls in a 480 box at the card's width (231 × 480 at three per row, 289 × 480 at 390).
 2. **Grow to the screen.** Whole up to the screen cap, max(480, screen − 56 − 96 − 32): 672 at 390, 628 at 1280, 1066 at 2200. Taller scrolls in a box that high.
@@ -64,7 +64,7 @@ Light and dark give the same sizes in all 123 pairs. In every run, View is 44 hi
 | Page 390 × 2400 beside a phone, two per row | 289 × 480 and 289 × 622 | 367 × 480, scrolls (today 234 × 480), beside 367 × 790 | as 1280 |
 
 - At 1280 and 2200 the picture row of a three-option card grows by 16px (`.head` from 555 to 571 below the card top); of a two-option card by 310px (555 to 865).
-- The scrollbar gutter measured 10px (`scrollbar-width: thin`), so a scrolling picture is the column less 12: 277 wide at 390.
+- The scrollbar gutter measured 10px (`scrollbar-width: thin`). A scrolling box, as the table measures it, is the column wide: 289 at 390. Its picture draws the column less 12 (the 1px border on each side and the gutter): 277 wide at 390.
 - The checks were computed again in the measure script, apart from the mockup's code. Each went red on a broken copy: a box 3px too wide (red for width and for "outside column") and a box 40px too short.
 
 ## 6. Card width: the limit at three per row and on wide screens
@@ -73,12 +73,14 @@ Owner grant: yes. Not drawn, and outside this lane. Filling the card does little
 - A wider page for an item with pictures on a wide screen, such as `.in` max-width 1600 at 1700px and wider.
 - At most two options per row for an item with pictures (`.opts.pics`), so each phone picture draws 367 wide.
 
-## 7. Departures
+## 7. Ruling and what it replaces
 
-- Departs from: `c193-sizes.md` item 3, option A (the 480 cap; option B, fill the card, is now asked). Owner grant: yes, for the pick of item 3. Not blocking.
-- Departs from: `c204-sizes.md` item 6, the 5B ruling (owner, 2026-10-30 14:45 CDT, waiting item 84 pick b): the scroll case drew min(221.8, column) wide. Now it draws the column's width less the gutter. Owner grant: yes. Not blocking.
-- Departs from: `c204-sizes.md` item 1, when a picture scrolls: past a phone's shape (2.16:1), not past 4:1. Owner grant: yes, with the pick of item 3. Not blocking.
-- Departs from: `optPic`'s maxScale 1 (c193 item 3 scope). Owner grant: yes, for item 4. Not blocking.
+- Ruling: owner pick a for waiting-page item 470 (the picture-size question), "a for 470", 2026-11-09 21:26 CST: Grow to a phone (section 3, rule 1). It fills the card, which is option B of waiting-page change c193 item 3, and sets the height rule. Not blocking.
+- The pick replaces:
+  - waiting-page change c193 item 3, option a (the 480 cap).
+  - waiting-page change c204 item 6 (the scale in the scroll case; the 5B ruling, owner 2026-10-30 14:45 CDT, waiting item 84 pick b, scroll width 221.8). Now the picture draws the card's width less the 2px border and the gutter.
+  - waiting-page change c204 item 1 (when a picture scrolls). It scrolled only past about 4:1. Now it scrolls past a phone's 2.16:1.
+- Departs from: `optPic`'s maxScale 1 in today's code (waiting-page change c193 item 3 scope sets 2). Owner grant: yes, for section 4 (upscale). Not blocking.
 
 ## 8. Builder rules
 
