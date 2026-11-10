@@ -2454,7 +2454,7 @@ const askDismissed = (t) => { const d = typeof t.dismissed === "string" ? Date.p
 // An ask with no home is not routed: it shows as it always did, in full when its answer is new and as a fold when seen.
 const askRouted = (t) => !!askReply(t) && typeof t.home === "string" && !!t.home.trim() && !askWaitsIn(t);
 // A routed ask answered before READ_FROM, the time this change shipped, counts as read, so no old answer comes back as a line. A thread with a `dismissed` field, set or null, is the owner's own mark: Mark unread keeps it out of this rule.
-const READ_FROM = Date.parse("2026-10-30T00:00:00Z");
+const READ_FROM = Date.parse("2026-11-10T18:00:00Z");
 const askTimeRead = (t) => { const l = askLatest(t), a = l ? Date.parse(l.answered) : NaN; return askRouted(t) && !("dismissed" in t) && !isNaN(a) && a < READ_FROM; };
 const askRead = (t) => askDismissed(t) || askTimeRead(t);
 const ASK_DIS_OFF = "your reply waits: no Mark read until it has its answer", ASK_EMPTY_DIS = "No ask on the list. Type above, and a session answers here.";
