@@ -1162,6 +1162,27 @@ class ParallelLint(Job):
         self.assertTrue(all(tok in log for tok in ("F-OUTPUT", "P1-OUTPUT", "P2-OUTPUT", "U-OUTPUT")),
                         "the run's log is missing a step's output:\n" + log)
 
+    def test_a_log_that_cannot_join_the_run_log_is_named_on_stderr_and_kept(self):
+        # VERDICT_LOG is a directory, so no CI step's copy can join it. Each verdict and the exit code stay as they are; ci-job
+        # names each kept log on stderr, and each kept log holds its own CI step's output.
+        os.makedirs(self.log)
+        steps = (self.lint("one", "print('ONE-OUTPUT')\n"), self.lint("two", "print('TWO-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("one", "PASS"), ("two", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        kept = {}
+        for ln in self.err_lines:
+            m = re.match(r"ci-job: could not add the log of CI step (\S+) to the run's log; its output is kept in (.+)$", ln)
+            if m:
+                kept[m.group(1)] = m.group(2)
+        self.assertEqual(sorted(kept), ["one", "two"], "a failed copy is not named on stderr:\n" + out)
+        for name, token in (("one", "ONE-OUTPUT"), ("two", "TWO-OUTPUT")):
+            path = kept[name]
+            self.addCleanup(shutil.rmtree, os.path.dirname(path), True)
+            self.assertTrue(os.path.exists(path), "the kept log named for %s is missing: %s\n%s" % (name, path, out))
+            with open(path, encoding="utf-8", errors="replace") as f:
+                self.assertIn(token, f.read(), "the kept log for %s does not hold its output\n%s" % (name, out))
+
     def test_an_unknown_step_alone_exits_two_while_the_others_pass(self):
         steps = (self.lint("u", "print('U-OUTPUT')\nsys.exit(127)\n"),) + tuple(self.rendezvous_steps(["p1", "p2"]))
         rc, lines, out = self.run_lint(*steps, workers=4)
