@@ -1952,7 +1952,7 @@ class StepCasesLastSection(unittest.TestCase):
         self.assertEqual(self.cases_read("shard suite"), self.case_names(lines))
 
     def test_a_last_section_with_no_case_lines_reads_no_cases_not_an_earlier_section(self):
-        """A re-run that passed on main writes its section last: its cases are none, and the head's cases do not stand in for them."""
+        """A passing re-run writes its section last. Its cases are none, and the head's cases do not stand in for them: a reader of the last section must not fall back to an earlier one."""
         self.section("shard suite", failing_cases("test_head_only_case"))
         self.section("shard suite", ["PASS-OUTPUT"])
         self.assertEqual(merge.CASE_SECTION.findall(self.text()), ["shard suite", "shard suite"], self.text())
