@@ -51,7 +51,7 @@ Both options keep owner item 448 a: when narrow, the press drops under the text,
   minimum) and the 8rem minimum; the date wraps between "Answered" and the date, as PR 2253's wrap does.
 - A row with Dismiss or Restore (`.askc.folded.withd`) is a wrapping flex row: the row button grows from 0, the press keeps its
   width and may shrink only when alone on its line. The card pads its start by `--lead` (28 px for Dismiss, so its label lines
-  up with the title; 40 px for Restore, its edge) and the row button, the reply line and the done line pull back by the same,
+  up with the title; 40 px for Restore, its edge). The row button, the reply line and the done line pull back by the same,
   so a press beside the text sits where main puts it.
 - The Dismissed line (`.askc.dropped .sline`) is a wrapping flex row with the same hanging glyph; its words take the 8rem
   minimum (select `> span:not(.g)`: the glyph is a span too).
@@ -59,7 +59,7 @@ Both options keep owner item 448 a: when narrow, the press drops under the text,
   window at 100%). Under it: a two-line title, 8 px row padding, "Show answer" kept in the row's name on a row with a press,
   4 px end padding. It moves no part.
 - The Ask box: its narrow form reads `@container askf (width < 28.375em)` (the box in a 520 px window at 100%). In it the row is
-  a wrapping flex row: the hint and the slot each take a full line, Add to list sits at the start and Send ask at the end, and
+  a wrapping flex row. The hint and the slot each take a full line. Add to list sits at the start and Send ask at the end.
   Send ask drops under Add to list only when the two no longer fit. This replaces the 16.5em rule. The hint keeps
   `max(66px, 3 * 1.55em)`.
 - Remove: the row and Dismissed-line parts of both 520 px media blocks, the whole `@container askl (width < 20.375em)` block, and
