@@ -193,8 +193,8 @@ Design:
   cannot: the desktop count reads a fixed constant, and both flag-override hooks in the public build return nothing
   (binary 2.1.319, read 2026-11-06 13:14 CST: `getEnvironmentOverrides(){return null}`, `readConfigOverrides(){return}`).
 - Q2, how a lost message is noticed: a session that waits on a reply checks for it. Coordinator pick,
-  2026-11-06 12:48 CST; it can be undone. It checks at its next turn start and may set that one check-in
-  (Q4).
+  2026-11-06 12:48 CST; it can be undone. It checks at its next turn start, and a cloud session that waits
+  on a reply may set that one check-in (Q4).
 - Q4, answered by the owner, 2026-11-10 09:39 CST, in his words: "ok one check in is allowed, i just don't
   think it'll be hollistic enough, but it's allowed that is enough". A cloud session that waits on a reply
   may set one `send_later` check-in for that one reply. His note: one check-in alone will not cover
