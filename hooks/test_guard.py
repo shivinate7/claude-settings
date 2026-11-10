@@ -13141,6 +13141,96 @@ if LINKS_MADE:
     sh("env: find -L -type d xargs grep -r control, the link points at a proj with no env file, allowed: "
        + _LINK_FIND_L, _LINK_FIND_L, "allow", cwd=ENVLINK_CLEAN)
 
+# -type d narrowing holes. Each DENY form below lets grep reach an env file that its find does not name: a pruned
+# folder that the implicit -print still prints, the parent that -printf names for a folder, a link that -type d does
+# not match, or an empty find, which hands xargs no folder, so grep -r reads the cwd. Each DENY is red on f9d35504a,
+# where the guard allows it. Each ALLOW control is the same form over the same tree with no env file.
+def _write_tree(base, folders, env_dir=None):
+    write(os.path.join(base, "README.md"), "base\n")
+    for folder in folders:
+        write(os.path.join(base, folder, "README.md"), "folder\n")
+    if env_dir is not None:
+        write(os.path.join(base, env_dir, ENV), "FIXTURE=1\n")
+
+
+ENVNM_HELD = os.path.join(ROOT, "envnm-held")          # node_modules/pkg holds the env file, src is clean
+ENVNM_CLEAN = os.path.join(ROOT, "envnm-clean")        # the same tree, with no env file
+ENVPKG_HELD = os.path.join(ROOT, "envpkg-held")        # a/ holds the env file, node_modules/pkg is clean
+ENVPKG_CLEAN = os.path.join(ROOT, "envpkg-clean")
+ENVSRC_HELD = os.path.join(ROOT, "envsrc-held")        # a/ holds the env file, a/src is clean
+ENVSRC_CLEAN = os.path.join(ROOT, "envsrc-clean")
+ENVNAME_HELD = os.path.join(ROOT, "envname-held")      # a/ holds the env file, and link is a symlink to a clean folder
+ENVNAME_CLEAN = os.path.join(ROOT, "envname-clean")
+ENVNAME_OUT = os.path.join(ROOT, "envname-out")        # the clean folder that link points at
+ENVEXD_HELD = os.path.join(ROOT, "envexd-held", "exd")   # x holds the env file, x/src is clean
+ENVEXD_HELD_CWD = os.path.join(ENVEXD_HELD, "cwd")       # a clean cwd beside x
+ENVEXD_CLEAN = os.path.join(ROOT, "envexd-clean", "exd")
+ENVEXD_CLEAN_CWD = os.path.join(ENVEXD_CLEAN, "cwd")
+
+
+def build_type_d_trees():
+    pkg = os.path.join("node_modules", "pkg")
+    _write_tree(ENVNM_HELD, ["src", pkg], env_dir=pkg)
+    _write_tree(ENVNM_CLEAN, ["src", pkg])
+    _write_tree(ENVPKG_HELD, ["a", pkg], env_dir="a")
+    _write_tree(ENVPKG_CLEAN, ["a", pkg])
+    _write_tree(ENVSRC_HELD, ["a", os.path.join("a", "src")], env_dir="a")
+    _write_tree(ENVSRC_CLEAN, ["a", os.path.join("a", "src")])
+    _write_tree(ENVNAME_HELD, ["a"], env_dir="a")
+    _write_tree(ENVNAME_CLEAN, ["a"])
+    write(os.path.join(ENVNAME_OUT, "README.md"), "outside\n")
+    _write_tree(ENVEXD_HELD, ["cwd", "x", os.path.join("x", "src")], env_dir="x")
+    _write_tree(ENVEXD_CLEAN, ["cwd", "x", os.path.join("x", "src")])
+    if LINKS_MADE:
+        for base in (ENVNAME_HELD, ENVNAME_CLEAN):
+            os.symlink(ENVNAME_OUT, os.path.join(base, "link"), target_is_directory=True)
+
+
+lazy_fixture((ENVNM_HELD, ENVNM_CLEAN, ENVPKG_HELD, ENVPKG_CLEAN, ENVSRC_HELD, ENVSRC_CLEAN, ENVNAME_HELD,
+              ENVNAME_CLEAN, ENVNAME_OUT, ENVEXD_HELD, ENVEXD_HELD_CWD, ENVEXD_CLEAN, ENVEXD_CLEAN_CWD),
+             build_type_d_trees)
+
+# F1. The implicit -print covers the whole expression, so the pruned node_modules is printed and grep -r reads it.
+_F1_NM = "find . -name node_modules -prune -o -type d -name src | xargs grep -r K"
+sh("env: find -name node_modules prune, -type d -name src, the env file is in node_modules/pkg, refused: " + _F1_NM,
+   _F1_NM, "deny", "env-file", cwd=ENVNM_HELD)
+sh("env: find -name node_modules prune, -type d -name src control, the same tree with no env file, allowed: "
+   + _F1_NM, _F1_NM, "allow", cwd=ENVNM_CLEAN)
+
+# F2. The pruned node_modules is not printed, so find prints nothing and xargs runs grep -r K on the cwd, which holds
+# a/. The -r control hands xargs no run at all, so it is allowed.
+_F2_PKG = "find . -path ./node_modules -prune -o -type d -name pkg -print | xargs grep -r K"
+_F2_PKG_R = "find . -path ./node_modules -prune -o -type d -name pkg -print | xargs -r grep -r K"
+sh("env: find -path node_modules prune, -type d -name pkg, the env file is in a, refused: " + _F2_PKG,
+   _F2_PKG, "deny", "env-file", cwd=ENVPKG_HELD)
+sh("env: find -path node_modules prune, -type d -name pkg, xargs -r control, the env file is in a, allowed: "
+   + _F2_PKG_R, _F2_PKG_R, "allow", cwd=ENVPKG_HELD)
+sh("env: find -path node_modules prune, -type d -name pkg control, the same tree with no env file, allowed: "
+   + _F2_PKG, _F2_PKG, "allow", cwd=ENVPKG_CLEAN)
+
+# F3. -printf %h prints the parent of each src, which is a/, and grep -r reads a/ and its env file.
+_F3_PARENT = r"find . -type d -name src -printf '%h\n' | xargs grep -r K"
+sh("env: find -type d -name src -printf %h, the env file is in a, the parent of a clean src, refused: " + _F3_PARENT,
+   _F3_PARENT, "deny", "env-file", cwd=ENVSRC_HELD)
+sh("env: find -type d -name src -printf %h control, the same tree with no env file, allowed: " + _F3_PARENT,
+   _F3_PARENT, "allow", cwd=ENVSRC_CLEAN)
+
+# F4. -type d does not match the symlink named link, so find prints nothing and xargs runs grep -r K on the cwd.
+_F4_LINK = "find . -type d -name link | xargs grep -r K"
+if LINKS_MADE:
+    sh("env: find -type d -name link, the env file is in a, link is a symlink to a clean folder, refused: " + _F4_LINK,
+       _F4_LINK, "deny", "env-file", cwd=ENVNAME_HELD)
+    sh("env: find -type d -name link control, the same tree with no env file, allowed: " + _F4_LINK,
+       _F4_LINK, "allow", cwd=ENVNAME_CLEAN)
+
+# F5. -execdir runs grep in the folder that holds each match, which is exd/x, and grep -r . reads the env file there.
+# The cwd exd/cwd is clean, so a guard that checks only the cwd allows it.
+_F5_EXECDIR = r"find ../x -type d -name src -execdir grep -r K . \;"
+sh("env: find ../x -type d -name src -execdir grep -r, the env file is in x, the cwd is clean, refused: "
+   + _F5_EXECDIR, _F5_EXECDIR, "deny", "env-file", cwd=ENVEXD_HELD_CWD)
+sh("env: find ../x -type d -name src -execdir grep -r control, the same tree with no env file, allowed: "
+   + _F5_EXECDIR, _F5_EXECDIR, "allow", cwd=ENVEXD_CLEAN_CWD)
+
 # A relative cd and an env -C reach the env file's folder through two steps the guard follows: cd src moves into
 # clean/src, and env -C ../../held reaches held, which holds the env file. ENVCD_ROOT is built with ENVPROJ_ROOT above.
 _CD_REL_ENV_CHDIR = "cd src && env -C ../../held grep -r K"
