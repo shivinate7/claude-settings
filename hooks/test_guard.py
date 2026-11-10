@@ -14391,6 +14391,8 @@ REC_LANE = "# Records index\nrecords page v2, rebuilt by the lane\n"
 REC_FEAT = "# Records index\nrecords page on the feature branch\n"
 REC_REBUILT = "# Records index\nrecords page rebuilt by hand after the merge\n"
 REC_MOVED_TEXT = "# Records index\nrecords page v3, moved on again on main\n"
+REC_STACK_CUT = "# Records index\nrecords page on the stacked base, as the lane was cut\n"
+REC_STACK_MOVED = "# Records index\nrecords page on the stacked base, moved on\n"
 RECROOT = os.path.join(ROOT, "recpage")
 RECMAIN = os.path.join(RECROOT, "main")
 # One linked worktree per index state, each cut from the stale local `main`: a case only reads, but
@@ -14514,6 +14516,10 @@ REC_MOVED_LANES = {name: os.path.join(RECMORE, "moved-" + name) for name in (
 # A branch merged into origin/main: its tip is in origin/main's history, off the first-parent line.
 REC_ANC = os.path.join(RECMORE, "ancestor")
 REC_ANC_LANE = os.path.join(RECMORE, "ancestor-lane")
+# A stacked base: a branch with a page commit of its own, cut from main and never merged into it, so its tip is
+# off origin/main's history. Each lane is cut from it, the base moves on, and the lane merges it again.
+REC_STACK = os.path.join(RECMORE, "stacked")
+REC_STACK_LANES = {name: os.path.join(RECMORE, "stacked-" + name) for name in ("merge", "rebuilt", "quit")}
 
 
 def _build_records_more():
@@ -14677,10 +14683,58 @@ def _build_records_more():
          "the ancestor fixture: feat-merged is not in origin/main's history off its first-parent line, "
          "or the lane does not hold the branch's page")
 
+    # The stacked base `stack-base` is cut from main with its own page commit (B1). Its tip is NOT in origin/main's
+    # history. Each lane is cut from it at B1, then the base moves on to B2, and each lane merges it again.
+    make_repo(REC_STACK, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    advance(REC_STACK, {"docs/records.md": REC_V1}, "refs/remotes/origin/main")   # origin/main: v1
+    run(REC_STACK, "checkout", "-q", "-b", "stack-base")
+    write(page(REC_STACK), REC_STACK_CUT)
+    run(REC_STACK, "add", "-A")
+    run(REC_STACK, "commit", "-q", "-m", "stacked base page")
+    run(REC_STACK, "update-ref", "refs/remotes/origin/stack-base", "stack-base")
+    run(REC_STACK, "checkout", "-q", "main")
+    for name, where in REC_STACK_LANES.items():
+        run(REC_STACK, "worktree", "add", "-q", "-b", "lane-stack-" + name, where, "stack-base")
+        write(os.path.join(where, "src", "app.py"), "x = 2\n")   # the lane's own commit, so the merge is no fast-forward
+        run(where, "add", "-A")
+        run(where, "commit", "-q", "-m", "lane change")
+    run(REC_STACK, "checkout", "-q", "stack-base")
+    write(page(REC_STACK), REC_STACK_MOVED)
+    run(REC_STACK, "add", "-A")
+    run(REC_STACK, "commit", "-q", "-m", "stacked base moves on")
+    run(REC_STACK, "update-ref", "refs/remotes/origin/stack-base", "stack-base")
+    run(REC_STACK, "checkout", "-q", "main")
+    base_tip = run(REC_STACK, "rev-parse", "refs/heads/stack-base")
+    need(base_tip not in run(REC_STACK, "rev-list", "--first-parent", "origin/main").split(),
+         "the stacked fixture: the base's tip is on origin/main's first-parent line")
+    need(run(REC_STACK, "show", "origin/main:docs/records.md") == REC_V1.strip(),
+         "the stacked fixture: origin/main's page is not v1")
+    for name in REC_STACK_LANES:
+        run(REC_STACK_LANES[name], "merge", "-q", "--no-commit", "--no-ff", "origin/stack-base")
+        need(run(REC_STACK_LANES[name], "rev-parse", "--verify", "-q", "MERGE_HEAD") == base_tip,
+             "the stacked fixture: MERGE_HEAD is not the base's tip in the lane %r" % name)
+    lane = REC_STACK_LANES["merge"]
+    cut = run(lane, "merge-base", "HEAD", "MERGE_HEAD")
+    need(run_vcs(REC_STACK, "merge-base", "--is-ancestor", cut, "origin/main").returncode == 1,
+         "the stacked fixture: the lane's merge base with the base is on origin/main, so no unmerged history is shared")
+    need(run(lane, "show", "HEAD:docs/records.md") == REC_STACK_CUT.strip(),
+         "the stacked fixture: the merge lane's HEAD page is not the page it was cut with")
+    need(run(lane, "show", ":docs/records.md") == REC_STACK_MOVED.strip(),
+         "the stacked fixture: the merge lane's staged page is not the base's moved page")
+    write(page(REC_STACK_LANES["rebuilt"]), REC_REBUILT)
+    run(REC_STACK_LANES["rebuilt"], "add", "docs/records.md")
+    need(run(REC_STACK_LANES["rebuilt"], "show", ":docs/records.md") == REC_REBUILT.strip(),
+         "the stacked fixture: the rebuilt lane's staged page is not the hand-written page")
+    run(REC_STACK_LANES["quit"], "merge", "--quit")          # MERGE_HEAD removed; the index keeps the base's page
+    need(run_vcs(REC_STACK_LANES["quit"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0,
+         "the stacked fixture: the quit lane still has a merge in progress")
+    need(run(REC_STACK_LANES["quit"], "show", ":docs/records.md") == REC_STACK_MOVED.strip(),
+         "the stacked fixture: the quit lane's staged page is not the base's moved page")
+
 
 lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
               REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values(),
-              REC_ANC, REC_ANC_LANE], _build_records_more)
+              REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values()], _build_records_more)
 
 
 def records_refuse(name, command, lane, **kw):
@@ -14869,7 +14923,8 @@ records_allow("a chain that runs the generator, then add -A and commit, where th
 # A merge of origin/main brings the page of the base tip it merged, MERGE_HEAD's page. When origin/main
 # holds a newer page, that page is neither HEAD's, the base tip's nor origin/<base>'s, and the merge commit
 # holds it. The rule allows exactly that page, and only when MERGE_HEAD is a base tip on origin/<base>'s
-# first-parent line. Any other page is refused.
+# first-parent line, or when the lane shares unmerged history with its base (the merge base of HEAD and
+# MERGE_HEAD is not on origin/<base>). Any other page is refused.
 #
 # The scope is exact blob equality with MERGE_HEAD's page: a rebuilt page, the page of a branch merged off
 # the first-parent line, and a page taken once the merge state is gone are refused.
@@ -14921,6 +14976,16 @@ records_allow("a test-author writes MERGE_HEAD's page into the tree, with no com
 # that tip is not a merge of a base tip, so the page it brings is not the base's own page.
 records_refuse("a test-author commit of a page from a branch merged into origin/main off its first-parent line",
              VCS + " commit -m x", REC_ANC_LANE, **RECORDS_AUTHOR)
+
+# A stacked base's merge: the base is cut from main, never merged into it, and the lane is cut from it. The base
+# moves on and the lane merges it again, so the merge brings the base's page and the lane shares unmerged history
+# with that base. Allowed. A page the lane wrote by hand, and a commit after `merge --quit`, stay refused.
+records_allow("a lane's merge of its unmerged stacked base, which moved on, with the base's page staged",
+              VCS + " commit -m x", REC_STACK_LANES["merge"])
+records_refuse("a lane's merge of its unmerged stacked base, with a page rebuilt by hand",
+               VCS + " commit -m x", REC_STACK_LANES["rebuilt"])
+records_refuse("a lane's commit of the stacked base's page after merge --quit, no merge in progress",
+               VCS + " commit -m x", REC_STACK_LANES["quit"])
 
 # =========================================================================== 5d. conflict markers
 #
