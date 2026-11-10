@@ -94,6 +94,18 @@ def rotation_steps(rule):
                     [" ".join(t.split()) for t in re.split(r"(?m)^\s+\d+\.\s", rule)[1:]]))
 
 
+def near(flat, anchor, *needs, span=300):
+    """True when the text `span` characters either side of an `anchor` match holds every `needs` pattern.
+
+    A passage, not one sentence, so a rewording that splits the rule over two sentences still passes.
+    """
+    for m in re.finditer(anchor, flat, re.I):
+        window = flat[max(0, m.start() - span):m.end() + span]
+        if all(re.search(need, window, re.I) for need in needs):
+            return True
+    return False
+
+
 class TempDest(unittest.TestCase):
     def setUp(self):
         self.dest = tempfile.mkdtemp(dir=RUN_FOLDER)
@@ -269,6 +281,32 @@ class Scaffold(TempDest):
     def test_brief_carries_repo_tag(self):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
         self.assertIn("tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`", flat)
+
+    def test_brief_isolates_test_author_and_builder(self):
+        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
+        self.assertIn("Lane brief:", flat, "scope: templates/brief.md is not the lane brief")
+        self.assertTrue(
+            near(flat, r"\bbuilder", r"test[- ]author", r"\bworktrees?\b", r"\b(own|separate|isolated)\b",
+                 r"\b(never|not|neither|no)\b", r"\b(shar\w*|same checkout|one checkout)\b"),
+            "brief does not say the test-author and the builder each get their own isolated worktree, "
+            "never one shared checkout")
+
+    def test_brief_lands_test_commits_before_builder_starts(self):
+        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
+        self.assertIn("Lane brief:", flat, "scope: templates/brief.md is not the lane brief")
+        self.assertTrue(
+            near(flat, r"\bbuilder", r"test[- ]author", r"\bbranch\b", r"\b(tip|head)\b",
+                 r"\b(before|after|once|prior|first|then)\b", r"\b(land\w*|push\w*|commit\w*)\b"),
+            "brief does not say the test-author's commits land on the lane branch before the builder's "
+            "worktree starts, from that tip")
+
+    def test_brief_forbids_builder_rewriting_test_commits(self):
+        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
+        self.assertIn("Lane brief:", flat, "scope: templates/brief.md is not the lane brief")
+        self.assertTrue(
+            near(flat, r"\bbuilder", r"\b(never|not|no|neither|cannot|can't)\b", r"cherry[- ]?pick\w*",
+                 r"\bamend\w*", r"\b(rewrit\w*|rebas\w*|reword\w*|squash\w*)\b", r"\btests?\b"),
+            "brief does not say the builder never cherry-picks, amends or rewrites a test commit")
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
