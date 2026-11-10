@@ -56,6 +56,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
+  two-worktrees-one-branch
+                       deny. A `checkout -B` or `switch -C` of a branch another worktree of the clone holds, a
+                       forced `worktree add` of one, or `checkout` or `switch` with
+                       `--ignore-other-worktrees` and any branch. The worktree list is read only for these forms,
+                       and a read that fails refuses. An override lifts it.
   pointer-edit         deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
                        pointer checkout's own files. The pointer's `.git`, a linked worktree under
                        `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
@@ -120,6 +125,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
                        -u. No upstream is needed. A delete, a mirror and a dry run pass.
   env-file             deny. Any read or write of an environment file.
+  process-args         deny. A command that prints other processes' full arguments, which can hold a
+                       secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
+                       `ps -x`, `pgrep -a` or `-l` with `-f`, `pstree -a`, `top -c`, a command or `<`
+                       redirect that reads `/proc/<pid|glob|$var>/cmdline`, and a PowerShell or `wmic`
+                       read that selects `CommandLine`. Pid and name forms pass. Read from the parsed
+                       command words, also inside wrappers, `bash -c` and `$(...)`, so quoted text and a
+                       heredoc body pass. (process-args-guard)
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
@@ -305,6 +317,10 @@ Other tools, in `judge` order:
                        the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
                        passes. The deny reason names the tag to add.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
+  lane-start-settings  deny. A `create_session` call with a lane tag (as for lane-effort-pin) whose input has no
+                       `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
+                       stripped, counts as missing. A call with no lane tag passes. The deny reason names both
+                       fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -346,6 +362,23 @@ Other tools, in `judge` order:
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
+  handoff-checked-stamp
+                       deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
+                       that changes a premise's stamp (the line's text from its last `Checked` or `Re-checked`
+                       word, so a respelled, dropped or new stamp is a change), unless the session's transcript
+                       backs it. A premise is judged by its kind before the write; a new line by its own kind.
+                       Evidence: a successful, read-type, main-session tool_use after the last
+                       `compact_boundary` (none: the whole transcript) whose input holds a token of the
+                       premise's `Source:` (a path, a 7+ hex hash, a backticked command, a record slug); with
+                       no token, any one read-type call. No evidence: a Write or Edit of any file, an Agent
+                       call, a send or PR-write tool, a call that failed, any agent record (isSidechain or
+                       agent_id), and the handoff itself. An unchanged stamp, `Checked never`, a `ruling`
+                       premise and a handoff with no premise lines pass. The reason gives one remedy line per
+                       unbacked premise, naming its token or "any read". No transcript_path, an unreadable
+                       transcript, handoff or prompt, and a failed import allow. An override lifts it. Cost:
+                       reads on demand inside this call, the transcript once and only when a stamp changed,
+                       one more small read of the prompt, and for a Write the handoff on disk; no new log,
+                       hook, file or process start. (precompact-handoff, item 15)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -411,7 +444,7 @@ if sys.path[:1] != [_HERE]:
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
-                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
+                   "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
 # (the repo copy, or an old file from before the stamp). A set of all placeholders matches, which is the
@@ -464,6 +497,7 @@ while True:
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
             worktree_remove_forced,
         )
+        from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON, two_worktrees_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
@@ -508,6 +542,8 @@ while True:
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
             lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
+        _loading = "guard_argv"
+        from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
@@ -1162,15 +1198,18 @@ def handoff_sections_result(tool, tool_input, target, cwd):
     return before, text
 
 
-def handoff_sections_hit(tool, tool_input, target, cwd):
+def handoff_sections_hit(tool, tool_input, target, cwd, result=False):
     """The required handoff sections a write to a session handoff would drop, as one text, else "". The
     list is the prompt's marker, read by precompact_handoff.missing_sections, which fails open: an unread
     prompt or marker gives none. A Write is refused for any name its text lacks. An Edit or MultiEdit is
     refused only for a name the result lacks and the file holds now: it drops nothing from a handoff that
     already lacked the name. The prompt is read once per call, and both texts are judged against that read.
-    A failed import allows."""
-    result = handoff_sections_result(tool, tool_input, target, cwd)
-    if result is None:
+    A failed import or a `result` that is not a (before, after) pair of texts allows. `result` is
+    handoff_sections_result's value when the caller has it already."""
+    if result is False:
+        result = handoff_sections_result(tool, tool_input, target, cwd)
+    if result is None or not (isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], str)
+                              and (result[0] is None or isinstance(result[0], str))):
         return ""
     try:
         from precompact_handoff import missing_sections, required_sections
@@ -1183,6 +1222,51 @@ def handoff_sections_hit(tool, tool_input, target, cwd):
         already = set(missing_sections(before, names))
         gone = [name for name in gone if name not in already]
     return ", ".join(gone)
+
+
+HANDOFF_STAMP_REASON = (
+    "Rule (handoff-checked-stamp): this write restamps the Checked value of a premise in the session handoff, and "
+    "this session's own transcript holds no check of it since its last compact boundary. A stamp says you checked "
+    "the premise. Remedy: check each premise below, then repeat the call, or write `Checked never` on it.\n%s\n"
+    "(decision precompact-handoff, item 15)"
+)
+
+
+def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
+    """(remedy lines, ids) for the premises that a write to a session handoff restamps with no evidence in the
+    session's transcript, else None. A premise's before kind judges it, a stamp spelled other than `Checked <value>`
+    counts, and only a read-type call that did not fail backs a token (precompact_handoff.backed_premises).
+    `result` is handoff_sections_result's (before, after), None for no handoff. A Write has no before, so the handoff on disk is its before (a missing file holds none). Premise parsing and the
+    transcript scan are precompact_handoff's. The transcript is read once, and only when a stamp changed. Fails open:
+    no transcript_path, an unreadable transcript, handoff or prompt, a prompt with no premises name, a failed import."""
+    if result is None or not isinstance(transcript, str) or not transcript:
+        return None
+    try:
+        import precompact_handoff
+        name = precompact_handoff.premises_section()
+        if not name:
+            return None
+        before, after = result
+        path = os.path.expanduser(target)
+        path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+        if before is None:
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    before = handle.read()
+            except FileNotFoundError:
+                before = ""
+        need = precompact_handoff.stamp_changes(before, after, name)
+        backed = precompact_handoff.backed_premises(transcript, need, path) if need else None
+    except Exception:
+        return None
+    if backed is None:
+        return None
+    unbacked = [(pid, tokens) for pid, tokens in need if pid not in backed]
+    if not unbacked:
+        return None
+    lines = ["  %s: %s." % (pid, "read or run " + " or ".join(tokens[:3]) if tokens else "any read")
+             for pid, tokens in unbacked]
+    return "\n".join(lines), ", ".join(pid for pid, _tokens in unbacked)
 
 
 OTHER_CHECKOUT_REASON = (
@@ -2750,6 +2834,12 @@ LANE_REPO_TAG_REASON = (
     "A lane session carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
     "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
 )
+# A lane start names the model and the repo it works in. The reason names both fields and says why.
+LANE_START_SETTINGS_REASON = (
+    "A lane session's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
+    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
+    "`model` (the model that row names) and `source_url` (the repo) on create_session."
+)
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
 # The one list of roles that may run Haiku. lint/check_agent_models.py reads it from here.
@@ -2757,6 +2847,10 @@ HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "recor
 MODEL_FLOOR_REASON = (
     "Sonnet is the floor for this role. Start the agent or session with model sonnet, "
     "or name no model and let the default apply."
+)
+# A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
+LANE_MODEL_FLOOR_REASON = (
+    "Sonnet is the floor for a lane session. Start the lane with model sonnet and the source_url of its repo."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -2878,17 +2972,27 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
+def lane_tags(tool_input) -> list:
+    """The `tags` of a call as a list: one string is a list of one; anything else that is not a list is empty."""
+    tags = tool_input.get("tags")
+    if isinstance(tags, str):
+        return [tags]
+    return tags if isinstance(tags, list) else []
+
+
+def is_lane_create_session(tool: str, tool_input) -> bool:
+    """True for a create_session call that tags a lane: any tag that, stripped and casefolded, is LANE_TAG. The one
+    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
+    return tool == CREATE_SESSION_TOOL and any(
+        isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
+
+
 def lane_effort_hit(tool: str, tool_input) -> str:
     """The prompt of a create_session call that tags a lane and is not the effort command exactly, or "".
     A slash command runs only as the whole prompt, so the compare is exact: no strip. A lane tag is any
     tag that, stripped and casefolded, is LANE_TAG; `tags` may be one string. A call with no lane tag
     is not judged. A missing prompt is not the command."""
-    tags = tool_input.get("tags")
-    if tool != CREATE_SESSION_TOOL:
-        return ""
-    if isinstance(tags, str):
-        tags = [tags]
-    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
+    if not is_lane_create_session(tool, tool_input):
         return ""
     prompt = tool_input.get("prompt")
     return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
@@ -2899,13 +3003,9 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
     ("", None). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
     key first, then the origin's path. A lane tag is judged as in lane_effort_hit. With no readable repo, any full
     `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
-    tags = tool_input.get("tags")
-    if tool != CREATE_SESSION_TOOL:
+    if not is_lane_create_session(tool, tool_input):
         return "", None
-    if isinstance(tags, str):
-        tags = [tags]
-    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
-        return "", None
+    tags = lane_tags(tool_input)
     repo = git_reads.github_repo(cwd) if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None
     # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
     for tag in tags:
@@ -2914,6 +3014,17 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
         if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
             return "", None
     return ", ".join(str(t) for t in tags), repo
+
+
+def lane_start_settings_hit(tool: str, tool_input) -> str:
+    """The settings a lane `create_session` call leaves out, as "model", "source_url" or "model, source_url", or "".
+    A lane tag is judged as in lane_effort_hit. A value counts as missing when it is not text or is empty once
+    stripped. A call with no lane tag is not judged."""
+    if not is_lane_create_session(tool, tool_input):
+        return ""
+    missing = [k for k in ("model", "source_url")
+               if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
+    return ", ".join(missing)
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -4173,6 +4284,23 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 
+    # 1b2. A checkout, switch or forced worktree add that takes a branch another worktree holds.
+    # Each segment is judged in the tree it runs in: its own `git -C` or `--git-dir`, else the cwd as
+    # earlier `cd` segments left it. Placed after the pointer rule and before the silent-write rule;
+    # the worktree list is read only for a call of the refused forms.
+    here = cwd
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        words = segment_tokens(segment)
+        moved = _segment_cd_target(words) if words else None
+        if moved is not None:
+            here = _absolute(moved, here)
+            continue
+        matched = two_worktrees_hit(segment, head_root(segment, here))
+        if matched:
+            refuse(tool, "deny", "two-worktrees-one-branch", TWO_WORKTREES_REFUSE_REASON, matched)
+
     # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
     # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the
     # pointer-head rule and before every rule below, so a silenced write is caught on its own
@@ -4393,6 +4521,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 label = gh_write_of(seg) if seg.strip() else ""
                 if label:
                     refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
+
+    # 5c. A command that prints other processes' full arguments (rule process-args). Judged per
+    # command word from the parsed segments, so quoted text and a heredoc body never fire it.
+    matched = process_args_hit(raw, stripped)
+    if matched:
+        refuse(tool, "deny", "process-args", PROCESS_ARGS_REASON, matched)
 
     # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
     # could not run. Judged per segment from the command word, so quoted text never fires it.
@@ -4810,6 +4944,8 @@ def impeccable_shell_hit(segment: str) -> str:
     if index >= len(tokens) or impeccable_name(tokens[index]) != "impeccable":
         return ""
     rest = tokens[index + 1:]
+    while rest and rest[0].startswith("-"):   # leading flags and the `--` that ends them
+        rest = rest[1:]
     if rest[:1] == ["detect"] or rest[:2] == ["hooks", "status"]:
         return ""
     return segment.strip()[:100]
@@ -5882,7 +6018,9 @@ def judge(payload) -> None:
     # model; the log holds what the call asked for.
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
-        refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
+        refuse(tool, "deny", "agent-model-floor",
+               LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,
+               floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
@@ -5898,9 +6036,15 @@ def judge(payload) -> None:
 
     # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
     # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
-    lane_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
-    if lane_tags:
-        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), lane_tags)
+    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    if repo_tag_hit_tags:
+        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags)
+
+    # 9b2c. The lane start settings: a lane session names its model and its source_url. After the repo tag. An
+    # override lifts it.
+    lane_missing = lane_start_settings_hit(tool, tool_input)
+    if lane_missing:
+        refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
@@ -6087,9 +6231,14 @@ def judge(payload) -> None:
 
         # 7a. A write that leaves a session handoff without a required section (rule handoff-sections).
         # Not in never_lifted: the owner may mean the write.
-        dropped = handoff_sections_hit(tool, tool_input, target, cwd)
+        handoff_result = handoff_sections_result(tool, tool_input, target, cwd)
+        dropped = handoff_sections_hit(tool, tool_input, target, cwd, handoff_result)
         if dropped:
             refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
+        # 7a'. A write that restamps a premise's Checked value with no evidence (rule handoff-checked-stamp).
+        stamped = handoff_stamp_hit(tool, tool_input, target, cwd, payload.get("transcript_path"), handoff_result)
+        if stamped:
+            refuse(tool, "deny", "handoff-checked-stamp", HANDOFF_STAMP_REASON % stamped[0], stamped[1])
     for target in targets:
         # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
         if is_project_config(target, cwd):
