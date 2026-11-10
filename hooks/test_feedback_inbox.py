@@ -1957,7 +1957,7 @@ def case_repo_kind_is_in_the_kind_lists():
 
 def case_no_open_page_or_repo_item_reads_no_transcript():
     """Cost: a Stop reads the transcript only for an open page or repo item. With none, a missing
-    transcript path gives no output. Green on main by design: no page or repo item is in the inbox."""
+    transcript path gives no output, since no page or repo item is in the inbox to need the read."""
     cfg, sid = new_cfg(), "repo-no-read"
     write_file(inbox_of(cfg, sid), render_block(
         "a ruling\nand a second line\nand a third",
