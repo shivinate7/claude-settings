@@ -21028,10 +21028,11 @@ def ors_stop_into(ctx, role=ORS_REVIEWER):
 
 
 def ors_push(ctx):
-    """The lane's push, judged by the guard in the lane's checkout, in the case's session and config."""
+    """The lane's push, judged by the guard in the checkout it is pushed from (the lane's, unless a case names
+    `push_from`), in the case's session and config, as the agent the case names (none unless it names one)."""
     tool_input = ctx["tool_input"] or {"command": ctx["command"]}
-    return ov_call(ctx["tool"], tool_input, ctx["lane"], ctx["config"], ctx["session"], 0,
-                   env_path=ors_path(ctx["gh"]))
+    return ov_call(ctx["tool"], tool_input, ctx.get("push_from") or ctx["lane"], ctx["config"], ctx["session"], 0,
+                   agent_id=ctx.get("agent_id"), agent_type=ctx.get("agent_type"), env_path=ors_path(ctx["gh"]))
 
 
 def ors_scope_problem(ctx, red):
@@ -21045,7 +21046,7 @@ def ors_scope_problem(ctx, red):
             problem = "scope: origin's lane ref still holds the head, so the rewrite did not happen"
     elif not ors_holds(ctx["main"], ctx["head"]):
         problem = "scope: origin's lane ref does not hold the head the case reviews"
-    elif red and ors_head(ctx["lane"]) == ctx["head"]:
+    elif red and not ctx.get("chained") and ors_head(ctx.get("push_from") or ctx["lane"]) == ctx["head"]:   # a chain is judged before its commit runs
         problem = "scope: the push source is the reviewed head, so the push owes nothing"
     elif ctx["scope"]:
         problem = ctx["scope"](ctx)
@@ -21505,6 +21506,167 @@ ors_allow("push-owes-review-record: G1 the reviewer stopped at a head on main, t
 ors_allow("push-owes-review-record: G2 an entry at H0 never got a record, then H1 is recorded: a push is allowed silently",
           ors_g2)
 ors_asks_rule("push-owes-review-record: G2c the newest entry at H1 has no record: asks", ors_g2c)
+
+
+def ors_chain(label, command, recorded=False):
+    """A chained command judged with the lane still at the reviewed head H: the entry is at H, and the command runs
+    a HEAD-moving step before its push. `recorded` posts a record at H."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    ctx["chained"] = True
+    ctx["command"] = command
+    ctx["scope"] = lambda c: ("" if ors_head(c["lane"]) == c["head"] else
+                              "scope: the lane moved off the reviewed head before the command was judged")
+    comments = {ORS_PR: [ors_record(ctx["head"], rounds=[(1, ORS_REVIEWER, PFR_MODEL, "PASS")])]} if recorded else None
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])], comments=comments)
+    ctx["note"] = "a chained command judged at H"
+    return ctx
+
+
+def ors_h1(label):
+    """H1, a commit then a push in one command."""
+    return ors_chain(label, VCS + " commit -am fix && " + ORS_PUSH)
+
+
+def ors_h1c(label):
+    """H1c, the same chain with a record at H."""
+    return ors_chain(label, VCS + " commit -am fix && " + ORS_PUSH, recorded=True)
+
+
+def ors_h2(label):
+    """H2, a merge then a push in one command."""
+    return ors_chain(label, VCS + " merge origin/main && " + ORS_PUSH)
+
+
+def ors_h3(label):
+    """H3, a rebase then a push in one command."""
+    return ors_chain(label, VCS + " pull --rebase && " + ORS_PUSH)
+
+
+def ors_h4(label):
+    """H4, a commit then a push, separated by a semicolon."""
+    return ors_chain(label, VCS + " commit -m x; " + ORS_PUSH)
+
+
+def ors_h5(label):
+    """H5, a status check then a push: no step moves HEAD, and HEAD is at H, the remote's tip."""
+    return ors_chain(label, VCS + " status && " + ORS_PUSH)
+
+
+def ors_refused_alone(label, build):
+    """A chained ask command: `build` makes the scenario, then the push must deny as a chained ask command, since an
+    ask command runs alone (rule ask-alone)."""
+    def case():
+        ctx = build(ors_slug(label))
+        problem = ors_scope_problem(ctx, red=True)
+        if problem:
+            return False, problem
+        decision, reason = ors_push(ctx)
+        if decision != "deny" or CHAIN_ASK not in reason:
+            return False, "the push was %s (%s), want deny naming %s" % (decision, reason[:80], CHAIN_ASK)
+        problem = ors_reason_problem(reason)
+        if problem:
+            return False, problem
+        return True, "denied as a chained ask command: " + ctx["note"]
+    FIXTURELESS_CHECKS.add(case)
+    LOG_CHECKS_EXTRA.append((label, case))
+
+
+ors_refused_alone("push-owes-review-record: H1 a commit then a push in one command, an entry at H with no record: denies, ask-alone",
+               ors_h1)
+ors_allow("push-owes-review-record: H1c the same chain with a record at H: allowed silently", ors_h1c)
+ors_refused_alone("push-owes-review-record: H2 a merge then a push in one command, an entry at H with no record: denies, ask-alone",
+               ors_h2)
+ors_refused_alone("push-owes-review-record: H3 a rebase then a push in one command, an entry at H with no record: denies, ask-alone",
+               ors_h3)
+ors_refused_alone("push-owes-review-record: H4 a commit then a push separated by a semicolon, an entry at H with no record: "
+               "denies, ask-alone", ors_h4)
+ors_allow("push-owes-review-record: H5 a status check then a push, HEAD at H and the remote at H: allowed silently", ors_h5)
+
+
+ORS_PEER_AGENT = "a9c8b7a6f5e4d3c21"   # an agent id in the shape AGENT_ID accepts
+
+
+def ors_peer(label, agent_type, rel):
+    """H6, the reviewer stopped at H and left an entry. An agent commits one step past H in its own worktree of the
+    same repo, and pushes from there with no record. The entry belongs to the repo, not to a worktree."""
+    ctx = ors_new(label)
+    ors_stop_into(ctx)
+    peer = ctx["lane"] + "-peer"
+    shutil.rmtree(peer, ignore_errors=True)
+    _must(ctx["lane"], "worktree", "add", "-q", "--detach", peer, ctx["head"])
+    ors_commit(peer, "agent fix", "x = 3\n", rel=rel)
+    ctx.update(push_from=peer, agent_id=ORS_PEER_AGENT, agent_type=agent_type, command=ORS_PUSH)
+    ctx["scope"] = ors_entries_scope
+    ctx["gh"] = ors_gh(label, others=[ors_pr(ctx["head"])])
+    ctx["note"] = "a %s pushes from its own worktree, an entry at H with no record" % agent_type
+    return ctx
+
+
+def ors_h6(label):
+    """H6, a builder's push from its own worktree."""
+    return ors_peer(label, "builder", "src/app.py")
+
+
+def ors_h6t(label):
+    """H6t, a test-author's push from its own worktree, of a test file."""
+    return ors_peer(label, "test-author", "test_peer.py")
+
+
+# A control: the orchestrator's push and the agents' pushes meet the same rule.
+ors_red("push-owes-review-record: H6 a builder pushes from its own worktree, an entry at H with no record: asks", ors_h6)
+ors_red("push-owes-review-record: H6t a test-author pushes from its own worktree, an entry at H with no record: asks",
+        ors_h6t)
+
+
+ORS_PAST = "rrbap-x"   # a branch one commit past the reviewed head, for the J cases
+
+
+def ors_past(ctx, name):
+    """Makes branch `name` one commit past the reviewed head, without moving the lane's HEAD."""
+    tree = run_vcs(ctx["lane"], "rev-parse", "HEAD^{tree}").stdout.strip()
+    past = run_vcs(ctx["lane"], *IDENT, "commit-tree", tree, "-p", ctx["head"], "-m", "one past the reviewed head")
+    _must(ctx["lane"], "branch", name, past.stdout.strip())
+    return ctx
+
+
+def ors_j(label, make, past=False):
+    """A chained command judged with the lane at H. `make(ctx)` gives the command. `past` makes ORS_PAST one commit
+    past H first."""
+    ctx = ors_chain(label, "")
+    if past:
+        ors_past(ctx, ORS_PAST)
+    ctx["command"] = make(ctx)
+    return ctx
+
+
+ors_refused_alone("push-owes-review-record: J1 a switch to a commit past H, then a push, an entry at H unrecorded: denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " switch " + ORS_PAST + " && " + ORS_PUSH, past=True))
+ors_refused_alone("push-owes-review-record: J1b a checkout to a commit past H, then a push, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " checkout " + ORS_PAST + " && " + ORS_PUSH, past=True))
+ors_refused_alone("push-owes-review-record: J3r reset --soft to a commit past H, then a push, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " reset --soft " + ORS_PAST + " && " + ORS_PUSH, past=True))
+ors_refused_alone("push-owes-review-record: J3v revert of H, then a push, an entry at H unrecorded: denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " revert --no-edit HEAD && " + ORS_PUSH))
+ors_refused_alone("push-owes-review-record: J3c cherry-pick of a commit past H, then a push, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " cherry-pick " + ORS_PAST + " && " + ORS_PUSH, past=True))
+ors_refused_alone("push-owes-review-record: J3a am of a patch, then a push, an entry at H unrecorded: denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " am rrbap-patch.mbox && " + ORS_PUSH))
+ors_refused_alone("push-owes-review-record: J3d a commit in the lane named by -C, then a push, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " -C " + c["lane"] + " commit -am fix && " + ORS_PUSH))
+ors_refused_alone("push-owes-review-record: J3n a commit, a newline, then a push, an entry at H unrecorded: denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " commit -am fix\n" + ORS_PUSH))
+ors_refused_alone("push-owes-review-record: J3o a commit, then a push after two bars, an entry at H unrecorded: "
+               "denies, ask-alone",
+               lambda label: ors_j(label, lambda c: VCS + " commit -am fix || " + ORS_PUSH))
+ors_allow("push-owes-review-record: J4 a commit then a push of a branch with no entry: allowed silently",
+          lambda label: ors_j(label, lambda c: VCS + " commit -am fix && " + VCS + " push origin HEAD:archive/rrbap-chain"))
+ors_allow("push-owes-review-record: J5 a fetch then a push, HEAD at H and the remote at H: allowed silently",
+          lambda label: ors_j(label, lambda c: VCS + " fetch && " + ORS_PUSH))
 
 
 def ors_entries_scope(c):

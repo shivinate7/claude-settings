@@ -438,6 +438,12 @@ MUTATIONS = [
      '                if newest is None or written > newest:\n                    newest, heads = written, [sha]\n'
      '                elif written == newest:\n                    heads.append(sha)\n                break',
      '                heads.append(sha)\n                break', "guard", 'G2 an entry at H0 never got a record'),
+    ("push-owes-review-record: the moved flag is ignored, so a chained push reads its source as HEAD",
+     '(None if moved else _plain_source(',
+     '(_plain_source(', "guard", 'H1 a commit then a push in one command'),
+    ("push-owes-review-record: reset is dropped from the head-moving verbs",
+     '("commit", "revert", "reset") + _CONFLICT_VERBS',
+     '("commit", "revert") + _CONFLICT_VERBS', "guard", 'J3r reset --soft to a commit past H'),
     ("push-needs-review-record: a verdict on the Done label line is not read",
      '                if loose and marker:\n                    return loose.group(), "round" if marker.group(1) else "fix", int(marker.group(1)) if marker.group(1) else None',
      '                if loose and marker:\n                    return None', "guard",
