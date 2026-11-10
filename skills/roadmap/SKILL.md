@@ -267,7 +267,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
     branch, or its `head` sha is already in the default branch (`git merge-base --is-ancestor`). A step off the record
     branch has landed only by its trailer or a landed pull. A landed pull on a step's own head refs (or a trailer, or status
     `done`) also clears the "still doing under this lane" hold; a pull found only by its body does not;
-  - no open pull holds it. The lane's pull set is the pulls whose `branch` is a step slug or `lane/<slug>`, plus any
+  - no open pull holds it. The lane's pull set is the pulls whose `branch` is a step slug or `lane/<slug>`. It also holds any
     pull, open or closed, whose `body` names the session id as a whole token (the URL or the bare id). A
     draft pull whose `head` sha is already in the default branch
     releases the lane. A ready pull always holds it. An open pull row with no `body` key reads as naming every lane,
