@@ -402,7 +402,7 @@ def main():
             import question_form
             import override  # the writer's record id, as guard.py reads it; the payload's id is a local UUID
             hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "", override.remote_session_id())
-            judged = [] if hit[0] else question_form.judged_item_writes(writes)
+            judged = [] if hit[0] else question_form.judged_item_writes(writes, payload.get("cwd") or "")
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0
             shown = json.dumps(judged, ensure_ascii=False)
