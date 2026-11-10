@@ -81,12 +81,18 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR and has no replacer.
-   Other lane PRs stay draft. A lane PR closes as replaced when the integration PR that names it
-   ("Replaces #N") opens. An open PR whose head is an ancestor of another open PR's head
-   (`git merge-base --is-ancestor`) closes at once as carried, with the comment "Carried by #R;
-   reopens if #R is dropped." Each closed PR keeps its branch. It reopens if the PR that replaced
-   or carried it closes unmerged. The merge tool's wake will list these closes (step
-   `close-replaced-at-open`, not built yet). Until it lands, the batch runner closes them by hand.
+   Other lane PRs stay draft. `merge --reviewed --root` lists each close as a line: `close as replaced`,
+   `close as carried` or `reopen` (step `close-replaced-at-open`). The batch runner acts on each line.
+   It closes the PR with `gh api -X PATCH repos/OWNER/REPO/pulls/N -f state=closed` (or
+   `update_pull_request`) and posts the comment, or it reopens the PR. The tool posts and closes nothing.
+   When an integration PR opens with a body line `Replaces #N`, the lane PR it names closes as
+   replaced. That line counts only at a line start, outside a code fence and a quote. Two PRs that
+   name each other with `Replaces` close neither. An open PR with a done review record closes as
+   carried when another open PR on the same base holds its head (GitHub compare read). A PR closed
+   as replaced cannot carry another. Each close comment starts a line. It reads `Replaced by #R;
+   reopens if #R is dropped`, or `Carried by #R; reopens if #R is dropped`. A `reopen` line fires
+   when R closes unmerged. For a Replaced note, it also fires when R is open and no longer names N.
+   A Carried note reopens only when R closes unmerged. Each closed PR keeps its branch.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
    Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
    run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
