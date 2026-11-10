@@ -1747,10 +1747,11 @@ test("the faint text reaches 4.5:1 on chips and the ground, for any brand", asyn
 
 test("a sent chip carries a mark, a ring while filing is pending and a check once filed, so it differs from ready by more than colour", async (t) => {
   const mark = (page) => page.evaluate((id) => getComputedStyle(document.getElementById("c-" + id), "::before").content, DECISION.id);
-  const page = await open(t, { answers: SAVED_A }); if (!page) return;
+  // TASK first: open() waits for the first item's card, and a filed item draws as one line, not a card.
+  const page = await open(t, { items: [TASK, DECISION], answers: SAVED_A }); if (!page) return;
   assert.match(await mark(page), /○/);
   await page.close();
-  const page2 = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { filed: "2026-10-26T03:00:00Z" } } }); if (!page2) return;
+  const page2 = await open(t, { items: [TASK, DECISION], answers: SAVED_A, receipts: { [DECISION.id]: { filed: "2026-10-26T03:00:00Z" } } }); if (!page2) return;
   assert.match(await mark(page2), /✓/);
 });
 
@@ -3610,7 +3611,11 @@ test("dismiss: with no store, the list says it cannot be read and no Mark read i
 // A routed ask has a home and a reply, and no record in its thread waits. A routed item is a closed item with a `closed` time,
 // or an open item with a filed receipt and no waits.
 // Every case lists an open, unanswered item first (TASK), so open() waits for an id that every build keeps.
-const AP_ASK = { id: "ask-ap-routed", text: "Which step holds the one-line rule?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-10-30T10:00:00Z", reply: "Routed to step ask-phase-out. The rest is on the Status tab.", home: "step:ask-phase-out" };
+// READ_FROM, the ship time of the one-line rule, is 2026-11-10T18:00:00Z. AP_ASK (18:01Z) is answered after it, so it is a line;
+// AP_EARLY (17:59Z) is answered before it, so it reads as read. Both are in the past: Mark read stamps dismissed with the page's
+// clock, and an answer later than that stamp keeps the ask on the list.
+const AP_ASK = { id: "ask-ap-routed", text: "Which step holds the one-line rule?", at: "2026-10-30T09:00:00Z", owner: "triage", answered: "2026-11-10T18:01:00Z", reply: "Routed to step ask-phase-out. The rest is on the Status tab.", home: "step:ask-phase-out" };
+const AP_EARLY = { id: "ask-ap-early", text: "Was the one-line rule routed before the ship time?", at: "2026-11-10T16:00:00Z", owner: "triage", answered: "2026-11-10T17:59:00Z", reply: "Routed to step ask-phase-out before the ship time.", home: "step:ask-phase-out" };
 const AP_CLOSED = mk("ap-closed", 70, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", reply: "Filed as step ask-phase-out. The record stays there." });
 // Closed before the ship time: no `closed` field, so it counts as read.
 const AP_CLOSED_OLD = mk("ap-closed-old", 71, { status: "closed", home: "step:ask-phase-out", reply: "Old answer, closed before the ship time." });
@@ -3642,6 +3647,15 @@ test("ask-phase-out: a routed ask shows one line with its home and its short rep
   assert.ok(said.includes(AP_ASK.home), `the line of the routed ask does not show its home ${AP_ASK.home}`);
   assert.ok(said.includes("Routed to step ask-phase-out."), "the line of the routed ask does not show its short reply");
   assert.equal(await row.locator(`#reply-${AP_ASK.id}`).count(), 0, "the routed ask is drawn in full, with its Reply button, not as one line");
+});
+
+test("ask-phase-out: a routed ask answered before READ_FROM reads as read: no line on the list, and it sits under Show read asks", async (t) => {
+  const page = await open(t, { items: [AP_OPEN], dbExtra: { asks: { [AP_EARLY.id]: AP_EARLY, [DIS_KEEP.id]: DIS_KEEP } }, storage: RPL_SEEN }); if (!page) return;
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN); // the list has drawn, so the absence below is real
+  assert.equal(await page.locator(`${DIS_SHOWN}#row-${AP_EARLY.id}`).count(), 0, `the routed ask ${AP_EARLY.id}, answered before READ_FROM, is drawn as a line on the list`);
+  await mustHave(page, "#askDismissed", "Show read asks unfold, which holds the read asks");
+  await page.click("#askDismissed");
+  await mustHave(page, `ol#askDList li#row-${AP_EARLY.id}`, `the routed ask ${AP_EARLY.id} in the read list`);
 });
 
 test("ask-phase-out: Mark read on a routed ask writes dismissed with update, deletes nothing, keeps the record, and the ask leaves the list at the next load", async (t) => {
@@ -5437,6 +5451,7 @@ test("the Sent bar keeps its parts on the page's spacing steps", async (t) => {
 });
 
 // One containment sweep catches overflow of any kind on every state and width. A new item state is one row in STATES, a new width one entry in SWEEP_WIDTHS.
+// The filed row lists TASK first: a filed item draws as one line, and open() waits for the first item's card.
 const SWEEP_WIDTHS = [320, 390, 768, 1024, 1280, 1600, 2200, 2560];
 const LONGT = "A very long title that runs across the whole width of the rail and then some more ";
 const TALL = '<body style="margin:0"><div style="width:390px;height:844px;background:#eee"></div></body>';
@@ -5444,7 +5459,7 @@ const STATES = [
   ["open", () => ({ items: [DECISION, TASK] })],
   ["draft ready", () => ({ items: [DECISION, TASK] }), (page) => choose(page, DECISION, "a")],
   ["answered, filing pending", () => ({ items: [DECISION, TASK], answers: SAVED_A })],
-  ["answered, filed", () => ({ items: [DECISION, TASK], answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } })],
+  ["answered, filed", () => ({ items: [TASK, DECISION], answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } })],
   ["answered, read", () => ({ items: [DECISION, TASK], answers: SAVED_A, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } } })],
   ["bundle", () => ({ items: [1, 2, 3].map((n) => mk("sw-" + n, n, { group: "pair", title: LONGT + n })), groups: { pair: { title: "Answer these together", why: "Linked." } } })],
   ["pictures", () => ({ items: [mk("sw-pics", 1, { options: LOOK_OPTS, pick: "a", designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 390, h: 844 } })) })], designData: Object.fromEntries(LOOK_OPTS.map((o) => [o.design, TALL])) })],
