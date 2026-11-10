@@ -46,12 +46,13 @@ class Unknown(Exception):
 
 
 def findings(text, known):
-    """[(line number, what)] for each bare link and each unregistered cite in `text`."""
+    """[(line number, what)] for each bare link and each unregistered cite in `text`. `known` None reads no cite:
+    a bare link is a find with no registry, and a cite needs one."""
     found = []
     for number, line in enumerate(text.splitlines(), 1):
         if BARE_LINK.search(line):
             found.append((number, "a bare artifact link; cite it as artifact:<id> and register the page"))
-        for cite in CITE.finditer(line):
+        for cite in CITE.finditer(line) if known is not None else ():
             if cite.group(1) not in known:
                 found.append((number, "artifact:%s is not in the artifacts registry" % cite.group(1)))
     return found
@@ -100,31 +101,53 @@ def step_files(root):
             continue
         if probe.returncode != 0:
             raise Unknown("git cannot read %s" % ref)
-        listed = git(root, "ls-tree", "-r", ref, "--", STEP_FOLDER)
-        if listed.returncode != 0:
-            raise Unknown("git cannot list %s" % ref)
-        entries = []
-        for line in listed.stdout.decode("utf-8", "replace").splitlines():
-            meta, _, name = line.partition("\t")
-            parts = meta.split()
-            if len(parts) == 3 and parts[1] == "blob" and name.endswith(".json"):
-                entries.append((name, parts[2]))
-        if not entries:
-            return []
-        blobs = git(root, "cat-file", "--batch", data="".join(sha + "\n" for _, sha in entries).encode())
-        if blobs.returncode != 0:
-            raise Unknown("git cannot read the steps of %s" % ref)
-        out, pos, found = blobs.stdout, 0, []
-        for name, sha in entries:
-            end = out.index(b"\n", pos)
-            head = out[pos:end].split()
-            if len(head) != 3 or head[0].decode() != sha:
-                raise Unknown("git gave no blob for %s" % name)
-            size = int(head[2])
-            found.append((name, out[end + 1:end + 1 + size].decode("utf-8", "replace")))
-            pos = end + 1 + size + 1
-        return found
+        return ref_step_files(root, ref)
     return []
+
+
+def ref_step_files(root, ref):
+    """[(path, text)] of each step at the revision `ref`, in two git processes (one when it holds no step). Unknown
+    when git cannot read the revision: a caller that holds a pushed head names it here, with no probe first."""
+    listed = git(root, "ls-tree", "-r", ref, "--", STEP_FOLDER)
+    if listed.returncode != 0:
+        raise Unknown("git cannot list %s" % ref)
+    entries = []
+    for line in listed.stdout.decode("utf-8", "replace").splitlines():
+        meta, _, name = line.partition("\t")
+        parts = meta.split()
+        if len(parts) == 3 and parts[1] == "blob" and name.endswith(".json"):
+            entries.append((name, parts[2]))
+    if not entries:
+        return []
+    blobs = git(root, "cat-file", "--batch", data="".join(sha + "\n" for _, sha in entries).encode())
+    if blobs.returncode != 0:
+        raise Unknown("git cannot read the steps of %s" % ref)
+    out, pos, found = blobs.stdout, 0, []
+    for name, sha in entries:
+        end = out.index(b"\n", pos)
+        head = out[pos:end].split()
+        if len(head) != 3 or head[0].decode() != sha:
+            raise Unknown("git gave no blob for %s" % name)
+        size = int(head[2])
+        found.append((name, out[end + 1:end + 1 + size].decode("utf-8", "replace")))
+        pos = end + 1 + size + 1
+    return found
+
+
+def pushed_step_findings(root, ref):
+    """[(step path, what)] for each find in the steps at the revision `ref` (a pushed head), judged against the registry
+    of the working tree at `root`: the one test `check` applies to the record branch. A registry that cannot be read
+    still judges each bare link, since no registry makes one safe; with no bare link found, Unknown. Unknown too when
+    the revision cannot be read, never an empty list."""
+    try:
+        known = {entry["id"] for entry in layout.artifacts(root)}
+        unread = None
+    except layout.LayoutError as err:
+        known, unread = None, "the artifacts registry cannot be read: %s" % err
+    found = [(rel, what) for rel, text in ref_step_files(root, ref) for _, what in step_findings(text, known)]
+    if unread and not found:
+        raise Unknown(unread)
+    return found
 
 
 def step_findings(text, known):
