@@ -9623,9 +9623,9 @@ push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=P
 sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
    VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
 
-# ASK, rules 206 a and 207 a, and DENY, rule push-agent-branch, on a local-path origin. A main refspec there is
-# silent, and the refspec after it still decides. The controls decide with no main refspec ahead: HEAD on
-# PUSHLOCALSTRAY (its branch tracks origin/other) is stray, and the agent name on PUSHLOCAL is refused.
+# ASK, rules push-stray-branch and push-main, and DENY, rule push-agent-branch, on a local-path origin. A main
+# refspec there is silent, and the refspec after it still decides. The controls decide with no main refspec ahead:
+# HEAD on PUSHLOCALSTRAY (its branch tracks origin/other) is stray, and the agent name on PUSHLOCAL is refused.
 push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
 agent_refused("push: local origin, main then the agent name asks the agent rule",
@@ -9634,9 +9634,10 @@ push_case("local origin, HEAD on a branch tracking another name asks stray (cont
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
 agent_refused("push: local origin, the agent name alone asks the agent rule (control)",
               VCS + " push origin claude/agent-deadbeef01", cwd=PUSHLOCAL)
-# On a network origin, a main refspec before an agent name is refused by the agent rule, not asked as push-main
-# (owner ruling, 2026-11-10). The agent name is in the push, so the refusal holds from any checkout. A main
-# refspec before a lane name still asks push-main, and so does `origin main HEAD`.
+# On a network origin, a main refspec before an agent name is refused by the agent rule, not asked as push-main.
+# One click on the push-main ask would otherwise carry the agent branch to origin as well. The agent name is in the
+# push, so the refusal holds from any checkout. A main refspec before a lane name still asks push-main, and so does
+# `origin main HEAD`.
 push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
 push_case("network origin, main then a lane name asks push-main", "origin main HEAD:lane-x", "ask",
           rule=PUSH_MAIN_RULE)
