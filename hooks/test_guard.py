@@ -34038,7 +34038,8 @@ for _command in ('gh pr comment 5 --body "Round 2 -> pass"',
                  'gh pr comment 5 --body "> quoted text"',
                  'gh pr comment 5 --body "CI is green (3 > 2 jobs)"'):
     cs_shell("gh_comment_body_quoted_gt_denied", "deny", _command)
-# A cloud gh write is refused by gh-write-cloud, which runs first here. The case holds that the refusal is that rule's, not coordinator-scope's.
+# Coordinator-scope judges this call first and does not refuse it; gh-write-cloud then denies it. The case holds that
+# the refusal is that rule's, not coordinator-scope's.
 _gh_cfg, _gh_transcript = cs_pair("coordinator")
 add("coordinator-scope: gh_comment_body_without_gt_is_not_a_coordinator_scope_refusal, shell: gh pr comment 5 --body \"Round 2 passes\"",
     "deny", rule=GH_WRITE_RULE, tool="Bash", command='gh pr comment 5 --body "Round 2 passes"', cwd=GITMAIN,
@@ -34517,14 +34518,16 @@ def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None, transcri
 
 
 def cs_rule_opens(config, tool, tool_input, cwd, env=None, agent_id=None, transcript=None):
-    """(decision, reason, every open, the opens only the rule makes, the rule's opens of `transcript`) of one call. The
-    rule's own opens are the call's less those of the same call with CLAUDE_CODE_REMOTE "false", so another rule's opens of
-    the transcript cancel out."""
+    """(decision, reason, every open, the opens the rule adds, the rule's opens of `transcript`) of one call. The rule adds
+    an open of a path when the call opens it more times than the same call with CLAUDE_CODE_REMOTE "false" does. The
+    count, not the path alone, catches an extra read of a path that another rule also reads: the pointer-edit rule reads
+    the config CLAUDE.md in both runs."""
     env = dict(CS_REMOTE if env is None else env)
     got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env, agent_id, transcript)
     _, _, off = cs_opens_of(config, tool, tool_input, cwd, dict(env, CLAUDE_CODE_REMOTE="false"), agent_id, transcript)
     own_record = opened.count(os.path.abspath(transcript)) - off.count(os.path.abspath(transcript)) if transcript else 0
-    return got, reason, opened, [path for path in dict.fromkeys(opened) if path not in off], own_record
+    adds = [path for path in dict.fromkeys(opened) if opened.count(path) > off.count(path)]
+    return got, reason, opened, adds, own_record
 
 
 def cs_cost_check(role, tool, tool_input, cwd, env=None, agent_id=None, shut=False, home=False):
