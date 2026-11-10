@@ -1517,6 +1517,7 @@ class BatchLintFlags(tm.Env):
 BATCH_LANE = "batch-73"  # an integration branch: `batch-` and a number, so the lane lint runs the batch checks
 BATCH_DEBT = "batch-74"  # an integration branch whose head closes a debt (the fixture of tm.DebtRetire)
 LANE_SLUG = "batch-push-full-checks"  # a lane whose slug starts `batch-` but names no number: a lane, so the lane lint runs the lint route
+SUFFIXED_LANE = "batch-73-fix"  # `batch-` and a number, then a suffix: a lane's name, not an integration branch's, so the lint route
 FULL_PASS = [("PASS", "record slugs"), ("PASS", "comment narration")]  # the batch's full checks job, green
 FULL_FAIL = [("PASS", "record slugs"), ("FAIL", "shard suite")]
 FULL_UNKNOWN = [("PASS", "record slugs"), ("unknown", "shard suite")]
@@ -1791,6 +1792,26 @@ class BatchLane(LaneFixture):
         rc, out = self.run_lane("--lane-lint", LANE_SLUG)
         self.assertEqual(rc, 0, out)
         self.assert_lint_route(out)
+
+    def test_a_lane_slug_with_a_number_and_a_suffix_takes_the_lint_route(self):
+        self.push_branch_of(SUFFIXED_LANE)
+        self.assertTrue(self.head(SUFFIXED_LANE), "the lane branch %s was not pushed" % SUFFIXED_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", SUFFIXED_LANE)
+        self.assertEqual(rc, 0, out)
+        self.assert_lint_route(out)
+
+    def test_a_ref_past_an_integration_branch_takes_the_lint_route(self):
+        """`origin/batch-73~1` names the commit before an integration branch's head, not the branch: the lint route, at that commit."""
+        self.push_branch_of(BATCH_LANE)
+        self.use_routed_ci_job(FULL_PASS)
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        parent = tm.sh(self.co, "git", "rev-parse", "origin/%s~1" % BATCH_LANE)
+        self.assertNotEqual(parent, self.head(BATCH_LANE), "fixture: the parent of the integration branch is its head")
+        rc, out = self.run_lane("--lane-lint", "origin/%s~1" % BATCH_LANE)
+        self.assertEqual(rc, 0, out)
+        self.assert_lint_route(out)
+        self.assertEqual([r["head"] for r in self.lint_runs()], [parent], "the lint did not run at the parent commit:\n" + out)
 
     def test_an_integration_branch_named_by_number_takes_the_batch_route(self):
         self.push_branch_of(BATCH_LANE)
