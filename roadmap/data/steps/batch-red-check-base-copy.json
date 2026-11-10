@@ -1,0 +1,12 @@
+{
+  "title": "When a batch check goes red and a batch lane changes that check's own file, re-run main's copy of the check before naming a lane",
+  "phase": "now",
+  "status": "queued",
+  "order": 1015,
+  "owner": "triage",
+  "why": "Batch runner 8 dropped #2252 at 13:17 CST Nov 10 for a silent-undo red that #1099's rewrite of that check caused; it had not run main's copy of the check first, so a good lane was dropped and a fix lane was wasted.",
+  "note": "Proposed by batch runner 8, backed by the coordinator 14:01 CST Nov 10. Guard: the batch tool re-runs main's copy of a red check on the batch head when a batch lane edits that check's own file, and names the lane only if main's copy is red too. Tests first: a batch where the lane that edits the check is the cause, and one where main's copy is also red.",
+  "updatedAt": "2026-11-10T14:05:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
