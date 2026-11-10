@@ -3649,9 +3649,23 @@ sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane"
 
 # Kill cases for mutate_guard: a quoted refspec and a quoted force in a commit message are verdicts.
 sh("per-file kill: a quoted refspec keeps its quotes, so a force push asks",
-   VCS + " push origin \"+main\" $'it\\'s'", "ask", cwd=GITWT)
+   VCS + " push origin \"+main\" \"x", "ask", cwd=GITWT)
 sh("per-file kill: false alarm: --force quoted in a commit message stays allowed",
-   VCS + " commit -m $'release git push --force notes\\'s'", "allow", cwd=GITWT)
+   VCS + " commit -m \"release git push --force notes\" \"x", "allow", cwd=GITWT)
+
+# NORMAL COMMITS WITH AN ANSI-C MESSAGE ALLOW. The guard decodes a bash `$'...'` word before it reads a
+# command (guard_core.decode_ansi_c), so each of these commits must still read as a plain commit.
+sh("per-file allow: an ANSI-C commit message with an escaped quote allows",
+   VCS + " commit -m $'it\\'s fine'", "allow", cwd=GITWT)
+sh("per-file allow: an ANSI-C commit message over two lines allows",
+   VCS + " commit -m $'line one\\nline two'", "allow", cwd=GITWT)
+sh("per-file allow: an ANSI-C commit message naming git push --force as text allows",
+   VCS + " commit -m $'release git push --force notes'", "allow", cwd=GITWT)
+# THE FORM THAT ALLOWS, PINNED. A commit message whose quote never closes is a bash syntax error, so the
+# shell runs nothing. push_text blanks the open quote's tail (_push_scan), so the quoted `git push --force`
+# is text, not a push, and the call reads as a plain commit.
+sh("per-file allow: a commit message whose quote never closes names git push --force, allows",
+   VCS + " commit -m \"release git push --force notes", "allow", cwd=GITWT)
 
 # THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decision agent-worktree-discard-is-noted, section "Agent-owned worktree").
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
@@ -8614,10 +8628,11 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=()):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
     """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
-    force-push. `silent` marks an allow that must print nothing."""
-    sh("push: " + name, VCS + " push " + tail, expected,
+    force-push. `silent` marks an allow that must print nothing. `word` is the command word the call
+    names: the plain `git`, or a form of it that the shell reads as git."""
+    sh("push: " + name, word + " push " + tail, expected,
        rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
        carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
 
@@ -8797,6 +8812,23 @@ sh("push: lease with -c push.default=current ignores the repository's upstream",
    VCS + " -c push.default=current push " + LE.strip(), "allow", cwd=PUSHUP)
 sh("push: lease with -c push.default=matching asks",
    VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+
+# THE COMMAND WORD SPLIT OR QUOTED INTO PIECES. The guard reads such a word as `git`, as the shell does.
+# A shlex reader does that for the shell forms below, which already ask: green locks that keep it so.
+# Bash's ANSI-C quoting also expands to `git`, but the reader does not unquote `$'...'`, so the word reads
+# as `$git` and the act is allowed. Those are the red rows. Each form expects the plain word's verdict.
+SPLIT_FORCE = "--force origin main"
+SPLIT_PUSH_MAIN = "origin HEAD:main"
+SPLIT_ANSI_WORDS = ["$'g'it", "g$'i't", "$'\\147it'"]
+SPLIT_SHELL_WORDS = ["g'i't", 'gi""t', '"g"it', "\\git", 'g""it', "gi\\t", "env g'i't", "command g'i't"]
+for _word in SPLIT_ANSI_WORDS + SPLIT_SHELL_WORDS:
+    push_case("split word " + _word + " force-pushes main, asks", SPLIT_FORCE, "ask", word=_word)
+    push_case("split word " + _word + " pushes to main, asks", SPLIT_PUSH_MAIN, "ask",
+              rule=PUSH_MAIN_RULE, word=_word)
+# Controls: a plain word that only contains git is text, so it stays allowed.
+sh("split word control: digit, a word with git inside, allows", "digit", "allow")
+sh("split word control: gitk-free, a word with git inside, allows", "gitk-free", "allow")
+sh("split word control: echo git, git as text, allows", "echo git", "allow")
 
 # FALSE ALARMS: a guard that cries wolf is spent.
 # Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
@@ -26101,9 +26133,10 @@ def subject_unread_log_case(command=None, expect_note=True, cwd=SUBJDIRTY, searc
 
 
 def per_file_quoted_force_noted_case():
-    """KILL CASE for a mutate_guard entry removed in 78e8446: a quoted force on a worktree remove.
-    The base reads the quoted `--force`, so the unread subject is noted, not silent."""
-    return subject_unread_log_case(VCS + " worktree remove \"--force\" $'x\\'y' /x")
+    """KILL CASE for the mutate_guard entry `subject: a quoted force flag reads as unforced`
+    (hooks/mutate_guard.py). A quoted `--force` on a worktree remove reads as forced, so the unread
+    subject is noted, not silent. The abbreviated entry is killed by the `log:` check, not this one."""
+    return subject_unread_log_case(VCS + " worktree remove \"--force\" \"x'y /x")
 
 
 LOG_CHECKS_EXTRA.append(("per-file kill: log: a quoted or abbreviated force on a worktree remove "
