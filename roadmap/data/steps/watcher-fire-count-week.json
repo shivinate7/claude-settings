@@ -1,0 +1,12 @@
+{
+  "title": "Count each of the six model-call hooks' fires over one week, then delete each that never fired",
+  "phase": "build",
+  "status": "ready",
+  "order": 968,
+  "owner": null,
+  "why": "Owner's answer b on page item 248 (Nov 6, 12:19 CST): measure how often each hook fires for a week, then delete the ones that never fire. What was built followed a misrouted note (option a): docs/plans/builtin-hook-survey.md (86da64a52) has an unmeasured \"Cost now\" column and no fire count.",
+  "note": "Read the counts on demand from logs that already exist (guard.log), with no new logging. guard.log lives on the owner's machines, so this needs a session on his computer. The six hooks: call_judge, prose_judge, reply_judge, feedback_guard, report_guard, sendmessage_state.",
+  "lane": null,
+  "blockedBy": [],
+  "updatedAt": "2026-11-10T04:56:00-06:00"
+}
