@@ -20338,6 +20338,10 @@ BS_BRIEFS = {
                  + ". Report in 10 lines.",
     "abs-guard": "Task: fix the guard.\nFiles: " + os.path.join(DIFFROOT, "bs-abs-guard-main", "hooks", "guard.py")
                  + ". Report in 10 lines.",
+    # a Windows drive path quoted with no repo path, and the same brief beside a repo path
+    "drive": r"Fix the Windows failure. The log is at C:\Users\runneradmin\out.txt",
+    "drive-named": "Fix the Windows failure. The log is at C:\\Users\\runneradmin\\out.txt\n"
+                   "Files: `src/app.py`. Report in 10 lines.",
 }
 
 
@@ -20372,7 +20376,7 @@ BS_IDS = {key: "b5a%013x" % n for n, key in enumerate(
     ["exact", "bare", "dir", "glob", "nopaths", "lone", "author", "notes", "other", "later", "list",
      "ptr-abs", "ptr-repo", "ptr-missing", "ptr-chain", "bracket", "folder", "slowglob",
      "missing", "unreadable", "misfire", "prose", "dollar", "abs-other", "abs-guard", "ptr-names",
-     "ptr-missing-names"], 1)}
+     "ptr-missing-names", "drive", "drive-named"], 1)}
 
 
 def bs_agent(key):
@@ -20621,6 +20625,12 @@ bs_judge("brief-scope: a push refusal says to stop and report a change an own co
          "builder", "exact", command=PUSH, rule=BS_RULE, lacks="src/contest.py",
          carries=BS_REMEDY + (BS_STOP_REPORT,))
 
+# ---- a Windows drive path in the brief is no repo path: beside a named file it names nothing, so it adds no name
+bs_judge("brief-scope: a drive path beside a repo path that names the changed file: a commit of that file is allowed",
+         "allow", bs_app_named, "builder", "drive-named")
+bs_judge("brief-scope: a drive path beside a named repo file: a commit of an unnamed file is denied", "deny",
+         bs_app_unnamed, "builder", "drive-named", rule=BS_RULE, lacks="src/contest.py")
+
 
 def _bs_scope(repo, rel):
     """The fixture's own change, read from git before any guard call: a log check judges only what it built."""
@@ -20778,6 +20788,17 @@ LOG_CHECKS_EXTRA.append(("brief-scope: an unreadable pointer beside the message'
                          "logs brief-scope-unread", bs_ptr_missing_names_log))
 LOG_CHECKS_EXTRA.append(("brief-scope: a slash word in prose allows an unnamed file and logs brief-scope-unnamed",
                          bs_prose_log))
+
+
+def bs_drive_log():
+    """A Windows drive path quoted in the brief names no repo path off Windows: a change to the existing file
+    it does not name is allowed at each call, and the log holds brief-scope-unnamed."""
+    return bs_logged(os.path.join(ROOT, "briefscope-log-drive"), bs_app_named, ["src/app.py"],
+                     _bs_bodies(bs_app_named, "builder", "drive", [COMMIT]), BS_UNNAMED)
+
+
+LOG_CHECKS_EXTRA.append(("brief-scope: a drive path quoted in the brief names no repo path: the change is allowed "
+                         "and logs brief-scope-unnamed", bs_drive_log))
 
 
 # =========================================================================== builder refusal
