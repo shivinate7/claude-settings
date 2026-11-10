@@ -1,4 +1,6 @@
-Lane page-save-reaches-auto-mode (session_013NEJL3rTtVuJHBka4oSALE). Message to collector 12:28 CST.
-Work: owner typed "widen" (11:06:35 CST, relayed to coordinator session_013NEJL2hB1pLZPDpzas7VgB). PR #2554, head d1ea4bf5a42a72e819d30092ffa49cb24231a315, branch lane/page-save-reaches-auto-mode.
-State: review record PR comment 6775316417 (rounds 1 FAIL, 2 PASS, 3 PASS; fix check PASS; net value zero; guard yes). Lane lint PASS on that head. Lane never merges; a batch runner merges it (CI green on this head, nothing merging during a batch CI run).
-Left: nothing in this lane. Open owner questions: none. The merge request sits with the coordinator and batch runner 8, not with the collector.
+IDLE (B), lane page-save-reaches-auto-mode (session_013NEJL3rTtVuJHBka4oSALE). Reply to collector 12:33 CST; corrects its 12:28 message (owner meant archive, not merge).
+Goal: auto mode counts the owner's page save for one named settings change (step page-save-reaches-auto-mode). Owner typed "widen" at 11:06 CST (event 229e1841-338f-48cb-8249-00e3bdecb237).
+State: built and reviewed. Repo claude-settings, branch lane/page-save-reaches-auto-mode, draft PR 2554, head d1ea4bf5a42a72e819d30092ffa49cb24231a315. Review record comment 6775316417 (rounds FAIL, PASS, PASS; fix check PASS; net value zero). Lane lint PASS. Coordinator session_013NEJL2hB1pLZPDpzas7VgB has the event and releases the PR to batch runner 8.
+Left: batch runner merges (CI green on head, no batch CI run in progress), then the coordinator closes the step with the merge commit. Three limits are in docs/debts/notes.md. Unmeasured: whether the classifier reads label= from the counted line.
+Files: settings.json (Relayed Grant entry), skills/waiting-page/page_grant.py, skills/waiting-page/SKILL.md, docs/decisions/relayed-grant-read-from-page.md, hooks/test_auto_mode_allow.py, skills/waiting-page/test_page_grant.py, skills/waiting-page/test_skill_park_relay.py, docs/debts/notes.md.
+Archive branch on origin: archive/page-save-reaches-auto-mode-notes. No processes of its own running.

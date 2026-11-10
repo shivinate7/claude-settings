@@ -363,7 +363,7 @@ session_013NEJL3qKvwXBThPagV7fsa	10:02 CST	11:06 CST	handoff-B	archive: archived
 session_013NEJL3qSsV2LJ6R1a1HMCB	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3qwtN2VRPNsTZMhZD	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3r8JbyJKhCzBoC6sF	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
-session_013NEJL3rTtVuJHBka4oSALE	10:02 CST	11:06 CST	KEEP	archive: active-kept (turn/agent running at 11:2x CST)
+session_013NEJL3rTtVuJHBka4oSALE	10:02 CST	11:06 CST	KEEP	archive: archived-idle 12:33 CST (own IDLE reply, override 4h)
 session_013NEJL3sBYfjKAhvyn761vu	10:02 CST	11:07 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3sBYfjKAhvyn761vu.idle.md)
 session_013NEJL3ttjVfExjpp5nLDcz	10:02 CST	11:06 CST	handoff-B	archive: archived 11:2x CST under owner override 4h
 session_013NEJL3uzxpVTQAsNhcR9t9	10:02 CST	11:06 CST	KEEP	archive: archived-idle (owner 11:21 CST ruling, override 4h; handoffs/session_013NEJL3uzxpVTQAsNhcR9t9.idle.md)
