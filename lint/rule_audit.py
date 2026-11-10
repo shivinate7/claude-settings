@@ -106,7 +106,7 @@ RULE_FLOOR = 98
 # 59 includes roles-orchestrator-never-builds: its guard is partial and the schema has no partial
 # marker (debt orchestrator-rule-half-guarded).
 UNMECHANIZED_EXPECTED = 59
-JUDGMENT_EXPECTED = 24
+JUDGMENT_EXPECTED = 25
 REASON_MIN_WORDS = 8
 
 KINDS = {"guard", "check", "ci", "unmechanized", "judgment"}
