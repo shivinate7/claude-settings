@@ -1,0 +1,12 @@
+{
+  "title": "An owner comment on any repo's waiting page about the page's form becomes a claude-settings step that names skills/waiting-page",
+  "phase": "now",
+  "status": "ready",
+  "order": 985,
+  "owner": "claude-settings",
+  "lane": "",
+  "blockedBy": [],
+  "why": "The owner's page feedback must reach the shared template that builds every repo's page, and today that routing is by hand, so feedback lands in one repo or not at all.",
+  "note": "Owner 09:13 CST Nov 10 (relayed by the coordinator,  CST): every page feedback he gives goes into the shared template, skills/waiting-page (page.html, SKILL.md), and he expects that to be mechanical. Fix: a comment on the page's form, on any repo's waiting page, becomes a step in claude-settings that names skills/waiting-page; a check proves a page-form comment routes there. Related: ask-phase-out, page-thread-reply-refused (filed in place of reply-size-hook).",
+  "updatedAt": "2026-11-10T09:16:00-06:00"
+}
