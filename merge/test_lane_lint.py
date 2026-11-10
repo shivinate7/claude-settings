@@ -1903,6 +1903,71 @@ class BatchLane(LaneFixture):
         self.assertIn("retire-target [red]", out, "the red Retire check is not named\n" + out)
 
 
+class StepCasesLastSection(unittest.TestCase):
+    """merge.step_cases reads a CI step's failing cases from the LAST section of that step in a ci-job log. ci-job appends each run
+    to $VERDICT_LOG, so a re-run on main writes its section after the head's. Each section here is a real bin/verdict run headed by
+    the step's name (VERDICT_LABEL), so the header is the one ci-job writes."""
+
+    def setUp(self):
+        self.t = tempfile.mkdtemp(prefix="step-cases-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.t, True)
+        self.log = os.path.join(self.t, "ci-job.log")
+
+    def section(self, step, output_lines):
+        """Appends one verdict run headed by `step` to the shared log; its output is `output_lines`."""
+        env = {**os.environ, "VERDICT_LOG": self.log, "VERDICT_LABEL": step}
+        subprocess.run([sys.executable, os.path.join(REPO, "bin", "verdict"), sys.executable, "-c",
+                        "import sys; sys.stdout.write(sys.argv[1])", "".join(line + "\n" for line in output_lines)],
+                       env=env, capture_output=True, text=True, timeout=120)
+
+    def text(self):
+        with open(self.log, encoding="utf-8", errors="replace") as f:
+            return f.read()
+
+    def cases_read(self, step):
+        return merge.step_cases("log=" + self.log, step)
+
+    @staticmethod
+    def case_names(lines):
+        """The case names of unittest's FAIL lines, as step_cases reads them."""
+        return {line[len("FAIL: "):] for line in lines}
+
+    def test_a_step_with_two_sections_reads_the_last_one_past_other_steps(self):
+        """The head's section comes first and main's last. Other steps write sections between and after them, each with its own
+        FAIL lines: a first-section reader gets the head's cases, a reader of the log's last section gets the other step's, and a
+        reader with no end to its section gets main's and the other step's."""
+        head, main, other = failing_cases("test_head_only_case"), failing_cases("test_main_case"), failing_cases("test_other_case")
+        self.section("shard suite", head)
+        self.section("Lint one", ["PASS-OUTPUT"])
+        self.section("shard suite", main)
+        self.section("Lint two", other)
+        self.assertEqual(merge.CASE_SECTION.findall(self.text()), ["shard suite", "Lint one", "shard suite", "Lint two"],
+                         "the log does not hold the four sections in order:\n" + self.text())
+        self.assertEqual(self.cases_read("shard suite"), self.case_names(main), "step_cases did not read the step's last section")
+
+    def test_a_step_with_one_section_reads_its_cases(self):  # the control
+        lines = failing_cases("test_only_case")
+        self.section("shard suite", lines)
+        self.assertEqual(merge.CASE_SECTION.findall(self.text()), ["shard suite"], self.text())
+        self.assertEqual(self.cases_read("shard suite"), self.case_names(lines))
+
+    def test_a_last_section_with_no_case_lines_reads_no_cases_not_an_earlier_section(self):
+        """A re-run that passed on main writes its section last: its cases are none, and the head's cases do not stand in for them."""
+        self.section("shard suite", failing_cases("test_head_only_case"))
+        self.section("shard suite", ["PASS-OUTPUT"])
+        self.assertEqual(merge.CASE_SECTION.findall(self.text()), ["shard suite", "shard suite"], self.text())
+        self.assertEqual(self.cases_read("shard suite"), set(), "step_cases read an earlier section's cases")
+
+    def test_a_step_with_no_section_reads_no_cases_not_another_steps(self):
+        self.section("Lint one", failing_cases("test_other_case"))
+        self.assertEqual(merge.CASE_SECTION.findall(self.text()), ["Lint one"], self.text())
+        self.assertEqual(self.cases_read("shard suite"), set(), "step_cases read another step's cases")
+
+    def test_a_log_that_cannot_be_read_reads_no_cases(self):
+        self.assertEqual(merge.step_cases("log=" + os.path.join(self.t, "gone.log"), "shard suite"), set())
+        self.assertEqual(merge.step_cases("", "shard suite"), set())
+
+
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
     """The ready check of the draft step (merge.draft_step): before a draft goes ready, the repo's declared merge.readyChecks
     run through ci-job as `checks --step NAME ... --base origin/<base>`, on the tree that would be pushed. A FAIL or an
