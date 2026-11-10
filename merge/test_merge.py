@@ -4245,6 +4245,85 @@ def gh_case_setup(test):
     test.ticks, test.paused, test.at_pause = 0, [], []
     GhHalf.set(test, checks_seq=[[("checks", "pass", "")]])
 
+class CloseKeywordReason(Env):
+    """A reason flag's reason lands in the merge commit (lift_message), and GitHub closes an issue that a commit names after a closing keyword.
+    So a reason with a closing keyword before an issue ref is refused, after argparse and before the lock, any host read and any write.
+    The refusal gives the reword example and never prints the closing form. A closing word before an issue URL is refused the same way. A keyword with no ref or URL right after it is allowed."""
+    FLAGS = ("--base-red-ok", "--undo-check-unknown-ok")
+    NINE = ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved")
+    REFUSED = ([f"{word} #2390" for word in NINE]
+               + ["FiXeS #2390", "CLOSED #2390", "rEsOlVeS #2390", "fixes: #2390", "fixes:#2390", "fixes#2390", "Resolves:   #2390",
+                  "fixes shivinate7/claude-settings#2390", "closes owner/repo#2390", "base red; this fixes #2390 too"])
+    REFUSED_URL = ([f"{word} https://github.com/o/r/issues/2390" for word in NINE]
+                   + ["Fixes: https://github.com/o/r/issues/2390", "resolves http://github.com/o/r/issues/2390",
+                      "closed www.github.com/o/r/issues/2390", "fix https://github.com/o/r/pull/2390",
+                      "fixes https://www.github.com/o/r/issues/2390", "closes:https://github.com/shivinate7/claude-settings/issues/2390",
+                      "base red; this fixes https://github.com/o/r/issues/2390 too"])
+    ALLOWED = ("PR #2390", "#2390", "fix the base", "fix the base, see #2390", "prefixes #2390", "cause and fix: PR 2390",
+               "see https://github.com/o/r/issues/2390", "fix https://example.com/issues/5")
+    REWORD = "cause and fix: PR 2390"  # the example the refusal gives
+    CLOSE_FORM = re.compile(r"(?i)\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b\s*:?\s*"
+                            r"(?:(?:https?://)?(?:www\.)?github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/\d+|(?:[\w.-]+/[\w.-]+)?#\d+)")  # a closing keyword before an issue ref or an issue URL
+
+    def refused_each(self, flag, reasons):
+        """Each refused reason, given with `flag`, stops before the host read. The PR is CLOSED, so a run that reads it stops on a CLOSED line instead."""
+        self.host.pr_state = "CLOSED"
+        for reason in reasons:
+            with self.subTest(flag=flag, reason=reason):
+                reads = len(self.host.pr_calls)
+                rc, out, err = self.run_args("7", "--confirm", flag, reason)
+                self.assertEqual(len(self.host.pr_calls), reads, "the reason was not refused before the host read: the run read the PR")
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn(self.REWORD, err, "the refusal does not give the reword example")
+                self.assertRegex(err, r"(?i)reword", "the refusal does not say to reword the reason")
+                self.assertIsNone(self.CLOSE_FORM.search(out + err), "the refusal prints a closing keyword before an issue ref or URL")
+                self.assertNotIn("Traceback", err)
+
+    def refusal_writes_nothing(self, flag, reason="fixes #2390"):
+        """A refused reason stops the run before the lock, the claim, the merge and any host read. The PR is OPEN and green, so a run that gets past the reason merges it."""
+        reads, refs = len(self.host.pr_calls), self.refs()
+        rc, out, err = self.run_args("7", "--confirm", flag, reason)
+        self.assertEqual(len(self.host.pr_calls), reads, "the reason was not refused before the host read: the run read the PR")
+        self.assertFalse(self.lock_ref(), "the reason was not refused before the lock: the run took the merge lock")
+        self.assertEqual(self.refs(), refs, "the run pushed to origin before the reason was refused")
+        self.assertEqual(rc, 1, out + err)
+
+    def test_close_keyword_base_red_ok_refuses_each_closing_form_before_the_host_read(self):
+        self.refused_each("--base-red-ok", self.REFUSED)
+
+    def test_close_keyword_undo_check_unknown_ok_refuses_each_closing_form_before_the_host_read(self):
+        self.refused_each("--undo-check-unknown-ok", self.REFUSED)
+
+    def test_close_keyword_base_red_ok_refuses_each_closing_issue_url_before_the_host_read(self):
+        self.refused_each("--base-red-ok", self.REFUSED_URL)
+
+    def test_close_keyword_undo_check_unknown_ok_refuses_each_closing_issue_url_before_the_host_read(self):
+        self.refused_each("--undo-check-unknown-ok", self.REFUSED_URL)
+
+    def test_close_keyword_base_red_ok_refused_reason_takes_no_lock_and_writes_nothing(self):
+        self.refusal_writes_nothing("--base-red-ok")
+
+    def test_close_keyword_undo_check_unknown_ok_refused_reason_takes_no_lock_and_writes_nothing(self):
+        self.refusal_writes_nothing("--undo-check-unknown-ok")
+
+    def test_close_keyword_base_red_ok_refused_issue_url_takes_no_lock_and_writes_nothing(self):
+        self.refusal_writes_nothing("--base-red-ok", "fixes https://github.com/o/r/issues/2390")
+
+    def test_close_keyword_undo_check_unknown_ok_refused_issue_url_takes_no_lock_and_writes_nothing(self):
+        self.refusal_writes_nothing("--undo-check-unknown-ok", "fixes https://github.com/o/r/issues/2390")
+
+    def test_close_keyword_allowed_reasons_reach_the_host_read_for_both_flags(self):
+        # the controls: a reason with no closing form before a ref is not refused, so the run goes on to read the PR, which is CLOSED here
+        self.host.pr_state = "CLOSED"
+        for flag in self.FLAGS:
+            for reason in self.ALLOWED:
+                with self.subTest(flag=flag, reason=reason):
+                    reads = len(self.host.pr_calls)
+                    rc, out, err = self.run_args("7", "--confirm", flag, reason)
+                    self.assertGreater(len(self.host.pr_calls), reads, "the reason was refused before the host read")
+                    self.assertIn("CLOSED", err, "the run did not reach the PR's state read")
+                    self.assertNotRegex(err, r"(?i)reword", "an allowed reason got the reword refusal")
+
 class GhHalf(Env):
     """Host against a `gh` shim on PATH. The shim merges into the local bare origin through the `other` clone."""
     def setUp(self):
@@ -12404,6 +12483,11 @@ class CloudSession(Env):
                 rc = e.code
         return rc, out.getvalue(), err.getvalue()
 
+    def runner_confirm(self):
+        """-> run_main of `merge 7 --confirm --head <live head>`: a batch runner's confirm, which names the head its CI ran on
+        (decision auto-mode-owner-acts). The head is read when the call is made, so a case that moves feat first reads the moved head."""
+        return self.run_main("7", "--confirm", "--head", self.head())
+
 class MergeRoleCheck(CloudSession):
     """A cloud session's `merge <pr> --confirm` runs only when the session's recorded role is batch-runner (decision session-tiers: the coordinator never merges).
     The role file is <config dir>/state/merge-role.json, {"session": <session id>, "role": <tier>}, written by `merge --role <tier>`.
@@ -12559,7 +12643,7 @@ class MergeRoleCheck(CloudSession):
 
     def test_a_batch_runner_session_merges(self):
         self.put_role("batch-runner")
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
@@ -12618,7 +12702,7 @@ class MergeRoleCheck(CloudSession):
         # decision session-tiers: re-pointed from coordinator to batch-runner
         rc, out, err = self.run_main("--role", "batch-runner")
         self.assertEqual(rc, 0, out + err)
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(self.host.merged)
 
@@ -12721,14 +12805,14 @@ class StandingGrantSwitch(CloudSession):
         """`merge 7 --confirm` in a cloud session as `role`, after a false grant on the base: the grant refusal, and nothing merged."""
         self.put_role(role)
         refs = self.refs()
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.run_main("7", "--confirm", "--head", self.head())  # decision auto-mode-owner-acts: a confirm names the head it runs on
         self.assert_grant_refused(rc, out, err, refs)
 
     # ---- the key is optional: absent is today's behaviour, and no notice names it
     # decision session-tiers: re-pointed from coordinator to batch-runner
     def test_an_absent_key_proceeds_for_a_batch_runner_and_no_notice_names_it(self):
         self.put_role("batch-runner")  # the fixture's base is CONFIG, which leaves out requiredChecks: the defaults notice prints
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
         self.assertIn("leaves out", out)  # the notice is there, so the check below reads a real one
         self.assertNotRegex(out + err, r"(?i)standinggrant")
@@ -12737,7 +12821,7 @@ class StandingGrantSwitch(CloudSession):
         drop_config(self)
         self.put_role("batch-runner")
         with unittest.mock.patch.object(merge, "host_default_branch", return_value="main"):
-            rc, out, err = self.run_main("7", "--confirm")
+            rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
         self.assertNotRegex(out + err, r"(?i)standinggrant")
 
@@ -12753,7 +12837,7 @@ class StandingGrantSwitch(CloudSession):
     def test_true_proceeds_for_a_batch_runner_in_the_cloud(self):
         self.grant_config(standingGrant=True)
         self.put_role("batch-runner")
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
 
     def test_true_proceeds_outside_the_cloud(self):
@@ -12824,8 +12908,68 @@ class StandingGrantSwitch(CloudSession):
         self.grant_config()
         self.put_pr_tree(self.grant_text(standingGrant=False))
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator
-        rc, out, err = self.run_main("7", "--confirm")
+        rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
+
+
+class BatchRunnerHead(CloudSession):
+    """A batch runner's `merge <pr> --confirm` names the head its CI ran on (decision auto-mode-owner-acts). With no
+    --head the confirm is refused before the lock, any claim or any write. The refusal names the --head flag, the way
+    through, and never the live head (git-remedy-never-names-target). With --head set to the live head it proceeds.
+    A session with no batch-runner role is not checked here: MergeRoleCheck and Flow pin those paths."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_role("batch-runner")
+
+    def assert_scope(self):
+        """The case probes the batch-runner branch, so the role it probes is read back first (P7)."""
+        with self.cloud():
+            self.assertEqual(merge.read_merge_role(), "batch-runner", "the case did not record the batch-runner role it probes")
+
+    def refused_without_head(self):
+        """`merge 7 --confirm` with no --head in the batch runner's session: rc 1, a line on stderr, nothing merged. -> stderr"""
+        self.assert_scope()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, "a batch runner's confirm with no --head was not refused: " + out + err)
+        self.assertFalse(getattr(self.host, "merged", False), "a batch runner's confirm with no --head merged")
+        self.assertNotIn("Traceback", err)
+        return err
+
+    def test_a_confirm_with_no_head_is_refused_before_the_lock_claim_or_write(self):
+        self.assert_scope()
+        taken = []
+        acquire = self.lock.acquire
+        self.lock.acquire = lambda b, ttl: (taken.append(b), acquire(b, ttl))[1]
+        refs = self.refs()
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, "a batch runner's confirm with no --head was not refused: " + out + err)
+        self.assertEqual(taken, [], "the refused confirm took the lock")
+        self.assertEqual(self.refs(), refs, "the refused confirm pushed a claim or took the lock")
+        self.assertEqual(self.claims(), 0, "the refused confirm pushed a claim to main")
+        self.assertEqual(self.worktrees(), 1, "the refused confirm left a worktree")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_the_refusal_says_the_merge_needs_the_head_the_ci_ran_on(self):
+        err = self.refused_without_head()
+        self.assertRegex(err, r"(?i)needs the head the CI ran on", "the refusal does not say the merge needs the head the CI ran on")
+
+    def test_the_refusal_names_the_head_flag_and_no_live_head(self):
+        err = self.refused_without_head()
+        head = self.head()
+        self.assertIn("--head", err, "the refusal does not name the --head flag, the way through")
+        self.assertNotIn("--confirm", err, "the refusal names the refused command's flag --confirm")
+        self.assertNotRegex(err, r"\bmerge\s+[<\d]", "the refusal names the refused command, merge <pr>")
+        self.assertNotIn(head[:7], err, "the refusal names the live head")
+        self.assertNotRegex(err, r"[0-9a-f]{40}", "the refusal names a full sha")
+
+    def test_a_confirm_with_the_live_head_flag_merges(self):
+        # the control: the head flag is the way through, so the refusal above is the missing flag and nothing else
+        self.assert_scope()
+        rc, out, err = self.runner_confirm()
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(getattr(self.host, "merged", False), out + err)
 
 
 REPO_ROOT = os.path.dirname(HERE)
