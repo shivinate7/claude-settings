@@ -17,6 +17,7 @@ import shlex
 import sys
 import time
 from datetime import datetime
+from typing import Optional
 
 # No try/except: a guard copy without git_reads.py judges nothing, so it fails closed (guard.py).
 from git_reads import (  # noqa: F401
@@ -1163,7 +1164,7 @@ def _compound_delta(segment: str, wide: bool = False) -> int:
     return delta
 
 
-def _sets_errexit(tokens, sure: bool) -> bool | None:
+def _sets_errexit(tokens, sure: bool) -> Optional[bool]:
     """True or False when the segment holds a `set` that turns `-e` (or `-o errexit`) on or off, None
     when it holds none. A `set +e` counts wherever it stands, in a group, an `if`, a function or a
     `( ... )`, since it may run: errexit is then off, which fails closed. A `set -e` counts only when

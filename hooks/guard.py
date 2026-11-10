@@ -456,8 +456,9 @@ while True:
         )
         _loading = "guard_branch_worktree"
         from guard_branch_worktree import (
-            BRANCH_DELETE_DENY_REASON, BRANCH_DELETE_FLAGS, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
+            BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
             worktree_remove_forced,
+            BRANCH_DELETE_FLAGS,
         )
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
