@@ -21,7 +21,8 @@
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened. MODEL must be sonnet on every record (exit 2 otherwise).
+                          PR's issue comments since the PR opened; or the record has a Fix check line and SHA is a merge commit whose first
+                          parent is HEAD and whose second parent is on the base (a merge of the base into the fixed head). MODEL must be sonnet on every record (exit 2 otherwise).
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --reviewed --root DIR [--root DIR ...]
@@ -1045,6 +1046,16 @@ class Host:
             return json.loads(out)["status"] in ("ahead", "identical")
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}: {e}")
+
+    def commit_parents(self, sha):
+        """-> the parent shas of the commit `sha`, in order (first parent first): one read of commits/<sha>. Any failed read raises Stop."""
+        c, out = self.api(f"commits/{sha}")
+        try:
+            if c:
+                raise ValueError(out)
+            return [p["sha"] for p in json.loads(out)["parents"]]
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop(f"cannot read the parents of {sha[:9]} {READ_CITE}: {e}")
 
     def protection_names(self):
         """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
@@ -3932,11 +3943,18 @@ def main(argv, host=None, lock=None, hosts=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
-            if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
+            if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
-                if not last or last["head"] != a.fix_check[0] or last["fix"]:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
+                if not last or last["head"] != a.fix_check[0]:
+                    ok = False
+                elif not last["fix"]:
+                    ok = True
+                else:  # a fix never follows a fix, but a merge of main into the fixed head is a new head: first parent the fixed head, second parent on the base
+                    parents = h.commit_parents(a.head)
+                    ok = len(parents) == 2 and parents[0] == a.fix_check[0] and h.holds_head(parents[1], info["base"])
+                if not ok:
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line, unless the pull request head is a merge of the base into that Head. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
