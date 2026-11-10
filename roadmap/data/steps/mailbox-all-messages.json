@@ -1,0 +1,12 @@
+{
+  "title": "Cloud-to-cloud messages move to the mailbox, with a doorbell",
+  "phase": "now",
+  "status": "blocked",
+  "order": 986,
+  "owner": "claude-settings",
+  "lane": "",
+  "blockedBy": [],
+  "why": "A delivered send_message is not a read and leaves no copy, so cloud-to-cloud messages can be lost with no trace.",
+  "note": "Owner ruling, typed in chat to the session-messaging topic session at 09:33 CST Nov 10 (relayed  CST; page item 482, closed): every message goes through the git mailbox, cloud to cloud included (\"everything on one side\"); it replaces decision session-messages' line \"Cloud to cloud keeps send_message\". Cloud send_message stays only as a short \"check your mail\" doorbell, so an idle session wakes. Work: record the ruling in decision session-messages; mail send also sends the doorbell; the waiting-page skill drops the cloud send_message route. Blocked: the freeze (owner 09:18 CST Nov 10) holds new lanes, and the decision text lands after #2544 (session-messages Q4 answered, docs only) merges. Open, not yet asked: which send_message problems the owner saw.",
+  "updatedAt": "2026-11-10T09:34:00-06:00"
+}
