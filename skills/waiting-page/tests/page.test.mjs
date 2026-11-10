@@ -3203,6 +3203,33 @@ for (const width of [240, 180]) {
   });
 }
 
+// The wrap of a side press (.askc.folded.withd). Where the text beside Dismiss or Restore would fall under its minimum, the press drops
+// under the text, and the page does not run past the window for it. A card set to nowrap keeps the press beside the text, and at 240 wide
+// and at 360 wide with the root font size doubled, past the window. Each case fails by name under that mutant, and the page passes in both fonts.
+for (const [width, zoom] of [[280, false], [240, false], [180, false], [360, true]]) for (const kind of SIDE_KINDS) {
+  layoutTest(`folded row, side press: at ${atWidth(width, zoom)}, the ${FOLD_ROWS[kind].press} press sits under the text`, async (t) => {
+    const page = await foldedRowPage(t, kind, width); if (!page) return;
+    const id = FOLD_ROWS[kind].ask.id;
+    if (zoom) await zoomText(page);
+    foldedScope(await foldedDate(page, id), kind, width);
+    const g = await pressGeo(page, id);
+    assert.ok(g.press.t >= g.title.b - 1, `the ${FOLD_ROWS[kind].press} press is drawn at ${Math.round(g.press.t)} px, beside the text that ends at ${Math.round(g.title.b)} px, at ${atWidth(width, zoom)}`);
+  });
+}
+layoutTest("folded row, side press: at 240 wide, the page does not scroll sideways beside the Dismiss row", async (t) => {
+  const page = await foldedRowPage(t, "dismiss", 240); if (!page) return;
+  foldedScope(await foldedDate(page, FOLD_ROWS.dismiss.ask.id), "dismiss", 240);
+  const g = await pressGeo(page, FOLD_ROWS.dismiss.ask.id);
+  assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at 240 wide beside the Dismiss row`);
+});
+for (const kind of SIDE_KINDS) layoutTest(`folded row, side press: at 360 wide with the root font size doubled, the page does not scroll sideways beside the ${FOLD_ROWS[kind].press} row`, async (t) => {
+  const page = await foldedRowPage(t, kind, 360); if (!page) return;
+  await zoomText(page);
+  foldedScope(await foldedDate(page, FOLD_ROWS[kind].ask.id), kind, 360);
+  const g = await pressGeo(page, FOLD_ROWS[kind].ask.id);
+  assert.ok(g.scrollW <= g.innerW, `the page is ${g.scrollW} px wide in a ${g.innerW} px window at 360 wide with the root font size doubled, beside the ${FOLD_ROWS[kind].press} row`);
+});
+
 // Served-font boxes the fix must keep. At 1440, 820 and 390 wide they equal main's boxes; at 360 wide they hold the folded-date wrap
 // (docs/design/ask-folded-date-notes.md). Each row's box is [left, right, height] of the folded row's li; the row and press are [right, top offset from the li, height] and [left, right, top offset, height]. A box that moves fails by
 // name. The Ask box presses are [Add left, Add right, Send left, Send right]. Tolerance is 1 px.
