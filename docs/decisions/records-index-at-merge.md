@@ -43,7 +43,7 @@ would hold has the exact blob id of the page at MERGE_HEAD, and one of two thing
 commit on origin/<base>'s first-parent line (a past base tip). Two: some best merge base of HEAD and MERGE_HEAD (`merge-base --all`) is no
 ancestor of origin/<base>. Two is a stacked lane: it was cut from a branch that main has not merged, and
 MERGE_HEAD is that branch moved on. A lane cut from main has every best merge base on main, so it gets no pass
-from two. Two cannot tell the lane's base from a sibling lane that shares its unmerged history: a sibling's page
+from two. Two cannot tell the lane's base from a sibling lane that shares its unmerged history. A sibling's page
 passes the same way, and the merge tool rebuilds the page before ready.
 A commit in the base's history off that line, such as a lane branch already merged into the base, is refused. A
 rebuilt page, a page of a merge of any other commit, a page taken after `merge --quit` are refused. A failed
