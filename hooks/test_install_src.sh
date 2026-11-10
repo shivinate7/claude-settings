@@ -2839,8 +2839,9 @@ bin_case2() {
 PATH_MARK='# claude-settings: ~/.claude/bin on PATH'
 PATH_LINE='export PATH="$HOME/.claude/bin:$PATH"'
 run_path_install() {
-  # $1 = checkout, $2 = HOME, $3 = CLAUDE_CONFIG_DIR, $4 = SHELL value
-  ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" SHELL="$4" bash ./install.sh 2>&1 )
+  # $1 = checkout, $2 = HOME, $3 = CLAUDE_CONFIG_DIR, $4 = SHELL value,
+  # $5 = install.sh argument (optional, e.g. --cloud), $6 = one extra VAR=value (optional, e.g. CLAUDE_CODE_REMOTE=true)
+  ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" SHELL="$4" ${6:+"$6"} bash ./install.sh ${5:+"$5"} 2>&1 )
 }
 
 path_case1() {
@@ -2899,19 +2900,49 @@ path_case3() {
   rm -rf "$h"
 }
 
-path_case4() {
-  name="path4: --cloud and CLAUDE_CODE_REMOTE=true touch no rc file"
+path_case4_cloud() {
+  name="path4: cloud mode (--cloud under bash, CLAUDE_CODE_REMOTE=true under zsh) puts one marked block in the rc of the SHELL value, keeps its content, and leaves the other rc alone"
   h=$(new_home); cfg="$h/.claude-cfg"; co="$work/path4-checkout"
   make_checkout "$co" "# path4 content"
   cp "$INSTALL_SH" "$co/install.sh"
   printf '# my bashrc\n' > "$h/.bashrc"; printf '# my zshrc\n' > "$h/.zshrc"
-  out1=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SHELL=/bin/bash bash ./install.sh --cloud 2>&1 ); rc1=$?
-  out2=$( cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" SHELL=/usr/bin/zsh CLAUDE_CODE_REMOTE=true bash ./install.sh 2>&1 ); rc2=$?
-  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
-  elif [ "$(cat "$h/.bashrc")" != "# my bashrc" ]; then bad "$name" "the ~/.bashrc was changed in cloud mode"
-  elif [ "$(cat "$h/.zshrc")" != "# my zshrc" ]; then bad "$name" "the ~/.zshrc was changed in cloud mode"
+  if grep -qF "$PATH_MARK" "$h/.bashrc" "$h/.zshrc"; then
+    bad "$name" "fixture precondition failed: an rc file already holds the marker"; rm -rf "$h"; return
+  fi
+  # Scenario 1: --cloud under SHELL=/bin/bash, run twice. Snapshot each rc after each run.
+  out1=$(run_path_install "$co" "$h" "$cfg" /bin/bash --cloud); rc1=$?
+  b1=$(cat "$h/.bashrc")
+  out2=$(run_path_install "$co" "$h" "$cfg" /bin/bash --cloud); rc2=$?
+  b2=$(cat "$h/.bashrc"); z2=$(cat "$h/.zshrc")
+  m1=$(grep -cF "$PATH_MARK" "$h/.bashrc"); l1=$(grep -cF "$PATH_LINE" "$h/.bashrc")
+  # Scenario 2: CLAUDE_CODE_REMOTE=true under SHELL=/usr/bin/zsh, no install argument, run twice.
+  out3=$(run_path_install "$co" "$h" "$cfg" /usr/bin/zsh "" CLAUDE_CODE_REMOTE=true); rc3=$?
+  z3=$(cat "$h/.zshrc")
+  out4=$(run_path_install "$co" "$h" "$cfg" /usr/bin/zsh "" CLAUDE_CODE_REMOTE=true); rc4=$?
+  b4=$(cat "$h/.bashrc"); z4=$(cat "$h/.zshrc")
+  m2=$(grep -cF "$PATH_MARK" "$h/.zshrc"); l2=$(grep -cF "$PATH_LINE" "$h/.zshrc")
+  # Scenario 3: an empty home (no rc file yet), CLAUDE_CODE_REMOTE=true under SHELL=/usr/bin/zsh.
+  h3=$(new_home); cfg3="$h3/.claude-cfg"
+  if [ -e "$h3/.bashrc" ] || [ -e "$h3/.zshrc" ]; then
+    bad "$name" "fixture precondition failed: an empty home already holds an rc file"; rm -rf "$h" "$h3"; return
+  fi
+  out5=$(run_path_install "$co" "$h3" "$cfg3" /usr/bin/zsh "" CLAUDE_CODE_REMOTE=true); rc5=$?
+  m3=$(grep -cF "$PATH_MARK" "$h3/.zshrc" 2>/dev/null); l3=$(grep -cF "$PATH_LINE" "$h3/.zshrc" 2>/dev/null)
+  if [ $rc1 -ne 0 ] || [ $rc2 -ne 0 ]; then bad "$name" "--cloud under bash: install.sh exited rc1=$rc1 rc2=$rc2: $out1 / $out2"
+  elif [ "$z2" != "# my zshrc" ]; then bad "$name" "--cloud under bash changed ~/.zshrc"
+  elif [ "$m1" != 1 ] || [ "$l1" != 1 ]; then bad "$name" "--cloud under bash: ~/.bashrc holds $m1 marks and $l1 export lines, expected 1 and 1"
+  elif [ "$(head -1 "$h/.bashrc")" != "# my bashrc" ]; then bad "$name" "--cloud under bash: ~/.bashrc lost its existing content"
+  elif [ "$b2" != "$b1" ]; then bad "$name" "--cloud under bash: a second run changed ~/.bashrc"
+  elif [ $rc3 -ne 0 ] || [ $rc4 -ne 0 ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: install.sh exited rc3=$rc3 rc4=$rc4: $out3 / $out4"
+  elif [ "$b4" != "$b2" ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh changed ~/.bashrc"
+  elif [ "$m2" != 1 ] || [ "$l2" != 1 ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: ~/.zshrc holds $m2 marks and $l2 export lines, expected 1 and 1"
+  elif [ "$(head -1 "$h/.zshrc")" != "# my zshrc" ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: ~/.zshrc lost its existing content"
+  elif [ "$z4" != "$z3" ]; then bad "$name" "CLAUDE_CODE_REMOTE=true under zsh: a second run changed ~/.zshrc"
+  elif [ $rc5 -ne 0 ]; then bad "$name" "empty home, CLAUDE_CODE_REMOTE=true under zsh: install.sh exited $rc5: $out5"
+  elif [ -e "$h3/.bashrc" ]; then bad "$name" "empty home, CLAUDE_CODE_REMOTE=true under zsh: wrote ~/.bashrc"
+  elif [ "$m3" != 1 ] || [ "$l3" != 1 ]; then bad "$name" "empty home, CLAUDE_CODE_REMOTE=true under zsh: ~/.zshrc does not hold one marker and one export line"
   else ok "$name"; fi
-  rm -rf "$h"
+  rm -rf "$h" "$h3"
 }
 
 caseF5() {
@@ -4455,7 +4486,8 @@ caseK5() {
   write_redirect "$h" "$work/k5-missing.git"   # this path is never created, so the clone fails
   make_curl_stub "$bin"
   cloud_install "$h" "$scratch" "$bin"
-  left=$(find "$h" -mindepth 1 -maxdepth 1 ! -name .gitconfig ! -name .claude-cfg ! -name claude-settings | head -n 1)
+  # The cloud install writes the ~/.claude/bin PATH block to the login shell's rc file: that file is not a stray entry.
+  left=$(find "$h" -mindepth 1 -maxdepth 1 ! -name .gitconfig ! -name .claude-cfg ! -name claude-settings ! -name .bashrc ! -name .zshrc | head -n 1)
 
   if [ $rc -ne 0 ]; then
     bad "$name" "install.sh exited $rc: $(install_problems)"
@@ -5269,7 +5301,7 @@ run bin_case2
 run path_case1
 run path_case2
 run path_case3
-run path_case4
+run path_case4_cloud
 run caseF1
 run caseF2
 run caseF3
