@@ -1012,7 +1012,7 @@ function unavailable(){
   if(got.steps) renderPlan(); else { draw(); marks(); }
   if(box) new MutationObserver(marks).observe(box, {childList:true, subtree:true});
 })();
-/* "Landed in #N" on each open step a merged Step: trailer names, until triage closes it. */
+/* "Landed in #N" on each open step that a Step: trailer on main or a landedPulls row names, until triage closes it. */
 (() => {
   const marks = (window.ROADMAP_BUILD && window.ROADMAP_BUILD.landed) || {}, box = document.getElementById('phases');
   if(!box || !Object.keys(marks).length) return;
