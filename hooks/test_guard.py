@@ -25350,6 +25350,95 @@ def brief_scratch_diag_lines():
                                                          else SCRATCH_REPO.replace(os.sep, "/")))
         show(label + " brief_destructive_hit", guard.brief_destructive_hit(
             "Agent", {"prompt": prompt, "subagent_type": "builder", "model": "sonnet"}))
+    lines.extend(brief_scratch_decide_lines())
+    return lines
+
+
+# Replays one case in a fresh process with the env and stdin that decide() gave the hook, and prints what the hook sees.
+BRIEF_SCRATCH_DRIVER = r'''
+import contextlib, io, json, os, runpy, sys, tempfile
+hooks, guard_file = sys.argv[1], sys.argv[2]
+sys.path.insert(0, hooks)
+raw = sys.stdin.read()
+payload = json.loads(raw)
+prompt = payload["tool_input"].get("prompt")
+print("BRIEF-DIAG driver prompt after JSON load = %r" % (prompt,))
+print("BRIEF-DIAG driver os.getcwd() = %r" % (os.getcwd(),))
+print("BRIEF-DIAG driver tempfile.gettempdir() = %r" % (tempfile.gettempdir(),))
+print("BRIEF-DIAG driver realpath(gettempdir()) = %r" % (os.path.realpath(tempfile.gettempdir()),))
+out = io.StringIO()
+sys.stdin = io.StringIO(raw)
+try:
+    with contextlib.redirect_stdout(out):
+        runpy.run_path(guard_file, run_name="__main__")
+except SystemExit as exc:
+    print("BRIEF-DIAG driver hook SystemExit = %r" % (exc.code,))
+print("BRIEF-DIAG driver hook stdout = %r" % (out.getvalue()[:300],))
+import guard, guard_core, guard_shared_tree
+print("BRIEF-DIAG driver POWERSHELL_CALL[0] after hook = %r" % (guard_core.POWERSHELL_CALL[0],))
+print("BRIEF-DIAG driver brief_destructive_hit = %r" % (guard.brief_destructive_hit(payload["tool_name"], payload["tool_input"]),))
+for command, before, covered in guard._brief_commands(prompt or ""):
+    for segment in guard.split_segments(command):
+        target, _ = guard._brief_target(segment, None)
+        if target is not None:
+            resolved = guard.shell_abs(target, None) or target
+            print("BRIEF-DIAG driver -C target = %r" % (target,))
+            print("BRIEF-DIAG driver realpath(shell_abs(target)) = %r" % (os.path.realpath(resolved),))
+            print("BRIEF-DIAG driver in_any_session_scratchpad(shell_abs(target)) = %r" % (guard_shared_tree.in_any_session_scratchpad(resolved),))
+'''
+BRIEF_SCRATCH_CASE_NAMES = (
+    "brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed",
+    "brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed",
+)
+
+
+def brief_scratch_decide_lines():
+    """BRIEF-DIAG lines for the two Windows-failing cases. Each runs through decide() as registered. A spy on
+    subprocess.run takes the env, stdin and cwd decide gives the hook, and a driver replays that run in a fresh process."""
+    lines = []
+
+    def show(name, value):
+        lines.append("BRIEF-DIAG %s = %r" % (name, value))
+
+    show("TEMP_DIR (module global, at check time)", TEMP_DIR)
+    real_run = subprocess.run
+    for name in BRIEF_SCRATCH_CASE_NAMES:
+        case = next((c for c in CASES if c["name"] == name), None)
+        if case is None:
+            show("case not registered", name)
+            continue
+        show("case name", name)
+        for field in ("expected", "temp", "session", "cwd", "process_cwd", "config", "env", "guard", "tool_input"):
+            show("case[%r]" % field, case.get(field))
+        cfg = case.get("config") or CFG
+        before = len(_guard_log_lines(cfg))
+        captured = {}
+
+        def spy(*args, **kwargs):
+            captured["command"] = args[0] if args else kwargs.get("args")
+            captured.update(kwargs)
+            return real_run(*args, **kwargs)
+
+        with mock.patch.object(subprocess, "run", side_effect=spy):
+            decision, reason = decide(case)
+        env = captured.get("env") or {}
+        show("decide() decision", decision)
+        show("decide() reason", reason)
+        show("decide() command", captured.get("command"))
+        show("decide() env TMPDIR, TEMP, TMP, CLAUDE_CONFIG_DIR",
+             [env.get(v) for v in ("TMPDIR", "TEMP", "TMP", "CLAUDE_CONFIG_DIR")])
+        show("decide() cwd", captured.get("cwd"))
+        show("decide() stdin payload", captured.get("input"))
+        log_lines = _guard_log_lines(cfg)
+        show("guard.log lines written by this run", len(log_lines) - before)
+        for line in log_lines[before:]:
+            show("guard.log line", line)
+        child = real_run([sys.executable, "-c", BRIEF_SCRATCH_DRIVER, HERE, case.get("guard") or GUARD],
+                         input=captured.get("input"), capture_output=True, text=True,
+                         env=captured.get("env"), cwd=captured.get("cwd"), timeout=120)
+        lines.extend(child.stdout.splitlines())
+        if child.returncode != 0 or child.stderr:
+            show("driver returncode, stderr tail", (child.returncode, child.stderr[-300:]))
     return lines
 
 
