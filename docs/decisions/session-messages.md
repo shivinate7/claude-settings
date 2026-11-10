@@ -4,11 +4,11 @@ Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft. Q1 to Q3, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
-Q4 (a timed check-in) is open with the owner. The build is on main: PR #1371 (the mailbox build) merged
-2026-11-08 as merge commit f1488533f (integration batch batch-65g).
-Next step: build step 2, the Mac and Windows auth check for `ls-remote`. `MAILBOX_REPO` is still unset in
-settings.json; a session sets it in its env. Step 2 and the 20-message trial (step 5) need a Mac session.
-The settings.json default needs the owner's typed words.
+Q4 (a timed check-in) is open with the owner. The mailbox build is on main, merged 2026-11-08 with batch-65g
+(PR #2236, merge commit 2ac382cc6). Follow-up PR #2484 merged in batch 71 (merge commit 64f721a49).
+Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
+(step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
+Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
 
 ## Ruling
 

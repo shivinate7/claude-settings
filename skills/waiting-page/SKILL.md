@@ -674,7 +674,7 @@ thread waits, and on only when every record of the thread has its `reply`. The w
 
 ## Message another session
 
-Draft: decision `session-messages` is open. The git mailbox is built on branch `smp-mailbox-build`, not merged.
+Draft: decision `session-messages` is open. The git mailbox is on main, merged 2026-11-08 with batch-65g (PR #2236, merge commit 2ac382cc6). Follow-up PR #2484 merged in batch 71.
 Build step 2 (the Mac and Windows auth check) has not run.
 
 Decision `session-messages` (messages between sessions) sets this.
