@@ -5665,22 +5665,26 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
             command = str(tool_input.get("command", "") or "")
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
                 return agent, session, files, removed
-            command, found = strip_heredoc_bodies(command), {}
+            command, found, by_word = strip_heredoc_bodies(command), {}, {}
 
             def in_scratchpad(word, at, verb):
                 full = shell_abs(word, at)
                 if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
-                    found[word] = (full, verb in SCRATCHPAD_REMOVERS)
+                    found[full], by_word[word] = verb in SCRATCHPAD_REMOVERS, full
                     return True
                 return False
 
             for _ in range(SCRATCHPAD_WRITE_PASSES):   # the reader names one hit a pass: exclude each as it is listed
                 hit = _shell_write_hit(command, cwd, in_scratchpad, follow_cd=True, predicate_command=True)
-                if not hit:
+                # With follow_cd the reader names the hit as a path from `cwd`, not as the word the predicate saw.
+                full = shell_abs(hit, cwd) if hit else ""
+                if full not in found:
+                    full = by_word.get(hit, "")
+                if full not in found:
                     break
-                files.append(found[hit][0])
-                if found[hit][1]:
-                    removed.add(found[hit][0])
+                files.append(full)
+                if found[full]:
+                    removed.add(full)
     except Exception:
         pass   # a file that cannot be read is not judged and not recorded, never a failed call
     return agent, session, files, removed
