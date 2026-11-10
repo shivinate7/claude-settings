@@ -243,6 +243,11 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
+# The in-place flag of `sed` wherever a segment's text shows it: alone, last in a flag cluster (`-ri`, `-Ei`,
+# `-ni`, `-i.bak`), or long. A flag glued to a word (`--in-place`) starts after a space, never inside a word.
+_SED_IN_PLACE = r"(?<![\w-])(?:-[A-Za-z]*i\b|--in-place\b)"
+
+
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
 # or a backslash (an escaped quote or separator the split would read wrongly).
 _SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
@@ -257,7 +262,7 @@ def _script_mutates(script: str) -> bool:
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
         if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+                command == "sed" and any(re.match(_SED_IN_PLACE, word) for word in rest)):
             return True
     return False
 
@@ -279,10 +284,10 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*" + _SED_IN_PLACE + r"[^\n;|&]*" + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
+    if re.search(r"\bsed\b[^\n;|&]*" + _SED_IN_PLACE + r"[^\n;|&]*" + target, cmd):
         return True
     return False
 
@@ -1734,19 +1739,21 @@ _SED_VALUE_FLAGS = {"expression": (True, True), "file": (False, True), "line-len
 
 def _sed_script_words(words) -> set:
     """The indexes of the words of a `sed` segment that are its script: the value of each `-e` or
-    `--expression`. With no `-e`, `-f` or `--file` (spaced or glued), the first word that is no flag is
-    the script. A script is text, never a path. A `-f` or `-l` value and the words after the script are not.
-    Empty when the segment is no `sed`."""
+    `--expression`. With no `-e`, `-f` or `--file` anywhere (spaced or glued), the first operand is the
+    script. sed reads its flags wherever they stand, so an operand before `-e` or `-f` is a file, and
+    only `--` ends the flags. A script is text, never a path. A `-f` or `-l` value and the other operands
+    are not. Empty when the segment is no `sed`."""
     index = resolve_command(tuple(words))
     if index is None or _name(words[index]) != "sed":
         return set()
-    scripts, explicit, at = set(), False, index + 1
+    scripts, operands, explicit, at, flags = set(), [], False, index + 1, True
     while at < len(words):
         word = _unquoted(words[at])
-        if word == "--" or word == "-" or not word.startswith("-"):
-            break
-        step = 1
-        if word.startswith("--"):
+        if flags and word == "--":
+            flags = False
+        elif not flags or word == "-" or not word.startswith("-"):
+            operands.append(at)
+        elif word.startswith("--"):
             name, glued, _value = word[2:].partition("=")
             kind = next((flag for flag in _SED_VALUE_FLAGS if name and flag.startswith(name)), None)
             if kind:
@@ -1754,7 +1761,7 @@ def _sed_script_words(words) -> set:
                 explicit = explicit or gives_script
                 if is_script:
                     scripts.add(at if glued else at + 1)
-                step = 1 if glued else 2
+                at += 0 if glued else 1
         else:
             for place, letter in enumerate(word[1:]):
                 if letter == "i":
@@ -1764,11 +1771,11 @@ def _sed_script_words(words) -> set:
                     explicit = explicit or letter in "ef"
                     if letter == "e":
                         scripts.add(at if glued else at + 1)
-                    step = 1 if glued else 2
+                    at += 0 if glued else 1
                     break
-        at += step
-    if not explicit and at < len(words):
-        scripts.add(at)
+        at += 1
+    if not explicit and operands:
+        scripts.add(operands[0])
     return scripts
 
 
@@ -1797,11 +1804,26 @@ def _put_values(text, children):
         lambda found: "x" if next(uses, False) else " ".join(children[int(found.group(1))]), marked)
 
 
+_LOOP_BASENAME = re.compile(r'\$\(\s*basename\s+(?:--\s+)?"?\$(?:(\w+)|\{(\w+)\})"?\s*\)')
+
+
+def _loop_basenames(cmd: str) -> str:
+    """`cmd` with each `$(basename "$v")` of an open `for v` loop variable put as `${v##*/}`, the same
+    name, so the loop puts it as each list word's last part (`_trimmed`) and the copy's DEST is judged by the
+    name it gets. Any other substitution stays, read as the roots of its inner command."""
+    def put(found):
+        name = found.group(1) or found.group(2)
+        return "${%s##*/}" % name if re.search(r"\bfor\s+%s\s+in\b" % re.escape(name), cmd) else found.group(0)
+    return _LOOP_BASENAME.sub(put, cmd) if "basename" in cmd else cmd
+
+
 def _fed_substitutions(cmd: str) -> str:
     """`cmd` with each `$(...)`, backtick pair and process substitution read as the roots of its inner
     command. `_substitutions` lists the texts children first, siblings left to right, each parent
     holding one mark per child, so a stack gives each mark its child. The outer text is last: its marks
-    are put by where their value is used (`_put_values`)."""
+    are put by where their value is used (`_put_values`). A `$(basename "$v")` of a loop variable is first put as
+    `${v##*/}` (`_loop_basenames`), so the loop gives it each list word's name."""
+    cmd = _loop_basenames(cmd)
     texts, too_deep = _substitutions(cmd, mark=_MARK)
     if too_deep or len(texts) < 2:
         return cmd
@@ -1820,9 +1842,30 @@ def _fed_substitutions(cmd: str) -> str:
     return cmd
 
 
+# A parameter expansion of a loop variable that trims a prefix or a suffix: `${f##*/}`, `${f#src/}`, `${f%.py}`,
+# `${f%%.*}`. Its pattern holds no quote, variable or backslash, so it can be read as the glob it is.
+_TRIM_PATTERN = r"[^}$`'\"\\]*"
+
+
 def _loop_variable(name):
-    """The pattern that finds `$name` and `${name}` in a word."""
-    return re.compile(r"\$\{%s\}|\$%s(?!\w)" % (re.escape(name), re.escape(name)))
+    """The pattern that finds `$name`, `${name}` and a trimmed `${name#PATTERN}` in a word (`_trimmed`)."""
+    return re.compile(r"\$\{%s(?:(?P<op>##|#|%%%%|%%)(?P<pattern>%s))?\}|\$%s(?!\w)"
+                      % (re.escape(name), _TRIM_PATTERN, re.escape(name)))
+
+
+def _trimmed(value, op, pattern) -> str:
+    """`value` as the shell trims it for `${v#P}`, `${v##P}`, `${v%P}` and `${v%%P}`: the shortest (one mark) or the
+    longest (two) part at the front (`#`) or the back (`%`) that the glob `P` matches. No part matching leaves it."""
+    size = len(value)
+    ends = range(size + 1)
+    if op in ("#", "##"):
+        spans = [(0, stop) for stop in (ends if op == "#" else reversed(ends))]
+    else:
+        spans = [(start, size) for start in (reversed(ends) if op == "%" else ends)]
+    for start, stop in spans:
+        if fnmatch.fnmatchcase(value[start:stop], pattern):
+            return value[stop:] if op in ("#", "##") else value[:start]
+    return value
 
 
 _UNROLL_LIMIT = 1000   # the most word lists `_fill_loop_variables` makes of one segment
@@ -1896,9 +1939,10 @@ def _put_loop_item(variable, word, item) -> str:
     loop starts, so the variable holds its matches: an `item` that holds one, put inside double quotes
     (`"$f"`), leaves those quotes, so the glob is still read as a glob."""
     def put(found):
-        if not _LIST_MAGIC.search(item) or word[:found.start()].count('"') % 2 == 0:
-            return item
-        return '"%s"' % item
+        value = _trimmed(item, found["op"], found["pattern"]) if found["op"] else item
+        if not _LIST_MAGIC.search(value) or word[:found.start()].count('"') % 2 == 0:
+            return value
+        return '"%s"' % value
     return variable.sub(put, word)
 
 

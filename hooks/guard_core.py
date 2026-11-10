@@ -1071,6 +1071,20 @@ def shell_abs(path: str, base):
     return path
 
 
+@functools.lru_cache(maxsize=4096, typed=True)   # typed: a PosixScript is not its plain twin
+def _cd_facts(segment, powershell: bool):
+    """What `dir_before_segment` reads of one segment: its open and close parentheses outside quotes, its
+    tokens (None when they do not parse), the directory move it makes (`_segment_cd_move`) and whether a
+    bash pipe would make that move a subshell's. The answer depends on the text and on `powershell` alone,
+    so a loop that a command unrolls into a thousand segments reads each segment once, not once per later
+    segment (`dir_before_segment` runs for each of them). `powershell` is in the key, as in
+    `_split_segments_cached`: the readers below read `POWERSHELL_CALL[0]`."""
+    marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
+    tokens = segment_tokens(segment)
+    move = _segment_cd_move(tokens) if tokens else None
+    return marks.count("("), marks.count(")"), tokens, move, not is_powershell(segment)
+
+
 def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, made=()):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
@@ -1090,21 +1104,19 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     prev, stack = None, []
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
-        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        opens, closes, tokens, move, is_bash = _cd_facts(segment, POWERSHELL_CALL[0])
+        stack.extend([(where, prev)] * opens)
         end = ends[at] if at < len(ends) else ""
         if at == number:
             return None if skipping else where
         if skipping:
             skipping = end in ("&&", "|")
-            for _ in range(marks.count(")")):
+            for _ in range(closes):
                 if stack:
                     where, prev = stack.pop()
                     skipping = False
             continue
-        tokens = segment_tokens(segment)
-        move = _segment_cd_move(tokens) if tokens else None
-        if move is not None and not is_powershell(segment) and "|" in (
+        if move is not None and is_bash and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
         if tokens is None:
@@ -1127,7 +1139,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 else:
                     where = None
             prev = old
-        for _ in range(marks.count(")")):
+        for _ in range(closes):
             if stack:
                 where, prev = stack.pop()
     return where
