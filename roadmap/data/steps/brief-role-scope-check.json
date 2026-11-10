@@ -1,0 +1,12 @@
+{
+  "title": "The agent-brief check refuses a brief that asks a role to write paths its role may not write",
+  "phase": "now",
+  "status": "todo",
+  "order": 991,
+  "owner": "claude-settings",
+  "why": "Triage briefed a test-author to resolve a merge whose only conflict was in a product file; the role may not write it, so one agent run was wasted (note brief-role-scope-mismatch, 11:38 CST Nov 10).",
+  "note": "Filed by triage 11:40 CST Nov 10, from its own mistake on #2268. Check: hooks/agent_brief.py compares the spawn's role with the paths the brief names to write or resolve, and refuses a test-author brief that resolves a product path, or a builder brief that edits a test path. Red case first. Freeze: triage may build it with agents (owner 11:26 CST).",
+  "updatedAt": "2026-11-10T11:38:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
