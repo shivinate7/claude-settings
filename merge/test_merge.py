@@ -153,6 +153,9 @@ class FakeHost:
             raise merge.Stop(self.files_error)
         return list(self.changed)
 
+    def compare_files(self, first, second):  # the own-commit read of a named round head; these cases name the live head, which the base branch reads ahead of
+        return {"status": "ahead", "ahead_by": 1, "behind_by": 0, "files": []}
+
     def pr(self, n):
         self.pr_calls.append(n)
         head = merge.origin_head(self.root, self.branch)
@@ -12047,6 +12050,9 @@ class PullsHost(merge.Host):
             m = re.fullmatch(r"pulls/(\d+)", rel)
             if m:
                 return self.pull_reply(int(m.group(1)))
+            m = re.fullmatch(r"compare/([^/]+)\.\.\.([^/]+)", rel)
+            if m:
+                return self.compare_answer(*m.groups())
             return 0, self.answer(rel, args[1:])
         route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
@@ -12054,12 +12060,17 @@ class PullsHost(merge.Host):
             return self.pull_reply(int(m.group(1)))
         m = re.search(r"/compare/([^/]+)\.\.\.([^/]+)$", route)
         if m:
-            self.compare_reads.append(m.groups())
-            is_base = re.fullmatch(r"[0-9a-f]{40}", m.group(1)) is None  # compare/<base branch>...<head>: the base read
-            if self.compare_error or (is_base and self.base_compare_error):
-                return self.compare_error or self.base_compare_error
-            return 0, json.dumps(self.compare_reply(*m.groups()))
+            return self.compare_answer(*m.groups())
         raise AssertionError("unexpected gh call: " + " ".join(args))
+
+    def compare_answer(self, first, second):
+        """-> (code, output) of GitHub's compare of first...second: the one answer the plain and the counted reads give. A first operand that is
+        a branch name is the base branch's read, which `base_compare_error` answers."""
+        self.compare_reads.append((first, second))
+        is_base = re.fullmatch(r"[0-9a-f]{40}", first) is None  # compare/<base branch>...<head>: the base read
+        if self.compare_error or (is_base and self.base_compare_error):
+            return self.compare_error or self.base_compare_error
+        return 0, json.dumps(self.compare_reply(first, second))
 
     def compare_reply(self, first, second):
         """The reply of GitHub's three-dot compare of first...second: status, the commit counts, and the files on second's side of the merge base.
@@ -14233,7 +14244,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
 
     def test_a_fix_check_copy_whose_fix_base_holds_every_round_one_line_is_written(self):
         # control: a fix check copy whose fix base holds each of its first round lines is written
-        fix = ("--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        fix = ("--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PASS")
         rounds = ("1:reviewer:sonnet:PASS", "1:reviewer:haiku:FAIL", "2:reviewer:sonnet:PASS")
         held = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: reviewer, haiku, FAIL")))
         rc, out, err = self.post(held, rounds=rounds, extra=fix)
@@ -14256,7 +14267,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         # control: the fix base is the FAIL record's head, and the copy keeps every line of that record, so the fix check stays allowed
         earlier = review_comment(1, 7, record_text(head=self.ANCESTOR, rounds=(self.FIRST, self.SECOND)))
         rc, out, err = self.post(earlier, rounds=self.SHAPE, guard="yes", net="positive",
-                                 extra=("--fix-check", f"{self.ANCESTOR}:reviewer:haiku:PASS"))
+                                 extra=("--fix-check", f"{self.ANCESTOR}:reviewer:sonnet:PASS"))
         self.assertEqual(rc, 0, "control: a fix check at the head, whose fix base is the FAIL record's head, was refused:\n" + out + err)
 
     def test_a_round_one_pass_at_the_head_of_an_earlier_round_one_fail_is_refused(self):
@@ -14367,7 +14378,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertEqual(rc, 0, "control: a PASS top round on a head no earlier record named was refused:\n" + out + err)
 
     def test_round_heads_a_top_round_that_fails_on_the_named_head_is_written(self):
-        # control: a third round FAIL on the head the earlier FAIL named is not a PASS, so the same head is written
+        # control: a third round FAIL line on the head that an earlier FAIL line named is written, since only a PASS line on that head is refused
         host = self.record_host(self.earlier_top_fail(), diffs=self.own_replies(self.OWN, self.OWN_TWO))
         rc, out, err = self.write_at(host, (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN_TWO}", f"3:reviewer:opus:FAIL:{self.OWN_TWO}"),
                                      guard="yes", net="positive")
@@ -14409,7 +14420,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         # compared. The copy names its own first round head, and the new second round names a head of another pull request
         earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=(f"Round 1: reviewer, sonnet, PASS, {REVIEW_OLD_HEAD}",)))
         rounds = (f"1:reviewer:sonnet:PASS:{REVIEW_OLD_HEAD}", f"2:reviewer:sonnet:PASS:{self.FOREIGN[0]}")
-        fix = ("--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:haiku:PASS")
+        fix = ("--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PASS")
         host = self.record_host(earlier, diffs=self.own_replies(REVIEW_OLD_HEAD))
         rc, out, err = self.write_at(host, rounds, extra=fix)
         self.assertIn((self.FOREIGN[0], self.LIVE), host.compare_reads, "scope: the fix-check write did not compare the foreign head with the live head")
@@ -16527,7 +16538,7 @@ class ReviewGuardEnv(ReviewEnv):
     """The guard and kind cases' one home: the record's argv at the feature branch's head (the fake host reports it as live), and the refusal's shape."""
 
     def review_argv(self, kind="normal", guard="no"):
-        rounds = () if kind == "docs-only" else ("--round", "1:reviewer:sonnet:PASS")  # a docs-only change owes no round
+        rounds = () if kind == "docs-only" else ("--round", f"1:reviewer:sonnet:PASS:{self.head()}")  # a docs-only change owes no round
         return ("7", "--review-record", "--head", self.head(), "--kind", kind, "--guard", guard, *rounds)
 
     def assert_refused(self, rc, out, err, *paths, holds="Guard or check"):
@@ -16649,7 +16660,7 @@ class ReviewGuardFiles(ReviewGuardEnv):
 
     def run_record(self, files, kind="normal", guard="no", files_error=None, changed=None):
         host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files, files_error=files_error, changed_files=changed)
-        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", kind, "--guard", guard, "--round", "1:reviewer:sonnet:PASS",
+        return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", kind, "--guard", guard, "--round", f"1:reviewer:sonnet:PASS:{REVIEW_HEAD}",
                              host=host)
 
     def test_a_rename_out_of_hooks_refuses_by_its_old_name(self):
@@ -16803,7 +16814,7 @@ class ReviewGuardCost(ReviewEnv):
             with self.subTest(guard=guard, files=len(files) if files else 1):
                 host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=files)
                 rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", guard,
-                                             "--round", "1:reviewer:sonnet:PASS", host=host)
+                                             "--round", f"1:reviewer:sonnet:PASS:{REVIEW_HEAD}", host=host)
                 self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
                 self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
