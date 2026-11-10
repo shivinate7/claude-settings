@@ -1518,6 +1518,10 @@ BATCH_LANE = "batch-73"  # an integration branch: `batch-` and a number, so the 
 BATCH_DEBT = "batch-74"  # an integration branch whose head closes a debt (the fixture of tm.DebtRetire)
 LANE_SLUG = "batch-push-full-checks"  # a lane whose slug starts `batch-` but names no number: a lane, so the lane lint runs the lint route
 SUFFIXED_LANE = "batch-73-fix"  # `batch-` and a number, then a suffix: a lane's name, not an integration branch's, so the lint route
+LETTERED_BATCH = "batch-73c"  # a real integration branch: `batch-`, a number and a letter (see `git log origin/main --merges`), so the batch checks
+LETTERED_BATCH_OTHER = "batch-65g"  # another real integration branch name: a different number and letter, so the batch checks
+RED_FIXES_LANE = "batch-red-fixes"  # `batch-` and a word, no number: a lane's name, so the lint route
+SLOT_ISO_LANE = "batch-slot-iso"  # `batch-` and a word, no number: a lane's name, so the lint route
 FULL_PASS = [("PASS", "record slugs"), ("PASS", "comment narration")]  # the batch's full checks job, green
 FULL_FAIL = [("PASS", "record slugs"), ("FAIL", "shard suite")]
 FULL_UNKNOWN = [("PASS", "record slugs"), ("unknown", "shard suite")]
@@ -1625,10 +1629,24 @@ class BatchLane(LaneFixture):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def push_branch_of(self, name):
-        """Push origin's feat to a branch called `name`, so the lane lint reads a head under that name."""
+    def push_branch_of(self, name, local=False):
+        """Push origin's feat to a branch called `name`, so the lane lint reads a head under that name. `local` also makes the
+        lane checkout's own branch `name` at that sha, so a refs/heads/ target resolves (lane_head_and_base reads no other ref for it)."""
         tm.sh(self.other, "git", "fetch", "-q", "origin")
         tm.sh(self.other, "git", "push", "-q", "origin", "origin/feat:refs/heads/" + name)
+        if local:
+            tm.sh(self.co, "git", "fetch", "-q", "origin")
+            tm.sh(self.co, "git", "branch", name, "origin/" + name)
+
+    def run_pushed_lane_lint(self, name, target=None, local=False):
+        """Push `name` (push_branch_of), then run `merge --lane-lint` on `target`, default `name`, with the routed stub. -> the run's output.
+        The push is asserted first, so a route case never reads a branch that was not pushed."""
+        self.push_branch_of(name, local=local)
+        self.assertTrue(self.head(name), "the lane branch %s was not pushed" % name)
+        self.use_routed_ci_job(FULL_PASS)
+        rc, out = self.run_lane("--lane-lint", target or name)
+        self.assertEqual(rc, 0, out)
+        return out
 
     def log_entries(self):
         """Every line the stub and the fake rebuild logged, oldest first: ci-job runs as {argv, cwd, head}, rebuilds as {rebuild}."""
@@ -1843,6 +1861,27 @@ class BatchLane(LaneFixture):
         rc, out = self.run_lane("--lane-lint", sha)
         self.assertEqual(rc, 0, out)
         self.assert_lint_route(out)
+
+    def test_batch_73c_takes_the_batch_route(self):
+        self.assert_batch_route(self.run_pushed_lane_lint(LETTERED_BATCH))
+
+    def test_batch_65g_takes_the_batch_route(self):
+        self.assert_batch_route(self.run_pushed_lane_lint(LETTERED_BATCH_OTHER))
+
+    def test_refs_heads_of_a_lettered_integration_branch_takes_the_batch_route(self):
+        self.assert_batch_route(self.run_pushed_lane_lint(LETTERED_BATCH, target="refs/heads/" + LETTERED_BATCH, local=True))
+
+    def test_origin_name_of_a_lettered_integration_branch_takes_the_batch_route(self):
+        self.assert_batch_route(self.run_pushed_lane_lint(LETTERED_BATCH, target="origin/" + LETTERED_BATCH))
+
+    def test_refs_heads_of_a_number_only_integration_branch_takes_the_batch_route(self):  # the control
+        self.assert_batch_route(self.run_pushed_lane_lint(BATCH_LANE, target="refs/heads/" + BATCH_LANE, local=True))
+
+    def test_a_lane_slug_named_batch_red_fixes_takes_the_lint_route(self):  # the control
+        self.assert_lint_route(self.run_pushed_lane_lint(RED_FIXES_LANE))
+
+    def test_a_lane_slug_named_batch_slot_iso_takes_the_lint_route(self):  # the control
+        self.assert_lint_route(self.run_pushed_lane_lint(SLOT_ISO_LANE))
 
     def test_an_unknown_that_main_also_has_refuses_without_the_lint_unknown_flag(self):
         # An unknown is never a silent pass: it refuses unless --lint-unknown-ok is given, even when main has the same unknown.
