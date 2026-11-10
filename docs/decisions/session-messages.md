@@ -4,8 +4,7 @@ Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft. Q1 to Q3, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
-Q4 (a timed check-in) is open with the owner. The mailbox build is on main, merged 2026-11-08 with batch-65g
-(PR #2236, merge commit 2ac382cc6). Follow-up PR #2484 merged in batch 71 (merge commit 64f721a49).
+Q4 (a timed check-in) is open with the owner. The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
 Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
 (step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
 Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
@@ -181,7 +180,7 @@ Design:
    Not yet measured: Mac and Windows auth for `ls-remote`.
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
-4. Builder, merged as #1371 (f1488533f): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
+4. Builder, merged as #1371 inside batch-65g (PR #2236): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
    `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
    Windows auth for `ls-remote`.
 5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to Mac, none lost, none acted
