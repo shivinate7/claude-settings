@@ -271,7 +271,6 @@
 - reviewer-rm-outside-scratch: a reviewer agent ran `rm -f /tmp/x` on a shared /tmp path it had not written (its write was refused), and its report claimed it "filed a debt" it could not write (reviewer agent on PR #1604, 2026-11-07). Fix: none — rare and harmless. Until: 2026-11-21
 - rm-shim-bypass-forms: /bin/rm, command rm and find -delete skip the rm shim (bin/rm)
 - rm-shim-call-cost: a recursive rm costs about 40 ms, and the marker search reads byte by byte (bin/rm)
-- rm-shim-cloud-path: the PATH step skips cloud mode, so the rm shim is off in cloud sessions (install.sh)
 - rm-shim-flag-order: macOS 'rm dir -rf' is read as a flag (false alarm, one retry), and GNU --rec abbreviations are not judged (bin/rm)
 - rm-shim-glob-passes: the shell expands '*' first, so rm -rf * in the cwd passes (bin/rm)
 - rm-shim-link-refused: rm -r link, where link points at home or the cwd, is refused though real rm removes only the link (bin/rm)
@@ -429,7 +428,7 @@
 - local-time-fixed-at-send: the time is fixed at prompt send or agent start (hooks/local_time.py). Decision: local-time-central
 - local-time-needs-install: the hook reaches a machine only after install.sh copies it to ~/.claude/hooks; until then no line shows. Decision: local-time-central
 - rm-shim-bypass-forms: shim skipped by /bin/rm, command rm, env -i rm, a shell with no rc PATH line, and find -delete (bin/rm). Decision: rm-path-wrapper
-- rm-shim-no-windows-cloud: no shim on Windows (install.ps1 skips bin/rm) or in a cloud install (no PATH line) (bin/rm). Decision: rm-path-wrapper
+- rm-shim-no-windows: no shim on Windows (install.ps1 skips bin/rm) (bin/rm). Decision: rm-path-wrapper
 - rm-shim-glob-passes: the shell expands globs first, so rm -rf * in the cwd arrives as a list of children and passes (bin/rm). Decision: rm-path-wrapper
 - rm-shim-flag-reading: flags read anywhere before --; macOS 'rm dir -rf' is refused though BSD rm would not run it recursive; GNU abbreviations such as --rec pass unjudged (bin/rm). Decision: rm-path-wrapper
 - rm-shim-symlink-refused: rm -r link is refused when link points at home, the cwd or a parent, though real rm removes only the link (bin/rm). Decision: rm-path-wrapper
