@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roadmap stalled paused</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen is the page's own CSS (#pagecss), the change for both options (#newcss) and the picked option's CSS. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 52px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+.tool code { overflow-wrap: anywhere; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No step, id, phase count, name or time on this page is real.</div>
+<header class="tool">
+  <h1>Roadmap Plan view: Stalled in the feed, stalled and paused cells in the phase bars</h1>
+  <div class="row"><span>Data</span>
+    <button data-s="mixed">12 steps in the phase</button>
+    <button data-s="dense">30 steps in the phase</button>
+  </div>
+  <div class="row"><span>Bars</span>
+    <button data-o="hatch">Hatch and ring</button>
+    <button data-o="tint">Tint</button>
+    <button class="hide" data-hide="hatch" data-name="Hatch and ring">Hide Hatch and ring</button>
+    <button class="hide" data-hide="tint" data-name="Tint">Hide Tint</button>
+  </div>
+  <div class="row"><span>Count</span>
+    <button data-c="on">Count words</button>
+    <button data-c="off">No count words</button>
+    <button class="hide" data-hide="on" data-name="Count words">Hide Count words</button>
+    <button class="hide" data-hide="off" data-name="No count words">Hide No count words</button>
+  </div>
+  <div class="row"><span>Size</span>
+    <button data-w="all">Both</button><button data-w="390">Phone 390</button><button data-w="1280">Wide 1280</button>
+  </div>
+  <div class="row"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=mixed|dense, &amp;o=hatch|tint, &amp;c=on|off, &amp;w=all|390|1280, &amp;t=light|dark, &amp;lab=off, &amp;hide=tint,off</code>. Drawn from skills/roadmap/page/index.html at 38a463f8e. Phone 390 and Wide 1280 are the brief's sizes; this repo's device list is unknown. Notes: the file of the same name ending -notes.md.</p>
+</header>
+<main id="stage"></main>
+<script type="text/plain" id="pagecss">
+/* =====================================================================
+   THEME TOKENS: the only block a repo edits to re-skin this page.
+   A repo supplies: --repo-name, --accent (+ -ink, -soft, on-accent),
+   fonts and radii, in light and in dark. Status colours (good / warn /
+   bad) are shared by all repos.
+   ===================================================================== */
+:root{
+  --repo-name:"claude-settings";
+  --accent:#3b4fd8; --accent-ink:#2a3aa8; --accent-soft:#e8ebfc; --on-accent:#ffffff;
+  --font-ui:"IBM Plex Sans",system-ui,sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,monospace;
+  --radius-s:3px; --radius-m:6px;
+  --bg:#f4f4f1; --surface:#ffffff; --surface-2:#f9f9f7; --line:#e2e2dc; --line-2:#cfcfc7;
+  --ink:#1b1c1f; --ink-2:#45474d; --muted:#6c6e75;
+  --good:#1f7a43; --good-soft:#e3f2e8; --warn:#9a6200; --warn-soft:#fbf0d9; --bad:#b4271f; --bad-soft:#fbe5e3;
+  --chart-grid:#e6e6e0;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --accent:#8c9bff; --accent-ink:#b3bdff; --accent-soft:#232848; --on-accent:#10132b;
+    --bg:#111214; --surface:#191a1d; --surface-2:#1e1f23; --line:#2b2d32; --line-2:#3a3d44;
+    --ink:#ececee; --ink-2:#c3c4c9; --muted:#9a9ca4;
+    --good:#5fcb8a; --good-soft:#16301f; --warn:#e9b44c; --warn-soft:#33270f; --bad:#ff8a80; --bad-soft:#3a1a18;
+    --chart-grid:#2a2c31;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --accent:#8c9bff; --accent-ink:#b3bdff; --accent-soft:#232848; --on-accent:#10132b;
+  --bg:#111214; --surface:#191a1d; --surface-2:#1e1f23; --line:#2b2d32; --line-2:#3a3d44;
+  --ink:#ececee; --ink-2:#c3c4c9; --muted:#9a9ca4;
+  --good:#5fcb8a; --good-soft:#16301f; --warn:#e9b44c; --warn-soft:#33270f; --bad:#ff8a80; --bad-soft:#3a1a18;
+  --chart-grid:#2a2c31;
+  color-scheme:dark;
+}
+/* ===================== end of theme tokens ===================== */
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--font-ui)}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+button:disabled{cursor:default}
+a{color:var(--accent-ink)}
+.num,.id{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.wrap{max-width:1240px;margin:0 auto;padding:0 16px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--radius-s)}
+.muted{color:var(--muted)}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;align-items:center;gap:12px;min-height:48px;flex-wrap:wrap;padding-top:6px;padding-bottom:6px}
+.brand{display:flex;align-items:baseline;gap:8px;min-width:0}
+.brand b{font-family:var(--font-num);font-weight:600;font-size:15px}
+.brand b::before{content:var(--repo-name)}
+.brand span{color:var(--muted);font-size:12px}
+.tabs{display:flex;gap:2px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-m);padding:2px}
+.tabs button{padding:4px 10px;border-radius:calc(var(--radius-m) - 2px);font-size:13px;color:var(--ink-2)}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line-2)}
+.tabs .ct{font-family:var(--font-num);font-size:11px;color:var(--accent-ink);margin-left:4px}
+.tools{margin-left:auto;display:flex;gap:6px;align-items:center}
+.seg{display:flex;border:1px solid var(--line-2);border-radius:var(--radius-s);overflow:hidden}
+.seg button{font-size:12px;padding:3px 8px;color:var(--ink-2)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+
+/* where-you-are band */
+.now{display:grid;grid-template-columns:1.1fr 1.4fr 1.6fr 1.6fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius-m);overflow:hidden;margin:14px 0 10px}
+.now>div{background:var(--surface);padding:10px 12px;min-width:0}
+.now h2{margin:0 0 6px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;justify-content:space-between;gap:8px}
+.now h2 .plain{text-transform:none;letter-spacing:0;font-weight:400}
+.now .big{font-size:18px;font-weight:600;line-height:1.2}
+.now .sub{font-size:12px;color:var(--ink-2)}
+.now ol,.now ul{margin:0;padding:0;list-style:none}
+.now li{display:flex;gap:8px;align-items:baseline;padding:2px 0;font-size:13px;min-width:0}
+.now li .id{flex:none}
+.now li .tx{min-width:0}
+.now li button.tx{color:var(--ink)}
+.now li button.tx:hover{text-decoration:underline}
+.now li .g{align-self:center}
+.ix{font-family:var(--font-num);font-size:11px;color:var(--muted);flex:none;width:12px}
+.off li .ic{color:var(--bad);flex:none;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;border:1px solid currentColor;border-radius:3px;padding:0 4px;height:16px;line-height:14px;margin-top:2px;min-width:62px;text-align:center}
+.off .link{display:block;font-size:12px;color:var(--accent-ink);margin-top:1px}
+.off .link:hover{text-decoration:underline}
+.off .link .id{font-size:12px}
+.notice{grid-column:1/-1;padding:16px 12px}
+.notice h3{margin:0 0 4px;font-size:15px}
+.notice p{margin:0;color:var(--ink-2)}
+
+html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
+.bar{height:6px;border-radius:3px;overflow:hidden;display:flex;gap:2px}
+.bar i{display:block;flex:1;height:100%;background:var(--line);border-radius:1px}
+.bar i.done{background:var(--accent)}
+.bar i.act{background:var(--accent);opacity:.45}
+.bar i.blk{background:var(--bad)}
+
+/* phase selector */
+.rail{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
+.rail button{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-m);padding:7px 9px;min-width:0}
+.rail button:hover{border-color:var(--line-2)}
+.rail button[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 2px 0 var(--accent)}
+.rail .nm{display:flex;justify-content:space-between;gap:6px;font-size:12px;font-weight:600;margin-bottom:5px;white-space:nowrap}
+.rail .nm .num{font-weight:400;color:var(--muted)}
+.rail .here{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-left:5px;vertical-align:2px}
+
+/* layout */
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start;padding-bottom:40px}
+.side{position:sticky;top:62px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-m);min-width:0}
+.card>header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.card>header h3{margin:0;font-size:13px;font-weight:600}
+.card>header .lbl{text-transform:none;letter-spacing:0}
+
+/* phase card */
+.phase{margin-bottom:16px;scroll-margin-top:64px}
+.ph-head{display:flex;align-items:center;gap:10px;padding:10px 12px;flex-wrap:wrap}
+.ph-head h2{margin:0;font-size:15px;font-weight:700}
+.ph-head .pill{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--accent);color:var(--on-accent)}
+.ph-head .prog{display:flex;align-items:center;gap:8px;margin-left:auto;font-size:12px;color:var(--ink-2)}
+.ph-head .prog .bar{width:90px}
+.asof{font-size:11px;color:var(--muted);padding:0 12px 8px}
+.howto{font-size:11px;color:var(--accent-ink);font-weight:600;margin-left:4px}
+.howbody{font-size:12px;color:var(--ink-2);padding:0 12px 10px}
+.foot{font-size:11px;color:var(--muted);padding:6px 12px;border-bottom:1px solid var(--line)}
+.hint{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--muted);padding:6px 12px;border-bottom:1px solid var(--line)}
+
+/* number tiles */
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.tile{background:var(--surface-2);padding:9px 11px 8px;min-width:0;display:flex;flex-direction:column;gap:3px;text-align:left}
+.tile:hover{background:var(--surface)}
+.tile .tl{font-size:11.5px;color:var(--ink-2);line-height:1.25;min-height:2.5em}
+.tile .row{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.tile .v{font-family:var(--font-num);font-size:20px;font-weight:600;letter-spacing:-.02em;line-height:1.1;overflow-wrap:anywhere}
+.tile .v small{font-size:13px;color:var(--muted);font-weight:400}
+.tile .goal{font-size:11px;color:var(--muted)}
+.tile svg{display:block;width:100%;height:30px;overflow:visible}
+.tile .ft{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
+.tile .rule{display:none;font-size:11.5px;color:var(--ink-2);border-top:1px dashed var(--line-2);padding-top:5px;margin-top:2px}
+.tile[aria-expanded="true"] .rule{display:block}
+.tiles .empty{grid-column:1/-1;background:var(--surface-2);padding:12px;font-size:12px;color:var(--muted)}
+.dl{font-family:var(--font-num);font-size:11px;font-weight:500;padding:0 4px;border-radius:var(--radius-s);white-space:nowrap}
+.dl.good{color:var(--good);background:var(--good-soft)}
+.dl.bad{color:var(--bad);background:var(--bad-soft)}
+.dl.flat{color:var(--muted);background:var(--surface)}
+.meter{display:flex;gap:2px;height:8px;margin:11px 0}
+.meter i{flex:1;background:var(--line);border-radius:2px}
+.meter i.on{background:var(--accent)}
+.one{font-size:11px;color:var(--muted);min-height:30px;display:flex;align-items:center;gap:6px}
+.one::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+
+/* step rows */
+.steps{list-style:none;margin:0;padding:0}
+.st{border-top:1px solid var(--line)}
+.st:first-child{border-top:0}
+.rw{display:grid;grid-template-columns:32px minmax(0,1fr);align-items:stretch}
+.sp{display:grid;place-items:center;padding-left:8px;min-height:36px}
+.sp:hover .g svg{transform:scale(1.15)}
+.sp:disabled{opacity:.7}
+.tg{display:grid;grid-template-columns:44px minmax(0,1fr) auto 14px;gap:8px;align-items:center;width:100%;padding:7px 12px 7px 4px;min-height:36px}
+.rw:hover{background:var(--surface-2)}
+.g{width:14px;height:14px;display:grid;place-items:center;flex:none}
+.g svg{width:14px;height:14px;transition:transform .12s}
+.st .ttl{min-width:0;overflow-wrap:anywhere}
+.st .meta{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted);white-space:nowrap}
+.chev{color:var(--muted);transition:transform .15s;font-size:10px}
+.st.open .chev{transform:rotate(90deg)}
+.st.active .rw{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.st.active .ttl{font-weight:600}
+.st.blocked .rw{box-shadow:inset 3px 0 0 var(--bad)}
+.tag{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:999px;line-height:17px;white-space:nowrap}
+.tag.t-now{background:var(--accent);color:var(--on-accent)}
+.tag.next{border:1px solid var(--accent);color:var(--accent-ink)}
+.tag.blk{background:var(--bad-soft);color:var(--bad)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block;flex:none}
+.st.done .ttl{text-decoration:line-through;text-decoration-color:var(--line-2);color:var(--muted)}
+.st.done .id{color:var(--muted)}
+.body{display:none;padding:2px 12px 12px 80px;font-size:13px;color:var(--ink-2)}
+.st.open .body{display:block}
+.body dl{margin:0;display:grid;grid-template-columns:44px minmax(0,1fr);gap:6px 10px}
+.body dt{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;padding-top:2px}
+.body dd{margin:0;overflow-wrap:anywhere;min-width:0}
+.ask{display:flex;gap:8px;align-items:flex-start;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-s);padding:6px 8px;font-family:var(--font-num);font-size:12px;color:var(--ink)}
+.ask span{flex:1;min-width:0;overflow-wrap:anywhere;white-space:pre-wrap;max-height:12em;overflow:auto}
+.copy{flex:none;font-family:var(--font-ui);font-size:11px;font-weight:600;padding:2px 8px;border-radius:var(--radius-s);background:var(--accent);color:var(--on-accent)}
+.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.more{font-size:11.5px;font-weight:600;color:var(--accent-ink);margin-top:2px}
+.emptyrow{padding:12px;font-size:13px;color:var(--muted)}
+.donefold>button{display:flex;gap:8px;align-items:center;width:100%;padding:8px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--line)}
+.donefold>button:hover{color:var(--ink)}
+.donefold.open>button .chev{transform:rotate(90deg)}
+.donefold .fb{display:none;border-top:1px solid var(--line)}
+.donefold.open .fb{display:block}
+
+/* pager */
+.pager{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 12px;border-top:1px solid var(--line);background:var(--surface-2)}
+.pager .pc{font-size:12px;color:var(--ink-2);text-align:center}
+.pager button{font-size:12px;font-weight:600;color:var(--accent-ink);border:1px solid var(--line-2);background:var(--surface);border-radius:var(--radius-s);padding:4px 10px;min-height:30px;white-space:nowrap}
+.pager button:disabled{color:var(--muted);opacity:.5}
+.card>.pager:last-child{border-radius:0 0 var(--radius-m) var(--radius-m)}
+
+/* side cards */
+.trend{padding:8px 12px 10px;display:grid;gap:8px}
+.tr{display:grid;grid-template-columns:96px minmax(0,1fr) 64px;gap:8px;align-items:center}
+.tr .k{font-size:12px;color:var(--ink-2);line-height:1.2}
+.tr svg{width:100%;height:30px;display:block;overflow:visible}
+.tr .r{text-align:right;line-height:1.15}
+.tr .r .num{font-size:13px;font-weight:600;display:block}
+.legend{display:flex;gap:12px;font-size:11px;color:var(--muted);padding:0 12px 10px;flex-wrap:wrap}
+.legend i{display:inline-block;width:12px;border-top:1px dashed var(--muted);vertical-align:middle;margin-right:4px}
+.burn{padding:8px 12px 10px}
+.burn svg{width:100%;height:110px;display:block;overflow:visible}
+.feed{list-style:none;margin:0;padding:0}
+.feed li{display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;padding:6px 12px;border-top:1px solid var(--line);font-size:12.5px}
+.feed li:first-child{border-top:0}
+.feed .when{font-family:var(--font-num);font-size:11px;color:var(--muted);padding-top:1px}
+.feed .what{min-width:0}
+.feed .what .id{color:var(--accent-ink);font-size:12px}
+.kind{font-size:11px;color:var(--muted)}
+.kind.done{color:var(--good)}
+.kind.active{color:var(--accent-ink)}
+.kind.blocked{color:var(--bad)}
+.morelink{display:block;width:100%;padding:8px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--accent-ink);font-weight:600}
+
+/* changes view */
+.day h3{margin:0;padding:9px 12px;font-size:13px;display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.day:not(:first-child) h3{border-top:1px solid var(--line)}
+.day h3 .lbl{text-transform:none;letter-spacing:0;font-weight:400}
+.ev{display:grid;grid-template-columns:56px 16px minmax(0,1fr);gap:8px;padding:8px 12px;border-top:1px solid var(--line);font-size:13px}
+.ev:first-of-type{border-top:0}
+.ev .when{font-family:var(--font-num);font-size:11px;color:var(--muted);padding-top:2px}
+.ev .g{margin-top:3px}
+.ev .gist{color:var(--ink-2);font-size:12.5px;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ev button .id{color:var(--accent-ink)}
+.ev button:hover .t{text-decoration:underline}
+.ev.done .t{text-decoration:line-through;text-decoration-color:var(--line-2)}
+
+/* reference */
+.ref{margin-bottom:16px}
+.ref ol{margin:0;padding:0 0 0 18px;font-size:13px}
+.ref ol li{padding:2px 0}
+.tp>button{display:grid;grid-template-columns:30px minmax(0,1fr) 14px;gap:8px;width:100%;padding:8px 12px;border-top:1px solid var(--line);align-items:baseline}
+.tp:first-of-type>button{border-top:0}
+.tp>button:hover{background:var(--surface-2)}
+.tp .sm{display:block;font-size:12px;color:var(--muted)}
+.tp .tb{display:none;padding:0 12px 12px 50px;min-width:0}
+.tp.open .tb{display:block}
+.tp.open .chev{transform:rotate(90deg)}
+.tp ul{margin:0;padding-left:16px;font-size:13px;color:var(--ink-2)}
+.tp ul li{margin:3px 0}
+.tp .ask{margin-top:6px}
+.tp .ask span{max-height:16em}
+.src{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;margin-top:8px}
+.lead{padding:10px 12px;margin:0;font-size:13px;color:var(--ink-2)}
+
+.view[hidden]{display:none}
+#tip{position:fixed;z-index:50;pointer-events:none;background:var(--ink);color:var(--bg);font-size:11.5px;padding:4px 7px;border-radius:var(--radius-s);max-width:240px;opacity:0;transition:opacity .08s;left:0;top:0}
+#tip.on{opacity:1}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--bg);font-size:13px;padding:8px 14px;border-radius:var(--radius-m);max-width:calc(100vw - 32px);box-shadow:0 4px 18px rgba(0,0,0,.18)}
+#toast[hidden]{display:none}
+
+@media (max-width:1000px){
+  .cols{grid-template-columns:minmax(0,1fr)}
+  .side{position:static}
+  .now{grid-template-columns:1fr 1fr}
+}
+@media (max-width:640px){
+  .top .wrap{gap:8px}
+  .tools{margin-left:0;width:100%;justify-content:flex-end}
+  .tabs{order:3;width:100%}
+  .tabs button{flex:1;text-align:center}
+  .now{grid-template-columns:1fr}
+  .rail{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+  .rail button{padding:6px 5px}
+  .rail .nm{flex-direction:column;gap:0;font-size:11px;white-space:normal;line-height:1.2}
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .rw{grid-template-columns:30px minmax(0,1fr)}
+  .sp{padding-left:6px;align-items:start;padding-top:11px}
+  .tg{grid-template-columns:34px minmax(0,1fr) 12px;gap:6px;padding:8px 10px 8px 2px}
+  .st .meta{grid-column:2;grid-row:2;margin-top:-2px;flex-wrap:wrap}
+  .body{padding:2px 10px 12px 10px}
+  .ph-head .prog{margin-left:0;width:100%}
+  .ph-head .prog .bar{flex:1}
+  .tp .tb{padding:0 12px 12px 12px}
+  .ev{grid-template-columns:48px 14px minmax(0,1fr);gap:6px}
+}
+/* Panels build.py adds: read-at stamps and landed marks. */
+.stamps{display:flex;flex-wrap:wrap;gap:4px 14px;margin:-4px 2px 12px;font-size:11px;color:var(--muted)}
+.stamps .sk{text-transform:uppercase;letter-spacing:.06em}
+.stamps .unk{color:var(--warn)}
+.tag.landed{color:var(--good);background:var(--good-soft)}
+#rec .card{margin-bottom:16px}
+.hl,.rc{list-style:none;margin:0;padding:0}
+.hl li,.rc li{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;padding:8px 12px;border-top:1px solid var(--line);font-size:13px}
+.hl li:first-child,.rc li:first-child{border-top:0}
+.hl .k{color:var(--ink-2);font-weight:600}
+.hl .unk,.rc .unk{color:var(--warn)}
+.rc li{grid-template-columns:72px minmax(0,1fr)}
+.rc .when{font-family:var(--font-num);font-size:11px;color:var(--muted);padding-top:2px}
+.rc a,.hl a{color:var(--accent-ink);text-decoration:none}
+.rc a:hover,.hl a:hover{text-decoration:underline}
+.rc .nm{display:block;font-family:var(--font-num);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.count{font-family:var(--font-num);font-size:22px;font-weight:600;padding:10px 12px 2px}
+@media (max-width:560px){ .hl li{grid-template-columns:minmax(0,1fr);gap:2px} }
+/* Live work: the publisher's project threads and open pull requests, read just before the build. */
+.live{margin:0 0 14px;border:1px solid var(--line);border-radius:var(--radius-m);background:var(--surface)}
+.live summary{cursor:pointer;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 12px;font-size:13px}
+.live summary .lh{font-weight:600;color:var(--ink)}
+.live summary .lh::before{content:'\25B8\00A0';color:var(--muted)}
+.live[open] summary .lh::before{content:'\25BE\00A0'}
+.live summary .asof{margin-left:auto;font-size:11px;color:var(--muted)}
+.live .unk{color:var(--warn)}
+.live ul{list-style:none;margin:0;padding:0}
+.live li{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;padding:7px 12px;border-top:1px solid var(--line);font-size:13px}
+.live li .nm{display:block;font-family:var(--font-num);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.live a{color:var(--accent-ink);text-decoration:none}
+.live a:hover{text-decoration:underline}
+.live h4{margin:0;padding:8px 12px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-top:1px solid var(--line)}
+.tag.st-blocked{color:var(--bad);background:var(--bad-soft)}
+.tag.st-working{color:var(--accent-ink);background:var(--accent-soft)}
+.tag.st-review_ready{color:var(--good);background:var(--good-soft)}
+.tag.st-failed,.tag.st-stopped{color:var(--warn);background:var(--warn-soft)}
+@media (max-width:560px){ .live li{grid-template-columns:minmax(0,1fr);gap:2px} }
+/* The stalled band: the box, head and row grid of Live work. A red edge only while something is stalled. */
+.stall{margin:0 0 14px;border:1px solid var(--line);border-radius:var(--radius-m);background:var(--surface)}
+.stall.hot{box-shadow:inset 4px 0 0 var(--bad)}
+.stall .sth{display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;padding:8px 12px;min-height:40px;font-size:13px}
+.stall .sth h3{display:inline-flex;align-items:center;gap:6px;margin:0;font-size:13px;font-weight:600;color:var(--ink)}
+.stall .sth.calm h3{color:var(--muted)}
+.stall .sth .lead{flex:1 1 24ch;min-width:0;color:var(--muted)}
+.stall h4{margin:0;padding:8px 12px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);border-top:1px solid var(--line)}
+.stall ul{list-style:none;margin:0;padding:0}
+.stall li{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;align-items:baseline;padding:6px 12px;border-top:1px solid var(--line);font-size:13px}
+.stall h4+ul>li:first-child{border-top:0}
+.stall li .tx{text-align:left;color:var(--ink)}
+.stall li .tx:hover{text-decoration:underline}
+.stall li .fx{display:block;font-size:12px;color:var(--muted)}
+.stall li .fx.land{color:var(--good);font-weight:600}
+.stall li .fx.bad,.stall .unk{color:var(--warn)}
+.stall li .fx.why{color:var(--ink)}
+.stall li .ln{font-family:var(--font-num);font-size:12px;overflow-wrap:anywhere}
+.stall li.unkrow{grid-template-columns:minmax(0,1fr)}
+.stall li.unkrow summary{cursor:pointer;display:inline-flex;align-items:center;min-height:40px;font-size:13px;color:var(--muted)}
+.stall li.unkrow pre{margin:0 0 8px}
+.stall .g{display:inline-flex;vertical-align:-2px}
+.stall .pz{border-top:1px solid var(--line)}
+.stall .pz>summary{cursor:pointer;display:flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;font-size:13px;font-weight:600;color:var(--muted)}
+.stall details pre{margin:0 12px 8px;font-family:var(--font-num);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.stall .nr{padding:8px 12px;font-size:13px}
+.tag.stl{background:var(--bad-soft);color:var(--bad)}
+.tag.pzd{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+.tag.ic{display:inline-grid;place-items:center;min-width:24px;padding:0 4px}
+.tag.ic svg{width:12px;height:12px}
+@media (max-width:560px){ .stall li{grid-template-columns:40px minmax(0,1fr);gap:0 8px} .stall li.it,.stall li.unkrow{grid-template-columns:minmax(0,1fr)} .stall .sth .lead{flex-basis:100%} }
+</script>
+<script type="text/plain" id="newcss">
+/* Harness labels only: dashed "Today:" and "New:" marks. They are not part of the screen. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+.bar[data-new], .segbar[data-new] { overflow: visible; }
+.bar[data-new]::after, .segbar[data-new]::after { left: auto; right: 0; top: 10px; }
+.nowlab[data-new] { outline-offset: -3px; }
+.nowlab[data-new]::after { top: auto; bottom: 3px; left: auto; right: 6px; }
+.rail[data-new]::after, .prail[data-new]::after { left: auto; right: 4px; }
+.kind[data-new]::after, .kind[data-today]::after { top: -15px; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+/* ---------- New, both options: the feed and the Changes view name a stalled step in red, as Blocked. Paused stays grey. ---------- */
+.kind.stalled{color:var(--bad)}
+</script>
+<script type="text/plain" id="hatchcss">
+/* ---------- New, option Hatch and ring: shape and colour together ---------- */
+/* Stalled: red stripes, so it reads apart from solid red Blocked. Paused: a grey ring, so it reads apart from grey To do. */
+.bar i.stl{background:repeating-linear-gradient(135deg,var(--bad) 0 2px,transparent 2px 4px)}
+.bar i.pzd{background:transparent;box-shadow:inset 0 0 0 1.5px var(--muted)}
+</script>
+<script type="text/plain" id="tintcss">
+/* ---------- New, option Tint: colour only, as .act tints the accent ---------- */
+.bar i.stl{background:var(--bad);opacity:.45}
+.bar i.pzd{background:var(--muted);opacity:.45}
+</script>
+<script>
+/* ---------- Sample steps: no id, title, count or time here is real ---------- */
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const lab = (kind, text) => text ? ` data-${kind}="${esc(text)}"` : "";
+const TITLES = ["Move the score table to the new store", "Name each empty state in plain words", "Split the nightly job into two runs", "Give the import a stop control",
+  "Read the device list from one home", "Keep the sort order after an edit", "Show a failed read as failed, not empty", "Put the main action in thumb reach",
+  "Drop the second copy of the date helper", "Check every screen in the dark theme", "Write the record for the merge window", "Cap the log at one reader",
+  "Fold the done steps under their phase", "Teach the batch runner to split a red run", "Tag each lane with its branch slug", "Bake the step list at build time",
+  "Count the hook lines after the cull", "Give the guard record its incident", "Draw the folded and open Duo poses", "Rename the tier word in one place"];
+/* Rows: [phase, total, done, in progress, stalled, paused, blocked]. Stalled and paused steps keep status active, as the build leaves them. */
+function mk(rows) {
+  const out = []; let n = 0;
+  rows.forEach(([phase, total, d, a, st, pz, b]) => {
+    for (let i = 0; i < total; i++) {
+      n++;
+      const cut = [d, d + a, d + a + st, d + a + st + pz, d + a + st + pz + b];
+      const kind = i < cut[0] ? "done" : i < cut[1] ? "active" : i < cut[2] ? "stalled" : i < cut[3] ? "paused" : i < cut[4] ? "blocked" : "todo";
+      const status = kind === "stalled" || kind === "paused" ? "active" : kind;
+      out.push({ id: "s" + (40 + n), phase, status, shown: kind, title: TITLES[(n * 7) % TITLES.length] });
+    }
+  });
+  return out;
+}
+const PH = [{ k: "cleanup", n: "Clean up" }, { k: "organize", n: "Organize" }, { k: "design", n: "Design" }, { k: "rollout", n: "Roll out" }, { k: "later", n: "Later" }];
+const DATA = {
+  mixed: { label: "12 steps in the phase", steps: mk([["cleanup", 6, 6, 0, 0, 0, 0], ["organize", 8, 8, 0, 0, 0, 0], ["design", 12, 4, 1, 1, 1, 1], ["rollout", 7, 1, 0, 1, 0, 0], ["later", 5, 0, 0, 0, 0, 0]]) },
+  dense: { label: "30 steps in the phase", steps: mk([["cleanup", 18, 18, 0, 0, 0, 0], ["organize", 9, 9, 0, 0, 0, 0], ["design", 30, 12, 1, 2, 1, 1], ["rollout", 24, 2, 0, 1, 1, 0], ["later", 10, 0, 0, 0, 0, 0]]) },
+};
+/* The feed: the newest changes first, one of each kind the feed can say. */
+const AGO = ["10:42", "09:15", "2h ago", "5h ago", "1d ago", "1d ago", "2d ago"];
+function feedSteps(steps) {
+  const pick = (k, ph) => steps.find((s) => s.shown === k && (!ph || s.phase === ph));
+  return [pick("stalled", "design"), pick("paused"), pick("blocked"), pick("active"), pick("done", "design"), pick("todo", "design"), pick("stalled", "rollout")].filter(Boolean);
+}
+const count = (ss, k) => ss.filter((s) => s.shown === k).length;
+/* ---------- Roadmap drawing kit: the markup index.html builds, from the sample steps ---------- */
+const SCREEN_NAME = "Roadmap Plan view";
+const GLYPH = {
+  done: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--good)"/><path d="M4 7.2l2 2 4-4.2" stroke="var(--surface)" stroke-width="1.7" fill="none"/></svg>',
+  active: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--accent)" stroke-width="1.6"/><path d="M7 1.5a5.5 5.5 0 0 1 0 11z" fill="var(--accent)"/></svg>',
+  todo: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/></svg>',
+  blocked: '<svg viewBox="0 0 14 14" aria-hidden="true"><rect x="1" y="1" width="12" height="12" rx="2.5" fill="var(--bad)"/><path d="M4 7h6" stroke="var(--surface)" stroke-width="1.8"/></svg>',
+  stalled: '<svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5a5.5 5.5 0 1 1-5.2 3.7" fill="none" stroke="var(--bad)" stroke-width="1.8" stroke-linecap="round"/><circle cx="7" cy="7" r="1.7" fill="var(--bad)"/></svg>',
+  paused: '<svg viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--muted)" stroke-width="1.6"/><path d="M5.6 4.7v4.6M8.4 4.7v4.6" stroke="var(--muted)" stroke-width="1.6"/></svg>'
+};
+const LABEL = { todo: "To do", active: "In progress", done: "Done", blocked: "Blocked", stalled: "Stalled", paused: "Paused" };
+const glyph = (s) => `<span class="g">${GLYPH[s] || GLYPH.todo}</span>`;
+const KIND = (s) => s.status === "done" ? "Done" : s.shown === "stalled" ? "Stalled" : s.shown === "paused" ? "Paused" : s.status === "active" ? "In progress" : s.status === "blocked" ? "Blocked" : "Updated";
+/* New segs: one cell per step, in this order: done, in progress, stalled, paused, blocked, the rest. */
+const segs = (d, a, t, p, b, n) => ["done", "act", "stl", "pzd", "blk"].map((c, k) => `<i class="${c}"></i>`.repeat([d, a, t, p, b][k])).join("") + "<i></i>".repeat(Math.max(0, n - d - a - t - p - b)) + (n ? "" : "<i></i>");
+/* New: the bar's name, for a bar that is not aria-hidden and is not inside a named button. */
+const segName = (d, a, t, p, b, n) => [[d, "done"], [a, "in progress"], [t, "stalled"], [p, "paused"], [b, "blocked"], [n - d - a - t - p - b, "to do"]].filter(([v]) => v > 0).map(([v, w]) => v + " " + w).join(", ");
+const tally = (ss) => ({ d: count(ss, "done"), a: count(ss, "active"), t: count(ss, "stalled"), p: count(ss, "paused"), b: count(ss, "blocked"), n: ss.length });
+
+function screen(sid, opt, cnt) {
+  const steps = DATA[sid].steps, byPhase = (k) => steps.filter((s) => s.phase === k);
+  const cur = PH.find((p) => byPhase(p.k).some((s) => s.status !== "done")), ss = byPhase(cur.k), c = tally(ss);
+  const tot = steps.length, tdone = count(steps, "done");
+  const active = steps.filter((s) => s.status === "active"), nu = ss.filter((s) => s.shown === "todo").slice(0, 3), off = steps.filter((s) => s.shown === "blocked");
+  const barLab = opt === "tint" ? "stalled and paused tinted" : "stalled hatched, paused ringed";
+  const words = cnt && (c.t || c.p) ? `${c.t ? ` · <span class="num">${c.t}</span> stalled` : ""}${c.p ? ` · <span class="num">${c.p}</span> paused` : ""}` : "";
+
+  const top = `<header class="top"><div class="wrap"><div class="brand"><b></b><span>roadmap</span></div>
+    <nav class="tabs" role="tablist" aria-label="Views"><button role="tab" aria-selected="true">Plan</button><button role="tab" aria-selected="false">Changes</button><button role="tab" aria-selected="false">Reference</button><button role="tab" aria-selected="false">Records</button></nav>
+    <div class="tools"><span class="lbl">Theme</span><div class="seg" role="group" aria-label="Light or dark"><button aria-pressed="true">Auto</button><button aria-pressed="false">Light</button><button aria-pressed="false">Dark</button></div></div></div></header>`;
+
+  // Today renderNow passes 0 for blocked; the mockup keeps that and adds stalled and paused.
+  const now = `<section class="now" id="now" aria-label="Where you are">
+  <div class="nowlab"${lab("new", (words ? "counts in words, " : "") + barLab)}><h2>Phase <span class="num">${PH.indexOf(cur) + 1}/${PH.length}</span></h2>
+    <div class="big">${esc(cur.n)}</div>
+    <div class="sub" id="pick-count"><span class="num">${c.d}</span> of <span class="num">${c.n}</span> done${c.a ? ` · <span class="num">${c.a}</span> in progress` : ""}${words}</div>
+    <div class="bar" style="margin-top:7px" role="img" aria-label="${segName(c.d, c.a, c.t, c.p, 0, c.n)}" title="${segName(c.d, c.a, c.t, c.p, 0, c.n)}">${segs(c.d, c.a, c.t, c.p, 0, c.n)}</div>
+    <div class="sub" style="margin-top:6px;color:var(--muted)">Whole plan <span class="num">${tdone}/${tot}</span> done</div>
+  </div>
+  <div><h2>Doing now</h2><ul>${active.map((s) => `<li>${s.shown === "active" ? glyph("active") : `<span class="g" role="img" aria-label="${LABEL[s.shown]}">${GLYPH[s.shown]}</span>`}<span class="id">${s.id}</span><button class="tx">${esc(s.title)}</button></li>`).join("")}</ul></div>
+  <div><h2>Up next <span class="plain">in work order</span></h2><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${s.id}</span><button class="tx">${esc(s.title)}</button></li>`).join("")}</ol></div>
+  <div class="off"><h2>Off track <span class="num" style="color:var(--bad)">${off.length}</span></h2><ul>${off.map((s) => `<li><span class="ic">Blocked</span><span class="tx">Waits on the owner's pick. <button class="link"><span class="id">${s.id}</span> ${esc(s.title)}</button></span></li>`).join("")}</ul></div></section>`;
+
+  const nSt = count(steps, "stalled"), nPz = count(steps, "paused");
+  const stall = `<section class="stall hot" id="stall" aria-label="Stalled steps"><div class="sth"><h3><span class="g">${GLYPH.stalled}</span>Stalled: <span class="num">${nSt}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>
+    <details class="pz"><summary><span class="g">${GLYPH.paused}</span>Paused: <span class="num">${nPz}</span></summary></details></section>`;
+
+  const rail = `<nav class="rail" id="rail" aria-label="Phases"${lab("new", barLab)}>${PH.map((p) => {
+    const t = tally(byPhase(p.k)), extra = (t.t ? `, ${t.t} stalled` : "") + (t.p ? `, ${t.p} paused` : "");
+    return `<button data-phase="${p.k}" aria-pressed="${p === cur}" aria-label="${esc(p.n)}: ${t.d} of ${t.n} done${extra}${p === cur ? ", current phase" : ""}"><div class="nm"><span>${esc(p.n)}${p === cur ? '<span class="here" title="Current phase: the first with work left"></span>' : ""}</span><span class="num">${t.d}/${t.n}</span></div>
+      <div class="bar">${segs(t.d, t.a, t.t, t.p, t.b, t.n)}</div></button>`;
+  }).join("")}</nav>`;
+
+  const open = [...ss.filter((s) => s.status === "active"), ...ss.filter((s) => s.status !== "active" && s.status !== "done")];
+  const row = (s, i) => {
+    const sk = s.shown === "stalled" || s.shown === "paused" ? s.shown : "";
+    const tags = (s.status === "active" && !sk ? '<span class="tag t-now">Now</span>' : "") + (s.shown === "todo" && nu.includes(s) ? `<span class="tag next">Next ${nu.indexOf(s) + 1}</span>` : "") + (s.status === "blocked" ? '<span class="tag blk">Blocked</span>' : "")
+      + (sk ? `<span class="tag ${sk === "stalled" ? "stl" : "pzd"} ic" role="img" aria-label="${LABEL[sk]}">${GLYPH[sk]}</span>` : "");
+    return `<li class="st ${s.status}"><div class="rw"><button class="sp" disabled aria-label="${s.id} status: ${LABEL[sk || s.status]}">${glyph(sk || s.status)}</button>
+      <button class="tg" aria-expanded="false"><span class="id">${s.id}</span><span class="ttl">${esc(s.title)}</span><span class="meta">${tags}</span><span class="chev" aria-hidden="true">▶</span></button></div></li>`;
+  };
+  // Today the phase head passes 0 for blocked; the mockup keeps that.
+  const phase = `<section class="card phase" id="p-${cur.k}">
+    <div class="ph-head"><span class="lbl">Phase ${PH.indexOf(cur) + 1}</span><h2>${esc(cur.n)}</h2>
+      <div class="prog" id="pick-bars"><span class="num">${c.d}/${c.n}</span><div class="bar" role="img" aria-label="${segName(c.d, c.a, c.t, c.p, 0, c.n)}" title="${segName(c.d, c.a, c.t, c.p, 0, c.n)}"${lab("new", barLab)}>${segs(c.d, c.a, c.t, c.p, 0, c.n)}</div><span>done</span></div></div>
+    <div class="tiles"><div class="empty" style="padding:9px 12px;background:var(--surface-2);grid-column:1/-1;font-size:12px;color:var(--muted)">No numbers saved for this phase yet.</div></div>
+    <div class="hint"><span>${open.length} open steps, in work order</span><span>Read only</span></div>
+    <ul class="steps">${open.slice(0, 7).map(row).join("")}</ul></section>`;
+
+  const feed = `<div class="card"><header><h3>Latest changes</h3><span class="lbl">Sat, Nov 7</span></header>
+    <ul class="feed" id="pick-kind">${feedSteps(steps).map((s, i) => {
+      const k = s.status === "done" ? "done" : s.shown;
+      const l = k === "stalled" && i === 0 ? lab("new", "Stalled in red") : k === "paused" ? lab("today", "Paused in grey") : "";
+      return `<li><span class="when">${AGO[i]}</span><span class="what"><span class="kind ${k}"${l}>${KIND(s)}</span> · <button><span class="id">${s.id}</span> ${esc(s.title)}</button></span></li>`;
+    }).join("")}</ul>
+    <button class="morelink">All changes by day →</button></div>`;
+
+  return `${top}<main class="wrap">${now}${stall}${rail}<div class="view" id="v-plan"><div class="cols"><div id="phases">${phase}</div><aside class="side" id="side">${feed}</aside></div></div></main>`;
+}
+/* ---------- Harness: data, option, count words, size, theme and labels from the URL hash ---------- */
+const WIDTHS = [390, 1280], WNAME = { 390: "Phone", 1280: "Wide" };
+const OPTS = { o: ["hatch", "tint"], c: ["on", "off"] };
+const P = { s: "mixed", o: "hatch", c: "on", w: "all", t: "", lab: "on", hide: [] };
+function readHash() {
+  Object.assign(P, { s: "mixed", o: "hatch", c: "on", w: "all", t: "", lab: "on", hide: [] });
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; });
+  if (!DATA[P.s]) P.s = "mixed";
+  if (!OPTS.o.includes(P.o)) P.o = "hatch";
+  if (!OPTS.c.includes(P.c)) P.c = "on";
+}
+function writeHash() {
+  const q = new URLSearchParams({ s: P.s, o: P.o, c: P.c, w: P.w });
+  if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(","));
+  const h = "#" + q; if (location.hash !== h) history.replaceState(null, "", h);
+}
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+const css = (id) => document.getElementById(id).textContent;
+function docFor() {
+  const opt = css("newcss") + (P.o === "tint" ? css("tintcss") : css("hatchcss"));
+  return `<!doctype html><html lang="en" data-theme="${theme()}" class="${P.lab === "off" ? "nolab" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css("pagecss")}${opt}</style></head><body>${screen(P.s, P.o, P.c === "on")}</body></html>`;
+}
+function frame(w) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = WNAME[w] + " " + w + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = SCREEN_NAME + " at " + w + " wide"; f.style.width = w + "px"; f.dataset.w = w;
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = 900;
+    try { hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { fit(); setTimeout(fit, 250); });
+  f.srcdoc = docFor();
+  addEventListener("resize", fit);
+}
+function render() {
+  // A hidden option is never drawn: the other one in its group takes its place.
+  ["o", "c"].forEach((g) => { if (P.hide.includes(P[g])) { const v = OPTS[g].find((x) => !P.hide.includes(x)); if (v) P[g] = v; } });
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  document.querySelectorAll("[data-s]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === P.s)));
+  document.querySelectorAll("[data-o]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.o); b.setAttribute("aria-pressed", String(b.dataset.o === P.o)); });
+  document.querySelectorAll("[data-c]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.c); b.setAttribute("aria-pressed", String(b.dataset.c === P.c)); });
+  document.querySelectorAll("[data-hide]").forEach((b) => { const off = P.hide.includes(b.dataset.hide); b.textContent = (off ? "Show " : "Hide ") + b.dataset.name; b.setAttribute("aria-pressed", String(off)); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  (P.w === "all" ? WIDTHS : [Number(P.w) || 390]).forEach(frame);
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.o) P.o = b.dataset.o;
+  if (b.dataset.c) P.c = b.dataset.c;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.id === "labBtn") P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const id = b.dataset.hide; P.hide = P.hide.includes(id) ? P.hide.filter((i) => i !== id) : [...P.hide, id]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!P.t) render(); });
+readHash(); render();
+</script>
+</body>
+</html>
