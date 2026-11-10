@@ -76,6 +76,10 @@ def take(env, addrs, mid):
 
 
 def main(argv):
+    # The tool reads and prints UTF-8 whatever the locale: a Windows pipe defaults to cp1252 and fails on "→".
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):  # a test swaps in a StringIO
+            stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(prog="mail")
     sub = parser.add_subparsers(dest="command", required=True)
     one = sub.add_parser("send")
