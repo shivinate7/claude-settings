@@ -1131,8 +1131,8 @@ class CrlfIndexLines(MailCase):
 
 class ReadBackFromTip(MailCase):
     """A good send, read back from the pushed tip: mail/<to>/<id>.md holds the body file's bytes, and no path or
-    content in the tip's tree holds a CR. Green on the base commit, since Linux writes LF. A guard, not a red case:
-    the CR defects are simulated in CrlfIndexLines and IndexUpdateDropped."""
+    content in the tip's tree holds a CR. Linux writes LF, so this case holds on any correct send; it guards the
+    read-back, and the CR defects are simulated in CrlfIndexLines and IndexUpdateDropped."""
 
     def send_and_read_back(self, store, sender, marker):
         body_path = self.body(marker)
