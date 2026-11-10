@@ -1,11 +1,11 @@
 {
   "title": "`verdict <cmd> | tail` no longer hides a red exit",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 0.96,
   "owner": "coordinator",
   "why": "Coordinator, 13:52 CST Nov 7.",
-  "note": " Triage sweep 04:49 CST Nov 10: back to ready. Lane session_013NEJL3ZEoUgdA2sYjqkekS is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane session_013NEJL1fXmMyjpN5ToK7SXQ at 04:53 CST Nov 10.",
+  "note": " Triage sweep 04:49 CST Nov 10: back to ready. Lane session_013NEJL3ZEoUgdA2sYjqkekS is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane session_013NEJL1fXmMyjpN5ToK7SXQ at 04:53 CST Nov 10. Done, coordinator 05:23 CST Nov 10: on main by a8b5cf6c6 (rule verdict-pipe; decision verdict-pipe-refused, ruling 2026-11-08 03:44 CST). The coordinator closes its lane.",
   "lane": "session_013NEJL1fXmMyjpN5ToK7SXQ",
-  "updatedAt": "2026-11-10T04:53:00-06:00"
+  "updatedAt": "2026-11-10T05:23:00-06:00"
 }

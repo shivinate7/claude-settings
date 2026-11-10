@@ -5,8 +5,8 @@
   "order": 965,
   "owner": "triage",
   "why": "Triage mistake, 03:45 CST Nov 10: the sweep moved 13 shipped steps to ready, because it read open PRs only. The coordinator then started lanes on 13 steps that were already done. The harm is lanes spent on shipped work.",
-  "note": "Guard: the sweep becomes a roadmap script. It checks each step's cited PRs (merged), its cited commits and a git log grep on main, and it refuses to set ready when any of them is on main. Owner: triage. Two misses of the slug match (coordinator 05:15 CST Nov 10): watcher-builtin-hook-survey (merged through batch-63l) and handoff-sections-kept (56b7dadf4, the subject lacks the slug). Both went to ready and got a lane for shipped work. So a grep for the slug is not enough. The sweep must also read the commits that touch the step's cited paths or rule ids, or ask a reader agent before it sets a step ready.",
-  "updatedAt": "2026-11-10T05:15:00-06:00",
+  "note": "Guard: the sweep becomes a roadmap script. It checks each step's cited PRs (merged), its cited commits and a git log grep on main, and it refuses to set ready when any of them is on main. Owner: triage. Two misses of the slug match (coordinator 05:15 CST Nov 10): watcher-builtin-hook-survey (merged through batch-63l) and handoff-sections-kept (56b7dadf4, the subject lacks the slug). Both went to ready and got a lane for shipped work. So a grep for the slug is not enough. The sweep must also read the commits that touch the step's cited paths or rule ids, or ask a reader agent before it sets a step ready. Third miss (05:23 CST Nov 10): verdict-pipe-masks-exit, on main by a8b5cf6c6, which does not name the slug.",
+  "updatedAt": "2026-11-10T05:23:00-06:00",
   "lane": null,
   "blockedBy": []
 }
