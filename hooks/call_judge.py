@@ -16,7 +16,7 @@ A call with no write on collection `items` exits before importing question_form.
 For the rest, question_form.page_item_hit picks the item writes of this repo's waiting page. A write
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
 context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
-many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note) adds NONE_DIRECTION_RULE
+many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note with no picked choice) adds NONE_DIRECTION_RULE
 to that one prompt, once. A set or update with non-empty `options` adds WIDENING_RULE once: an option that widens what a
 shared tool accepts must carry `widens: true`, and the judge refuses an unmarked one by its option key (decision
 uniform-over-variants). WIDENING_RULE is built from question_form.WIDENS_KEY on each read (module `__getattr__`, no cache), so an
@@ -181,14 +181,14 @@ PAGE_PROMPT = (
     "the Problem or a recommended option, because a task has none of them. "
     "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
 )
-# A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note. The text is appended to
+# A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note with no picked choice. The text is appended to
 # the formatted PAGE_PROMPT, only for such a call (skill waiting-page, "Route and close"). It has no `%`, so it is
 # never formatted.
 NONE_DIRECTION_RULE = (
-    "This call includes a re-ask: a write that gives an item new options and carries a `lastAnswer` note, so it asks "
-    "the owner again after a \"none of these\" answer. A note that asks for other choices (cheaper, different, more) "
+    "This call includes a re-ask: a write that gives an item new options and carries a `lastAnswer` note with no picked choice, "
+    "so it asks the owner again after a \"none of these\" answer. A note that asks for other choices (cheaper, different, more) "
     "is always allowed, even with other words. Otherwise, if the note already names an act a session can take with no "
-    "further pick from the owner, block it: the item should close and the note be filed as a step. "
+    "further pick from the owner, block it: the item should close and the note be filed as a roadmap step, or a todo record where there is no roadmap. "
     "The reason names no target."
 )
 # A write that sets options may widen what a shared tool accepts (decision uniform-over-variants). Appended like
@@ -400,7 +400,8 @@ def main():
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
             import question_form
-            hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "")
+            import override  # the writer's record id, as guard.py reads it; the payload's id is a local UUID
+            hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "", override.remote_session_id())
             judged = [] if hit[0] else question_form.judged_item_writes(writes)
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0
