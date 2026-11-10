@@ -445,6 +445,55 @@ def _powershell_values(segment: str) -> str:
     return "".join(out)
 
 
+ANSI_C_SIMPLE = {"a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r",
+                 "t": "\t", "v": "\v", "\\": "\\", "'": "'", '"': '"', "?": "?"}
+ANSI_C_ESCAPE = re.compile(r"\\(?:([0-7]{1,3})|x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})"
+                           r"|c(.)|(.))", re.DOTALL)
+
+
+def _ansi_c_value(match) -> str:
+    octal, hexa, short, wide, control, plain = match.groups()
+    if octal or hexa or short or wide:
+        try:
+            return chr(int(octal or hexa or short or wide, 8 if octal else 16) & (0xFF if octal else 0x10FFFF))
+        except (ValueError, OverflowError):
+            return match.group(0)
+    if control:
+        return chr(ord(control) & 0x1F)
+    return ANSI_C_SIMPLE.get(plain, match.group(0))
+
+
+def decode_ansi_c(text: str) -> str:
+    """`text` with each bash ANSI-C string (`$'...'`) read as the shell reads it: the escapes
+    (`\\NNN` octal, `\\xHH`, `\\n` and the rest) decode, a `\\0` ends the string, and the result
+    stands as one single-quoted word. shlex has no such quoting and reads `$'g'it` as `$git`, so
+    a command word spelled in pieces got past every rule that reads the word. A `$'` inside
+    quotes or after a backslash is text and stays."""
+    out, quote, index, last = [], "", 0, 0
+    while index < len(text):
+        if not quote and text[index] == "'" and is_contraction(text, index):
+            width, after = 1, ""
+        else:
+            width, after = quote_advance(text, index, quote)
+        if after == "$'" and not quote:
+            end, scan = None, index + 2
+            while scan < len(text):
+                if text[scan] == "\\":
+                    scan += 2
+                elif text[scan] == "'":
+                    end = scan
+                    break
+                else:
+                    scan += 1
+            if end is not None:
+                body = ANSI_C_ESCAPE.sub(_ansi_c_value, text[index + 2:end]).split("\x00", 1)[0]
+                out.append(text[last:index] + "'" + body.replace("'", "'\\''") + "'")
+                last = index = end + 1
+                continue
+        quote, index = after, index + width
+    return "".join(out) + text[last:] if out else text
+
+
 def segment_tokens(segment: str):
     """Tokenize one segment with shlex, or return None when it cannot be parsed.
 
@@ -468,6 +517,8 @@ def segment_tokens(segment: str):
     else:
         if "`" in segment:
             source = segment   # bash text: shlex keeps its backtick substitutions as they stand
+        if "$'" in segment:
+            segment = decode_ansi_c(segment)
         found = _segment_tokens(segment)
     if found is None:
         return None
