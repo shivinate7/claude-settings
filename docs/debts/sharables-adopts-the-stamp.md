@@ -4,7 +4,7 @@
 
 **Where.** `actions/stamp`, and claude-sharables.
 
-**Decision.** `one-shared-record-stamp`, one shared parser, not four claim tools.
+**Decision.** `one-shared-record-stamp` (one shared parser, not four claim tools).
 
 **Retire.** Move sharables onto the stamp. If the stamp cannot write its ids, change the stamp here first. Revisit at sharables' next claim of a record id, or the next stamp change. Closed when the `merge` tool runs in sharables.
 

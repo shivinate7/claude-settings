@@ -4,6 +4,6 @@
 
 **Where.** `bin/verdict`, `TEST_OK` and `test_argv`.
 
-**Decision.** Rule `verification-report-unknown-reads` (a read that could not run is unknown, never clear).
+**Decision.** none. Rule `verification-report-unknown-reads` (a read that could not run is unknown, never clear).
 
 **Retire.** Read the formatter's own summary as a count and its success line as a marker, from a real xcbeautify log (unmeasured: which lines xcbeautify keeps). Close it after two cases: a red case with that log and no count reads FAIL, and the same log with a count reads PASS.

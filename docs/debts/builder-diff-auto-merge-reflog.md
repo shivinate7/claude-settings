@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard.py`. `ENTRY_OWN` matches `commit`, `commit (initial)`, `commit (amend)` and `commit (merge)`. `ENTRY_RESOLVED` matches `commit (cherry-pick)` and `revert`. `ENTRY_REBASE` matches rebase steps. No pattern matches the strategy merge subject. So `entry_kind` returns `''`, and `own_changes` judges only the `OWN` and `NOTED` kinds.
 
-**Decision.** `builders-cannot-edit-tests`, builders cannot edit tests.
+**Decision.** `builders-cannot-edit-tests` (builders cannot edit tests).
 
 **Retire.** The fix step is `step:builder-diff-auto-merge-reflog`. It judges such a merge as `own_changes` judges a `commit (merge)`. Closed when `hooks/test_guard.py` has a case where a builder's `git merge -X ours` drops a test case, the guard refuses it with `builder-diff`, and the case passes.

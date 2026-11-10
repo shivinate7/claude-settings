@@ -4,7 +4,7 @@
 
 **Where.** `actions/stamp/stamp.mjs`.
 
-**Decision.** `one-shared-record-stamp`, one shared parser, not four claim tools.
+**Decision.** `one-shared-record-stamp` (one shared parser, not four claim tools).
 
 **Retire.** Revisit when a repo reports its full-history checkout is too slow. First, a fixture makes a shallow clone of a real two-parent merge commit. Closed when the check passes on it at depth 2.
 
