@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 15:19 CST.
+Last rewrite: 2026-11-10 15:24 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -12,8 +12,8 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 1. **Drain.** In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we speak"). The freeze holds
    (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
 2. **Land this plan on main.** One prose PR holds every settled ruling below in the owner's words with
-   its time. It is the first PR after the drain. Open: an express pass for prose (stage 5) would make
-   this PR fast; until then it takes the normal docs-only route.
+   its time. It is the first PR after the drain. The express pass (R7, stage 5) would make
+   this PR fast; until it lands, the PR takes the normal docs-only route.
 3. **Change how every lane flows,** before any other lane starts. Each is one lane, in this order:
    0. One glossary of roles, the same on local and cloud (rulings G1-G13; step
       glossary-same-local-cloud). First because every later brief uses its terms.
@@ -24,8 +24,8 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    4. A batch closes on a limit (step batch-freeze-lane-set-enforce, already doing).
    5. Lane lint runs once per lane; batch CI fails fast (ruling R4).
    6. One cull of guards with recorded wrong refusals (ruling R5).
-4. **Make the roadmap and triage mechanical** (direction D1, D2; not yet settled).
-5. **Express pass for prose** (direction D3; open).
+4. **Make the roadmap and triage mechanical** (direction D1, open; ruling R6).
+5. **Express pass for prose** (ruling R7). It can move before stage 2 so this plan's PR uses it.
 6. **Resume lanes** under the new flow. Then the rest of the queue.
 
 ## Settled rulings
@@ -164,24 +164,33 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 ## Directions, not yet settled
 
 - **D1. The roadmap is mechanical.** Owner 14:14 CST Nov 10: "realistically we have the actual roadmap
-  be mechanizable like the status/queue/asks/etc". Read: a step's status is computed from facts (PR
-  open or merged, session live or archived), not hand-written. Evidence: 135 of 396 "doing" steps
-  point at archived sessions; 292 "doing" steps were re-stamped by bulk passes on Nov 10.
-- **D2. Triage's review is mechanical.** Owner 14:12 CST Nov 10: "the review of triage ought to be
-  mechanized, not that the draft prs become mechanized immediately". Read: a check, run when triage
-  reports status, lists each outbox item and whether its home on main holds it. Evidence: 563 outbox
-  notes, about 6% acted on; 14 of 16 owner-ruling notes have no match on main. Related: step
-  coordinator-transcript-reconcile (one-time reconcile of rulings against main).
-- **D3. Express pass for prose.** Owner 14:12 CST Nov 10: "if we develop some sorta express pass for
-  the entirety of prose to be fast to review i'd be open to considering that". One idea: a PR that only
-  adds owner words with their time is checked by machine against the inbox and merges without review.
+  be mechanizable like the status/queue/asks/etc". Already ruled: decision stalled-steps (owner
+  2026-11-06 11:39 and 2026-11-07 12:22 CST) says `doing` is derived from live work, and
+  skills/roadmap/build.py prints each stalled step. Not in force: 135 of 396 "doing" steps point at
+  archived sessions, and 292 were re-stamped by bulk passes on Nov 10. Owner 15:22 CST: "i think at that
+  point we should just integrate github's pr tracker thing there's like a whole connector it has doesn't
+  it it's kinda like a table that shows stuff in progress" (GitHub Projects, the table view). Open: a
+  probe confirms which connector or API can read and write it from local and cloud; this session has no
+  Projects tool loaded (unverified whether the GitHub MCP server offers one).
+
+## Settled after discussion
+
+- **R6. Triage's outbox is read against main.** Owner 15:22 CST Nov 10: "yes but it's tbd if an outbox
+  is the right spot right? but for rn it only make senses that it is read". A check, run when triage
+  reports status, lists each owner ruling in the outbox and whether its home on main holds its words.
+  Whether the outbox stays the place for rulings is open. Home: decision owner-feedback-inbox.
+- **R7. Express pass for prose.** Owner 14:12 CST Nov 10: "if we develop some sorta express pass for the
+  entirety of prose to be fast to review i'd be open to considering that"; 15:22 CST: "this is very key
+  yes". A PR whose owner quotes match the feedback log word for word skips the review round that
+  decision docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling.
+  First user: this plan's own PR (stage 2). Home: decision docs-only-prs-skip-review, rewritten in place.
 
 ## Open topics, not yet discussed
 
 - How many lanes start: the owner said in the same answer "the limit isn't the problem, it's how the limit
   batches that's the problem". Covered by stage 3.4 for now.
-- About 89% of 746 open steps work on this repo's own merge, review and lint machinery (title
-  inference).
+- Dropped: "89% of open steps work on this repo's own machinery". Owner 15:22 CST: "this repo's own
+  machinery is basically every repo's own machinery though to be fair".
 
 ## Baseline, to judge the restart
 
