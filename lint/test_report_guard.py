@@ -2282,6 +2282,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                "A (my pick): fold the guard", "B: add a second hook", DEPARTS]
     LINKED = PICK + [PAGE]
     QUESTION = ["Close q_max #969 as replaced by #1010?"]
+    NO_KEY = object()  # make_repo's writer default: the extras file holds no "waiting-page-writer" key
 
     def setUp(self):
         self.run_dir = tempfile.mkdtemp(dir=_ISOLATION["dir"])
@@ -2292,14 +2293,25 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         os.makedirs(self.home)
         self.repo = self.make_repo("repo")
 
-    def make_repo(self, name, page=True):
+    def make_repo(self, name, page=True, writer=NO_KEY):
+        """A repo whose extras file names the waiting page (when page is true). `writer` sets its
+        "waiting-page-writer" key to that JSON value (None, "" or a non-string included); NO_KEY leaves it out."""
         repo = os.path.join(self.run_dir, name)
         os.makedirs(os.path.join(repo, ".git"))
         if page:
             os.makedirs(os.path.join(repo, ".claude"))
+            keys = {"kinds": {}, "waiting-page": self.PAGE}
+            if writer is not self.NO_KEY:
+                keys["waiting-page-writer"] = writer
             with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
-                json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
+                json.dump(keys, f)
         return repo
+
+    def extras_key(self, repo):
+        """The "waiting-page-writer" value on disk in `repo`, or NO_KEY when the file holds no such key."""
+        with open(os.path.join(repo, ".claude", "layout-extras.json")) as f:
+            keys = json.load(f)
+        return keys["waiting-page-writer"] if "waiting-page-writer" in keys else self.NO_KEY
 
     def reply(self, body):
         """A report whose Input Needed item holds the lines of `body`. Its Done line names a commit, so a
@@ -2567,6 +2579,86 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             with self.subTest(form=label):
                 out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
                 self.assert_blocked(out, "Pick guard")
+
+    # Owner-facing turn with no meta/page read: the layout's "waiting-page-writer" key is the writer.
+
+    def test_qm_layout_writer_green_send_to_the_key_id_passes(self):
+        # Catches: a send to the layout key's writer refused when the transcript holds no meta/page read, so a
+        # cloud session that never reads meta/page is blocked for a question it sent to the real writer.
+        bare = self.make_repo("bare_key")
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                records = [human("decide"), *send, assistant_text(self.reply(self.PICK))]
+                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
+                self.assertIsNone(self.stop(records, repo=keyed), "a send to the layout key's writer id was refused")
+
+    def test_qm_layout_writer_green_ack_from_the_key_writer_keeps_the_turn(self):
+        # Catches: the layout writer's ack after a send starting a new turn, which hides the send and blocks the question.
+        bare = self.make_repo("bare_key")
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        ack = peer_msg("got it", from_session=self.WRITER)
+        for label, send in (("session_id", self.send(session_id=self.WRITER)), ("to", self.send(to=self.WRITER))):
+            with self.subTest(field=label):
+                records = [human("decide"), *send, ack, assistant_text(self.reply(["Close q_max #969?"]))]
+                self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
+                self.assertIsNone(self.stop(records, repo=keyed), "the layout writer's ack after a send started a new turn")
+
+    def test_qm_layout_writer_red_send_to_another_id_blocks(self):
+        # Catches: a send to a session that is not the layout key's writer passing because the key is set.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        sends = (("session_id", self.send(session_id="session_other9")), ("to", self.send(to="session_other9")),
+                 ("no id", self.call("mcp__claude-code-remote__send_message", {"message": "pick"})))
+        for label, send in sends:
+            with self.subTest(form=label):
+                out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_layout_writer_red_no_send_this_turn_blocks(self):
+        # Catches: the layout key alone passing a question, or an earlier turn's send to the key id counting as this turn's.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        earlier = (("no send", []),
+                   ("send in an earlier turn", [human("first"), *self.send(session_id=self.WRITER),
+                                                assistant_text("Sent earlier.")]))
+        for label, before in earlier:
+            with self.subTest(case=label):
+                out = self.stop([*before, human("decide"), assistant_text(self.reply(self.PICK))], repo=keyed)
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_layout_writer_red_no_usable_key_still_says_not_known(self):
+        # Catches: a missing, null, empty or non-string key read as a writer id, so a send to any id passes.
+        for label, value in (("no key", self.NO_KEY), ("null", None), ("empty", ""), ("number", 5),
+                             ("list", [self.WRITER])):
+            with self.subTest(key=label):
+                repo = self.make_repo("key_" + label.replace(" ", "_"), writer=value)
+                self.assertEqual(self.extras_key(repo), value, "scope: the repo's extras file does not hold the key as set")
+                out = self.stop([human("decide"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))],
+                                repo=repo)
+                self.assert_blocked(out, "Pick guard", "the page writer is not known to this session")
+
+    def test_qm_layout_writer_transcript_read_wins_over_the_key(self):
+        # Catches: the layout key taking the place of a meta/page read that names another writer.
+        keyed = self.make_repo("keyed_key", writer=self.OLDER_WRITER)
+        self.assertEqual(self.extras_key(keyed), self.OLDER_WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        reads = self.writer_read(self.WRITER)
+        out = self.stop([human("decide"), *reads, *self.send(session_id=self.OLDER_WRITER),
+                         assistant_text(self.reply(self.PICK))], repo=keyed)
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+        self.assertIsNone(self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
+                                     assistant_text(self.reply(self.PICK))], repo=keyed),
+                          "a send to the transcript's writer was refused when the layout key names another id")
+
+    def test_qm_layout_writer_lane_send_to_the_key_id_is_refused(self):
+        # Catches: a lane reading the layout key, so a send to the key's writer passes where a lane's own chat never reaches the owner.
+        keyed = self.make_repo("keyed_key", writer=self.WRITER)
+        self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
+        out = self.lane(peer_msg("pick?"), *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK)),
+                        repo=keyed)
+        self.assert_blocked(out, "Lane pick guard")
 
     FRESH_QUESTION_CODE = (
         "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "

@@ -1019,6 +1019,36 @@ class WaitingPageBranding(Tree):
                     self.layout.waiting_page_icon(self.tree)
 
 
+class WaitingPageWriter(Tree):
+    """A repo's extras file names the session id of its waiting page's writer ("waiting-page-writer"). The Stop
+    check reads it when the transcript holds no meta/page read (report_guard.py question_problem)."""
+    SESSION = "session_013NEJL1nAsHBKJTpeHV1sJN"
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def test_the_key_reads_its_session_id(self):
+        # Catches: the "waiting-page-writer" key not read, or read as another value.
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-writer": self.SESSION}))
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+        self.assertEqual(self.layout.waiting_page_writer(self.tree), self.SESSION)
+
+    def test_no_extras_file_or_no_key_is_none(self):
+        # Catches: a repo with no writer key read as having a writer, with or without an extras file.
+        self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a repo with no extras file has a writer")
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": "https://claude.ai/artifact/abc123"}))
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+        self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a repo with no writer key has a writer")
+
+    def test_null_empty_or_not_a_string_is_none(self):
+        # Catches: a key holding no session id read as a writer id, so a send to any id would pass the Stop check.
+        for bad in (None, "", 5, ["session_013NEJL1nAsHBKJTpeHV1sJN"], {"id": "session_013NEJL1nAsHBKJTpeHV1sJN"}):
+            with self.subTest(bad=bad):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page-writer": bad}))
+                self.assertIsNone(self.layout.waiting_page_writer(self.tree), "a key that holds no session id has a writer")
+
+
 class RolledOutMark(Tree):
     """An extras file alone is not the mark: "rolled-out": true is (waiting page item 29 (a), the rolled-out mark is its own key).
     Keys that are not about folder placement read whenever the file exists."""
