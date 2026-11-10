@@ -1,0 +1,14 @@
+{
+ "title": "Waiting page: a read ask's title keeps a readable width between 521 and 700 px",
+ "phase": "now",
+ "status": "todo",
+ "order": 1042,
+ "owner": "triage",
+ "why": "Design check on #2559, 16:58 CST Nov 10 (design-reviewer opus): on main too, the read asks row's title is 0 px at 521, 61 at 600 and 161 at 700 px.",
+ "note": "Cause: the date (\"Answered Oct 28, 04:00 CDT\") plus Show answer and Mark unread share its row. At 390 it wraps whole. Fix the same way as #2559's head: wrap below 701 px. Shots: triage scratchpad shots2/askd-*.png.",
+ "updatedAt": "2026-11-10T17:02:00-06:00",
+ "lane": "",
+ "blockedBy": [
+  "ask-phase-out"
+ ]
+}
