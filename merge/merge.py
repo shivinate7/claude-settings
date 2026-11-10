@@ -2677,7 +2677,8 @@ def run_touched_tests(wt, base, head):
         return 0, [], [], [f"the lint tree's {TOUCHED_SELECTOR} could not be loaded: {type(e).__name__}: {e}"]
     tracked = set(listed.split("\0")) - {""}
     try:
-        tests = sorted(set().union(*(candidates(p, tracked) for p in diff.split("\0") if p)))
+        # a path the diff deleted or renamed away is not in the tree, so it is no test to run; the selector's own main() drops it the same way
+        tests = sorted(set().union(*(candidates(p, tracked) for p in diff.split("\0") if p and p in tracked)))
     except Exception as e:  # the lane's selector code: a bug in it must not read as a pass or a traceback
         return 0, [], [], [f"the selector's candidates() raised {type(e).__name__}: {e}"]
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
