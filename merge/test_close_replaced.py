@@ -38,11 +38,13 @@ def closed_pull(number, sha, body="", merged=False):
 class ClosedHost(PullsHost):
     """PullsHost that also answers `pulls/<n>` for each closed pull request in `closed`. Every other number and every other read is PullsHost's."""
 
-    def __init__(self, pulls, check_rows, closed=(), **kw):
+    def __init__(self, pulls, check_rows, closed=(), unreadable=(), **kw):
         super().__init__(pulls, check_rows, **kw)
-        self.closed = list(closed)
+        self.closed, self.unreadable = list(closed), set(unreadable)
 
     def pull_reply(self, n):
+        if n in self.unreadable:
+            return 1, "gh: HTTP 500 (test: the pull request cannot be read)"
         found = [d for d in self.closed if d["number"] == n]
         if not found:
             return super().pull_reply(n)
@@ -139,17 +141,65 @@ class CloseAsReplaced(CloseEnv):
         self.assertIn("close as replaced: o/alpha #6 by #8", lines, "control: #8 replaces open #6 and prints no line:\n" + "\n".join(lines))
         self.assertEqual(lines, ["close as replaced: o/alpha #6 by #8"], "a Closes, Fixes or Unreplaces body printed a replaced line for #4")
 
-    def test_a_replacer_can_itself_be_replaced(self):
-        # #7 replaces #4, and #9 replaces #7. Both close: #7 is closed by #9, not by its own claim on #4.
+    def test_a_replaced_replacer_holds_nothing(self):
+        # Re-pointed, ruling 2 (lane, 22:14 CST): a PR named on a close as replaced line holds nothing. #7 replaces #4 and is itself replaced by
+        # #9, so #7's claim on #4 closes nothing. Only `#7 by #9` prints. The old expectation let #7 hold #4 in the same run.
         pulls = [named_pull(4, head_of(4)), named_pull(7, head_of(7), body="Replaces #4"), named_pull(9, head_of(9), body="Replaces #7")]
         block = self.block_for_alpha(pulls=pulls)
-        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #4 by #7", "close as replaced: o/alpha #7 by #9"],
-                         "\n".join(block))
+        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #7 by #9"], "\n".join(block))
 
-    def test_a_full_repo_of_twelve_chained_prs_closes_eleven(self):
+    def test_a_full_repo_of_twelve_chained_prs_prints_no_replacer_that_is_replaced(self):
+        # Re-pointed, ruling 2 (lane, 22:14 CST): #11 is closed by #12, so #11 holds nothing and #10 by #11 prints no line. The ruling does not
+        # say how a whole chain resolves, so this pins only what it does say: #11 by #12 prints, and no replacer on a printed line is a PR
+        # that a printed line replaces.
         pulls = [named_pull(n, head_of(n), body=f"Replaces #{n - 1}" if n > 1 else "") for n in range(1, 13)]
-        block = self.block_for_alpha(pulls=pulls)
-        self.assertEqual(kind_lines(block, REPLACED), [f"close as replaced: o/alpha #{n} by #{n + 1}" for n in range(1, 12)], "\n".join(block))
+        lines = kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
+        self.assertIn("close as replaced: o/alpha #11 by #12", lines, "\n".join(lines))
+        self.assertNotIn("close as replaced: o/alpha #10 by #11", lines, "#11 is closed by #12, yet its claim on #10 prints")
+        replaced = {int(re.search(r"#(\d+) by", l).group(1)) for l in lines}
+        replacers = {int(re.search(r"by #(\d+)$", l).group(1)) for l in lines}
+        self.assertFalse(replaced & replacers, "a replacer on a printed line is itself replaced on one:\n" + "\n".join(lines))
+
+    def test_a_mutual_replaces_closes_neither(self):
+        # Ruling 1 (lane, 22:14 CST): #1 says Replaces #2 and #2 says Replaces #1. Neither closes. Control: #8 replaces open #6 and prints.
+        pulls = [named_pull(1, head_of(1), body="Replaces #2"), named_pull(2, head_of(2), body="Replaces #1"),
+                 named_pull(6, head_of(6)), named_pull(8, head_of(8), body="Replaces #6")]
+        lines = kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
+        self.assertIn("close as replaced: o/alpha #6 by #8", lines, "control: #8 replaces open #6 and prints no line:\n" + "\n".join(lines))
+        self.assertEqual(lines, ["close as replaced: o/alpha #6 by #8"], "a mutual Replaces closed one of its pair")
+
+    def test_a_replacer_on_another_base_closes_nothing(self):
+        # Ruling 4 (lane, 22:14 CST): #7 is on base release and names `Replaces #4`; #4 is on main, so no line. Control: #8 on main replaces #6.
+        pulls = [named_pull(4, head_of(4)), named_pull(6, head_of(6)), named_pull(7, head_of(7), body="Replaces #4", base="release"),
+                 named_pull(8, head_of(8), body="Replaces #6")]
+        lines = kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
+        self.assertIn("close as replaced: o/alpha #6 by #8", lines, "control: #8 replaces open #6 and prints no line:\n" + "\n".join(lines))
+        self.assertEqual(lines, ["close as replaced: o/alpha #6 by #8"], "a PR on base release closed #4 on base main")
+
+    def test_a_quoted_replaces_closes_nothing(self):
+        # Ruling 5 (lane, 22:14 CST): Replaces counts only at a line start, after optional whitespace, and not in a `>` quote. Control: #8's
+        # body is indented, and that is allowed.
+        pulls = [named_pull(4, head_of(4)), named_pull(6, head_of(6)), named_pull(7, head_of(7), body="> Replaces #4"),
+                 named_pull(8, head_of(8), body="  Replaces #6")]
+        lines = kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
+        self.assertIn("close as replaced: o/alpha #6 by #8", lines, "control: an indented Replaces prints no line:\n" + "\n".join(lines))
+        self.assertEqual(lines, ["close as replaced: o/alpha #6 by #8"], "a quoted Replaces closed #4")
+
+    def test_a_fenced_replaces_closes_nothing(self):
+        # Ruling 5 (lane, 22:14 CST): a Replaces line inside a fenced code block names nothing. Control: #8 replaces open #6.
+        pulls = [named_pull(4, head_of(4)), named_pull(6, head_of(6)), named_pull(7, head_of(7), body="```\nReplaces #4\n```"),
+                 named_pull(8, head_of(8), body="Replaces #6")]
+        lines = kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
+        self.assertIn("close as replaced: o/alpha #6 by #8", lines, "control: #8 replaces open #6 and prints no line:\n" + "\n".join(lines))
+        self.assertEqual(lines, ["close as replaced: o/alpha #6 by #8"], "a Replaces in a fenced block closed #4")
+
+    def test_a_replaces_inside_a_sentence_closes_nothing(self):
+        # Ruling 5 (lane, 22:14 CST): Replaces must start its line. Control: #8 replaces open #6.
+        pulls = [named_pull(4, head_of(4)), named_pull(6, head_of(6)), named_pull(7, head_of(7), body="This lane Replaces #4 later."),
+                 named_pull(8, head_of(8), body="Replaces #6")]
+        lines = kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
+        self.assertIn("close as replaced: o/alpha #6 by #8", lines, "control: #8 replaces open #6 and prints no line:\n" + "\n".join(lines))
+        self.assertEqual(lines, ["close as replaced: o/alpha #6 by #8"], "a Replaces in the middle of a sentence closed #4")
 
     def test_close_lines_print_after_the_batch_line(self):
         pulls = [named_pull(4, head_of(4)), named_pull(5, head_of(5)), named_pull(7, head_of(7), body="Replaces #4")]
@@ -193,6 +243,25 @@ class CloseAsCarried(CloseEnv):
         host = tm.ReviewedRoots.held_hosts(self, {(head_of(5), head_of(9)): "ahead"}, draft9=True)[self.alpha]
         block = block_of(self, self.reviewed(host), "o/alpha")
         self.assertEqual(kind_lines(block, CARRIED), ["close as carried: o/alpha #5 by #9"], "\n".join(block))
+
+    def test_a_replaced_pr_holds_no_carry(self):
+        # Ruling 2 (lane, 22:14 CST): #4 holds #3, and #5 names #4 as replaced without holding #3. #4 is named on a line, so it holds nothing:
+        # #3 gets no carried line, and the replaced line for #4 prints.
+        pulls = [named_pull(3, head_of(3)), named_pull(4, head_of(4)), named_pull(5, head_of(5), body="Replaces #4")]
+        host = closed_host("o/alpha", pulls=pulls, comments=[record_of(3, head_of(3))], check_rows={head_of(3): green()},
+                           compares={(head_of(3), head_of(4)): "ahead"})
+        block = block_of(self, self.reviewed(host), "o/alpha")
+        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #4 by #5"], "\n".join(block))
+        self.assertEqual(kind_lines(block, CARRIED), [], "#3 is carried by #4, which is named replaced:\n" + "\n".join(block))
+
+    def test_an_identical_head_under_a_replaced_lower_is_not_carried(self):
+        # Ruling 2 (lane, 22:14 CST): #10 is named replaced by #12. #11 has #10's head, so #10 would carry it, but #10 holds nothing.
+        same = head_of(10)
+        pulls = [named_pull(10, same), named_pull(11, same), named_pull(12, head_of(12), body="Replaces #10")]
+        host = closed_host("o/alpha", pulls=pulls, comments=[record_of(11, same)], check_rows={same: green()})
+        block = block_of(self, self.reviewed(host), "o/alpha")
+        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #10 by #12"], "\n".join(block))
+        self.assertEqual(kind_lines(block, CARRIED), [], "#11 is carried by #10, which is named replaced:\n" + "\n".join(block))
 
     def test_identical_heads_close_only_the_higher_numbered_pr(self):
         # #4 and #6 have one head, and each holds the other. Only #6 closes, by #4. #4 stays open.
@@ -274,6 +343,37 @@ class ReopenClosed(CloseEnv):
                               extra_comments=[review_comment(90, 4, "Replaced by #7"), review_comment(91, 6, "Replaced by #8")])
         self.assertIn("reopen: o/alpha #6 (replacer #8 no longer names it)", lines, "control: #6 has no reopen line:\n" + "\n".join(lines))
         self.assertFalse([l for l in lines if l.startswith("reopen: o/alpha #4 ")], "#4 reopened while its replacer still names it")
+
+    def test_an_indented_closing_note_reopens(self):
+        # Ruling 5 (lane, 22:14 CST): a closing note counts at a line start after optional whitespace. #4's note is indented, and #7 is closed.
+        lines = self.reopened(closed=[closed_pull(4, head_of(4)), closed_pull(7, head_of(7))],
+                              extra_comments=[review_comment(90, 4, "  Replaced by #7")])
+        self.assertEqual(lines, ["reopen: o/alpha #4 (replacer #7 dropped)"], "\n".join(lines))
+
+    def test_a_fenced_closing_note_reopens_nothing(self):
+        # Ruling 5 (lane, 22:14 CST): a closing note inside a fenced code block names nothing. Control: #6's plain note reopens.
+        lines = self.reopened(closed=[closed_pull(4, head_of(4)), closed_pull(7, head_of(7)), closed_pull(6, head_of(6)), closed_pull(8, head_of(8))],
+                              extra_comments=[review_comment(90, 4, "```\nReplaced by #7\n```"), review_comment(91, 6, "Replaced by #8")])
+        self.assertIn("reopen: o/alpha #6 (replacer #8 dropped)", lines, "control: #6 has no reopen line:\n" + "\n".join(lines))
+        self.assertEqual(lines, ["reopen: o/alpha #6 (replacer #8 dropped)"], "a closing note in a fenced block reopened #4")
+
+    def test_an_unreadable_candidate_names_its_repo_and_number(self):
+        # Ruling 6 (lane, 22:14 CST): the reopen unknown text names OWNER/NAME #N, never a bare #N. The read of pulls/4 fails.
+        host = closed_host("o/alpha", pulls=[named_pull(5, head_of(5))], comments=[record_of(5, head_of(5)), review_comment(90, 4, "Replaced by #7")],
+                           closed=[closed_pull(4, head_of(4)), closed_pull(7, head_of(7))], unreadable=(4,), check_rows={head_of(5): green()})
+        rc, out, err = self.run_args("--reviewed", "--root", self.alpha, hosts={self.alpha: host})
+        unknown = [l for l in block_of(self, out, "o/alpha") if l.startswith("reopen unknown (")]
+        self.assertTrue(unknown, "no `reopen unknown (...)` line for the unreadable #4:\n" + out + err)
+        self.assertIn("o/alpha #4", unknown[0], "the reopen unknown line names #4 with no repo name:\n" + unknown[0])
+
+    def test_zero_open_pulls_says_the_reopen_is_not_checked(self):
+        # Ruling 3 (lane, 22:14 CST): with no open pull request the reopen lines are not read. The block keeps its empty line and says so.
+        host = closed_host("o/alpha", pulls=[], comments=[review_comment(90, 4, "Replaced by #7")],
+                           closed=[closed_pull(4, head_of(4)), closed_pull(7, head_of(7))])
+        block = block_of(self, self.reviewed(host), "o/alpha")
+        self.assertIn("no open pull requests.", block, "\n".join(block))
+        self.assertIn("reopen not checked (no open pull request)", block, "a zero-open block does not say the reopen was not checked:\n" + "\n".join(block))
+        self.assertEqual(kind_lines(block, REOPENED), [], "\n".join(block))
 
     def test_a_merged_replacer_does_not_reopen(self):
         # Anchor: #6 reopens (replacer #8 closed, unmerged). #4's replacer #7 was merged, so #4 stays closed.
