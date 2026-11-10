@@ -879,7 +879,11 @@ def _conflict_markers_hit(stripped: str, cwd: str):
             taken, pending = pending, []   # this commit takes the adds so far; the next starts clean
             wholes, adds = set(), []   # tops an add stages whole / (where, top, specs) of adds that name paths
             for add_where, add_paths in taken:
-                add_repo = _repo_of(repos, add_where)
+                try:
+                    add_repo = _repo_of(repos, add_where)
+                except _GitUnread as caught:
+                    unread = unread or caught   # the add's folder could not be read: held, so this commit's own folder is still judged
+                    continue
                 if add_repo is None:
                     continue
                 if add_paths is None:
