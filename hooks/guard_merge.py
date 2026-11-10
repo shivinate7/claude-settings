@@ -403,7 +403,7 @@ READY_PAGE_STALE_REASON = (
 READY_PAGE_UNKNOWN_REASON = (
     "Rule (Git, guard-hooks-fail-closed): the records page on the head of this pull request could not be read, so it is "
     "unknown whether it is stale: %s. A read that cannot run refuses the ready mark. "
-    "Remedy: fix that cause and mark it ready again, or run the merge tool's records step on the draft, `merge <pr> --confirm`. "
+    "Remedy: retry when the read works, or return the pull request to draft and run the merge tool's draft step. "
     "(decision guard-hooks-fail-closed, a guard that cannot run its read refuses)"
 )
 

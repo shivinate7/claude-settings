@@ -3052,7 +3052,7 @@ def ready_page_state(root, n, host):
     """The records page on the head of pull request `n`, read before the pull request is marked ready (decision records-index-at-merge).
     -> "current": the generator changes nothing on the head. "stale": it would. "skip": the rule does not judge this head: the base is not
     the default branch, the head holds a Record-claim, or the head lacks the base tip (every lack, as draft_step reads one).
-    A read that cannot run raises Stop. Pushes nothing, claims nothing, takes no lock and prints nothing: a caller inside a hook reads only the return."""
+    A read that cannot run raises Stop, an unknown ancestry too. Pushes nothing, claims nothing, takes no lock and prints nothing: a caller inside a hook reads only the return."""
     info = host.pr(n)
     base = info["base"]
     with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; the default branch is all this read takes from it
@@ -3061,7 +3061,12 @@ def ready_page_state(root, n, host):
         return "skip"
     tmp, wt = open_worktree(root, info, base)
     try:
-        if head_claim(wt) or ancestor(wt, f"origin/{base}", info["head"]) is not True:  # a claim stays at the ready confirm
+        if head_claim(wt):  # a claim stays at the ready confirm
+            return "skip"
+        lacks = ancestor(wt, f"origin/{base}", info["head"])
+        if lacks is None:  # git could not tell (a shallow clone, a timeout): unread, never off the rule
+            raise Stop(f"cannot tell whether the head of #{n} holds the tip of {base}: the ancestry read failed (decision guard-hooks-fail-closed, a read that cannot run refuses)")
+        if lacks is False:
             return "skip"
         return "stale" if rebuild_records(wt) else "current"
     finally:
