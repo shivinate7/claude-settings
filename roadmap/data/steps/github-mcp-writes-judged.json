@@ -1,0 +1,14 @@
+{
+ "title": "The guard judges GitHub MCP writes: push_files, create_or_update_file, delete_file and update_pull_request",
+ "phase": "later",
+ "status": "todo",
+ "order": 1036,
+ "owner": "triage",
+ "why": "Coordinator 16:32 CST Nov 10, from lane guard-matcher-github-mcp (#2571): after #2571 the guard sees those tools, but no rule judges them; create_or_update_file on main is allowed.",
+ "note": "A guard change, so it needs the owner's word: a question for restart stage 3, not now.",
+ "updatedAt": "2026-11-10T16:36:00-06:00",
+ "lane": "",
+ "blockedBy": [
+  "guard-matcher-github-mcp"
+ ]
+}
