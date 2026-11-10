@@ -3,7 +3,7 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 15:24 CST.
+Last rewrite: 2026-11-10 15:46 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -24,6 +24,9 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
    4. A batch closes on a limit (step batch-freeze-lane-set-enforce, already doing).
    5. Lane lint runs once per lane; batch CI fails fast (ruling R4).
    6. One cull of guards with recorded wrong refusals (ruling R5).
+   7. One model table that every spawn, guard and check reads (ruling R8).
+   8. One rounds record; round 3 only for a guard or check change that failed a round (ruling R9).
+   9. A hook refusal asks for a short correction, never the whole reply again (ruling R10).
 4. **Make the roadmap and triage mechanical** (direction D1, open; ruling R6).
 5. **Express pass for prose** (ruling R7). It can move before stage 2 so this plan's PR uses it.
 6. **Resume lanes** under the new flow. Then the rest of the queue.
@@ -82,14 +85,37 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
 - **R5. One guard cull now, then notes only.** Owner 15:04 CST Nov 10: "i'd say option e works for now
   with a revisit maybe to threshold lanes if it turns out to be problematic". One cull lane in stage 3
   fixes or deletes each guard or check with a recorded wrong refusal (60 "false alarm" lines in
-  docs/debts/notes.md), whichever costs less; the cost of deleting counts the harm the guard stops
-  (rule building-guard-needs-incident). The list also covers the lane pick guard's wrong fires and the
+  docs/debts/notes.md). It fixes each one, and deletes it only when its wrong refusals cost more than the
+  harm it stops (rule building-guard-needs-incident stays; owner 15:23 CST: "b ... this is fine"). The list also covers the lane pick guard's wrong fires and the
   Departs-from separator and Recovered-line fires (owner 15:18 CST: "A is fine -- but the coordinator
   probably has way more data on how hooks have been acting than your small sample size does"); the
   coordinator sends triage its record of hook fires for the same list. After it, wrong refusals are notes only. If they turn out
   to be a problem again, revisit a threshold (a guard with 3 recorded wrong refusals gets its own lane).
   Home: new decision cull-guard-wrong-refusals, beside cull-rules (triage branch cull-false-alarms-once;
   rulings-declare-kind allows one ruling per record).
+
+- **R8. One model table.** Owner 15:44 CST Nov 10: "on #1 -- A seems best". The role table in decision
+  agent-model-cap is the only home for each role's and round's model and effort. The spawn guard requires
+  or fills in the row's model and effort (today it only permits them, guard.py:3783-3788, so a spawn with
+  no model runs reviewer.md's Haiku). The merge tool checks the model that ran, not the record's text.
+  Agent files, brief markers and checks read the table. Each model ruling lands in one lane that changes
+  the table and every reader together. Cause: rulings 279 d, 439 and 444 a reached main 12-57 h late and
+  in pieces; 359 a, 359 b, 289 and 295 a are not on main. Home: decision agent-model-cap.
+- **R9. One rounds record; no round 3 after a pass.** Owner 15:44 CST Nov 10: "yeah i never wanted round 3
+  if it passed earlier and was so confused to see that it was occuring"; "agreed A -- can look into the
+  sonnet noise thing later". Fold the 15+ rounds rulings into one record. Round 1 runs on item 359 a's
+  model (Sonnet for a guard or check change, the role's model otherwise). Fixes are verified per G5. Round
+  3 with the net-value test runs only for a guard or check change that failed a round. Evidence: round 3
+  found a failure 0 of 14+ times after a clean round 2; the net-value hold caught 6 real holes. Deferred:
+  Sonnet round 1 for every logic change (Haiku round 1 fails 79% vs 38%; noise share unknown).
+  Home: decision hold-unsafe-after-round-3; CLAUDE.md roles-review-cap-three and
+  roles-third-round-steps-up rewritten.
+- **R10. A hook refusal gets a short correction.** Owner 15:44 CST Nov 10: "i never want my hook to have
+  one spew out the whole thing again after -- as i fixed long ago in how the done deviations inputneeded
+  hook works, that should be viewed as a best practice for other hooks that make you regurgitate output
+  again". guard-remedy-not-to-owner:177 already says "post only the corrected lines ... Never send the
+  report again", but no refusal text says it. Each Stop-hook refusal ends with that line.
+  Home: decision guard-remedy-not-to-owner.
 
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
@@ -110,7 +136,7 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   decides to stop. Builds on owner 2026-11-06 11:38 CST (decision session-tiers).
 - **G4. Plain names.** Owner 14:29 CST Nov 10: "check fix reviewer should be the name", "review log is
   fine", "feedback log is good too". 14:33 CST: "i meant let's call it the "check fix reviewer" (or find a
-  better name that's cool too)". Picked under that leave: fix check -> fix verifier (the reviewer that
+  better name that's cool too)"; 15:44 CST: "sure that's fine" to fix verifier. Fix check -> fix verifier (the reviewer that
   verifies one fix). Reason: "check" already names a lint, test or CI job in the glossary, so a name
   with "check" in it would clash. review record -> review log; the per-session inbox file -> feedback
   log. The mailbox keeps its name.
