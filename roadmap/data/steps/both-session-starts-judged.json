@@ -1,0 +1,12 @@
+{
+  "title": "Guards that judge a lane start judge start_session as well as create_session",
+  "phase": "now",
+  "status": "ready",
+  "order": 1021,
+  "owner": "triage",
+  "why": "Owner glossary ruling topic 1, 14:36 CST Nov 10.",
+  "note": "Glossary topic 1 close (owner 14:36 CST Nov 10). Plan and refuter 14:54 CST: create_session-only judges are lane-effort-pin, lane-repo-tag, lane-start-settings (guard.py ~2975 is_lane_create_session), agent-no-remote-tools (shared_names.py ~20, guard.py ~6001) and lane-one-topic records (own_session.py ~107). Add start_session to agent-no-remote-tools (red: an agent_id payload on start_session expects a deny). start_session's input has no tags field (only fixture: test_guard.py ~37136), so the lane-tag guards are platform-forced there; the reason goes in the tool comment. Gotcha: mutate_guard.py ~2595-2625 matches the exact line 'return tool == CREATE_SESSION_TOOL and any('. Records: agent-model-cap known gaps, lanes-start-as-agents.",
+  "updatedAt": "2026-11-10T14:55:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}

@@ -1,0 +1,12 @@
+{
+  "title": "A Workflow call refuses placeholder args, and a script that reads args asserts their shape before its first agent",
+  "phase": "now",
+  "status": "ready",
+  "order": 1021,
+  "owner": "triage",
+  "why": "Mistake made twice in normal work (building-mistake-names-its-guard).",
+  "note": "Coordinator 14:48 CST Nov 10: twice today a workflow ran with a placeholder string as its args (\"FACT_CLOSE_PLACEHOLDER\", then \"__FILL__\"), so its agents checked nothing and returned an empty or useless result. Guard: a PreToolUse check refuses a Workflow call whose args value is an ALL-CAPS or __X__ placeholder; a workflow script that reads args asserts their shape before its first agent. The coordinator's fix for that run was a shape assert at the top of the script.",
+  "updatedAt": "2026-11-10T14:55:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}

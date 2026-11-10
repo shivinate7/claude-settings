@@ -1,0 +1,14 @@
+{
+  "title": "The load brake runs on the cloud too, with a remedy that works there",
+  "phase": "now",
+  "status": "blocked",
+  "order": 1021,
+  "owner": "triage",
+  "why": "Owner glossary ruling topic 1, 14:36 CST Nov 10.",
+  "note": "Glossary topic 1 close (owner 14:36 CST Nov 10): remove rule-chosen local/cloud splits. Plan (opus) and refuter 14:54 CST: drop is_cloud() from load_hit, running_agent_hit and lane_session_hit (guard.py ~3901, ~3952, ~3971); guard_log_report.py prints a reading in place of n/a (cloud), and CLAUDE.md reports-batch-pace-numbers changes with it; create_session keeps its skip as a forced split (the new session runs in another container). Refuter gap: the refusal remedies (LOAD_FULL_REASON 'wait, then retry'; parent frees space) strand a cloud session, whose disk does not drain while it waits; the tool needs a cloud steer. Departs from owner 2026-11-01 21:34 CST (brake local-only, machine-load-brake.md:20), which the 14:36 ruling covers. Red: test_guard.py load-brake family with CLAUDE_CODE_REMOTE=true and an injected full read_load. After #2566 merges (CLAUDE.md:106 is one line that both rewrite).",
+  "updatedAt": "2026-11-10T14:55:00-06:00",
+  "lane": "",
+  "blockedBy": [
+    "glossary-roles-g1-g3"
+  ]
+}
