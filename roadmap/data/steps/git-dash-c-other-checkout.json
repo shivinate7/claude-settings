@@ -1,11 +1,11 @@
 {
   "title": "The guard resolves a `git -C <path>` target the way it resolves a cd, so an agent's commit into the primary checkout is refused",
   "why": "Coordinator 13:27 CST Nov 8: an agent's `git -C <primary checkout> commit/add` is allowed by the guard, while `cd <primary> && git commit` is refused (other_checkout_hit). It is the same mistake class as the cd form.",
-  "note": " Sighting (coordinator 19:47 CST Nov 9, from runner 8): after a resume, the runner's primary checkout moves to the main checkout. The other-checkout guard then refuses `git -C <batch worktree> checkout` in the runner's own worktree, but lets `env -C <batch worktree> git checkout` through. Either the refusal is a false alarm on a session's own worktree after a resume, or `env -C` is a hole; one of the two needs a fix.",
+  "note": " Sighting (coordinator 19:47 CST Nov 9, from runner 8): after a resume, the runner's primary checkout moves to the main checkout. The other-checkout guard then refuses `git -C <batch worktree> checkout` in the runner's own worktree, but lets `env -C <batch worktree> git checkout` through. Either the refusal is a false alarm on a session's own worktree after a resume, or `env -C` is a hole; one of the two needs a fix. Lane session_013NEJKzsUKjkcSWJSe2tXSP started (coordinator 19:52 CST Nov 9).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "status": "todo",
+  "lane": "session_013NEJKzsUKjkcSWJSe2tXSP",
+  "status": "doing",
   "order": 808,
-  "updatedAt": "2026-11-09T19:44:00-06:00"
+  "updatedAt": "2026-11-09T19:46:00-06:00"
 }
