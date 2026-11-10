@@ -13066,8 +13066,8 @@ for _cmd in (_PIN_TYPE_NOT_D, _PIN_TYPE_D_LAST, _PIN_TYPE_D_OR_F_GREP_R, _PIN_TY
        cwd=ENVWALK_HELD)
 
 # A -type d term in a find hands grep the folders it prints, and grep -r reads every file below each one. The rows
-# below print one folder, or start below the top, so the env file at the top is not handed to grep. Each ALLOW row is
-# refused today, so it is red on f534ea8bb. Each control names a folder that holds an env file, and stays refused.
+# below print one folder, or start below the top, so the env file at the top is not handed to grep. Each ALLOW row
+# must pass, so a guard that refuses it fails. Each control names a folder that holds an env file, and stays refused.
 _TYPE_D_NAME_SRC = "find . -type d -name src -exec grep -r K {} +"
 _TYPE_D_NAME_DOTENV = r"find . -type d -name '.env*' -exec grep -r K {} +"
 _TYPE_D_NAME_BIG = "find . -type d -name big -exec grep -r K {} +"
@@ -13143,8 +13143,8 @@ if LINKS_MADE:
 
 # -type d narrowing holes. Each DENY form below lets grep reach an env file that its find does not name: a pruned
 # folder that the implicit -print still prints, the parent that -printf names for a folder, a link that -type d does
-# not match, or an empty find, which hands xargs no folder, so grep -r reads the cwd. Each DENY is red on f9d35504a,
-# where the guard allows it. Each ALLOW control is the same form over the same tree with no env file.
+# not match, or an empty find, which hands xargs no folder, so grep -r reads the cwd. Each DENY must be refused,
+# so a guard that allows it fails. Each ALLOW control is the same form over the same tree with no env file.
 def _write_tree(base, folders, env_dir=None):
     write(os.path.join(base, "README.md"), "base\n")
     for folder in folders:
