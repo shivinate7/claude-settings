@@ -4750,7 +4750,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # sessions and writes records. Its own write goes only to a record home, its own scratchpad, or a path in no
 # repository. A record home is a layout kind of COORDINATOR_KINDS, at the path lint/layout.py gives for THAT
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a
-# checkout that stands on the record branch (RECORD_BRANCH, with RECORD_DATA in it). The record-branch folders are
+# checkout that stands on the record branch (record_branch_of, with RECORD_DATA in it). The record-branch folders are
 # RECORD_FOLDERS plus the waiting page's copy, which the coordinator writes when no triage runs (decision
 # session-tiers, "Where triage runs"; decision waiting-data-in-repo): the `waiting-data` kind at the path
 # lint/layout.py gives, and layout.ARTIFACT_EXPORT, the folder of each other artifact's export. In a checkout of
@@ -4768,8 +4768,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # of the same call reaches (`-a`: the modified tracked files too).
 # Cost (rule outcomes-mechanize-rules): the cheap filters run first (cloud, no agent, a write or shell tool). A call that
 # names a repository path then reads lint/layout.json, the repo's extras file and git config (lint/layout.py, file
-# reads), the settings clone pointer (~/.claude/CLAUDE.md) and, for a checkout that has roadmap/data, one
-# `git symbolic-ref`. A `git commit` adds one `git diff --cached` (plus `git diff` for `-a`) and one
+# reads) and, for a checkout that has roadmap/data, one `git symbolic-ref`. A `git commit` adds one `git diff --cached` (plus `git diff` for `-a`) and one
 # `git rev-parse`; each `git add` before it adds one `git rev-parse` and one `git ls-files`. Only a call that
 # would be refused reads the transcript, once, so a write to a record home reads none. Never a role file; no new
 # process, file or timer. A git read that fails judges nothing. Not read: symlinks inside a
@@ -4784,10 +4783,9 @@ COORDINATOR_SCOPE_REASON = (
     "Remedy: brief a lane session to make this change, with the files and the check that proves it. "
     "Write records and your scratchpad yourself."
 )
-# The record branch of skill project-ops (SKILL.md, "The record branch"): an orphan branch, `roadmap` by default,
-# laid out by its scaffold.py. skills/roadmap/build.py (record_source, DATA) tells the checkout apart the same
-# way. Not imported from there: that module is a builder script, and the guard must not load it per call.
-RECORD_BRANCH = "roadmap"
+# The record branch of skill project-ops (SKILL.md, "The record branch"): an orphan branch, `roadmap` by default
+# (record_branch_of), laid out by its scaffold.py. skills/roadmap/build.py (record_source, DATA) tells the checkout
+# apart the same way. Not imported from there: that module is a builder script, and the guard must not load it per call.
 RECORD_DATA = "roadmap/data"
 RECORD_FOLDERS = ("roadmap", "briefs", "handoffs")
 RECORD_PAGE_KIND = "waiting-data"   # the layout kind of the waiting page's copy on the record branch
@@ -4823,8 +4821,8 @@ def coordinator_paths(root: str):
     if root in _COORDINATOR_PATHS:
         return _COORDINATOR_PATHS[root]
     found = []
-    home = coordinator_layout()
     try:
+        home = _layout_module()   # the one home of the layout import
         for kind in COORDINATOR_KINDS:
             try:
                 spelled = home.candidates(root, kind)
@@ -4872,7 +4870,7 @@ def coordinator_record_checkout(root: str) -> bool:
         stands = False
         if os.path.isdir(os.path.join(root, *RECORD_DATA.split("/"))):
             done = guard_core._git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
-            stands = done is not None and done.returncode == 0 and done.stdout.strip() == RECORD_BRANCH
+            stands = done is not None and done.returncode == 0 and done.stdout.strip() == record_branch_of(root)
         _RECORD_CHECKOUTS[root] = stands
     return _RECORD_CHECKOUTS[root]
 
