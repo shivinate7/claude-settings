@@ -8,7 +8,7 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 
 - Owner, 19:23 CST, typed in the pr-acts-grant lane session: `yes coordinators can merge across repos that is okay it doens't need to juts be in its repo`.
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.` Per the 19:23 ruling, "REVIEW" there means reviewer agents.
-- Each build has one holder. In a build with a coordinator, the coordinator holds the grant and a batch runner uses it.
+- Each build has one holder. In a build with a coordinator, the coordinator holds the grant. Only the batch runner runs the merge, under it (waiting-page item 111, pick a, 2026-11-01 11:53 CST). The coordinator never merges (owner, 2026-11-01 21:34 CST).
 - A session with no coordinator (solo or one lane) holds the 2026-10-10 grant in claude-settings only. The 19:23 ruling does not widen it.
 - In a cloud session, `merge.py` refuses `--confirm` unless the session recorded the batch-runner role.
 - A solo session merges with no batch runner (owner, 2026-11-02 14:02 CST). The merge tool still refuses its cloud confirm, because the role is missing. It merges only under that repo's own merge grant or the owner's named act, and it widens no grant (decision `session-tiers`, Solo session).
@@ -38,7 +38,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - "Coordinator just keep it known u will have perpetual standing merge authority that i will withdraw when i decide so no need to ask about merging"
 - "on the other repos too for now"
 
-- A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review (record `pr-review-record`) where one is required. The coordinator never merges (owner ruling, 2026-11-01 21:34 CST). A batch runner never asks the owner to merge. A lane session that a coordinator started never merges.
+- A batch runner merges by pull request with the merge tool of each repo, on green checks and a done review (record `pr-review-record`) where one is required. The coordinator never merges (owner ruling, 2026-11-01 21:34 CST). In a cloud coordinator, guard `coordinator-scope` refuses the coordinator's own `gh pr merge` and `merge --confirm` (`session-tiers`, Spawns and merges). The two GitHub MCP merge tools are in the guard matcher, so the same refusal covers them. A batch runner never asks the owner to merge. A lane session that a coordinator started never merges.
 - The batch runner still builds the batches. It runs every merge under the coordinator's grant. It holds no grant of its own.
 - Auto mode allows that merge: `settings.json` `autoMode.allow`, entry "Batch Runner Merge" (owner, 2026-11-07 13:27 CST; decision `auto-mode-owner-acts`).
 - A batch runner's merge names the head its CI ran on, with `--head <sha>`. The coordinator's merge go carries that head (coordinator, 2026-11-08 12:55 CST; same ruling as decision `auto-mode-owner-acts`).

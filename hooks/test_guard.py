@@ -144,6 +144,7 @@ FAMILIES = {
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
+    "coordinator-scope": "rule coordinator-scope: a cloud coordinator writes only records, its own scratchpad and paths in no repo",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
@@ -12690,6 +12691,15 @@ sh("merge-checks: the merge tool is judged by its own wait, not here",
    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: reading a pending pull request is untouched", "gh pr view 12 --json state",
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# The shared merge reader also reads a repo flag before `pr`, so merge-checks judges these spellings as it judges `gh pr merge`.
+sh("merge-checks: gh -R names the repo, and a pending head denies", "gh -R y/x pr merge 12 --squash", "deny", "merge-checks",
+   carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: gh --repo names the repo, and a pending head denies", "gh --repo y/x pr merge 12 --squash", "deny",
+   "merge-checks", carries="pending", cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# Pin (rule coordinator-scope adds the enable tool to the coordinator refusal only): merge-checks does not newly fire on it.
+add("merge-checks: the enable tool of the host is not judged by merge-checks, so a pending head still allows", "allow",
+    silent=True, tool="mcp__github__enable_pr_auto_merge", cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: quoted text that names a merge is text", 'echo "gh pr merge 12 --squash"',
    "allow", silent=True, cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: a heredoc body that names a merge is data",
@@ -12717,12 +12727,15 @@ STAMPDIR = os.path.join(ROOT, "stamp_dir")           # stamp.json is a folder: i
 STAMPLIST = os.path.join(ROOT, "stamp_list")         # stamp.json is JSON, not an object, and holds "merge"
 STAMPLINK = os.path.join(ROOT, "stamp_link", "into")  # a symlink from outside into STAMPREPO/hooks
 STAMPIGNORE = os.path.join(ROOT, "stamp_ignore")     # stamp.json whose merge block ignores the `sync` check
+STAMPORIGIN = os.path.join(ROOT, "stamp_origin")     # STAMPREPO's stamp, in a checkout whose origin is the GitHub repo y/x
 
 
 def _build_stamp_repos():
     stamp = {"defaultBranch": "main", "kinds": [], "merge": {
         "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True}}
     make_repo(STAMPREPO, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+    make_repo(STAMPORIGIN, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
+    run_vcs(STAMPORIGIN, "remote", "add", "origin", "https://github.com/y/x.git")
     ignoring = {"defaultBranch": "main", "kinds": [], "merge": {
         "method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True,
         "ignoreChecks": [{"name": "sync", "reason": "the sync job is advisory"}]}}
@@ -12737,7 +12750,7 @@ def _build_stamp_repos():
         os.symlink(os.path.join(STAMPREPO, "hooks"), STAMPLINK, target_is_directory=True)
 
 
-lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE],
+lazy_fixture([STAMPREPO, STAMPNONE, STAMPNOBLOCK, STAMPBAD, STAMPDIR, STAMPLIST, STAMPLINK, STAMPIGNORE, STAMPORIGIN],
              _build_stamp_repos)
 add("merge-batch: the merge tool of the host is allowed past an ignored running workflow on another ready pr", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
@@ -12800,6 +12813,23 @@ sh("bare-merge: a heredoc body that names a merge is data",
    "cat > notes.txt <<'EOF'\ngh pr merge 12 --squash\nEOF", "allow", silent=True, cwd=STAMPREPO)
 sh("bare-merge: a comment that names a merge is text", "echo done # gh pr merge 3", "allow",
    silent=True, cwd=STAMPREPO)
+# The host's merge (the GitHub MCP merge tool) and its auto-merge arming tool are judged against the repo they NAME. A call from
+# the checkout of that repo, whose stamp has a merge block, asks as a bare `gh pr merge` does. A call that names another repo,
+# or runs from a checkout with no origin, allows.
+MCP_MERGE_NAMED = {"tool": "mcp__github__merge_pull_request", "owner": "y", "repo": "x", "pullNumber": 12}
+MCP_ENABLE_NAMED = dict(MCP_MERGE_NAMED, tool="mcp__github__enable_pr_auto_merge")
+add("bare-merge: an MCP merge of y/x from its own checkout asks", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPORIGIN,
+    lacks=("stamp_origin",), env_path=GREEN_ON, config=MERGECFG, **MCP_MERGE_NAMED)
+add("bare-merge: an MCP enable of auto-merge for y/x from its own checkout asks", "ask", BARE_MERGE, carries=BARE_SAYS,
+    cwd=STAMPORIGIN, lacks=("stamp_origin",), env_path=GREEN_ON, config=MERGECFG, **MCP_ENABLE_NAMED)
+add("bare-merge: an MCP merge of another repo from a checkout of y/x allows", "allow", silent=True, cwd=STAMPORIGIN,
+    env_path=GREEN_ON, config=MERGECFG, **dict(MCP_MERGE_NAMED, owner="z", repo="w"))
+add("bare-merge: an MCP enable of auto-merge for another repo from a checkout of y/x allows", "allow", silent=True,
+    cwd=STAMPORIGIN, env_path=GREEN_ON, config=MERGECFG, **dict(MCP_ENABLE_NAMED, owner="z", repo="w"))
+add("bare-merge: an MCP merge of y/x from a merge-tool checkout with no origin allows", "allow", silent=True, cwd=STAMPREPO,
+    env_path=GREEN_ON, config=MERGECFG, **MCP_MERGE_NAMED)
+add("bare-merge: an MCP merge of y/x with a pending head from its own checkout still denies", "deny", "merge-checks",
+    carries="pending", cwd=STAMPORIGIN, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG, **MCP_MERGE_NAMED)
 
 
 # =========================================================================== 5e. the merge role record
@@ -12990,6 +13020,9 @@ ROLE_LINES = {
     "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
+    # The coordinator-scope tier fallback (no role file): a foreign coordinator record, and a stale untagged read then a coordinator.
+    "other-coordinator": role_call("g1", COORD_TAGS, session=ROLE_OTHER),
+    "untagged-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", COORD_TAGS),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
@@ -15836,6 +15869,40 @@ sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_ST
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
    "frozen-path", cwd=NOGIT)
+# The `sed -i` script is code, not a path. From inside a frozen folder every relative word resolves to a frozen path, so a
+# script judged as a path would refuse a write to a file outside the config folder. The deny beside it holds the same cwd.
+sh("frozen: sed -i on a config hook, from a frozen folder", 'sed -i "s/a/b/" ' + CFG_HOOK, "deny", "frozen-path",
+   cwd=os.path.join(CFG, "hooks"))
+sh("frozen: sed -i on a file outside the config folder, from a frozen folder, is allowed",
+   'sed -i "s/a/b/" ' + slash(os.path.join(NOGIT, "f.txt")), "allow", cwd=os.path.join(CFG, "hooks"))
+# The FILE operands of an in-place sed are what it writes, however the options are spelled and whatever the
+# script holds. A text match on `-i` then the path misses a script with a `|`, a cluster that ends in `i` and the
+# long form. A script with a `w` command is judged as text, so the file it names counts.
+sh("frozen: sed -i with a pipe-delimited script on a config hook", "sed -i 's|a|b|' " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen: sed -Ei on a config hook", "sed -Ei 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -ni on a config hook", "sed -ni 'p' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed --in-place with a backup suffix on a config hook",
+   "sed --in-place=.b 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i whose w command writes a config hook, the file operand a scratch file",
+   "sed -i 's/a/b/w " + CFG_HOOK + "' /tmp/x", "deny", "frozen-path", cwd=NOGIT)
+# A `w` command is the file a script writes, however the script is spelled: `-e` glued to its script, `--expression=`,
+# or an `s` with a comma delimiter, whose flag `w` follows the last comma. The operand is a scratch file, so only the
+# script's `w` names the frozen path.
+sh("frozen: sed -i -e with a glued w command that writes the config settings file",
+   "sed -i -e'w " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i --expression= with a w command that writes the config settings file",
+   "sed -i --expression='w " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i with a comma-delimited s whose w flag writes the config settings file",
+   "sed -i 's,a,b,w " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -n on a config hook, with no -i, is a read",
+   "sed -n 'p' " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen: sed -i on a scratch file is allowed", "sed -i 's/a/b/' /tmp/x", "allow", cwd=NOGIT)
+# A `w` or `e` letter in the text of a script is no command. These stay allowed: the script is text, not a write.
+sh("frozen: sed -i with w and e in the text of its script, on docs/todo.md, is allowed",
+   "sed -i 's/hello/world/' docs/todo.md", "allow", cwd=NOGIT)
+sh("frozen: sed -i -e with w and e in the text of its script, on docs/todo.md, is allowed",
+   "sed -i -e 's/we/us/' docs/todo.md", "allow", cwd=NOGIT)
 # A real newline inside a quoted argument does not split the command: the sed -i and the frozen path it names
 # stay one write.
 sh("frozen: sed -i with a newline in its quoted script, onto the frozen settings",
@@ -18564,10 +18631,11 @@ DIFFROOT = os.path.join(ROOT, "diffrepos")
 # `MUTATE_ONLY` selects one or two cases. So a repo is built LAZILY, the first time a case runs in
 # it (`materialize`, called from `decide`). MEASURED on Windows CI: building all of them at import
 # cost 1 min 52 s per run of this module.
-def diff_repo(name, change, commit=False, cut_from=None, files=None):
+def diff_repo(name, change, commit=False, cut_from=None, files=None, stage=False):
     """A real linked worktree, as a builder runs in: a main checkout with a base commit, and a
     worktree on a new branch `work` cut from `cut_from` (default HEAD). `change` edits the
-    worktree; `commit` then commits there. Returns the worktree's path. Built on first use."""
+    worktree; `stage` then stages every change, and `commit` commits it. Returns the worktree's
+    path. Built on first use."""
     main = os.path.join(DIFFROOT, name + "-main")
     where = os.path.join(DIFFROOT, name)
 
@@ -18578,8 +18646,9 @@ def diff_repo(name, change, commit=False, cut_from=None, files=None):
         if made.returncode != 0:
             sys.exit("fixture setup failed: worktree in %r: %s" % (where, made.stderr.strip()))
         change(where)
-        if commit:
+        if stage or commit:
             run_vcs(where, "add", "-A")
+        if commit:
             done = run_vcs(where, *IDENT, "commit", "-q", "-m", "work")
             if done.returncode != 0:
                 sys.exit("fixture setup failed: commit in %r: %s" % (where, done.stderr.strip()))
@@ -24574,7 +24643,7 @@ def decide(case):
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
     for name, value in (case.get("env") or {}).items():   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
-        if value is None:   # None unsets the variable, as a case that tests the missing default needs
+        if value is None:   # None drops a variable the runner's own environment holds, as a case that tests the missing default needs
             env.pop(name, None)
         else:
             env[name] = value
@@ -24583,7 +24652,7 @@ def decide(case):
         env["PATH"] = NOPS
     if case["env_path"]:
         env["PATH"] = case["env_path"]
-    guard_file = case.get("guard") or GUARD
+    guard_file = case.get("guard") or GUARD   # "guard": a copy under test (a mode constant changed)
     command = [sys.executable, guard_file]
     if case.get("tool") in dict(LB_TOOLS).values():
         # A start call makes the guard read the machine's load. A case about another rule must
@@ -24592,6 +24661,11 @@ def decide(case):
         # the case names one (`load`). Only the load-brake family sets a busy or full reading.
         command = [sys.executable, "-c", LB_PROBE, guard_file, os.devnull,
                    json.dumps({"mode": "judge", "reading": case.get("load") or LB_NORMAL})]
+    if case.get("probe_side"):
+        # A case that reads what the guard did, not only what it decided: the probe runs the guard in its own
+        # process and writes its counts to `probe_side` (a spec of `probe_spec`, see LB_PROBE).
+        command = [sys.executable, "-c", LB_PROBE, case.get("guard") or GUARD, case["probe_side"],
+                   json.dumps(case["probe_spec"])]
     started = time.monotonic()
     limit = case.get("max_seconds")
     try:
@@ -32534,17 +32608,18 @@ def ov_type(config, session, prompt, seconds=0):
 
 
 def ov_call(tool, tool_input, cwd, config, session, seconds, agent_id=None, agent_type=None,
-            temp=None, env=None, load=None, env_path=None):
+            temp=None, env=None, load=None, env_path=None, guard=None):
     """One guard call at OV_T0 + seconds. Returns (decision, reason). `temp` is the folder the guard
     reads as the system temp: a git write under it is a throwaway, and silent-write skips it. `env`
     adds variables to this one guard run. `load` is the machine reading a start call meets
-    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's)."""
+    (LB_NORMAL when None). `env_path` is the PATH of this one guard run (None keeps the runner's).
+    `guard` is the path of a guard copy to run instead of GUARD."""
     fixed = {"LOCAL_TIME_NOW": ov_clock(seconds)}
     fixed.update(env or {})
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": env_path,
         "config": config, "agent_id": agent_id, "agent_type": agent_type, "temp": temp,
-        "env": fixed, "tool_input": tool_input, "load": load,
+        "env": fixed, "tool_input": tool_input, "load": load, "guard": guard,
     })
 
 
@@ -32613,7 +32688,8 @@ OV_ACTS = (
 
 def ov_act_check(act, timed):
     """A one-act override lets the act through once, then it is refused again. A timed override lets it through
-    every time until the override ends, and the call at the end instant is refused."""
+    every time until the override ends, and the call at the end instant is refused. A `command` that is
+    callable is a call of its own: command(config, session, seconds) returns (decision, reason)."""
     key, _, command, cwd, refused, rule, sessions_from = act
     kind = "timed" if timed else "once"
 
@@ -32625,6 +32701,8 @@ def ov_act_check(act, timed):
                             os.path.join(config, "sessions"), dirs_exist_ok=True)
 
         def call(seconds):
+            if callable(command):
+                return lambda: command(config, session, seconds)
             return lambda: ov_call("Bash", {"command": command}, cwd, config, session, seconds)
 
         ok, why = ov_story([("with no override", call(0), refused, rule)])
@@ -33789,6 +33867,1440 @@ for _label, _check in (
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
+# =========================================================================== coordinator scope
+FAMILY = "coordinator-scope"
+# Rule coordinator-scope (records session-tiers and roles-orchestrator-never-builds). A cloud coordinator
+# briefs lanes and writes records: it may write a repo path only inside a kind of COORDINATOR_KINDS, plus its
+# own scratchpad and any path in no repo, and it may commit only such paths. The guard acts only when
+# the call has no agent_id, CLAUDE_CODE_REMOTE is "true", and this session's merge role is `coordinator`.
+# read_merge_role (hooks/shared_names.py, the one reader) reads the role from <config dir>/state/merge-role.json
+# and matches the file's session to the environment's CLAUDE_CODE_REMOTE_SESSION_ID (cse_<id>), never to the
+# payload's session_id. So every case gives the payload an id of another form than the env id.
+#
+# Failure classes: false allow (a repo path outside the kinds slips through a write tool, a shell write or a
+# commit) and false deny (a record, the scratchpad, a path in no repo, a lane agent, another tier, a laptop
+# session or a typed override is blocked). Each allow case repeats a deny case's call and changes one factor.
+CS_RULE = "coordinator-scope"
+CS_ENV_SID = "cse_013NEJL2pASwRjgJDnsvnpNe"          # the id a live coordinator's env and role file both hold
+CS_PAYLOAD_SID = "session_013NEJL2pASwRjgJDnsvnpNe"  # the payload's session_id: never the env id
+CS_OTHER_SID = "cse_01OtherCoordinatorSession"
+CS_REMOTE = {"CLAUDE_CODE_REMOTE": "true", "CLAUDE_CODE_REMOTE_SESSION_ID": CS_ENV_SID}
+CS_KINDS = ("decisions", "debts", "debt-notes", "plans", "specs", "todo", "records-index", "design", "scorecard")
+
+
+def cs_put_role(folder, role, session=CS_ENV_SID):
+    """The role file as `merge --role` writes it into `folder`'s state folder."""
+    write(os.path.join(folder, "state", "merge-role.json"), json.dumps({"session": session, "role": role}))
+
+
+def cs_config(name, role=None, session=CS_ENV_SID):
+    """A config folder of its own whose role file names `role` for `session`; no file when role is None."""
+    folder = os.path.join(ROOT, "cscfg", name)
+    os.makedirs(os.path.join(folder, "state"), exist_ok=True)
+    if role is not None:
+        cs_put_role(folder, role, session)
+    return folder
+
+
+CS_CONFIG = {
+    "coordinator": cs_config("coordinator", "coordinator"),
+    "batch-runner": cs_config("batch-runner", "batch-runner"),
+    "lane": cs_config("lane", "lane"),
+    "other-session": cs_config("other-session", "coordinator", CS_OTHER_SID),
+    "payload-id": cs_config("payload-id", "coordinator", CS_PAYLOAD_SID),
+    "none": cs_config("none"),
+    # Role files that name the session id of ROLE_ENV, so the own record of the merge-role fixtures is this session's.
+    "lane-own": cs_config("lane-own", "lane", ROLE_ENV["CLAUDE_CODE_REMOTE_SESSION_ID"]),
+    "coordinator-own": cs_config("coordinator-own", "coordinator", ROLE_ENV["CLAUDE_CODE_REMOTE_SESSION_ID"]),
+}
+# The env of a case whose own record is one of the merge-role fixtures (role_path): the id the record names.
+TAG_ENV = dict(CS_REMOTE, CLAUDE_CODE_REMOTE_SESSION_ID=ROLE_ENV["CLAUDE_CODE_REMOTE_SESSION_ID"])
+
+
+def cs_layout():
+    with open(os.path.join(REPO, "lint", "layout.json"), encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def cs_kind_path(kind):
+    """A repo-relative path inside the layout kind (its file, or a file in its folder), or None for no such kind."""
+    found = cs_layout()["kinds"].get(kind)
+    if not found:
+        return None
+    return found["path"] if os.path.splitext(found["path"])[1] else found["path"] + "/x.md"
+
+
+def cs_label(path):
+    if not os.path.isabs(path):
+        return path
+    for base in (GITMAIN, DIFFROOT):   # DIFFROOT holds the repos the commit and record cases build
+        if path.startswith(base):
+            return os.path.relpath(path, base)
+    return "a path in no repo"
+
+
+def cs(name, expected, role="coordinator", env=None, session=CS_PAYLOAD_SID, **call):
+    """One case, judged for the session whose role file is CS_CONFIG[role]. `env` replaces CS_REMOTE; a None value drops
+    that variable from the guard's environment."""
+    call.setdefault("cwd", GITMAIN)
+    add("coordinator-scope: " + name, expected, rule=None if expected == "allow" else CS_RULE,
+        session=session, config=CS_CONFIG[role], **call)
+    CASES[-1]["env"] = dict(CS_REMOTE if env is None else env)
+
+
+def cs_write(name, expected, path, tool="Edit", **kw):
+    """`cs` for a write tool on `path`. A refusal must not name the file."""
+    field = "notebook_path" if tool == "NotebookEdit" else "file_path"
+    cs("%s, %s of %s" % (name, tool, cs_label(path)), expected, tool=tool, new_string="x", content="x",
+       new_source="x", lacks=(os.path.basename(path),) if expected != "allow" else (), **{field: path}, **kw)
+
+
+def cs_shell(name, expected, command, target="", **kw):
+    """`cs` for a shell command. A refusal must not name `target`."""
+    cs("%s, shell: %s" % (name, command.splitlines()[0]), expected, tool="Bash", command=command,
+       lacks=(target,) if target and expected != "allow" else (), **kw)
+
+
+CS_CODE = os.path.join(GITMAIN, "src", "app.py")
+CS_NOTEBOOK = os.path.join(GITMAIN, "src", "a.ipynb")
+CS_CLAUDE_MD = os.path.join(GITMAIN, "CLAUDE.md")
+CS_OWN_SCRATCH = os.path.join(GITMAIN, CS_PAYLOAD_SID, "scratchpad", "notes", "out.txt")
+CS_OTHER_SCRATCH = os.path.join(GITMAIN, CS_OTHER_SID, "scratchpad", "notes", "out.txt")
+# A repo path over the log field's bound on every platform, so the field must shorten it. Its folders are plain names:
+# no record kind and no scratchpad segment, so the Edit is refused.
+CS_DEEP_CODE = os.path.join(GITMAIN, "deep-" + "x" * 45, "nested-" + "y" * 45, "src", "app.py")
+
+# ---- denied: a repo path outside the kinds, by each write tool
+for _tool in ("Edit", "Write"):
+    cs_write("product_code_denied", "deny", CS_CODE, _tool)
+    cs_write("claude_md_denied", "deny", CS_CLAUDE_MD, _tool)
+cs_write("product_code_denied", "deny", CS_NOTEBOOK, "NotebookEdit")
+cs_write("product_code_denied", "deny", "hooks/guard.py")
+cs_write("readme_denied", "deny", os.path.join(GITMAIN, "README.md"), "Write")
+for _path in ("AGENTS.md", "tokens/tokens.json"):  # layout kinds that are not in COORDINATOR_KINDS
+    cs_write("other_kind_denied", "deny", _path)
+for _path in ("docs/decisionsx/a.md", "docs/todo.md.py", "docs/decisions/../../src/app.py", "x/docs/decisions/a.md"):
+    cs_write("near_miss_denied", "deny", _path)
+cs_write("other_session_scratchpad_denied", "deny", CS_OTHER_SCRATCH, "Write")
+
+# ---- allowed: a kind's path (read from lint/layout.json, so no path is copied here), the scratchpad, a path in no repo
+for _kind in CS_KINDS:
+    _path = cs_kind_path(_kind)
+    if _path:
+        cs_write({"decisions": "decision_allowed", "todo": "todo_allowed"}.get(_kind, "kind_%s_allowed" % _kind), "allow", _path)
+cs_write("decision_allowed", "allow", cs_kind_path("decisions") or "docs/decisions/x.md", "Write")
+# A repo that has not rolled out keeps decisions where the layout's legacy map says; the records are the same.
+cs_write("legacy_decision_allowed", "allow", cs_layout()["legacy"]["docs/decisions"] + "/x.md")
+cs_write("scratchpad_allowed", "allow", CS_OWN_SCRATCH, "Write")
+cs_write("outside_repo_allowed", "allow", OUTSIDE_TEMP, "Write")
+
+# ---- a shell write is judged by _shell_write_hit: the same words, the same scanner
+for _command, _target in (("echo x > src/app.py", "app.py"), ("echo x >> src/app.py", "app.py"),
+                          ("cat > README.md <<'EOF'\nline one\nline two\nEOF", "README.md"),
+                          ("echo x | tee src/app.py", "app.py"),
+                          ('echo "see # and // here" > README.md', "README.md"),   # a comment opener inside a string hides nothing
+                          ('echo "it\'s done" > README.md', "README.md")):         # a lone quote in the text hides nothing
+    cs_shell("shell_redirect_denied", "deny", _command, _target)
+for _command in ("echo x >> docs/todo.md",
+                 "echo x > " + slash(OUTSIDE_TEMP),
+                 "echo x > " + slash(CS_OWN_SCRATCH),
+                 "git status", "cat CLAUDE.md", "grep -n x hooks/guard.py",
+                 'echo "a > README.md"', "echo hi # > README.md",
+                 'echo "first\nsecond > README.md"', "echo \"it's > README.md\"",
+                 "cat > docs/todo.md <<'EOF'\n# heading > README.md\nEOF"):
+    cs_shell("shell_write_allowed", "allow", _command)
+
+# ---- `sed -i`: the script is code, and the file operands that follow it are what it writes. A script that holds `|`, `;`,
+# `&`, `#`, `//`, a lone quote or a line break must not be judged as a path (a false deny) and must not hide the file
+# after it (a false allow: `writes_to` stops reading at `;`, `|` and `&`, so a judge that skips the script alone passes
+# `sed -i 's|a|b|' hooks/a.py`). Each script runs on a product file (denied) and on a record (allowed).
+CS_SED_SCRIPTS = (
+    ("slash", '"s/a/b/"'), ("pipe", "'s|a|b|'"), ("semicolon", '"s/a/b/;s/c/d/"'), ("ampersand", '"s/a/&&/"'),
+    ("line_break", '"s/a/b/\ns/c/d/"'),
+    ("hash_in_pattern", '"s/#/x/"'), ("hash_comment", '"s/a/b/ # note"'), ("double_slash", '"s,//,/,"'),
+    ("lone_quote", '"s/it\'s/it is/"'), ("multi_line_with_comment", '"s/a/b/\n# c\ns/d/e/"'))
+for _name, _script in CS_SED_SCRIPTS:
+    cs_shell("sed_script_%s_product_file_denied" % _name, "deny", "sed -i %s hooks/a.py" % _script, "a.py")
+    cs_shell("sed_script_%s_record_allowed" % _name, "allow", "sed -i %s docs/todo.md" % _script)
+for _command in ('sed -i -e "s/a/b/" -e "s/c/d/" hooks/a.py',               # each -e script is code
+                 'sed -i -e "s/a/b/" -e "s|c|d|" hooks/a.py',
+                 'sed -i "s/a/b/" docs/todo.md hooks/a.py',                  # one product path among the files
+                 "sed -i 's|a|b|' docs/todo.md hooks/a.py",
+                 "sed -i.bak 's/a/b/' hooks/a.py",
+                 'sed -i "/foo/d" hooks/a.py',                               # the script reads as an absolute word today
+                 'sed "s/a/b/" docs/todo.md > hooks/a.py',                   # no -i: the redirect writes
+                 "sed -i -e'w hooks/a.py' docs/todo.md"):                    # a w command in a glued -e script writes it
+    cs_shell("sed_product_file_denied", "deny", _command, "a.py")
+for _command in ('sed -i "s/a/b/" docs/decisions/a.md',
+                 'sed -i -e "s/a/b/" docs/decisions/a.md',
+                 'sed -i -e "s/a/b/" -e "s|c|d|" docs/todo.md',
+                 'sed -i.bak "s/a/b/" docs/todo.md',                         # the backup lands beside the record
+                 'sed -i "/foo/d" docs/todo.md',
+                 'sed "s/a/b/" hooks/a.py',                                  # no -i: a read
+                 'sed -n "s/a/b/p" hooks/a.py',
+                 "sed -i 's/hello/world/' docs/todo.md",                     # w and e in a script's text are no command
+                 "sed -i -e 's/we/us/' docs/todo.md"):
+    cs_shell("sed_record_or_read_allowed", "allow", _command)
+# A script beside a path in no repo. Like a `cp` source, a script stood in by an empty word would resolve to the cwd, so
+# each runs at a repo root, in a folder of the repo, and at the root of a worktree nested in the repo.
+for _where, _cwd in (("repo root", GITMAIN), ("repo folder", os.path.join(GITMAIN, "src")), ("nested worktree root", AGENTWT)):
+    for _script in ('"s/a/b/"', '"1,3d"', "'s|a|b|'", '"/foo/d"'):
+        cs_shell("sed_script_beside_a_path_in_no_repo_allowed (%s)" % _where, "allow",
+                 "sed -i %s %s" % (_script, slash(OUTSIDE_TEMP)), cwd=_cwd)
+
+# ---- a commit holds the staged paths: `git commit -m x` in a worktree whose index holds them
+CS_COMMIT_FILES = dict(BASE_FILES, **{"docs/decisions/a.md": "a\n", "docs/todo.md": "- a\n"})
+
+
+def _cs_repo(name, change, stage=True, files=None):
+    return diff_repo("cs-" + name, change, files=files or CS_COMMIT_FILES, stage=stage)
+
+
+def _cs_records(w):
+    write(os.path.join(w, "docs", "decisions", "a.md"), "b\n")
+    write(os.path.join(w, "docs", "todo.md"), "- b\n")
+
+
+CS_STAGED_CODE = _cs_repo("code", _put("src/app.py", "x = 2\n"))
+CS_STAGED_RECORDS = _cs_repo("records", _cs_records)
+CS_STAGED_MIXED = _cs_repo("mixed", lambda w: (_cs_records(w), write(os.path.join(w, "src", "app.py"), "x = 2\n")))
+CS_UNSTAGED_CODE = _cs_repo("unstaged", _put("src/app.py", "x = 2\n"), stage=False)
+cs("commit_staged_code_denied", "deny", command=COMMIT, cwd=CS_STAGED_CODE, lacks=("app.py",))
+cs("commit_staged_code_denied, with records staged beside it", "deny", command=COMMIT, cwd=CS_STAGED_MIXED, lacks=("app.py",))
+for _flags in ("-am x", "-a -m x"):
+    cs("commit_all_denied: -a stages the modified code, as `%s`" % _flags, "deny", command=VCS + " commit " + _flags,
+       cwd=CS_UNSTAGED_CODE, lacks=("app.py",))
+cs("commit_pathspec_denied: a path on the commit line", "deny", command=COMMIT + " src/app.py", cwd=CS_UNSTAGED_CODE, lacks=("app.py",))
+cs("commit_staged_record_allowed", "allow", command=COMMIT, cwd=CS_STAGED_RECORDS)
+cs("commit_unstaged_code_allowed: the commit holds nothing of it", "allow", command=COMMIT, cwd=CS_UNSTAGED_CODE)
+
+# ---- the three conditions: each case repeats a denied call with one factor changed
+cs_write("agent_write_passes", "allow", CS_CODE, agent_id="bld1", agent_type="builder")
+cs_shell("agent_write_passes", "allow", "echo x > src/app.py", agent_id="bld1", agent_type="builder")
+cs("agent_write_passes, a lane agent's commit", "allow", command=COMMIT, cwd=CS_STAGED_CODE, agent_id="bld1", agent_type="builder")
+for _role, _name in (("lane", "lane_role_file_passes"), ("batch-runner", "batch_runner_role_file_passes"),
+                     ("other-session", "other_session_role_file_passes"),
+                     ("payload-id", "payload_id_role_file_passes: the file names the payload's id, not the env's"),
+                     ("none", "no_role_file_passes")):
+    cs_write(_name, "allow", CS_CODE, role=_role)
+cs_write("local_passes", "allow", CS_CODE, env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None))
+cs_write("remote_false_passes", "allow", CS_CODE, env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE="false"))
+cs_write("no_env_session_id_passes", "allow", CS_CODE, env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE_SESSION_ID=None))
+
+# ---- scope the rule reads exactly: cp and mv, the record branch, legacy-repos, interpreters, chained adds, cost
+CS_OUT = slash(OUTSIDE_TEMP)   # a path in no repo
+CS_OUT_DIR = slash(os.path.dirname(OUTSIDE_TEMP))
+
+# 1. cp and mv judge the destination only. A cp source is read, so it counts for nothing, whatever it is. An mv source
+# is removed, so it is a write and counts. The scanner stands an empty word in for a read-only source, and that word
+# resolves to the cwd: a repo path whenever the cwd lies below a repo root. So each group runs at a repo root, in a
+# folder of the repo, and at the root of a worktree nested in the repo.
+for _where, _cwd, _root in (("repo root", GITMAIN, GITMAIN), ("repo folder", os.path.join(GITMAIN, "src"), GITMAIN),
+                            ("nested worktree root", AGENTWT, AGENTWT)):
+    def _from(path, _cwd=_cwd, _root=_root):
+        """A path of the checkout, spelled from the cwd."""
+        return slash(os.path.relpath(os.path.join(_root, path), _cwd))
+    for _command in ("cp %s %s" % (_from("docs/decisions/x.md"), CS_OUT),
+                     "cp %s %s" % (_from("src/app.py"), CS_OUT),
+                     "cp -t %s %s" % (CS_OUT_DIR, _from("docs/decisions/x.md")),
+                     "cp %s %s" % (CS_OUT, _from("docs/decisions/y.md")),
+                     "mv %s %s" % (_from("docs/decisions/x.md"), CS_OUT),
+                     "mv %s %s" % (CS_OUT, _from("docs/decisions/y.md"))):
+        cs_shell("cp_mv_source_not_judged (%s)" % _where, "allow", _command, cwd=_cwd)
+    for _command, _target in (("cp %s %s" % (CS_OUT, _from("hooks/a.py")), "a.py"),
+                              ("cp %s %s" % (_from("docs/decisions/x.md"), _from("hooks/a.py")), "a.py"),
+                              ("cp %s %s" % (_from("src/app.py"), _from("hooks/a.py")), "a.py"),
+                              ("cp -t %s %s" % (_from("hooks"), _from("docs/decisions/x.md")), ""),
+                              ("mv %s %s" % (CS_OUT, _from("hooks/a.py")), "a.py"),
+                              ("mv %s %s" % (_from("src/app.py"), CS_OUT), "app.py")):   # an mv removes its source
+        cs_shell("cp_mv_destination_denied (%s)" % _where, "deny", _command, _target, cwd=_cwd)
+
+# 2. The record branch. skills/project-ops (SKILL.md, "The record branch") keeps the coordinator's briefs, hand-off
+# notes and roadmap on an orphan branch `roadmap`, in a worktree beside the repo, laid out by scaffold.py. That
+# checkout is a record home: a write there passes, and so does the commit that files it. The same folder names in a
+# checkout of main stay product paths, and so does any other path of the record checkout. skills/roadmap/build.py
+# (record_source) tells the checkout apart by its branch, `roadmap` by default, and its roadmap/data folder; this
+# fixture has both.
+CS_RECORD_MAIN = os.path.join(DIFFROOT, "cs-record-main")
+CS_RECORD = os.path.join(DIFFROOT, "cs-record")
+CS_SCAFFOLD = os.path.join(REPO, "skills", "project-ops", "scripts", "scaffold.py")
+
+
+def _cs_build_record():
+    """A main checkout that has a briefs folder of its own, and beside it the record branch as the skill makes it. The
+    skeleton is committed; one brief and one hand-off note are staged on top of it."""
+    make_repo(CS_RECORD_MAIN, dict(BASE_FILES, **{"briefs/README.md": "product briefs\n"}))
+    made = run_vcs(CS_RECORD_MAIN, "worktree", "add", "-q", "--orphan", "-b", "roadmap", CS_RECORD)
+    if made.returncode != 0:
+        sys.exit("fixture setup failed: an orphan worktree needs git 2.42 or later: %s" % made.stderr.strip())
+    done = subprocess.run([sys.executable, CS_SCAFFOLD, "--dest", CS_RECORD, "--repo", "owner/name",
+                           "--branch", "roadmap"], capture_output=True, text=True)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: scaffold.py: %s" % done.stderr.strip())
+    run_vcs(CS_RECORD, "add", "-A")
+    committed = run_vcs(CS_RECORD, *IDENT, "commit", "-q", "-m", "skeleton")
+    if committed.returncode != 0:
+        sys.exit("fixture setup failed: the record branch commit: %s" % committed.stderr.strip())
+    write(os.path.join(CS_RECORD, "briefs", "s-slug.md"), "brief\n")
+    write(os.path.join(CS_RECORD, "handoffs", "c-2026-10-31.md"), "note\n")
+    run_vcs(CS_RECORD, "add", "-A")
+
+
+lazy_fixture([CS_RECORD, CS_RECORD_MAIN], _cs_build_record)
+for _rel in ("briefs/s-slug.md", "handoffs/c-2026-10-31.md", "roadmap/data/steps/s-slug.json"):
+    cs_write("record_branch_allowed", "allow", os.path.join(CS_RECORD, *_rel.split("/")), "Write", cwd=CS_RECORD)
+cs_write("record_branch_allowed", "allow", os.path.join(CS_RECORD, "briefs", "s-slug.md"), "Edit", cwd=CS_RECORD)
+cs_shell("record_branch_allowed", "allow", "echo x > briefs/s-slug.md", cwd=CS_RECORD)
+cs("record_branch_commit_allowed: the staged brief and hand-off note", "allow", command=COMMIT, cwd=CS_RECORD)
+cs_write("main_checkout_briefs_denied", "deny", os.path.join(CS_RECORD_MAIN, "briefs", "s-slug.md"), "Write", cwd=CS_RECORD_MAIN)
+cs_write("main_checkout_product_denied", "deny", os.path.join(CS_RECORD_MAIN, "src", "app.py"), "Write", cwd=CS_RECORD_MAIN)
+cs_write("record_checkout_other_path_denied", "deny", os.path.join(CS_RECORD, "src", "app.py"), "Write", cwd=CS_RECORD)
+
+# 3. A kind a repo keeps where the layout's "legacy-repos" says (lint/layout.py, unmoved(): by the repo's origin). The
+# file is the source, so no repo name or path is copied here. The same path in a checkout whose origin is another
+# repo stays a product path: one repo's place is no other repo's.
+CS_LEGACY_REPOS = cs_layout().get("legacy-repos", {})
+
+
+_CS_CHECKOUTS = {}
+
+
+def _cs_legacy_checkout(name, rolled_out=False):
+    """A checkout whose origin is the GitHub repo `name`, built when a case first names it. `rolled_out` adds the extras
+    file that marks the checkout as rolled out to the layout (lint/layout.py, rolled_out). One path per (name, mark): a
+    second call returns the first call's path without registering its fixture again."""
+    if (name, rolled_out) in _CS_CHECKOUTS:
+        return _CS_CHECKOUTS[(name, rolled_out)]
+    where = os.path.join(DIFFROOT, ("cs-rolled-" if rolled_out else "cs-legacy-") + name.replace("/", "-"))
+    files = dict(BASE_FILES, **{cs_layout()["extras"]: json.dumps({"kinds": {}, "rolled-out": True}) + "\n"}) if rolled_out \
+        else BASE_FILES
+
+    def build_legacy_checkout():
+        make_repo(where, files)
+        run_vcs(where, "remote", "add", "origin", "https://github.com/%s.git" % name)
+    lazy_fixture([where], build_legacy_checkout)
+    _CS_CHECKOUTS[(name, rolled_out)] = where
+    return where
+
+
+for _repo, _kept in sorted(CS_LEGACY_REPOS.items()):
+    _checkout = _cs_legacy_checkout(_repo)
+    for _kind, _path in sorted(_kept.items()):
+        if _kind in CS_KINDS:
+            _file = _path.strip("/") if os.path.splitext(_path)[1] else _path.strip("/") + "/x.md"
+            cs_write("legacy_repos_%s_allowed" % _kind, "allow", os.path.join(_checkout, *_file.split("/")), cwd=_checkout)
+            cs_write("legacy_repos_%s_other_repo_denied" % _kind, "deny", os.path.join(GITMAIN, *_file.split("/")))
+    cs_write("legacy_repos_product_denied", "deny", os.path.join(_checkout, "src", "app.py"), cwd=_checkout)
+
+# 4. An interpreter writes a file as a redirect does. A write of python, perl or dd to a product path is refused, and
+# a read is not. The scanner reads python, so a comment opener inside a string, a multi-line string and a lone quote
+# hide no write that follows them, and a write that only sits in a comment or in a printed string runs nothing.
+
+
+def _heredoc(interpreter, *lines):
+    return "%s - <<'EOF'\n%s\nEOF" % (interpreter, "\n".join(lines))
+
+
+for _name, _command in (
+        ("python_heredoc_write_text", _heredoc("python3", "from pathlib import Path", 'Path("hooks/a.py").write_text("x")')),
+        ("python_heredoc_open_w", _heredoc("python3", 'open("hooks/a.py", "w").write("x")')),
+        ("python_c_open_w", "python3 -c \"open('hooks/a.py','w')\""),
+        ("python_c_open_a_single_quoted", "python3 -c 'open(\"hooks/a.py\", \"a\")'"),
+        ("python_c_write_text", "python3 -c \"from pathlib import Path; Path('hooks/a.py').write_text('x')\""),
+        ("perl_in_place", "perl -pi -e 's/a/b/' hooks/a.py"),
+        ("dd_of", "dd if=/dev/zero of=hooks/a.py bs=1 count=1"),
+        ("dd_of_after_a_pipe", "echo x | dd of=hooks/a.py"),
+        ("python_string_with_hash", "python3 -c \"x = 'see # here'; open('hooks/a.py', 'w').write(x)\""),
+        ("python_string_with_slashes", _heredoc("python3", 'url = "http://example.com"; open("hooks/a.py", "w").write(url)')),
+        ("python_multi_line_string", _heredoc("python3", 'text = """first', "# not a comment", "it's here", '"""',
+                                              'open("hooks/a.py", "w").write(text)')),
+        ("python_lone_quote", _heredoc("python3", 'print("it\'s done")', 'open("hooks/a.py", "w").write("x")'))):
+    cs_shell(_name + "_denied", "deny", _command, "a.py")
+for _name, _command in (
+        ("python_c_json_load", "python3 -c \"import json;print(json.load(open('x.json')))\""),
+        ("python_heredoc_read", _heredoc("python3", "import json", 'print(json.load(open("docs/todo.md")))')),
+        ("python_open_read_modes", "python3 -c \"print(open('hooks/a.py', 'r').read(), open('hooks/a.py', 'rb').read())\""),
+        ("python_open_encoding", "python3 -c \"print(open('hooks/a.py', encoding='utf-8').read())\""),
+        ("python_read_text", "python3 -c \"from pathlib import Path; print(Path('hooks/a.py').read_text())\""),
+        ("python_runs_a_script", "python3 hooks/guard.py"),
+        ("python_module", "python3 -m json.tool docs/todo.md"),
+        ("perl_read_only", "perl -ne 'print if /x/' hooks/a.py"),
+        ("dd_reads_into_no_repo", "dd if=hooks/a.py of=" + CS_OUT),
+        ("python_write_to_a_record", "python3 -c \"open('docs/todo.md', 'w')\""),
+        ("python_heredoc_write_to_no_repo", _heredoc("python3", 'open("%s", "w").write("x")' % CS_OUT)),
+        ("python_write_only_in_a_comment", _heredoc("python3", '# open("hooks/a.py", "w").write("x")', "print(1)")),
+        ("python_write_only_in_a_string", _heredoc("python3", "print(\"open('hooks/a.py', 'w')\")"))):
+    cs_shell(_name + "_allowed", "allow", _command)
+
+# 5. A commit holds what the same call adds before it. The index is clean when the guard reads it, so the staged-file
+# read sees nothing: the add before the commit must be read as well. The repo holds code, CLAUDE.md and a record, all
+# changed and none staged.
+CS_CHAIN_FILES = dict(CS_COMMIT_FILES, **{"CLAUDE.md": "rules\n"})
+
+
+def _cs_chain_change(w):
+    _cs_records(w)
+    write(os.path.join(w, "src", "app.py"), "x = 2\n")
+    write(os.path.join(w, "CLAUDE.md"), "rules, changed\n")
+
+
+CS_CHAIN = _cs_repo("chain", _cs_chain_change, stage=False, files=CS_CHAIN_FILES)
+CS_CHAIN_RECORDS = _cs_repo("chain-records", _cs_records, stage=False, files=CS_CHAIN_FILES)
+for _command, _target in ((VCS + " add CLAUDE.md && " + COMMIT, "CLAUDE.md"),
+                          (VCS + " add src/app.py && " + COMMIT, "app.py"),
+                          (VCS + " add -A && " + COMMIT, "app.py"),
+                          (VCS + " add . ; " + COMMIT, "app.py")):
+    cs_shell("chained_add_commit_denied", "deny", _command, _target, cwd=CS_CHAIN)
+# The scanner reads shell text: a comment opener, a lone quote and a line break inside the message hide nothing, and a real
+# comment hides the commit that follows it.
+for _message in ('"see # and // here"', '"it\'s done"', '"first\nsecond # third\nfourth"'):
+    cs_shell("chained_add_commit_denied, message %s" % _message.splitlines()[0], "deny",
+             VCS + " add CLAUDE.md && " + VCS + " commit -m " + _message, "CLAUDE.md", cwd=CS_CHAIN)
+cs_shell("chained_add_record_commit_allowed, message names code as text", "allow",
+         VCS + " add docs/todo.md && " + VCS + ' commit -m "# CLAUDE.md // src/app.py"', cwd=CS_CHAIN)
+cs_shell("chained_add_commit_allowed, a comment hides the commit", "allow",
+         VCS + " add CLAUDE.md # && " + COMMIT, cwd=CS_CHAIN)
+cs_shell("chained_add_record_commit_allowed", "allow", VCS + " add docs/todo.md && " + COMMIT, cwd=CS_CHAIN)
+cs_shell("chained_add_all_of_records_commit_allowed", "allow", VCS + " add -A && " + COMMIT, cwd=CS_CHAIN_RECORDS)
+
+# ---- coordinator acts (rule coordinator-scope, waiting-page item 111 a). In a coordinator
+# build only the batch runner merges, and the coordinator runs no build or review agent. A spawn passes only when its type is
+# Plan, Explore or claude-code-guide. A Workflow is judged by each agent() call it holds. A merge (the host's tool, `gh pr
+# merge`, or the merge tool's --confirm) is refused before any read. create_session and start_session stay allowed.
+# The rows name no model: the test run's env sets the agent default, so the floor, cap and role-model rules stay quiet.
+# A refusal must not echo the brief, so every refused row carries a sentinel brief in `lacks`.
+CS_SPAWN_PROMPT = "Zebra quartz brief"
+CS_SPAWN_INPUT = {"subagent_type": "builder", "prompt": CS_SPAWN_PROMPT}
+CS_SPAWN = {"prompt": CS_SPAWN_PROMPT, "cwd": NOGIT, "lacks": (CS_SPAWN_PROMPT,)}
+CS_WORKFLOW = {"cwd": NOGIT, "lacks": (CS_SPAWN_PROMPT,)}
+CS_CREATE_SESSION = "mcp__claude-code-remote__create_session"
+CS_START_SESSION = "mcp__ccd_session__start_session"
+
+for _type in ("builder", "reviewer", "test-author", "record-writer", "designer", "design-reviewer"):
+    cs("coordinator_%s_spawn_denied" % _type.replace("-", "_"), "deny", tool="Agent", subagent_type=_type, **CS_SPAWN)
+cs("coordinator_untyped_spawn_denied", "deny", tool="Agent", **CS_SPAWN)
+cs("coordinator_empty_type_spawn_denied", "deny", tool="Agent", subagent_type="", **CS_SPAWN)
+cs("coordinator_task_tool_denied", "deny", tool="Task", subagent_type="builder", **CS_SPAWN)
+cs("coordinator_workflow_builder_denied", "deny", tool="Workflow",
+   script='await agent("%s", {agentType: "builder"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_unread_type_denied", "deny", tool="Workflow",
+   script='await agent("%s", {agentType: role})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_untyped_denied", "deny", tool="Workflow",
+   script='await agent("%s", {model: "sonnet"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+# The scanner reads a Workflow script as code: comment openers inside a string, a lone quote in a comment ahead of the
+# call, and a multi-line template literal each hide no builder call.
+cs("coordinator_workflow_comment_opener_denied", "deny", tool="Workflow",
+   script='await agent("%s /* // # x", {agentType: "builder"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_lone_quote_denied", "deny", tool="Workflow",
+   script='// don\'t stop\nawait agent("%s", {agentType: "builder"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_template_denied", "deny", tool="Workflow",
+   script='await agent(`%s\n${task}\nbuild it`, {agentType: "builder"})' % CS_SPAWN_PROMPT, **CS_WORKFLOW)
+cs("coordinator_workflow_explore_allowed", "allow", tool="Workflow",
+   script='await agent("Read the repo.", {agentType: "Explore", model: "haiku"})', cwd=NOGIT)
+cs("coordinator_workflow_commented_builder_allowed", "allow", tool="Workflow",
+   script='// await agent("%s", {agentType: "builder"})\nawait agent("Read the repo.", {agentType: "Explore", model: "haiku"})'
+   % CS_SPAWN_PROMPT, cwd=NOGIT)
+
+cs("coordinator_plan_spawn_allowed", "allow", tool="Agent", subagent_type="Plan", prompt="Design the plan.", cwd=NOGIT)
+cs("coordinator_explore_spawn_allowed", "allow", tool="Agent", subagent_type="Explore", prompt="Read the repo.", cwd=NOGIT)
+cs("coordinator_guide_spawn_allowed", "allow", tool="Agent", subagent_type="claude-code-guide",
+   prompt="How do hooks work?", cwd=NOGIT)
+# Exact type only, since the host's case rule is unknown: a lowercase `explore` or `plan` is refused.
+cs("coordinator_explore_casing_spawn_denied", "deny", tool="Agent", subagent_type="explore", **CS_SPAWN)
+cs("coordinator_plan_casing_spawn_denied", "deny", tool="Agent", subagent_type="plan", **CS_SPAWN)
+cs("coordinator_create_session_allowed", "allow", tool=CS_CREATE_SESSION, prompt="do the task", cwd=NOGIT)
+cs("coordinator_start_session_allowed", "allow", tool=CS_START_SESSION, prompt="do the task", cwd=NOGIT)
+cs("batch_runner_builder_spawn_allowed", "allow", role="batch-runner", tool="Agent", subagent_type="builder",
+   prompt="Build the change.", cwd=NOGIT)
+# Holds only with no cs-build tag in the own record either: a coordinator tag there makes the missing file a coordinator.
+cs("no_role_file_spawn_allowed", "allow", role="none", env=TAG_ENV, transcript=role_path("untagged"), tool="Agent",
+   subagent_type="builder", prompt="Build the change.", cwd=NOGIT)
+cs("local_spawn_allowed", "allow", env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None), tool="Agent", subagent_type="builder",
+   prompt="Build the change.", cwd=NOGIT)
+cs("other_session_role_spawn_allowed", "allow", role="other-session", tool="Agent", subagent_type="builder",
+   prompt="Build the change.", cwd=NOGIT)
+cs("agent_spawn_from_agent_allowed", "allow", tool="Agent", subagent_type="builder", prompt="Build the change.",
+   cwd=NOGIT, agent_id="bld1", agent_type="builder")
+
+# A merge is refused before any read, so each row runs with a fake gh that would answer green, and with no repo. The
+# merge tool's --confirm is named by its spellings: merge_call_of reads only `gh pr merge`.
+cs("coordinator_gh_pr_merge_denied", "deny", tool="Bash", command="gh pr merge 4321 --squash", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_gh_pr_merge_quoted_body_denied", "deny", tool="Bash",
+   command='gh pr merge 4321 --body "don\'t // x"', cwd=NOGIT, env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_merge_confirm_denied", "deny", tool="Bash", command="merge 4321 --confirm", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+for _name, _command in (("coordinator_merge_confirm_bin_denied", "python3 bin/merge 4321 --confirm"),
+                        ("coordinator_merge_confirm_script_denied", "python3 merge/merge.py 4321 --confirm"),
+                        ("coordinator_merge_confirm_shim_denied", "~/.claude/bin/merge 4321 --confirm")):
+    cs(_name, "deny", tool="Bash", command=_command, cwd=NOGIT, env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_echo_gh_pr_merge_allowed", "allow", tool="Bash", command='echo "gh pr merge 4321 --squash"', cwd=NOGIT,
+   env_path=GREEN_ON, silent=True)
+cs("batch_runner_merge_confirm_unchanged", "allow", role="batch-runner", tool="Bash",
+   command="python3 bin/merge 4321 --confirm", cwd=NOGIT, env_path=GREEN_ON, silent=True)
+# A session with no role file is no coordinator, so coordinator-scope never refuses its merge. In a cloud session the
+# gh-write-cloud rule refuses a gh pr merge before the bare-merge ask is reached. Outside a cloud session the ask holds.
+add("coordinator-scope: solo_gh_pr_merge_cloud_refused, a session with no role file is refused for a bare merge in a cloud session by gh-write-cloud, not by coordinator-scope",
+    "deny", GH_WRITE_RULE, tool="Bash", command="gh pr merge 4321 --squash", cwd=STAMPREPO, session=CS_PAYLOAD_SID,
+    config=CS_CONFIG["none"], lacks=("4321", CS_RULE), env_path=GREEN_ON)
+CASES[-1]["env"] = dict(CS_REMOTE)
+add("coordinator-scope: solo_gh_pr_merge_still_asks, a session with no role file asks for a bare merge in a repo with a merge block outside a cloud session",
+    "ask", BARE_MERGE, tool="Bash", command="gh pr merge 4321 --squash", cwd=STAMPREPO, session=CS_PAYLOAD_SID,
+    config=CS_CONFIG["none"], carries=BARE_SAYS, env_path=GREEN_ON)
+CASES[-1]["env"] = dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None)
+
+# Merge spellings a coordinator is refused, read by the shared reader (merge_call_of, merge_confirm_of): a repo flag before `pr`,
+# and a subshell. `--disable-auto` turns auto-merge off and merges nothing, so it passes. The host's enable tool is refused for a
+# coordinator; MERGE_TOOLS and the merge-checks verdicts stay as they are (see the merge-checks pins).
+CS_MCP_ENABLE_TOOL = "mcp__github__enable_pr_auto_merge"
+cs("coordinator_gh_repo_flag_pr_merge_denied", "deny", tool="Bash", command="gh -R o/r pr merge 4321", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_gh_repo_long_flag_pr_merge_denied", "deny", tool="Bash", command="gh --repo o/r pr merge 4321", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_merge_confirm_subshell_denied", "deny", tool="Bash", command="(merge 4321 --confirm)", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_merge_confirm_cd_subshell_denied", "deny", tool="Bash", command="cd x && (merge 4321 --confirm)", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+cs("coordinator_gh_pr_merge_subshell_denied", "deny", tool="Bash", command="(gh pr merge 4321 --squash)", cwd=NOGIT,
+   env_path=GREEN_ON, lacks=("4321",))
+# In a cloud session gh-write-cloud refuses every gh pr merge, `--disable-auto` included. coordinator-scope does not refuse it, so
+# the reason names no coordinator-scope. Outside a cloud session the same call passes, silently.
+add("coordinator-scope: coordinator_gh_pr_merge_disable_auto_cloud_refused, a coordinator's gh pr merge --disable-auto in a cloud session is refused by gh-write-cloud, not by coordinator-scope",
+    "deny", GH_WRITE_RULE, tool="Bash", command="gh pr merge 4321 --disable-auto", cwd=NOGIT, session=CS_PAYLOAD_SID,
+    config=CS_CONFIG["coordinator"], lacks=("4321", CS_RULE), env_path=GREEN_ON)
+CASES[-1]["env"] = dict(CS_REMOTE)
+cs("coordinator_gh_pr_merge_disable_auto_allowed", "allow", env=dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None), tool="Bash",
+   command="gh pr merge 4321 --disable-auto", cwd=NOGIT, env_path=GREEN_ON, silent=True)
+cs("coordinator_enable_pr_auto_merge_denied", "deny", tool=CS_MCP_ENABLE_TOOL, owner="acme", repo="widgets", pullNumber=4321,
+   cwd=NOGIT, env_path=GREEN_ON, lacks=("4321",))
+
+# ---- the GitHub MCP file-write tools (rule coordinator-scope, decision session-tiers). A coordinator's write through
+# create_or_update_file, push_files or delete_file is judged by each repo path the call names (`path`, or each `files[].path`),
+# read against the record homes of the repo the call runs in. A product path is refused and a record home passes. Each refused
+# row has an allowed row beside it that changes one factor: the path, the role, or one entry of a push.
+CS_MCP_PRODUCT = "src/app.py"                                            # a repo path no record home holds
+CS_MCP_RECORD = cs_kind_path("decisions")                                # a record home: a file in a kind's folder
+CS_MCP_TODO = cs_kind_path("todo")                                       # a record home: a kind's own file
+CS_MCP_CLIMB = os.path.dirname(CS_MCP_RECORD) + "/../../src/app.py"     # climbs out of the record folder into product code
+CS_MCP_REPO = {"owner": "acme", "repo": "widgets", "branch": "work", "message": "x"}
+
+
+def cs_mcp(name, expected, tool, path=None, files=None, role="coordinator", lacks=(), cwd=None,
+           named={"owner": "acme", "repo": "widgets"}):
+    """`cs` for one GitHub MCP write: `path`, or `files` (push_files' entries, given as their paths). A refusal must not name
+    the file it refuses, so a deny row passes that file's name in `lacks`. `cwd` is the folder the call runs in (GITMAIN when
+    None). `named` is the repo the call names, as its owner and repo keys; {} names none, so the call carries neither."""
+    call = dict(CS_MCP_REPO, tool=tool)
+    call.pop("owner")
+    call.pop("repo")
+    call.update(named)
+    if files is None:
+        call["path"] = path
+    else:
+        call["files"] = [{"path": entry, "content": "x"} for entry in files]
+    if cwd is not None:
+        call["cwd"] = cwd
+    cs(name, expected, role=role, lacks=lacks, **call)
+
+
+for _tool in ("mcp__github__create_or_update_file", "mcp__github__push_files", "mcp__github__delete_file"):
+    _short = _tool.replace("mcp__github__", "")
+    cs_mcp("coordinator_mcp_%s_product_denied" % _short, "deny", _tool, path=CS_MCP_PRODUCT, lacks=("app.py",))
+    cs_mcp("coordinator_mcp_%s_record_allowed" % _short, "allow", _tool, path=CS_MCP_RECORD)
+    cs_mcp("lane_mcp_%s_product_allowed" % _short, "allow", _tool, path=CS_MCP_PRODUCT, role="lane")
+    cs_mcp("coordinator_mcp_%s_climb_out_of_record_denied" % _short, "deny", _tool, path=CS_MCP_CLIMB, lacks=("app.py",))
+# push_files judges every entry: a product entry after two record entries is refused, and so is the same list with the
+# product entry swapped for a record. A `..` entry that climbs out of a record folder is refused beside record entries.
+cs_mcp("coordinator_push_files_product_entry_last_denied", "deny", "mcp__github__push_files",
+       files=[CS_MCP_RECORD, CS_MCP_TODO, CS_MCP_PRODUCT], lacks=("app.py",))
+cs_mcp("coordinator_push_files_records_only_allowed", "allow", "mcp__github__push_files", files=[CS_MCP_RECORD, CS_MCP_TODO, CS_MCP_TODO])
+cs_mcp("lane_push_files_product_entry_last_allowed", "allow", "mcp__github__push_files",
+       files=[CS_MCP_RECORD, CS_MCP_TODO, CS_MCP_PRODUCT], role="lane")
+cs_mcp("coordinator_push_files_climb_entry_denied", "deny", "mcp__github__push_files", files=[CS_MCP_RECORD, CS_MCP_CLIMB],
+       lacks=("app.py",))
+# The empty and full-size states: no entry names a path, so nothing is judged; 25 entries with the product one last.
+cs_mcp("coordinator_push_files_no_entry_allowed", "allow", "mcp__github__push_files", files=[])
+cs_mcp("coordinator_push_files_full_size_records_allowed", "allow", "mcp__github__push_files", files=[CS_MCP_RECORD] * 25)
+cs_mcp("coordinator_push_files_full_size_product_last_denied", "deny", "mcp__github__push_files",
+       files=[CS_MCP_RECORD] * 24 + [CS_MCP_PRODUCT], lacks=("app.py",))
+
+# ---- the repo an MCP write names (rule coordinator-scope, decision session-tiers). The record homes of a write are those of the
+# repo the call names (owner and repo): that repo's legacy-repos paths, the layout's legacy spellings and its layout path
+# (lint/layout.py, named_candidates). The checkout the call runs in decides only when its origin is that repo, so a write that
+# names another repo reads that checkout's extras file for nothing. Repo and path names come from the layout, never copied here.
+def cs_guard_names(constant):
+    """The tuple `constant` of the guard under test, read from its module the way lint/test_settings_matcher.py reads them."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("guard_under_names", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(getattr(module, constant))
+
+
+def cs_kept_file(path):
+    """The repo-relative file a legacy-repos path names: the path itself when it has an extension, else a file in that folder."""
+    return path.strip("/") if os.path.splitext(path)[1] else path.strip("/") + "/x.md"
+
+
+def cs_named_call(name, expected, tool, rel, cwd=None, named={"owner": "acme", "repo": "widgets"}, role="coordinator"):
+    """`cs_mcp` for one repo path of `tool`: the path itself, or the one entry of push_files. A deny row must not name the file."""
+    kw = {"files": [rel]} if tool == "mcp__github__push_files" else {"path": rel}
+    lacks = (os.path.basename(rel),) if expected != "allow" else ()
+    cs_mcp(name, expected, tool, lacks=lacks, cwd=cwd, named=named, role=role, **kw)
+
+
+CS_NAMED_OTHER = {"owner": "acme", "repo": "widgets"}   # a repo that no legacy-repos entry names
+CS_ROLLED = _cs_legacy_checkout("acme/gizmo", rolled_out=True)   # rolled out to the layout, its origin another repo
+CS_LEGACY_KEPT = [(repo, kind, cs_kept_file(path)) for repo, kept in sorted(CS_LEGACY_REPOS.items())
+                  for kind, path in sorted(kept.items()) if kind in CS_KINDS]
+CS_LEGACY_TODO_FILE = next(rel for _, kind, rel in CS_LEGACY_KEPT if kind == "todo" and os.path.splitext(rel)[1])  # a kept file
+CS_LEGACY_DECISIONS = cs_layout()["legacy"][cs_layout()["kinds"]["decisions"]["path"]]   # the legacy spelling of decisions
+CS_LEGACY_PLANS = cs_layout()["legacy"][cs_layout()["kinds"]["plans"]["path"]]           # the legacy spelling of plans
+CS_NAMED_WRITE = cs_guard_names("COORDINATOR_MCP_WRITE_TOOLS")
+for _tool in CS_NAMED_WRITE:
+    _short = _tool.replace("mcp__github__", "")
+    for _repo, _kind, _rel in CS_LEGACY_KEPT:   # RED: a rolled-out checkout writes that repo's kept path, naming the repo
+        _owner, _name = _repo.split("/")
+        cs_named_call("named_repo_rolled_checkout_%s_%s_%s_allowed" % (_short, _name, _kind), "allow", _tool, _rel, cwd=CS_ROLLED,
+                      named={"owner": _owner, "repo": _name})
+    for _repo, _kind, _rel in CS_LEGACY_KEPT:   # RED: that repo's own checkout writes the same path for another repo: denied
+        cs_named_call("named_repo_legacy_checkout_%s_%s_%s_other_repo_denied" % (_short, _repo.split("/")[1], _kind), "deny", _tool,
+                      _rel, cwd=_cs_legacy_checkout(_repo))
+    # A legacy spelling is a home only for a repo that the layout lists under legacy-repos (decision uniform-over-variants: a
+    # shared tool never grows a second accepted form to fit one repo). The named repo, acme/widgets, is not listed: a rolled-out
+    # checkout's write of the legacy decisions or plans spelling for it is refused.
+    cs_named_call("named_repo_rolled_checkout_%s_legacy_decisions_unlisted_repo_denied" % _short, "deny", _tool,
+                  CS_LEGACY_DECISIONS + "/x.md", cwd=CS_ROLLED)
+    cs_named_call("named_repo_rolled_checkout_%s_legacy_plans_unlisted_repo_denied" % _short, "deny", _tool,
+                  CS_LEGACY_PLANS + "/app.py", cwd=CS_ROLLED)
+    # Green: a listed repo keeps its legacy spelling, so the same write named as that repo is allowed.
+    for _repo in sorted(CS_LEGACY_REPOS):
+        _owner, _name = _repo.split("/")
+        cs_named_call("named_repo_rolled_checkout_%s_%s_legacy_decisions_listed_allowed" % (_short, _name), "allow", _tool,
+                      CS_LEGACY_DECISIONS + "/x.md", cwd=CS_ROLLED, named={"owner": _owner, "repo": _name})
+    # Green: the rolled-out checkout names its own repo, and writes a path only another repo keeps: denied, as before.
+    cs_named_call("named_repo_rolled_checkout_%s_own_repo_other_kept_path_denied" % _short, "deny", _tool, CS_LEGACY_TODO_FILE,
+                  cwd=CS_ROLLED, named={"owner": "acme", "repo": "gizmo"})
+    # Green: a mixed-case name finds the repo's kept paths, from a checkout whose origin is that repo and from no checkout.
+    for _repo, _kind, _rel in CS_LEGACY_KEPT:
+        _owner, _name = _repo.split("/")
+        _mixed = {"owner": _owner.capitalize(), "repo": _name.upper()}
+        cs_named_call("named_repo_mixed_case_checkout_%s_%s_%s_allowed" % (_short, _name, _kind), "allow", _tool, _rel,
+                      cwd=_cs_legacy_checkout("%s/%s" % (_mixed["owner"], _mixed["repo"])), named=_mixed)
+        cs_named_call("named_repo_mixed_case_no_checkout_%s_%s_%s_allowed" % (_short, _name, _kind), "allow", _tool, _rel,
+                      named=_mixed)
+    # Green: a call that names no repo is judged on the default union, the layout's paths and its legacy spellings.
+    cs_named_call("named_repo_no_owner_layout_record_%s_allowed" % _short, "allow", _tool, cs_kind_path("decisions"),
+                  cwd=CS_ROLLED, named={})
+    cs_named_call("named_repo_no_owner_kept_path_%s_denied" % _short, "deny", _tool, CS_LEGACY_TODO_FILE, cwd=CS_ROLLED, named={})
+
+# ---- the tier when the role file is missing (rule coordinator-scope). The tier falls back to the session's own cs-build tag,
+# read from the newest get_session record that names the session's id, as merge-role-proof reads it. A role file that is there
+# decides alone. The fixtures are the merge-role records (role_path), and TAG_ENV is the env they name.
+cs_write("no_role_file_tag_coordinator_write_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("coordinator"))
+cs("no_role_file_tag_coordinator_spawn_denied", "deny", role="none", env=TAG_ENV, transcript=role_path("coordinator"),
+   tool="Agent", subagent_type="builder", **CS_SPAWN)
+cs_write("no_role_file_tag_lane_passes", "allow", CS_CODE, role="none", env=TAG_ENV, transcript=role_path("lane"))
+cs_write("no_role_file_no_tag_passes", "allow", CS_CODE, role="none", env=TAG_ENV, transcript=role_path("untagged"))
+cs_write("no_role_file_other_session_tag_passes", "allow", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("other-coordinator"))
+cs_write("no_role_file_newest_own_coordinator_tag_denied", "deny", CS_CODE, role="none", env=TAG_ENV,
+         transcript=role_path("untagged-then-coordinator"))
+cs_write("role_file_wins_over_tag", "allow", CS_CODE, role="lane-own", env=TAG_ENV, transcript=role_path("coordinator"))
+cs_write("role_file_wins_over_tag_coordinator_file", "deny", CS_CODE, role="coordinator-own", env=TAG_ENV,
+         transcript=role_path("lane"))
+
+# ---- what needs more than one verdict runs as a check
+# Each refused input is a row: (what, tool, tool input, cwd, text its refusal must not name).
+CS_REFUSED = (
+    ("an Edit of product code", "Edit", {"file_path": CS_CODE, "new_string": "x"}, GITMAIN, "app.py"),
+    ("a Write of CLAUDE.md", "Write", {"file_path": CS_CLAUDE_MD, "content": "x"}, GITMAIN, "CLAUDE"),
+    ("a NotebookEdit", "NotebookEdit", {"notebook_path": CS_NOTEBOOK, "new_source": "x"}, GITMAIN, "a.ipynb"),
+    ("a shell redirect into README.md", "Bash", {"command": "echo x > README.md"}, GITMAIN, "README"),
+    ("a commit of staged product code", "Bash", {"command": COMMIT}, CS_STAGED_CODE, "app.py"),
+)
+
+
+def cs_refused(guard=None):
+    """(what, decision, reason) for each CS_REFUSED row, as the coordinator, through `guard` (a copy) or the real guard."""
+    return [(what, *ov_call(tool, dict(tool_input), cwd, CS_CONFIG["coordinator"], CS_PAYLOAD_SID, 0, env=CS_REMOTE, guard=guard))
+            for what, tool, tool_input, cwd, _target in CS_REFUSED]
+
+
+def cs_reason_check():
+    """A refusal names its rule, says to brief a lane session, ends with the standard override line, and names no target."""
+    offer = ov_home("offer")
+    line = offer(CS_RULE) if offer else "override"
+    problems = []
+    for (what, got, reason), row in zip(cs_refused(), CS_REFUSED):
+        if got != "deny":
+            problems.append("%s: got %s, want deny" % (what, got))
+            continue
+        for want in (CS_RULE, line):
+            if want not in reason:
+                problems.append("%s: the reason does not carry %r: %s" % (what, want, reason[-100:]))
+        if "brief a lane session" not in reason.lower():
+            problems.append("%s: the reason does not say to brief a lane session: %s" % (what, reason[:100]))
+        for named in (row[4], GITMAIN, ROOT, slash(ROOT)):
+            if named in reason:
+                problems.append("%s: the reason names the target %r" % (what, named))
+    return not problems, "; ".join(problems) or "five refusals, each with its rule, the lane remedy and the override line, none naming a target"
+
+
+def cs_ask_guard():
+    """A copy of the guard whose COORDINATOR_SCOPE_MODE is "ask". The layout it reads sits one folder above the copy, where
+    settings_roots looks. Raises StaleMutant when the guard has no such constant."""
+    folder = _guard_copy("coordinator-ask", None)
+    mutate_shared.apply_mutant(folder, 'COORDINATOR_SCOPE_MODE = "deny"', 'COORDINATOR_SCOPE_MODE = "ask"')
+    lint = os.path.join(os.path.dirname(folder), "lint")
+    os.makedirs(lint, exist_ok=True)
+    for name in ("layout.json", "layout.py"):
+        shutil.copy(os.path.join(REPO, "lint", name), lint)
+    return os.path.join(folder, "guard.py")
+
+
+def cs_ask_check():
+    """In ask mode each refusal is an ask that names the rule. A record path still passes, so the copy does read the layout."""
+    try:
+        guard = cs_ask_guard()
+    except (mutate_shared.StaleMutant, mutate_shared.AmbiguousMutant) as why:
+        return False, "no guard copy in ask mode: %s" % why
+    got, reason = ov_call("Edit", {"file_path": cs_kind_path("todo"), "new_string": "x"}, GITMAIN, CS_CONFIG["coordinator"],
+                          CS_PAYLOAD_SID, 0, env=CS_REMOTE, guard=guard)
+    if got != "allow" or reason:
+        return False, "the ask copy did not pass a record path (%s %s): it cannot read the layout" % (got, reason[:70])
+    problems = []
+    for what, got, reason in cs_refused(guard):
+        problem = ov_want(got, reason, "ask", CS_RULE)
+        if problem:
+            problems.append("%s: %s" % (what, problem))
+    return not problems, "; ".join(problems) or "each of five refusals asks, and a record path still passes"
+
+
+def _cs_literal(node):
+    """The literal a module-level constant holds, also under set(), frozenset(), tuple() or list()."""
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and len(node.args) == 1
+            and node.func.id in ("set", "frozenset", "tuple", "list")):
+        node = node.args[0]
+    return ast.literal_eval(node)
+
+
+def cs_constants_check():
+    """COORDINATOR_KINDS names exactly the nine kinds, each a kind of lint/layout.json, and COORDINATOR_SCOPE_MODE is "deny"."""
+    found = {}
+    for path in mutate_shared.module_files(os.path.dirname(GUARD)):
+        with open(path, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        for node in tree.body:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in ("COORDINATOR_KINDS", "COORDINATOR_SCOPE_MODE"):
+                    try:
+                        value = _cs_literal(node.value)
+                    except (ValueError, SyntaxError):
+                        value = "not a literal"
+                    found.setdefault(target.id, []).append(value)
+    problems = []
+    for name in ("COORDINATOR_KINDS", "COORDINATOR_SCOPE_MODE"):
+        if len(found.get(name, [])) != 1:
+            problems.append("%s is set %d times in the guard modules, want once" % (name, len(found.get(name, []))))
+    if not problems:
+        kinds, mode = found["COORDINATOR_KINDS"][0], found["COORDINATOR_SCOPE_MODE"][0]
+        if kinds == "not a literal" or set(kinds) != set(CS_KINDS):
+            problems.append("COORDINATOR_KINDS is %r, want %s" % (kinds, sorted(CS_KINDS)))
+        if mode != "deny":
+            problems.append("COORDINATOR_SCOPE_MODE is %r, want 'deny'" % (mode,))
+    missing = [kind for kind in CS_KINDS if kind not in cs_layout()["kinds"]]
+    if missing:
+        problems.append("lint/layout.json has no kind %s" % missing)
+    return not problems, "; ".join(problems) or "nine kinds, all in the layout, and the mode is deny"
+
+
+def cs_override_call(config, session, seconds, tool="Edit", tool_input=None, cwd=GITMAIN):
+    """The refused call (an Edit of product code by default), made by a coordinator whose role file sits in this story's
+    config folder."""
+    cs_put_role(config, "coordinator")
+    if tool_input is None:
+        tool_input = {"file_path": CS_CODE, "new_string": "x"}
+    return ov_call(tool, tool_input, cwd, config, session, seconds, env=CS_REMOTE)
+
+
+# 6. Cost (rule outcomes-mechanize-rules). The rule opens the role file, at most once, and nothing else on a call that is
+# not a coordinator's, and on a coordinator's call that names no repo path. It never opens lint/layout.json or the config
+# folder's CLAUDE.md there: those are read to judge a repo path, so they are not read to find that there is none. The
+# probe's `opens` seam counts the opens (LB_PROBE). The rule's own opens are the call's less those of the same call with
+# CLAUDE_CODE_REMOTE "false", where the rule leaves at its first condition and no other rule reads that variable; other rules'
+# own opens (the session record, say) cancel out. The layout and the config CLAUDE.md are also asserted unopened among
+# the call's whole opens, so a rule that read them before its conditions cannot hide in the difference. The control row
+# shows the spy sees a read, so a pass is no blind spy's.
+CS_OPENS_DIR = os.path.join(ROOT, "cs-opens")
+
+
+def cs_probe_report(config, tool, tool_input, cwd, env=None, agent_id=None, env_path=None, transcript=None):
+    """(decision, reason, the probe's report) of one guard call, made as `cs` makes one. The report holds `opens` (each
+    path the call opens), `open_modes` (each open as [path, mode]), `children` (each subprocess the call starts) and
+    `log_children` (per guard.log write, the subprocesses that write starts). The report is {} when the probe wrote none.
+    `env_path` is the PATH the guard run gets, so a fake `gh` can answer a merge check. `transcript` is the payload's
+    transcript_path, when the call names one."""
+    os.makedirs(CS_OPENS_DIR, exist_ok=True)
+    handle, side = tempfile.mkstemp(dir=CS_OPENS_DIR, suffix=".json")
+    os.close(handle)
+    got, reason = decide({"raw": None, "tool": tool, "cwd": cwd, "session": CS_PAYLOAD_SID, "env_path": env_path,
+                          "config": config, "agent_id": agent_id, "agent_type": "builder" if agent_id else None,
+                          "env": dict(CS_REMOTE if env is None else env), "tool_input": tool_input,
+                          "transcript": transcript, "probe_side": side,
+                          "probe_spec": {"mode": "judge", "opens": True, "log_children": True}})
+    try:
+        with open(side, encoding="utf-8") as done:
+            return got, reason, json.load(done)
+    except (OSError, ValueError):
+        return got, reason, {}
+
+
+def cs_opens_of(config, tool, tool_input, cwd, env=None, agent_id=None, transcript=None):
+    """(decision, reason, the absolute path of each open) of one guard call, made as `cs` makes one."""
+    got, reason, report = cs_probe_report(config, tool, tool_input, cwd, env, agent_id, transcript=transcript)
+    if "opens" not in report:
+        return "error", "the probe wrote no opens: %s" % reason[:90], []
+    return got, reason, report["opens"]
+
+
+def cs_rule_opens(config, tool, tool_input, cwd, env=None, agent_id=None, transcript=None):
+    """(decision, reason, every open, the opens only the rule makes) of one call. Each open of the call's control (the same
+    call with CLAUDE_CODE_REMOTE "false") pays for one open of the call, so a read that main also makes is not the rule's,
+    and a second read of the same path is."""
+    env = dict(CS_REMOTE if env is None else env)
+    got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env, agent_id, transcript)
+    _, _, off = cs_opens_of(config, tool, tool_input, cwd, dict(env, CLAUDE_CODE_REMOTE="false"), agent_id, transcript)
+    spare = list(off)
+    rule_only = []
+    for path in opened:
+        if path in spare:
+            spare.remove(path)
+        else:
+            rule_only.append(path)
+    return got, reason, opened, rule_only
+
+
+def cs_cost_check(config_role, tool, tool_input, cwd, env=None, agent_id=None):
+    """A check that the call is allowed, that the rule opened no layout and no config CLAUDE.md, and nothing but the role
+    file, which it opened at most once. The layout is judged on the whole call. The config CLAUDE.md is judged on the rule's
+    own opens (rule_opens): the pointer rule (guard_pointer.pointer_checkout) reads it on every Write-family call, and the
+    control run makes that read too, so only a second read by the rule shows."""
+    def check():
+        config = CS_CONFIG[config_role]
+        got, reason, opened, rule_opens = cs_rule_opens(config, tool, tool_input, cwd, env, agent_id)
+        if got != "allow":
+            return False, "the call was %s, want allow: %s" % (got, reason[:90])
+        role = os.path.abspath(os.path.join(config, "state", "merge-role.json"))
+        pointer = os.path.abspath(os.path.join(config, "CLAUDE.md"))
+        problems = []
+        if [path for path in opened if slash(path).endswith("lint/layout.json")]:
+            problems.append("it opened lint/layout.json")
+        if pointer in rule_opens:
+            problems.append("the rule opened the config folder's CLAUDE.md")
+        if opened.count(role) > 1:
+            problems.append("it opened the role file %d times" % opened.count(role))
+        named = [os.path.basename(path) for path in rule_opens if path not in (role, pointer)]
+        if named:
+            problems.append("the rule opened %s besides the role file" % named)
+        return not problems, "; ".join(problems) or "no layout, no config CLAUDE.md, the role file at most once"
+    return check
+
+
+def cs_cost_control_check():
+    """The refused Write of product code shows the layout among the call's opens, so the checks above can see a read."""
+    got, reason, opened = cs_opens_of(CS_CONFIG["coordinator"], "Write", {"file_path": CS_CODE, "content": "x"}, GITMAIN)
+    if got != "deny":
+        return False, "the control Write was %s, want deny: %s" % (got, reason[:90])
+    if not [path for path in opened if slash(path).endswith("lint/layout.json")]:
+        return False, "the rule's own read of the layout did not show: the spy is blind, so a pass above proves nothing"
+    return True, "the refused Write shows the layout among the opens"
+
+
+CS_OVERRIDE_ACT = ("coordinator-scope", "a coordinator's Edit of product code", cs_override_call, GITMAIN, "deny", CS_RULE, None)
+CS_CHECKS = [
+    ("coordinator-scope constants: COORDINATOR_KINDS names nine layout kinds and the mode is deny", cs_constants_check),
+    ("coordinator-scope ask_mode_asks: ask mode turns each refusal into an ask", cs_ask_check),
+    ("coordinator-scope refusal_names_no_target: the reason names the rule, the lane remedy and the override line, no target",
+     cs_reason_check),
+]
+for _cs_timed in (False, True):
+    CS_CHECKS.append(("coordinator-scope override_lifts: " + (
+        "a timed override lets through an Edit of product code until it ends" if _cs_timed else
+        "a one-act override lets through an Edit of product code once, then it is refused again"),
+        ov_act_check(CS_OVERRIDE_ACT, _cs_timed)))
+CS_COST_CODE = {"file_path": CS_CODE, "content": "x"}
+for _who, _role, _call in (   # a call that is not a coordinator's: the same Write of product code, one condition unmet each time
+        ("no role file", "none", {}),
+        ("another session's role file", "other-session", {}),
+        ("a lane role file", "lane", {}),
+        ("a batch-runner role file", "batch-runner", {}),
+        ("an agent's own call", "coordinator", {"agent_id": "bld1"}),
+        ("a local session", "coordinator", {"env": dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None)})):
+    CS_CHECKS.append(("coordinator-scope cost: %s, so the rule opens no layout and no config CLAUDE.md" % _who,
+                      cs_cost_check(_role, "Write", CS_COST_CODE, GITMAIN, **_call)))
+for _what, _tool, _input, _cwd in (   # a coordinator's call that names no repo path
+        ("a Write to a path in no repo", "Write", {"file_path": OUTSIDE_TEMP, "content": "x"}, GITMAIN),
+        ("a redirect into no repo, from a folder in no repo", "Bash", {"command": "echo x > " + CS_OUT}, NOGIT),
+        ("a redirect into no repo, from a repo", "Bash", {"command": "echo x > " + CS_OUT}, GITMAIN),
+        ("git status in a repo", "Bash", {"command": VCS + " status"}, GITMAIN),
+        ("git log in a repo", "Bash", {"command": VCS + " log --oneline -3"}, GITMAIN),
+        ("echo in a repo", "Bash", {"command": "echo hi"}, GITMAIN)):
+    CS_CHECKS.append(("coordinator-scope cost: a coordinator call that names no repo path (%s) opens only the role file" % _what,
+                      cs_cost_check("coordinator", _tool, _input, _cwd)))
+CS_CHECKS.append(("coordinator-scope cost: the control, a coordinator's refused Write of product code shows the layout open",
+                  cs_cost_control_check))
+
+
+def cs_tag_cost_check(want, reads, config_role, tool, tool_input, transcript, cwd=GITMAIN, env=None):
+    """A check that the call gets the `want` verdict, and that the own record (the transcript) is opened `reads` times: once
+    per call while the role file is missing, however many rules read the tier, and never while a role file is there."""
+    def check():
+        config = CS_CONFIG[config_role]
+        got, reason, opened = cs_opens_of(config, tool, tool_input, cwd, env or TAG_ENV, transcript=transcript)
+        problems = []
+        if got != want:
+            problems.append("the call was %s, want %s: %s" % (got, want, reason[:90]))
+        count = opened.count(os.path.abspath(transcript))
+        if count != reads:
+            problems.append("it opened the own record %d time(s), want %d" % (count, reads))
+        return not problems, "; ".join(problems) or "the own record opened %d time(s)" % reads
+    return check
+
+
+CS_CHECKS.append(("coordinator-scope tag_cost: a missing role file reads the own record once, for a coordinator's Write of product code",
+                  cs_tag_cost_check("deny", 1, "none", "Write", CS_COST_CODE, role_path("coordinator"))))
+CS_CHECKS.append(("coordinator-scope tag_cost: a missing role file reads the own record once, for a coordinator's merge that two rules judge",
+                  cs_tag_cost_check("deny", 1, "none", "Bash", {"command": "gh pr merge 4321"}, role_path("coordinator"),
+                                    cwd=NOGIT)))
+CS_CHECKS.append(("coordinator-scope tag_cost: a role file that is there is judged alone, and the own record is not opened",
+                  cs_tag_cost_check("deny", 0, "coordinator-own", "Write", CS_COST_CODE, role_path("lane"))))
+
+
+# 7. guard.log: these cases pin that each coordinator-scope refusal appends exactly one guard.log line, and each
+# override that lifts one appends exactly one line, so the log counts every refusal and lift once. The log exists for
+# shiv to read (rule outcomes-mechanize-rules; waiting-page item 112 a). A log line costs one append in the guard
+# process already running: no process starts for it.
+CS_LOG_EDIT = {"file_path": CS_CODE, "new_string": "x"}
+
+
+def cs_log_rows(config):
+    """The guard.log lines of `config`, each split into its tab fields."""
+    return [line.split("\t") for line in gs_log_lines(config)]
+
+
+def cs_log_refused_line(name, tool_input, tool="Edit"):
+    """The one guard.log line of a coordinator call that is refused: the six fields of one deny line for
+    coordinator-scope. Returns (fields, problem), with fields None when the call or its line is wrong. Every refusal
+    check in this section takes its line here, so each case adds only its own assertions."""
+    config = cs_config(name, "coordinator")
+    got, reason = ov_call(tool, dict(tool_input), GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE)
+    problem = ov_want(got, reason, "deny", CS_RULE)
+    if problem:
+        return None, problem
+    rows = cs_log_rows(config)
+    if len(rows) != 1:
+        return None, "the refusal wrote %d guard.log lines, want one: %r" % (len(rows), rows)
+    fields = rows[0]
+    if len(fields) != 6 or fields[2:4] != ["deny", CS_RULE]:
+        return None, "the line is %r, want six fields with decision deny and rule coordinator-scope" % (fields,)
+    return fields, ""
+
+
+def cs_log_refusal_check(tool="Edit", tool_input=None, name="cs-log-refusal", matched=os.path.basename(CS_CODE)):
+    """One denied coordinator write appends one guard.log line: six fields, decision deny, rule coordinator-scope, the
+    refused path in the matched field, and the payload's session last. The remedy is printed, not logged, so the line
+    holds none of its words. `matched` is the fragment the matched field must hold, or None to leave that field unpinned."""
+    fields, problem = cs_log_refused_line(name, CS_LOG_EDIT if tool_input is None else tool_input, tool)
+    if problem:
+        return False, problem
+    if matched is not None and matched not in fields[4]:
+        return False, "the matched field is %r, want the refused path" % fields[4]
+    if fields[5] != CS_PAYLOAD_SID:
+        return False, "the session field is %r, want the payload's session" % fields[5]
+    text = "\t".join(fields).lower()
+    for remedy in ("brief a lane session", "to allow this act"):
+        if remedy in text:
+            return False, "the log line holds remedy text %r: %r" % (remedy, fields)
+    return True, "one deny line names coordinator-scope and the refused path, and no remedy text"
+
+
+def cs_log_deep_path_check():
+    """A refused path longer than the log field keeps its file name at the tail and shortens its head, by guard_core's
+    path rule: the mark, then the tail of the path. A path is never cut from its tail, so a deep path must not reach the
+    cut that a command takes. CS_DEEP_CODE is over the bound on every platform, so the case reads the same on Linux,
+    where the temporary root is short, and on macOS, where it is long."""
+    from guard_core import LOG_CUT_MARK, LOG_MAX_MATCHED, LOG_PATH_MARK  # the one home of the field bound and path mark
+    if len(CS_DEEP_CODE) <= LOG_MAX_MATCHED:
+        return False, "the fixture path is only %d characters, so it pins nothing" % len(CS_DEEP_CODE)
+    fields, problem = cs_log_refused_line("cs-log-deep-path", dict(CS_LOG_EDIT, file_path=CS_DEEP_CODE))
+    if problem:
+        return False, problem
+    matched = fields[4]
+    if len(matched) > LOG_MAX_MATCHED:
+        return False, "the matched field runs to %d characters, past the %d bound: %r" % (len(matched), LOG_MAX_MATCHED, matched)
+    if LOG_CUT_MARK in matched:
+        return False, "the matched field is cut from its tail, so the file name is lost: %r" % matched
+    if not matched.startswith(LOG_PATH_MARK):
+        return False, "the matched field does not shorten the path's head with %r: %r" % (LOG_PATH_MARK, matched)
+    name = os.path.basename(CS_DEEP_CODE)
+    visible = matched.rstrip()  # a space the field ends with is no part of the path's tail
+    if not visible.endswith(name):
+        return False, "the matched field does not keep the file name %r at its tail: %r" % (name, matched)
+    if not CS_DEEP_CODE.endswith(visible[len(LOG_PATH_MARK):]):
+        return False, "the matched field's tail is not a tail of the refused path: %r" % matched
+    return True, "a %d-character path logs as %d characters, its head marked and its file name at the tail" % (
+        len(CS_DEEP_CODE), len(matched))
+
+
+def cs_log_override_check():
+    """An override that lifts a coordinator write appends one guard.log line that marks it an override of
+    coordinator-scope. The grant writes no line: a bare `override` carries no reason."""
+    config = cs_config("cs-log-lift", "coordinator")
+    note = ov_type(config, CS_PAYLOAD_SID, "override")
+    if gs_log_lines(config):
+        return False, "the grant wrote %r, want no line for a bare override" % gs_log_lines(config)
+    got, reason = ov_call("Edit", dict(CS_LOG_EDIT), GITMAIN, config, CS_PAYLOAD_SID, 60, env=CS_REMOTE)
+    problem = ov_want(got, reason, "allow", CS_RULE)
+    if problem:
+        return False, "%s (%s)" % (problem, note or "typed")
+    rows = cs_log_rows(config)
+    if len(rows) != 1:
+        return False, "the lifted write appended %d guard.log lines, want one: %r" % (len(rows), rows)
+    fields = rows[0]
+    if len(fields) != 6 or fields[2:4] != ["override", CS_RULE]:
+        return False, "the line is %r, want decision override and rule coordinator-scope" % (fields,)
+    return True, "a typed override lets one write through and appends one override line naming coordinator-scope"
+
+
+def cs_log_unreadable_diagnostic_check():
+    """An unreadable override file is two events, not a lift. The bad file writes one override-unread line, the corrupt-file
+    diagnostic that ov_corrupt_check reads and every rule shares. The refusal writes one deny line for coordinator-scope.
+    No override line is written, since nothing was lifted."""
+    config = cs_config("cs-log-unreadable", "coordinator")
+    write(ov_pass_path(config, CS_PAYLOAD_SID), "not an override")
+    got, reason = ov_call("Edit", dict(CS_LOG_EDIT), GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE)
+    problem = ov_want(got, reason, "deny", CS_RULE)
+    if problem:
+        return False, problem
+    rows = cs_log_rows(config)
+    deny = [row for row in rows if row[2:4] == ["deny", CS_RULE]]
+    unread = [row for row in rows if row[2] == "override-unread"]
+    overrides = [row for row in rows if row[2] == "override"]
+    if len(deny) != 1 or len(unread) != 1 or overrides or len(rows) != 2:
+        return False, "the refusal wrote decisions %r, want one deny for coordinator-scope and one override-unread, no override" % (
+            [row[2:4] for row in rows],)
+    return True, "an unreadable override file writes one override-unread line and one deny line, and no override line"
+
+
+def cs_log_allowed_check():
+    """A record write, and writes no coordinator-scope refusal covers (a lane's product write, an agent's product
+    write), append no guard.log line."""
+    calls = (("a record write by a coordinator", "coordinator", {"file_path": cs_kind_path("todo"), "new_string": "x"}, None),
+             ("a product write by a lane session", "lane", dict(CS_LOG_EDIT), None),
+             ("a product write by an agent", "coordinator", dict(CS_LOG_EDIT), "bld1"))
+    for index, (what, role, tool_input, agent_id) in enumerate(calls):
+        config = cs_config("cs-log-allowed-%d" % index, role)
+        got, reason = ov_call("Edit", tool_input, GITMAIN, config, CS_PAYLOAD_SID, 0, env=CS_REMOTE, agent_id=agent_id,
+                              agent_type="builder" if agent_id else None)
+        problem = ov_want(got, reason, "allow", CS_RULE)
+        if problem:
+            return False, "%s: %s" % (what, problem)
+        if gs_log_lines(config):
+            return False, "%s wrote guard.log lines %r, want none" % (what, gs_log_lines(config))
+    return True, "a record write and two writes no coordinator scope covers append no guard.log line"
+
+
+def cs_log_cost_check():
+    """A refusal and a lift each make one guard.log write, which opens the file for append once and starts no process
+    (the probe counts the children each write starts). Each refusal, lifted or not, opens the override folder once:
+    override.take() reads the session's override file, and nothing else opens it on that call. An allowed write makes
+    no write and opens neither. The refusal is the control: its one append shows the spy sees the open. The call's own
+    reads of the repository are not the log's, so they are not counted here."""
+    def appends(config, report):
+        log = os.path.abspath(os.path.join(config, "guard.log"))
+        return [path for path, mode in report.get("open_modes", []) if path == log and "a" in mode]
+
+    def override_opens(config, report):
+        folder = os.path.abspath(os.path.join(config, "state", "override")) + os.sep
+        return [path for path, _mode in report.get("open_modes", []) if path.startswith(folder)]
+
+    refuse_config = cs_config("cs-log-cost-refusal", "coordinator")
+    lift_config = cs_config("cs-log-cost-lift", "coordinator")
+    ov_type(lift_config, CS_PAYLOAD_SID, "override")
+    allow_config = cs_config("cs-log-cost-allowed", "coordinator")
+    events = (
+        ("a refusal", "deny", refuse_config, dict(CS_REMOTE), dict(CS_LOG_EDIT), 1, 1),
+        ("a lifted refusal", "allow", lift_config, dict(CS_REMOTE, LOCAL_TIME_NOW=ov_clock(60)), dict(CS_LOG_EDIT), 1, 1),
+        ("an allowed record write", "allow", allow_config, dict(CS_REMOTE),
+         {"file_path": cs_kind_path("todo"), "new_string": "x"}, 0, 0),
+    )
+    problems = []
+    for what, want, config, env, tool_input, want_appends, want_opens in events:
+        got, reason, report = cs_probe_report(config, "Edit", tool_input, GITMAIN, env=env)
+        if got != want:
+            problems.append("%s: got %s, want %s (%s)" % (what, got, want, reason[:70]))
+            continue
+        writes = report.get("log_children", None)
+        if writes != [0] * want_appends:
+            problems.append("%s: its guard.log writes started %s processes, want %d write(s) with none"
+                            % (what, writes, want_appends))
+        found = appends(config, report)
+        if len(found) != want_appends:
+            problems.append("%s opened guard.log for append %d times, want %d" % (what, len(found), want_appends))
+        opened = override_opens(config, report)
+        if len(opened) != want_opens:
+            problems.append("%s opened the override folder %d times, want %d: %r" % (what, len(opened), want_opens, opened))
+    return not problems, "; ".join(problems) or (
+        "a refusal and a lifted refusal each open guard.log for append once and the override folder once, and start no "
+        "process; an allowed write opens neither")
+
+
+CS_CHECKS.append(("coordinator-scope refusal_logs_one_line: one denied coordinator write appends one guard.log line that "
+                  "names the rule and holds no remedy text", cs_log_refusal_check))
+CS_CHECKS.append(("coordinator-scope refusal_logs_deep_path_tail: a refused path longer than the log field keeps its file "
+                  "name at the tail and shortens its head, by guard_core's path rule", cs_log_deep_path_check))
+CS_CHECKS.append(("coordinator-scope override_logs_one_line: a typed override that lifts a coordinator write appends one "
+                  "line that marks it an override of coordinator-scope", cs_log_override_check))
+CS_CHECKS.append(("coordinator-scope unreadable_override_logs_diagnostic_then_refusal: an unreadable override file writes one "
+                  "override-unread line and one deny line for the refusal, and no override line", cs_log_unreadable_diagnostic_check))
+CS_CHECKS.append(("coordinator-scope allowed_write_logs_nothing: a record write and two writes no coordinator scope covers "
+                  "append no guard.log line", cs_log_allowed_check))
+CS_CHECKS.append(("coordinator-scope log_cost: a refusal and a lift each open guard.log for append once and the override "
+                  "folder once, and start no process; an allowed write opens neither", cs_log_cost_check))
+# ---- coordinator acts: the checks that need a spy, an override, a log line or a cost read.
+CS_MCP_MERGE_TOOL = "mcp__github__merge_pull_request"
+CS_MCP_MERGE_INPUT = {"owner": "acme", "repo": "widgets", "pullNumber": 4321}
+
+
+def cs_mcp_merge_spy_check():
+    """A coordinator's host merge is refused before any read: the probe starts no child process, so no `gh` runs. The
+    control is the same call from a session with no role file, which the merge guard judges against a pending head. That
+    run starts a child, so the spy does see a read."""
+    fake_gh = GHPEND + os.pathsep + PY_PATH
+    got, reason, report = cs_probe_report(CS_CONFIG["coordinator"], CS_MCP_MERGE_TOOL, dict(CS_MCP_MERGE_INPUT), NOGIT,
+                                          env=CS_REMOTE, env_path=fake_gh)
+    problem = ov_want(got, reason, "deny", CS_RULE)
+    if problem:
+        return False, problem
+    if "children" not in report:
+        return False, "the probe wrote no child list"
+    if report["children"]:
+        return False, "the refusal started %d child process(es): %s" % (len(report["children"]), report["children"][:3])
+    got, reason, control = cs_probe_report(CS_CONFIG["none"], CS_MCP_MERGE_TOOL, dict(CS_MCP_MERGE_INPUT), NOGIT,
+                                           env=CS_REMOTE, env_path=fake_gh)
+    problem = ov_want(got, reason, "deny", "merge-checks")
+    if problem:
+        return False, "the control, a session with no role file: " + problem
+    if not control.get("children"):
+        return False, "the control started no child process, so the spy is blind"
+    return True, "a coordinator's host merge is refused and starts no process; the same call from a session with no role file starts one"
+
+
+CS_SPAWN_ACT = ("coordinator-spawn", "a coordinator's spawn of a builder",
+                lambda config, session, seconds: cs_override_call(config, session, seconds, "Agent", CS_SPAWN_INPUT, NOGIT),
+                NOGIT, "deny", CS_RULE, None)
+
+
+def cs_spawn_log_check():
+    """A refused coordinator spawn appends one guard.log line, as a refused write does. The matched field is not pinned."""
+    return cs_log_refusal_check("Agent", dict(CS_SPAWN_INPUT), "cs-log-spawn", None)
+
+
+def cs_call_cost_check(want, tool_input, tool="Agent", role="coordinator", cwd=NOGIT, env=None, role_opens=(1,)):
+    """A call's cost, for a call the rule judges. The role file is opened a count of `role_opens` times (once for a cloud
+    session, none for a local one), it opens no layout and no config CLAUDE.md, and it starts no child process. A coordinator's
+    spawn is the default. `env` is the call's environment: CS_REMOTE, unless a case gives another. The same call with
+    CLAUDE_CODE_REMOTE "false" is the control, as in cs_rule_opens. A refusal writes its own guard.log line and reads its own
+    override file: those are the refusal's reads, not the rule's, so they are set aside."""
+    def check():
+        config = CS_CONFIG[role]
+        env_of_call = dict(CS_REMOTE if env is None else env)
+        got, reason, report = cs_probe_report(config, tool, dict(tool_input), cwd, env=env_of_call)
+        if "opens" not in report:
+            return False, "the probe wrote no opens: %s" % reason[:90]
+        _, _, off = cs_probe_report(config, tool, dict(tool_input), cwd, env=dict(env_of_call, CLAUDE_CODE_REMOTE="false"))
+        opened = report["opens"]
+        rule_opens = [path for path in dict.fromkeys(opened) if path not in off.get("opens", [])]
+        role_file = os.path.abspath(os.path.join(config, "state", "merge-role.json"))
+        log = os.path.abspath(os.path.join(config, "guard.log"))
+        override = os.path.abspath(os.path.join(config, "state", "override")) + os.sep
+        problems = []
+        if got != want:
+            problems.append("the call was %s, want %s: %s" % (got, want, reason[:90]))
+        if opened.count(role_file) not in role_opens:
+            problems.append("it opened the role file %d times, want %s"
+                            % (opened.count(role_file), " or ".join(map(str, role_opens))))
+        if [path for path in opened if slash(path).endswith("lint/layout.json")]:
+            problems.append("it opened lint/layout.json")
+        # The config folder's CLAUDE.md is the pointer every spawn's role-model rule reads, so it is judged on the rule's own
+        # opens only; the layout is read by no spawn, so it is judged on the whole call.
+        if os.path.abspath(os.path.join(config, "CLAUDE.md")) in rule_opens:
+            problems.append("the rule opened the config folder's CLAUDE.md")
+        named = [os.path.basename(path) for path in rule_opens if path not in (role_file, log) and not path.startswith(override)]
+        if named:
+            problems.append("the rule opened %s besides the role file" % named)
+        if report.get("children"):
+            problems.append("it started %d child process(es): %s" % (len(report["children"]), report["children"][:3]))
+        return not problems, "; ".join(problems) or "the role file as often as allowed, no layout, no config CLAUDE.md, no child process"
+    return check
+
+
+CS_CHECKS.append(("coordinator-scope coordinator_mcp_merge_denied: a coordinator's host merge is refused before any read, "
+                  "and the same call from a session with no role file starts a child process", cs_mcp_merge_spy_check))
+CS_CHECKS.append(("coordinator-scope spawn_override_lifts_once: a one-act override lets through one coordinator spawn of a "
+                  "builder, then it is refused again", ov_act_check(CS_SPAWN_ACT, False)))
+CS_CHECKS.append(("coordinator-scope spawn_refusal_logs_one_line: one refused coordinator spawn appends one guard.log line "
+                  "that names the rule and holds no remedy text", cs_spawn_log_check))
+CS_CHECKS.append(("coordinator-scope spawn_log_cost: a refused coordinator spawn opens the role file once, no layout, "
+                  "no child process", cs_call_cost_check("deny", CS_SPAWN_INPUT)))
+CS_CHECKS.append(("coordinator-scope spawn_log_cost: a coordinator's Plan spawn opens the role file once, no layout, "
+                  "no child process", cs_call_cost_check("allow", {"subagent_type": "Plan", "prompt": "Design the plan."})))
+# ---- the cost of the five GitHub MCP names, and the repo a merge names (rule coordinator-scope, decision session-tiers). The
+# names are read from the guard: COORDINATOR_MCP_WRITE_TOOLS, COORDINATOR_MERGE_TOOLS (the merge tool and the arming tool) and
+# MERGE_TOOLS (the merge tool). A write or an arm call by a lane session, or by a local one, is allowed, starts no child process
+# and opens the role file at most once. The merge tool's reads are the merge tool's own: a counted fake `gh` answers them, and
+# its count is pinned. A coordinator's write that names another repo reads no extras file of the checkout it runs in.
+CS_MCP_MERGE_TOOLS = cs_guard_names("COORDINATOR_MERGE_TOOLS")   # the merge tool and the arming tool: numbered calls
+CS_MCP_MERGE = cs_guard_names("MERGE_TOOLS")                    # the merge tool: merge-checks reads its head
+CS_MCP_NAMES = CS_NAMED_WRITE + CS_MCP_MERGE_TOOLS
+CS_MCP_NUMBERED = {"owner": "acme", "repo": "widgets", "pullNumber": 4321}
+# The gh calls of one merge of a green numbered head with no other ready pull request, as merge/merge.py head_read makes them: the
+# pull request, the head's check runs and statuses, its run list, then the batch read (the open pull requests, the protection,
+# and the head's check runs, statuses and run list again).
+CS_MERGE_GH_CALLS = 9
+
+
+def cs_mcp_cost_input(tool):
+    """The input of a call of `tool` a lane session makes: a product path for a write, the numbered pull request for a merge."""
+    if tool in CS_MCP_MERGE_TOOLS:
+        return dict(CS_MCP_NUMBERED)
+    if tool == "mcp__github__push_files":
+        return dict(CS_MCP_REPO, files=[{"path": CS_MCP_PRODUCT, "content": "x"}])
+    return dict(CS_MCP_REPO, path=CS_MCP_PRODUCT)
+
+
+def merge_counted_gh():
+    """A counted fake `gh`, green on any head. Each call it answers is one line of its log, which gh_calls_taken reads."""
+    folder = os.path.join(ROOT, "mergecount")
+    make_fake_gh(folder, "main", count_file=os.path.join(folder, ARCHIVE_CALLS))
+    return folder
+
+
+def cs_merge_count_check(tool, role, env):
+    """A merge of a green numbered head, by `role`, is allowed and makes CS_MERGE_GH_CALLS gh calls: the merge tool's own reads."""
+    def check():
+        folder = merge_counted_gh()
+        gh_calls_taken(folder)
+        got, reason, report = cs_probe_report(CS_CONFIG[role], tool, dict(CS_MCP_NUMBERED), NOGIT, env=env,
+                                              env_path=folder + os.pathsep + PY_PATH)
+        calls = gh_calls_taken(folder)
+        problems = []
+        if got != "allow":
+            problems.append("the merge was %s, want allow: %s" % (got, reason[:90]))
+        if len(calls) != CS_MERGE_GH_CALLS:
+            problems.append("the merge made %d gh call(s), want %d: %s" % (len(calls), CS_MERGE_GH_CALLS, " | ".join(
+                " ".join(json.loads(line)[:3]) for line in calls)))
+        return not problems, "; ".join(problems) or "a green merge makes %d gh calls, all the merge tool's" % CS_MERGE_GH_CALLS
+    return check
+
+
+def cs_extras_open_check():
+    """A coordinator's write that names another repo opens no extras file of the checkout it runs in: the record homes of the named
+    repo decide, and the checkout's own extras file is read only when its origin is that repo. The control names the checkout's own
+    repo, which does open it, so a spy that sees no open proves nothing."""
+    extras = os.path.abspath(os.path.join(CS_ROLLED, *cs_layout()["extras"].split("/")))
+    tool_input = dict(CS_MCP_REPO, path=CS_MCP_RECORD)   # CS_MCP_REPO names acme/widgets, the other repo
+    got, reason, other = cs_probe_report(CS_CONFIG["coordinator"], CS_NAMED_WRITE[0], tool_input, CS_ROLLED, env=CS_REMOTE)
+    own_got, own_reason, own = cs_probe_report(CS_CONFIG["coordinator"], CS_NAMED_WRITE[0], dict(tool_input, repo="gizmo"),
+                                               CS_ROLLED, env=CS_REMOTE)
+    problems = []
+    if got != "allow":
+        problems.append("the write naming another repo was %s, want allow: %s" % (got, reason[:90]))
+    if "opens" not in other:
+        problems.append("the probe wrote no opens for the write naming another repo")
+    elif extras in other["opens"]:
+        problems.append("the write naming another repo opened the checkout's extras file")
+    if own_got != "allow":
+        problems.append("the control, a write naming the checkout's own repo, was %s, want allow: %s" % (own_got, own_reason[:90]))
+    elif extras not in own.get("opens", []):
+        problems.append("the control did not open the checkout's extras file, so the spy is blind")
+    return not problems, "; ".join(problems) or "no extras file opened for a write naming another repo; the own-repo control opens it"
+
+
+# Gap 2, the coordinator's refusal of the two host merge names when they name y/x from its checkout: refused before the merge-checks
+# read and before the bare-merge ask, so the coordinator's refusal wins.
+cs("named_repo_merge_by_coordinator_denied", "deny", tool="mcp__github__merge_pull_request", owner="y", repo="x", pullNumber=12,
+   cwd=STAMPORIGIN, env_path=GREEN_ON, lacks=("stamp_origin",))
+cs("named_repo_enable_by_coordinator_denied", "deny", tool="mcp__github__enable_pr_auto_merge", owner="y", repo="x", pullNumber=12,
+   cwd=STAMPORIGIN, env_path=GREEN_ON, lacks=("stamp_origin",))
+for _tool in CS_MCP_NAMES:
+    if _tool in CS_MCP_MERGE:   # counted below: the merge tool's own reads
+        continue
+    for _who, _role, _env in (("a lane session", "lane", CS_REMOTE),
+                              ("a local session", "coordinator", dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None))):
+        CS_CHECKS.append(("coordinator-scope cost: %s by %s is allowed, starts no child process, and opens the role file at most once"
+                          % (_tool, _who),
+                          cs_call_cost_check("allow", cs_mcp_cost_input(_tool), _tool, role=_role, cwd=GITMAIN, env=_env,
+                                             role_opens=(0, 1))))
+for _who, _role, _env in (("a lane session", "lane", CS_REMOTE),
+                          ("a local session", "coordinator", dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None))):
+    CS_CHECKS.append(("coordinator-scope cost: the merge tool by %s makes CS_MERGE_GH_CALLS gh calls, the merge tool's own reads"
+                      % _who, cs_merge_count_check(CS_MCP_MERGE[0], _role, _env)))
+CS_CHECKS.append(("coordinator-scope cost: a coordinator's write naming another repo opens no extras file of its checkout, and "
+                  "the own-repo control does", cs_extras_open_check))
+
+
+def cs_repo_git_files():
+    """The git files a merge reads of this suite's checkout (REPO): its config, or for a linked worktree its `.git` file, the
+    gitdir's commondir and the common config. The shape is read from the checkout, so a clone and a worktree both pass."""
+    dotgit = os.path.join(REPO, ".git")
+    if not os.path.isfile(dotgit):
+        return [os.path.join(dotgit, "config")]
+    with open(dotgit, encoding="utf-8") as handle:
+        gitdir = os.path.normpath(os.path.join(REPO, handle.read().split(":", 1)[1].strip()))
+    commondir = os.path.join(gitdir, "commondir")
+    with open(commondir, encoding="utf-8") as handle:
+        common = os.path.normpath(os.path.join(gitdir, handle.read().strip()))
+    return [dotgit, commondir, os.path.join(common, "config")]
+
+
+def cs_call_pins(config, checkout, remote, stamp, write=None):
+    """The paths a GitHub MCP call opens in a session of `config`, in the checkout it runs in: the session's own record of that
+    checkout, the role file of a cloud session, and the checkout's stamp when `stamp` is true. An arm or merge call (`write` is
+    None) also opens the config folder's CLAUDE.md (the pointer to the settings clone) and the checkout's git config, in every
+    session. A file-write call passes `write` as (coordinator, own): it opens those two only as a coordinator, and then also
+    lint/layout.json, and the checkout's extras file when `own` says the checkout is the repo the call names."""
+    pins = [os.path.join(checkout, ".git", "session-homes", CS_PAYLOAD_SID)]
+    if write is None or write[0]:
+        pins += [os.path.join(config, "CLAUDE.md"), os.path.join(checkout, ".git", "config")]
+    if remote:
+        pins.append(os.path.join(config, "state", "merge-role.json"))
+    if stamp:
+        pins.append(os.path.join(checkout, ".github", "stamp.json"))
+    if write is not None and write[0]:
+        pins.append(os.path.join(REPO, "lint", "layout.json"))
+        if write[1]:
+            pins.append(os.path.abspath(os.path.join(checkout, *cs_layout()["extras"].split("/"))))
+    return pins
+
+
+def cs_refusal_pins(config):
+    """The reads of a refusal or an ask, which a call makes on top of its own: the session's override file and its guard.log."""
+    return [os.path.join(config, "state", "override", CS_PAYLOAD_SID + ".json"), os.path.join(config, "guard.log")]
+
+
+def cs_merge_repo_pins():
+    """The reads the merge tool makes of this suite's checkout (REPO): the layout, its extras file, the CI alarm file, and the git
+    files of the checkout."""
+    reads = ("lint/layout.json", cs_layout()["extras"], "actions/ci-alarm/events.json")
+    return [os.path.join(REPO, *read.split("/")) for read in reads] + cs_repo_git_files()
+
+
+def cs_merge_gh_path():
+    """The PATH of a merge: a counted fake gh that answers green, then the python folder."""
+    return merge_counted_gh() + os.pathsep + PY_PATH
+
+
+def cs_show(path):
+    """A path with its fixture or suite root named, so a failure message reads short."""
+    for base, label in ((ROOT, "<ROOT>"), (os.path.realpath(ROOT), "<ROOT>"),
+                        (REPO, "<REPO>"), (os.path.realpath(REPO), "<REPO>")):
+        if path.startswith(base):
+            return label + path[len(base):]
+    return path
+
+
+def cs_open_set_check(want, pins, config, tool, tool_input, cwd, env, env_path=None):
+    """A check that a call gets the `want` decision and opens exactly the `pins` paths, no more and no fewer. The probe counts
+    every open, the rule's and every other rule's, so the set is the whole cost of the call. A path counts once however often
+    the call opens it, and a symlinked spelling counts as the path it names. `env_path` is a PATH string, or a function that
+    makes one when the check runs (a merge needs its fake gh folder then). The control is the set itself: a spy that saw no
+    open would fail on the pins."""
+    def check():
+        gh_path = env_path() if callable(env_path) else env_path
+        got, reason, report = cs_probe_report(config, tool, dict(tool_input), cwd, env=env, env_path=gh_path)
+        if "opens" not in report:
+            return False, "the probe wrote no opens: %s" % reason[:90]
+        if got != want:
+            return False, "the call was %s, want %s: %s" % (got, want, reason[:90])
+        opened = {os.path.realpath(path) for path in report["opens"]}
+        pinned = {os.path.realpath(path) for path in pins}
+        problems = []
+        extra = sorted(opened - pinned)
+        if extra:
+            problems.append("it opened %s, which the pinned set does not hold" % ", ".join(cs_show(path) for path in extra))
+        missing = sorted(pinned - opened)
+        if missing:
+            problems.append("it never opened %s, which the pinned set holds" % ", ".join(cs_show(path) for path in missing))
+        return not problems, "; ".join(problems) or "it opened the %d pinned paths, and no other" % len(pinned)
+    return check
+
+
+# The open set of the GitHub MCP arm and merge calls, in a session that is not a coordinator (rule coordinator-scope, decision
+# session-tiers). Each pin is the call's whole open set: the rule's reads and every other rule's. The cost rows above subtract a
+# local run of the same call, and judge()'s merge block reads the checkout's git config in that run as well, so an extra read
+# there is subtracted and those rows cannot see it. These pins can. The stamp is read by a merge always, and by an arm only when
+# the checkout's origin is the repo the call names.
+CS_LOCAL_ENV = dict(CS_REMOTE, CLAUDE_CODE_REMOTE=None)   # the env of a local session: no cloud marker
+CS_OTHER_REPO_ASK = {"owner": "y", "repo": "x", "pullNumber": 12}   # the repo whose origin STAMPORIGIN holds
+CS_CHECKS.append(("coordinator-scope cost: enable_pr_auto_merge by a lane session in another repo's checkout, the pinned "
+                  "open set",
+                  cs_open_set_check("allow", cs_call_pins(CS_CONFIG["lane"], GITMAIN, True, False), CS_CONFIG["lane"],
+                                    CS_MCP_ENABLE_TOOL, CS_MCP_NUMBERED, GITMAIN, CS_REMOTE)))
+CS_CHECKS.append(("coordinator-scope cost: enable_pr_auto_merge by a local session in another repo's checkout, the pinned "
+                  "open set",
+                  cs_open_set_check("allow", cs_call_pins(CS_CONFIG["coordinator"], GITMAIN, False, False),
+                                    CS_CONFIG["coordinator"], CS_MCP_ENABLE_TOOL, CS_MCP_NUMBERED, GITMAIN, CS_LOCAL_ENV)))
+CS_CHECKS.append(("coordinator-scope cost: enable_pr_auto_merge by a lane session in the named repo's checkout, which asks, "
+                  "the pinned open set",
+                  cs_open_set_check("ask", cs_call_pins(CS_CONFIG["lane"], STAMPORIGIN, True, True)
+                                    + cs_refusal_pins(CS_CONFIG["lane"]), CS_CONFIG["lane"], CS_MCP_ENABLE_TOOL,
+                                    CS_OTHER_REPO_ASK, STAMPORIGIN, CS_REMOTE)))
+CS_CHECKS.append(("coordinator-scope cost: enable_pr_auto_merge by a local session in the named repo's checkout, which asks, "
+                  "the pinned open set",
+                  cs_open_set_check("ask", cs_call_pins(CS_CONFIG["coordinator"], STAMPORIGIN, False, True)
+                                    + cs_refusal_pins(CS_CONFIG["coordinator"]), CS_CONFIG["coordinator"], CS_MCP_ENABLE_TOOL,
+                                    CS_OTHER_REPO_ASK, STAMPORIGIN, CS_LOCAL_ENV)))
+CS_CHECKS.append(("coordinator-scope cost: the merge tool by a lane session in another repo's checkout, the pinned open set "
+                  "with the merge tool's reads",
+                  cs_open_set_check("allow", cs_call_pins(CS_CONFIG["lane"], GITMAIN, True, True) + cs_merge_repo_pins(),
+                                    CS_CONFIG["lane"], CS_MCP_MERGE[0], CS_MCP_NUMBERED, GITMAIN, CS_REMOTE,
+                                    env_path=cs_merge_gh_path)))
+CS_CHECKS.append(("coordinator-scope cost: the merge tool by a local session in another repo's checkout, the pinned open set "
+                  "with the merge tool's reads",
+                  cs_open_set_check("allow", cs_call_pins(CS_CONFIG["coordinator"], GITMAIN, False, True) + cs_merge_repo_pins(),
+                                    CS_CONFIG["coordinator"], CS_MCP_MERGE[0], CS_MCP_NUMBERED, GITMAIN, CS_LOCAL_ENV,
+                                    env_path=cs_merge_gh_path)))
+# The open set of each GitHub MCP file-write call (rule coordinator-scope, decision session-tiers), path by path. A lane session
+# and a local one open their session's own record, and a cloud session also its role file. A coordinator also opens the config's
+# CLAUDE.md, the checkout's git config and lint/layout.json. For the repo the call names, it also opens the checkout's extras file
+# (cs_extras_open_check). A write that names another repo opens no extras file. Each row is the whole open set of its call.
+CS_WRITE_OPEN_SETS = (
+    ("a lane session, not a coordinator", CS_CONFIG["lane"], CS_REMOTE, GITMAIN, "widgets", True, (False, False)),
+    ("a local session", CS_CONFIG["coordinator"], CS_LOCAL_ENV, GITMAIN, "widgets", False, (False, False)),
+    ("a cloud coordinator writing its own repo", CS_CONFIG["coordinator"], CS_REMOTE, CS_ROLLED, "gizmo", True, (True, True)),
+    ("a cloud coordinator writing another named repo", CS_CONFIG["coordinator"], CS_REMOTE, CS_ROLLED, "widgets", True,
+     (True, False)),
+)
+for _tool in CS_NAMED_WRITE:
+    _short = _tool.replace("mcp__github__", "")
+    for _who, _config, _env, _checkout, _repo, _remote, _write in CS_WRITE_OPEN_SETS:
+        _input = dict(CS_MCP_REPO, repo=_repo)
+        if _tool == "mcp__github__push_files":
+            _input["files"] = [{"path": CS_MCP_RECORD, "content": "x"}]
+        else:
+            _input["path"] = CS_MCP_RECORD
+        CS_CHECKS.append(("coordinator-scope cost: write open set, %s by %s, the pinned paths" % (_short, _who),
+                          cs_open_set_check("allow", cs_call_pins(_config, _checkout, _remote, False, _write), _config, _tool,
+                                            _input, _checkout, _env)))
+for _label, _check in CS_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)  # decide() builds the fixtures each call names
+
+
 # The prompt grammar (decision owner-override, the orchestrator's call on the keyword grammar). A
 # punctuation mark after the word, with a space or the end of the prompt after it, separates it from its
 # reason or its length: `override, yes` is a one-act override and `override, 15m` a timed one. A mark run
@@ -34864,6 +36376,10 @@ FAMILY = "load-brake"
 # A fake case must start no child process; the probe counts them and the case checks the count.
 # The probe also counts the child processes a run starts (subprocess.Popen, os.system, os.spawn*,
 # os.posix_spawn*, os.startfile), which is the harness's process seam for the "zero children" cases.
+# With spec "opens" the probe also records, around main() only, each path the call opens through
+# builtins.open or io.open (pathlib reads through io.open), as an absolute path in `opens`, and its mode
+# as [path, mode] in `open_modes`: the one seam for a cost case that counts file opens (rule coordinator-scope,
+# cs_probe_report). A failed open counts too.
 LB_PROBE = r"""
 import builtins, importlib.machinery, importlib.util, io, json, os, subprocess, sys, time, types
 from unittest import mock
@@ -35031,6 +36547,30 @@ try:
             g.floor_hit = lambda tool, tool_input: "haiku"
         elif spec.get("patch_floor") == "read":
             g.floor_hit = lambda tool, tool_input: g.read_load() and ""
+        if spec.get("opens"):
+            out["opens"] = opened = []
+            out["open_modes"] = modes = []
+            real_open = io.open
+
+            def spy_open(file, *args, **kwargs):
+                if isinstance(file, (str, bytes, os.PathLike)):
+                    opened.append(os.path.abspath(os.fsdecode(file)))
+                    modes.append([opened[-1], str(args[0] if args else kwargs.get("mode", "r"))])
+                return real_open(file, *args, **kwargs)
+            builtins.open = io.open = spy_open
+        if spec.get("log_children"):
+            # Each guard.log write (guard_core.record) counts the child processes it starts: one entry per write.
+            core = sys.modules["guard_core"]
+            out["log_children"] = log_children = []
+            real_record = core.record
+
+            def counted_record(*args, **kwargs):
+                before_count = len(children)
+                try:
+                    return real_record(*args, **kwargs)
+                finally:
+                    log_children.append(len(children) - before_count)
+            core.record = counted_record
         try:
             if spec["mode"] == "hit":
                 # The brake's two functions, called direct on the call's own payload (the probe's stdin), so a
@@ -35049,6 +36589,9 @@ try:
                 g.main()
         except SystemExit:
             pass
+        finally:
+            if spec.get("opens"):
+                builtins.open = io.open = real_open   # the probe's own write of `side` is no open of the call
     out["files"] = [p for p in listing() if p not in before]
 except Exception as exc:
     out["probe_error"] = type(exc).__name__ + ": " + str(exc)[:200]
