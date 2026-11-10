@@ -10,4 +10,4 @@ the same turn that a session rotates. A session reads it right before it message
 - Batch runner (integration batch, CI waits, merge tool runs under the coordinator's grant, archiving lanes whose topic has no queued step):
   "<session title>", <session id>, since <date and time>.
 
-Lane sessions are not on the roster. The coordinator holds lane state.
+Lanes are not on the roster. The coordinator holds lane state.

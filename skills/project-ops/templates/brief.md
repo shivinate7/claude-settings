@@ -1,6 +1,6 @@
 Lane brief: <step-slug>. Topic: <topic-slug>. <Plain name of the step>.
 
-<Who runs it: a cloud lane session, or a lane session on a named local machine.> The coordinator
+<Who runs it: a cloud lane, or a lane on a named local machine.> The coordinator
 starts it with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
 The coordinator also tags the lane `cs-topic:<topic slug>`, its one topic. The step slug is the step id.
 The guard reads the Topic on the first line and refuses a brief whose Topic differs from that tag (rule `lane-one-topic`), so keep this line first.

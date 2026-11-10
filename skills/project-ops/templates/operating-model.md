@@ -5,15 +5,15 @@ from `roster.md`.
 
 ## Session tiers
 
-Every session that starts agents is an orchestrator. A session's tier is its identity.
+Every session that starts agents spawns its own agents. A session's roles are the hats it wears.
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane session in roadmap order with `model` (the lane row's), `source_url` (the repo), the tags `cs-repo`, `cs-build:lane`, `cs-step`, `cs-topic`, and the prompt `/effort medium` alone and then sends its brief, and talks with the owner. On a local session, the load
+  writes each lane brief, starts each lane in roadmap order with `model` (the lane row's), `source_url` (the repo), the tags `cs-repo`, `cs-build:lane`, `cs-step`, `cs-topic`, and the prompt `/effort medium` alone and then sends its brief, and talks with the owner. On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
-  A lane session also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
+  A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
   merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a solo run the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
@@ -58,8 +58,8 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
   integration PR on green. It asks the owner for no merge. It prints the merge output on the
   terminal, never to a log only. It dispatches no deferred step.
-- **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
-  It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
+- **Lane.** Runs one line of work, with its own builder and reviewer agents.
+  It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
 
 When the owner names the wrong tier, or brings work that belongs to another tier, the session
