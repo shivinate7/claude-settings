@@ -668,8 +668,10 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
    The stamp is Central time with its offset, for example `2026-11-10 12:08 CST (UTC-06:00)`. Read the time from
    `~/.claude/bin/now-central --full`, and add `(UTC-06:00)` for CST or `(UTC-05:00)` for CDT. `<HHMM>` is the stamp's
    hour and minute. Then move it to its home. Write `home` and `filed`, and a short `reply`.
-   A comment wake in claude-settings (the banner `[Artifact comment sent to Claude]`, not an ask, and not a Saved
-   wake without a note) needs one of two item lines under its block, or the Stop guard blocks the turn:
+   A comment wake in claude-settings needs one of two item lines under its block, or the Stop guard blocks the turn.
+   The guard checks every wake on the waiting page that starts with the banner `[Artifact comment sent to Claude]`:
+   Asked, Replied, owner prose, and a Saved wake whose items carry a note in parentheses. Only a plain Saved wake,
+   with no note in its items, is exempt. The two item lines:
    `- fb-<HHMM>-<n> [task] -> step:<slug>`, where that step's file on the record branch names `skills/waiting-page`;
    or `- fb-<HHMM>-<n> [note] -> not-page-form`, when the comment is not page form.
 4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
