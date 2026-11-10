@@ -7,5 +7,5 @@
   "lane": null,
   "updatedAt": "2026-11-10T06:53:00-06:00",
   "why": "#2533 (live-test-reads-step-lane) counts a step live when its lane field names a live lane session. Three docs still tell sessions to tag one cs-step per step, so the docs and the build disagree.",
-  "note": "Record lane. Files: skills/project-ops/templates/operating-model.md line 16, skills/project-ops/templates/brief.md line 4, skills/waiting-page/SKILL.md near line 577. WAITS: #2533 merges (batch 72). Source: coordinator session_013NEJL2hB1pLZPDpzas7VgB,  CST Nov 10."
+  "note": "Record lane. Files: skills/project-ops/templates/operating-model.md line 16, skills/project-ops/templates/brief.md line 4, skills/waiting-page/SKILL.md near line 577. WAITS: #2533 merges (batch 72). Source: coordinator session_013NEJL2hB1pLZPDpzas7VgB, 06:53 CST Nov 10."
 }

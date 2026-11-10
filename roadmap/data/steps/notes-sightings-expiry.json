@@ -5,7 +5,7 @@
   "order": 263.1,
   "owner": "coordinator",
   "why": "Owner, item 358, 14:41 CST: a and b (not c).",
-  "note": "Builds sightings and expiry, plus one debt-fix lane per batch. Builds on step notes-name-their-fix, and must merge after it (lane, 14:51 CST). PR #1619, with the runner. It joins after #1516 (coordinator, 17:04 CST). Doing  CST Nov 10: open PR #1619 on branch notes-sightings-expiry (triage live build).",
+  "note": "Builds sightings and expiry, plus one debt-fix lane per batch. Builds on step notes-name-their-fix, and must merge after it (lane, 14:51 CST). PR #1619, with the runner. It joins after #1516 (coordinator, 17:04 CST). Doing 05:58 CST Nov 10: open PR #1619 on branch notes-sightings-expiry (triage live build).",
   "lane": "session_013NEJL2vaREMqJHVJ16kbQf",
   "updatedAt": "2026-11-10T05:57:00-06:00"
 }

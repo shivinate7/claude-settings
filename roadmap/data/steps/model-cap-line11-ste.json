@@ -1,7 +1,7 @@
 {
   "title": "agent-model-cap's long sentence on line 11 splits under the STE limit",
   "why": "Lane agent-served-model-check (#2442, batch 69), relayed by the coordinator 08:58 CST Nov 9: docs/decisions/agent-model-cap.md line 11 holds a 35-word sentence (STE001 limit 30). CI lints changed lines only, so it never blocked. Harm: the next PR that touches that line goes red on a sentence it did not write.",
-  "note": "Fix: a docs-only PR splits it at its first semicolon or \"and\", meaning kept. Docs-only, so it merges on passing checks (decision docs-only-prs-skip-review). Lane session_013NEJKzvX8gzYSZhs2sfsew (agent-served-model-check) takes it as a separate docs-only PR, 09:00 CST Nov 9 (coordinator). Done: a057a1d73 on main (2026-11-09): docs/decisions/agent-model-cap.md sentence split (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10). #2442 re-released to batch 72 at  CST Nov 10 (coordinator).",
+  "note": "Fix: a docs-only PR splits it at its first semicolon or \"and\", meaning kept. Docs-only, so it merges on passing checks (decision docs-only-prs-skip-review). Lane session_013NEJKzvX8gzYSZhs2sfsew (agent-served-model-check) takes it as a separate docs-only PR, 09:00 CST Nov 9 (coordinator). Done: a057a1d73 on main (2026-11-09): docs/decisions/agent-model-cap.md sentence split (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). #2442 re-released to batch 72 at 08:17 CST Nov 10 (coordinator).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKzvX8gzYSZhs2sfsew",

@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL2KhBtBKhdyNpyv8c6",
   "why": "An old pin runs old checks, so q_max misses fixes main already has.",
-  "note": "Pins move from 4f2e205 to 174b005c1. Lane qmax-ste-lint-in-narrow-checks; filed from the coordinator 19:48 CST Nov 7. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10).",
+  "note": "Pins move from 4f2e205 to 174b005c1. Lane qmax-ste-lint-in-narrow-checks; filed from the coordinator 19:48 CST Nov 7. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "updatedAt": "2026-11-10T06:03:00-06:00"
 }

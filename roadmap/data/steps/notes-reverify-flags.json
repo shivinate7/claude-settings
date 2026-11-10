@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL2iRRDz4vLswobTwYf",
   "why": "Coordinator, 15:13 CST: lane notes-keep-reverify flagged 13 kept notes as likely real gaps. Source: docs/plans/notes-sort/reverify-flag.tsv on branch claude/notes-keep-reverify, a1959b187.",
-  "note": "Each note is reproduced before its fix. Wave 7 (#1530) points its Fix lines at this step. Topic notes-backlog. Lane scope, 15:15 CST: planned PRs by file area: builder-diff guard (guard.py), frozen-path guard (guard_frozen.py), merge tool, mutation report, stall alarm. Child-repo rows go to runner 9. Ready, lane ended and not landed: no step PR; #1530 open only cites it; no commit on main (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10). Doing 06:06 CST Nov 10 in lane session_013NEJL2iRRDz4vLswobTwYf (coordinator).",
+  "note": "Each note is reproduced before its fix. Wave 7 (#1530) points its Fix lines at this step. Topic notes-backlog. Lane scope, 15:15 CST: planned PRs by file area: builder-diff guard (guard.py), frozen-path guard (guard_frozen.py), merge tool, mutation report, stall alarm. Child-repo rows go to runner 9. Ready, lane ended and not landed: no step PR; #1530 open only cites it; no commit on main (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Doing 06:06 CST Nov 10 in lane session_013NEJL2iRRDz4vLswobTwYf (coordinator).",
   "updatedAt": "2026-11-10T06:06:00-06:00"
 }

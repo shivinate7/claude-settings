@@ -5,7 +5,7 @@
   "order": 0.12,
   "owner": "coordinator",
   "why": "Coordinator, 13:59 CST Nov 7: q_max main has 33 TypeScript errors.",
-  "note": "Renamed from qmax-main-map-ts at 14:00 CST. The MAP part stays with step qmax-map-format-skew (coordinator, 14:00 CST). Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10).",
+  "note": "Renamed from qmax-main-map-ts at 14:00 CST. The MAP part stays with step qmax-map-format-skew (coordinator, 14:00 CST). Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "lane": "session_013NEJKzRCmwHVEerq6qBgSn",
   "updatedAt": "2026-11-10T06:03:00-06:00"
 }

@@ -5,7 +5,7 @@
   "order": 0.27,
   "owner": "coordinator",
   "why": "Lane qmax-revive-idle, 12:48 CST Nov 7: docs/debts/README.md:16 (after PR #1020) records a round-3 review limit under \"Holes, named\" in its decision and also in the debt store. That is two homes for one gap, against the file's own \"One gap, one home\" heading.",
-  "note": "13:33 CST Nov 7: the lane found 58 q_max decisions that still carry a \"Holes, named\" section. They wait on item 355 (notes backlog sort).\nNo owner question: the file's own rule and global rule building-one-home-per-capability answer it. Drop the \"Holes, named\" clause and keep the debt record. Done: one home for the gap on q_max main. Filed under pr-backlog-clear. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10).",
+  "note": "13:33 CST Nov 7: the lane found 58 q_max decisions that still carry a \"Holes, named\" section. They wait on item 355 (notes backlog sort).\nNo owner question: the file's own rule and global rule building-one-home-per-capability answer it. Drop the \"Holes, named\" clause and keep the debt record. Done: one home for the gap on q_max main. Filed under pr-backlog-clear. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "updatedAt": "2026-11-10T06:03:00-06:00",
   "lane": "session_013NEJL1A1182h8pf7SyqYfQ"
 }

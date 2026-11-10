@@ -5,7 +5,7 @@
   "order": 921,
   "owner": "coordinator",
   "why": "For a merge commit that lost a line, lint/check_silent_undo.py prints \"put the work back, or add the trailer\". A later commit that puts the line back does not clear the refusal, because the check reads the merge against its parent. Lane #2378 lost a review round to it.",
-  "note": "Coordinator (13:07 CST Nov 9): a possible false-alarm remedy, not a hold. Two fixes: the check clears a lost line that the head holds again, or the remedy names the trailer as the only way out for a merge. Not folded into lane-lint-before-push: that step moves the check earlier, and this one changes what the check says. Done: cc75a70f2 and 9dc4efda5 on main (2026-11-09): lint/check_silent_undo.py unrestored() clears a line the head holds again (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10).",
+  "note": "Coordinator (13:07 CST Nov 9): a possible false-alarm remedy, not a hold. Two fixes: the check clears a lost line that the head holds again, or the remedy names the trailer as the only way out for a merge. Not folded into lane-lint-before-push: that step moves the check earlier, and this one changes what the check says. Done: cc75a70f2 and 9dc4efda5 on main (2026-11-09): lint/check_silent_undo.py unrestored() clears a line the head holds again (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "updatedAt": "2026-11-10T06:03:00-06:00",
   "lane": "session_013NEJL3jZu7VBFpZ1EZJZGo"
 }

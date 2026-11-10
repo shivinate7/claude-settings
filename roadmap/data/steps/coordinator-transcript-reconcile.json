@@ -3,7 +3,7 @@
   "status": "doing",
   "order": 981,
   "why": "Rulings, asks and follow-ups that live only in the coordinator's transcript are lost unless something reads them back against the tracked homes.",
-  "note": "Owner 09:05 CST Nov 10 (relayed by the coordinator,  CST): Sonnet extractors over the coordinator transcript, one Sonnet reconciler against main, the roadmap and the PRs. First run started 09:05 CST Nov 10 by the coordinator; It runs as the coordinator's workflow wf_8af462fc-358, not a lane session.",
+  "note": "Owner 09:05 CST Nov 10 (relayed by the coordinator, 09:11 CST): Sonnet extractors over the coordinator transcript, one Sonnet reconciler against main, the roadmap and the PRs. First run started 09:05 CST Nov 10 by the coordinator; It runs as the coordinator's workflow wf_8af462fc-358, not a lane session.",
   "lane": "coordinator session_013NEJL2hB1pLZPDpzas7VgB (workflow)",
   "blockedBy": [],
   "updatedAt": "2026-11-10T09:16:00-06:00",

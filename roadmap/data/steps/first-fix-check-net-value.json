@@ -1,7 +1,7 @@
 {
   "title": "The first fix check on a round-3 record cannot carry a lane-written net value that clears a negative round 3",
   "why": "On main, the first fix check on a round-3 record may carry any --net-value, so one lane-written \"zero\" clears a negative round 3, against decision hold-unsafe-after-round-3. Found by PR #1808's round 1 (coordinator, 01:05 CST Nov 8).",
-  "note": "Built as a follow-up PR after #1808 (now replaced by PR #1829), in lane fail-record-ancestor-head (session_013NEJKzYhDtNPLcEdeVFEVe). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:06 CST Nov 8. Kept doing on: #1829 open draft (replaced #1808, closed unmerged) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96,  CST Nov 10).",
+  "note": "Built as a follow-up PR after #1808 (now replaced by PR #1829), in lane fail-record-ancestor-head (session_013NEJKzYhDtNPLcEdeVFEVe). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:06 CST Nov 8. Kept doing on: #1829 open draft (replaced #1808, closed unmerged) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
   "phase": "now",
   "status": "doing",
   "order": 554,
