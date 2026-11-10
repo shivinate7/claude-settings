@@ -112,6 +112,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
@@ -15012,6 +15013,218 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+
+
+# =========================================================================== a header stamp matches the clock
+FAMILY = "message-time-matches-clock"
+#
+# Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
+# with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
+# then `,`, `:`, or a dash spaced on both sides (` - `, ` — `), then an optional date `YYYY-MM-DD `, then `H:MM` or
+# `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any letter case. Anything may follow it. The zone must
+# be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
+# A dated stamp is an instant with its zone's offset, refused when it is more than 1 minute ahead, with no upper
+# limit. An undated stamp is a signed minute-of-day offset mod 1440, refused only when it is 2 to 60 minutes ahead:
+# more than 60 ahead reads as a quote from an earlier day, and passes. A stamp behind the clock passes. The wrap reads
+# the short way: 00:01 at a clock of 23:59 is 2 minutes ahead. The clock is LOCAL_TIME_NOW. The rule reads no
+# transcript and only the first line, so the cases here need no transcript, except the one lane brief, which needs a
+# lane that lane-one-topic allows.
+MTC_RULE = "message-time-matches-clock"
+MTC_TOOL = "mcp__claude-code-remote__send_later"  # a tool with a message field that is not send_message
+MTC_CLOCK = "2026-11-07T13:22:00-06:00"           # 13:22 CST, the clock of most cases below
+MTC_NEXT_DAY = "2026-11-08T00:01:00-06:00"        # 00:01 CST, the clock of the midnight pair
+MTC_BODY = "detail " * 2500                       # a long body after the first line: about 17,500 characters
+MTC_MORNING = "2026-11-08T07:08:00-06:00"        # 07:08 CST, the clock of the header-form, zone and window cases
+MTC_CDT = "2026-10-30T13:22:00-05:00"            # 13:22 CDT, the clock of the CDT-season cases
+
+
+def mtc_env(clock):
+    """The guard's environment with its clock fixed, so a verdict never depends on the real time."""
+    return dict(ROLE_ENV, LOCAL_TIME_NOW=clock)
+
+
+def mtc_refuse(name, message, clock=MTC_CLOCK, carries=(), lacks=()):
+    """A send_message whose header stamp is off the clock. The guard refuses it, and the reason names the rule."""
+    add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=SEND_MESSAGE, cwd=NOGIT,
+        env=mtc_env(clock), session_id=ROLE_OTHER, message=message, carries=carries, lacks=lacks)
+
+
+def mtc_allow(name, message, clock=MTC_CLOCK, transcript=None):
+    """A send_message the guard lets through silently."""
+    add("message-time-matches-clock: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True,
+        env=mtc_env(clock), session_id=ROLE_OTHER, message=message, transcript=transcript)
+
+
+# Refused: an incident stamp 18 minutes ahead. The reason prints the real time, so the sender can fix the stamp.
+mtc_refuse("an incident stamp 18 minutes ahead is refused, and the reason prints the real time 13:22 CST",
+           "Coordinator, 13:40 CST: pick 1 taken", carries=("13:22 CST",))
+# Refused: 24 minutes ahead, on a clock that is not the default.
+mtc_refuse("a stamp 24 minutes ahead, at a clock of 13:26, is refused",
+           "Coordinator, 13:50 CST", clock="2026-11-07T13:26:00-06:00")
+# Passes: 10 minutes behind. A stamp behind the clock passes.
+mtc_allow("a stamp 10 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:12 CST: pick 1 taken")
+# Refused: 4 minutes ahead. The limit is 1 minute, so this sits past it.
+mtc_refuse("a stamp 4 minutes ahead is refused: the limit is 1 minute",
+           "Coordinator, 13:26 CST")
+# Passes: 4 minutes behind. A stamp behind the clock passes.
+mtc_allow("a stamp 4 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:18 CST")
+# Refused: `Now` is a label like any other, so `Now: 13:30 CST` is a header 8 minutes ahead.
+mtc_refuse("a Now: header 8 minutes ahead, Now: 13:30 CST, is refused",
+           "Now: 13:30 CST")
+# Refused: markdown lead chars are read past, so the bold and quote forms carry the header too.
+mtc_refuse("a bold header, **Coordinator, 13:40 CST**, is refused",
+           "**Coordinator, 13:40 CST**")
+mtc_refuse("a quoted header, > Coordinator, 13:40 CST, is refused",
+           "> Coordinator, 13:40 CST: pick 1 taken")
+# Refused: a date in the stamp is read, and the stamp is judged as the instant it names.
+mtc_refuse("a dated header, 2026-11-07 13:40 CST, 18 minutes ahead is refused",
+           "Coordinator, 2026-11-07 13:40 CST")
+# Passes: dated the day before, the stamp is behind the clock. The date counts toward how far behind.
+mtc_allow("a header dated the day before, at the clock's own minute, is allowed: a stamp behind the clock passes",
+          "Coordinator, 2026-11-06 13:22 CST")
+# Refused: dated the day after, the stamp is 1440 minutes ahead. A reader that ignores the date sees 0 and allows it.
+mtc_refuse("a header dated the day after, at the clock's own minute, is refused: a date counts",
+           "Coordinator, 2026-11-08 13:22 CST")
+# Refused: 14:22 CDT is the instant 13:22 CST, but CDT is the wrong zone label in CST season, so it is refused.
+mtc_refuse("a CDT header in CST season at the same instant, 14:22 CDT at 13:22 CST, is refused: the zone is wrong",
+           "Coordinator, 14:22 CDT")
+# Refused: 15:22 CDT is 14:22 CST, 60 minutes ahead. The reason prints the clock in CST, not CDT.
+mtc_refuse("a CDT header in CST season, 60 minutes ahead, is refused, and the reason prints 13:22 CST, not CDT",
+           "Coordinator, 15:22 CDT", carries=("13:22 CST",), lacks=("13:22 CDT",))
+# Refused: only the header stamp is judged. A right stamp later on the line does not save an off header.
+mtc_refuse("a header 18 minutes off is refused though a right stamp follows it on the line",
+           "Coordinator, 13:40 CST: pick 1 taken (13:22 CST)")
+# Refused: the marker is the first non-blank line, so blank lines above it do not hide the header.
+mtc_refuse("a header after two blank lines is the first non-blank line, and is refused",
+           "\n\nCoordinator, 13:40 CST: pick 1 taken")
+# Passes: 23:50 is 11 minutes behind 00:01 across midnight. A stamp behind the clock passes.
+mtc_allow("a header of 23:50 CST at 00:01 CST, 11 minutes behind across midnight, is allowed",
+          "Coordinator, 23:50 CST", clock=MTC_NEXT_DAY)
+# Refused: 00:01 at a clock of 23:59 is 2 minutes ahead across midnight. The mirror of the pair above.
+mtc_refuse("a header of 00:01 CST at 23:59 CST, 2 minutes ahead across midnight, is refused",
+           "Coordinator, 00:01 CST", clock="2026-11-07T23:59:00-06:00")
+# Refused: a long body after an off header changes nothing. The first line is judged at full message size.
+mtc_refuse("a header 18 minutes off with a long body after it is refused, however long the message",
+           "Coordinator, 13:40 CST: pick 1 taken\n" + MTC_BODY)
+
+# Refused: the incident. A header 2 minutes ahead is past the 1-minute limit.
+mtc_refuse("a header 2 minutes ahead is refused: the incident, pick taken at 13:24 CST",
+           "Coordinator, 13:24 CST: pick taken")
+# Refused: 3 minutes ahead is past the limit.
+mtc_refuse("a header 3 minutes ahead is refused: the limit is 1 minute",
+           "Coordinator, 13:25 CST")
+# Passes: exactly 1 minute ahead is inside the limit. The limit is inclusive.
+mtc_allow("a header exactly 1 minute ahead is allowed: the limit is inclusive",
+          "Coordinator, 13:23 CST")
+# Passes: 3 minutes behind is behind the clock, so it passes.
+mtc_allow("a header 3 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:19 CST")
+# Passes: 23:59 at 00:01 is 2 minutes behind across midnight, so it passes.
+mtc_allow("a header of 23:59 CST at 00:01 CST, 2 minutes behind across midnight, is allowed",
+          "Coordinator, 23:59 CST", clock=MTC_NEXT_DAY)
+# Passes: a dated header exactly 1 minute ahead is inside the limit.
+mtc_allow("a dated header exactly 1 minute ahead is allowed",
+          "Coordinator, 2026-11-07 13:23 CST")
+# Passes: a ruling quoted mid-line carries its own stamp. Only the header stamp is read.
+mtc_allow("a quoted ruling mid-line is allowed: the owner's stamp sits inside the line",
+          'Coordinator, 13:22 CST: owner ruled (owner 2026-10-30 16:20 CDT) yes')
+# Passes: a second stamp on the header line is not judged. The header stamp is the one that counts.
+mtc_allow("a second stamp on the header line is allowed: only the header stamp is judged",
+          "Coordinator, 13:22 CST: first offered 13:40 CST, pick 1 taken")
+# Passes: a stamp only on line 2. The first line is a status line with no stamp.
+mtc_allow("a stamp only on line 2 is not read: the first line is a status line",
+          "Status: PR #12 merged.\nCoordinator, 13:40 CST: pick 1 taken")
+# Passes: a stamp mid-line on a status line is not a header.
+mtc_allow("a status line with a stamp mid-line is allowed",
+          "Status: PR #12 merged (owner 16:36 CST).")
+# Passes: a lane brief's first line holds no stamp, so the later stamp is not judged. The lane fixture lets the
+# brief through lane-one-topic, so this case isolates this rule.
+mtc_allow("a lane brief whose first line holds no stamp is allowed, though a stamp follows it",
+          "Lane brief: icon-a. Topic: icons.\nCoordinator, 13:40 CST: go",
+          transcript=role_path("step-topic-lane"))
+# Refused: a label of four words is a header, so this stamp 18 minutes ahead is refused.
+mtc_refuse("a label of four words, Owner of the lane, 13:40 CST, is a header and is refused",
+           "Owner of the lane, 13:40 CST: pick 1 taken")
+# Passes: a label with no comma, colon or dash is not a header, so the line passes.
+mtc_allow("a label with no comma, colon or dash is not a header, so the line passes",
+          "Coordinator 13:40 CST: pick 1 taken")
+# Passes: the empty states. No first line means nothing to judge.
+mtc_allow("an empty message passes: there is no first line to judge",
+          "")
+mtc_allow("a message of blank lines only passes: there is no first line to judge",
+          "\n  \n\n")
+# Passes: the full-size pair of the refusal above. A header 1 minute ahead with a long body is allowed.
+mtc_allow("a header 1 minute ahead with a long body after it is allowed, however long the message",
+          "Coordinator, 13:23 CST: pick 1 taken\n" + MTC_BODY)
+# Passes: the rule judges send_message only. Another tool with a message field and the same stamp is not judged.
+add("message-time-matches-clock: a send_later with a header 18 minutes off is not judged: the rule is send_message's",
+    "allow", tool=MTC_TOOL, cwd=NOGIT, silent=True, env=mtc_env(MTC_CLOCK),
+    message="Coordinator, 13:40 CST: pick 1 taken", delay_minutes=5)
+# Passes: a dated header behind the clock passes, with seconds on the clock. 13:22 against 13:25:30 is 3 minutes behind.
+mtc_allow("a dated header 3 minutes behind, at a clock of 13:25:30, is allowed: a stamp behind the clock passes",
+          "Coordinator, 2026-11-07 13:22 CST", clock="2026-11-07T13:25:30-06:00")
+# Passes: 16:36 is 9 hours 28 minutes ahead at 07:08. More than 60 minutes ahead reads as a quote from an earlier day.
+mtc_allow("a header quoting another label's time, Owner, 16:36 CST, 9 hours 28 minutes ahead, is allowed: past 60 minutes it passes",
+          "Owner, 16:36 CST: go", clock=MTC_MORNING)
+# Refused: a header quoting another label's time, 18 minutes ahead. The reason tells the sender to open with its own label.
+mtc_refuse("a header quoting another label's time, Owner, 13:40 CST, is refused, and the reason names your own label",
+           "Owner, 13:40 CST: go", carries=("your own label",))
+
+# The wider header form. Each form is refused at a stamp 32 minutes ahead of 07:08, and passes at the clock's own minute.
+# Refused: a 1-digit hour.
+mtc_refuse("a 1-digit hour header, Triage, 7:40 CST, 32 minutes ahead at 07:08, is refused",
+           "Triage, 7:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a 1-digit hour header at the clock's own minute, Triage, 7:08 CST, is allowed",
+          "Triage, 7:08 CST: x", clock=MTC_MORNING)
+# Refused: a spaced em dash in place of the comma.
+mtc_refuse("a spaced em-dash header, 07:40 CST after the label, 32 minutes ahead at 07:08, is refused",
+           "Coordinator — 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a spaced em-dash header at the clock's own minute, 07:08 CST after the label, is allowed",
+          "Coordinator — 07:08 CST: x", clock=MTC_MORNING)
+# Refused: a spaced hyphen in place of the comma.
+mtc_refuse("a spaced hyphen header, 07:40 CST after the label, 32 minutes ahead at 07:08, is refused",
+           "Coordinator - 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a spaced hyphen header at the clock's own minute, 07:08 CST after the label, is allowed",
+          "Coordinator - 07:08 CST: x", clock=MTC_MORNING)
+# Refused: a label of four words.
+mtc_refuse("a four-word label header, Coordinator for the lane, 07:40 CST, 32 minutes ahead at 07:08, is refused",
+           "Coordinator for the lane, 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a four-word label header at the clock's own minute, Coordinator for the lane, 07:08 CST, is allowed",
+          "Coordinator for the lane, 07:08 CST: x", clock=MTC_MORNING)
+# Refused: seconds after the time.
+mtc_refuse("a header with seconds, Coordinator, 07:40:00 CST, 32 minutes ahead at 07:08, is refused",
+           "Coordinator, 07:40:00 CST: x", clock=MTC_MORNING)
+mtc_allow("a header with seconds at the clock's own minute, Coordinator, 07:08:00 CST, is allowed",
+          "Coordinator, 07:08:00 CST: x", clock=MTC_MORNING)
+# Refused: a lowercase zone.
+mtc_refuse("a lowercase zone header, Coordinator, 07:40 cst, 32 minutes ahead at 07:08, is refused",
+           "Coordinator, 07:40 cst: x", clock=MTC_MORNING)
+mtc_allow("a lowercase zone header at the clock's own minute, Coordinator, 07:08 cst, is allowed",
+          "Coordinator, 07:08 cst: x", clock=MTC_MORNING)
+
+# The zone must be the clock's own. A wrong zone label is refused whatever the minutes.
+# Refused: a CDT stamp at the clock's own minute, in CST season. The instant is an hour behind, so only the label is wrong.
+mtc_refuse("a CDT header at the clock's own minute in CST season, Coordinator, 07:08 CDT, is refused: the zone is wrong",
+           "Coordinator, 07:08 CDT: x", clock=MTC_MORNING)
+# Refused: a CST stamp in CDT season. 12:22 CST is the instant 13:22 CDT, so only the zone label is wrong.
+mtc_refuse("a CST header in CDT season at the same instant, Coordinator, 12:22 CST at 13:22 CDT, is refused: the zone is wrong",
+           "Coordinator, 12:22 CST: x", clock=MTC_CDT)
+# Passes: the CDT-season pair. A CDT stamp at the clock's own minute in CDT season is allowed.
+mtc_allow("a CDT header at the clock's own minute in CDT season, Coordinator, 13:22 CDT, is allowed",
+          "Coordinator, 13:22 CDT: x", clock=MTC_CDT)
+
+# The undated window: 2 to 60 minutes ahead is refused, and past 60 it reads as a quote from an earlier day.
+# Refused: 60 minutes ahead at 07:08 is the window's upper edge, and the edge is inside it.
+mtc_refuse("a header 60 minutes ahead at 07:08 is refused: the window's upper edge is inside it",
+           "Coordinator, 08:08 CST: x", clock=MTC_MORNING)
+# Passes: 61 minutes ahead at 07:08 is past the window, so it reads as a quote from an earlier day.
+mtc_allow("a header 61 minutes ahead at 07:08 is allowed: past 60 minutes it reads as a quote from an earlier day",
+          "Coordinator, 08:09 CST: x", clock=MTC_MORNING)
+# Refused: a dated stamp has no window. 16:36 on the same day is 9 hours 28 minutes ahead at 07:08, and is refused.
+mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
 
 
 # =========================================================================== 5i. SendMessage to a cloud session

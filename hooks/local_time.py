@@ -98,8 +98,12 @@ def line(clock=clock):
 
 
 def central_hhmm(at):
-    """`HH:MM CDT` (or CST) for an instant: the time line's own clock, cut to the end of an override."""
-    return " ".join(line(lambda: at).split()[3:5])
+    """`HH:MM CDT` (or CST) for an instant: the time line's own clock, cut to the end of an override.
+    A display helper that never raises: anything that is not a datetime (or one out of range) gives "", not a guessed time."""
+    try:
+        return " ".join(line(lambda: at).split()[3:5])
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return ""
 
 
 def central_full(at):
