@@ -13363,9 +13363,9 @@ def posted_body(test, out):
     test.assertTrue(ends, "the printed record has no CI line:\n" + out)
     return "\n".join(lines[start:ends[0] + 1]) + "\n"
 
-def review_comment(cid, number, body, created="2026-10-02T00:00:00Z"):
-    """A comment on issue or pull request `number`, as the repo-wide comment list gives it."""
-    return {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
+def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=None):
+    """A comment on issue or pull request `number`, as the repo-wide comment list gives it. `updated` is its updated_at; None means never edited."""
+    return {"id": cid, "created_at": created, "updated_at": updated or created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
@@ -14247,6 +14247,491 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+class ReleaseHost(PullsHost):
+    """A PullsHost for `merge --release-check`. A number in `closed` answers `pulls/<n>` as a closed pull request (the open list leaves it out),
+    a number in `broken` fails that read, `gh_missing` makes every pull request read raise what a missing gh raises, and any other number that is
+    not open answers 404, as GitHub does for a pull request that does not exist."""
+
+    def __init__(self, pulls, closed=(), broken=(), gh_missing=False, **reads):
+        super().__init__(pulls, {}, **reads)
+        self.closed, self.broken, self.gh_missing = list(closed), set(broken), gh_missing
+
+    def pr(self, n):
+        if self.gh_missing:
+            raise FileNotFoundError(2, "No such file or directory", "gh")  # subprocess's error when gh is not on PATH
+        return super().pr(n)
+
+    def pull_reply(self, n):
+        if n in self.broken:
+            return 1, "gh: could not read the pull request"
+        for d in self.closed:
+            if d["number"] == n:
+                return 0, json.dumps({**d, "state": "closed", "merged": False, "mergeable": None, "mergeable_state": "unknown", "body": "",
+                                      "changed_files": 1})
+        return super().pull_reply(n)
+
+class ReleaseCheck(ReviewEnv):
+    """`merge --release-check N [N ...] [--lint N@SHA:VERDICT ...]`: one line per pull request given, in the order given: `#N PASS`, or `#N FAIL: `
+    and its reasons joined by `; `. A PASS whose lint is UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`. Six checks, each a reason when it fails:
+    the pull request is open; its newest review record is done at the live head (review_state, as `--reviewed` reads it); the newest record is
+    unedited; its lint verdict is PASS or UNKNOWN-AT-CAP for the live head (missing, FAIL, or a SHA that is not the live head is a reason); the merge
+    result is clean (git merge-tree); and a base that is not the default branch has its open pull request in the call, and that one passes.
+    Exit 0 only when every line is a PASS. A case's pull requests sit at the feature branch's real commit, so the merge-tree check can read them."""
+
+    SHA_RULE = r"(?i)\bsha\b|40[- ]hex"  # a usage error for a lint in the wrong form names the sha rule
+
+    @staticmethod
+    def error_line(err):
+        """The error lines of a usage error. The usage block names every flag, so `--head SHA` in it would match SHA_RULE on any refusal."""
+        return "\n".join(line for line in err.splitlines() if "error:" in line)
+
+    def live(self, n, base="main", head=None):
+        """Pull request n, open, at the feature branch's real head unless `head` is given."""
+        return batch_pull(n, head or self.head("feat"), base=base)
+
+    def review(self, n, head=None, updated=None, **kw):
+        """The review record comment of pull request n: done at the live head unless `head` is given, unedited unless `updated` is. `kw` goes to record_text."""
+        return review_comment(n, n, record_text(n=n, head=head or self.head(), **kw), updated=updated)
+
+    def lints(self, numbers, verdict="PASS", heads=None):
+        """The --lint flags that give each pull request number the verdict, bound to its head: `heads` maps a number to the sha it is bound to,
+        and a number it does not name is bound to the feature branch's head."""
+        heads, feat = heads or {}, self.head("feat")
+        return [flag for n in numbers for flag in ("--lint", f"{n}@{heads.get(n, feat)}:{verdict}")]
+
+    def assert_lint_refused(self, lint):
+        """A usage error for `--lint lint`: rc 2, and stderr names the sha rule."""
+        _, err = self.assert_usage_error("--release-check", "7", "--lint", lint)
+        self.assertRegex(self.error_line(err), self.SHA_RULE, f"the refusal of --lint {lint} does not name the sha rule: " + err)
+
+    def release(self, numbers, lint=None, pulls=None, comments=None, closed=(), broken=(), gh_missing=False, **reads):
+        """-> (rc, lines, err, host) of `merge --release-check numbers`. Each pull request is open, reviewed and lint-passed unless the argument
+        says otherwise: `pulls`, `comments` and `lint` (the --lint flags) replace the defaults. The default lint is bound to each pull request's head."""
+        numbers = list(numbers)
+        pulls = [self.live(n) for n in numbers] if pulls is None else pulls
+        comments = [self.review(n) for n in numbers] if comments is None else comments
+        heads = {p["number"]: p["head"]["sha"] for p in [*pulls, *closed]}
+        lint = self.lints(numbers, heads=heads) if lint is None else lint
+        host = ReleaseHost(pulls, closed=closed, broken=broken, gh_missing=gh_missing, comments=list(comments), **reads)
+        rc, out, err = self.run_args("--release-check", *map(str, numbers), *lint, host=host)
+        self.assertIn(rc, (0, 1), f"merge refused the --release-check line (rc {rc}):\n{err}")  # the flag is accepted before any line is read
+        return rc, out.splitlines(), err, host
+
+    def line_of(self, lines, n):
+        """The one line pull request n has in `lines`."""
+        found = [l for l in lines if l.startswith(f"#{n} ")]
+        self.assertEqual(len(found), 1, f"want one line for #{n}:\n" + "\n".join(lines))
+        return found[0]
+
+    def assert_fails_alone(self, line, n, pattern):
+        """`line` is `#n FAIL: ` with one reason, and that reason matches `pattern`."""
+        self.assertTrue(line.startswith(f"#{n} FAIL: "), line)
+        reason = line[len(f"#{n} FAIL: "):]
+        self.assertNotIn("; ", reason, "more than one reason on one line: " + line)
+        self.assertRegex(reason, pattern, line)
+
+    def stacked(self):
+        """feat7 at the feature head, and feat8 one commit on it: the stacked pair. -> feat8's real sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "push", "-q", "origin", "origin/feat:refs/heads/feat7")
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat8", "origin/feat7")
+        put(os.path.join(o, "stacked.txt"), "stacked\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "feat8"); sh(o, "git", "push", "-q", "origin", "feat8")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "rev-parse", "origin/feat8")
+
+    # The baseline, the output shape and the exit code
+
+    def test_all_six_checks_green_give_one_pass_line_and_write_nothing(self):
+        before, locked = self.refs(), self.lock_ref()
+        rc, lines, err, _ = self.release([7])
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+        self.assertEqual(self.refs(), before, "the check pushed")
+        self.assertEqual(self.lock_ref(), locked, "the check took the merge lock")
+
+    def test_one_line_per_pr_in_the_order_given(self):
+        rc, lines, err, _ = self.release([9, 7, 8])
+        self.assertEqual(lines, ["#9 PASS", "#7 PASS", "#8 PASS"], err)
+        self.assertEqual(rc, 0, err)
+
+    def test_every_pr_of_a_full_list_gets_its_line(self):
+        numbers = list(range(25, 0, -1))
+        rc, lines, err, _ = self.release(numbers)
+        self.assertEqual(lines, [f"#{n} PASS" for n in numbers], err)
+        self.assertEqual(rc, 0, err)
+
+    def test_a_repeated_release_check_flag_adds_its_numbers_to_the_list(self):
+        pulls, comments = [self.live(5), self.live(6)], [self.review(5), self.review(6)]
+        rc, out, err = self.run_args("--release-check", "5", "6", *self.lints([5, 6]), host=ReleaseHost(pulls, comments=comments))  # control: one flag
+        self.assertEqual((rc, out.splitlines()), (0, ["#5 PASS", "#6 PASS"]), err)
+        rc, out, err = self.run_args("--release-check", "5", "--release-check", "6", *self.lints([5, 6]),
+                                     host=ReleaseHost(pulls, comments=comments))
+        self.assertEqual(out.splitlines(), ["#5 PASS", "#6 PASS"],
+                         "a repeated --release-check flag replaces the numbers the flag before it gave: " + out + err)
+        self.assertEqual(rc, 0, err)
+
+    def test_a_duplicate_number_gets_one_line_at_its_first_position(self):
+        # One --lint per number: a second verdict for the same number is a usage error, which is not what this case reads.
+        _, lines, err, _ = self.release([5, 5], pulls=[self.live(5)], comments=[self.review(5)], lint=self.lints([5]))
+        self.assertEqual(lines, ["#5 PASS"], err)
+        rc, lines, err, _ = self.release([5, 7, 5], pulls=[self.live(5), self.live(7)], comments=[self.review(5), self.review(7)],
+                                         lint=self.lints([5, 7]))
+        self.assertEqual((rc, lines), (0, ["#5 PASS", "#7 PASS"]), err)
+
+    def test_no_open_pr_still_gives_each_number_a_fail_line(self):
+        rc, lines, err, _ = self.release([7, 8], pulls=[])
+        self.assertEqual(rc, 1, err)
+        self.assertEqual([l.split(":", 1)[0] for l in lines], ["#7 FAIL", "#8 FAIL"], err)
+
+    def test_exit_is_0_only_when_every_line_is_pass(self):
+        rc, lines, err, _ = self.release([7, 8], lint=[*self.lints([7]), *self.lints([8], "UNKNOWN-AT-CAP")])
+        self.assertEqual((rc, lines), (0, ["#7 PASS", "#8 PASS (lint unknown at cap)"]), err)
+        rc, lines, err, _ = self.release([7, 8], lint=[*self.lints([7]), *self.lints([8], "FAIL")])
+        self.assertEqual(rc, 1, err)
+        self.assertEqual(lines[0], "#7 PASS", err)
+        self.assertTrue(lines[1].startswith("#8 FAIL: "), err)
+
+    def test_two_failing_checks_share_one_line_joined_by_semicolons(self):
+        _, lines, err, _ = self.release([8], pulls=[self.live(8)], comments=[], lint=[])
+        line = self.line_of(lines, 8)
+        self.assertIn("no review record", line, err)
+        self.assertIn("lint", line, err)
+        self.assertEqual(line.count("; "), 1, "the reasons are not joined by one '; ': " + line)
+
+    # A pull request with no record beside one with a record
+
+    def test_incident_a_pr_with_no_record_beside_a_done_one_prints_no_record(self):
+        rc, lines, err, _ = self.release([7, 8], comments=[self.review(7)])
+        self.assertEqual(lines, ["#7 PASS", "#8 FAIL: no review record"], err)
+        self.assertEqual(rc, 1, err)
+
+    # Check 1: the pull request is open
+
+    def test_check_1_a_closed_pr_fails_alone_and_an_open_one_passes(self):
+        _, lines, err, _ = self.release([7], pulls=[], closed=[self.live(7)])
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"open|closed|merged")
+        _, lines, err, _ = self.release([7])
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_check_1_a_pr_that_does_not_exist_gets_a_fail_unknown_line(self):
+        rc, lines, err, _ = self.release([7, 99], pulls=[self.live(7)], comments=[self.review(7)])
+        self.assertEqual(lines[0], "#7 PASS", err)
+        self.assertRegex(self.line_of(lines, 99), r"^#99 FAIL: unknown", err)
+        self.assertEqual(rc, 1, err)
+
+    def test_a_pr_whose_read_fails_gets_a_fail_unknown_line(self):
+        rc, lines, err, _ = self.release([7, 8], broken=[8])
+        self.assertEqual(lines[0], "#7 PASS", err)
+        self.assertRegex(self.line_of(lines, 8), r"^#8 FAIL: unknown", err)
+        self.assertEqual(rc, 1, err)
+
+    def test_a_failed_comment_read_gives_every_pr_a_fail_unknown_line(self):
+        rc, lines, err, _ = self.release([7, 8], comments_error="reading issue comments from GitHub failed")
+        self.assertEqual(len(lines), 2, err)
+        for n in (7, 8):
+            self.assert_fails_alone(self.line_of(lines, n), n, r"unknown")
+        self.assertEqual(rc, 1, err)
+
+    # Reads that fail: every number still gets its line, and its reason names the cause
+
+    def test_a_missing_gh_gives_every_pr_a_fail_unknown_line_and_no_traceback(self):
+        try:
+            rc, lines, err, _ = self.release([7, 8], gh_missing=True)
+        except Exception as e:  # the check raised: no line printed for any pull request
+            self.fail(f"release-check raised {type(e).__name__} instead of a line for each pull request: {e}")
+        for n in (7, 8):
+            self.assertRegex(self.line_of(lines, n), rf"^#{n} FAIL: unknown \(.+\)$", err)
+        self.assertEqual(rc, 1, err)
+
+    def assert_unknown_line_each(self, lines, numbers, err):
+        """One line per distinct number, in order of first appearance, each `#N FAIL: unknown (...)`, and no other line."""
+        want = list(dict.fromkeys(numbers))
+        self.assertEqual(len(lines), len(want), f"want one line for each of {want}, got {len(lines)}:\n" + "\n".join(lines) + "\n" + err)
+        for n, line in zip(want, lines):
+            self.assertRegex(line, rf"^#{n} FAIL: unknown \(.+\)$", err)
+
+    def release_past_sh(self, numbers, stub):
+        """-> (rc, lines, err) of `merge --release-check numbers` with merge.sh patched. `stub(args)` raises, or returns (code, text) for a call
+        it names, and returns None for every other call, which runs the real sh. The pull requests and review records are read before the patch."""
+        head = self.head("feat")
+        pulls = [self.live(n, head=head) for n in dict.fromkeys(numbers)]
+        comments = [self.review(n, head=head) for n in dict.fromkeys(numbers)]
+        real_sh = merge.sh
+
+        def patched(args, *a, **kw):
+            answer = stub(args)
+            return real_sh(args, *a, **kw) if answer is None else answer
+
+        with unittest.mock.patch.object(merge, "sh", side_effect=patched):
+            rc, lines, err, _ = self.release(numbers, pulls=pulls, comments=comments, lint=self.lints(dict.fromkeys(numbers)))
+        return rc, lines, err
+
+    @staticmethod
+    def no_checkout(args):
+        """The stub of a folder that is not a git checkout: `git rev-parse --show-toplevel` fails there, and every other call runs."""
+        if args[:1] == ["git"] and "rev-parse" in args and "--show-toplevel" in args:
+            return 128, "fatal: not a git repository (or any of the parent directories): .git"
+        return None
+
+    def test_outside_a_git_checkout_every_pr_gets_a_fail_unknown_line(self):
+        _, lines, err, _ = self.release([7, 8, 7], lint=self.lints([7, 8]))  # control: in a checkout, one PASS line per distinct number
+        self.assertEqual(lines, ["#7 PASS", "#8 PASS"], err)
+        rc, lines, err = self.release_past_sh([7, 8, 7], self.no_checkout)
+        self.assertEqual(rc, 1, err)
+        self.assert_unknown_line_each(lines, [7, 8, 7], err)
+
+    def test_outside_a_git_checkout_a_full_list_gets_a_fail_unknown_line_each(self):
+        numbers = list(range(25, 0, -1))
+        _, lines, err, _ = self.release(numbers)  # control: the full list passes in a checkout
+        self.assertEqual(lines, [f"#{n} PASS" for n in numbers], err)
+        rc, lines, err = self.release_past_sh(numbers, self.no_checkout)
+        self.assertEqual(rc, 1, err)
+        self.assert_unknown_line_each(lines, numbers, err)
+
+    def test_missing_git_every_pr_gets_a_fail_unknown_line_and_no_traceback(self):
+        _, lines, err, _ = self.release([7, 8, 7], lint=self.lints([7, 8]))  # control: in a checkout, one PASS line per distinct number
+        self.assertEqual(lines, ["#7 PASS", "#8 PASS"], err)
+
+        def no_git(args):
+            if args[:1] == ["git"]:
+                raise FileNotFoundError(2, "No such file or directory", "git")  # subprocess's error when git is not on PATH
+            return None
+
+        try:
+            rc, lines, err = self.release_past_sh([7, 8, 7], no_git)
+        except Exception as e:  # the check raised: no line printed for any pull request
+            self.fail(f"release-check raised {type(e).__name__} instead of a line for each pull request: {e}")
+        self.assertEqual(rc, 1, err)
+        self.assert_unknown_line_each(lines, [7, 8, 7], err)
+
+    def test_a_git_fetch_that_times_out_gives_every_pr_a_fail_unknown_line(self):
+        self.assert_git_timeout_gives_unknown("fetch")
+
+    def test_a_git_merge_tree_that_times_out_gives_every_pr_a_fail_unknown_line(self):
+        self.assert_git_timeout_gives_unknown("merge-tree")
+
+    def assert_git_timeout_gives_unknown(self, name):
+        """The one git call `name` times out, every other git call runs. Each pull request still gets a FAIL unknown line."""
+        real_git = merge.git
+
+        def slow(cwd, *a, input=None):
+            if a[:1] == (name,):
+                raise subprocess.TimeoutExpired(cmd=["git", *a], timeout=60)
+            return real_git(cwd, *a, input=input)
+
+        with unittest.mock.patch.object(merge, "git", side_effect=slow):
+            try:
+                rc, lines, err, _ = self.release([7, 8])
+            except Exception as e:
+                self.fail(f"a timed-out git {name} raised {type(e).__name__} instead of a line for each pull request: {e}")
+        for n in (7, 8):
+            self.assertRegex(self.line_of(lines, n), rf"^#{n} FAIL: unknown \(.+\)$", err)
+        self.assertEqual(rc, 1, err)
+
+    def test_a_head_the_clone_cannot_fetch_names_the_reason_git_gave(self):
+        head = "f" * 40  # no commit of the repo has this sha, and origin has no refs/pull/7/head to fetch
+        rc, lines, err, _ = self.release([7], pulls=[self.live(7, head=head)], comments=[self.review(7, head=head)])
+        line = self.line_of(lines, 7)
+        self.assertRegex(line, r"^#7 FAIL: unknown \(", err)
+        self.assertIn("couldn't find remote ref refs/pull/7/head", line, "the reason drops git's own fetch output: " + line)
+        self.assertEqual(rc, 1, err)
+
+    # Check 2: the newest record is done at the live head
+
+    def test_check_2_a_record_not_done_at_the_live_head_fails_with_its_state_why(self):
+        bad = {
+            "stale": (self.review(7, head=REVIEW_OLD_HEAD), "#7 FAIL: the record is for head 0f0f0f0f0"),  # REVIEW_OLD_HEAD's first 9 characters
+            "open": (self.review(7, rounds=("Round 1: reviewer, sonnet, FAIL",)), "#7 FAIL: round 1 is not passed"),
+            "held": (self.review(7, guard="yes", net="negative"), "#7 FAIL: net value is negative"),
+            "bad": (self.review(7, rounds=("Round 1: reviewer, sonnet, MAYBE",)), "#7 FAIL: the newest record does not parse"),
+        }
+        for state, (comment, want) in bad.items():
+            with self.subTest(state=state):
+                _, lines, err, _ = self.release([7], comments=[comment])
+                self.assertEqual(lines, [want], err)
+        _, lines, err, _ = self.release([7], comments=[self.review(7)])
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_check_2_a_record_that_names_another_pr_does_not_count_for_this_one(self):
+        stray = review_comment(9, 7, record_text(n=8, head=self.head()))  # on #7's thread, but it names #8
+        rc, lines, err, _ = self.release([7, 8], comments=[stray, self.review(8)])
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"record")
+        self.assertEqual(self.line_of(lines, 8), "#8 PASS", err)
+        self.assertEqual(rc, 1, err)
+
+    # Check 3: the newest record is unedited
+
+    def test_check_3_an_edited_newest_record_fails_alone_and_an_unedited_one_passes(self):
+        _, lines, err, _ = self.release([7], comments=[self.review(7, updated="2026-10-03T00:00:00Z")])
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"edit")
+        _, lines, err, _ = self.release([7])
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_check_3_only_the_newest_record_is_read_for_an_edit(self):
+        older = self.review(7, rounds=("Round 1: reviewer, sonnet, FAIL",), updated="2026-10-03T00:00:00Z")
+        newest = review_comment(8, 7, record_text(n=7, head=self.head(), rounds=REVIEW_PASS), created="2026-10-04T00:00:00Z")
+        _, lines, err, _ = self.release([7], comments=[older, newest])
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    # Check 4: the lint verdict, bound to the live head
+
+    def test_check_4_a_missing_or_failed_lint_fails_alone(self):
+        for name, lint in (("missing", []), ("FAIL", self.lints([7], "FAIL"))):
+            with self.subTest(lint=name):
+                _, lines, err, _ = self.release([7], lint=lint)
+                self.assert_fails_alone(self.line_of(lines, 7), 7, r"lint")
+
+    def test_check_4_a_pass_or_unknown_at_cap_passes(self):
+        for verdict, want in (("PASS", "#7 PASS"), ("UNKNOWN-AT-CAP", "#7 PASS (lint unknown at cap)")):
+            with self.subTest(lint=verdict):
+                _, lines, err, _ = self.release([7], lint=self.lints([7], verdict))
+                self.assertEqual(lines, [want], err)
+
+    def test_check_4_the_unknown_at_cap_suffix_is_for_a_pass_only(self):
+        _, lines, err, _ = self.release([7, 8], comments=[self.review(7)], lint=self.lints([7, 8], "UNKNOWN-AT-CAP"))
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS (lint unknown at cap)", err)
+        self.assertEqual(self.line_of(lines, 8), "#8 FAIL: no review record", err)  # 8 fails its review check: no suffix on a FAIL line
+
+    def test_check_4_a_lint_for_another_head_fails_alone_and_names_both_shas(self):
+        live, other = self.head("feat"), REVIEW_OLD_HEAD  # the feature branch's head, and a sha that is not it
+        rc, out, err = self.run_args("--release-check", "7", "--lint", f"7@{other}:PASS", host=ReleaseHost([self.live(7)], comments=[self.review(7)]))
+        self.assertEqual(rc, 1, out + err)
+        line = self.line_of(out.splitlines(), 7)
+        self.assert_fails_alone(line, 7, r"live head")
+        self.assertIn(other[:9], line, "the reason does not name the lint's head: " + line)
+        self.assertIn(live[:9], line, "the reason does not name the live head: " + line)
+
+    def test_check_4_a_lint_for_the_live_head_passes_and_prints_exactly_pr_pass(self):
+        live = self.head("feat")
+        rc, out, err = self.run_args("--release-check", "7", "--lint", f"7@{live}:PASS", host=ReleaseHost([self.live(7)], comments=[self.review(7)]))
+        self.assertEqual((rc, out), (0, "#7 PASS\n"), err)
+
+    def test_check_4_the_bare_lint_form_is_a_usage_error(self):
+        # A verdict with no sha is bound to no head, so it is refused. The host has the pull request, so a parser that takes the form runs the checks.
+        rc, out, err = self.run_args("--release-check", "7", "--lint", "7:PASS", host=ReleaseHost([self.live(7)], comments=[self.review(7)]))
+        self.assertEqual((rc, out), (2, ""), err)
+        self.assertRegex(self.error_line(err), self.SHA_RULE, "the refusal of the bare form does not name the sha rule: " + err)
+
+    def test_check_4_a_lint_for_a_number_not_in_the_call_is_ignored(self):
+        _, lines, err, _ = self.release([7], lint=[*self.lints([7]), *self.lints([9], "FAIL")])
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    # Check 5: the merge result is clean
+
+    def test_check_5_a_clean_merge_passes_and_a_conflict_with_main_fails_alone(self):
+        _, lines, err, _ = self.release([7])
+        self.assertEqual(lines, ["#7 PASS"], err)
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "docs/decisions/second.md"), record("rival", "rival"))  # the feature branch adds this file with other text
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main adds the same file"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        _, lines, err, _ = self.release([7])
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"conflict|clean")
+
+    def test_check_5_a_merge_that_cannot_run_fails_unknown(self):
+        head = "f" * 40  # no commit of the repo has this sha
+        _, lines, err, _ = self.release([7], pulls=[self.live(7, head=head)], comments=[self.review(7, head=head)])
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"unknown")
+
+    # Check 6: the stack
+
+    def test_check_6_a_stacked_pr_passes_with_its_base_pr_in_the_call(self):
+        feat8 = self.stacked()
+        pulls = [self.live(7), self.live(8, base="feat7", head=feat8)]
+        rc, lines, err, _ = self.release([8, 7], pulls=pulls, comments=[self.review(7), self.review(8, head=feat8)])
+        self.assertEqual((rc, lines), (0, ["#8 PASS", "#7 PASS"]), err)
+
+    def test_check_6_a_stacked_pr_fails_naming_its_base_when_the_base_pr_is_not_in_the_call(self):
+        feat8 = self.stacked()
+        pulls = [self.live(7), self.live(8, base="feat7", head=feat8)]
+        _, lines, err, _ = self.release([8], pulls=pulls, comments=[self.review(7), self.review(8, head=feat8)])
+        self.assert_fails_alone(self.line_of(lines, 8), 8, r"feat7")
+
+    def test_check_6_a_stacked_pr_fails_naming_its_base_when_no_open_pr_has_that_base(self):
+        feat8 = self.stacked()
+        _, lines, err, _ = self.release([8], pulls=[self.live(8, base="feat7", head=feat8)], comments=[self.review(8, head=feat8)])
+        self.assert_fails_alone(self.line_of(lines, 8), 8, r"feat7")
+
+    def test_check_6_a_stacked_pr_fails_when_its_base_pr_fails(self):
+        feat8 = self.stacked()
+        pulls = [self.live(7), self.live(8, base="feat7", head=feat8)]
+        _, lines, err, _ = self.release([8, 7], pulls=pulls, comments=[self.review(8, head=feat8)])  # no record for #7
+        self.assertEqual(self.line_of(lines, 7), "#7 FAIL: no review record", err)
+        self.assert_fails_alone(self.line_of(lines, 8), 8, r"#7|feat7")
+
+    def test_check_6_a_closed_pr_on_the_base_head_does_not_fail_a_stacked_pr_whose_open_base_passes(self):
+        # Two pull requests share the head branch feat7: #6 is closed and comes first in the call, #7 is open and passes.
+        feat8 = self.stacked()
+        feat = self.head("feat")
+        closed6 = {**batch_pull(6, feat), "head": {"ref": "feat7", "sha": feat}}
+        _, lines, err, _ = self.release([5, 7], pulls=[self.live(5, base="feat7", head=feat8), self.live(7)],
+                                        comments=[self.review(5, head=feat8), self.review(7)])  # control: no closed pull request on that head
+        self.assertEqual(lines, ["#5 PASS", "#7 PASS"], err)
+        _, lines, err, _ = self.release([5, 6, 7], pulls=[self.live(5, base="feat7", head=feat8), self.live(7)], closed=[closed6],
+                                        comments=[self.review(5, head=feat8), self.review(7)])
+        self.assertEqual(self.line_of(lines, 6), "#6 FAIL: the pull request is closed, not open", err)
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", err)
+        self.assertEqual(self.line_of(lines, 5), "#5 PASS", err)
+
+    def test_check_6_a_stack_cycle_fails_both_prs_each_naming_the_other_and_ends(self):
+        feat8 = self.stacked()
+        pulls = [self.live(7, base="feat8"), self.live(8, base="feat7", head=feat8)]  # #7 is based on #8's head, and #8 on #7's
+        rc, lines, err, _ = self.release([7, 8], pulls=pulls, comments=[self.review(7), self.review(8, head=feat8)])
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"#8")
+        self.assert_fails_alone(self.line_of(lines, 8), 8, r"#7")
+        self.assertEqual(rc, 1, err)
+
+    # The usage: the flags, the lint verdicts and the numbers
+
+    def test_lint_takes_a_full_sha_and_a_verdict_and_nothing_else(self):
+        live = self.head("feat")
+        for bad in (f"7@{live}:pass", f"7@{live}:MAYBE", f"7@{live}", f"7@{live}:", f"7{live}:PASS"):
+            with self.subTest(lint=bad):
+                self.assert_lint_refused(bad)
+        _, lines, err, _ = self.release([7], lint=self.lints([7]))
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_a_short_or_upper_case_sha_is_a_usage_error_that_names_the_sha(self):
+        live = self.head("feat")
+        for bad in (live[:7], live[:39], live.upper()):
+            with self.subTest(sha=bad):
+                self.assert_lint_refused(f"7@{bad}:PASS")
+        _, lines, err, _ = self.release([7], lint=self.lints([7]))  # control: the full lower-case sha passes
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_two_lint_flags_for_one_pr_are_a_usage_error(self):
+        live = self.head("feat")
+        _, err = self.assert_usage_error("--release-check", "7", "--lint", f"7@{live}:PASS", "--lint", f"7@{live}:FAIL")
+        self.assertIn("more than one verdict", err, "the refusal does not say why: " + err)
+
+    def test_release_check_stands_alone(self):
+        for argv in (("--release-check", "7", "--confirm"), ("--release-check", "7", "--reviewed"), ("--release-check", "7", "--lane-lint"),
+                     ("--release-check", "7", "--review-record", "--head", REVIEW_HEAD), ("--release-check", "7", "--role", "coordinator"),
+                     ("--release-check", "7", "--unlock"), ("--release-check", "7", "--idle-lanes"), ("--release-check", "7", "--root", self.co),
+                     ("7", "--release-check", "7"), ("--release-check",)):
+            with self.subTest(argv=argv):
+                self.assert_usage_error(*argv)
+        rc, lines, err, _ = self.release([7])
+        self.assertEqual(rc, 0, err)
+
+    def test_lint_goes_with_release_check(self):
+        # On main, argparse reads --lint as an abbreviation of --lint-unknown-ok, which is refused for another reason. The refusal must name --release-check.
+        live = self.head("feat")
+        for argv in (("--reviewed", "--lint", f"7@{live}:PASS"), ("7", "--lint", f"7@{live}:PASS")):
+            with self.subTest(argv=argv):
+                _out, err = self.assert_usage_error(*argv)
+                # The usage block names every flag, --release-check too, so only the error line can say what the refusal is for.
+                self.assertRegex(err, r"error: [^\n]*--release-check", "the refusal does not name --release-check: " + err)
+
+    def test_a_pr_number_that_is_not_a_number_is_a_usage_error(self):
+        rc, out, err = self.run_args("--release-check", "seven", "--lint", f"7@{self.head('feat')}:PASS")
+        self.assertEqual(rc, 2, out + err)
+        self.assertNotIn("unrecognized arguments", err, err)
 
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
