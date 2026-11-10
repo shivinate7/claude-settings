@@ -15032,6 +15032,8 @@ REC_LANE = "# Records index\nrecords page v2, rebuilt by the lane\n"
 REC_FEAT = "# Records index\nrecords page on the feature branch\n"
 REC_REBUILT = "# Records index\nrecords page rebuilt by hand after the merge\n"
 REC_MOVED_TEXT = "# Records index\nrecords page v3, moved on again on main\n"
+REC_STACK_CUT = "# Records index\nrecords page on the stacked base, as the lane was cut\n"
+REC_STACK_MOVED = "# Records index\nrecords page on the stacked base, moved on\n"
 RECROOT = os.path.join(ROOT, "recpage")
 RECMAIN = os.path.join(RECROOT, "main")
 # One linked worktree per index state, each cut from the stale local `main`: a case only reads, but
@@ -15044,6 +15046,16 @@ REC_NOBASE = os.path.join(RECROOT, "nobase")   # a page change staged, and no or
 
 def _rec_run(where, *args):
     done = run_vcs(where, *IDENT, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the records-page fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _rec_run_at(when, where, *args):
+    """_rec_run with the author and committer dates fixed at `when` (unix seconds)."""
+    env = dict(os.environ, GIT_AUTHOR_DATE="@%d +0000" % when, GIT_COMMITTER_DATE="@%d +0000" % when)
+    done = subprocess.run([VCS, *IDENT, *args], cwd=where, env=env, capture_output=True, text=True)
     if done.returncode != 0:
         sys.exit("fixture setup failed in the records-page fixtures: %s %s in %r: %s"
                  % (VCS, " ".join(args), where, done.stderr.strip()))
@@ -15155,18 +15167,44 @@ REC_MOVED_LANES = {name: os.path.join(RECMORE, "moved-" + name) for name in (
 # A branch merged into origin/main: its tip is in origin/main's history, off the first-parent line.
 REC_ANC = os.path.join(RECMORE, "ancestor")
 REC_ANC_LANE = os.path.join(RECMORE, "ancestor-lane")
+# A stacked base: a branch with a page commit of its own, cut from main and never merged into it, so its tip is
+# off origin/main's history. Each lane is cut from it, the base moves on, and the lane merges it again.
+REC_STACK = os.path.join(RECMORE, "stacked")
+REC_STACK_LANES = {name: os.path.join(RECMORE, "stacked-" + name) for name in ("merge", "rebuilt", "quit")}
+# A criss-cross stacked base: the base is cut from main at R, merges origin/main at M1 and moves on to S2. Each lane is
+# cut from the base's first commit S1 and merges origin/main at M2, a later main commit. The lane's merge with the base
+# then has two best merge bases, S1 (off origin/main) and M1 (on it). Commits carry fixed dates, REC_T0 plus an offset,
+# so the order of the bases does not depend on the clock.
+REC_T0 = 1700000000
+REC_MAIN_LATER = "# Records index\nrecords page on main, after the stacked base merged it\n"
+REC_CRISS_HAND = "# Records index\nrecords page written by hand on the criss-cross lane\n"
+REC_CRISS = os.path.join(RECMORE, "criss")
+REC_CRISS_LANES = {name: os.path.join(RECMORE, "criss-" + name) for name in ("merge", "hand")}
+# A lane cut from main that merges an unrelated unmerged branch B. B is cut from a commit X1 that main has merged, and
+# B merged origin/main at an older commit A1, so the lane's two best merge bases are A1 and X1, both on origin/main.
+REC_UNREL_PAGE = "# Records index\nrecords page on an unrelated unmerged branch\n"
+REC_UNREL = os.path.join(RECMORE, "unrelated")
+REC_UNREL_LANE = os.path.join(RECMORE, "unrelated-lane")
+# A repository with no origin, so no origin/main ref. The base is local `main`, and `merge-base --is-ancestor` against
+# origin/main exits 128: a failed read, not "not an ancestor". The lane merges a feature branch's page, so the staged
+# page is MERGE_HEAD's.
+REC_NOORIGIN = os.path.join(RECMORE, "noorigin")
+REC_NOORIGIN_LANE = os.path.join(RECMORE, "noorigin-lane")
 
 
 def _build_records_more():
     run, need, page = _rec_run, _rec_need, _rec_page
 
-    def advance(where, files, origin_head, start="HEAD"):
+    def advance(where, files, origin_head, start="HEAD", when=None):
         # origin/main moves on after the lane's cut; local main stays at the cut
         run(where, "checkout", "-q", "-b", "advance", start)
         for rel, text in files.items():
             write(os.path.join(where, rel), text)
         run(where, "add", "-A")
-        run(where, "commit", "-q", "-m", "main moves the page")
+        if when is None:
+            run(where, "commit", "-q", "-m", "main moves the page")
+        else:
+            _rec_run_at(when, where, "commit", "-q", "-m", "main moves the page")
         run(where, "update-ref", "refs/remotes/origin/main", "advance")
         run(where, "symbolic-ref", "refs/remotes/origin/HEAD", origin_head)
         run(where, "checkout", "-q", "main")
@@ -15318,10 +15356,177 @@ def _build_records_more():
          "the ancestor fixture: feat-merged is not in origin/main's history off its first-parent line, "
          "or the lane does not hold the branch's page")
 
+    # The stacked base `stack-base` is cut from main with its own page commit (B1). Its tip is NOT in origin/main's
+    # history. Each lane is cut from it at B1, then the base moves on to B2, and each lane merges it again.
+    make_repo(REC_STACK, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    advance(REC_STACK, {"docs/records.md": REC_V1}, "refs/remotes/origin/main")   # origin/main: v1
+    run(REC_STACK, "checkout", "-q", "-b", "stack-base")
+    write(page(REC_STACK), REC_STACK_CUT)
+    run(REC_STACK, "add", "-A")
+    run(REC_STACK, "commit", "-q", "-m", "stacked base page")
+    run(REC_STACK, "update-ref", "refs/remotes/origin/stack-base", "stack-base")
+    run(REC_STACK, "checkout", "-q", "main")
+    for name, where in REC_STACK_LANES.items():
+        run(REC_STACK, "worktree", "add", "-q", "-b", "lane-stack-" + name, where, "stack-base")
+        write(os.path.join(where, "src", "app.py"), "x = 2\n")   # the lane's own commit, so the merge is no fast-forward
+        run(where, "add", "-A")
+        run(where, "commit", "-q", "-m", "lane change")
+    run(REC_STACK, "checkout", "-q", "stack-base")
+    write(page(REC_STACK), REC_STACK_MOVED)
+    run(REC_STACK, "add", "-A")
+    run(REC_STACK, "commit", "-q", "-m", "stacked base moves on")
+    run(REC_STACK, "update-ref", "refs/remotes/origin/stack-base", "stack-base")
+    run(REC_STACK, "checkout", "-q", "main")
+    base_tip = run(REC_STACK, "rev-parse", "refs/heads/stack-base")
+    need(base_tip not in run(REC_STACK, "rev-list", "--first-parent", "origin/main").split(),
+         "the stacked fixture: the base's tip is on origin/main's first-parent line")
+    need(run(REC_STACK, "show", "origin/main:docs/records.md") == REC_V1.strip(),
+         "the stacked fixture: origin/main's page is not v1")
+    for name in REC_STACK_LANES:
+        run(REC_STACK_LANES[name], "merge", "-q", "--no-commit", "--no-ff", "origin/stack-base")
+        need(run(REC_STACK_LANES[name], "rev-parse", "--verify", "-q", "MERGE_HEAD") == base_tip,
+             "the stacked fixture: MERGE_HEAD is not the base's tip in the lane %r" % name)
+    lane = REC_STACK_LANES["merge"]
+    cut = run(lane, "merge-base", "HEAD", "MERGE_HEAD")
+    need(run_vcs(REC_STACK, "merge-base", "--is-ancestor", cut, "origin/main").returncode == 1,
+         "the stacked fixture: the lane's merge base with the base is on origin/main, so no unmerged history is shared")
+    need(run(lane, "show", "HEAD:docs/records.md") == REC_STACK_CUT.strip(),
+         "the stacked fixture: the merge lane's HEAD page is not the page it was cut with")
+    need(run(lane, "show", ":docs/records.md") == REC_STACK_MOVED.strip(),
+         "the stacked fixture: the merge lane's staged page is not the base's moved page")
+    write(page(REC_STACK_LANES["rebuilt"]), REC_REBUILT)
+    run(REC_STACK_LANES["rebuilt"], "add", "docs/records.md")
+    need(run(REC_STACK_LANES["rebuilt"], "show", ":docs/records.md") == REC_REBUILT.strip(),
+         "the stacked fixture: the rebuilt lane's staged page is not the hand-written page")
+    run(REC_STACK_LANES["quit"], "merge", "--quit")          # MERGE_HEAD removed; the index keeps the base's page
+    need(run_vcs(REC_STACK_LANES["quit"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0,
+         "the stacked fixture: the quit lane still has a merge in progress")
+    need(run(REC_STACK_LANES["quit"], "show", ":docs/records.md") == REC_STACK_MOVED.strip(),
+         "the stacked fixture: the quit lane's staged page is not the base's moved page")
+
+    # The criss-cross stacked base. Plain `git merge-base` must print M1 here, or the criss-cross case proves nothing,
+    # so the fixture stops when it does not.
+    make_repo(REC_CRISS, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    advance(REC_CRISS, {"docs/records.md": REC_V1}, "refs/remotes/origin/main", when=REC_T0 + 2000)   # origin/main: M1
+    m1 = run(REC_CRISS, "rev-parse", "origin/main")
+    run(REC_CRISS, "checkout", "-q", "-b", "criss-base", "main")                                       # cut from R
+    write(page(REC_CRISS), REC_STACK_CUT)
+    run(REC_CRISS, "add", "-A")
+    _rec_run_at(REC_T0 + 1000, REC_CRISS, "commit", "-q", "-m", "stacked base page")                    # S1
+    s1 = run(REC_CRISS, "rev-parse", "criss-base")
+    for name, lane in REC_CRISS_LANES.items():
+        run(REC_CRISS, "worktree", "add", "-q", "-b", "lane-criss-" + name, lane, "criss-base")
+        write(os.path.join(lane, "src", "app.py"), "x = 2\n")
+        run(lane, "add", "-A")
+        _rec_run_at(REC_T0 + 1100, lane, "commit", "-q", "-m", "lane change, " + name)
+    run(REC_CRISS, "checkout", "-q", "criss-base")
+    run_vcs(REC_CRISS, *IDENT, "merge", "--no-commit", "--no-ff", m1)                                  # the base merges M1
+    _require_conflict(REC_CRISS, "docs/records.md")
+    write(page(REC_CRISS), REC_STACK_MOVED)
+    run(REC_CRISS, "add", "docs/records.md")
+    _rec_run_at(REC_T0 + 2100, REC_CRISS, "commit", "-q", "--no-edit")                                # S2
+    s2 = run(REC_CRISS, "rev-parse", "criss-base")
+    run(REC_CRISS, "checkout", "-q", "main")
+    advance(REC_CRISS, {"docs/records.md": REC_MAIN_LATER}, "refs/remotes/origin/main",
+            start="refs/remotes/origin/main", when=REC_T0 + 2200)                                      # origin/main: M2
+    m2 = run(REC_CRISS, "rev-parse", "origin/main")
+    for name, text in (("merge", REC_STACK_MOVED), ("hand", REC_CRISS_HAND)):
+        lane = REC_CRISS_LANES[name]
+        _rec_run_at(REC_T0 + 2300, lane, "merge", "--no-edit", "-X", "ours", m2)                     # keeps its own page
+        run_vcs(lane, *IDENT, "merge", "--no-commit", "--no-ff", s2)                                # then the base's tip
+        need(run(lane, "rev-parse", "--verify", "-q", "MERGE_HEAD") == s2,
+             "the criss-cross fixture: MERGE_HEAD is not the base's tip in the lane %r" % name)
+        write(page(lane), text)
+        run(lane, "add", "docs/records.md")
+    lane = REC_CRISS_LANES["merge"]
+    need(set(run(lane, "merge-base", "--all", "HEAD", "MERGE_HEAD").split()) == {m1, s1},
+         "the criss-cross fixture: the lane's merge bases are not M1 and S1 (merge-base --all)")
+    need(run(lane, "merge-base", "HEAD", "MERGE_HEAD") == m1,
+         "the criss-cross fixture: plain merge-base does not print the main commit M1")
+    need(run_vcs(REC_CRISS, "merge-base", "--is-ancestor", m1, "origin/main").returncode == 0
+         and run_vcs(REC_CRISS, "merge-base", "--is-ancestor", s1, "origin/main").returncode == 1,
+         "the criss-cross fixture: M1 is not on origin/main, or S1 is")
+    need(run(lane, "show", ":docs/records.md") == REC_STACK_MOVED.strip()
+         and run(lane, "show", "HEAD:docs/records.md") == REC_STACK_CUT.strip(),
+         "the criss-cross fixture: the merge lane's staged page is not the base's moved page")
+    need(run(REC_CRISS_LANES["hand"], "show", ":docs/records.md") == REC_CRISS_HAND.strip(),
+         "the criss-cross fixture: the hand lane's staged page is not the hand-written page")
+
+    # A lane cut from main merges an unrelated unmerged branch B. X1 is a branch commit that main has merged; B is cut
+    # from X1 and merges origin/main at A1. The lane merges origin/main at M, the merge commit that holds X1.
+    make_repo(REC_UNREL, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(REC_UNREL, "checkout", "-q", "-b", "feat-x")
+    write(os.path.join(REC_UNREL, "src", "x.py"), "y = 1\n")
+    run(REC_UNREL, "add", "-A")
+    _rec_run_at(REC_T0 + 1000, REC_UNREL, "commit", "-q", "-m", "feature x")                          # X1
+    x1 = run(REC_UNREL, "rev-parse", "HEAD")
+    run(REC_UNREL, "checkout", "-q", "main")
+    write(page(REC_UNREL), REC_V1)
+    run(REC_UNREL, "add", "-A")
+    _rec_run_at(REC_T0 + 1100, REC_UNREL, "commit", "-q", "-m", "main moves the page")                # A1
+    a1 = run(REC_UNREL, "rev-parse", "HEAD")
+    run(REC_UNREL, "update-ref", "refs/remotes/origin/main", a1)
+    run(REC_UNREL, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run(REC_UNREL, "checkout", "-q", "-b", "unrelated", x1)
+    write(page(REC_UNREL), REC_UNREL_PAGE)
+    run(REC_UNREL, "add", "-A")
+    _rec_run_at(REC_T0 + 1200, REC_UNREL, "commit", "-q", "-m", "unrelated page")                     # B1
+    _rec_run_at(REC_T0 + 1300, REC_UNREL, "merge", "--no-edit", "-X", "ours", a1)                     # B2: origin/main at A1
+    b2 = run(REC_UNREL, "rev-parse", "HEAD")
+    run(REC_UNREL, "checkout", "-q", "main")
+    _rec_run_at(REC_T0 + 1400, REC_UNREL, "merge", "--no-edit", "--no-ff", "feat-x")                  # main takes X1: M
+    run(REC_UNREL, "update-ref", "refs/remotes/origin/main", "main")
+    run(REC_UNREL, "worktree", "add", "-q", "-b", "lane-unrelated", REC_UNREL_LANE, a1)               # cut from main at A1
+    write(os.path.join(REC_UNREL_LANE, "src", "app.py"), "x = 2\n")
+    run(REC_UNREL_LANE, "add", "-A")
+    _rec_run_at(REC_T0 + 1500, REC_UNREL_LANE, "commit", "-q", "-m", "lane change")
+    _rec_run_at(REC_T0 + 1600, REC_UNREL_LANE, "merge", "--no-edit", "origin/main")                    # origin/main at M
+    run_vcs(REC_UNREL_LANE, *IDENT, "merge", "--no-commit", "--no-ff", b2)
+    need(run(REC_UNREL_LANE, "rev-parse", "--verify", "-q", "MERGE_HEAD") == b2,
+         "the unrelated fixture: MERGE_HEAD is not the unrelated branch's tip")
+    write(page(REC_UNREL_LANE), REC_UNREL_PAGE)
+    run(REC_UNREL_LANE, "add", "docs/records.md")
+    bases = set(run(REC_UNREL_LANE, "merge-base", "--all", "HEAD", "MERGE_HEAD").split())
+    need(bases == {a1, x1}, "the unrelated fixture: the lane's merge bases are not A1 and X1 (merge-base --all)")
+    need(all(run_vcs(REC_UNREL, "merge-base", "--is-ancestor", base, "origin/main").returncode == 0 for base in bases),
+         "the unrelated fixture: a merge base is not on origin/main")
+    need(run(REC_UNREL_LANE, "show", ":docs/records.md") == REC_UNREL_PAGE.strip(),
+         "the unrelated fixture: the lane's staged page is not the unrelated branch's page")
+
+    make_repo(REC_NOORIGIN, {"docs/records.md": REC_V0, "src/app.py": "x = 1\n"})
+    run(REC_NOORIGIN, "checkout", "-q", "-b", "feat-page")
+    write(page(REC_NOORIGIN), REC_FEAT)
+    run(REC_NOORIGIN, "add", "-A")
+    _rec_run_at(REC_T0 + 1000, REC_NOORIGIN, "commit", "-q", "-m", "feature page")
+    feat = run(REC_NOORIGIN, "rev-parse", "refs/heads/feat-page")
+    run(REC_NOORIGIN, "checkout", "-q", "main")
+    run(REC_NOORIGIN, "worktree", "add", "-q", "-b", "lane-noorigin", REC_NOORIGIN_LANE, "main")
+    write(os.path.join(REC_NOORIGIN_LANE, "src", "app.py"), "x = 2\n")
+    run(REC_NOORIGIN_LANE, "add", "-A")
+    _rec_run_at(REC_T0 + 1100, REC_NOORIGIN_LANE, "commit", "-q", "-m", "lane change")
+    run_vcs(REC_NOORIGIN_LANE, *IDENT, "merge", "--no-commit", "--no-ff", "feat-page")
+    need(run_vcs(REC_NOORIGIN, "rev-parse", "--verify", "-q", "refs/remotes/origin/main").returncode != 0
+         and not run(REC_NOORIGIN, "remote"), "the noorigin fixture has an origin or an origin/main ref")
+    need(run(REC_NOORIGIN_LANE, "rev-parse", "--verify", "-q", "MERGE_HEAD") == feat,
+         "the noorigin fixture: MERGE_HEAD is not the feature branch's tip")
+    need(run(REC_NOORIGIN_LANE, "show", ":docs/records.md") == REC_FEAT.strip(),
+         "the noorigin fixture: the lane's staged page is not the feature branch's page")
+    need(run(REC_NOORIGIN_LANE, "show", "HEAD:docs/records.md") == REC_V0.strip()
+         and run(REC_NOORIGIN_LANE, "show", "main:docs/records.md") == REC_V0.strip(),
+         "the noorigin fixture: HEAD's page or the base's page is not v0")
+    bases = run(REC_NOORIGIN_LANE, "merge-base", "--all", "HEAD", "MERGE_HEAD").split()
+    need(bases and all(run_vcs(REC_NOORIGIN, "merge-base", "--is-ancestor", base, "origin/main").returncode == 128
+                       for base in bases),
+         "the noorigin fixture: a merge base's is-ancestor read against origin/main does not exit 128")
+    need(run_vcs(REC_NOORIGIN, "rev-list", "--first-parent", "origin/main").returncode != 0,
+         "the noorigin fixture: rev-list --first-parent origin/main does not fail")
+
 
 lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
               REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values(),
-              REC_ANC, REC_ANC_LANE], _build_records_more)
+              REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values(),
+              REC_CRISS, *REC_CRISS_LANES.values(), REC_UNREL, REC_UNREL_LANE,
+              REC_NOORIGIN, REC_NOORIGIN_LANE], _build_records_more)
 
 
 def records_refuse(name, command, lane, **kw):
@@ -15510,7 +15715,8 @@ records_allow("a chain that runs the generator, then add -A and commit, where th
 # A merge of origin/main brings the page of the base tip it merged, MERGE_HEAD's page. When origin/main
 # holds a newer page, that page is neither HEAD's, the base tip's nor origin/<base>'s, and the merge commit
 # holds it. The rule allows exactly that page, and only when MERGE_HEAD is a base tip on origin/<base>'s
-# first-parent line. Any other page is refused.
+# first-parent line, or when the lane shares unmerged history with its base (some best merge base of HEAD and
+# MERGE_HEAD is not on origin/<base>). Any other page is refused.
 #
 # The scope is exact blob equality with MERGE_HEAD's page: a rebuilt page, the page of a branch merged off
 # the first-parent line, and a page taken once the merge state is gone are refused.
@@ -15562,6 +15768,33 @@ records_allow("a test-author writes MERGE_HEAD's page into the tree, with no com
 # that tip is not a merge of a base tip, so the page it brings is not the base's own page.
 records_refuse("a test-author commit of a page from a branch merged into origin/main off its first-parent line",
              VCS + " commit -m x", REC_ANC_LANE, **RECORDS_AUTHOR)
+
+# A stacked base's merge: the base is cut from main, never merged into it, and the lane is cut from it. The base
+# moves on and the lane merges it again, so the merge brings the base's page and the lane shares unmerged history
+# with that base. Allowed. A page the lane wrote by hand, and a commit after `merge --quit`, stay refused.
+records_allow("a lane's merge of its unmerged stacked base, which moved on, with the base's page staged",
+              VCS + " commit -m x", REC_STACK_LANES["merge"])
+records_refuse("a lane's merge of its unmerged stacked base, with a page rebuilt by hand",
+               VCS + " commit -m x", REC_STACK_LANES["rebuilt"])
+records_refuse("a lane's commit of the stacked base's page after merge --quit, no merge in progress",
+               VCS + " commit -m x", REC_STACK_LANES["quit"])
+
+# A criss-cross stacked base: the lane and its base each merged origin/main at a different commit, so the lane's merge
+# has two best merge bases, S1 (off origin/main) and M1 (on it). Plain merge-base prints M1, which is on origin/main, so
+# the check must read every best base, not that one. The base's own page passes. A page written by hand is refused.
+records_allow("a lane's merge of a criss-cross stacked base, with the base's page staged", VCS + " commit -m x",
+              REC_CRISS_LANES["merge"])
+records_refuse("a lane's merge of a criss-cross stacked base, with a page written by hand", VCS + " commit -m x",
+               REC_CRISS_LANES["hand"])
+# A lane cut from main that merges an unrelated unmerged branch. Both best merge bases are on origin/main, so no base is
+# off main and the branch's page is refused.
+records_refuse("a lane's merge of an unrelated unmerged branch, whose merge bases are both on origin/main",
+               VCS + " commit -m x", REC_UNREL_LANE)
+# A failed is-ancestor read gives no stacked pass. origin/main is missing, so `merge-base --is-ancestor` exits 128, and
+# the first-parent read fails too. The commit is refused, though a branch's page is staged. An exit of 0 or 1 is a
+# read that answered.
+records_refuse("a lane's merge of a feature page, with no origin/main, so the is-ancestor read fails",
+               VCS + " commit -m x", REC_NOORIGIN_LANE)
 
 # =========================================================================== 5d. conflict markers
 #
@@ -16856,6 +17089,35 @@ sh("frozen shell: r2 cov, a multi-line commit message before a real write, denie
 sh("frozen shell: r2 cov, a /* and an apostrophe in a commit message before a real write, denies [r2 cov]",
    VCS + " commit -m \"don't /* stop\" && cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
+# gh-comment-body. A quoted `>` in the body of a gh pr comment, gh issue comment or gh pr review is text, not
+# a redirect: the body names a path and writes nothing. Main reads these calls as plain shell, so each form
+# reds on the frozen-path rule. The controls pin what stays refused: a redirect or a substitution that
+# runs in the body still reaches the rule that reads it.
+for _gh_lead, _gh_label in (("gh pr comment 1", "gh pr comment"), ("gh issue comment 1", "gh issue comment"),
+                            ("gh pr review 1 --comment", "gh pr review")):
+    for _gh_flag, _gh_form in (("--body", '--body "a > %s"'), ("-b", '-b "a > %s"'),
+                               ("glued --body=", '--body="a > %s"')):
+        sh("frozen data: gh-comment-body, %s with a %s quoted > onto the config settings, allows [gh-comment-body red]"
+           % (_gh_label, _gh_flag), _gh_lead + " " + _gh_form % CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen data: gh-comment-body, gh pr edit body with a quoted > onto the config settings, allows [gh-comment-body control]",
+   "gh pr edit 1 --body \"a > " + CFG_SETTINGS + "\"", "allow", cwd=NOGIT)
+sh("frozen data: gh-comment-body, a redirect onto the config settings from a gh pr comment body, denies [gh-comment-body control]",
+   "gh pr comment 1 --body hi > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: gh-comment-body, a gh pr comment redirect inside bash -c onto the config settings, denies [gh-comment-body control]",
+   "bash -c \"gh pr comment 1 --body hi > " + CFG_SETTINGS + "\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: gh-comment-body, a gh pr comment body that is only a $(echo) redirect onto the config settings, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"$(echo hi > " + CFG_SETTINGS + ")\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: gh-comment-body, a gh pr comment body that is only a backtick redirect onto the config settings, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"`echo hi > " + CFG_SETTINGS + "`\"", "deny", "frozen-path", cwd=NOGIT)
+sh("env: gh-comment-body, a gh pr comment body that is only a $(cat) of the env file, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"$(cat " + ENV + ")\"", "deny", "env-file", cwd=NOGIT)
+sh("env: gh-comment-body, a gh pr comment body that is only a backtick cat of the env file, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"`cat " + ENV + "`\"", "deny", "env-file", cwd=NOGIT)
+sh("frozen shell: gh-comment-body, an apostrophe and /* in a gh pr comment body before a real write, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"don't /* stop\" && cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: gh-comment-body, a multi-line gh pr comment body with a # before a real write, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"line one\n# two\" ; cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 # A program piped into python that reads its program from stdin
 # runs as code, so a frozen write inside it must deny, as `python -` does. The /dev/stdin, /dev/fd/0,
 # /proc/self/fd/0 and CON forms name the same stdin (_STDIN_FILES).
@@ -18040,6 +18302,24 @@ sh("builder join: a temp folder from mkdtemp() joined inline to tests is allowed
 sh("builder join: a TemporaryDirectory held in a variable, joined through .name to tests is allowed",
    '''python3 -c "import os, tempfile; td = tempfile.TemporaryDirectory(); open(os.path.join(td.name, 'tests', 'test_x.py'), 'w')"''',
    "allow", **B)
+
+# gh-comment-body. A quoted `>` in the body of a gh comment or review is text, not a redirect. Main's builder
+# rule reads it as a redirect onto a test file, so each form reds. The controls: a path no test covers is
+# allowed, and a redirect onto a test file that runs in the body is still refused.
+for _gh_lead, _gh_label in (("gh pr comment 1", "gh pr comment"), ("gh issue comment 1", "gh issue comment"),
+                            ("gh pr review 1 --comment", "gh pr review")):
+    for _gh_flag, _gh_form in (("--body", '--body "a > %s"'), ("-b", '-b "a > %s"'),
+                               ("glued --body=", '--body="a > %s"')):
+        sh("builder-test: gh-comment-body, %s with a %s quoted > onto a test file, allows [gh-comment-body red]"
+           % (_gh_label, _gh_flag), _gh_lead + " " + _gh_form % "src/test_app.py", "allow", **B)
+sh("builder-test: gh-comment-body, a gh pr comment body with a quoted > onto a non-test path, allows [gh-comment-body control]",
+   'gh pr comment 1 --body "a > src/x"', "allow", **B)
+sh("builder-test: gh-comment-body, a redirect onto a test file from a gh pr comment body, denies [gh-comment-body control]",
+   "gh pr comment 1 --body hi > src/test_app.py", "deny", rule=BT, **B)
+sh("builder-test: gh-comment-body, a gh pr comment redirect inside bash -c onto a test file, denies [gh-comment-body control]",
+   "bash -c \"gh pr comment 1 --body hi > src/test_app.py\"", "deny", rule=BT, **B)
+sh("builder-test: gh-comment-body, a gh pr comment body that is only a $(echo) redirect onto a test file, denies [gh-comment-body control]",
+   "gh pr comment 1 --body \"$(echo hi > src/test_app.py)\"", "deny", rule=BT, **B)
 
 # ---- a script file a builder runs by name (debt script-file-runs-test-write)
 # A shell call that runs a python or node file by name is judged by the writes that file's body makes,
