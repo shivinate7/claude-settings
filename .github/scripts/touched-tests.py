@@ -76,8 +76,8 @@ HEAVY = {
 
 # Suites that need a browser or a tool this workflow does not install (glob -> reason).
 NEEDS_SETUP = {
-    "*/tests/page.test.mjs": "needs Playwright and Chromium; runs in checks-shoot on Linux only",
-    "skills/waiting-page/tests/test_check_designs.mjs": "needs Playwright and Chromium; runs in checks-shoot on Linux only",
+    "*/tests/page.test.mjs": "needs Playwright and Chromium; runs in checks-shoot (roadmap) or checks-waiting-page (waiting page) on Linux only",
+    "skills/waiting-page/tests/test_check_designs.mjs": "needs Playwright and Chromium; runs in checks-waiting-page on Linux only",
     "lint/test_shoot.mjs": "needs Playwright and Chromium; runs in checks-shoot on Linux only",
     "lint/test_ios_ship.sh": "needs macOS tooling (bin/ios-ship); runs in shell-macos only",
     "lint/test_sim_test.sh": "needs macOS tooling (bin/sim-test); runs in shell-macos only",

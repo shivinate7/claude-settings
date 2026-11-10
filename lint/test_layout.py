@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINT = os.path.abspath(os.environ.get("LAYOUT_LINT_UNDER_TEST") or HERE)
@@ -396,7 +397,44 @@ class RecordBranch(Tree):
                     self.layout.record_branch(self.tree)
 
 
-class WaitingCopy(Tree):
+class GitTree(Tree):
+    """The git steps of a fixture repo: one home for the cases that build one (WaitingCopy, DefaultBranchPage)."""
+
+    def git(self, *args, input=None, env=None):
+        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
+        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
+        return done.stdout
+
+    def record(self, branch, files):
+        """A branch whose one commit holds `files` ({path: text}): refs/heads/<branch>, or the full ref when `branch`
+        starts with refs/, such as refs/remotes/origin/main. Plumbing only: no checkout moves."""
+        ref = branch if branch.startswith("refs/") else "refs/heads/" + branch
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "index-" + ref.replace("/", "_")))
+        self.git("read-tree", "--empty", env=env)
+        for rel, text in files.items():
+            blob = self.git("hash-object", "-w", "--stdin", input=text, env=env).strip()
+            self.git("update-index", "--add", "--cacheinfo", "100644," + blob + "," + rel, env=env)
+        tree = self.git("write-tree", env=env).strip()
+        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
+        self.git("update-ref", ref, commit)
+
+    def ref_exists(self, ref):
+        return subprocess.run(["git", "-C", self.tree, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
+
+    def origin_only(self, branch):
+        """The branch on a bare origin, with no local ref: what a fetch leaves behind."""
+        bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
+        self.addCleanup(tracked_tree.rm_tree, bare)
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
+        self.git("remote", "add", "origin", bare)
+        self.git("push", "-q", "origin", branch)
+        self.git("update-ref", "-d", "refs/heads/" + branch)
+        self.assertTrue(self.ref_exists("refs/remotes/origin/" + branch), "the fixture lost origin's ref")  # scope: the fixture
+        self.assertFalse(self.ref_exists("refs/heads/" + branch), "the fixture kept the local ref")
+
+
+class WaitingCopy(GitTree):
     """The waiting page's copy lives in `waiting/` on the record branch (decision waiting-data-in-repo). A repo whose
     extras file names a waiting page must hold that folder there. The child-repo layout probe runs the check, and it
     reads the branch that record_branch() names, the local ref first, then origin's. A branch that cannot be read is
@@ -418,41 +456,10 @@ class WaitingCopy(Tree):
         self.git("add", "-A", "-f")
         self.git("commit", "-q", "-m", "base")
 
-    def git(self, *args, input=None, env=None):
-        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
-        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
-                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
-        return done.stdout
-
     def extras(self, keys):
         data = {"kinds": {}, "rolled-out": True}
         data.update(keys)
         self.put(EXTRAS, json.dumps(data))
-
-    def record(self, branch, files):
-        """A record branch whose one commit holds `files` ({path: text}). Plumbing only: no checkout moves."""
-        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "index-" + branch))
-        self.git("read-tree", "--empty", env=env)
-        for rel, text in files.items():
-            blob = self.git("hash-object", "-w", "--stdin", input=text, env=env).strip()
-            self.git("update-index", "--add", "--cacheinfo", "100644," + blob + "," + rel, env=env)
-        tree = self.git("write-tree", env=env).strip()
-        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
-        self.git("update-ref", "refs/heads/" + branch, commit)
-
-    def ref_exists(self, ref):
-        return subprocess.run(["git", "-C", self.tree, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
-
-    def origin_only(self, branch):
-        """The branch on a bare origin, with no local ref: what a fetch leaves behind."""
-        bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
-        self.addCleanup(tracked_tree.rm_tree, bare)
-        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
-        self.git("remote", "add", "origin", bare)
-        self.git("push", "-q", "origin", branch)
-        self.git("update-ref", "-d", "refs/heads/" + branch)
-        self.assertTrue(self.ref_exists("refs/remotes/origin/" + branch), "the fixture lost origin's ref")  # scope: the fixture
-        self.assertFalse(self.ref_exists("refs/heads/" + branch), "the fixture kept the local ref")
 
     def probe(self):
         return run([os.path.join(LINT, "compliance_probes.py"), "layout", self.tree], self.tree)
@@ -516,6 +523,131 @@ class WaitingCopy(Tree):
         self.assertEqual(code, 2, out)
         self.assertIn("unknown", out)
         self.assertNotIn("preview finding", out, "an unread copy reads as a clear preview")
+
+
+class DefaultBranchPage(GitTree):
+    """A checkout with no extras file reads the waiting page from the repo's default branch on origin: the branch
+    origin/HEAD names, else origin/main (skill waiting-page). A worktree on the record branch can hold no extras file;
+    without this read its page would read as unknown and its page checks would not run. The read is of the ref only: no
+    checkout moves and no fetch runs."""
+    URL_MAIN = "https://claude.ai/artifact/fromorigin"
+    URL_LOCAL = "https://claude.ai/artifact/fromlocal"
+    URL_TRUNK = "https://claude.ai/artifact/fromtrunk"
+    REMOTE = "https://github.com/owner/fixture.git"
+    BRIEF = {"briefs/a.md": "# Brief\n"}
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.git("init", "-q")
+        self.record("roadmap", self.BRIEF)
+        self.git("checkout", "-q", "roadmap")  # the checkout is on the record branch, which holds no extras file
+
+    def registry(self, url):
+        """The extras file as main holds it: the page is the registry entry whose role is waiting-page."""
+        return json.dumps({"kinds": {}, "artifacts": [{"id": "queue", "url": url, "role": "waiting-page", "account": "current"}]})
+
+    def old_key(self, url):
+        return json.dumps({"kinds": {}, "waiting-page": url})
+
+    def scope_checkout(self):
+        self.assertFalse(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+
+    def scope_origin(self, ref):
+        """The ref holds the extras file, so an unknown page is the read's fault, not the fixture's."""
+        found = subprocess.run(["git", "-C", self.tree, "cat-file", "-e", ref + ":" + EXTRAS], capture_output=True).returncode
+        self.assertEqual(found, 0, "scope: the fixture's %s holds no extras file" % ref)
+
+    def test_origin_main_registry_names_the_page_at_a_checkout_with_no_extras_file(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_MAIN,
+                         "the checkout has no extras file, so the page reads as unknown, though origin/main holds it")
+
+    def test_origin_main_old_key_names_the_page_at_a_checkout_with_no_extras_file(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.old_key(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_MAIN,
+                         "the checkout has no extras file, so the page reads as unknown, though origin/main holds it")
+
+    def test_is_waiting_page_url_names_the_origin_main_page_at_a_checkout_with_no_extras_file(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.assertTrue(self.layout.is_waiting_page_url(self.tree, self.URL_MAIN),
+                        "the checkout has no extras file, so its page url reads as unknown and does not name the page")
+
+    def test_the_checkouts_own_extras_file_wins_over_origin(self):
+        self.put(EXTRAS, self.old_key(self.URL_LOCAL))
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_origin("refs/remotes/origin/main")
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds no extras file")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_LOCAL,
+                         "the page is read from origin, not from the checkout's own extras file")
+
+    def test_origin_head_names_the_default_branch(self):
+        self.record("refs/remotes/origin/trunk", {EXTRAS: self.registry(self.URL_TRUNK)})
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/trunk")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertEqual(self.git("symbolic-ref", "refs/remotes/origin/HEAD").strip(), "refs/remotes/origin/trunk",
+                         "scope: origin/HEAD does not name the trunk branch")
+        self.assertEqual(self.layout.waiting_page(self.tree), self.URL_TRUNK,
+                         "the checkout has no extras file, so the page reads as unknown, though origin/HEAD names a branch that holds it")
+
+    def test_no_origin_at_all_is_unknown_not_an_error(self):
+        self.scope_checkout()
+        self.assertEqual(self.git("remote").strip(), "", "scope: the fixture has a remote")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "a repo with no origin and no page reads as unknown")
+        self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL_MAIN))
+
+    def test_origin_without_main_is_unknown_not_an_error(self):
+        self.git("remote", "add", "origin", self.REMOTE)
+        self.record("refs/remotes/origin/dev", self.BRIEF)
+        self.scope_checkout()
+        self.assertFalse(self.ref_exists("refs/remotes/origin/main"), "scope: the fixture has an origin/main")
+        self.assertFalse(self.ref_exists("refs/remotes/origin/HEAD"), "scope: the fixture has an origin/HEAD")
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "an origin with no default branch reads as unknown")
+
+    def hooks_unimportable(self):
+        """The hooks folder cannot be imported here: a None entry in sys.modules makes `import _nowindow` raise
+        ImportError, as a copy of lint/ with no hooks/ beside it does. patch.dict restores the entry at cleanup."""
+        patch = mock.patch.dict(sys.modules, {"_nowindow": None})
+        patch.start()
+        self.addCleanup(patch.stop)
+        try:
+            import _nowindow  # noqa: F401
+        except ImportError:
+            return
+        self.fail("scope: _nowindow still imports with hooks/ made unimportable")
+
+    def read_without_raising(self, read):
+        """The read's value on this checkout. A raise fails the assert and names the raise: the read never raises."""
+        try:
+            return read(self.tree)
+        except Exception as err:
+            self.fail("%s raised %s when hooks/ is unimportable; the read must return None or unknown"
+                      % (read.__name__, type(err).__name__))
+
+    def test_default_branch_read_without_hooks_returns_none(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.hooks_unimportable()
+        self.assertIsNone(self.read_without_raising(self.layout._default_branch_extras),
+                          "the read cannot start git without the no-window helper, so it returns None")
+
+    def test_waiting_page_without_hooks_reads_unknown(self):
+        self.record("refs/remotes/origin/main", {EXTRAS: self.registry(self.URL_MAIN)})
+        self.scope_checkout()
+        self.scope_origin("refs/remotes/origin/main")
+        self.hooks_unimportable()
+        self.assertEqual(self.read_without_raising(self.layout.waiting_page), "unknown",
+                         "the read returns None without the no-window helper, so the page reads as unknown")
 
 
 class SetWaitingPage(Tree):
@@ -814,6 +946,23 @@ class Registry(Tree):
             self.artifacts()
         self.assertIn("collections", str(caught.exception), "the refusal does not name the missing collections")
         self.assertIn("ext001", str(caught.exception), "the refusal does not name its entry")
+
+    def test_a_page_only_entry_with_empty_collections_is_read(self):
+        """A page-only artifact gives `collections` []: its page and files export, and it holds no database."""
+        self.registry([self.queue_entry(collections=[])])
+        found = self.read_registry("a page-only entry with collections []")
+        self.assertEqual([e["id"] for e in found], ["queue02"], "the page-only entry was not read")
+        self.assertEqual(found[0]["collections"], [], "the page-only entry was not read with no collections")
+
+    def test_a_page_only_entry_exports_to_its_artifact_folder(self):
+        self.registry([self.queue_entry(collections=[])])
+        found = self.read_registry("a page-only entry with collections []")
+        self.assertEqual(found[0]["export"], "artifacts/queue02", "a page-only entry does not export to artifacts/<id>")
+
+    def test_a_waiting_page_entry_with_empty_collections_is_still_refused_and_named(self):
+        """Control: the waiting page exports its five collections, so an empty list on its role is refused, not read."""
+        self.registry([self.page_entry(collections=[])])
+        self.assertReported("page01", "a waiting-page entry with collections []")
 
     def test_an_export_path_entry_keeps_its_path(self):
         """Control: an entry with a path exports to that path, as it does today."""
@@ -1153,6 +1302,7 @@ class ConstantCheck(Tree):
         tracked_tree.copy_tracked(self.tree, "lint", "actions")  # the lint readers, the actions and the stamp examples
         os.makedirs(os.path.join(self.tree, "hooks"))  # the check parses hooks/ text and imports none of it
         shutil.copyfile(os.path.join(REPO, "hooks", "guard.py"), os.path.join(self.tree, "hooks", "guard.py"))
+        shutil.copyfile(os.path.join(REPO, "hooks", "git_reads.py"), os.path.join(self.tree, "hooks", "git_reads.py"))
         for name in ("layout.py", "layout.json", "check_layout.py"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
 
@@ -1249,6 +1399,12 @@ class ConstantCheck(Tree):
         self.edit("hooks/guard.py", 'RECORD_LAYOUT_FILE = os.path.join("lint", "layout.json")',
                   'RECORD_LAYOUT_FILE = os.path.join("lint", "check_record_slugs.py")')
         self.assert_red("RECORD_LAYOUT_FILE")
+
+    def test_extras_literal_that_drifts_from_the_layout_is_red(self):
+        # hooks/git_reads.py repeats the layout's "extras" path so a lane reads one file; the check pins it like RECORD_LAYOUT_FILE.
+        self.edit("hooks/git_reads.py", 'LAYOUT_EXTRAS = (".claude", "layout-extras.json")',
+                  'LAYOUT_EXTRAS = (".claude", "extras.json")')
+        self.assert_red("LAYOUT_EXTRAS")
 
     def test_action_default_that_names_a_folder_is_red(self):
         self.edit("actions/ruling-kind/action.yml", 'default: ""', "default: decisions")
@@ -1348,7 +1504,7 @@ SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asse
 class MockupHomes(Tree):
     """The one mockup home of a repo is its design folder: a mockup is a repo path under it, and git holds it. The
     machine-home form ~/Developer/<repo name>-imports is refused. Two readers:
-    mockup_homes(root, home=None) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
+    mockup_homes(root) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
     file in the design folder and a sentence for any other file. The home is passed in, so no case reads or writes
     the real home. A missing name fails by name (not built yet)."""
 

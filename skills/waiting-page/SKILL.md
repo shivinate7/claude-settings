@@ -27,6 +27,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 ## The database
 
+Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
+
 - `items/<id>`: one per waiting item. The database key and the `id` field must be the same
   string. The page keys on the database key, and warns on an item whose `id` field is missing or
   different. Fields: `id`, `n` (a stable number the owner answers by),
@@ -131,6 +133,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
     with `waits` and `lastAnswer` reads as answered on the page.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
+  - `repo` (`owner/name`, as in `waits`) is the repo the question is about. It is required on every open decision and task. A page's own repo writes its own name.
+  - `checked_with` is the session id of the triage, coordinator or owner's-computer session of that repo that said the owner has not ruled on it. It is required when `repo` is not this page's repo. It is never the session in the item's `owner` or, in a cloud session, the session that writes the item. To change `repo` or `checked_with`, send an `update` that carries both; a `str_replace` on either, or an `update` with `checked_with` and no `repo`, is refused. The writer refuses an item without it (guard rule `question-checked-with-repo`).
   - Before writing `reply`, `replied`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
     check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the five.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
@@ -157,7 +161,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   `id` (the entry's `id`), `act` (`unpark` or `drop`), `ref` and `note` (copies of the entry's), `at`. It names no item and
   counts toward none. Its key holds a dot, which an item id never holds, so it never meets an item's key. Undo and withdraw delete it, as for any answer.
 - `receipts/<id>`: written by the owning session, never by the page. Fields: `read` (ISO time the
-  session read the answer) and `filed` (ISO time it moved the answer to `home`). The page shows
+  session read the answer) and `filed` (ISO time it moved the answer to `home`). Write both as ISO UTC with a
+  trailing `Z`: the `--unread` check reads a time with no zone in the host's zone. The page shows
   them on the answered card. In a tier (an item answered on the open page), with no record the card says
   "Answered, filing pending" and the save time; with `filed`, "Answered, filed in <home>" (the item's `home`) and the
   filed time. In the Answered section, the same two read "Filing pending, sent" and "Filed in <home>". With only
@@ -184,7 +189,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
-  `{id, ref, note}`: `id` is a slug of 32 characters or fewer, unique in the list, that you set; a line with no `id` has its acts off) and `identity` (`{name, mark, brand, face, icon}`).
+  `{id, ref, note}`: `id` is a slug of 32 characters or fewer, unique in the list, that you set; a line with no `id` has its acts off) and `identity` (`{name, mark, brand, face, icon}`). The field `woke` is optional.
+  - `woke` is the ISO UTC time of the writer's previous wake, with a trailing `Z`. Only the writer writes it. At a comment wake the writer runs `--unread` ("Read the answers"), then writes `woke` at the end of that wake. With no `woke`: the first run; every answer with no receipt is listed. An answer still in its 10 s wait may be listed once. The cost is one message with no answer text.
   - `name` is the repo's name. It shows on the colour bar and in the tab title.
   - `mark` is one letter for the bar. It defaults to the first letter of `name`.
   - `brand` is one hex colour, such as `#f47820`. The page derives every colour from it and
@@ -281,7 +287,7 @@ repo's waiting page from a file behind main is refused, and its reason repeats s
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`, and with `--answers` one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
+one short read-only git process, with no fetch, and one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo
@@ -323,8 +329,12 @@ The scan reads shapes: tokens, keys, cookie and auth headers, named cookies set 
 passwords, URL query secrets and credentials in a URL. It reads secret, token, key or cookie names in any case form set to a random-looking value
 (`API_SECRET=...`, `apiKey: ...`). It also reads email addresses,
 phone numbers and postal addresses (street, PO box, "City, ST ZIP"). A personal fact in plain words, such as an employer or a city name alone, passes. Do not write one in an item.
-A password word with a placeholder, a mask or a plain word as its whole value, `PWD=<path>`, a no-reply address and
-the ssh remote of a public git host pass.
+A password word with a placeholder, a mask or a plain word as its value, and only blanks or plain prose after it on
+its line, passes. Prose is a function word, then letter words. After a `,` `;` or and/or/but/is/are, a later word on the
+line that is no function word refuses. The `,` `;` or `.` that ends the value does not count. So `none, then swordfish`
+passes, and `none and swordfish` does not. `PWD=<path>`, a no-reply address and the ssh remote of a public git host pass
+too. So does a `key` that ends one of nine everyday words (monkey, hotkey, turkey, turnkey, donkey, whiskey, jockey,
+hockey, lackey), when the word starts at a non-letter or the string start: `turnkey=` passes, `superturnkey=` refuses.
 
 Cost: one list call per page of each collection, one python process, and one commit when something changed. No
 timer, no watcher.
@@ -333,7 +343,8 @@ timer, no watcher.
 
 Each claude.ai artifact a repo holds is one entry in the `artifacts` key of its extras file
 (`python3 ~/.claude/lint/layout.py artifacts <repo root>` prints them). An entry has `id`, `url`, `role` and
-`account`. A role other than `waiting-page` also has `collections`, the collections to export. `id` is a slug of
+`account`. A role other than `waiting-page` also has `collections`, the collections to export. An empty list
+(`"collections": []`) makes a page-only entry: its page and files export, and no database does. `id` is a slug of
 32 characters or fewer. `account` is a plain label such as `work`, never an email. The role `waiting-page` marks
 the repo's waiting page. Its default collections are the five above, and its export folder is the waiting-data
 folder. Any other artifact exports to `artifacts/<id>/`. The old `waiting-page` key stays the fallback when no entry
@@ -358,7 +369,11 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    and each file of `Artifact` action `list` scope `files` to `<folder>/<id>/files/<path>`.
 3. Run `python3 ~/.claude/skills/waiting-page/export_page.py --all <repo root> --fetched <folder> --worktree <worktree>`.
    It prints one line per artifact, `<id>: <verdict>`, with the verdicts of a single export, or
-   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. The page and each
+   `<id>: skipped - no export` for an entry held with `"export": false`, which needs no folder. When the session
+   can read only one account's pages, pass `--account <label>` with its own account's label from the registry; without
+   it, each page the session cannot fetch prints `<id>: unknown`. An entry of another account prints
+   `<id>: skipped - account <its account>`, needs no folder and writes nothing. A label no entry holds, or an empty
+   one, prints one `unknown` line, writes nothing and exits 2. The page and each
    text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
    branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
@@ -377,7 +392,10 @@ live page.
    step 1 says.
 3. Make one new empty folder. Run
    `python3 ~/.claude/skills/waiting-page/export_page.py --rebuild <copy folder> --batches <new folder>`.
-   It prints `batches <k> docs <n>`. An empty or missing copy folder is `unknown`. Stop and say so.
+   For an artifact other than the waiting page, add `--collections <names>`: the `collections` of its registry entry,
+   or its folders are `unknown`. It prints `batches <k> docs <n>`. An empty or missing copy folder is `unknown`. Stop
+   and say so. A page-only copy (registry `collections: []`) has no docs, so `--rebuild` reports it holds no docs.
+   Restore it by publishing its `page/page.html` (and `page/files/`) to a new page.
 4. Send each `batch-NNN.json` list to the new page as one `ArtifactData batch`, in order. Each entry is a `set`.
 5. Put the mockups back. Take main's `page.html`. Replace the text inside its `designData` script element with
    the JSON of `page/designData.json`. Write each `<` as `\u003c`, so no string can close the script. Publish
@@ -385,6 +403,34 @@ live page.
 6. Read the new page's items back. Their count must equal the count of files in the copy's `items` folder.
 7. Write the new URL into the repo's extras file, in a pull request. Set the `url` of the `waiting-page` role entry
    in `artifacts`. If the repo has no such entry, set the `waiting-page` key.
+
+## Merge a copy into a live page
+
+Use this when two accounts each wrote a page for the same repo. One account's page is live. The other account's
+export is in the repo copy. This adds the copy's missing items to the live page. The live page wins, so a live item
+is never changed.
+
+1. Check out the record branch in its own worktree and name the copy folder, as "Keep a copy in the repo" step 1 says.
+2. Fetch the live page's collections into one new folder, `<live folder>`, as "Keep a copy in the repo" step 2 says.
+   Touch `.complete` in each collection folder after its last page. A folder with no marker is `unknown`. Also read
+   the live page with `Artifact` action `read`, and use the file the read names as `<html file>`. A read that gives a
+   summary, not the raw page, is `unknown`.
+3. Make one new empty folder, `<out folder>`. Run
+   `python3 ~/.claude/skills/waiting-page/export_page.py --merge <copy folder> --live <live folder> --batches <out folder> --live-page <html file>`.
+   For an artifact other than the waiting page, add `--collections <names>`.
+4. Read the last line: `batches <k> docs <n> kept-live <s> renumbered <r> designs <d>`. `renumbered` counts the copied
+   items that took a new `n` because the live page holds theirs. Each such item's answer takes the same `n`. A copy
+   answer is skipped when the live page holds its item. An `unknown` line writes nothing. Say it in the reply.
+5. Send each `batch-NNN.json` list to the live page as one `ArtifactData batch`, in order. Each entry is a `set`.
+6. Read the live page's items back. Their count must equal the count of live items from step 2, plus the items among
+   the `<n>` written docs.
+7. Put the mockups in, on main's code ("Keep the page on main's code"). Run its read, `stale_pages.py --write` and copy
+   steps on the live page. The page that `--write` writes is main's `page.html` with the live roadmap block carried
+   over. In that page, replace the text inside the `designData` script element with `<out folder>/designData.json`,
+   as is. The file already writes each `<` as `\u003c`, so no string can close the script. Publish that page once to
+   the live URL, as that section's republish step says.
+8. Rewrite each `page item <n>` cite of the copy's account in the roadmap, with `<out folder>/renumbered.json`: the
+   key is the old `n`, and the value is the new one. Commit it on the record branch.
 
 ## Add an item
 
@@ -400,6 +446,7 @@ live page.
    `a`, `b`, `c` in order, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
+   - Set `repo`. When it is not this page's repo, ask that repo's triage, coordinator or owner's-computer session whether the owner has ruled, and write its session id as `checked_with` (rule `question-checked-with-repo`).
    - Before you write a decision, run the owner-judge test: can the owner judge it from what he already knows?
      An undoable choice on internals he has no stake in is not asked. Take your own pick and set `stands: true`.
      A question stays only when it touches his goals, his money, a risk he would care about, a rule, or an act that
@@ -447,6 +494,9 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
+- At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
+  At the end of that wake it writes `woke`. It uses `ArtifactData update meta/page` with only `woke`, never `set`: `set` drops `parked`, `identity` and `checked`. The value is the time now, ISO UTC with a trailing `Z`. On exit 2 it does not write `woke`.
+  The check reads only the receipt field `read`. It does not use `filed`. It adds no store.
 - The owner can Undo a Send for 8 seconds, and Undo deletes the answers. Wait 10 seconds after an
   answer's `at` before you route it. An "Undone on the waiting page" notice withdraws the items it
   names.
@@ -457,7 +507,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
-  Do it as "Route and close" says: the busy-lane rule for a `none` note with a clear direction (file the note as a step), step 3 for other new options (or a close when they are not ready), or step 4 (context). With no answer, there is no
+  Do it as "Route and close" says: the busy-lane rule for a `none` note with a clear direction (file the note as a roadmap step, or a todo record where there is no roadmap), step 3 for other new options (or a close when they are not ready), or step 4 (context). With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
@@ -472,10 +522,10 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
 - `choice: "none"` asks for new options, unless its note gives a clear direction. It never picks an option.
   With a clear direction (see "A decision answer is clear only when"), it is a clear answer: the note becomes
-  a step, routed by the busy-lane rule in "Route and close". The owner is not asked again. Otherwise treat it as step 3 of
+  a roadmap step (a todo record where there is no roadmap), routed by the busy-lane rule in "Route and close". The owner is not asked again. Otherwise treat it as step 3 of
   "Route and close" says. Who judges: the routing session decides when it reads the answer. The page judge
   (`hooks/call_judge.py`, whose rule name is `question-judge`) also checks a re-ask write: one that gives the
-  item new `options` and carries a `lastAnswer` note. It refuses that write when the note already names a
+  item new `options` and carries a `lastAnswer` note with no picked choice (`choice` absent or `none`). It refuses that write when the note already names a
   clear direction (decision `question-reviewer-agent-hook`, the judge's record). In the terminal, "27 none of these (note)" is the same
   answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
   `+`, in rank order when `ranked`.
@@ -545,10 +595,10 @@ While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `ans
 `waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}, "replied": "<now>"}`). With `lane` set, that is all: the close and the
 delete of `answers/<id>` wait for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
 
-1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
+1. Write `receipts/<id>` with `read` set to now, ISO UTC with a trailing `Z` (a time with no zone is read in the host's zone). Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
-   home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
-   direction becomes a step: a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
+   home) says. When it is there, update the receipt with `filed` set to now, in the same form. A `none` answer with a clear
+   direction becomes a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
    `git rev-parse --verify --quiet origin/<branch>^{commit}` succeeds, with `<branch>` from `record_branch()` in `~/.claude/lint/layout.py`, default `roadmap`). Otherwise it becomes a todo record
    (layout `todo` or `debts`). When the home is a roadmap step, the filed note cites `page item <n>`, which the
    roadmap upkeep row "page rulings not on their step" checks.

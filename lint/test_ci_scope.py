@@ -9,7 +9,7 @@ scratch tree with a copy of mod-tests.sh and run it there; they need node on PAT
 Output names pinned (the `scope` job re-exports them as job outputs):
   JOB_FLAGS  one per check job except the lint job `checks`: checks_windows, checks_windows_merge,
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
-  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the whole checks-shoot job)
+  STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the checks-shoot and checks-waiting-page jobs)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
@@ -226,6 +226,14 @@ class Scope(unittest.TestCase):
         self.assertEqual(reader, self.true_set(run(["lint/_transcript.py"])))
         self.assertTrue({"checks_windows_rest", "checks_macos", "code", "guard"} <= reader, reader)
 
+    # lint/_clause.py: report_guard.py imports it, and test_clause.py is its suite. It sits in the hooks/* arm of ci-scope.sh,
+    # so an edit turns on that arm's jobs and no merge job (only the transcript reader and guard_log_report.py reach that one).
+    # An edit, not a new file: a new file under lint/ also turns on the landed-dir jobs, which is another arm's rule.
+    def test_clause_parser_change_selects_the_jobs_the_arm_names(self):
+        self.assertEqual(self.true_set(run(["lint/_clause.py"], existing=["lint/_clause.py"])),
+                         {"checks_windows_rest", "checks_macos", "code", "guard"},
+                         "lint/_clause.py must select the hooks/* arm's jobs and no merge job")
+
     # Guard family: hooks/guard_<anything>.py is split out of hooks/guard.py. Each sibling must set
     # exactly the flags guard.py sets, as a new file and as an edit. Today the generic hooks/* rule
     # gives a new sibling no sweep flag, and an edited one no Windows or shell job.
@@ -369,6 +377,13 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
+    # bin/duo-fold and its suite run in the shell-macos job only, like bin/sim-test (bash 3.2 on macOS).
+    # Named failure: without the arm, bin/duo-fold turns every flag on, and the suite turns on `code` alone.
+    def test_duo_fold_edit_turns_on_only_the_macos_shell_job(self):
+        for p in ("bin/duo-fold", "lint/test_duo_fold.sh"):
+            with self.subTest(path=p):
+                self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+
     # bin/shoot's suite installs a browser, so its own paths and the browser installers turn `shoot` on. An edit sets
     # `code` and `shoot` and no other flag in true_set (checks_guard is outside ALL; the cases below pin it).
     # An unrelated code change leaves `shoot` off.
@@ -379,8 +394,9 @@ class Scope(unittest.TestCase):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
         self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
 
-    # checks-guard and checks-shoot both install actions/playwright-setup, and checks-guard gates on checks_guard
-    # alone (checks.yml). An edit to the action must set checks_guard directly, with `shoot` for checks-shoot.
+    # actions/playwright-setup has four callers (checks.yml): checks-guard and checks-guard-2 gate on checks_guard
+    # alone, and checks-shoot and checks-waiting-page gate on shoot alone. An edit to the action must set
+    # checks_guard directly, with `shoot` for the two shoot jobs.
     # Named failure: the action arm sets code and shoot only, so checks-guard skips its install and guard suite.
     def test_playwright_action_edit_turns_on_the_checks_guard_job(self):
         p = "actions/playwright-setup/action.yml"
@@ -407,7 +423,7 @@ class Scope(unittest.TestCase):
         self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
 
     # pin.sh is the install script checks-guard runs from actions/playwright-setup. Named failure: an edit that
-    # starts checks-shoot alone leaves the checks-guard install on the old script.
+    # starts the shoot jobs and no checks-guard job leaves the checks-guard install on the old script.
     def test_playwright_pin_script_edit_turns_on_the_checks_guard_job(self):
         p = "actions/playwright-setup/pin.sh"
         got = run([p], existing=[p])
@@ -415,8 +431,8 @@ class Scope(unittest.TestCase):
         self.assertIn("checks_guard", got, got)
         self.assertEqual(got["checks_guard"], "true", f"checks_guard: {got}")
 
-    # A .md edit under the action is docs, so neither job starts. Named failure: without the *.md carve-out, the
-    # action arm starts checks-shoot and checks-guard for a README edit.
+    # A .md edit under the action is docs, so no caller starts. Named failure: without the *.md carve-out, the
+    # action arm starts the two shoot jobs and the two checks-guard jobs for a README edit.
     def test_playwright_readme_edit_turns_on_no_job(self):
         p = "actions/playwright-setup/README.md"
         got = run([p], existing=[p])
