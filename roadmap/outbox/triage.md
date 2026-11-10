@@ -473,3 +473,9 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - stamp-redirect-quote-false-alarm (#2480): outside debt stamp-read-false-alarms (heredoc `>` only), a read that redirects onto a scratch log (`cmd > x.log 2>&1`) counts as a write, and so does a quoted argument that is a bare `>` or starts with `>` (`grep -n ">" f`). Class: scanner-respects-strings.
 - stamp-docstring-handoff-evidence (#2480): the hooks/guard.py docstring row for `handoff-checked-stamp` says the handoff itself is no evidence; the code excludes only a Read whose file_path is the handoff (item 15 says "only"). A Bash `cat <handoff>` backs a premise. No effect on behaviour.
 - shell-tools-two-homes (#2480): `SHELL_TOOLS` is declared in hooks/precompact_handoff.py (about line 631) and in hooks/guard_core.py (about line 61, its home). No test pins them together; a tool added only at the home becomes no-evidence in the guard, which fails safe.
+- merge-route-cost-line-overstates (lane batch-ci-merge-guard, #2513 round 3, coordinator 04:08 CST Nov 10): the #2513 decision cost line says the merge-route cost case "pins the spawn count"; it pins only one pull-list read.
+- push-stuck-docstring-narrates (#2513): the `push_stuck_compare_case` docstring narrates a fixed bug (building-comments-say-why).
+- merge-matcher-tools-copy (#2513): the test's `MERGE_MATCHER_TOOLS` copies `MERGE_TOOLS` (building-allow-list-is-the-constant).
+- decision-watch-merge-tools-copy (#2513): hooks/decision_watch.py keeps its own one-entry `MERGE_TOOLS` list.
+- merge-guard-limits-gaps (#2513): the MCP file-write tools to main and the `bash -c` wrapper are not in the decision's Limits.
+- mutate-merge-substring-anchor (#2513): the mutate merge target accepts a substring anchor and does not report it.
