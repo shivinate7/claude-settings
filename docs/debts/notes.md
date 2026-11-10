@@ -1842,3 +1842,4 @@
 - launch-cloud-mirror-marker-reads-stderr: merge/launch.py `git()` joins stderr to stdout, so a git warning on `config --get claude-settings.cloudMirror` hides the marker and the mirror is fast-forwarded. install.sh and hooks/session_start.sh read stdout only.
 - launch-cloud-mirror-hides-other-reason: a marked mirror that is also dirty or off main prints only "cloud mirror" in launch.py's left-as-is line.
 - launch-cloud-mirror-test-gaps: no case pins a dirty marked mirror or a non-literal true spelling (`yes`, `1`); the code matches install.sh's literal `true`.
+- close-form-shape-check-sibling-only: the shape check in merge/test_merge.py (`adjacent_whitespace_repeats`) sees two sibling whitespace repeats only. A quadratic respelling with the second repeat in a capture group or an alternation arm (`\s*(?:|:)\s*`, `(\s*):?(\s*)`) stays green. Claude would write one only on purpose. Round 2 note, PR 2524.
