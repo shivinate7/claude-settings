@@ -1,0 +1,12 @@
+{
+  "title": "A step that states a time or count names where it was measured, or triage's write is refused",
+  "phase": "now",
+  "status": "todo",
+  "order": 1008,
+  "owner": "triage",
+  "why": "Triage filed step lane-lint-bg-timeout with a 6000 s bound that no code holds; a builder spent a search on it and the step's done check was wrong.",
+  "note": "Filed by triage 12:39 CST Nov 10, its own mistake (rule building-mistake-names-its-guard). Guard: a check on the roadmap writer refuses a step whose title, why or done check states a figure (seconds, minutes, counts) with no source (a file:line, a run, a log or 'unmeasured'). Incident: lane-lint-bg-timeout, corrected at 5a691e8cb.",
+  "updatedAt": "2026-11-10T12:39:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
