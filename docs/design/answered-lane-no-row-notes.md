@@ -19,8 +19,15 @@ questions area. It stays open, so page_grant.py reads it unchanged.
   as an answered-by-wait card does. States `before` (today: open in Blocking) and `after`.
 - Gain: the questions tiers hold only questions the owner has not answered. The Blocking count, the Questions tab count and
   the bar's "N stay open" drop by one.
-- Loss: none seen. A Change still reopens the card in place in Answered, as on any sunk card.
-- Pick: sink. Owner grant: item 477 (Nov 10, 09:06 CST).
+- Loss: a withdrawn answer reads as sent for a while. Withdraw on a kept-answer lane card (No. 52's kind) deletes its answers
+  row and leaves `lane` and `lastAnswer` (page.html `withdrawAll`). Until the owning session's next re-read drops `lane`
+  (waiting-page SKILL.md, "Route and close", Withdrawn), the item matches the new predicate. On a reload in that gap it sinks
+  as "Sent <time>", though the owner withdrew it. On the same visit it stays open in Answered, as a Change does. The page data
+  cannot tell this gap from a relayed grant. A closer fix is a writer-side field that marks the relay; that is outside this
+  lane. Unmeasured how long the gap lasts.
+- A Change still reopens the card in place in Answered, as on any sunk card. A Send then writes an answers row, and the card
+  becomes a kept-answer lane card ("Filing pending, sent"). Today's open card allows the same answer again, so this is no departure.
+- Pick: sink. Owner grant: yes (granted, page item 477, Nov 10 09:06 CST).
 - Departs from: `lane-answered-sink-notes.md`, "Settled", first line: "A lane item sinks only when its answers record
   exists (`isSaved`) ... No lane + `lastAnswer` predicate (coordinator, Nov 6 15:47 CST)." Item 477 overrides it.
 - Built: one home. Widen `answeredByWait` (page.html line 1234) to an "answered off the page" predicate:
