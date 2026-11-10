@@ -50,7 +50,7 @@ A focus box narrower than the card scales up until it fills, at most 2x (`stageF
 
 ## 5. Measured sizes, pick (Grow to a phone, up to 2x)
 
-Light and dark give the same sizes in all 123 pairs. In every run: View is 44 high, the picture's button (`.opic`, picture plus View) is at least 44 × 44 (smallest: 289 × 214), the picture is inside its card and column and ends above `.head`, and the page has no sideways scroll.
+Light and dark give the same sizes in all 123 pairs. In every run, View is 44 high. The picture's button (`.opic`, picture plus View) is at least 44 × 44 (smallest: 289 × 214). The picture is inside its card and column, and ends above `.head`. The page has no sideways scroll.
 
 | Case | 390 | 1280 | 2200 |
 |---|---|---|---|
@@ -85,10 +85,10 @@ Owner grant: yes. Not drawn, and outside this lane. Filling the card does little
 - Change only `optPic`'s call and `fitFrame`'s capped path (`maxH`). `designPreview` (maxScale 1, no maxH) and the viewer's `stageFrame` (maxScale 2) do not change. The c204 scroll case keeps its DOM, cue, shades, gutter click cancel, keys, `inert` frame and `aria-hidden` wrap.
 - `optPic` passes maxScale 2. In `fit()` with maxH: room0 = floor(column rect width) − 2; sc = min(maxScale, room0 / bw); F = max(maxH, ceil(room0 × PHONE_H / FIT_W)); scroll when ceil(bh × sc) > F + 1.
 - Scroll case: turn `.scroll` on, read g as today, room = floor(column) − 2 − g, sc = min(maxScale, room / bw), box maxH high and pw + 2 + g wide. If then ceil(bh × sc) ≤ maxH + 1, the gutter made it fit: turn `.scroll` off and draw it whole at the first sc (measured on the "Keep the 480 box" rule, where a 496-high phone fit once narrowed).
-- `MIN_PIC` goes: the width is always the card's. `PHONE_H` stays, in F. The 5B width cap min(221.8, …) goes.
+- `MIN_PIC` stays as a number (check_designs.mjs and the write guard read it); fitFrame stops using it as a width floor. `PHONE_H` stays, in F. The 5B width cap min(221.8, …) goes.
 - In both branches, the measured one and the declared-size one, set the width and height from the column, so the first paint already has the size.
 - The c204 acceptance check ("a picture that fits looks as today") turns false by design. Re-point it: a picture that fits is floor(column) wide, or 2 × its width when that is less.
-- `SKILL.md` lines 740–741 ("Add a design" step 1, "The page scales it to the card") and 755 (step 4, the `focus` bullet, "Either way the picture is scaled to fit the card") turn false; the builder rewrites them. Line 741: "The page scales it to the card's width. A picture taller than a phone picture at that width scrolls in a 480px box." Line 755: "Either way the picture is scaled to the card's width, at most 2x. It draws whole while it is no taller than a 390 × 844 phone picture at that width; a taller one stays 480px high, scrolls in its box, and opens at the top of what the card shows."
+- `SKILL.md` lines 740–741 ("Add a design" step 1, "The page scales it to the card") and 755 (step 4, the `focus` bullet, "Either way the picture is scaled to fit the card") turn false; the builder rewrites them. Line 741: "The page scales it to the card's width. A picture taller than a phone picture at that width scrolls in a 480px box." Line 755: "Either way the picture is scaled to the card's width, at most 2x. It draws whole while it is no taller than a 390 × 844 phone picture at that width. A taller one stays 480px high and scrolls in its box. It opens at the top of what the card shows."
 
 ## 9. Card pictures for the waiting page
 
