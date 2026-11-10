@@ -27830,7 +27830,7 @@ add("lane-effort-pin: a create_session with no lane tag passes unchanged, with t
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="/effort medium")
 add("lane-effort-pin: create_session with no tags is allowed", "allow",
     tool=LANE_TOOL, prompt="do the task")
-# Grant start, round 1 review. The owner ruled on 2026-11-10 13:19 CST, "B is good": a lane starts with the effort field at
+# Grant start. The owner ruled ("B is good"): a lane starts with the effort field at
 # medium and its whole brief as the prompt, opening with the Grant line. The brief's Topic must match the lane's cs-topic tag
 # at create_session, as it must at send_message (rule lane-one-topic). A Grant line with no owner words is no grant: a
 # template placeholder, or punctuation alone, is refused.
