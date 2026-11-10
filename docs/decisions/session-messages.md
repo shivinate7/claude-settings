@@ -18,7 +18,7 @@ session-messaging-plan and peer-message-turn-cap.
 ## One route (owner, 2026-11-10 09:33 CST)
 
 Ruling: every message between sessions goes through the git mailbox, cloud to cloud included.
-Cloud `send_message` stays only as a short "check your mail" doorbell, so an idle session wakes.
+The doorbell is open (owner unsure, 2026-11-10 09:36 CST): a cloud-only doorbell breaks "the device shouldn't matter", and no wake route is known for a local computer.
 The mailbox is read at turn start, so it cannot wake anyone.
 The design is device-neutral: local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
 Local-computer checks: measured on a Mac only; Windows unmeasured.
@@ -32,7 +32,7 @@ Why:
 
 Wake routes under study. All unmeasured.
 
-- (a) Doorbell: `mail send` also fires a short `send_message`. Works cloud to cloud. Cloud to the owner's computer is refused.
+- (a) Doorbell (open, see above): `mail send` also fires a short `send_message`. Works cloud to cloud. Cloud to the owner's computer is refused.
 - (b) One long-lived pull request per session in shivinate7/session-mailbox. Each message is also a
   comment. The receiver subscribes with `subscribe_pr_activity` (the tool that watches PR activity).
 - (c) A GitHub webhook to a session's `watch_url`. Likely blocked: the signing secret is sealed to the
@@ -43,6 +43,7 @@ Home of the measurement: roadmap step `mailbox-wake-routes` (the wake-route meas
 
 State: the code still sends cloud to cloud by `send_message` until a build lands. No build is started.
 The owner froze new lanes at 09:18 CST.
+Timed check-ins: the owner has not ruled. Q4 is open (owner, 09:36 CST).
 
 ## The 10-message stop on the Mac
 
@@ -77,7 +78,7 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 - One convention, plain text, so any harness can carry it. First line of a mailbox message:
   `Msg <id> from <addr> to <addr> kind request|inform|reply re <id or -> try <n>`. The addresses are set
   out under Design. Id: 12 lowercase hex characters (`secrets.token_hex(6)` in `hooks/mail.py`).
-  The doorbell's cloud `send_message` target is picked by all of its tags, in the forms of
+  If a doorbell is built (open), its cloud `send_message` target is picked by all of its tags, in the forms of
   skills/project-ops/templates/operating-model.md (`cs-repo:<owner>/<name>` plus `cs-build:<tier>` or
   `cs-step:<step id>`).
 - `try` counts push attempts inside one `mail send`. A push race keeps the id and raises `try` by one.
@@ -117,7 +118,7 @@ Desktop sessions have no `ArtifactComments` tool. An artifact watch wakes only c
 
 Ruling: every message goes through the git mailbox, read at turn start (owner, page item 153, pick a,
 2026-11-06 15:24 CST; cloud to cloud added 2026-11-10 09:33 CST, see One route above).
-Not built: a doorbell for a local computer (option B) and a local relay (option C). Owner note: "i think
+Not built, doorbell open: a doorbell for a local computer (option B) and a local relay (option C). Owner note: "i think
 B and C can still work too though probably."
 Store: answered. Page item 308 (the store), owner pick a, relayed by triage 2026-11-06: a private repo,
 shivinate7/session-mailbox. The owner allowed Cloudflare if it is faster. Lane verdict: git.
