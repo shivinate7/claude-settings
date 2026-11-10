@@ -152,6 +152,7 @@ FAMILIES = {
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
+    "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -27574,6 +27575,48 @@ for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
     add("floor: create_session naming %s is allowed" % (_model,), "allow",
         tool=CREATE_SESSION_CALL, prompt="x", model=_model)
 add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
+
+# ---- A Workflow call whose args hold a placeholder. A placeholder is an all-caps word with an underscore, or a
+# __X__ word, and the whole value must be one (a sentence that holds one passes). The guard reads args and each
+# array item or object value one level down. Each refusal names the placeholder and the fix. The args are
+# structured values, not source text, so no comment-opener or quote case applies.
+FAMILY = "workflow-args"
+WORKFLOW_ARGS_RULE = "workflow-args-shape-check"
+WORKFLOW_ARGS_FIX = ("replace", "real value", "fill in")
+WORKFLOW_ARGS_SCRIPT = _step_flow("'Check the named files.'", "agentType: 'reviewer', model: 'sonnet'")
+add("workflow-args: a placeholder string in args is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="FACT_CLOSE_PLACEHOLDER",
+    carries=("FACT_CLOSE_PLACEHOLDER", WORKFLOW_ARGS_FIX))
+add("workflow-args: a __X__ placeholder string in args is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="__FILL__",
+    carries=("__FILL__", WORKFLOW_ARGS_FIX))
+add("workflow-args: a __X__ placeholder last in an args array is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=["a.ts", "__FILL__"],
+    carries=("__FILL__", WORKFLOW_ARGS_FIX))
+add("workflow-args: a __X__ placeholder first in an args array is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=["__FILL__", "a.ts"],
+    carries=("__FILL__", WORKFLOW_ARGS_FIX))
+add("workflow-args: a caps placeholder as an args object value is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args={"pr": "PR_NUMBER"},
+    carries=("PR_NUMBER", WORKFLOW_ARGS_FIX))
+add("workflow-args: a Workflow call with no args is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT)
+add("workflow-args: a file-list args array is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=["hooks/guard.py"])
+add("workflow-args: a sentence args string is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="Fix the CI red on PR 2560")
+add("workflow-args: an args object with a short all-caps word is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args={"mode": "OK"})
+add("workflow-args: a sentence that names an env var is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="MAILBOX_REPO is off")
+add("workflow-args: a dunder inside a longer path is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=["hooks/__init__.py"])
+add("workflow-args: an empty args array is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=[])
+add("workflow-args: an empty args object is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args={})
+add("workflow-args: an empty args string is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="")
 
 # ---- An agent's outward remote tools. An agent's call to a claude-code-remote tool that acts on another
 # session, a trigger or a repo is refused. No agent role needs the server, and a general-purpose agent without an
