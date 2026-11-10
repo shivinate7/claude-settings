@@ -662,8 +662,16 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
-3. Feedback (about the page, a rule or the way of working) is filed like a chat message: jot it to the feedback inbox
-   (`local_time.py --page-note`), then move it to its home. Write `home` and `filed`, and a short `reply`.
+3. Feedback (about the page, a rule or the way of working) is filed like a chat message. Jot it to the feedback inbox,
+   `~/.claude/handoffs/<session id>.inbox.md`: a heading `### <stamp>`, then the text in a backtick fence (use more
+   backticks if the text holds three), then one item line under the fence: `- fb-<HHMM>-<n> [<kind>] -> <home>`.
+   The stamp is Central time with its offset, for example `2026-11-10 12:08 CST (UTC-06:00)`. Read the time from
+   `~/.claude/bin/now-central --full`, and add `(UTC-06:00)` for CST or `(UTC-05:00)` for CDT. `<HHMM>` is the stamp's
+   hour and minute. Then move it to its home. Write `home` and `filed`, and a short `reply`.
+   A comment wake in claude-settings (the banner `[Artifact comment sent to Claude]`, not an ask, and not a Saved
+   wake without a note) needs one of two item lines under its block, or the Stop guard blocks the turn:
+   `- fb-<HHMM>-<n> [task] -> step:<slug>`, where that step's file on the record branch names `skills/waiting-page`;
+   or `- fb-<HHMM>-<n> [note] -> not-page-form`, when the comment is not page form.
 4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
 
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
