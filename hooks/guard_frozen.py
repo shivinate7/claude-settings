@@ -1189,7 +1189,7 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
             if not quote:
                 texts += [text for text, _ in _substitutions(body, heredoc=True)[0][:-1]]   # bash runs these
         if _has_inline_flag(raw):
-            for kind, script, *_ in _inline_scripts(raw):
+            for kind, script, *_ in _inline_scripts(_resolve_vars(raw)):
                 texts += script_spots(script, kind)
         for text in texts:
             hit = hit or _shell_write_hit(text, cwd, predicate, holds)

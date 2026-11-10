@@ -5,6 +5,7 @@ Other files reach these names through `guard`.
 """
 import fnmatch
 import re
+import shlex
 import warnings
 
 from guard_core import (
@@ -620,7 +621,7 @@ def script_spots(script: str, lang: str = ""):
         if each == "js":
             names = _js_module_names(script)
             if names is None:
-                return [script]
+                return _whole_script(script, each)
             calls += "".join(r"|(?<=(?<![\w$.])" + re.escape(name) + r"\.)exec" for name in names)
         tail = _SPOT_PAREN + (_SPOT_BARE if each in ("perl", "ruby") else "")
         for call in re.finditer("(?:" + calls + ")(?:" + tail + ")", script):
@@ -629,11 +630,22 @@ def script_spots(script: str, lang: str = ""):
                     if arg.strip() and not _KEYWORD_ARG.match(arg) and not arg.lstrip().startswith("{")]
             if not any(mark in arg for arg in args for mark in "'\"`") or (
                     each != "py" and not all(_literal_arg(arg, each) for arg in args)):
-                return [script]
+                return _whole_script(script, each)
             out.append(re.sub(r"\s*\($", "", call.group(0).rstrip()) + "(" + ", ".join(args) + ")")
     if lang in ("", "perl", "ruby"):
         out += _command_spans(script)
     return out
+
+
+def _whole_script(script: str, lang: str):
+    """The shell texts that stand for a script whose shell spots cannot be told: the script, and for js each
+    of its string literals as the target of a write (`tee`). A node script joins a path into a command with
+    `+`, so the path sits in a literal beside the call, and the script as shell text names it nowhere a write
+    reads. This refuses more, never less."""
+    if lang != "js":
+        return [script]
+    return [script] + ["tee " + shlex.quote(text) for text in (
+        found.group(0)[1:-1] for found in re.finditer(_STRING, script)) if text.strip()]
 
 
 def _elide_substitutions(text: str) -> str:
