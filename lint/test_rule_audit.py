@@ -754,7 +754,7 @@ class EmittedRuleIdsTests(unittest.TestCase):
 
 CITE_RE = re.compile(r"\b(decision|rule) ([a-z0-9][a-z0-9-]*)\b")
 HOME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
-MAX_DEPTH = 12
+MAX_DEPTH = 24  # hops a read may follow: report_guard's 3100 needs 16. Scan time grows steeply above 32.
 PENDING_ASK = "PENDING_ASK"  # filled only by ask_command(), whose literal call sites are scanned
 EXEMPT_REASON_WORDS = 6  # the least words an exempt entry's reason may have
 
@@ -1132,13 +1132,28 @@ class _Reasons:
     def __init__(self, world):
         self.world = world
         self._locals = {}
+        self._memo = {}  # (read, ids of its node, module, locals, depth) -> (result, the objects those ids name)
+        self._no_locals = {}  # the locals of a module-level value; never written, so one object serves every read
 
     def locals_of(self, fdef, mod):
         if id(fdef) not in self._locals:
             self._locals[id(fdef)] = _locals(fdef, mod)
         return self._locals[id(fdef)]
 
+    def _memo_read(self, key, keep, compute):
+        """The result of one read, computed once per key. A read repeats the same sub-reads once per branch it
+        takes, so without this the cost grows with the depth cap. `keep` holds the objects whose ids the key
+        names, so no id is reused while the memo lives. A list result is copied, so no caller can change it."""
+        if key not in self._memo:
+            self._memo[key] = (compute(), keep)
+        result = self._memo[key][0]
+        return None if result is None else list(result)
+
     def alts(self, expr, mod, locs, depth=0):
+        return self._memo_read(("alts", id(expr), id(mod), id(locs), depth), (expr, mod, locs),
+                               lambda: self._alts(expr, mod, locs, depth))
+
+    def _alts(self, expr, mod, locs, depth):
         if depth > MAX_DEPTH:
             return None
         d = depth + 1
@@ -1257,6 +1272,10 @@ class _Reasons:
 
     def _elt(self, expr, i, mod, locs, depth):
         """The text of element `i` of a tuple-valued expression."""
+        return self._memo_read(("elt", id(expr), i, id(mod), id(locs), depth), (expr, mod, locs),
+                               lambda: self._elt_of(expr, i, mod, locs, depth))
+
+    def _elt_of(self, expr, i, mod, locs, depth):
         if depth > MAX_DEPTH:
             return None
         d = depth + 1
@@ -1294,7 +1313,7 @@ class _Reasons:
         if home is None:
             return None
         hmod, values = home
-        return _union([self._value(v, None, index, hmod, {}, depth) for v in values])
+        return _union([self._value(v, None, index, hmod, self._no_locals, depth) for v in values])
 
     def _home(self, mod, name, depth=0):
         """(module, values) where a module-level name is bound, following `from` imports."""
@@ -1316,6 +1335,10 @@ class _Reasons:
     def _call(self, call, mod, locs, depth, index):
         """The reason a call returns: each return value, or element `index` of each return tuple. The
         parameters the call passes read as their arguments, read in the caller's scope."""
+        return self._memo_read(("call", id(call), id(mod), id(locs), depth, index), (call, mod, locs),
+                               lambda: self._call_of(call, mod, locs, depth, index))
+
+    def _call_of(self, call, mod, locs, depth, index):
         if not isinstance(call.func, ast.Name) or depth > MAX_DEPTH:
             return None
         found = self._function(call.func.id, mod)
@@ -1347,7 +1370,7 @@ class _Reasons:
         hmod, table = home[0], home[1][0]
         for key, value in zip(table.keys, table.values):
             if self._key_text(key, hmod) == sub.slice.value:
-                return self.alts(value, hmod, {}, depth + 1)
+                return self.alts(value, hmod, self._no_locals, depth + 1)
         return None
 
     def _key_text(self, key, mod):
@@ -3019,7 +3042,10 @@ def call_rows(src, homes=HOMES):
 class RefuseHelperArgumentTests(unittest.TestCase):
     """A block dict passed to a helper that prints its parameter is a refuse site, read at each call as a refuse
     print is: its id is the caller's `module:function`, and its reason is read at the call. A helper that only
-    stores its parameter, and a dict that is not a block, are no site."""
+    stores its parameter, and a dict that is not a block, are no site.
+
+    Known gap, not built: a block dict bound to a name first, and then passed to a printing helper, is not read.
+    No case here covers it, and the scan reads it as no site."""
 
     def assertReadAtCall(self, src, status, homes=HOMES):
         """The scope first: main is the only refusal id. Then the subject: the call's reason reads as `status`."""
@@ -3068,6 +3094,19 @@ class RefuseHelperArgumentTests(unittest.TestCase):
         self.assertReadAtCall(src, "cited", RULE_HOMES)
         # The twin: the same reason, with homes that do not name the tail's anchor, reads no cite.
         self.assertEqual(call_rows(src).get("guard:main"), ["no cite"], "the tail's rule anchor does not decide the cite")
+
+
+class RefuseReasonDepthTests(unittest.TestCase):
+    """A reason is read through the names that bind it, one hop each, up to MAX_DEPTH. A cite past the old cap of
+    12 hops reads cited."""
+
+    def test_a_cite_twenty_name_hops_from_the_reason_reads_cited(self):
+        chain = '    r0 = "held, see decision alpha"\n' + "".join("    r%d = r%d\n" % (i, i - 1) for i in range(1, 21))
+        src = closure_src(chain + call_of("finish", '{"decision": "block", "reason": r20}'))
+        rows = call_rows(src)
+        self.assertEqual(sorted(rows), ["guard:main"], "the call is no refuse site of main")
+        self.assertEqual(rows.get("guard:main"), ["cited"],
+                         "a cite 20 name hops from the reason does not read as cited (the depth cap)")
 
 
 class SettingsScriptFormTests(unittest.TestCase):
