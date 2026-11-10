@@ -1,7 +1,7 @@
 #!/bin/bash
 # Usage: sim-test [--device duo|pro] <xcodebuild test args without -destination>   (run from the folder that holds the project)
 #        sim-test [--device duo|pro] --hold [--for S] [-- CMD ARGS...]
-# Runs the tests on one phone simulator, by role: the Duo by default (owner, 2026-11-02 13:17 and 15:03 CST), the 18 Pro
+# Runs the tests on one phone simulator, by role: the Duo by default (decision sim-test-is-the-one-boot-path), the 18 Pro
 # with --device pro. Its flags are double-dash and come first; the first argument it does not know starts xcodebuild's own
 # arguments, which pass through unchanged. Any other --device value, or a bad --for: one usage line, exit 2, no lock.
 # It keeps no UDID: `sim-lease take --device <role> --udid` grants one (SLOT_UDID in bin/sim-lease is the one home).
