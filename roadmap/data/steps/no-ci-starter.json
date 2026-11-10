@@ -1,0 +1,12 @@
+{
+ "title": "A repo with no CI gets a starter CI from skill project-ops, and a refusal for no CI names that step as the fix",
+ "phase": "now",
+ "status": "todo",
+ "order": 1037,
+ "owner": "triage",
+ "why": "Owner R17, 16:25 and 16:36 CST Nov 10 (relayed by the retrospective session): \"repos that have no CI need to get an easy exemption so that they can still call claude-settings but basically things that need CI don't pertain to them -- how can that become a thing?\"; \"this is approved and sounds better than allowing no ci\".",
+ "note": "Keeps decision same-check-kinds (item 87). The starter CI checks that links resolve, scripts parse and JSON parses, inside the all-jobs-passed rollup. When the merge tool (required_names, \"no required checks are named\") or lane lint (bin/ci-job, no checks.yml) refuses for no CI, the refusal names that step as the fix. Folds in roadmap step c33. Home: decision same-check-kinds; skill project-ops. Plan stage 3.1, commit 4ac2c0351.",
+ "updatedAt": "2026-11-10T16:40:00-06:00",
+ "lane": "",
+ "blockedBy": []
+}
