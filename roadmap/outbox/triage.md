@@ -506,3 +506,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - guard-stream-bare-wait-pid (same source): hooks/guard_stream.py lines 73, 559 and 728 still print a bare `bin/wait-pid PID`.
 - cloud-bin-rc-shell-mismatch (same source): the install writes the PATH block only to the rc of $SHELL. With a zsh SHELL and a bash Bash tool, bin stays off PATH. Unmeasured.
 - (debt) stale-drafts-reads-live-steps (#2533, coordinator  CST Nov 10): stale_drafts in skills/roadmap/build.py reads only liveSteps, so the draft rows that the lane-field test makes live were not built. The stale-draft upkeep row can miss a live lane's draft or list it wrongly.
+- cite-parser-paren-wrapped-lists (#2530, coordinator  CST Nov 10): the Input Needed cite parser in lint/report_guard.py misses lists in parentheses and hard-wrapped lists.
+- cite-parser-count-as-item (same source): the parser can read a count after a separator as an item when the count's unit word is not in its list.
+- closed-item-past-ruling-refused (same source): a closed item cited as the source of a past ruling is refused. That matches the step's wording.
+- waiting-copy-lags-live-page (same source): the waiting copy lags the live page, so an item closed after the last export passes.
