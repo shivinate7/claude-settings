@@ -3835,6 +3835,80 @@ test("ask-phase-out: control: no Mark all control is drawn with a routed ask and
   assert.equal(await page.getByRole("button", { name: /Mark all/i }).count(), 0, "a Mark all control is drawn");
 });
 
+// ---------------------------------------------------------------- ask-phase-out: a read item is counted where it is drawn (step ask-phase-out)
+// A routed item is answered and filed, with no lane and no waits, so it draws as one line. Read at load (`dismissed` on its record), it sits
+// behind Show read items. Taken to Change there, it draws as a card, and the Answered header and the rail count that card. A read item that a
+// session gives a lane or waits is a card from the load on, and it is counted where it is drawn too.
+const APR_FILED = { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" };
+const APR_ROUTED = mk("apr-routed", 77, { added: at(7), dismissed: "2026-11-09T16:00:00Z" });
+const APR_LANE = mk("apr-lane", 78, { added: at(8), dismissed: "2026-11-09T16:00:00Z", lane: "ci-done-comment" });
+const APR_WAITS = mk("apr-waits", 79, { added: at(9), dismissed: "2026-11-09T16:00:00Z", waits: { repo: "shivinate7/claude-settings", run: 123 } });
+const APR_UNREAD = mk("apr-unread", 80, { added: at(10) });
+// A page whose store holds one answered, filed item as `it`, with no read mark unless `it` carries one. The open TASK keeps open() waiting for a card.
+const aprOpen = (t, it) => open(t, { items: [AP_OPEN], rawItems: { [it.id]: it }, answers: answerOf(it), receipts: { [it.id]: APR_FILED } });
+const answeredHeader = async (page) => ((await page.locator("#tier-answered .rhead .ct").textContent()) || "").trim();
+// The owner's way to a read item's card: Show read items, Show answer on its line, then Change on the answer.
+async function changeReadItem(page, it) {
+  await mustHave(page, "#readItems", `the Show read items fold that holds No. ${it.n}`);
+  await page.click("#readItems");
+  await mustHave(page, `#readItemList #lrow-${it.id}`, `the line of No. ${it.n} in Show read items`);
+  await page.click(`#readItemList #lrow-${it.id}`);
+  await mustHave(page, `#readItemList #line-${it.n} button.changebtn`, `Change on the answer of No. ${it.n}`);
+  await page.click(`#readItemList #line-${it.n} button.changebtn`);
+  await mustHave(page, `#tier-answered #item-${it.id}`, `the card of No. ${it.n} in the Answered section after Change`);
+}
+
+test("ask-phase-out: control: a routed item read at load counts 0 in the Answered header while it sits behind Show read items", async (t) => {
+  const page = await aprOpen(t, APR_ROUTED); if (!page) return;
+  await mustHave(page, "#readItems", `the Show read items fold that holds No. ${APR_ROUTED.n}`);
+  const got = await answeredHeader(page);
+  assert.equal(got, "0", `the Answered header counts ${got} while No. ${APR_ROUTED.n} is behind Show read items`);
+});
+
+test("ask-phase-out: control: an unread routed item counts 1 in the Answered header before and after Change", async (t) => {
+  const page = await aprOpen(t, APR_UNREAD); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${APR_UNREAD.n}`, `the line of No. ${APR_UNREAD.n} in the Answered section`);
+  const before = await answeredHeader(page);
+  assert.equal(before, "1", `the Answered header counts ${before} before Change, with No. ${APR_UNREAD.n} drawn as a line`);
+  await mustHave(page, `#tier-answered #lrow-${APR_UNREAD.id}`, `Show answer on the line of No. ${APR_UNREAD.n}`);
+  await page.click(`#tier-answered #lrow-${APR_UNREAD.id}`);
+  await mustHave(page, `#tier-answered #line-${APR_UNREAD.n} button.changebtn`, `Change on the answer of No. ${APR_UNREAD.n}`);
+  await page.click(`#tier-answered #line-${APR_UNREAD.n} button.changebtn`);
+  await mustHave(page, `#tier-answered #item-${APR_UNREAD.id}`, `the card of No. ${APR_UNREAD.n} after Change`);
+  const after = await answeredHeader(page);
+  assert.equal(after, "1", `the Answered header counts ${after} after Change, with No. ${APR_UNREAD.n} drawn as a card`);
+});
+
+test("ask-phase-out: a routed item read at load, taken to Change from Show read items, is counted in the Answered header", async (t) => {
+  const page = await aprOpen(t, APR_ROUTED); if (!page) return;
+  await changeReadItem(page, APR_ROUTED);
+  const got = await answeredHeader(page);
+  assert.equal(got, "1", `the Answered header counts ${got}, but No. ${APR_ROUTED.n} is drawn as a card in the section`);
+});
+
+test("ask-phase-out: the rail's Answered row counts the card of a read routed item taken to Change", async (t) => {
+  const page = await aprOpen(t, APR_ROUTED); if (!page) return;
+  await changeReadItem(page, APR_ROUTED);
+  const row = page.locator('#rail a.ov-head[href="#tier-answered"]');
+  await need(row, `the rail has no Answered row, but No. ${APR_ROUTED.n} is drawn as a card in the Answered section`);
+  const got = (await row.locator(".ct").textContent()).trim();
+  assert.equal(got, "1", `the rail's Answered row counts ${got}, but No. ${APR_ROUTED.n} is drawn as a card`);
+});
+
+test("ask-phase-out: a read item that a session gives a lane is counted in the Answered header where it is drawn", async (t) => {
+  const page = await aprOpen(t, APR_LANE); if (!page) return;
+  await mustHave(page, `#tier-answered #item-${APR_LANE.id}`, `the card of No. ${APR_LANE.n} in the Answered section`);
+  const got = await answeredHeader(page);
+  assert.equal(got, "1", `the Answered header counts ${got}, but No. ${APR_LANE.n} is drawn as a card in the section`);
+});
+
+test("ask-phase-out: a read item that a session gives waits is counted in the Answered header where it is drawn", async (t) => {
+  const page = await aprOpen(t, APR_WAITS); if (!page) return;
+  await mustHave(page, `#tier-answered #item-${APR_WAITS.id}`, `the card of No. ${APR_WAITS.n} in the Answered section`);
+  const got = await answeredHeader(page);
+  assert.equal(got, "1", `the Answered header counts ${got}, but No. ${APR_WAITS.n} is drawn as a card in the section`);
+});
+
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
 
 // The reach line of the ask row that holds the text, or "" when no row holds it. Reads the page, never waits.
