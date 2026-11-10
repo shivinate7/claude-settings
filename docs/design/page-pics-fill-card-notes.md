@@ -101,7 +101,10 @@ Each `pic-` state draws one figure, 300 wide, with its `data-state` and `id` in 
 | Grow with no cap | `pic-grow` | `#pic-grow` | {w: 300, h: 457} |
 | Keep the 480 box | `pic-box` | `#pic-box` | {w: 300, h: 457} |
 | Shrink to the screen | `pic-shrink` | `#pic-shrink` | {w: 300, h: 457} |
+| Today (main's rule: 480 cap, maxScale 1, a tall picture 221.8 wide) | `pic-today` | `#pic-today` | {w: 300, h: 457} |
+
+`pic-today` draws the same two sample pictures as `pic-grow`, so the two can sit side by side as options. Today, two per row at 1280: phone 224 × 480 whole, very tall 234 × 480 scrolls.
 
 ## 10. Deep links
 
-`#s=three-phone|two-phone|duo|focus|tall|two-tall|pic-phone|pic-screen|pic-grow|pic-box|pic-shrink`, `&r=today|phone|screen|grow|box|shrink`, `&up=2|1`, `&w=all|390|1280|2200`, `&t=light|dark`, `&lab=off`, `&hide=<ids>`.
+`#s=three-phone|two-phone|duo|focus|tall|two-tall|pic-phone|pic-screen|pic-grow|pic-box|pic-shrink|pic-today`, `&r=today|phone|screen|grow|box|shrink`, `&up=2|1`, `&w=all|390|1280|2200`, `&t=light|dark`, `&lab=off`, `&hide=<ids>`.
