@@ -153,7 +153,6 @@ LINUX_SUITES = {
     "python3 lint/test_retired_repos.py": (None, None),
     "python3 skills/waiting-page/test_stale_pages.py": (None, None),
     "python3 skills/waiting-page/test_splice.py": (None, None),
-    "python3 skills/waiting-page/test_export_page.py": (None, None),
     "python3 lint/test_check_artifact_cites.py": (None, None),
     "python3 skills/roadmap/test_build.py": (None, None),
     "python3 lint/test_check_shared_resources.py": (None, None),
@@ -319,6 +318,9 @@ MUTATE_JOB = "checks-mutate-guard"
 # The bin/shoot suite and its browser install have their own Linux job, off the `checks` lint job.
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
+# The export suite runs in SHOOT_JOB too: its picture cases run check_designs.mjs in Playwright, and loadPlaywright reads NODE_PATH.
+EXPORT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" python3 skills/waiting-page/test_export_page.py'
+EXPORT_IF = "needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request'"
 # The waiting page suite has its own job, so SHOOT_JOB keeps its cap (decision ci-job-caps). ROADMAP_CMD stays in SHOOT_JOB.
 WAITING_PAGE_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs'
 WAITING_PAGE_JOB = "checks-waiting-page"
@@ -716,6 +718,19 @@ def shoot_problems(text):
     return problems
 
 
+def export_suite_problems(text):
+    """The export suite runs in SHOOT_JOB and in no other job, as EXPORT_CMD, with its `if:` and `shell:` pinned (EXPORT_IF, bash)
+    and no env. Its picture cases need the Playwright that only SHOOT_JOB installs, so a copy elsewhere would fail there."""
+    named = [n for n in all_jobs(text) for st in step_blocks(job_block(text, n))
+             if any("test_export_page.py" in ln for ln in run_lines(st))]
+    if named != [SHOOT_JOB]:
+        return [f"the export suite runs in {named}, want exactly [{SHOOT_JOB!r}]"]
+    homes = split_homes(text, [SHOOT_JOB], EXPORT_CMD)
+    if len(homes) != 1:
+        return [f"{SHOOT_JOB}: no step runs {EXPORT_CMD!r}, so the export suite's run line is not the pinned one"]
+    return pin_problems(SHOOT_JOB, homes[0][1], EXPORT_CMD, EXPORT_IF, "bash")
+
+
 def waiting_page_problems(text):
     """The waiting page suite runs in WAITING_PAGE_JOB on Linux and in no other job. The roadmap suite runs in SHOOT_JOB
     alone. Every step of WAITING_PAGE_JOB carries the scope condition alone (step_rest), so no step can add a condition that
@@ -908,6 +923,34 @@ class WindowsSplit(unittest.TestCase):
         for label, text in bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(shoot_problems(text), label)
+
+    def test_the_export_suite_is_pinned_in_the_shoot_job(self):
+        # Named failure: the export suite runs in `checks` again, which installs no browser, or in SHOOT_JOB without the
+        # NODE_PATH prefix, so its picture cases find no Playwright and go red.
+        self.assertEqual(export_suite_problems(self.text), [])
+
+    def test_the_export_suite_checker_sees_its_defects(self):
+        export = (f"      - name: export suite\n        if: ${{{{ {EXPORT_IF} }}}}\n"
+                  f"        shell: bash\n        run: {EXPORT_CMD}\n")
+
+        def doc(shoot=export, checks=""):
+            return ("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n"
+                    "      - name: lint\n        run: ruff\n" + checks
+                    + f"  {SHOOT_JOB}:\n    runs-on: ubuntu-latest\n    needs: scope\n    steps:\n"
+                    f"      - name: Install Chromium\n        if: ${{{{ {EXPORT_IF} }}}}\n        run: playwright install chromium\n"
+                    + shoot)
+
+        self.assertEqual(export_suite_problems(doc()), [])
+        bad = {"in checks": doc(checks=export),
+               "dropped": doc(shoot=""),
+               "no NODE_PATH prefix": doc(shoot=export.replace(EXPORT_CMD, "python3 skills/waiting-page/test_export_page.py")),
+               "shell not bash": doc(shoot=export.replace("        shell: bash\n", "")),
+               "if adds its own condition": doc(shoot=export.replace(EXPORT_IF, f"({EXPORT_IF}) && false")),
+               "if lacks the scope condition": doc(shoot=export.replace(f"        if: ${{{{ {EXPORT_IF} }}}}\n", "")),
+               "env set": doc(shoot=export.replace("        run:", "        env:\n          BASE_REF: main\n        run:"))}
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(export_suite_problems(text), label)
 
     def test_the_waiting_page_suite_has_its_own_job(self):
         # Named failure: the waiting page suite back in checks-shoot, where it hit that job's cap, or the roadmap suite moved out of it.
