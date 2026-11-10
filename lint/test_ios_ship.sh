@@ -551,6 +551,21 @@ need "rc=$rc, want 2" test "$rc" -eq 2
 need "build ran" not built
 need "refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
 end_case "tf: --method with an unknown value refused with the usage line, no build"
+one_app; tf --export-only --method app-store-connect
+need "rc=$rc, want 2" test "$rc" -eq 2
+need "build ran" not built
+need "refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+end_case "tf: --method app-store-connect (the default, not a value --method takes) refused with the usage line, no build"
+# Near-misses that only the ^ and $ anchors refuse. A regex with one anchor dropped takes one of the two, so both run.
+one_app; tf --export-only --method debugging-x
+need "debugging-x: rc=$rc, want 2" test "$rc" -eq 2
+need "debugging-x: build ran" not built
+need "debugging-x: refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+one_app; tf --export-only --method xdebugging
+need "xdebugging: rc=$rc, want 2" test "$rc" -eq 2
+need "xdebugging: build ran" not built
+need "xdebugging: refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+end_case "tf: --method near-misses debugging-x and xdebugging refused with the usage line, no build"
 one_app; tf --export-only --method
 need "rc=$rc, want 2" test "$rc" -eq 2
 need "build ran" not built
