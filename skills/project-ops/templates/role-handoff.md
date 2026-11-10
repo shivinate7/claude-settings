@@ -26,6 +26,8 @@ query. Add only a deferred step that has no home, and why. Do not ask. Never cop
 
 Watches stopped at <time>
 
+<Read the time from `~/.claude/bin/now-central --full`, never from memory.>
+
 <The URL of each page this role owns. The old session stopped watching each one at that time,
 answered each comment still open at that time, then wrote this file. The successor watches
 each one at once, and reads its comments since that time.>
