@@ -3575,19 +3575,25 @@ RELEASE_LINT_OK = ("PASS", "UNKNOWN-AT-CAP")  # an unknown at the lint cap is no
 def unknown_reason(e):
     return f"unknown ({' '.join(str(e).split())})"
 
+RELEASE_READ_ERRORS = (Stop, ValueError, KeyError, TypeError, OSError, subprocess.TimeoutExpired)  # OSError: gh or git missing; TimeoutExpired: sh's cap on a slow call
+
 def merge_reason(root, n, base, head, fetched):
     """-> None when merging `head` into origin/<base> is clean, else the reason. `git merge-tree --write-tree` exits 1 both for a conflict and
     for a sha it cannot read, so only a CONFLICT line in its output says conflict; any other output is unknown, never clean. The base is fetched once
     per run (`fetched` maps base -> its fetch error or None). A head this clone lacks is fetched from the pull request's own ref."""
     if base not in fetched:
-        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
-        fetched[base] = unknown_reason(f"git fetch origin {base} failed: {out}") if c else None
+        try:
+            c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+            fetched[base] = unknown_reason(f"git fetch origin {base} failed: {out}") if c else None
+        except (OSError, subprocess.TimeoutExpired) as e:  # cached like a failed exit, so a slow remote costs one wait, not one per pull request
+            fetched[base] = unknown_reason(f"git fetch origin {base} failed: {e}")
     if fetched[base]:
         return fetched[base]
+    fetch_out = ""
     if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
-        git(root, "fetch", "-q", "origin", f"+refs/pull/{n}/head:refs/remotes/origin/pull/{n}")
+        fetch_out = git(root, "fetch", "-q", "origin", f"+refs/pull/{n}/head:refs/remotes/origin/pull/{n}")[1]
     if git(root, "cat-file", "-e", f"{head}^{{commit}}")[0]:
-        return unknown_reason(f"the head {head[:9]} is not in this clone and could not be fetched")
+        return unknown_reason(f"the head {head[:9]} is not in this clone and could not be fetched: {fetch_out}")
     c, out = git(root, "merge-tree", "--write-tree", f"refs/remotes/origin/{base}", head)
     if not c:
         return None
@@ -3604,11 +3610,12 @@ def release_check(root, h, numbers, lints):
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
     base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks; no new
     process kept, file or timer."""
+    numbers = list(dict.fromkeys(numbers))  # a number given twice gets one line, at its first position
     infos, own, fetched = {}, {}, {}
-    for n in dict.fromkeys(numbers):
+    for n in numbers:
         try:
             infos[n] = h.pr(n)
-        except (Stop, ValueError, KeyError, TypeError) as e:
+        except RELEASE_READ_ERRORS as e:
             own[n] = [unknown_reason(e)]
     live = {n: i for n, i in infos.items() if i["state"] == "OPEN"}
     for n, i in infos.items():
@@ -3618,11 +3625,11 @@ def release_check(root, h, numbers, lints):
     if live:
         try:
             records = h.review_records(min(i["created"] or "1970-01-01T00:00:00Z" for i in live.values()))
-        except (Stop, ValueError, KeyError, TypeError) as e:
+        except RELEASE_READ_ERRORS as e:
             records_why = unknown_reason(e)
     try:
         default, default_why = default_branch(root), None
-    except Stop as e:
+    except RELEASE_READ_ERRORS as e:
         default, default_why = None, unknown_reason(e)
     for n, i in live.items():
         out = [records_why] if records_why else []
@@ -3644,7 +3651,10 @@ def release_check(root, h, numbers, lints):
             out.append("no lint verdict was given")
         elif lints[n] not in RELEASE_LINT_OK:
             out.append(f"lint {lints[n]}")
-        clash = merge_reason(root, n, i["base"], i["head"], fetched)
+        try:
+            clash = merge_reason(root, n, i["base"], i["head"], fetched)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            clash = unknown_reason(e)
         if clash:
             out.append(clash)
         own[n] = out
@@ -3656,7 +3666,7 @@ def release_check(root, h, numbers, lints):
             if default_why:
                 out.append(default_why)
             elif base != default:
-                owner = next((m for m, i in infos.items() if i["branch"] == base), None)
+                owner = next((m for m, i in sorted(infos.items(), key=lambda kv: kv[0] not in live) if i["branch"] == base), None)  # an open pull request on that head, else a closed one
                 if owner is None:
                     out.append(f"its base {base} is not the default branch, and no pull request with head {base} is in the call")
                 elif owner == n or owner in trail:
@@ -3805,7 +3815,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
-    p.add_argument("--release-check", nargs="+", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
+    p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
     p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N:VERDICT", help="with --release-check: the lint verdict of pull request N (PASS, FAIL or UNKNOWN-AT-CAP); a number with none FAILs")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it. With --confirm: the 40-hex head a relayed yes named; a moved head is refused before anything is claimed")
