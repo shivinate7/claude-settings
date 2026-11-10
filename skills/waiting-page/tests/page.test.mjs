@@ -3676,6 +3676,11 @@ const AP_UNKNOWN = mk("ap-unknown", 74, { zzzNotAField: "x" });
 const AP_FILED = mk("ap-filed", 75, { added: at(5) });
 const AP_PENDING = mk("ap-pending", 76, { added: at(6) });
 const AP_OPEN = TASK;
+// A closed item with no home and a title too long for one row: its head keeps the number, the title and the home on one row.
+const AP_LONG_TITLE = "A closed item whose title runs on and on and on and on, so that it cannot fit one row at tablet or desktop width and must be cut ".repeat(2);
+const AP_LONG = mk("ap-long", 77, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "", title: AP_LONG_TITLE, reply: "Filed with no home." });
+// The newer of two closed lines in the Answered section. AP_CLOSED (No. 70) closed at 15:00 the same day, so it sits under this one.
+const AP_NEWER = mk("ap-newer", 78, { status: "closed", closed: "2026-11-09T16:00:00Z", home: "step:ask-phase-out", title: "Newer line", reply: "Newer." });
 const apWrites = (page, coll) => page.evaluate((c) => window.__log.filter((l) => l[0] === "update" && l[1] === c).map((l) => ({ id: l[2], body: l[3] })), coll);
 const apBad = (page, coll) => page.evaluate((c) => window.__log.filter((l) => (l[0] === "set" || l[0] === "delete") && l[1] === c), coll);
 // Waits, up to 1.5 s, for the store to hold n updates of one collection. The caller asserts the count, so a wait that gives up fails by name.
@@ -3907,6 +3912,67 @@ test("ask-phase-out: a read item that a session gives waits is counted in the An
   await mustHave(page, `#tier-answered #item-${APR_WAITS.id}`, `the card of No. ${APR_WAITS.n} in the Answered section`);
   const got = await answeredHeader(page);
   assert.equal(got, "1", `the Answered header counts ${got}, but No. ${APR_WAITS.n} is drawn as a card in the section`);
+});
+
+// ---------------------------------------------------------------- ask-phase-out: the line head, the read list's Mark unread, the rail's order
+test("ask-phase-out: Mark unread in the read asks list is quiet, as it is in the read items list", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_READ], dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW }); if (!page) return;
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
+  await mustHave(page, "#askDismissed", "Show read asks unfold");
+  await page.click("#askDismissed");
+  await mustHave(page, `ol#askDList #res-${DIS_HIDDEN.id}`, "Mark unread in the read asks list");
+  const askCls = await page.locator(`ol#askDList #res-${DIS_HIDDEN.id}`).getAttribute("class");
+  await mustHave(page, "#readItems", "Show read items unfold");
+  await page.click("#readItems");
+  await mustHave(page, `#ires-${AP_READ.id}`, "Mark unread in the read items list");
+  const itemCls = await page.locator(`#ires-${AP_READ.id}`).getAttribute("class");
+  assert.match(itemCls, /\bquiet\b/, "the read items list does not draw Mark unread quiet, so it is no reference: " + itemCls);
+  assert.doesNotMatch(askCls, /\balt\b/, "Mark unread in the read asks list is the loud bordered press: " + askCls);
+  assert.match(askCls, /\bquiet\b/, "Mark unread in the read asks list is not quiet: " + askCls);
+});
+
+for (const width of [768, 1280]) {
+  test(`ask-phase-out: a long closed title at ${width} px is cut with an ellipsis, on one row with its number and home`, async (t) => {
+    const page = await open(t, { items: [AP_OPEN, AP_LONG], viewport: { width, height: 900 } }); if (!page) return;
+    await mustHave(page, "#line-77 .fhead", "the head of the long-title line");
+    await mustHave(page, "#line-77 .fno", "the number of the long-title line");
+    await mustHave(page, "#line-77 .ftext", "the title of the long-title line");
+    await mustHave(page, "#line-77 .hometag", "the home tag of the long-title line");
+    const g = await page.evaluate(() => {
+      const q = (s) => document.querySelector("#line-77 " + s), box = (e) => e.getBoundingClientRect();
+      const no = q(".fno"), tx = q(".ftext"), pill = q(".hometag"), head = q(".fhead");
+      // A centre, not a top: the title and the home tag differ in height, so on one row their tops differ.
+      const centre = (e) => { const b = box(e); return b.top + b.height / 2; };
+      return {
+        overflow: getComputedStyle(tx).textOverflow, cut: tx.scrollWidth > tx.clientWidth,
+        centres: [centre(no), centre(tx), centre(pill)],
+        right: box(pill).right, headRight: box(head).right, headH: box(head).height,
+        line: parseFloat(getComputedStyle(tx).lineHeight) || 22,
+      };
+    });
+    assert.equal(g.overflow, "ellipsis", "the long title has text-overflow " + g.overflow + ", not ellipsis");
+    assert.equal(g.cut, true, "the long title is not cut: it fits its box");
+    assert.ok(Math.max(...g.centres) - Math.min(...g.centres) < 3, "the number, the title and the home are not on one row: centres " + g.centres.map((c) => c.toFixed(1)).join(", "));
+    assert.ok(g.headH < g.line * 1.6, "the head is " + g.headH + "px tall, more than one text row");
+    assert.ok(g.right <= g.headRight + 0.5, "the home pill leaves the head");
+  });
+}
+
+test("ask-phase-out: the rail's Answered row follows the Answered section's order, newest answer first", async (t) => {
+  const sent = { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", done: true, note: "" };
+  const page = await open(t, { items: [DECISION, TASK, AP_CLOSED, AP_NEWER], answers: { [TASK.id]: sent } }); if (!page) return;
+  await mustHave(page, "#line-78", "the newer closed line");
+  await mustHave(page, "#tier-answered", "the Answered section");
+  await mustHave(page, '#rail a.ov-head[href="#tier-answered"]', "the Answered row of the rail");
+  const r = await page.evaluate(() => {
+    const sec = [...document.querySelectorAll('#tier-answered [id^="line-"], #tier-answered [id^="item-"]')].map((e) => e.id.startsWith("line-") ? +e.id.slice(5) : e.id);
+    const head = document.querySelector('#rail a.ov-head[href="#tier-answered"]');
+    const rail = [...head.parentElement.querySelectorAll(".nchip .no")].map((e) => +e.textContent);
+    return { sec, rail };
+  });
+  const secN = r.sec.map((x) => (x === "item-" + TASK.id ? TASK.n : x));
+  assert.deepEqual(secN, [AP_NEWER.n, AP_CLOSED.n, TASK.n], "the Answered section is not newest first: " + JSON.stringify(secN));
+  assert.deepEqual(r.rail, secN, "the rail's Answered row " + JSON.stringify(r.rail) + " is not in the section's order " + JSON.stringify(secN));
 });
 
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
