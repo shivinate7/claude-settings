@@ -1410,6 +1410,13 @@ const FIRST_FRAME_KINDS = {
   "small focus 110x90": SMALL_FOCUS("ff-focus-110", 110, 90),
   // A declared tall picture settles to the 480px scroll box. Its first frame is drawn from the declared height at the full column width.
   "declared tall 390x2400": { item: (count) => picItem("ff-tall", 88, { count, declared: { w: 390, h: 2400 } }), data: SAME(TALL_PIC(2400)), H: 2400 },
+  // A picture 1 px taller than a 390 x 844 phone's aspect. Its first frame is capped at 480; placed, it draws whole in a wide column.
+  "phone 390x845": { item: (count) => picItem("ff-phone-845", 88, { count, declared: { w: 390, h: 845 } }), data: SAME(TALL_PIC(845)), H: 845 },
+  // Focus boxes taller than a phone's aspect, so the same cap applies to their first frame. At 1280 with 3 options the 600 box scrolls once placed,
+  // as its first frame does, so that config passes on the old code and is skipped.
+  "focus 100x300": { ...SMALL_FOCUS("ff-focus-100x300", 100, 300), skip: [[1280, 3]] },
+  "focus 60x250": SMALL_FOCUS("ff-focus-60x250", 60, 250),
+  "focus 144x312": SMALL_FOCUS("ff-focus-144x312", 144, 312),
 };
 // The viewport holds every option in view.
 const firstFrameAndSettled = async (t, kind, width, count, scheme) => {
@@ -1426,6 +1433,7 @@ const firstFrameAndSettled = async (t, kind, width, count, scheme) => {
   return { first, settled: await optBoxes(page, item.id) };
 };
 for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) for (const count of [2, 3]) for (const kind of Object.keys(FIRST_FRAME_KINDS)) {
+  if ((FIRST_FRAME_KINDS[kind].skip || []).some(([w, c]) => w === width && c === count)) continue; // a config that already passes on the old code
   test(`a ${kind} picture's box in its first painted frame is the height it settles to once measured, with ${count} options at ${width} wide, ${scheme} scheme`, async (t) => {
     const r = await firstFrameAndSettled(t, kind, width, count, scheme); if (!r) return;
     assertScope(r.settled, count, width);
