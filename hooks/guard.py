@@ -173,7 +173,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An
                        undated stamp more than 60 minutes ahead reads as a quote from an earlier day, and passes; so
                        does a stamp behind. The reason steers to your own label and prints the real time. No
-                       transcript, file or process; a missing clock module passes the message. An override lifts it.
+                       transcript or process; a missing clock module passes the message. A dated limit of 1 minute ahead also judges
+                       three written values, each an ISO instant with an offset: `added` in an ArtifactData set,
+                       update or batch write to collection items (inline, through `file_path`, one local file read
+                       only for an items write with no inline data, or as a str_replace's new text or time
+                       fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
+                       Edit's or MultiEdit's new text; the last literal double-quoted `updatedAt` in a Bash command, read as text. The reason prints the time in Central and ISO. One clock read only when
+                       a judged value is present. An override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
                        tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
@@ -536,7 +542,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool,
             _add_shape, _commit_shape, _is_python, own_tier_tagged,
         )
@@ -6526,6 +6532,11 @@ def judge(payload) -> None:
     stamped = stamp_hit(tool, tool_input)
     if stamped:
         refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
+    written = written_time_hit(tool, tool_input, cwd)
+    if written:
+        refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
