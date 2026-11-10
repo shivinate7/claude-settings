@@ -13089,6 +13089,58 @@ sh("env: find -type d starts in the held folder one level up, refused: " + _TYPE
 sh("env: find -type d control, the start folder is clean, allowed: " + _TYPE_D_START_CLEAN, _TYPE_D_START_CLEAN,
    "allow", cwd=ENVWALK_CLEAN)
 
+# The -type d finds below print zz/inner or zz, so xargs hands grep a folder that holds the env file. The env file
+# is in zz/inner; each tree holds a README in src, app, other and node_modules/pkg. ENVZZ_CLEAN is the same tree with
+# no env file, and each red form's control runs over it.
+ENVZZ_HELD = os.path.join(ROOT, "envzz-held")    # zz/inner holds the env file
+ENVZZ_CLEAN = os.path.join(ROOT, "envzz-clean")  # the same tree, with no env file
+# A folder whose `link` is a symlink to a proj outside it. The held proj holds the env file; the clean one does not.
+ENVLINK_HELD = os.path.join(ROOT, "envlink-held")
+ENVLINK_HELD_PROJ = os.path.join(ROOT, "envlink-held-out", "proj")
+ENVLINK_CLEAN = os.path.join(ROOT, "envlink-clean")
+ENVLINK_CLEAN_PROJ = os.path.join(ROOT, "envlink-clean-out", "proj")
+
+
+def build_envzz_folders():
+    for base in (ENVZZ_HELD, ENVZZ_CLEAN):
+        write(os.path.join(base, "zz", "inner", "README.md"), "inner\n")
+        for folder in ("src", "app", "other", os.path.join("node_modules", "pkg")):
+            write(os.path.join(base, folder, "README.md"), "held\n")
+    write(os.path.join(ENVZZ_HELD, "zz", "inner", ENV), "FIXTURE=1\n")
+
+
+def build_envlink_folders():
+    for base, proj, held in ((ENVLINK_HELD, ENVLINK_HELD_PROJ, True), (ENVLINK_CLEAN, ENVLINK_CLEAN_PROJ, False)):
+        write(os.path.join(proj, "README.md"), "proj\n")
+        if held:
+            write(os.path.join(proj, ENV), "FIXTURE=1\n")
+        write(os.path.join(base, "README.md"), "link\n")
+        if LINKS_MADE:
+            os.symlink(proj, os.path.join(base, "link"), target_is_directory=True)
+
+
+lazy_fixture((ENVZZ_HELD, ENVZZ_CLEAN), build_envzz_folders)
+lazy_fixture((ENVLINK_HELD, ENVLINK_HELD_PROJ, ENVLINK_CLEAN, ENVLINK_CLEAN_PROJ), build_envlink_folders)
+
+_ZZ_PRUNE_NODE = "find . -name node_modules -prune -o -type d -print0 | xargs -0 -r grep -r K"
+_ZZ_NAME_SRC_OR_DIR = "find . -type d -name src -o -type d -print0 | xargs -0 grep -r K"
+for _cmd in (_ZZ_PRUNE_NODE, _ZZ_NAME_SRC_OR_DIR):
+    sh("env: find -type d xargs grep -r, the env file is in zz/inner, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=ENVZZ_HELD)
+    sh("env: find -type d xargs grep -r control, the same tree with no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVZZ_CLEAN)
+# This form prints only src, which holds a README and no env file, so the env file in zz is never handed to grep.
+_ZZ_NAME_SRC = "find . -type d -name src -print0 | xargs -0 grep -r K"
+sh("env: find -type d -name src xargs grep -r control, the env file is only in zz, allowed: " + _ZZ_NAME_SRC,
+   _ZZ_NAME_SRC, "allow", cwd=ENVZZ_HELD)
+# find -L follows the link into proj, and xargs hands grep the link's folder, so grep -r reads proj's env file.
+_LINK_FIND_L = "find -L . -type d | xargs grep -r K"
+if LINKS_MADE:
+    sh("env: find -L -type d xargs grep -r, the link's proj holds the env file, refused: " + _LINK_FIND_L,
+       _LINK_FIND_L, "deny", "env-file", cwd=ENVLINK_HELD)
+    sh("env: find -L -type d xargs grep -r control, the link points at a proj with no env file, allowed: "
+       + _LINK_FIND_L, _LINK_FIND_L, "allow", cwd=ENVLINK_CLEAN)
+
 # A relative cd and an env -C reach the env file's folder through two steps the guard follows: cd src moves into
 # clean/src, and env -C ../../held reaches held, which holds the env file. ENVCD_ROOT is built with ENVPROJ_ROOT above.
 _CD_REL_ENV_CHDIR = "cd src && env -C ../../held grep -r K"
