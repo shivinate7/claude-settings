@@ -3601,22 +3601,25 @@ def merge_reason(root, n, base, head, fetched):
         return f"the merge with {base} is not clean (merge conflict)"
     return unknown_reason(f"git merge-tree exited {c}: {out}")
 
-def release_check(root, h, numbers, lints):
+def release_check(root, h, numbers, lints, root_why=None):
     """-> (lines, ok) of `merge --release-check`: one line per number in `numbers`, in order: `#N PASS`, or `#N FAIL: ` and the reasons joined by
     `; `. A check that cannot run is a reason (`unknown (...)`), and every number gets a line, so a missing line cannot read as a pass. `lints` maps
     a number to the lint verdict the caller reports. The checks: the pull request is open; its newest review record is done at the live head
     (review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint verdict is PASS or UNKNOWN-AT-CAP;
     the merge with the base tip is clean; and a base that is not the default branch is the head of a pull request in the call that passes.
+    `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
     base, one merge-tree per open number (it writes tree objects, never a ref), and a fetch of a pull request head the clone lacks; no new
     process kept, file or timer."""
     numbers = list(dict.fromkeys(numbers))  # a number given twice gets one line, at its first position
     infos, own, fetched = {}, {}, {}
-    for n in numbers:
+    for n in numbers if root_why is None else ():
         try:
             infos[n] = h.pr(n)
         except RELEASE_READ_ERRORS as e:
             own[n] = [unknown_reason(e)]
+    if root_why is not None:
+        own = {n: [unknown_reason(root_why)] for n in numbers}
     live = {n: i for n, i in infos.items() if i["state"] == "OPEN"}
     for n, i in infos.items():
         if n not in live:
@@ -3628,7 +3631,7 @@ def release_check(root, h, numbers, lints):
         except RELEASE_READ_ERRORS as e:
             records_why = unknown_reason(e)
     try:
-        default, default_why = default_branch(root), None
+        default, default_why = (default_branch(root) if live else None), None  # read only for an open number's base
     except RELEASE_READ_ERRORS as e:
         default, default_why = None, unknown_reason(e)
     for n, i in live.items():
@@ -3888,10 +3891,12 @@ def main(argv, host=None, lock=None, hosts=None):
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
                 return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role check and any lock: it merges and pushes nothing
         if a.release_check:
-            c, root = sh(["git", "rev-parse", "--show-toplevel"])
-            if c:
-                raise Stop("not in a git checkout")
-            lines, ok = release_check(root, host or Host(), a.release_check, dict(a.lint))  # before the role check and any lock: it reads, merges and pushes nothing
+            try:
+                c, root = sh(["git", "rev-parse", "--show-toplevel"])
+                root_why = "not in a git checkout" if c else None
+            except (OSError, subprocess.TimeoutExpired) as e:  # OSError: git is missing
+                root, root_why = None, e
+            lines, ok = release_check(root, host or Host(), a.release_check, dict(a.lint), root_why)  # before the role check and any lock: it reads, merges and pushes nothing
             say(*lines)
             return 0 if ok else 1
         if a.role is not None:
