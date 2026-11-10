@@ -1,0 +1,12 @@
+{
+  "title": "The Stop hook's refusal guard clears once a refusal is raised or ruled on",
+  "phase": "build",
+  "status": "doing",
+  "order": 970,
+  "owner": null,
+  "why": "Debt refusal-guard-never-clears (lane notes-fix-page, 05:42 CST Nov 10; decision refusals-reach-the-owner). One auto-mode refusal blocked every later reply for 8 turns, even after a coordinator ruling.",
+  "note": "Coordinator started lane session_013NEJL3fy7PDPhWER5r89ep at 05:43 CST Nov 10.",
+  "updatedAt": "2026-11-10T05:44:00-06:00",
+  "lane": "session_013NEJL3fy7PDPhWER5r89ep",
+  "blockedBy": []
+}
