@@ -426,3 +426,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - cdvar-command-text-redundant (#2379): _command_text looks redundant since 847 (mutant `R=B; R=A cd "$R"` still green).
 - cdvar-glob-cd-stays (#2379): `R=<dir>/h*; cd $R` under failed_cd_stays reads "stays" where bash goes to the match (same on main).
 - cdvar-stale-docstrings (#2379): stale docstrings in hooks/guard.py ("a folder that holds a variable is unknown and passes").
+- eskf-gaps (#2372 export-scan-key-false-alarms, coordinator 01:59 CST Nov 10): the wider user-part limit has no owner ruling; mutants no row kills (VENDOR_KEY, VALUE_END, the IPv6 clause of URL_HOST_START, JS_BOOLEANS); text after a boolean-run closer is ignored; export_page.py docs still say URL credentials refuse "on any host"; the debt file cites stale head f71e12a04.
+- model-correction-2119 (coordinator 01:59 CST Nov 10): #2119's record-writer ran haiku, not sonnet. No roadmap line named its model; correct any report or record that says sonnet.
