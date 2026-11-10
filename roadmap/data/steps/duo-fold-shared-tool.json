@@ -1,0 +1,10 @@
+{
+  "title": "Home's duo-fold.sh becomes a shared claude-settings tool next to sim-test and sim-lease",
+  "phase": "now",
+  "status": "todo",
+  "order": 949,
+  "owner": "coordinator",
+  "why": "Owner ruling, Degen item 187, 2026-11-09 20:16 CST: Home's scripts/duo-fold.sh, at e7f2b5d6, moves into claude-settings as a shared tool next to sim-test and sim-lease. Degen and Home each keep a copy until it lands (owner 20:22 CST).",
+  "note": "The coordinator starts its lane (20:30 CST Nov 9). After it lands, Degen's and Home's copies go, each by its own repo's lane. Related: skill ios-apps (fold the Duo). Filed 20:27 CST Nov 9.",
+  "updatedAt": "2026-11-09T20:27:00-06:00"
+}

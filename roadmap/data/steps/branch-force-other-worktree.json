@@ -1,11 +1,11 @@
 {
   "title": "The one-worktree-per-branch check also refuses `git branch -f` and `git update-ref` of a branch another worktree holds",
   "why": "A test-author's checkout -B moved a branch a builder's worktree held, so a commit there would have reverted a merge silently; nothing was lost (lane notes-fix-large-1, 19:29 CST Nov 8). #1583 covers only checkout -B and switch -C/-c (coordinator 19:31 CST Nov 8).",
-  "note": "Filed by triage, Nov 8 19:31 CST. Starts after #1583 merges. Extends #1583's check (step one-worktree-per-branch); builds no second check. Hold lifted 20:28 CST Nov 8 (owner's 20:24 CST word, via the coordinator). Lane session_013NEJL4UKALWPAbsRE1HhUo started 12:13 CST Nov 9 (coordinator). Back to todo 12:18 CST Nov 9 (coordinator): starts after #1583 merges; its lane session_013NEJL4UKALWPAbsRE1HhUo stays idle until then.",
+  "note": "Filed by triage, Nov 8 19:31 CST. Starts after #1583 merges. Extends #1583's check (step one-worktree-per-branch); builds no second check. Hold lifted 20:28 CST Nov 8 (owner's 20:24 CST word, via the coordinator). Lane session_013NEJL4UKALWPAbsRE1HhUo started 12:13 CST Nov 9 (coordinator). Back to todo 12:18 CST Nov 9 (coordinator): starts after #1583 merges; its lane session_013NEJL4UKALWPAbsRE1HhUo stays idle until then. Second incident (Degen gap 3; Owner 20:25 CST Nov 9: queue each of Degen's eight claude-settings gaps as a step or debt, with its incident (via the coordinator 20:30 CST).): a builder moved a lane branch ref under a checkout that had it checked out, leaving it dirty (Degen PR 566, 2026-11-09 16:15 CST). The coordinator proposed slug builder-no-ref-move-under-checkout; folded here.",
   "phase": "now",
   "owner": "coordinator",
   "lane": "session_013NEJL4UKALWPAbsRE1HhUo",
   "status": "todo",
   "order": 858,
-  "updatedAt": "2026-11-09T12:14:00-06:00"
+  "updatedAt": "2026-11-09T20:27:00-06:00"
 }
