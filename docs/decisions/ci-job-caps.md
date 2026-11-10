@@ -13,7 +13,7 @@ So the stopgap covers the CI job caps raised here, and local tool caps too:
 - The Retire check's bound per suite, `TIMEOUT` in `lint/check_debt_retire.py`: 600 s to 1800 s.
 - The Python floor check's bound, `TIMEOUT` in `lint/check_python_floor.py`: 300 s to 900 s.
 - The two mutation-run caps, `timeout` in `hooks/mutate_guard.py` and `janitor/mutate_sweep.py`: 1200 s to 3600 s.
-- Other local time limits, such as the other lint checks', fall under the same stopgap.
+- This PR raises only the local limits named above. Any other local time limit, such as the other lint checks', rises under the same stopgap when it fails off time.
 
 Why: local caps ran out on lane lint for PRs 2268, 2164 and 2276, and the Retire checks refused PR 2551 at merge.
 
