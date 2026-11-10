@@ -2317,6 +2317,15 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         return self.call("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
             {"op": "set", "collection": "items", "doc_id": "q1", "data": {}}]})
 
+    def mac_write(self, op, collection="items", doc_id="q1"):
+        """A Mac db_write of one op, with its url: the Mac twin of items_write (the call carries `ops`)."""
+        return self.call("mcp__claude-artifacts__db_write", {"ops": [
+            {"op": op, "path": collection + "/" + doc_id, "data": {}}], "url": self.PAGE})
+
+    def mac_read(self, short, path, result=None):
+        """A Mac read (db_get, db_list or db_query) of `path` with its url, and its result when one is given."""
+        return self.call("mcp__claude-artifacts__" + short, {"path": path, "url": self.PAGE}, result=result)
+
     def box(self, side=False):
         return self.call("AskUserQuestion", {}, side=side)
 
@@ -2441,6 +2450,39 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         for label, write in (("get", self.items_write("get")), ("notes", self.items_write("set", "notes"))):
             with self.subTest(write=label):
                 out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
+                self.assert_blocked(out, "Pick guard")
+
+    def test_qm_mac_db_get_of_meta_page_names_the_writer(self):
+        # Catches: a Mac db_get of meta/page not read as the page writer's read (the name is not ArtifactData), so a
+        # send to the writer is refused as "the page writer is not known". The ArtifactData get is the control.
+        result = json.dumps({"writer": self.WRITER, "url": self.PAGE})
+        control = [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)]
+        out = self.stop([human("decide"), *control, assistant_text(self.reply(self.PICK))])
+        self.assertIsNone(out, "control: the ArtifactData get and the send pass, the block is %r" % (out,))
+        mac = self.mac_read("db_get", "meta/page", result=result)
+        out = self.stop([human("decide"), *mac, *self.send(session_id=self.WRITER),
+                         assistant_text(self.reply(self.PICK))])
+        self.assertIsNone(out, "the Mac db_get of meta/page does not name the writer, so the send is refused: %r"
+                          % (out,))
+
+    def test_qm_mac_db_write_to_items_passes_as_the_batch_does(self):
+        # Catches: a Mac db_write of an item to the waiting page refused as "not sent to the page writer" (its name is
+        # not ArtifactData), while the ArtifactData batch of the same item passes. The batch is the control.
+        out = self.stop([human("decide"), *self.items_batch(), assistant_text(self.reply(self.PICK))])
+        self.assertIsNone(out, "control: the ArtifactData batch passes, the block is %r" % (out,))
+        for label, write in (("set", self.mac_write("set")), ("merge", self.mac_write("merge"))):
+            with self.subTest(write=label):
+                out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
+                self.assertIsNone(out, "the Mac db_write %s of an item on the waiting page is not counted: %r"
+                                  % (label, out))
+
+    def test_qm_mac_db_reads_and_other_collections_do_not_count(self):
+        # Catches: a Mac read of an item, or a Mac write to another collection, passing as the send. Both block on
+        # this head and must still block after a fix: the Mac twin of test_qm_red_items_read_or_other_collection.
+        for label, act in (("db_get items/q1", self.mac_read("db_get", "items/q1")),
+                           ("db_write notes/q1", self.mac_write("set", collection="notes"))):
+            with self.subTest(act=label):
+                out = self.stop([human("decide"), *act, assistant_text(self.reply(self.PICK))])
                 self.assert_blocked(out, "Pick guard")
 
     def test_qm_red_act_in_an_earlier_turn_does_not_count(self):
