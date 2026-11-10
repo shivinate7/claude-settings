@@ -1866,11 +1866,11 @@ test("a withdraw leaves an answer that changed since the page read it", async (t
   assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete"), []);
 });
 
-// A Withdraw on this visit of a card kept by an answers row and waiting on its lane (answered-sink). Withdraw deletes the row, and the card
-// must not redraw as sent: it is open again, with no Sent pill. The scope (the Blocking and Answered rows) is read before the card.
-// The placement and the counts are as the brief sets them; the lane's design note says a same-visit Withdraw stays in Answered.
+// A Withdraw on this visit of a card kept by an answers row and waiting on its lane (answered-sink). Withdraw deletes the row. The card stays
+// in Answered, as a saved card does on this visit (membership is fixed at load), and must not redraw as sent: it is drawn open, with no Sent pill.
+// The scope (the Blocking and Answered rows) is read before the card.
 const railCount = (page, k) => page.evaluate((key) => { const a = document.querySelector(`#rail a.ov-head[href="#tier-${key}"] .ct`); return a ? Number(a.textContent.trim()) : 0; }, k);
-test("answered-sink: a Withdraw on a kept-answer lane card, on this visit, draws it open with no Sent pill, and counts it back in Blocking", async (t) => {
+test("answered-sink: a Withdraw on a kept-answer lane card, on this visit, draws it open with no Sent pill, and leaves it in Answered", async (t) => {
   const it = mk("lane-wd", 1, { holds: "Blocks the release.", added: at(5), lane: "ci-done-comment", lastAnswer: { choice: "a", note: "", at: ANSWERED_AT } });
   const held = mk("lane-wd-held", 2, { holds: "Blocks the build.", added: NEW_ADDED });
   const page = await open(t, { items: [it, held], answers: answerOf(it, "a") }); if (!page) return;
@@ -1888,9 +1888,9 @@ test("answered-sink: a Withdraw on a kept-answer lane card, on this visit, draws
   const chip = await page.locator("#c-" + it.id).getAttribute("aria-label");
   assert.deepEqual(pills, [], `No. ${it.n} is drawn with a Sent pill after its withdraw: ${JSON.stringify(pills)}`);
   assert.doesNotMatch(chip, /answered/, `No. ${it.n}'s chip still reads as answered after its withdraw: ${JSON.stringify(chip)}`);
-  assert.equal(where, "tier-holds", `No. ${it.n} is not back in Blocking after its withdraw (in ${where})`);
-  assert.equal(holdsAfter, holdsBefore + 1, `the Blocking count did not go up by one after the withdraw`);
-  assert.equal(answeredAfter, answeredBefore - 1, `the Answered count did not go down by one after the withdraw`);
+  assert.equal(where, "tier-answered", `No. ${it.n} left the Answered section after its withdraw (in ${where})`);
+  assert.equal(holdsAfter, holdsBefore, `the Blocking count changed after the withdraw`);
+  assert.equal(answeredAfter, answeredBefore, `the Answered count changed after the withdraw`);
 });
 
 test("a note typed on an item whose pick stands sends the stood pick plus the note", async (t) => {
