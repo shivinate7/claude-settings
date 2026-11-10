@@ -714,7 +714,7 @@ def live_work(path, steps, slug=None):
     # `merged` is the JSON true or false the publisher read from GitHub; text such as "true" is a wrong shape, not a guess.
     landed_pulls = keep("landedPull", raw["landedPulls"], lambda r: type(r.get("number")) is int
                         and isinstance(r.get("branch"), str)
-                        and ("merged" not in r or isinstance(r["merged"], bool))) if "landedPulls" in raw else []
+                        and ("merged" not in r or isinstance(r["merged"], bool))) if "landedPulls" in raw else None
     landed_skipped = len(skipped) - before_landed
     for row in threads:
         sid = row.get("step") or None
@@ -1196,16 +1196,24 @@ def stale_drafts(work):
     return out
 
 
-WAIT_ON_PULL = re.compile(r"\b(?:after|waits?\s+on|waiting\s+for|blocked\s+on|once|until|when)\s+#(\d+)\b", re.I)
+# The words that say a step waits on pull request #N. One list, so a placement check can share it.
+WAIT_ON_PULL_PHRASES = ("after", "once", "until", "when", "blocked on", "stacked on", "stacks on", "stack on",
+                        "built on", "wait on", "waits on", "wait for", "waits for", "waiting on", "waiting for",
+                        "lands with")
+# `PR ` may sit before #N. A match followed by closed or merged is history ("continues here after #46 closed"), not a wait.
+WAIT_ON_PULL = re.compile(r"\b(?:%s)\s+(?:PR\s+)?#(\d+)\b(?!\s+(?:closed|merged)\b)"
+                          % "|".join(r"\s+".join(map(re.escape, ph.split())) for ph in WAIT_ON_PULL_PHRASES), re.I)
 
 
 def waits_on_closed_pulls(open_, work):
     """Entries `step (#N)` for each open step whose title, why or note waits on a pull request #N that the live file
     shows closed and not merged (a landedPulls row with merged false, and no pulls row or merged row for N), or one
-    unknown entry. The live file holds only the closed pulls the publisher reads, so a PR closed earlier is not seen."""
+    unknown entry (also when the live file has no landedPulls key). The live file holds only the closed pulls the publisher reads, so a PR closed earlier is not seen."""
     why = pair_why(work)
     if why:
         return [why]
+    if work["landedPulls"] is None:
+        return ["unknown (the live file has no landedPulls list)"]
     dead = {r["number"] for r in work["landedPulls"] if r.get("merged") is False}
     dead -= {r["number"] for r in work["landedPulls"] if r.get("merged") is True}
     dead -= {p["number"] for p in work["pulls"]}
