@@ -6,10 +6,10 @@ Owner, 2026-11-01 18:44 CST: each owner repo raises its job caps generously, as 
 
 Owner, 2026-10-27, roadmap step c95 (the cap rule):
 
-- A full CI run is red only when something is broken, never because a job ran out of time. This still holds under the pointer below.
-- Until the reader is built, the stored caps aim at a slowest run under 80% of the cap. The pointer below replaces that target.
-- Until the reader is built, a job that ends at its stored cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
-- A stored cap rises only with a measured figure in the comment beside it. The item stays suspended while the stopgap holds. It comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
+- A full CI run is red only when something is broken, never because a job ran out of time.
+- The target is a slowest run under 80% of the cap.
+- A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
+- A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
 
 Superseded in part, 2026-11-10 14:09 CST, by decision `time-limits-end-hangs-only` (a time limit ends only a hung run). Not built: the stored caps stay in force until the reader is built.
 
