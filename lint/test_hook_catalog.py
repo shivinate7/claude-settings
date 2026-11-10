@@ -77,7 +77,7 @@ they use. Interface the generator must meet. One home: the same generator, no se
   touches a record would have to carry a regenerated page, and two of them conflict on it. A lane cannot
   commit the page either, so its dispatched run would be red for a page only the merge writes. R10-R13
   read the committed page, so they are skipped on a waived run (pull_request_run). The fixture cases drop
-  the runner's run variables (B6-B15 and U8 set them).
+  the runner's run variables (B6-B16 and U8 set them).
 - A root with no records at all (no record folder, no rule marker) writes no page: exit 0, nothing
   written, `--check` silent. The merge tool runs the generator on every repo it merges (D5).
 - `--root DIR` is the repo root, the same as the environment variable HOOK_CATALOG_ROOT (both work).
@@ -1160,6 +1160,16 @@ def dispatched(branch):
     return {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/" + branch, "GITHUB_REF_NAME": branch}
 
 
+# Runs that are not a lane's dispatch: a dispatch of main (even with a lane's name in GITHUB_REF_NAME), a dispatch of an
+# empty branch, a dispatch of a tag, and a push of a lane. Each is no waived run and is red from --check on a stale page.
+NOT_A_LANE_RUNS = (
+    ("dispatch of main with a lane in GITHUB_REF_NAME", {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main", "GITHUB_REF_NAME": "lane"}),
+    ("dispatch of an empty branch", {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/", "GITHUB_REF_NAME": ""}),
+    ("dispatch of a tag", {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/tags/v1", "GITHUB_REF_NAME": "v1"}),
+    ("push of a lane", {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/lane", "GITHUB_REF_NAME": "lane"}),
+)
+
+
 class RecordsStale(Tree):
     def published(self, extra=None):
         root = self.tree(with_records(extra))
@@ -1332,6 +1342,15 @@ class RecordsStale(Tree):
         self.assertEqual(code, 1, out + err)
         self.assertIn("docs/catalog.md", out + err)
         self.assertNotIn("docs/records.md", out + err)
+
+    def test_b16_a_run_that_is_not_a_lane_dispatch_is_red_on_a_stale_page(self):
+        for name, env in NOT_A_LANE_RUNS:
+            with self.subTest(name):
+                root = self.published()
+                put(root, "debts/new-gap.md", DEBT.replace("Gap one", "New gap"))
+                code, out, err = generator(root, "--check", env=env)
+                self.assertEqual(code, 1, "a stale page is waived on %s:\n%s%s" % (name, out, err))
+                self.assertIn("docs/records.md", out + err, name)
 
 
 NOT_HISTORY = [
@@ -1640,6 +1659,7 @@ class Helpers(unittest.TestCase):
                   ("a pull request run", {"GITHUB_BASE_REF": "main"}, True),
                   ("a dispatch of main", dispatched("main"), False)]
         probes += [("a dispatch of lane %s" % branch, dispatched(branch), True) for branch in LANE_RUNS]
+        probes += [("not a lane run: %s" % name, env, False) for name, env in NOT_A_LANE_RUNS]
         for name, env, want in probes:
             with self.subTest(name), mock.patch.dict(os.environ, {**clean, **env}, clear=True):
                 self.assertEqual({k for k in RUN_ENV if k in os.environ}, set(env), "the fixture: only the probe's variables are set")
