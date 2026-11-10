@@ -129,6 +129,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        dry run, unless the session's own get_session record (read
                        from the transcript) shows the tag cs-build:triage with no set_session_tags after
                        it. No record, no transcript or no env id is a refusal. An override lifts it.
+  roadmap-artifact-cites
+                       deny or noted. A `git push` the triage session may make to the record branch, whose pushed
+                       head (the source of each refspec, HEAD for a bare push) holds a roadmap/data/steps/*.json
+                       with a bare claude.ai artifact link or an `artifact:<id>` cite that is not in the artifacts
+                       registry: deny, the reason names the cite form. A head or registry that cannot be read is
+                       allowed and noted with "unknown". A dry run, another branch and a lane's push (its own
+                       roadmap-one-writer refusal) are not judged. An override lifts it.
+                       (decision waiting-data-in-repo, lint/check_artifact_cites.py is the one home of the test)
   trust-card-in-build  deny. A call to either tool that opens the owner's trust card, unless the session's own
                        get_session record (read from the transcript) proves no cs-build tag. No record,
                        no transcript or no env id is a refusal.
@@ -477,8 +485,8 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_push_hit, records_page_hit, role_proof_hit,
+            ARTIFACT_CITES_REASON, DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -4405,11 +4413,18 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
-    # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
-    # transcript read only when the push reaches the record branch.
-    matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
-    if matched:
+    # roadmap-one-writer), then, for the triage session, a pushed head whose roadmap steps hold a bare artifact
+    # link or an unregistered cite (rule roadmap-artifact-cites). Cost: one `git rev-parse` and one small file read
+    # per push; when the push reaches the record branch, one transcript read, then `git ls-tree` and `git cat-file`
+    # (one when the head holds no step) per ref sent. A dry run or another branch reads none of them.
+    kind, matched = record_push_hit(stripped, cwd, transcript, record_branch_of, read_verb)
+    if kind == "writer":
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
+    elif kind == "cites":
+        refuse(tool, "deny", "roadmap-artifact-cites", ARTIFACT_CITES_REASON.format(found=matched),
+               "git push to the record branch: " + matched)
+    elif kind == "unknown":
+        record(tool, "noted", "roadmap-artifact-cites", matched)
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:

@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -1073,12 +1074,18 @@ def _push_calls(segment: str, script: str, cwd: str):
                     yield from _push_calls(part, each, inner_cwd)
 
 
-def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
-    """Return the matched push when a segment pushes to the checkout's record branch, or to the default
-    name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
-    reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
-    args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
-    reaches the branch."""
+ARTIFACT_CITES_REASON = (
+    "roadmap-artifact-cites: a roadmap step in this branch holds a bare artifact link or an artifact:<id> cite whose "
+    "id is not in the artifacts registry ({found}). Cite each page as artifact:<id>, register the page in the "
+    "registry, amend the step commit and send the branch again. (decision waiting-data-in-repo, git is each "
+    "artifact's home)"
+)
+
+
+def _record_pushes(stripped, cwd, record_branch_of, read_verb):
+    """(root, source, spec) of each ref a `git push` sends to the checkout's record branch or to `roadmap`, with
+    `source` the plain local revision the refspec names. A dry run moves nothing and is skipped. A push with no
+    nameable ref (`--all`, `--mirror`, a deletion) yields source None, so the writer check still sees it."""
     for segment in split_segments(stripped):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
@@ -1089,10 +1096,53 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
                 record = record_branch_of(root)
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
-            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)):
-                return "git push to the record branch"
-    return ""
+            dests = push_destinations(args, where, overrides)
+            if not {record, DEFAULT_RECORD_BRANCH} & set(dests):
+                continue
+            named = push_refspecs(args)
+            sent = False
+            for spec, dest in zip(named[1] or [""], dests) if named is not None and root else ():
+                if dest in (record, DEFAULT_RECORD_BRANCH):
+                    sent = True
+                    yield root, _plain_source(spec.lstrip("+").partition(":")[0])
+            if not sent:
+                yield root, None
+
+
+def record_push_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb):
+    """(kind, detail) of the first `git push` to the checkout's record branch, or to the default name `roadmap`,
+    that a rule refuses or notes, else ('', ''). `record_branch_of(root)` reads the checkout's branch
+    (lint/layout.py); a read error means the default. `read_verb(subcommand, args)` is guard.py's own test for a
+    dry run, which moves nothing.
+      'writer'  the own record does not prove the triage tier (rule roadmap-one-writer). The proof is read only
+                after a push reaches the branch.
+      'cites'   the pushed head's roadmap steps hold a bare artifact link or an unregistered cite (rule
+                roadmap-artifact-cites). `detail` is the reason's find. Only a push the writer check allowed
+                is read, so a lane keeps the writer refusal.
+      'unknown' the pushed head or the registry could not be read (rule roadmap-artifact-cites), allowed.
+    Cost beyond the writer check: git's `ls-tree` and `cat-file` of the pushed head, once per ref sent, and none
+    for a dry run or a push to another branch."""
+    proved = None
+    unread = ""
+    for root, source in _record_pushes(stripped, cwd, record_branch_of, read_verb):
+        if proved is None:
+            proved = _own_tier_proved(transcript, RECORD_WRITER_TIER)
+        if not proved:
+            return "writer", "git push to the record branch"
+        if source is None:
+            continue
+        try:  # imported late: only a proved triage push to the record branch reads the steps
+            lint = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lint")
+            if lint not in sys.path:
+                sys.path.append(lint)
+            import check_artifact_cites
+            finds = check_artifact_cites.pushed_step_findings(root, source)
+        except Exception as err:
+            unread = unread or "unknown: pushed head %s not read: %s" % (source, str(err)[:80]) 
+            continue
+        if finds:
+            return "cites", "; ".join("%s: %s" % find for find in finds[:3])
+    return ("unknown", unread) if unread else ("", "")
 
 
 TRUST_TOOLS = ("mcp__claude-code-remote__confirm_repository_trust", "mcp__claude-code-remote__request_computer_folder")
