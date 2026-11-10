@@ -155,6 +155,29 @@ class CiJobStub:
         return [c for c in calls if "--plan" not in c["argv"]]
 
 
+WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE")  # the HTTP methods that change GitHub; GET reads it
+
+
+class WriteRecorder(merge.Host):
+    """A real Host whose `gh` only records. `pr` is the fake host's, so the lane is the head the case pushed. Each gh call's argv is kept in
+    `calls`, and every call succeeds with an empty object. A FakeHost cannot show a write, because it never runs gh."""
+
+    def __init__(self, fake):
+        super().__init__()
+        self.fake, self.calls = fake, []
+
+    def pr(self, n):
+        return self.fake.pr(n)
+
+    def gh(self, args, cwd=None):
+        self.calls.append(list(args))
+        return 0, "{}"
+
+    def writes(self):
+        """The recorded calls whose argv names a method that changes GitHub."""
+        return [args for args in self.calls if any(a in WRITE_METHODS for a in args)]
+
+
 WAIT_LINE = "GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
 WAIT_CEILING = 600  # fake seconds a wait may run. The bound is the builder's choice; this ceiling only proves the wait is finite
 WAIT_POLLS_CEILING = 30  # pull request reads one wait may make
@@ -822,6 +845,16 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+    def test_lane_lint_on_a_pass_sends_no_write_to_github(self):
+        """Lane-lint is read-only (settings.json's read-check entry says so): a PASS sends no POST, and no other write, to GitHub."""
+        self.use_ci_job(PASSING, 0)
+        self.host = WriteRecorder(self.host)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        writes = [" ".join(args) for args in self.host.writes()]
+        self.assertEqual(writes, [], "a PASS lint sent a write to GitHub:\n" + out)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
