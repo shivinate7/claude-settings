@@ -1842,3 +1842,4 @@
 - launch-cloud-mirror-marker-reads-stderr: merge/launch.py `git()` joins stderr to stdout, so a git warning on `config --get claude-settings.cloudMirror` hides the marker and the mirror is fast-forwarded. install.sh and hooks/session_start.sh read stdout only.
 - launch-cloud-mirror-hides-other-reason: a marked mirror that is also dirty or off main prints only "cloud mirror" in launch.py's left-as-is line.
 - launch-cloud-mirror-test-gaps: no case pins a dirty marked mirror or a non-literal true spelling (`yes`, `1`); the code matches install.sh's literal `true`.
+- iceberg-prose-rules: iceberg's "condition first" and "numbers, not 'fast'" prose rules are ste-lint candidates if an incident shows the need; no incident is recorded, so no port (decision building-guard-needs-incident; source: docs/plans/plugin-assess-three.md, PR #1036 merged).
