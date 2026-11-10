@@ -746,7 +746,8 @@ class EmittedRuleIdsTests(unittest.TestCase):
 # A refusal prints a cite: `decision <slug>` for a file in docs/decisions/, or `rule <anchor>` for
 # a `<!-- rule:<anchor> -->` in CLAUDE.md or output-styles/*.md. Both sets are read live. A refusal
 # site is a refuse() or ask_command() call, a raw permissionDecision dict, a raise or return of a
-# Stop, or a refuse print (a decision "block" that reaches the output), whatever the hook event.
+# Stop, a refuse print (a decision "block" that reaches the output), or a block dict that a call passes
+# to a helper which prints that parameter. Whatever the hook event.
 # The scan reads hooks/*.py, merge/merge.py and each .py script settings.json wires. A refusal id
 # with a site that prints no cite, or whose reason the scan cannot read, fails unless it is in
 # REFUSAL_UNCITED_EXEMPT with its home. The exempt list only shrinks.
@@ -1533,13 +1534,39 @@ def _refuse_print(node, scope, mod, locs, reasons):
         decision, reason = node.value, _key_value(scope, item[0], "reason")
     else:
         return None
-    if decision is None or "block" not in (reasons.alts(decision, mod, locs) or []):
+    if not _reads_block(decision, mod, locs, reasons):
         return None
     if isinstance(node, (ast.Dict, ast.Call)):
         reached = _reaches_output(node, mod, scope)
     else:
         reached = _name_reaches(item[0], mod, scope, 0)
     return reason if reached else None
+
+
+def _reads_block(decision, mod, locs, reasons):
+    """True when a decision expression reads as "block" in some branch: the one test of a block, for a refuse
+    print and for a block dict a call passes to a printing helper."""
+    return decision is not None and "block" in (reasons.alts(decision, mod, locs) or [])
+
+
+def _dict_options(expr):
+    """The dict literals a call's argument can be: the dict itself, or the dicts of an `A if c else B` branch."""
+    if isinstance(expr, ast.Dict):
+        return [expr]
+    if isinstance(expr, ast.IfExp):
+        return _dict_options(expr.body) + _dict_options(expr.orelse)
+    return []
+
+
+def _block_reason(node, mod, locs, reasons):
+    """The reason expression of a dict literal whose decision reads as "block", NO_REASON when it has no reason
+    key, else None."""
+    if not isinstance(node, ast.Dict):
+        return None
+    pairs = _pairs(node)
+    if not _reads_block(pairs.get("decision"), mod, locs, reasons):
+        return None
+    return pairs.get("reason", NO_REASON)
 
 
 def _base_name(base):
@@ -1709,6 +1736,13 @@ class _Helpers:
             if (self.refs.get(id(d)) and id(d) not in self.hidden and d.name not in unseen
                     and not isinstance(mod.parents.get(id(d)), ast.ClassDef) and self._reaches(d)):
                 self.helpers[id(d)] = d
+        self.printers = {}  # id(def) -> the parameters whose values its output prints
+        for d in self.defs:
+            if (self.refs.get(id(d)) and id(d) not in self.hidden and d.name not in unseen
+                    and not isinstance(mod.parents.get(id(d)), ast.ClassDef)):
+                printed = self._printed_params(d)
+                if printed:
+                    self.printers[id(d)] = printed
 
     def lexical(self, name, node):
         """The def `name` refers to at `node`: the nearest enclosing def that binds it, else a module-level def."""
@@ -1821,6 +1855,36 @@ class _Helpers:
             rows.append(_judge(self.reasons.alts(msg, self.mod, flocs), homes, fallback))
         return rows
 
+    def _printed_params(self, d):
+        """The parameters of `d` whose values reach the output of `d` (see _reaches_output), as a printer's."""
+        params = set(_param_names(d))
+        return frozenset(n.id for n in _own(d) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
+                         and n.id in params and _reaches_output(n, self.mod, d))
+
+    def printer(self, call):
+        """The printing def a call runs, read as the def the call's name refers to at the call; else None."""
+        if not isinstance(call.func, ast.Name):
+            return None
+        d = self.lexical(call.func.id, call)
+        return d if d is not None and id(d) in self.printers else None
+
+    def print_rows(self, call, locs, homes):
+        """(status, spellings) for each block dict that a call passes to a parameter its def prints. Each such
+        dict is a refusal site of the caller: its reason is read at the call, in the caller's scope, as a refuse
+        print's reason is. A dict that the call's argument holds only by a name is not read here."""
+        d = self.printer(call)
+        if d is None or any(isinstance(a, ast.Starred) for a in call.args):
+            return []
+        rows = []
+        for name, arg in _call_args(call, d):
+            if name not in self.printers[id(d)]:
+                continue
+            for dict_node in _dict_options(arg):
+                reason = _block_reason(dict_node, self.mod, locs, self.reasons)
+                if reason is not None:
+                    rows.append(self.printed_site(reason, call, locs, homes))
+        return rows
+
 
 def _add(statuses, rid, where, status, spellings):
     statuses.setdefault(rid, []).append((where, status, spellings))
@@ -1833,7 +1897,8 @@ def refusal_status(sources, homes, scope, guards=None):
     names the modules whose refusals count, and `guards` the guard modules among them (all of `scope` when
     None). A guard module's refuse() and ask_command() calls name their id. Any module in scope also counts a
     raw refusal dict, a refuse print (see _refuse_print), a `raise Stop(...)`, `return Stop(...)` or
-    `raise kind(...)` (see _kind_params) of its own, and each call of a helper; their id is
+    `raise kind(...)` (see _kind_params) of its own, each call of a helper, and each block dict a call passes to a
+    printing helper (see _Helpers.print_rows); their id is
     `module:function`, the function that makes the refusal. A helper's own message is no site, and a hook that
     is no guard module (a judge hook) prints its refusal in its own refuse(), so only that print counts there.
     unattributed: the calls whose id the scan cannot read."""
@@ -1862,6 +1927,8 @@ def refusal_status(sources, homes, scope, guards=None):
                     for h in helpers.targets(site, fdef):
                         for status, spellings in helpers.instance_rows(h, site, locs, homes):
                             _add(statuses, rid, where, status, spellings)
+                    for status, spellings in helpers.print_rows(site, locs, homes):
+                        _add(statuses, rid, where, status, spellings)
                     continue
                 stop = _stop_reason(site, mod.stops, _kind_params(fdef, mod.stops))
                 expr = _raw_refuse_reason(site) or stop
