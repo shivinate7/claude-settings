@@ -21710,6 +21710,25 @@ def _pkg_done(w):
     _resolve_and_commit(w, ((TEST_A, LANE_TEXT), (PKG, PKG_MAIN)))
 
 
+def _checks_extra_done(w):
+    """The mixed merge of checks.yml, resolved by a test-author: the test file takes its lane text, and checks.yml takes
+    its ours side plus a line neither side holds. The merge is committed."""
+    _path_mid_merge(w, CHECKS, CHECKS_LANE, CHECKS_MAIN)
+    _resolve_and_commit(w, ((TEST_A, LANE_TEXT), (CHECKS, CHECKS_LANE + "        env: EXTRA=1\n")))
+
+
+# release.yml has two conflict blocks. Each side changes the run line of the lint step and of the vet step, and the
+# step name between them is unchanged, so git leaves one block per step.
+TWO = ".github/workflows/release.yml"
+TWO_BASE = CHECKS_TOP + "        run: python3 lint/ste_lint.py\n      - name: Vet\n        run: python3 lint/vet.py\n"
+TWO_LANE = CHECKS_TOP + "        run: python3 lane_lint.py\n      - name: Vet\n        run: python3 lane_vet.py\n"
+TWO_MAIN = CHECKS_TOP + "        run: python3 main_lint.py\n      - name: Vet\n        run: python3 main_vet.py\n"
+# The lint block as merge-tree wrote it, and the ours side that resolves it.
+TWO_LINT_BLOCK = "<<<<<<< HEAD\n        run: python3 lane_lint.py\n=======\n        run: python3 main_lint.py\n>>>>>>> main\n"
+TWO_LINT_OURS = "        run: python3 lane_lint.py\n"
+TWO_FILES = {**MIXED_FILES, TWO: TWO_BASE}
+
+
 PROD_MID = diff_repo("ta-prod-mid", _product_mid_merge, files=MIXED_FILES)
 PROD_DONE = diff_repo("ta-prod-done", _product_merge_commit, files=MIXED_FILES)
 CI_MID = diff_repo("ta-ci-mixed-mid", _mixed_workflow_mid_merge, files=CI_FILES)
@@ -21742,13 +21761,15 @@ CHECKS_ONLY_MID = diff_repo("ta-checks-only-mid",
 PKG_DONE = diff_repo("ta-pkg-done", _pkg_done, files=PKG_FILES)
 AUTH_CHECKS = dict(agent_id="auth1", agent_type="test-author", cwd=CHECKS_MID)
 CHECKS_PATH = os.path.join(CHECKS_MID, CHECKS)
-# Case 1 (red on main): a conflicted workflow resolved to one side whole, by an Edit that keeps ours and a Write that
-# keeps theirs.
+CHECKS_EXTRA_DONE = diff_repo("ta-checks-extra-done", _checks_extra_done, files=CHECKS_FILES)
+TWO_MID = diff_repo("ta-two-mid", lambda w: _path_mid_merge(w, TWO, TWO_LANE, TWO_MAIN), files=TWO_FILES)
+AUTH_TWO = dict(agent_id="auth1", agent_type="test-author", cwd=TWO_MID)
+# Case 1: a conflicted workflow resolved to one side whole, by an Edit that keeps ours and a Write that keeps theirs.
 add("test-author: Edit of a conflicted workflow that keeps its ours side whole is allowed", "allow", tool="Edit",
     file_path=CHECKS_PATH, old_string=CHECKS_BLOCK, new_string=CHECKS_OURS, **AUTH_CHECKS)
 add("test-author: Write of a conflicted workflow that keeps its theirs side whole is allowed", "allow", tool="Write",
     file_path=CHECKS_PATH, content=CHECKS_TOP + CHECKS_THEIRS, **AUTH_CHECKS)
-# Case 2 (red on main): both sides kept, the ours side then the theirs side.
+# Case 2: both sides kept, the ours side then the theirs side.
 add("test-author: Write of a conflicted workflow that keeps both sides, ours then theirs, is allowed", "allow",
     tool="Write", file_path=CHECKS_PATH, content=CHECKS_TOP + CHECKS_OURS + CHECKS_THEIRS, **AUTH_CHECKS)
 # Case 3 (green pin): a line neither side holds is new text, so it is refused.
@@ -21759,12 +21780,12 @@ add("test-author: Write of a conflicted workflow that adds a line neither side h
 add("test-author: Write of a conflicted workflow that reorders a side's lines is refused", "deny", rule=TA,
     tool="Write", file_path=CHECKS_PATH, content=CHECKS_TOP + "        env: LANE=1\n        run: python3 lane_lint.py\n",
     carries=("builder", "Report"), **AUTH_CHECKS)
-# Case 5 (red on main): the test-author's merge commit that resolves checks.yml to its ours side logs no author-diff.
+# Case 5: the test-author's merge commit that resolves checks.yml to its ours side logs no author-diff.
 LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a conflicted workflow to its ours "
                          "side logs no author-diff line",
                          author_silent_case(CHECKS_DONE, "ta-checks-done")))
-# Case 6 (red on main): the same for package.json resolved to its theirs side. At the write tool package.json already
-# passes (`author_path_ok`, through TEST_CONFIG), so the red sits at commit, where its content check logs author-diff.
+# Case 6: the same for package.json resolved to its theirs side. At the write tool package.json already passes
+# (`author_path_ok`, through TEST_CONFIG). This case judges the commit, which must not log it.
 LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a conflicted package.json to its "
                          "theirs side logs no author-diff line",
                          author_silent_case(PKG_DONE, "ta-pkg-done")))
@@ -21772,6 +21793,24 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that reso
 add("test-author: Write of a conflicted workflow in a merge with no test conflict is refused", "deny", rule=TA,
     tool="Write", file_path=os.path.join(CHECKS_ONLY_MID, CHECKS), content=CHECKS_LANE,
     carries=("builder", "Report"), agent_id="auth1", agent_type="test-author", cwd=CHECKS_ONLY_MID)
+# Case 8: a line above the block changes, and the block is side-picked. Text outside the blocks is git's, so the write
+# is refused. The changed line keeps its length, so only the outside-text check decides it.
+add("test-author: Write of a conflicted workflow that changes text outside its block is refused", "deny", rule=TA,
+    tool="Write", file_path=CHECKS_PATH, content=CHECKS_TOP.replace("name: Lint", "name: Lens") + CHECKS_OURS,
+    carries=("builder", "Report"), **AUTH_CHECKS)
+# Case 9: theirs then ours, both sides whole. It is one of the four ways a block may be side-picked.
+add("test-author: Write of a conflicted workflow that keeps both sides, theirs then ours, is allowed", "allow",
+    tool="Write", file_path=CHECKS_PATH, content=CHECKS_TOP + CHECKS_THEIRS + CHECKS_OURS, **AUTH_CHECKS)
+# Case 10: a test-author's merge commit resolves checks.yml to its ours side plus a line neither side holds. The block
+# is not side-picked, so the commit check logs author-diff. Nothing is refused.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a conflicted workflow to text "
+                         "neither side had logs author-diff",
+                         logged_case("ta-checks-extra-done", "test-author", "auth1", "author-diff")))
+# Case 11: a two-block workflow, with the lint block resolved by one Edit and the vet block still holding its markers.
+# At the write tool a block left as merge-tree wrote it, markers included, is unchanged text, so this Edit is allowed.
+add("test-author: Edit of one block of a two-block conflicted workflow, the other block still marked, is allowed",
+    "allow", tool="Edit", file_path=os.path.join(TWO_MID, TWO), old_string=TWO_LINT_BLOCK,
+    new_string=TWO_LINT_OURS, **AUTH_TWO)
 
 
 def refused_push_and_stop_case(label):
