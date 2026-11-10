@@ -20,7 +20,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_calls, push_destinations, push_refspecs, push_remote, push_target, push_text,
+    push_calls, push_destinations, push_refspecs, push_remote, push_target,
 )
 
 
