@@ -4,8 +4,10 @@ and whether a live session stands in it. The roadmap build also imports it for `
 reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares.
 
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
-so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
-that patches one of these names patches it here, on the one object every reader calls. Standard
+so its start-up never loads the guard. guard_core.py imports these names, and guard_merge.py takes
+`_git` from guard_core, so each binds its own copy of the name. A patch on a name here reaches the
+janitor and the callers in this file only. A test of a guard reader patches the name in the reader's
+own module too. Standard
 library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
 """
 import calendar
@@ -204,7 +206,15 @@ def stash_stack(where: str):
 # Any one of the three failing to ANSWER (not "false", but "git could not tell") makes the whole
 # read unreadable, because a read that skipped a test it could not run is a guess, not a proof.
 def read_default_base(where: str, remote: str = "origin"):
-    """Return (short ref name, `<remote>/HEAD`'s short name), each None when git does not answer.
+    """Return (short ref name, `<remote>/HEAD`'s short name); see `read_default_base_state`."""
+    return read_default_base_state(where, remote)[:2]
+
+
+def read_default_base_state(where: str, remote: str = "origin"):
+    """`read_default_base` with a third value: True when a read could not run (a base of None is then
+    unknown), False when git answered every read it made and none named a base.
+
+    Return (short ref name, `<remote>/HEAD`'s short name, unread), each name None when git does not answer.
 
     The order is `<remote>/HEAD` when it resolves, then `<remote>/main`, then
     `<remote>/master`, then local `main`, then local `master`. The first that resolves wins; the
@@ -219,7 +229,7 @@ def read_default_base(where: str, remote: str = "origin"):
     # `remotes/<remote>/<default>`. The full ref strips to the name with no such ambiguity.
     named = _git(where, "symbolic-ref", "-q", "refs/remotes/" + remote + "/HEAD")
     if named is None:  # git could not run: unreadable
-        return None, None
+        return None, None, True
     full_head = named.stdout.strip() if named.returncode == 0 else ""
     head = full_head.removeprefix("refs/remotes/")
     if head == full_head or not head.startswith(remote + "/"):
@@ -230,10 +240,10 @@ def read_default_base(where: str, remote: str = "origin"):
         full = ("refs/remotes/" if name.startswith(remote + "/") else "refs/heads/") + name
         live = _git(where, "rev-parse", "--verify", "--quiet", full + "^{commit}")
         if live is None:  # git could not run: unreadable, never "does not exist"
-            return None, head
+            return None, head, True
         if live.returncode == 0:
-            return name, head
-    return None, head
+            return name, head, False
+    return None, head, False
 
 
 def resolve_default_base(where: str, remote: str = "origin"):

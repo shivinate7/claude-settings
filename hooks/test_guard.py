@@ -14540,14 +14540,16 @@ def cite_unread_folders_case():
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
 
-    def ask(command):
+    def ask(command, git=False):
+        path = GHMAIN + os.pathsep + PY_PATH + (os.pathsep + GIT_PATH if git else "")
         return subprocess.run(
             [sys.executable, copy],
             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
                               "cwd": NOGIT}),
-            capture_output=True, text=True, env=env, timeout=60)
+            capture_output=True, text=True, env=dict(env, PATH=path), timeout=60)
 
-    probe = ask(VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"')
+    # Git runs for the probe, so its conflict-markers read answers clear and only the stand-down is tested.
+    probe = ask(VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"', git=True)
     if "permissionDecision" in probe.stdout:
         return False, "the inline probe must stand down, got %r" % probe.stdout[:120]
     try:
@@ -14557,6 +14559,7 @@ def cite_unread_folders_case():
         logged = False
     if not logged:
         return False, "the probe must log that the record folders are unread"
+    # Git cannot start for this call, so the conflict-markers read is unknown. The deny must still come first.
     result = ask(VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt")
     try:
         block = json.loads(result.stdout)["hookSpecificOutput"]
@@ -15354,6 +15357,9 @@ CMK_NOHEAD = os.path.join(CMKROOT, "nohead")    # no commit yet, the triplet sta
 CMK_LONE = os.path.join(CMKROOT, "lone")        # a lone apostrophe in text, then a staged triplet
 CMK_TPL = os.path.join(CMKROOT, "tpl")          # a staged triplet inside a multi-line template literal
 CMK_OPEN = os.path.join(CMKROOT, "open")        # a string holding comment openers, then a staged triplet
+CMK_UT = os.path.join(CMKROOT, "untracked")     # a triplet in an untracked file, nothing staged
+CMK_TWO_STAGED = os.path.join(CMKROOT, "twostaged")  # a lone marker line in src/a.txt, a triplet in src/b.txt, both staged
+CMK_TWO_UT = os.path.join(CMKROOT, "twountracked")   # a clean untracked src/a.txt, a triplet in untracked src/b.txt
 
 
 def _cmk_run(where, *args):
@@ -15419,10 +15425,18 @@ def _build_conflict_markers():
     stage(CMK_TPL, "src/tpl.js", "const a = 1;\nconst doc = `\n" + CM_TRIPLET + "`;\n")
     _cmk_topic(CMK_OPEN, {"src/opener.py": "x = 1\n"})
     stage(CMK_OPEN, "src/opener.py", 'x = 1\nNOTE = "/* // #"\n' + CM_TRIPLET)
+    _cmk_topic(CMK_UT, {"src/app.py": "x = 1\n"})
+    write(os.path.join(CMK_UT, "src", "new.py"), "x = 1\n" + CM_TRIPLET)   # untracked: never added
+    _cmk_topic(CMK_TWO_STAGED, {"src/a.txt": "x = 1\n", "src/b.txt": "y = 1\n"})
+    stage(CMK_TWO_STAGED, "src/a.txt", "x = 1\n" + CM_MID)
+    stage(CMK_TWO_STAGED, "src/b.txt", "y = 1\n" + CM_TRIPLET)
+    _cmk_topic(CMK_TWO_UT, {"base.txt": "base\n"})
+    write(os.path.join(CMK_TWO_UT, "src", "a.txt"), "x = 1\n")                # untracked, clean
+    write(os.path.join(CMK_TWO_UT, "src", "b.txt"), "y = 1\n" + CM_TRIPLET)   # untracked, a triplet
 
 
 lazy_fixture([CMK_MERGE, CMK_STAGED, CMK_AM, CMK_CLEAN, CMK_WS, CMK_MDOK, CMK_MDFENCE, CMK_NOHEAD,
-              CMK_LONE, CMK_TPL, CMK_OPEN], _build_conflict_markers)
+              CMK_LONE, CMK_TPL, CMK_OPEN, CMK_UT, CMK_TWO_STAGED, CMK_TWO_UT], _build_conflict_markers)
 
 
 def cmk_refuse(name, command, cwd):
@@ -15486,6 +15500,9 @@ CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holdin
 CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet unpushed in sub/f.txt
 CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
 CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
+CMK_NU = os.path.join(CMKPUSH, "newtriplet")   # a triplet on branch fresh, never pushed: no tracking ref, no upstream
+CMK_NC = os.path.join(CMKPUSH, "newclean")     # a clean commit on branch fresh, never pushed
+CMK_DT = os.path.join(CMKPUSH, "detached")     # a clean commit, unpushed, with HEAD detached: no branch to push
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -15581,13 +15598,23 @@ def _build_conflict_markers_push():
     commit(CMK_PAREN, "a.txt", CM_TRIPLET, "triplet on fix(x), unpushed")
     run(CMK_PAREN, "checkout", "-q", "topic")
     run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
+    _cmk_pushed(CMK_NU, {"a.txt": "base\n"})
+    run(CMK_NU, "checkout", "-q", "-b", "fresh")           # never pushed: no remote-tracking ref, no upstream
+    commit(CMK_NU, "a.txt", CM_TRIPLET, "triplet, branch never pushed")
+    _cmk_pushed(CMK_NC, {"a.txt": "base\n"})
+    run(CMK_NC, "checkout", "-q", "-b", "fresh")
+    commit(CMK_NC, "b.txt", "clean\n", "clean change, branch never pushed")
+    _cmk_pushed(CMK_DT, {"a.txt": "base\n"})
+    commit(CMK_DT, "b.txt", "clean\n", "clean change, unpushed")
+    run(CMK_DT, "checkout", "-q", "--detach")              # no branch: a bare push names no destination
     for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
         if os.path.exists(gone):
             sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
                      % gone)
 
 
-lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB, CMK_REL, CMK_PAREN],
+lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB, CMK_REL, CMK_PAREN,
+              CMK_NU, CMK_NC, CMK_DT],
              _build_conflict_markers_push)
 
 # A commit that cannot be judged, with no push after it in the call, is no hit. The sed and the fix script
@@ -15785,6 +15812,361 @@ cmk_refuse("a merge that conflicts on a clean tree, then add -A, commit and push
 # 8. A push judges the net change it sends: a triplet added and removed again is no hit.
 cmk_allow("two commits, the first adding a triplet and the second removing it, then a push",
           VCS + " push", R2_NET)
+
+
+# An unreadable git read. The commit check reads git through `_git`, which three modules bind by name: guard_merge
+# takes it from guard_core, which takes it from git_reads. A patch on git_reads alone reaches no reader, so each
+# case answers None on all three names. A git read that does not start or times out is None, and it counts as
+# unread: the check asks, and a triplet it already found keeps its deny. These judge in-process; every other row
+# runs the guard as a subprocess.
+CMK_READ_MODULES = ("git_reads", "guard_core", "guard_merge")
+CMK_STAGED_COMMIT = VCS + " add -A && " + VCS + " commit -m x"
+
+
+def _cmk_in_folder(where, folder):
+    return isinstance(where, str) and os.path.realpath(where) == os.path.realpath(folder)
+
+
+def _cmk_verdict(guard, command, cwd, unread=None, folder=None):
+    """`conflict_markers_hit` on COMMAND in CWD. With UNREAD, each git call whose args it matches is answered None
+    on every module that binds `_git`. With FOLDER, only the calls made in that folder are answered so. Returns the
+    verdict and the args of each call answered None. A push's destination cache is cleared first, so each verdict
+    makes its own destination reads."""
+    sys.modules["guard_push_delete"]._DESTINATIONS.clear()
+    if unread is None:
+        return guard.conflict_markers_hit(command, cwd), []
+    real = sys.modules["git_reads"]._git
+    nulled = []
+
+    def answering(where, *args):
+        if unread(args) and (folder is None or _cmk_in_folder(where, folder)):
+            nulled.append(args)
+            return None
+        return real(where, *args)
+
+    with mock.patch.object(sys.modules["git_reads"], "_git", answering), \
+            mock.patch.object(sys.modules["guard_core"], "_git", answering), \
+            mock.patch.object(sys.modules["guard_merge"], "_git", answering):
+        verdict = guard.conflict_markers_hit(command, cwd)
+    return verdict, nulled
+
+
+def _cmk_unread_case(what, unread, command=CMK_STAGED_COMMIT, fixture=CMK_STAGED, plain=("commit", "src/app.py"),
+                     keeps_found=False):
+    """COMMAND in FIXTURE is judged PLAIN with git unpatched. With the one git read UNREAD answers None, it is
+    unread, never allow. With KEEPS_FOUND, a triplet the check already found is refused as PLAIN, not unread."""
+    def check():
+        materialize(fixture)
+        guard = _load_guard_module()
+        missing = [name for name in CMK_READ_MODULES if name not in sys.modules]
+        if missing:
+            return False, "the guard no longer loads %s under those names: the reader moved" % ", ".join(missing)
+        got_plain, _nulled = _cmk_verdict(guard, command, fixture)
+        if got_plain != plain:
+            return False, "%r with git unpatched, want %r: the fixture changed" % (got_plain, plain)
+        got, nulled = _cmk_verdict(guard, command, fixture, unread)
+        if not nulled:
+            return False, "the patch never reached the reader: no call that %s names was made" % what
+        if keeps_found:
+            if got != plain:
+                return False, ("%r with %s answering None, %d calls: want %r, the triplet is already found"
+                               % (got, what, len(nulled), plain))
+            return True, "refused as %r with %s answering None, %d calls" % (got, what, len(nulled))
+        unread_kind = sys.modules["guard_merge"].CONFLICT_MARKERS_UNREAD_KIND
+        if got[0] != unread_kind:
+            return False, ("%r with %s answering None, %d calls: want kind %r, an unreadable read is never an allow"
+                           % (got, what, len(nulled), unread_kind))
+        return True, "unread with %s answering None, %d calls: %r" % (what, len(nulled), got)
+    return check
+
+
+def _cmk_unread_run_case(what, command, cwd):
+    """The guard, run as a subprocess on a PATH with no git, so git cannot start: COMMAND in CWD is asked, with
+    CONFLICT_MARKERS_UNREAD_REASON, never allowed and never with another rule's reason."""
+    def check():
+        materialize(cwd)
+        _load_guard_module()
+        reason_want = sys.modules["guard_merge"].CONFLICT_MARKERS_UNREAD_REASON
+        got, reason = decide({"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": NOPS,
+                              "config": None, "tool_input": {"command": command}})
+        if got != "ask":
+            return False, "%s with git unable to start is %s (%r), want ask" % (what, got, reason[:120])
+        if reason_want not in reason:   # the printed reason prefixes the rule name, so the constant is a substring
+            return False, "%s is asked, but its reason does not name CONFLICT_MARKERS_UNREAD_REASON: %r" % (
+                what, reason[:160])
+        return True, "%s is asked with CONFLICT_MARKERS_UNREAD_REASON" % what
+    return check
+
+
+def _cmk_allow_case(what, cwd):
+    """The same command in CWD is allowed with git unpatched: a folder that is no repository, or a clean tree."""
+    def check():
+        materialize(cwd)
+        guard = _load_guard_module()
+        got, _nulled = _cmk_verdict(guard, CMK_STAGED_COMMIT, cwd)
+        if got[1]:
+            return False, "refused (%r) %s with git unpatched: want allow" % (got, what)
+        return True, "allowed %s with git unpatched" % what
+    return check
+
+
+cmk_unread_show_top_case = _cmk_unread_case(
+    "rev-parse --show-toplevel", lambda args: "--show-toplevel" in args)
+cmk_unread_verify_head_case = _cmk_unread_case(
+    "rev-parse --verify -q HEAD", lambda args: "--verify" in args and "HEAD" in args)
+cmk_unread_marker_case = _cmk_unread_case(
+    "the marker read, git diff --check", lambda args: "--check" in args)
+cmk_unread_untracked_case = _cmk_unread_case(
+    "the untracked read, git ls-files", lambda args: "ls-files" in args,
+    command=CMK_STAGED_COMMIT, fixture=CMK_UT, plain=("commit", "src/new.py"))
+cmk_found_then_untracked_case = _cmk_unread_case(
+    "the untracked read, git ls-files, after a staged triplet is found", lambda args: "ls-files" in args,
+    keeps_found=True)
+cmk_unread_push_check_case = _cmk_unread_case(
+    "the diff --check read of a push", lambda args: "--check" in args,
+    command=VCS + " push origin topic", fixture=CMK_PU, plain=("push", "src/app.py"))
+cmk_unread_default_base_case = _cmk_unread_case(
+    "the default-base read of a push", lambda args: "refs/remotes/origin/HEAD" in args,
+    command=VCS + " push origin fresh", fixture=CMK_NU, plain=("push", "a.txt"))
+cmk_unread_ref_sha_case = _cmk_unread_case(
+    "the ref read of the pushed branch", lambda args: args[-1:] == ("fresh^{commit}",),
+    command=VCS + " push origin fresh", fixture=CMK_NC, plain=("", ""))
+cmk_unread_dest_case = _cmk_unread_case(
+    "the name of the checked-out branch, for a push of HEAD",
+    lambda args: "symbolic-ref" in args and args[-1:] == ("HEAD",),
+    command=VCS + " push origin HEAD", fixture=CMK_CL, plain=("", ""))
+cmk_nogit_allow_case = _cmk_allow_case("in a folder that is no repository", NOGIT)
+cmk_clean_allow_case = _cmk_allow_case("in a clean repository", SUBJCLEAN)
+cmk_unread_commit_run_case = _cmk_unread_run_case(
+    "a commit of a staged triplet", VCS + " commit -m x", CMK_STAGED)
+cmk_unread_push_run_case = _cmk_unread_run_case(
+    "a push of a triplet commit", VCS + " push origin topic", CMK_PU)
+
+
+def _cmk_verdict_case(what, command, fixtures, want, unread, folder):
+    """COMMAND, judged in the first of FIXTURES, is WANT with git unpatched. With UNREAD answering None on the calls
+    made in FOLDER, it is still WANT: a read that cannot run in one folder does not hide a triplet the command finds
+    in another, and an unreadable read never turns a found triplet into unread."""
+    def check():
+        for fixture in fixtures:
+            materialize(fixture)
+        guard = _load_guard_module()
+        missing = [name for name in CMK_READ_MODULES if name not in sys.modules]
+        if missing:
+            return False, "the guard no longer loads %s under those names: the reader moved" % ", ".join(missing)
+        got_plain, _nulled = _cmk_verdict(guard, command, fixtures[0])
+        if got_plain != want:
+            return False, "%r with git unpatched, want %r: the fixture changed" % (got_plain, want)
+        got, nulled = _cmk_verdict(guard, command, fixtures[0], unread, folder)
+        if not nulled:
+            return False, "the patch never reached the reader: no call that %s names was made in that folder" % what
+        if got != want:
+            return False, ("%r with %s answering None, %d calls: want %r"
+                           % (got, what, len(nulled), want))
+        return True, "%r with %s answering None, %d calls" % (got, what, len(nulled))
+    return check
+
+
+def _cmk_folder_calls(guard, command, cwd, folder):
+    """(verdict, args of each git call COMMAND makes in FOLDER), each such call answered None."""
+    return _cmk_verdict(guard, command, cwd, lambda args: True, folder)
+
+
+def _cmk_preface(fixtures):
+    """(guard, problem): the fixtures are built, and the guard loads under the names the patch reaches."""
+    for fixture in fixtures:
+        materialize(fixture)
+    guard = _load_guard_module()
+    missing = [name for name in CMK_READ_MODULES if name not in sys.modules]
+    if missing:
+        return guard, "the guard no longer loads %s under those names: the reader moved" % ", ".join(missing)
+    return guard, None
+
+
+def _cmk_no_call_case(what, command, fixture, want, control):
+    """COMMAND in FIXTURE is WANT with git unpatched, and makes no git call in that folder. CONTROL, a commit there,
+    makes one, so the patch is in scope and a silent add makes no read."""
+    def check():
+        guard, problem = _cmk_preface((fixture,))
+        if problem:
+            return False, problem
+        got_plain, _nulled = _cmk_verdict(guard, command, fixture)
+        if got_plain != want:
+            return False, "%r with git unpatched, want %r: the fixture changed" % (got_plain, want)
+        _verdict, scope = _cmk_folder_calls(guard, control, fixture, fixture)
+        if not scope:
+            return False, "scope: %s makes no git call in the folder, so the patch cannot reach it" % control
+        got, calls = _cmk_folder_calls(guard, command, fixture, fixture)
+        if calls:
+            return False, "%s makes %d git calls in the folder, want none: %r" % (what, len(calls), calls[0])
+        if got != want:
+            return False, "%r with no git call in the folder, want %r" % (got, want)
+        return True, "%r with no git call in the folder; the control makes %d" % (got, len(scope))
+    return check
+
+
+def _cmk_add_adds_no_call_case(what, add_then_push, push, fixture, want, control):
+    """ADD_THEN_PUSH in FIXTURE is WANT with git unpatched, and makes the same git calls in that folder as PUSH alone:
+    the add before it makes none. CONTROL, a commit there, makes some, so the patch is in scope."""
+    def check():
+        guard, problem = _cmk_preface((fixture,))
+        if problem:
+            return False, problem
+        got_plain, _nulled = _cmk_verdict(guard, add_then_push, fixture)
+        if got_plain != want:
+            return False, "%r with git unpatched, want %r: the fixture changed" % (got_plain, want)
+        _verdict, scope = _cmk_folder_calls(guard, control, fixture, fixture)
+        if not scope:
+            return False, "scope: %s makes no git call in the folder, so the patch cannot reach it" % control
+        _got, both = _cmk_folder_calls(guard, add_then_push, fixture, fixture)
+        _verdict, alone = _cmk_folder_calls(guard, push, fixture, fixture)
+        if both != alone:
+            return False, "%s makes %d git calls in the folder, %s alone makes %d: the add makes a call" % (
+                what, len(both), push, len(alone))
+        return True, "%r unpatched; the push's %d calls in the folder, the add none; the control makes %d" % (
+            got_plain, len(both), len(scope))
+    return check
+
+
+def _cmk_refused_no_read_case(what, command, fixtures, want, folder, control):
+    """COMMAND in FIXTURES[0] is WANT with git unpatched, and makes no git call in FOLDER at all: it is refused before
+    any read there. CONTROL, a commit in FOLDER, makes one, so the patch is in scope."""
+    def check():
+        guard, problem = _cmk_preface(fixtures)
+        if problem:
+            return False, problem
+        got_plain, _nulled = _cmk_verdict(guard, command, fixtures[0])
+        if got_plain != want:
+            return False, "%r with git unpatched, want %r: the fixture changed" % (got_plain, want)
+        _verdict, scope = _cmk_folder_calls(guard, control, folder, folder)
+        if not scope:
+            return False, "scope: %s makes no git call in the folder, so the patch cannot reach it" % what
+        _got, calls = _cmk_folder_calls(guard, command, fixtures[0], folder)
+        if calls:
+            return False, "%s makes %d git calls in the folder, want none: %r" % (what, len(calls), calls[0])
+        return True, "%r unpatched; no git call in the folder; the control makes %d" % (got_plain, len(scope))
+    return check
+
+
+# Two folders in one call: A is a clean repository, B holds a staged triplet. The triplet is in B, so each row's
+# deny is B's. A triplet already found keeps its deny; unread applies only when no read finds one.
+CMK_TWO_FOLDERS = ("cd " + slash(CMK_CLEAN) + " && " + VCS + " add -A && " + VCS + " commit -m x; cd "
+                   + slash(CMK_STAGED) + " && " + VCS + " add -A && " + VCS + " commit -m y")
+CMK_TWO_FIXTURES = (CMK_CLEAN, CMK_STAGED)
+cmk_fold_every_read_case = _cmk_verdict_case(
+    "every read in the clean folder", CMK_TWO_FOLDERS, CMK_TWO_FIXTURES, ("commit", "src/app.py"),
+    lambda args: True, CMK_CLEAN)
+cmk_fold_verify_head_case = _cmk_verdict_case(
+    "rev-parse --verify -q HEAD in the clean folder", CMK_TWO_FOLDERS, CMK_TWO_FIXTURES, ("commit", "src/app.py"),
+    lambda args: "--verify" in args and "HEAD" in args, CMK_CLEAN)
+cmk_fold_marker_case = _cmk_verdict_case(
+    "the marker read in the clean folder", CMK_TWO_FOLDERS, CMK_TWO_FIXTURES, ("commit", "src/app.py"),
+    lambda args: "--check" in args, CMK_CLEAN)
+# A blind commit of the staged triplet, then the clean folder's add and its push: the guard refuses the chain before
+# the push, so no git call reaches the clean folder.
+CMK_CHAIN_PUSH = ("./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && cd " + slash(CMK_CLEAN)
+                  + " && " + VCS + " add -A && " + VCS + " push")
+cmk_fold_chain_case = _cmk_refused_no_read_case(
+    "the chain after a blind commit of a staged triplet", CMK_CHAIN_PUSH, (CMK_STAGED, CMK_CLEAN),
+    ("chain", "git push"), CMK_CLEAN, VCS + " commit -m x")
+# An add carries nothing into history: an add alone makes no git call and is no hit, as on main.
+cmk_fold_add_only_case = _cmk_no_call_case(
+    "git add -A alone", VCS + " add -A", CMK_STAGED, ("", ""), VCS + " commit -m x")
+cmk_unread_merge_continue_case = _cmk_unread_case(
+    "rev-parse --show-toplevel, on git merge --continue", lambda args: "--show-toplevel" in args,
+    command=VCS + " merge --continue", fixture=CMK_STAGED, plain=("commit", "src/app.py"))
+
+# A read that answers None beside a triplet another read finds: the triplet's deny stands, and the None read
+# holds rather than stopping the reads after it. Each case nulls the one read its `what` names.
+cmk_none_index_case = _cmk_verdict_case(
+    "the cat-file read of the first staged file", VCS + " commit -m x", (CMK_TWO_STAGED,), ("commit", "src/b.txt"),
+    lambda args: args[:2] == ("cat-file", "-p") and args[-1:] == (":src/a.txt",), None)
+cmk_none_untracked_case = _cmk_verdict_case(
+    "the no-index read of the first untracked file", CMK_STAGED_COMMIT, (CMK_TWO_UT,), ("commit", "src/b.txt"),
+    lambda args: "--no-index" in args and args[-1:] == ("src/a.txt",), None)
+cmk_none_commit_marker_case = _cmk_verdict_case(
+    "the commit's first marker read, with an add of the triplet file",
+    VCS + " add src/app.py && " + VCS + " commit -m x", (CMK_AM,), ("commit", "src/app.py"),
+    lambda args: "--check" in args and args[-1:] == ("--cached",), None)
+cmk_none_untracked_marker_case = _cmk_verdict_case(
+    "the commit's first marker read, after add -A", CMK_STAGED_COMMIT, (CMK_UT,), ("commit", "src/new.py"),
+    lambda args: "--check" in args and args[-1:] == ("HEAD",), None)
+cmk_none_first_add_case = _cmk_verdict_case(
+    "the marker read of the first add", VCS + " add a.txt && " + VCS + " add b.txt && " + VCS + " commit -m x",
+    (CMK_SEQB,), ("commit", "b.txt"), lambda args: "--check" in args and args[-1:] == ("a.txt",), None)
+cmk_none_source_ref_case = _cmk_verdict_case(
+    "the ref read of the source, topic", VCS + " push origin topic:fresh", (CMK_PU,), ("push", "src/app.py"),
+    lambda args: args[-1:] == ("topic^{commit}",), None)
+cmk_none_checked_out_case = _cmk_verdict_case(
+    "the checked-out branch read, for a push of HEAD", VCS + " push origin HEAD", (CMK_PU,), ("push", "src/app.py"),
+    lambda args: "symbolic-ref" in args and args[-1:] == ("HEAD",), None)
+cmk_none_clean_push_case = _cmk_add_adds_no_call_case(
+    "a push of a clean range after add -A", VCS + " add -A && " + VCS + " push", VCS + " push", CMK_CL, ("", ""),
+    VCS + " commit -m x")
+
+
+# The conflict-markers checks, each beside its rows. Each materializes only the fixture it names.
+CMK_CHECKS = (
+    ("conflict-markers: a staged triplet, add -A and commit, with rev-parse --show-toplevel unreadable is not allowed",
+     cmk_unread_show_top_case),
+    ("conflict-markers: a staged triplet, add -A and commit, with rev-parse --verify HEAD unreadable is not allowed",
+     cmk_unread_verify_head_case),
+    ("conflict-markers: a staged triplet, add -A and commit, with the marker read unreadable is not allowed",
+     cmk_unread_marker_case),
+    ("conflict-markers: a push of a triplet commit, with the diff --check read unreadable, is not allowed",
+     cmk_unread_push_check_case),
+    ("conflict-markers: a push of a triplet on a branch never pushed, with the default base unreadable, is not allowed",
+     cmk_unread_default_base_case),
+    ("conflict-markers: a push of a clean branch never pushed, with its ref read unreadable, is not allowed",
+     cmk_unread_ref_sha_case),
+    ("conflict-markers: a push of HEAD, with the checked-out branch unreadable, is not allowed",
+     cmk_unread_dest_case),
+    ("conflict-markers: add -A and commit with an untracked triplet file, ls-files unreadable, is not allowed",
+     cmk_unread_untracked_case),
+    ("conflict-markers: add -A and commit with a staged triplet, ls-files unreadable, is still refused in that file",
+     cmk_found_then_untracked_case),
+    ("conflict-markers: add -A and commit in a folder that is no repository is allowed, with git unpatched",
+     cmk_nogit_allow_case),
+    ("conflict-markers: add -A and commit in a clean repository is allowed, with git unpatched",
+     cmk_clean_allow_case),
+    ("conflict-markers: a commit of a staged triplet, with no git on PATH, is asked as unread",
+     cmk_unread_commit_run_case),
+    ("conflict-markers: a push of a triplet commit, with no git on PATH, is asked as unread",
+     cmk_unread_push_run_case),
+    ("conflict-markers: add -A and commit in a clean folder with every read unreadable, then a staged triplet in another "
+     "folder, is refused as that commit",
+     cmk_fold_every_read_case),
+    ("conflict-markers: add -A and commit in a clean folder with rev-parse --verify HEAD unreadable, then a staged triplet "
+     "in another folder, is refused as that commit",
+     cmk_fold_verify_head_case),
+    ("conflict-markers: add -A and commit in a clean folder with the marker read unreadable, then a staged triplet in "
+     "another folder, is refused as that commit",
+     cmk_fold_marker_case),
+    ("conflict-markers: a blind commit of a staged triplet, then add and push in a clean folder, is refused as a chain "
+     "with no git call in that folder",
+     cmk_fold_chain_case),
+    ("conflict-markers: git add -A alone makes no git call and is not a hit",
+     cmk_fold_add_only_case),
+    ("conflict-markers: git merge --continue, with rev-parse --show-toplevel unreadable, is asked as unread",
+     cmk_unread_merge_continue_case),
+    ("conflict-markers: a commit of two staged files, with a read that answers None on the first file and a triplet in "
+     "the second, is refused", cmk_none_index_case),
+    ("conflict-markers: add -A and commit of two untracked files, with a read that answers None on the first file and a "
+     "triplet in the second, is refused", cmk_none_untracked_case),
+    ("conflict-markers: add of a triplet file then commit, with a read that answers None on the commit's first marker "
+     "read and the add's read finding the triplet, is refused", cmk_none_commit_marker_case),
+    ("conflict-markers: add -A and commit, with a read that answers None on the commit's first marker read and an "
+     "untracked triplet, is refused", cmk_none_untracked_marker_case),
+    ("conflict-markers: two adds then a commit, with a read that answers None on the first add and a triplet in the "
+     "second add's file, is refused", cmk_none_first_add_case),
+    ("conflict-markers: a push of topic to a new destination, with a read that answers None on the source ref and a "
+     "triplet in the upstream range, is refused", cmk_none_source_ref_case),
+    ("conflict-markers: a push of HEAD, with a read that answers None on the checked-out branch and a triplet in the "
+     "upstream range, is refused", cmk_none_checked_out_case),
+    ("conflict-markers: add -A then a push of a clean range makes the push's git calls only, and is no hit",
+     cmk_none_clean_push_case),
+)
+FIXTURELESS_CHECKS.update(check for _label, check in CMK_CHECKS)
 
 
 # =========================================================================== 6. frozen paths
@@ -18951,6 +19333,11 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+# The conflict-markers checks are defined beside their rows and register here, once LOG_CHECKS_EXTRA
+# exists. _TaggedLogs.append would take the family in force at this line, which belongs to another section.
+for _label, _check in CMK_CHECKS:
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "conflict-markers"
 # FLAG ORDER (pwsh-c-text-mode). POWERSHELL_CALL is one global that each judge sets for its own call. A
 # caller that reads it without setting it reads the last call's tool. Each pin reads one caller on a
 # PowerShell text, with the flag set by a PowerShell call, then judges a Bash call in this process and reads
@@ -26917,11 +27304,13 @@ def merge_tool_missing_case():
     if "merge-checks" not in result.stdout or "could not be loaded" not in result.stdout:
         return False, "expected a deny that names the unloadable tool, got %r" % result.stdout[:120]
     # The same copy cannot read the record folders either. The cite rule stands down, and the log says so.
+    # Git runs for this call, so the conflict-markers read answers clear (NOGIT is no repository) and does not ask.
+    git_env = dict(env, PATH=GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
     result = subprocess.run(
         [sys.executable, copy],
         input=json.dumps({"tool_name": "Bash", "cwd": NOGIT, "tool_input": {
             "command": VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"'}}),
-        capture_output=True, text=True, env=env, timeout=60)
+        capture_output=True, text=True, env=git_env, timeout=60)
     if "permissionDecision" in result.stdout:
         return False, "an unread folder list must not deny, got %r" % result.stdout[:120]
     try:
