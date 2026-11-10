@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzp9uMCVGV7smPn7qJ",
   "why": "No mutant proves the substitution read in guard_merge._push_calls; a change that drops it alone is not caught.",
-  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Stacked on #1506. Not done, no PR (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10). The coordinator starts a lane for it. Coordinator started lane session_013NEJKzp9uMCVGV7smPn7qJ at 04:57 CST Nov 10.",
-  "updatedAt": "2026-11-10T05:00:00-06:00"
+  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Stacked on #1506. Not done, no PR (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10). The coordinator starts a lane for it. Coordinator started lane session_013NEJKzp9uMCVGV7smPn7qJ at 04:57 CST Nov 10. #2526 released to batch 72 (coordinator 06:03 CST Nov 10). Its note guard-merge-families-miss-push-delete (the guard_merge.py row of GUARD_MODULE_FAMILIES lists only merge, so a changed-mode mutation run misses the push-delete case) stays a note: no incident yet (rule roles-findings-are-debts-or-notes; triage 06:03 CST).",
+  "updatedAt": "2026-11-10T06:03:00-06:00"
 }
