@@ -1,11 +1,11 @@
 {
   "title": "Lane sessions run Sonnet for now, on main, with a debt to check on it again",
   "why": "Owner item 439 \"none of these\" with direction (page answer 18:21Z = 12:21 CST Nov 8): \"set to sonnet temporarily, have that reach main, and then leave a debt to check in on this again later\". Narrows c201 (item 50 b) for now. Done when: agent-model-cap and session-tiers on main say lane sessions run Sonnet (Opus stays for Plan, designer, design reviewer, a builder's third try and the coordinator), the change cites his words and time, and a debt in docs/debts/ asks to recheck with its measure (lane cost and stalls on Sonnet against the $18 Opus average from step token-spend-sources). A settings write needs his typed words in the acting session (P43).",
-  "note": "Coordinator 12:21-12:22 CST Nov 8: lane session_013NEJKziVLcE1RT5jq36KVX, on Sonnet (first lane session_013NEJL4A2ZieM3DGDsGxeZQ had no source_url and was archived, $0.29). Home: decision agent-model-cap rewrite plus debt lane-model-recheck (until 2026-11-22). New lanes start on Sonnet from 12:21 CST. Lane session_013NEJKziVLcE1RT5jq36KVX woken for #2221, #2250 and #2292 (coordinator 19:52 CST Nov 9). Debt lane-model-recheck's Where list gains LANE_MODEL_FLOOR_REASON (hard-codes \"sonnet\"; #2292, coordinator 01:27 CST Nov 10). Kept doing on: #2221 open draft (lane-model-sonnet); #2250 #2292 open; no lane-model-recheck debt on main (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
+  "note": "Coordinator 12:21-12:22 CST Nov 8: lane session_013NEJKziVLcE1RT5jq36KVX, on Sonnet (first lane session_013NEJL4A2ZieM3DGDsGxeZQ had no source_url and was archived, $0.29). Home: decision agent-model-cap rewrite plus debt lane-model-recheck (until 2026-11-22). New lanes start on Sonnet from 12:21 CST. Lane session_013NEJKziVLcE1RT5jq36KVX woken for #2221, #2250 and #2292 (coordinator 19:52 CST Nov 9). Debt lane-model-recheck's Where list gains LANE_MODEL_FLOOR_REASON (hard-codes \"sonnet\"; #2292, coordinator 01:27 CST Nov 10). Kept doing on: #2221 open draft (lane-model-sonnet); #2250 #2292 open; no lane-model-recheck debt on main (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Done (triage 12:37 CST Nov 10, batch 72 on main a8a9fcdd5; audit Explore sonnet): #2221 f2c2cff8e, #2250 d4c74aae7, #2292 c349d6235, head on origin/main (merge-base --is-ancestor).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKziVLcE1RT5jq36KVX",
-  "status": "doing",
+  "status": "done",
   "order": 782,
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "updatedAt": "2026-11-10T12:37:00-06:00"
 }

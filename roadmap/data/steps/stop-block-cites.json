@@ -1,10 +1,10 @@
 {
   "title": "The cite check reads Stop-hook block prints too",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 485,
   "why": "Lane refusal-cite-reach's round 1 review found refusals the uncited-refusal check does not read: the block prints in hooks/ruling_home.py (line 530), hooks/precompact_handoff.py (line 587) and lint/report_guard.py (lines 661-766).",
-  "note": "Widen the cite check to Stop-hook block prints, then cite or record each. Outside step refusal-cite-reach's named scope. Ready. Port: yes. Lane session_013NEJL3ap46JabaGgVufJcX, started by the coordinator Nov 3 16:57 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJKzCSKTt9Mrr6n9GKiR at 03:46-03:49 CST Nov 10. Kept doing on: #2522 open draft (worktree-stop-block-cites) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
-  "updatedAt": "2026-11-10T11:20:00-06:00",
+  "note": "Widen the cite check to Stop-hook block prints, then cite or record each. Outside step refusal-cite-reach's named scope. Ready. Port: yes. Lane session_013NEJL3ap46JabaGgVufJcX, started by the coordinator Nov 3 16:57 CST. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJKzCSKTt9Mrr6n9GKiR at 03:46-03:49 CST Nov 10. Kept doing on: #2522 open draft (worktree-stop-block-cites) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Done (triage 12:37 CST Nov 10, batch 72 on main a8a9fcdd5; audit Explore sonnet): #2522 5cfa317c9, head on origin/main (merge-base --is-ancestor).",
+  "updatedAt": "2026-11-10T12:37:00-06:00",
   "lane": "archived, handoff at handoffs/session_013NEJKzCSKTt9Mrr6n9GKiR.md on archive/session-handoffs-2026-11-10"
 }

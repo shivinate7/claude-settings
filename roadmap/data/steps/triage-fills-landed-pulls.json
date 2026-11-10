@@ -1,11 +1,12 @@
 {
   "title": "Triage's live file lists the merged PRs of the last 14 days",
   "phase": "now",
-  "status": "blocked",
+  "status": "ready",
   "order": 973,
   "owner": "triage",
   "lane": null,
-  "updatedAt": "2026-11-10T06:00:00-06:00",
+  "updatedAt": "2026-11-10T12:37:00-06:00",
   "why": "Step step-landed-from-prs (#2525) reads landedPulls from the live file. Until triage fills it, the feature finds nothing.",
-  "note": "WAITS: #2525 (step-landed-from-prs, the build reads landed pulls) merges; released to batch 72. Then each --live build adds landedPulls: the closed PRs of the last 14 days whose base is the default branch (operating-model.md names it). Source: coordinator session_013NEJL2hB1pLZPDpzas7VgB, 05:54 CST Nov 10."
+  "note": "WAITS: #2525 (step-landed-from-prs, the build reads landed pulls) merges; released to batch 72. Then each --live build adds landedPulls: the closed PRs of the last 14 days whose base is the default branch (operating-model.md names it). Source: coordinator session_013NEJL2hB1pLZPDpzas7VgB, 05:54 CST Nov 10. Unblocked 12:37 CST Nov 10: blocker #2525 (488a0a49a) merged in batch 72.",
+  "blockedBy": []
 }
