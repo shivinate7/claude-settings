@@ -1167,14 +1167,12 @@ def _segment_git_c_parts(tokens):
 
     ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
     -C/some/path status` and `git -C=/some/path status` both fail with `unknown option:
-    -C/some/path` (or `-C=...`) and never run. An earlier version of this function also
-    accepted an attached `-C<path>` as if it named a tree, which let a command text attach any
-    path it liked to `-C` and have `_run_dir` read that path as though it were real, even
-    though git itself refused the call and the command ran wherever the shell's own cwd (or an
-    earlier, real `cd`) put it. Found in review of PR #75, reproduced against real git and
-    against the live guard: the attached form ALLOWED a `git reset --hard HEAD` that ran in a
-    real dirty checkout, because the fake `-C<path>` pointed the subject read at an unrelated
-    clean one.
+    -C/some/path` (or `-C=...`) and never run. Reading an attached `-C<path>` as a tree would
+    let a command text attach any path it liked to `-C` and have `_run_dir` read that path as
+    though it were real, even though git itself refuses the call and the command runs wherever
+    the shell's own cwd (or a real `cd`) puts it. A `git reset --hard HEAD` that runs in a real
+    dirty checkout would then be allowed, because the fake `-C<path>` points the subject read at
+    an unrelated clean one.
     """
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -1253,8 +1251,9 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     tokenizes to `cd`/`git` as its OWN command word (via `resolve_command`, which already steps
     over wrappers and loop keywords) counts. A segment that fails to tokenize (an unmatched
     quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. The FIRST
-    segment with a `git -C` still wins over every `cd`, matching this function's behaviour before
-    the env fix, and its relative folder reads against the shell cwd as it always did.
+    segment with a `git -C` wins over every `cd` and `env -C` move, and its relative folder reads
+    against the shell cwd, not against the folder an earlier `cd` left. That first-wins reading of
+    `git -C` is kept as the owner ruled.
 
     AN `env -C` FOLDER IS A MOVE, NOT A `git -C`: it moves the shell's folder as a `cd` does, so the
     LAST of the `cd` and `env -C` segments wins, and a relative one joins onto the folder the earlier
