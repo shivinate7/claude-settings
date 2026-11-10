@@ -1858,3 +1858,4 @@
 - launch-cloud-mirror-marker-reads-stderr: merge/launch.py `git()` joins stderr to stdout, so a git warning on `config --get claude-settings.cloudMirror` hides the marker and the mirror is fast-forwarded. install.sh and hooks/session_start.sh read stdout only.
 - launch-cloud-mirror-hides-other-reason: a marked mirror that is also dirty or off main prints only "cloud mirror" in launch.py's left-as-is line.
 - launch-cloud-mirror-test-gaps: no case pins a dirty marked mirror or a non-literal true spelling (`yes`, `1`); the code matches install.sh's literal `true`.
+- merge-open-subst-fails-closed: a merge whose `$(` is still open where the splitter cuts at `|`, `;` or `&&` is denied when `--confirm` follows, even in the session's own checkout, such as `merge $(gh pr list | head -1) --confirm` (hooks/guard_merge.py `_glued_counts`). Fail-closed by design: give the PR number as a literal.
