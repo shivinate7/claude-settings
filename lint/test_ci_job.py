@@ -1067,9 +1067,12 @@ class LintTools(Job):
         # CI's checkout has actions/code-check, the table it reads from lint/, and the root ruff.toml that sets its ruff
         # rules. A local uses: runs the repo under test's own copy. The base carries all three (lane commits them), so
         # the diff under test has none of them.
+        # A test-action run leaves __pycache__ in the checkout; it is not source and the fixture has no row for it.
         shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"),
-                        os.path.join(self.root, "actions", "code-check"))
-        shutil.copytree(os.path.join(CHECKOUT, "actions", "zizmor"), os.path.join(self.root, "actions", "zizmor"))
+                        os.path.join(self.root, "actions", "code-check"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(os.path.join(CHECKOUT, "actions", "zizmor"), os.path.join(self.root, "actions", "zizmor"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
         os.makedirs(os.path.join(self.root, "lint"))
         shutil.copyfile(os.path.join(CHECKOUT, "lint", "code_check_standard.json"),
                         os.path.join(self.root, "lint", "code_check_standard.json"))
