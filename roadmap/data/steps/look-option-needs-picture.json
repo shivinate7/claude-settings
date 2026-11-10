@@ -1,0 +1,12 @@
+{
+  "title": "A look item with any option lacking a picture is refused when it is written",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 995,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: home roadmap step look-item-every-option-pictured (2bbe917). page.html:1445 only warns in the browser; check_designs.mjs and hooks/guard.py:4586 skip an option with no design; steps d9 and page-item-checked-at-write do not do this.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

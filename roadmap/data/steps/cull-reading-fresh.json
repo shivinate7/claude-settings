@@ -1,0 +1,12 @@
+{
+  "title": "A fresh cull reading of claude-settings is taken, since the last one predates 2,938 commits",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 1005,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: claude-settings outbox health-check-nov-9.md bullet 5. meta/cull.json is not on origin/main; only docs/decisions/cull-rules.md exists.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

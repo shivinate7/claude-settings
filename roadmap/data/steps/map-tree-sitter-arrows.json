@@ -1,0 +1,12 @@
+{
+  "title": "The map skill reads Swift and Python with tree-sitter and marks each arrow exact or guessed",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 1003,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: q_max main specs/todo.md:138 (32d4373). Two owner questions are open in that line: which languages after these two, and where tree-sitter installs.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

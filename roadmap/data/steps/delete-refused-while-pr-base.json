@@ -1,0 +1,12 @@
+{
+  "title": "A branch delete is refused while an open PR has that branch as its base",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 999,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: home main docs/debts/stacked-base-delete-closes-prs.md (daffb31). hooks/guard_push_delete.py has no base read.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

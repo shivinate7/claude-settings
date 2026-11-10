@@ -1,0 +1,12 @@
+{
+  "title": "A refused lane brief tells the sender to also tell the refused lane that its work moved",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 997,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: home roadmap step refused-brief-tells-lane (2bbe917). one-lane-one-step is done; BRIEF_TOPIC_REASON in hooks/guard_merge.py has no tell-the-lane clause.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

@@ -1,0 +1,12 @@
+{
+  "title": "A cannot-reach claim in a page task is refused when measured from a session that would not act",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 998,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: home roadmap step why-yours-acting-session (2bbe917). why-cite-matches-act covers route-row cites only.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

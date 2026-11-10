@@ -1,0 +1,12 @@
+{
+  "title": "The shared map check counts extensionless files by whole filename, so seams need a map line",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 1001,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: banchi main docs/debts/002-the-maps-reach.md (78398f4). skills/plain-english-map map-config.mjs and map-check.mjs read codeExtensions only. The description-truth half has no mechanical close.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

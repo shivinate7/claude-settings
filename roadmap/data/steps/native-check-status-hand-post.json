@@ -1,0 +1,12 @@
+{
+  "title": "A hook refuses a hand-posted native-check commit status",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 1000,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: degen main docs/debts/notes.md:392 native-check-ui-step-forms (404f7ee). The `|| true` half is degen's own native_ci_check.py, not owed here.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

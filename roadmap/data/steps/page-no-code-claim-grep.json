@@ -1,0 +1,12 @@
+{
+  "title": "A page item that says a feature has no code must carry a search of main, or the write is refused",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 996,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: home roadmap step page-no-code-cites-grep (2bbe917). No step reads page-item claim evidence.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}

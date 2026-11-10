@@ -1,0 +1,12 @@
+{
+  "title": "A lane's push to a branch whose PR already merged is refused, with a remedy to cut a fresh branch",
+  "phase": "cleanup",
+  "status": "todo",
+  "order": 994,
+  "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: home roadmap step lane-fresh-branch-after-merge (2bbe917). No guard on main reads this; archive-refuses-unpr-branch is a different act.",
+  "updatedAt": "2026-11-10T12:21:00-06:00",
+  "owner": "triage",
+  "lane": "",
+  "blockedBy": []
+}
