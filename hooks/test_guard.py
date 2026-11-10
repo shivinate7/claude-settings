@@ -35138,94 +35138,72 @@ ROLE_OV_NO_MODEL = role_input("builder", None, "Fix the failing case.")
 ROLE_OV_UNSET = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 
 
-def role_override_lift_check():
-    """A test-author on sonnet is refused by its row. One override lifts that refusal once, then it refuses again."""
-    config, session = role_config("ov-lift", REPO), "role-ov-lift"
+def role_override_never_lifted_story(slug, spawn, spawn_env, what):
+    """A refusal that no override lifts (never_lifted) stays refused under an override, and spends none, so the override
+    that follows still lifts a test-author on sonnet. `what` names the refused spawn in the story's lines."""
+    config, session = role_config(slug, REPO), "role-" + slug
 
-    def call(seconds):
-        return ov_call("Agent", dict(ROLE_OV_TEST_AUTHOR), NOGIT, config, session, seconds)
+    def call(seconds, tool_input, env=None):
+        return ov_call("Agent", dict(tool_input), NOGIT, config, session, seconds, env=env)
 
-    ok, why = ov_story([("no override", lambda: call(0), "deny", ROLE_RULE)])
+    ok, why = ov_story([("%s, no override" % what, lambda: call(0, spawn, spawn_env), "deny", ROLE_RULE)])
     if not ok:
         return False, why
     note = ov_type(config, session, "override")
     ok, why = ov_story([
-        ("the first spawn, under the override", lambda: call(60), "allow", ROLE_RULE),
-        ("the next spawn, override spent", lambda: call(120), "deny", ROLE_RULE),
+        ("%s, under the override" % what, lambda: call(60, spawn, spawn_env), "deny", ROLE_RULE),
+        ("test-author on sonnet, the override not spent by the refusal of %s" % what,
+         lambda: call(120, ROLE_OV_TEST_AUTHOR), "allow", ROLE_RULE),
     ], note)
     if not ok:
         return False, why
-    return True, "refused by its row, lifted by one override, refused again once it was spent"
+    return True, "%s stayed refused under the override, which then lifted a test-author on sonnet" % what
+
+
+def role_override_lift_story(slug, spawn, what):
+    """A refusal above the row is lifted by one override, and refused again once the override is spent."""
+    config, session = role_config(slug, REPO), "role-" + slug
+
+    def call(seconds):
+        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds)
+
+    ok, why = ov_story([("%s, no override" % what, lambda: call(0), "deny", ROLE_RULE)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, "override")
+    ok, why = ov_story([
+        ("%s, under the override" % what, lambda: call(60), "allow", ROLE_RULE),
+        ("%s, override spent" % what, lambda: call(120), "deny", ROLE_RULE),
+    ], note)
+    if not ok:
+        return False, why
+    return True, "%s was refused, lifted by one override, and refused again once it was spent" % what
+
+
+def role_override_lift_check():
+    """A test-author on sonnet is refused by its row. One override lifts that refusal once, then it refuses again."""
+    return role_override_lift_story("ov-lift", ROLE_OV_TEST_AUTHOR, "a test-author on sonnet")
 
 
 def role_override_no_model_check():
     """The no-model refusal stays never-lifted: under an override it is still refused and spends none, so the
     override that follows still lifts a test-author on sonnet."""
-    config, session = role_config("ov-no-model", REPO), "role-ov-no-model"
-
-    def call(seconds, spawn, env=None):
-        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
-
-    ok, why = ov_story([("no model, no override", lambda: call(0, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_RULE)])
-    if not ok:
-        return False, why
-    note = ov_type(config, session, "override")
-    ok, why = ov_story([
-        ("no model, under the override", lambda: call(60, ROLE_OV_NO_MODEL, ROLE_OV_UNSET), "deny", ROLE_RULE),
-        ("test-author on sonnet, the override not spent by the no-model refusal",
-         lambda: call(120, ROLE_OV_TEST_AUTHOR), "allow", ROLE_RULE),
-    ], note)
-    if not ok:
-        return False, why
-    return True, "the no-model refusal stayed under the override, which then lifted a test-author on sonnet"
+    return role_override_never_lifted_story("ov-no-model", ROLE_OV_NO_MODEL, ROLE_OV_UNSET, "a builder with no model")
 
 
 def role_override_no_model_fix_check():
-    """A reviewer's fix check with no model is never-lifted, as the builder story above holds for a builder. Under an
-    override it is still refused and spends none, so the override that follows still lifts a test-author on sonnet.
-    Its refusal keeps ROLE_NO_MODEL_MATCH, which never_lifted reads."""
-    config, session = role_config("ov-fix-no-model", REPO), "role-ov-fix-no-model"
+    """A reviewer's fix check with no model is never-lifted: its refusal keeps ROLE_NO_MODEL_MATCH, which never_lifted
+    reads, so an override neither lifts it nor spends."""
     fix_check = role_input("reviewer", None, FIX_MARKER + ". Re-run the cases.")
-
-    def call(seconds, spawn, env=None):
-        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds, env=env)
-
-    ok, why = ov_story([("reviewer fix check with no model, no override",
-                         lambda: call(0, fix_check, ROLE_OV_UNSET), "deny", ROLE_RULE)])
-    if not ok:
-        return False, why
-    note = ov_type(config, session, "override")
-    ok, why = ov_story([
-        ("reviewer fix check with no model, under the override",
-         lambda: call(60, fix_check, ROLE_OV_UNSET), "deny", ROLE_RULE),
-        ("test-author on sonnet, the override not spent by the fix check refusal",
-         lambda: call(120, ROLE_OV_TEST_AUTHOR), "allow", ROLE_RULE),
-    ], note)
-    if not ok:
-        return False, why
-    return True, "the no-model fix check refusal stayed under the override, which then lifted a test-author on sonnet"
+    return role_override_never_lifted_story("ov-fix-no-model", fix_check, ROLE_OV_UNSET,
+                                            "a reviewer fix check with no model")
 
 
 def role_override_haiku_fix_check():
-    """A reviewer's fix check that names haiku is refused under agent-role-model, with ROLE_FIX_CHECK_MATCH, which the
-    general override lifts. One override lifts it once, then it refuses again."""
-    config, session = role_config("ov-fix-haiku", REPO), "role-ov-fix-haiku"
+    """A reviewer's fix check that names haiku is refused with ROLE_FIX_CHECK_MATCH, which the general override lifts.
+    One override lifts it once, then it refuses again."""
     fix_check = role_input("reviewer", "haiku", FIX_MARKER + ". Re-run the cases.")
-
-    def call(seconds):
-        return ov_call("Agent", dict(fix_check), NOGIT, config, session, seconds)
-
-    ok, why = ov_story([("reviewer fix check on haiku, no override", lambda: call(0), "deny", ROLE_RULE)])
-    if not ok:
-        return False, why
-    note = ov_type(config, session, "override")
-    ok, why = ov_story([
-        ("reviewer fix check on haiku, under the override", lambda: call(60), "allow", ROLE_RULE),
-        ("reviewer fix check on haiku, override spent", lambda: call(120), "deny", ROLE_RULE),
-    ], note)
-    if not ok:
-        return False, why
-    return True, "the haiku fix check refusal was lifted by one override, and refused again once it was spent"
+    return role_override_lift_story("ov-fix-haiku", fix_check, "a reviewer fix check on haiku")
 
 
 def role_opus_explore_lift_check():
