@@ -4952,6 +4952,8 @@ def impeccable_shell_hit(segment: str) -> str:
     if index >= len(tokens) or impeccable_name(tokens[index]) != "impeccable":
         return ""
     rest = tokens[index + 1:]
+    while rest and rest[0].startswith("-"):   # leading flags and the `--` that ends them
+        rest = rest[1:]
     if rest[:1] == ["detect"] or rest[:2] == ["hooks", "status"]:
         return ""
     return segment.strip()[:100]
