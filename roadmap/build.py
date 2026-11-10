@@ -110,6 +110,21 @@ def over_cap(steps):
 
 STEPS_PATH = "roadmap/data/steps"
 
+# A wait on a bare PR number goes dead when the PR closes; a wait on a step slug is tracked.
+PR_WAIT = re.compile(r"(?<!\w)(?:after|waits? on|waiting for|blocked on|once|until|when)\s+#\d+\b", re.I)
+
+
+def pr_wait_refusal(step_id, d):
+    """The refusal line for an open step that waits on a bare PR number with no blockedBy, else None."""
+    if d.get("status") == "done" or d.get("blockedBy"):
+        return None
+    for field in ("title", "why", "note"):
+        m = PR_WAIT.search(d[field]) if isinstance(d.get(field), str) else None
+        if m:
+            return (f"{step_id} waits on a PR number ({field}: \"{m.group(0)}\"). "
+                    "Put the step slug it waits on in blockedBy.")
+    return None
+
 
 def staged_notes_over_cap(repo):
     """(over_cap pairs, refusal lines) for the step files the staged commit adds or changes, read from the index.
@@ -166,6 +181,8 @@ def staged_notes_over_cap(repo):
             continue
         if not isinstance(d, dict):
             continue
+        if (line := pr_wait_refusal(shown(p.stem), d)):
+            refused.append(line)
         olds = [step_at(b, path) for b in bases]
         if any(o and o.get("status") != "done" and note_words(o) >= note_words(d) for o in olds):
             continue
