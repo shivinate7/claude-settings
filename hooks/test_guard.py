@@ -94,7 +94,9 @@ FAMILIES = {
     "shared-tree": "stash, reset, restore, checkout and the subject read",
     "branch-worktree": "branch delete and worktree remove/prune",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
+    "pointer-edit": "the pointer checkout's own files: a Write, Edit, MultiEdit or NotebookEdit into them is refused, naming EnterWorktree; its .git, a linked worktree, a target outside it, a stood-down pointer and the read tools pass",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
+    "scratchpad-owner": "rule scratchpad-owner: an agent that runs a script another agent of its session wrote into the shared scratchpad is asked; the write-time record, the run forms, the passes, the reads and the cost",
     "pointer": "the pointer HEAD checkout",
     "hand-made-worktree": "a worktree made by hand outside the agent home folder",
     "kill": "machine-wide kills and detached launches",
@@ -147,6 +149,7 @@ FAMILIES = {
     "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -699,6 +702,8 @@ def arch_copy(archive, others=()):
 PTRCFG = os.path.join(ROOT, "ptrcfg")
 PTRMAIN = os.path.join(ROOT, "ptrmain")
 PTRWT = os.path.join(ROOT, "ptrlane")
+# A linked worktree NESTED under the pointer checkout, at the harness's `.claude/worktrees/<name>` shape.
+PTRNEST = os.path.join(PTRMAIN, ".claude", "worktrees", "ptrnest")
 PTRBADCFG = os.path.join(ROOT, "ptrbadcfg")
 PTRGONECFG = os.path.join(ROOT, "ptrgonecfg")
 PTRNOCFG = os.path.join(ROOT, "ptrnocfg")
@@ -1957,6 +1962,18 @@ def _build_pointer():
     run_vcs(PTRMAIN, "worktree", "add", "-q", PTRWT, "-b", "ptrlane")
     _require_clean(PTRWT)
     _require_pointer_branch(PTRMAIN, "main")
+    # A linked worktree NESTED under the pointer, made the way the harness makes a lane's. It has its
+    # own git directory, so a write into it is a worktree's write and not the pointer's own. The
+    # scope check stops the suite if git gave it the pointer's git directory instead.
+    nested = run_vcs(PTRMAIN, "worktree", "add", "-q", PTRNEST, "-b", "ptrnest")
+    if nested.returncode != 0:
+        sys.exit("fixture setup failed: the nested worktree at %r: %s" % (PTRNEST, nested.stderr.strip()))
+    gitdir = run_vcs(PTRNEST, "rev-parse", "--absolute-git-dir")
+    if gitdir.returncode != 0 or os.path.normcase(os.path.realpath(gitdir.stdout.strip())) == (
+            os.path.normcase(os.path.realpath(os.path.join(PTRMAIN, ".git")))):
+        sys.exit("fixture setup failed: the nested worktree at %r does not hold its own git directory: %r"
+                 % (PTRNEST, gitdir.stdout.strip()))
+    _require_clean(PTRNEST)
     _set_origin_main(PTRMAIN, "HEAD")
     # The pointer line has the same shape the installer writes and the shell readers parse.
     write(os.path.join(PTRCFG, "CLAUDE.md"), "@" + slash(PTRMAIN) + "/CLAUDE.md\n")
@@ -1983,6 +2000,10 @@ def _build_pointer():
     write(os.path.join(PTRBADCFG, "CLAUDE.md"), "rules with no pointer line\n")
     write(os.path.join(PTRGONECFG, "CLAUDE.md"),
           "@" + slash(os.path.join(ROOT, "nosuchcheckout")) + "/CLAUDE.md\n")
+    # Scope before subject: the stand-down cases need the directory PTRGONECFG names to be absent.
+    if os.path.exists(os.path.join(ROOT, "nosuchcheckout")):
+        sys.exit("fixture setup failed: the directory the gone-pointer rules name exists: %r"
+                 % os.path.join(ROOT, "nosuchcheckout"))
     os.makedirs(PTRNOCFG, exist_ok=True)
 
     make_blind_git(GITBLIND)
@@ -4199,6 +4220,14 @@ def git_reads_ancestor_shallow_case():
     return False, "branch_is_ancestor(HEAD, pin) in a shallow clone reads %r, want None (unknown)" % (got,)
 
 
+def git_reads_origin_one_segment_case():
+    """An origin path with one segment names no owner, so origin_slug reads None. A pin of the current parse."""
+    got = _load_git_reads().origin_slug("https://host/r")
+    if got is None:
+        return True, "an origin whose path has one segment, https://host/r, reads None"
+    return False, "origin_slug('https://host/r') reads %r, want None (no owner segment)" % (got,)
+
+
 def _branch_delete_in(where, branch):
     """Claude's `git branch -D <branch>` in `where`, decided by the guard under its own config folder. Returns
     (decision, reason, config folder); the folder holds the guard.log that the call wrote."""
@@ -4403,6 +4432,92 @@ sh("pointer: a pointer naming a directory that is gone fires nothing",
    VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRGONECFG)
 sh("pointer: no global rules file at all fires nothing",
    VCS + " switch somebranch", "allow", cwd=PTRMAIN, config=PTRNOCFG)
+
+
+# =========================================================================== 1b. the pointer's own files
+FAMILY = "pointer-edit"
+#
+# Rule pointer-edit: a Write, Edit, MultiEdit or NotebookEdit whose TARGET is one of the pointer
+# checkout's own files is refused, and the remedy names the EnterWorktree tool. Every session on this
+# machine runs its hooks, its lint and its agents out of that checkout, so a file edited in it is live
+# for all of them at once. pointer-head guards a branch switch there and nothing else.
+#
+# The rule reads the TARGET path, never the cwd. Its passes are the pointer's own `.git`, a linked
+# worktree of the same clone (nested under the pointer, or elsewhere), and any target outside the
+# pointer. A rules file that is missing, unreadable or names no pointer stands the rule down. Read,
+# Grep, Artifact and ArtifactData are never judged: the gate is WRITE_TOOLS. A shell write into the
+# pointer is out of scope: a note only.
+#
+# The targets are plain fixture files, never the pointer's CLAUDE.md or anything under hooks/, lint/ or
+# agents/. frozen-path judges those only for the config-dir spelling, or when the pointer is the live pin
+# or the main mirror, so these cases must not depend on it. TEMP_DIR is ROOT/tmp for this section, as in the
+# hand-made-worktree section below, so ROOT under the system temp is not read as temp.
+TEMP_DIR = os.path.join(ROOT, "tmp")
+PE_TARGET = os.path.join(PTRMAIN, "f.txt")                       # a tracked file of the pointer checkout
+PE_NEW = os.path.join(PTRMAIN, "docs", "brand-new.md")           # a file the pointer does not hold yet
+PE_NOTEBOOK = os.path.join(PTRMAIN, "docs", "scratch.ipynb")     # a notebook path in the pointer
+PE_TEMP = os.path.join(TEMP_DIR, "probe.txt")                    # a file in the guard's temp folder
+PE_GITDIR = os.path.join(PTRMAIN, ".git", "pointer-edit-probe")  # inside the pointer's own .git
+# Under the directory PTRGONECFG names, which the fixture never creates. Its stand-down is the only
+# thing that passes this write: with the directory taken as the pointer, the target is inside it.
+PE_GONE_TARGET = os.path.join(ROOT, "nosuchcheckout", "f.txt")
+
+# THE DENY CASES. Each names the pointer itself as cwd, except the last, from a directory that is no
+# checkout, which proves the TARGET decides. Each reason must carry the EnterWorktree tool. Each stand-
+# down case below names the same target under a stood-down config, so the pair pins the cause.
+add("pointer-edit: Write of a tracked file in the pointer checkout is refused", "deny", "pointer-edit",
+    tool="Write", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET, content="changed\n",
+    carries="EnterWorktree")
+add("pointer-edit: Edit of a tracked file in the pointer checkout is refused", "deny", "pointer-edit",
+    tool="Edit", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET, old_string="base",
+    new_string="changed", carries="EnterWorktree")
+add("pointer-edit: MultiEdit of a tracked file in the pointer checkout is refused", "deny", "pointer-edit",
+    tool="MultiEdit", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET,
+    edits=[{"old_string": "base", "new_string": "changed"}], carries="EnterWorktree")
+add("pointer-edit: NotebookEdit into the pointer checkout is refused", "deny", "pointer-edit",
+    tool="NotebookEdit", cwd=PTRMAIN, config=PTRCFG, notebook_path=PE_NOTEBOOK, new_source="x = 1\n",
+    carries="EnterWorktree")
+add("pointer-edit: Write of a new file in the pointer checkout is refused", "deny", "pointer-edit",
+    tool="Write", cwd=PTRMAIN, config=PTRCFG, file_path=PE_NEW, content="# new\n",
+    carries="EnterWorktree")
+add("pointer-edit: Write into the pointer checkout from a directory that is no checkout is refused",
+    "deny", "pointer-edit", tool="Write", cwd=NOGIT, config=PTRCFG, file_path=PE_TARGET,
+    content="changed\n", carries="EnterWorktree")
+
+# THE PASSES. Each pins a write or read the rule must let through: the pointer's own .git, a linked
+# worktree (nested or elsewhere), another checkout, the temp folder, a directory that is no checkout,
+# a stood-down rule, and the read tools. A refusal here would block a lane's own work.
+# The nested worktree's scope (its own git directory) is checked where the fixture is built.
+add("pointer-edit: Write into the pointer's own .git is not judged", "allow", tool="Write",
+    cwd=PTRMAIN, config=PTRCFG, file_path=PE_GITDIR, content="probe\n")
+add("pointer-edit: Write into a linked worktree nested under the pointer is allowed", "allow",
+    tool="Write", cwd=PTRNEST, config=PTRCFG, file_path=os.path.join(PTRNEST, "f.txt"), content="lane\n")
+add("pointer-edit: Write into a linked worktree elsewhere is allowed", "allow", tool="Write",
+    cwd=PTRWT, config=PTRCFG, file_path=os.path.join(PTRWT, "f.txt"), content="lane\n")
+add("pointer-edit: Write into another checkout is allowed", "allow", tool="Write",
+    cwd=GITMAIN, config=PTRCFG, file_path=os.path.join(GITMAIN, "notes.txt"), content="x\n")
+add("pointer-edit: Write into the temp folder is allowed, with the pointer as cwd", "allow",
+    tool="Write", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TEMP, content="x\n")
+add("pointer-edit: Write into a directory that is no checkout is allowed", "allow", tool="Write",
+    cwd=NOGIT, config=PTRCFG, file_path=os.path.join(NOGIT, "notes.txt"), content="x\n")
+add("pointer-edit: a rules file with no pointer line stands the rule down", "allow", tool="Write",
+    cwd=PTRMAIN, config=PTRBADCFG, file_path=PE_TARGET, content="changed\n")
+add("pointer-edit: a pointer naming a directory that is gone stands the rule down", "allow",
+    tool="Write", cwd=PTRMAIN, config=PTRGONECFG, file_path=PE_GONE_TARGET, content="changed\n")
+add("pointer-edit: no global rules file at all stands the rule down", "allow", tool="Write",
+    cwd=PTRMAIN, config=PTRNOCFG, file_path=PE_TARGET, content="changed\n")
+add("pointer-edit: Read of a file in the pointer checkout is never judged", "allow", tool="Read",
+    cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
+add("pointer-edit: Grep under the pointer checkout is never judged", "allow", tool="Grep",
+    cwd=PTRMAIN, config=PTRCFG, pattern="base", path=PTRMAIN)
+# The gate is WRITE_TOOLS. Artifact and ArtifactData reach the guard with a file_path too, so they
+# must be named here: a gate dropped to every tool would refuse them, and these cases go red.
+add("pointer-edit: Artifact with a pointer file as file_path is not a write and is allowed", "allow",
+    tool="Artifact", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
+add("pointer-edit: ArtifactData with a pointer file as file_path is not a write and is allowed", "allow",
+    tool="ArtifactData", cwd=PTRMAIN, config=PTRCFG, file_path=PE_TARGET)
+
+TEMP_DIR = None   # back to the system temp for the sections below
 
 
 # =========================================================================== 1c. hand-made worktree
@@ -6428,6 +6543,145 @@ add("check-tail: a roster name after a quoted #, backgrounded, is allowed", "all
 add("check-tail: a roster name in a multi-line quote, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='echo "first line\nmerge --lane-lint 1 | tail -3\nlast line"')
+# Wrapper forms (`uv run`, a versioned python, a `VAR=x` prefix) read as the bare spellings do. The
+# allow cases name calls a wider match must not refuse: a pytest run and a grep that names the script.
+add("check-tail: uv run ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run ci-job checks --lint 2>&1 | tail -20")
+add("check-tail: env VAR=x then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="env CI=1 ~/.claude/bin/ci-job checks --lint | tail -5")
+add("check-tail: python3 runs the ci-job script piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 bin/ci-job checks --lint | tail -5")
+add("check-tail: python3 -W ignore runs the ci-job script piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 -W ignore bin/ci-job checks --lint | tail -5")
+add("check-tail: uv run python -m pytest piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run python -m pytest | tail -5")
+add("check-tail: uv run grep naming the script piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='uv run grep -n "--lane-lint" merge/merge.py | tail -20')
+add("check-tail: uv run -w pytest then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run -w pytest ci-job checks --lint | tail -5")
+add("check-tail: uv run --cache-dir then ci-job checks --lint piped to tail, backgrounded, is refused",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="uv run --cache-dir /tmp/c ci-job checks --lint | tail -5")
+add("check-tail: pytest with bin/ci-job as an argument piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
+
+# Wrapper forms in the foreground: each deny reads its check through the wrapper, each allow does not.
+sh("check-tail: uv run python runs the script piped to tail in the foreground is refused",
+   "uv run python merge/merge.py --lane-lint 7 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run runs merge --lane-lint piped to tail in the foreground is refused",
+   "uv run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3.11 runs the script piped to tail in the foreground is refused",
+   "python3.11 merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: env VAR=x then merge --lane-lint piped to tail in the foreground is refused",
+   "env FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: env VAR=x then python3 runs the script piped to head in the foreground is refused",
+   "env FOO=1 python3 merge/merge.py --review-record --head 0123456789abcdef0123456789abcdef01234567 "
+   "| head -5", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a VAR=x prefix on merge --lane-lint piped to tail in the foreground is refused",
+   "FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run python -m pytest piped to tail in the foreground is allowed",
+   "uv run python -m pytest | tail -5", "allow", cwd=NOGIT)
+sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in the foreground is refused",
+   "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
+   "uv --quiet run merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run --with-editable then python runs the script piped to tail is refused",
+   "uv run --with-editable . python merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+# `uv run` runs a script operand with no interpreter word, so the script is the command word. The check
+# reads only an interpreter's operand, so these uv spellings must still be refused.
+sh("check-tail: uv run merge/merge.py --lane-lint piped to tail in the foreground is refused",
+   "uv run merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: uv run --with x merge/merge.py --review-record piped to head is refused",
+   "uv run --with x merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+# Pins: pythonw and the -X value flag are read as interpreter spellings already. Dropping pythonw from
+# SCRIPT_INTERPRETER, or -X from INTERPRETER_VALUE_FLAGS, turns the matching row red.
+sh("check-tail: pythonw runs the merge script piped to tail in the foreground is refused",
+   "pythonw merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: python3 -X dev runs the merge script piped to tail in the foreground is refused",
+   "python3 -X dev merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+# Control: a uv run of another script that names --lane-lint is not the merge script, so it is allowed.
+sh("check-tail: uv run of another script naming --lane-lint piped to tail is allowed",
+   "uv run lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+# An unquoted substitution in the script operand splits into several words, so the first word after the
+# interpreter is not the script. Each spelling below names the merge script, so each must still be refused.
+sh("check-tail: an unquoted $(git rev-parse) script path piped to tail in the foreground is refused",
+   "python3 $(git rev-parse --show-toplevel)/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: an unquoted $(dirname $0) script path piped to head in the foreground is refused",
+   "python3 $(dirname $0)/merge/merge.py --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: a backtick script path piped to tail in the foreground is refused",
+   "python3 `git rev-parse --show-toplevel`/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail",
+   cwd=NOGIT)
+# Pins: a quoted substitution and one with no space are one word already, so these pass on the current guard.
+sh("check-tail: a quoted $(git rev-parse) script path piped to tail in the foreground is refused",
+   'python3 "$(git rev-parse --show-toplevel)/merge/merge.py" --lane-lint 7 | tail -3', "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a $(pwd) script path with no space piped to tail in the foreground is refused",
+   "python3 $(pwd)/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+# Control: an unquoted substitution that names another script is not the merge script, so it is allowed.
+sh("check-tail: an unquoted $(git rev-parse) path to another script naming --lane-lint is allowed",
+   "python3 $(git rev-parse --show-toplevel)/lint/other.py --lane-lint | tail -3", "allow", cwd=NOGIT)
+
+# A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
+# the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
+verdict_pipe("env VAR=x then verdict merge --lane-lint piped to tail is refused",
+             "env FOO=1 verdict merge --lane-lint 7 | tail -3", "deny")
+verdict_pipe("uv run verdict merge --lane-lint piped to tail is refused",
+             "uv run verdict merge --lane-lint 7 | tail -3", "deny")
+verdict_pipe("verdict piped to tail, then && commit, is refused",
+             "verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x", "deny")
+verdict_pipe("the absolute bin path piped to tail, then ;, is refused",
+             "~/.claude/bin/verdict python3 hooks/test_guard.py | tail -5; git push", "deny")
+verdict_pipe("two verdict pipes joined by ; are refused",
+             "verdict python3 lint/a.py 2>&1 | tail -3; verdict python3 lint/b.py 2>&1 | tail -3",
+             "deny")
+verdict_pipe("verdict piped to tail, then ; echo, is refused",
+             "verdict python3 lint/a.py | tail -1; echo ---", "deny")
+verdict_pipe("the relative bin path piped to head, then &&, is refused",
+             "bin/verdict make check | head -3 && echo ok", "deny")
+verdict_pipe("an env assignment before verdict piped to tail, then &&, is refused",
+             "GUARD_FAMILY=stream verdict python3 hooks/test_guard.py 2>&1 | tail -3 && git push",
+             "deny")
+verdict_pipe("the shortened incident line piped to tail, then && add and commit, is refused",
+             "~/.claude/bin/verdict python3 lint/ste_lint.py docs/decisions/x.md 2>&1 | tail -1 && "
+             "git add docs/decisions/x.md && git commit -q -m x", "deny")
+verdict_pipe("verdict piped to tail, then || echo, is refused",
+             "verdict python3 lint/check_x.py | tail -1 || echo failed", "deny")
+verdict_pipe("verdict piped to grep -q, then && push, is refused",
+             "verdict python3 lint/check_x.py 2>&1 | grep -q PASS && git push", "deny")
+verdict_pipe("verdict piped to sed -n, then && push, is refused",
+             "verdict make check | sed -n 1p && git push", "deny")
+verdict_pipe("verdict.cmd piped to tail, then && push, is refused",
+             "verdict.cmd python3 lint/check_x.py | tail -3 && git push", "deny")
+verdict_pipe("verdict piped to tail as the last pipeline is refused",
+             "verdict python3 lint/check_x.py | tail -3", "deny")
+verdict_pipe("verdict piped to grep as the last command is refused",
+             "verdict make check | grep FAIL", "deny")
+verdict_pipe("pipefail set earlier with set -o does not lift the refusal, then && commit, is refused",
+             "set -o pipefail; verdict python3 lint/check_x.py | tail -3 && git commit -m x", "deny")
+verdict_pipe("pipefail set earlier in set -euo does not lift the refusal, then && push, is refused",
+             "set -euo pipefail && verdict python3 lint/check_x.py | tail -3 && git push", "deny")
+verdict_pipe("set +o pipefail undoes an earlier set -o, then && push, is refused",
+             "set -o pipefail; set +o pipefail; verdict python3 lint/check_x.py | tail -3 && git push",
+             "deny")
+add("verdict-pipe: verdict piped to tail, then && commit, backgrounded, is refused", "deny",
+    VERDICT_PIPE, cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="verdict python3 lint/check_x.py 2>&1 | tail -3 && git commit -m x")
+verdict_pipe("a bare verdict call is allowed", "verdict python3 lint/check_x.py", "allow")
+verdict_pipe("verdict then && commit, with no pipe, is allowed",
+             "verdict python3 lint/check_x.py && git commit -m x", "allow")
+verdict_pipe("a pipe with no verdict in it is allowed", "cat x.log | tail -3 && echo ok", "allow")
+verdict_pipe("verdict inside single quotes is not a call",
+             "echo 'verdict a | tail -1 && b'", "allow")
 
 # Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
 # not refused in the foreground. A verdict call piped to tail is refused by verdict-pipe; with no pipe
@@ -12165,6 +12419,135 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
 
+# =========================================================================== 5a2. gh writes in a cloud session
+# The `gh-write-cloud` rule. A cloud session is one where is_cloud() holds: CLAUDE_CODE_REMOTE is exactly
+# "true". There the Bash guard refuses a gh write made outside the merge tool: gh pr create|merge|comment|edit|close|review|ready,
+# gh issue create|comment|edit|close, and gh api with a write method (-X or --method POST, PATCH, PUT or DELETE,
+# any case, also --method=POST and -XPOST), or with -f, -F, --field, --raw-field or --input and no GET method.
+# A read stays allowed: gh pr view|list|diff|checks|status, gh issue view|list, a plain gh api route (with --jq
+# or -q), gh api with an explicit GET, gh auth, and the merge tool's `merge <pr> --confirm`.
+# Each refused write has a twin outside a cloud session, which must allow. The twin is the green control, and
+# it pins the cloud scope.
+GH_WRITE_RULE = "gh-write-cloud"
+GH_WRITE_CLOUD = {"CLAUDE_CODE_REMOTE": "true"}
+GH_WRITE_REMEDY = ("mcp__github__",)   # the remedy names a GitHub MCP tool; which one is the builder's choice
+GH_MERGE_FIXTURE = {"env_path": GHMAIN + os.pathsep + PY_PATH, "config": MERGECFG}   # a green head, as the merge rows use
+
+
+def gh_verb(command):
+    """The words a refusal must not print: the first three words of the command, such as `gh pr comment`."""
+    return " ".join(command.split()[:3])
+
+
+def gh_write_refused(name, command, **fixture):
+    """One gh write refused in a cloud session, and the same write allowed outside one."""
+    sh("gh-write-cloud: %s is refused in a cloud session" % name, command, "deny", GH_WRITE_RULE,
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(gh_verb(command),), **fixture)
+    sh("gh-write-cloud: %s is allowed outside a cloud session" % name, command, "allow", cwd=NOGIT, **fixture)
+
+
+GH_WRITES = (
+    ("pr create", "gh pr create --draft --title x --body y"),
+    ("pr comment", "gh pr comment 12 --body hi"),
+    ("pr edit", "gh pr edit 12 --title x"),
+    ("pr close", "gh pr close 12"),
+    ("pr review", "gh pr review 12 --approve"),
+    ("pr ready", "gh pr ready 12"),
+    ("issue create", "gh issue create --title x --body y"),
+    ("issue comment", "gh issue comment 3 --body hi"),
+    ("issue edit", "gh issue edit 3 --title x"),
+    ("issue close", "gh issue close 3"),
+    ("api -X POST", "gh api -X POST repos/x/y/issues -f title=x"),
+    ("api -X post, no field", "gh api -X post repos/x/y/issues"),
+    ("api --method=POST, no field", "gh api --method=POST repos/x/y/issues"),
+    ("api -XPOST", "gh api -XPOST repos/x/y/issues"),
+    ("api -X patch", "gh api -X patch repos/x/y/pulls/1 -f state=closed"),
+    ("api -X PUT", "gh api -X PUT repos/x/y/pulls/1/merge"),
+    ("api -X DELETE", "gh api -X DELETE repos/x/y/issues/comments/1"),
+    ("api with -f and no method", "gh api repos/x/y/issues -f title=x"),
+    ("api with -F and no method", "gh api repos/x/y/issues -F title=x"),
+    ("api with --field and no method", "gh api repos/x/y/issues --field title=x"),
+    ("api with --raw-field and no method", "gh api repos/x/y/issues --raw-field body=x"),
+    ("api with --input and no method", "gh api repos/x/y/issues --input body.json"),
+)
+for _name, _command in GH_WRITES:
+    gh_write_refused(_name, _command)
+gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
+
+# A write that another rule also refuses gets the gh-write-cloud verdict in a cloud session. Its remedy
+# names an MCP tool, never the refused form. Each refusal has a twin outside a cloud session.
+sh("gh-write-cloud: a pull request opened without --draft is refused in a cloud session",
+   "gh pr create --title x --body y", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr create",))
+sh("gh-write-cloud: a merge with a pending head is refused in a cloud session, not by merge-checks",
+   "gh pr merge 12", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY,
+   lacks=("pending",), env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("gh-write-cloud: a merge with a pending head is judged by merge-checks outside a cloud session",
+   "gh pr merge 12", "deny", "merge-checks", cwd=NOGIT, carries="pending",
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("gh-write-cloud: a // and a /* inside a quoted body still refuse a pr comment in a cloud session",
+   'gh pr comment 12 --body "see // and /* here"', "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr comment",))
+sh("gh-write-cloud: a // and a /* inside a quoted body are allowed outside a cloud session",
+   'gh pr comment 12 --body "see // and /* here"', "allow", cwd=NOGIT)
+sh("gh-write-cloud: gh api with -X GET then --method POST is refused in a cloud session, the last method wins",
+   "gh api -X GET repos/o/r/issues --method POST", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh api",))
+sh("gh-write-cloud: gh api with -X GET then --method POST is allowed outside a cloud session",
+   "gh api -X GET repos/o/r/issues --method POST", "allow", cwd=NOGIT)
+sh("gh-write-cloud: gh api --input with no method is refused in a cloud session",
+   "gh api repos/o/r/issues --input -", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh api",))
+sh("gh-write-cloud: gh api --input with no method is allowed outside a cloud session",
+   "gh api repos/o/r/issues --input -", "allow", cwd=NOGIT)
+
+# Forms a naive reader misses. A `#` or a lone quote inside a quoted body is text, not a comment, and a write
+# is still a write after a root repo flag, a wrapper, a command substitution, a chain, or a comment tail.
+for _name, _command, _lacks in (
+    ("a # inside a quoted body", 'gh pr comment 12 --body "fix #12"', "gh pr comment"),
+    ("a lone quote inside a quoted body", "gh issue comment 3 --body \"Don't merge\"", "gh issue comment"),
+    ("a comment tail after the write", "gh pr comment 12 --body x  # note", "gh pr comment"),
+    ("the -R root repo flag", "gh -R o/r pr comment 12 -b x", "pr comment"),
+    ("a bash -c wrapper", "bash -c 'gh pr edit 12 -t x'", "gh pr edit"),
+    ("a command substitution", "echo $(gh api -X POST repos/x/y/issues)", "gh api -X"),
+    ("a write chained after a read", "gh pr view 12 && gh pr comment 12 --body hi", "gh pr comment"),
+):
+    sh("gh-write-cloud: %s is refused in a cloud session" % _name, _command, "deny", GH_WRITE_RULE,
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(_lacks,))
+
+# Reads and the merge tool stay allowed in a cloud session.
+for _command in (
+    "gh pr view 12", "gh pr list", "gh pr diff 12", "gh pr checks 12", "gh pr status",
+    "gh issue view 3", "gh issue list", "gh auth status",
+    "gh api repos/x/y/pulls/1", "gh api repos/x/y/pulls/1 -q .body",
+    "gh api -X GET search/code -f q=foo", "gh api -X get search/code -f q=foo",
+    "gh api -XGET search/code -f q=foo", "gh api --method=GET search/code -f q=foo",
+    "gh api --method get search/code -f q=foo",
+    "merge 12 --confirm", "~/.claude/bin/merge 12 --confirm",
+):
+    sh("gh-write-cloud: %s is allowed in a cloud session" % _command, _command, "allow", cwd=NOGIT,
+       env=GH_WRITE_CLOUD)
+
+# False alarms: text that names a write is not a write. Each must allow in a cloud session.
+for _name, _command in (
+    ("a python heredoc that names a merge as text", "python3 - <<'PY'\nmsg = 'run gh pr merge 12 by hand'\nprint(msg)\nPY"),
+    ("a bash heredoc body with a comment line", "cat > notes.txt <<'EOF'\ngh pr comment 12 --body hi\nEOF"),
+    ("a python -c print of a merge", "python3 -c 'print(\"gh pr merge 12\")'"),
+    ("an echo of a create", 'echo "gh pr create"'),
+    ("a git commit message that names a close", 'git commit -m "gh issue close"'),
+    ("a gh api read with --jq", "gh api repos/x/y/pulls/1 --jq .body"),
+    ("a read with a comment tail that names a comment", "gh pr view 12  # then gh pr comment"),
+    ("a node template literal across lines", "node -e 'const s = `\ngh pr merge 12\n`; console.log(s)'"),
+):
+    sh("gh-write-cloud: %s is allowed in a cloud session" % _name, _command, "allow", cwd=NOGIT,
+       env=GH_WRITE_CLOUD)
+
+# Only the exact value "true" is a cloud session, so another value judges the write as a local one.
+for _value in ("TRUE", "1"):
+    sh("gh-write-cloud: CLAUDE_CODE_REMOTE=%s is not a cloud session, so pr comment is allowed" % _value,
+       "gh pr comment 12 --body hi", "allow", cwd=NOGIT, env={"CLAUDE_CODE_REMOTE": _value})
+
+
 # =========================================================================== 5b. the merge guard
 #
 # The `merge-checks` guard rule. A merge made outside the merge tool is refused while the head has
@@ -13268,6 +13651,7 @@ ARCHIVE_RULE = "lane-closes-after-records"
 ARCHIVE_NAMED = ("archive_session",)  # the refusal never names the tool, so it never invites the same act
 ARCHIVE_STEER = ("get_session", "alone", ("retry", "Retry"))  # the remedy: get_session on the target alone, then retry
 ARCHIVE_OWNER = "5c2e7d1a-0000-4000-8000-00000000a7c1"  # the calling session's payload id, which an override names
+AGENT_NO_REMOTE = "agent-no-remote-tools"  # the rule id the refusal names; the agent-remote-tools section reads it too
 
 
 def fake_gh_path(folder):
@@ -13289,6 +13673,14 @@ def archive_allow(name, transcript, env_path, agent_id=None):
     """An archive_session of the target the guard lets through silently. `agent_id` as in archive_refuse."""
     add("lane-closes-after-records: " + name, "allow", tool=ARCHIVE_TOOL, cwd=NOGIT, silent=True,
         transcript=transcript, env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
+
+
+def agent_archive_refuse(name, transcript, env_path, agent_id):
+    """An agent's archive_session of a target lane-closes allows, refused by agent-no-remote-tools after it. The reason
+    names that rule and none of the lane's reasons, so a refusal that came from the lane logic does not pass."""
+    add("lane-closes-after-records: " + name, "deny", rule=AGENT_NO_REMOTE, tool=ARCHIVE_TOOL, cwd=NOGIT,
+        lacks=ARCHIVE_NAMED + ARCHIVE_OPEN_PIN + ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN, transcript=transcript,
+        env=ROLE_ENV, env_path=env_path, session_id=ROLE_OTHER, agent_id=agent_id)
 
 
 # A lane whose open pull request has a head exactly equal to its step slug is its own pull request: refused.
@@ -13610,9 +14002,10 @@ def write_agent_transcripts():
 
 
 lazy_fixture([role_path(name) for name in AGENT_FIXTURES], write_agent_transcripts)
-# An agent whose own record names a non-lane target: allowed, silently, though a slug pull request is open.
-archive_allow("an agent whose own record is a non-lane target is allowed: the record is read from the agent's transcript",
-              role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# An agent whose own record names a non-lane target passes lane-closes-after-records, and agent-no-remote-tools refuses
+# it after that (decision session-tiers: no agent archives a session). The refusal names that rule, not a lane reason.
+agent_archive_refuse("an agent whose own record is a non-lane target is refused by agent-no-remote-tools",
+                     role_path("agent-own-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
 # An agent whose own record is a lane with an open records pull request: refused, for that pull request. The reason pin
 # proves the agent's record was read: a guard that missed it would refuse for having no record.
 archive_refuse("an agent whose own record is a lane with an open records pull request is refused, for the open pull request",
@@ -13625,10 +14018,10 @@ archive_refuse("an agent with no record in its own transcript or the main one is
 # An orchestrator call (no agent_id) reads the main transcript only: its lane record refuses for the open pull request.
 archive_refuse("an orchestrator call with a lane record in the main transcript is refused, for the open pull request",
                role_path("archive-lane"), fake_gh_path(ARCHOPEN), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN)
-# An agent whose main record is non-lane, and whose own file reads clean but holds no record of the target: the main record
-# decides, so it is allowed. A fix that refused on a clean agent read with no record would turn this allow into a false alarm.
-archive_allow("an agent whose main record is non-lane is allowed though its own file holds no record of the target",
-              role_path("agent-quiet-main-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# An agent whose main record is non-lane, and whose own file reads clean but holds no record of the target: lane-closes
+# allows it, so the refusal is the agent rule's. A lane reader that refused for no record would fail this case.
+agent_archive_refuse("an agent whose main record is non-lane is refused by agent-no-remote-tools, though its own file holds no record",
+                     role_path("agent-quiet-main-triage"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
 # The same agent file, on an orchestrator call with no agent_id: the file is not its record, so the main record decides.
 archive_allow("an orchestrator call with a non-lane main record is allowed though an agent file beside it holds a lane",
               role_path("orchestrator-agent-file"), fake_gh_path(ARCHOPEN))
@@ -13646,10 +14039,10 @@ archive_refuse("a lane in the main record is refused though the agent's own reco
 archive_refuse("a malformed agent_id reads no agent file: a non-lane record at its raw path is not read, and the call is refused for no record",
                role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="x.y",
                carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
-# No file at the agent's path, and a non-lane main record: no agent record is read, so the main record decides and the
-# archive is allowed. A reader that refused on a missing agent file would refuse every agent that has no file of its own.
-archive_allow("an agent with no file at its agent path is allowed: the main record is non-lane and decides",
-              role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# No file at the agent's path, and a non-lane main record: no agent record is read, so lane-closes allows it, and
+# agent-no-remote-tools refuses it after. A reader that refused on a missing agent file would fail this case for no record.
+agent_archive_refuse("an agent with no file at its agent path is refused by agent-no-remote-tools: the main record is non-lane",
+                     role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
 # A folder at the agent's file path, and a non-lane main record: the read fails with an error other than a missing file, so
 # the archive is refused for no record. A reader that caught every read error as a missing file would allow it.
 archive_refuse("an agent whose file path is a folder is refused, for no record: a read error is not a missing agent file",
@@ -15951,6 +16344,131 @@ sh("frozen: var2: the write comes before the assignment", 'cp a "$D"; D=' + _P, 
 sh("frozen: var2: unset clears the variable", 'D=' + _P + '; unset D; cp a "$D"', "allow",
    cwd=NOGIT)
 sh("frozen: var2: single quotes do not expand", 'D=' + _P + "; cp a '$D'", "allow", cwd=NOGIT)
+
+# ---- resolve-vars: the resolver reads each assignment as the shell does. A value is split at its quote
+# when the text after the quote is read as its own word; an apostrophe in double quotes is text; a prefix
+# assignment and a subshell's assignment reach only the text the shell gives them. MUTATE_ONLY="resolve-vars"
+# runs these verdicts and the unit checks in the frozen block beside the LOG_CHECKS_EXTRA registrations.
+_SPLIT_SUB = slash(os.path.join(ROOT, "split", "sub"))   # an ordinary folder, not frozen
+_UP_TO_CONFIG = "/../../" + os.path.basename(CFG) + "/settings.json"   # back from it into the config folder
+
+# A value cut at its quote: `"$BASE"/../...` leaves the shell one path, and the guard read the cut value.
+sh("frozen resolve-vars: a write through a value split at its quote, into the config folder, denies",
+   'BASE=' + _SPLIT_SUB + '; WT="$BASE"' + _UP_TO_CONFIG + '; echo x > "$WT"', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, the same path as one unsplit value denies",
+   'WT=' + _SPLIT_SUB + _UP_TO_CONFIG + '; echo x > "$WT"', "deny", "frozen-path", cwd=NOGIT)
+# An apostrophe in double quotes, then a second one, makes one span that swallows a later reassignment.
+sh("frozen resolve-vars: a reassignment after an apostrophe in double quotes is seen, and its write denies",
+   'D=/tmp/o; echo "don\'t"; D=' + CFG_SETTINGS + "; echo 'x'; echo x > $D", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, the same with no apostrophe in the text denies",
+   'D=/tmp/o; echo "dont"; D=' + CFG_SETTINGS + "; echo 'x'; echo x > $D", "deny", "frozen-path",
+   cwd=NOGIT)
+# A prefix assignment takes effect for its own command only, after the words expand: `"$D"` is the old value.
+sh("frozen resolve-vars: a prefix assignment does not reach the word it expands, so a write to the old value denies",
+   'D=' + CFG_SETTINGS + '; D=/tmp/o cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, the same word with no prefix assignment denies",
+   'D=' + CFG_SETTINGS + '; cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+# A subshell's assignment ends at its closing paren.
+sh("frozen resolve-vars: an assignment in a subshell ends at its paren, so a write to the old value denies",
+   'D=' + CFG_SETTINGS + '; (D=/tmp/o); echo x > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, inside the subshell the new value holds, and the write goes there",
+   'D=' + CFG_SETTINGS + '; (D=/tmp/o; echo x > $D)', "allow", cwd=NOGIT)
+# Controls: a brace group and a bare assignment before && both keep the assignment for the next command.
+sh("frozen resolve-vars: control, a brace group keeps its assignment for the next command, denies",
+   '{ D=' + CFG_SETTINGS + '; }; cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a bare assignment before && keeps it for the next command, denies",
+   'D=' + CFG_SETTINGS + ' && cp a "$D"', "deny", "frozen-path", cwd=NOGIT)
+# Scanner traps (building-scanner-respects-strings): a comment opener or a lone quote inside double
+# quotes is text, so the write after it still reaches the frozen check.
+sh("frozen resolve-vars: a # inside double quotes is text, and the write after it denies",
+   'echo "# note"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a // inside double quotes is text, and the write after it denies",
+   'echo "http://x"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a /* inside double quotes is text, and the write after it denies",
+   'echo "/* x"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a lone apostrophe inside double quotes is text, and the write after it denies",
+   'echo "it\'s"; echo x > ' + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
+# A redirect-only assignment keeps its value for the next command, as bash does: `D=... >/dev/null` sets D.
+sh("frozen resolve-vars: a redirect-only assignment with >/dev/null keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + ' >/dev/null; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a redirect-only assignment with 2>/dev/null keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + ' 2>/dev/null; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a redirect-only assignment with >/dev/null keeps its value, so a write to it denies",
+   'D=' + CFG_SETTINGS + ' >/dev/null; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a plain assignment with no redirect keeps its value, so a cp to it denies",
+   'D=' + CFG_SETTINGS + '; cp a $D', "deny", "frozen-path", cwd=NOGIT)
+# A function body runs in the calling shell, so an assignment in it lasts after the call.
+sh("frozen resolve-vars: an assignment in a function body lasts after the call, so a write to it denies",
+   'function f { D=' + CFG_SETTINGS + '; }; f; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, an assignment in a f() body lasts after the call, so a write to it denies",
+   'f() { D=' + CFG_SETTINGS + '; }; f; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+# A verbatim heredoc body is text: its odd quote must not pair with a quote on a later line.
+sh("frozen resolve-vars: an odd quote in a heredoc body is text, so a write after the heredoc denies",
+   "python3 - <<'EOF'\nprint(\"x)\nEOF\nD=" + CFG_SETTINGS + '; echo "y" > $D', "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen resolve-vars: control, a heredoc body with its quote closed is text, so a write after it denies",
+   "python3 - <<'EOF'\nprint(\"x\")\nEOF\nD=" + CFG_SETTINGS + '; echo "y" > $D', "deny", "frozen-path",
+   cwd=NOGIT)
+# The shell reads an ambiguous redirect as an error and writes nothing, so the guard should allow it.
+sh("frozen resolve-vars: an ambiguous redirect from a value with an escaped space writes nothing, so a write to it allows",
+   'D=' + CFG_SETTINGS + '\\ x; echo y > $D', "allow", cwd=NOGIT)
+# Control: the same write with a plain value is denied, so the allow above comes from the ambiguous redirect.
+sh("frozen resolve-vars: control, the same assignment with no escaped space, then a write to it, denies",
+   'D=' + CFG_SETTINGS + '; echo y > $D', "deny", "frozen-path", cwd=NOGIT)
+
+# A backslash-newline joins two lines into one. So `X=1 && \` with `D=v` on the next line is `X=1 && D=v`,
+# and `D=v \` with `&& cmd` on the next line is `D=v && cmd`: the assignment still starts its command.
+sh("frozen resolve-vars: a backslash-newline after && does not hide an assignment, so a write to it denies",
+   "X=1 && \\\n  D=" + CFG_SETTINGS + " && \\\n  echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline after ; does not hide an assignment, so a write to it denies",
+   "true;\\\nD=" + CFG_SETTINGS + "; echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline before export does not hide it, so sed -i of the assigned path denies",
+   "cd /tmp && \\\n export D=" + CFG_SETTINGS + " && \\\n sed -i s/a/b/ $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: a backslash-newline after an assignment keeps it for the next command, so a write to it denies",
+   "D=" + CFG_SETTINGS + " \\\n  && echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a backslash-newline chain of a safe path, then a write to it, allows",
+   "X=1 && \\\n  D=/tmp/o && \\\n  echo y > $D", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, a backslash-newline after a safe assignment, then a write to it, allows",
+   "D=/tmp/o \\\n  && echo y > $D", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, the same chain on one line, denies",
+   "X=1 && D=" + CFG_SETTINGS + " && echo y > $D", "deny", "frozen-path", cwd=NOGIT)
+
+# PowerShell reads `$D='v'` and `$D="v"` as an assignment with or without spaces around the equals.
+sh("frozen resolve-vars: PowerShell $D='path' with no spaces, then Set-Content to $D, denies",
+   "$D='" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: PowerShell $D=\"path\" with no spaces, then Set-Content to $D, denies",
+   '$D="' + CFG_SETTINGS + '"; Set-Content $D x', "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: PowerShell $D= 'path', a space after the equals only, then Set-Content to $D, denies",
+   "$D= '" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: control, PowerShell $D='safe path' with no spaces, then Set-Content to $D, allows",
+   "$D='/tmp/o'; Set-Content $D x", "allow", tool="PowerShell", cwd=NOGIT)
+sh("frozen resolve-vars: control, PowerShell $D = 'path' with spaces, then Set-Content to $D, denies",
+   "$D = '" + CFG_SETTINGS + "'; Set-Content $D x", "deny", "frozen-path", tool="PowerShell", cwd=NOGIT)
+
+# A prefix assignment is in the environment of its command, and a heredoc is that command's input: the child
+# shell reads the value. `env NAME=v` gives the same environment. An export is in the environment too.
+sh("frozen resolve-vars: a prefix assignment into a bash heredoc script reaches the script, so its write denies",
+   "OUT=" + CFG_SETTINGS + " bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: an env assignment before sh with a heredoc script reaches the script, so its write denies",
+   "env OUT=" + CFG_SETTINGS + " sh <<'EOF'\necho y > $OUT\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen resolve-vars: control, a prefix assignment of a safe path into a heredoc script, then its write, allows",
+   "OUT=/tmp/o bash <<'EOF'\necho y > \"$OUT\"\nEOF", "allow", cwd=NOGIT)
+sh("frozen resolve-vars: control, an export of the frozen path before a heredoc script, then its write, denies",
+   "export OUT=" + CFG_SETTINGS + "; bash <<'EOF'\necho y > \"$OUT\"\nEOF", "deny", "frozen-path", cwd=NOGIT)
+
+# A run of heredoc blocks does not hide the write after it. Each closed body is read alone, on a copy of
+# the table, and the command goes on at its own depth, so the run never reaches `_NEST_LIMIT`. 20, 21 and
+# 30 blocks deny. The 21-block control with a safe path allows.
+_HEREDOC_BLOCK = "cat > f <<EOF\nline\nEOF\n"
+for _blocks in (20, 21, 30):
+    sh("frozen resolve-vars: %d heredoc blocks, then an assignment to the frozen path and a write to it, denies"
+       % _blocks, _HEREDOC_BLOCK * _blocks + "D=" + CFG_SETTINGS + "\necho y > $D", "deny", "frozen-path",
+       cwd=NOGIT)
+sh("frozen resolve-vars: control, 21 heredoc blocks, then an assignment to a safe path and a write to it, allows",
+   _HEREDOC_BLOCK * 21 + "D=/tmp/o\necho y > $D", "allow", cwd=NOGIT)
 
 # A TOKEN IN THE COMMAND LIFTS NOTHING. `DESTRUCTIVE_OK=1` and `GIT_DISCARD_OK=1` are plain env
 # assignments that the guard does not read. The one lift is the owner override (family
@@ -18673,6 +19191,94 @@ def _mirror_names_tie():
 LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
                          _mirror_names_tie))
 
+
+# ---- resolve-vars: `_resolve_vars` of guard_frozen, read as the shell reads each assignment. A check reads
+# the use site (the last `;` segment, double quotes removed), so a fix that rewrites an assignment's own text
+# still passes. The guard under test is loaded as every check loads it (GUARD_UNDER_TEST is honoured).
+def _resolver_under_test():
+    """`_resolve_vars` of guard_frozen as the guard under test loads it, or None when it has none."""
+    _load_guard_module()
+    return getattr(sys.modules.get("guard_frozen"), "_resolve_vars", None)
+
+
+def _use_site(text):
+    """The last `;` segment of a resolved command, with its double quotes removed."""
+    return text.split(";")[-1].strip().replace('"', "")
+
+
+def resolve_case(command, want):
+    """A check: the use site of `command`, once resolved, reads `want`."""
+    def check():
+        resolve = _resolver_under_test()
+        if resolve is None:
+            return False, "guard_frozen has no _resolve_vars"
+        got = _use_site(resolve(command))
+        if got != want:
+            return False, "%r resolves its use site to %r, want %r" % (command, got, want)
+        return True, "%r resolves its use site to %r" % (command, want)
+    FIXTURELESS_CHECKS.add(check)
+    return check
+
+
+_CHAIN = "; ".join(["A0=x"] + ["A%d=$A%d" % (n, n - 1) for n in range(1, 200)] + ["use $A199"])
+RESOLVE_CASES = (
+    # Red on the old code: each names one fault of the resolver.
+    ("frozen resolve-vars: a value split at its quote keeps the text after the quote",
+     'BASE=.claude/worktrees; WT="$BASE"/../lane; cp src $WT', "cp src .claude/worktrees/../lane"),
+    ("frozen resolve-vars: a reassignment after an apostrophe in double quotes is seen",
+     "S=a; echo \"don't\"; S=b; echo 'x'; use $S", "use b"),
+    ("frozen resolve-vars: a variable set after an apostrophe in double quotes is resolved",
+     "echo \"don't\" ; X=1; echo 'q'; echo $X", "echo 1"),
+    ("frozen resolve-vars: an assignment on the second line of a double-quoted string is text",
+     'echo "x\nS=a"; use $S', "use $S"),
+    ("frozen resolve-vars: an assignment after a # inside double quotes is text",
+     'echo "# S=a"; use $S', "use $S"),
+    ("frozen resolve-vars: a prefix assignment does not change the word its own command expands",
+     'S=x cmd "$S"', "S=x cmd $S"),
+    ("frozen resolve-vars: a prefix assignment's command expands the value before it",
+     'S=/safe; S=x cmd "$S"', "S=x cmd /safe"),
+    ("frozen resolve-vars: a prefix assignment does not reach the text after it",
+     'S=x cmd "$S"; use $S', "use $S"),
+    ("frozen resolve-vars: the value before a prefix assignment reaches the text after it",
+     'S=/safe; S=x cmd "$S"; use $S', "use /safe"),
+    ("frozen resolve-vars: a subshell's assignment does not reach the text after its paren",
+     "(S=x); echo $S", "echo $S"),
+    ("frozen resolve-vars: the value before a subshell's assignment reaches the text after it",
+     "S=/safe; (S=x); use $S", "use /safe"),
+    # Keep-green controls: the behaviour the fix must keep.
+    ("frozen resolve-vars: control, the last assignment wins",
+     "D=a; D=b; use $D", "use b"),
+    ("frozen resolve-vars: control, unset clears the variable",
+     "S=a; unset S; use $S", "use $S"),
+    ("frozen resolve-vars: control, single quotes do not expand",
+     "S=a; use '$S'", "use '$S'"),
+    ("frozen resolve-vars: control, export of two names reads both",
+     "export A=1 D=v; use $D", "use v"),
+    ("frozen resolve-vars: control, $HOME reads as ~",
+     "echo $HOME/x", "echo ~/x"),
+    ("frozen resolve-vars: control, the brief's apostrophe text with no second quote is still read",
+     "echo \"don't\"; S=a; S=b; use $S", "use b"),
+    ("frozen resolve-vars: control, the brief's second apostrophe text is still read",
+     "echo \"don't\" ; X=1; echo $X", "echo 1"),
+    ("frozen resolve-vars: control, a # inside double quotes is text, so a later reassignment is seen",
+     'echo "# note"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a // inside double quotes is text",
+     'echo "http://x"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a /* inside double quotes is text",
+     'echo "/* x"; S=b; use $S', "use b"),
+    ("frozen resolve-vars: control, a subshell's assignment holds inside the subshell",
+     "(S=x; use $S)", "use x)"),
+    ("frozen resolve-vars: control, a brace group keeps its assignment for the next command",
+     "{ S=x; }; use $S", "use x"),
+    ("frozen resolve-vars: control, a bare assignment before && keeps it for the next command",
+     "S=x && use $S", "S=x && use x"),
+    ("frozen resolve-vars: control, an empty command stays empty", "", ""),
+    ("frozen resolve-vars: control, a 200-link chain of assignments resolves to its first value",
+     _CHAIN, "use x"),
+)
+for _label, _command, _want in RESOLVE_CASES:
+    LOG_CHECKS_EXTRA.append((_label, resolve_case(_command, _want)))
+
 # ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
 # verb from each of them. One check per root flag form, called on gh_call_of directly.
@@ -18876,20 +19482,20 @@ LOG_CHECKS_EXTRA.append(("lane-closes-after-records: a lane archive writes no fi
 
 
 def archive_agent_non_lane_no_read_case():
-    """An agent's archive of a target that is no lane is allowed and makes no gh call, though its own record carries a
-    step slug that an open-list read would find."""
+    """An agent's archive of a target that is no lane is refused by agent-no-remote-tools, and makes no gh call, though
+    its own record carries a step slug that an open-list read would find. lane-closes-after-records allows it first."""
     folder = archive_counted_gh()
     gh_calls_taken(folder)
     decision, reason = archive_judged(role_path("agent-own-triage-slug"), folder, agent_id=AGENT_OWN_ID)
     calls = gh_calls_taken(folder)
-    if decision != "allow" or reason:
+    if decision != "deny" or AGENT_NO_REMOTE not in reason:
         return False, "an agent's non-lane target: %s (%r)" % (decision, reason)
     if calls:
         return False, "an agent's non-lane target made %d gh call(s): %r" % (len(calls), calls)
-    return True, "allowed, and no gh call"
+    return True, "refused by %s, and no gh call" % AGENT_NO_REMOTE
 
 
-LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive makes no gh call",
+LOG_CHECKS_EXTRA.append(("lane-closes-after-records: an agent's non-lane archive is refused by agent-no-remote-tools, and makes no gh call",
                          archive_agent_non_lane_no_read_case))
 
 
@@ -22038,6 +22644,7 @@ for _label, _check in (
         ("git_reads: branch_is_ancestor reads None for an unknown revision", git_reads_ancestor_unknown_rev_case),
         ("git_reads: branch_is_ancestor reads None, not False, in a shallow clone that cuts the path",
          git_reads_ancestor_shallow_case),
+        ("git_reads: origin_slug reads None for a one-segment origin (https://host/r)", git_reads_origin_one_segment_case),
         ("branch delete, shallow clone: the only copy is denied", git_reads_branch_only_copy_shallow_case),
         ("branch delete, shallow clone: the on-remote proof allows", git_reads_branch_on_remote_shallow_case)):
     FIXTURELESS_CHECKS.add(_check)
@@ -26102,6 +26709,153 @@ for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
     add("floor: create_session naming %s is allowed" % (_model,), "allow",
         tool=CREATE_SESSION_CALL, prompt="x", model=_model)
 add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
+
+# ---- An agent's outward remote tools. An agent's call to a claude-code-remote tool that acts on another
+# session, a trigger or a repo is refused. No agent role needs the server, and a general-purpose agent without an
+# agent file holds it (measured). The payload's agent_id marks the agent (AGENT_ID, hooks/guard.py).
+# The session's own call (no agent_id), an agent_type with no agent_id, and the read tools keep today's verdict.
+# The payload is built whole, not through add()'s keywords: create_trigger's input is `name`, which add() takes.
+FAMILY = "agent-remote-tools"
+REMOTE_PREFIX = "mcp__claude-code-remote__"
+AGENT_ID_VALUE = "a1b2c3d4e5f607182"  # 17 hex characters, the measured agent_id shape
+# archive_session is judged by lane-closes-after-records, which refuses a target it cannot read as a non-lane. A
+# triage target is the allowed one (archive_allow above), so the archive rows reach the agent rule on old code.
+OUTWARD_CALLS = (
+    ("create_session", {"prompt": "x"}, None),
+    ("archive_session", {"session_id": ROLE_OTHER}, role_path("archive-triage")),
+    ("send_message", {"session_id": "session_AGENTSEND01", "message": "x"}, None),
+    ("set_session_tags", {"session_ids": ["session_AGENTTAG01"], "add": ["x"]}, None),
+    ("create_trigger", {"name": "x", "prompt": "x", "initiation": "own_followup"}, None),
+)
+READ_CALLS = (
+    ("get_session", {"session_id": "session_AGENTREAD01"}),
+    ("list_sessions", {"limit": 5}),
+)
+AGENT_SHAPES = (
+    ("a general-purpose agent", AGENT_ID_VALUE, "general-purpose"),
+    ("an agent with no agent_type", AGENT_ID_VALUE, None),
+)
+
+
+def remote_call(tool, tool_input, agent_id=None, agent_type=None, transcript=None):
+    """The PreToolUse payload of one claude-code-remote call as the hook receives it. An agent's payload carries
+    agent_id and agent_type beside tool_name and tool_input. The session's own payload carries neither."""
+    body = {"tool_name": REMOTE_PREFIX + tool, "tool_input": tool_input, "cwd": NOGIT}
+    if agent_id:
+        body["agent_id"] = agent_id
+    if agent_type:
+        body["agent_type"] = agent_type
+    if transcript:
+        body["transcript_path"] = transcript
+    return json.dumps(body)
+
+
+def outward_case(name, expected, tool, tool_input, transcript, agent_id=None, agent_type=None, **kw):
+    """One case on a claude-code-remote payload. A transcript-reading call runs in ROLE_ENV, as archive_allow does."""
+    add(name, expected, raw=remote_call(tool, tool_input, agent_id, agent_type, transcript),
+        env=ROLE_ENV if transcript else None, **kw)
+
+
+for _tool, _input, _transcript in OUTWARD_CALLS:
+    for _shape, _id, _type in AGENT_SHAPES:
+        outward_case("agent-no-remote-tools: %s from %s is refused" % (_tool, _shape), "deny", _tool, _input,
+                     _transcript, _id, _type, rule=AGENT_NO_REMOTE, lacks=_tool)
+# A truthy agent_id that fails the AGENT_ID shape is still a carried agent_id: the rule keys on the field, so a
+# harness id that drifts from the measured form stays refused rather than turning the rule off.
+outward_case("agent-no-remote-tools: create_session with an agent_id that fails the AGENT_ID shape is refused", "deny",
+             "create_session", {"prompt": "x"}, None, "agent:1", "general-purpose", rule=AGENT_NO_REMOTE,
+             lacks="create_session")
+for _tool, _input, _transcript in OUTWARD_CALLS:
+    outward_case("agent-no-remote-tools: %s from the session itself keeps today's verdict" % _tool, "allow",
+                 _tool, _input, _transcript)
+    outward_case("agent-no-remote-tools: %s from an agent_type with no agent_id keeps today's verdict" % _tool,
+                 "allow", _tool, _input, _transcript, None, "general-purpose")
+for _tool, _input in READ_CALLS:
+    for _shape, _id, _type in AGENT_SHAPES:
+        add("agent-no-remote-tools: %s from %s is allowed" % (_tool, _shape), "allow", silent=True,
+            raw=remote_call(_tool, _input, _id, _type))
+# The twenty outward tools, pinned by full name. Each name gets its own deny case from a general-purpose agent, so a
+# REMOTE_OUTWARD_TOOLS that drops one name goes red on that name. The equality check holds the constant to this set.
+PINNED_OUTWARD_TOOLS = (
+    "mcp__claude-code-remote__create_session",
+    "mcp__claude-code-remote__send_message",
+    "mcp__claude-code-remote__archive_session",
+    "mcp__claude-code-remote__unarchive_session",
+    "mcp__claude-code-remote__interrupt_session",
+    "mcp__claude-code-remote__set_session_tags",
+    "mcp__claude-code-remote__set_session_title",
+    "mcp__claude-code-remote__create_trigger",
+    "mcp__claude-code-remote__update_trigger",
+    "mcp__claude-code-remote__delete_trigger",
+    "mcp__claude-code-remote__fire_trigger",
+    "mcp__claude-code-remote__send_later",
+    "mcp__claude-code-remote__watch_url",
+    "mcp__claude-code-remote__unwatch_url",
+    "mcp__claude-code-remote__subscribe_pr_activity",
+    "mcp__claude-code-remote__unsubscribe_pr_activity",
+    "mcp__claude-code-remote__add_repo",
+    "mcp__claude-code-remote__register_repo_root",
+    "mcp__claude-code-remote__confirm_repository_trust",
+    "mcp__claude-code-remote__request_computer_folder",
+)
+# Three pinned names have a main rule that answers first (judge() in guard.py: rules 8a before 8b). Each name's case on
+# the bare call expects that owner rule. A second case, on a shape the owner lets through, expects agent-no-remote-tools,
+# so the new rule is proven for each name. OUTWARD_CALLS also runs archive_session on that shape; the pinned case is the
+# one the pin set counts, so both stay.
+OWNED_PINNED = {
+    "mcp__claude-code-remote__archive_session": (ARCHIVE_RULE, {}),
+    "mcp__claude-code-remote__confirm_repository_trust": (TRUST_RULE, {}),
+    "mcp__claude-code-remote__request_computer_folder": (TRUST_RULE, {}),
+}
+# The shape each owner lets through, with the transcript it reads: a non-lane target, and an untagged own record.
+OWNER_PASSES = {
+    "mcp__claude-code-remote__archive_session": ({"session_id": ROLE_OTHER}, role_path("archive-triage")),
+    "mcp__claude-code-remote__confirm_repository_trust": (TRUST_TOOLS["mcp__claude-code-remote__confirm_repository_trust"],
+                                                          role_path("untagged")),
+    "mcp__claude-code-remote__request_computer_folder": (TRUST_TOOLS["mcp__claude-code-remote__request_computer_folder"],
+                                                         role_path("untagged")),
+}
+for _full in PINNED_OUTWARD_TOOLS:
+    _short = _full[len(REMOTE_PREFIX):]
+    if _full in OWNED_PINNED:
+        _owner, _bare_input = OWNED_PINNED[_full]
+        outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused by %s first" % (_short, _owner),
+                     "deny", _short, _bare_input, None, AGENT_ID_VALUE, "general-purpose", rule=_owner,
+                     lacks=(_short, AGENT_NO_REMOTE))
+        _pass_input, _pass_transcript = OWNER_PASSES[_full]
+        outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent on a shape %s allows is refused" % (_short, _owner),
+                     "deny", _short, _pass_input, _pass_transcript, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE,
+                     lacks=_short)
+        continue
+    outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused" % _short, "deny",
+                 _short, {}, None, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE, lacks=_short)
+
+
+def pinned_outward_check():
+    """REMOTE_OUTWARD_TOOLS in hooks/shared_names.py is the pinned set: it holds each pinned name, once, and no other.
+    It reads the copy beside this file, so a copy under test is the one checked."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("shared_names_pinned", os.path.join(HERE, "shared_names.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not hasattr(module, "REMOTE_OUTWARD_TOOLS"):
+        return False, "shared_names.py defines no REMOTE_OUTWARD_TOOLS"
+    constant = tuple(module.REMOTE_OUTWARD_TOOLS)
+    for name in PINNED_OUTWARD_TOOLS:
+        if name not in constant:
+            return False, "REMOTE_OUTWARD_TOOLS lacks %s" % name
+    for name in constant:
+        if name not in PINNED_OUTWARD_TOOLS:
+            return False, "REMOTE_OUTWARD_TOOLS holds %s, which is not pinned" % name
+    if len(set(constant)) != len(constant):
+        return False, "REMOTE_OUTWARD_TOOLS repeats a name"
+    return True, "REMOTE_OUTWARD_TOOLS holds exactly the 20 pinned names"
+
+
+FIXTURELESS_CHECKS.add(pinned_outward_check)
+LOG_CHECKS_EXTRA.append(("agent-remote-tools: REMOTE_OUTWARD_TOOLS holds exactly the pinned outward names",
+                         pinned_outward_check))
+FAMILY = "rule9"  # the family the cases below had before this section
 
 # ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
 # prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
@@ -30180,6 +30934,657 @@ LOG_CHECKS_EXTRA.append(("session-home: an owner override lifts the refusal, whi
                          "never_lifted", session_home_owner_override_lifts_case))
 LOG_CHECKS_EXTRA.append(("session-home: the record and the refusal add no git spawn to the same call "
                          "with no session", session_home_spawn_cost_case))
+
+
+# =========================================================================== scratchpad-owner
+# Rule scratchpad-owner (decision an-agent-outside-its-home-tree-must-stop, the own-scratchpad
+# exemption). Every agent of one session shares that session's scratchpad (note
+# scratchpad-shared-per-session), so an agent can run a script that another agent of the session left
+# there. At write time the guard records the agent_id that wrote each file under THIS session's
+# scratchpad. At run time it asks when an agent runs such a file that a different agent recorded. The
+# writer, a top-level call, a file with no record and a read all pass. Each case makes its guard calls
+# in its own temp folder and its own session, so one case's record never reaches another case.
+FAMILY = "scratchpad-owner"
+SPO_RULE = "scratchpad-owner"
+SPO_WRITER = "spo-writer-01"   # an agent id in the shape AGENT_ID accepts
+SPO_OTHER = "spo-other-02"
+SPO_SLUG = "-home-user-claude-settings"   # the project folder the scratchpad sits under
+PY_TEXT = "print(1)\n"
+SH_TEXT = "echo hi\n"
+SPO_NT = "skipped: these cases use POSIX shell forms and POSIX paths"
+
+
+def spo_fixture(tag):
+    """One case's folders under this run's folder: a temp folder the guard reads as TMPDIR, this
+    session's scratchpad inside it (`<tmp>/<slug>/<session>/scratchpad`), and a working folder that
+    sits in no checkout. The session id is new for each case."""
+    folder = os.path.join(ROOT, "spo", tag)
+    fx = {"tmp": os.path.join(folder, "tmp"), "sid": "spo-" + uuid.uuid4().hex,
+          "work": os.path.join(folder, "work")}
+    fx["scratch"] = os.path.join(fx["tmp"], SPO_SLUG, fx["sid"], "scratchpad")
+    os.makedirs(fx["scratch"], exist_ok=True)
+    os.makedirs(fx["work"], exist_ok=True)
+    return fx
+
+
+def spo_call(fx, tool, agent, **tool_input):
+    """One guard call, as the harness sends it in this case: its session, its temp folder and its
+    working folder. `agent` is None for the top-level session."""
+    return _decide_full(tool, fx["work"], agent_id=agent, session=fx["sid"], temp=fx["tmp"],
+                        **tool_input)
+
+
+def spo_run(fx, agent, command):
+    """One Bash call from `agent`, by its command text."""
+    return spo_call(fx, "Bash", agent, command=command)
+
+
+def spo_scope(fx, name, path):
+    """Scope before subject: `path` lies inside this case's session scratchpad, by its real path."""
+    if os.path.realpath(path).startswith(os.path.realpath(fx["scratch"]) + os.sep):
+        return ""
+    return "%s: scope, the fixture is not under this session's scratchpad" % name
+
+
+def spo_wrote(fx, name, agent, path, text, tool="Write", command=None):
+    """Agent `agent` makes `path`: its guard call first, then the file lands on disk, as the tool
+    would write it. A refused call is a problem, since the record needs an allowed write."""
+    if tool == "Write":
+        got, reason = spo_call(fx, "Write", agent, file_path=path, content=text)
+    else:
+        got, reason = spo_call(fx, "Bash", agent, command=command)
+    if got != "allow":
+        return ["%s: setup, agent %s's write is %s, want allow (%s)"
+                % (name, agent, got, reason[:100])]
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return []
+
+
+def spo_allowed(name, got, reason):
+    """A call the rule passes: the decision is allow."""
+    if got == "allow":
+        return ""
+    return "%s: want allow, got %s (%s)" % (name, got, reason[:100])
+
+
+def spo_asked(name, got, reason, banned):
+    """A run the rule asks about: decision ask, the rule's id in the reason, and no path in it. The
+    `banned` fragments are the scratchpad folder and the script's name, which the refusal never names."""
+    if got != "ask":
+        return "%s: want ask naming %s, got %s (%s)" % (name, SPO_RULE, got, reason[:100])
+    if SPO_RULE not in reason:
+        return "%s: the ask does not name %s (%s)" % (name, SPO_RULE, reason[:100])
+    if names_the_target(reason, SPO_RULE) or any(item in reason for item in banned):
+        return "%s: the ask names the scratchpad or the script" % name
+    return ""
+
+
+def spo_result(problems, passed):
+    """(True, `passed`) when no problem holds, else (False, the problems joined)."""
+    found = [p for p in problems if p]
+    return (False, "; ".join(found)) if found else (True, passed)
+
+
+def spo_snapshot(folder):
+    """Every entry under `folder`, dotfiles included, with its size and mtime: any write shows."""
+    seen = {}
+    for dirpath, dirnames, filenames in os.walk(folder):
+        for name in dirnames + filenames:
+            path = os.path.join(dirpath, name)
+            info = os.lstat(path)
+            seen[os.path.relpath(path, folder)] = (info.st_size, info.st_mtime_ns)
+    info = os.lstat(folder)
+    seen["."] = (info.st_size, info.st_mtime_ns)
+    return seen
+
+
+def spo_case_1():
+    """Agent A writes probe2.py with Write; agent B runs it with python3: asked."""
+    fx = spo_fixture("c1")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "1", probe)] + spo_wrote(fx, "1", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_asked("1", got, reason, (fx["scratch"], "probe2.py")))
+    return spo_result(problems, "agent B's python3 run of agent A's script is asked")
+
+
+def spo_case_2():
+    """Agent A writes probe2.py with Write; agent B runs it after a cd into the scratchpad: asked."""
+    fx = spo_fixture("c2")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "2", probe)] + spo_wrote(fx, "2", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "cd %s && python3 probe2.py" % fx["scratch"])
+    problems.append(spo_asked("2", got, reason, (fx["scratch"], "probe2.py")))
+    return spo_result(problems, "agent B's cd and python3 run of agent A's script is asked")
+
+
+def spo_case_3():
+    """Agent A writes p.sh by a bash heredoc; agent B runs it through bash: asked."""
+    fx = spo_fixture("c3")
+    script = os.path.join(fx["scratch"], "p.sh")
+    heredoc = "cat > %s <<'EOF'\n%sEOF" % (script, SH_TEXT)
+    problems = [spo_scope(fx, "3", script)] + spo_wrote(
+        fx, "3", SPO_WRITER, script, SH_TEXT, tool="Bash", command=heredoc)
+    got, reason = spo_run(fx, SPO_OTHER, "bash %s" % script)
+    problems.append(spo_asked("3", got, reason, (fx["scratch"], "p.sh")))
+    return spo_result(problems, "agent B's bash run of agent A's heredoc script is asked")
+
+
+def spo_case_4():
+    """Agent A writes p.sh with Write; agent B runs it as the command word: asked."""
+    fx = spo_fixture("c4")
+    script = os.path.join(fx["scratch"], "p.sh")
+    problems = [spo_scope(fx, "4", script)] + spo_wrote(fx, "4", SPO_WRITER, script, SH_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, script)
+    problems.append(spo_asked("4", got, reason, (fx["scratch"], "p.sh")))
+    return spo_result(problems, "agent B's run of agent A's script by its path is asked")
+
+
+def spo_case_5():
+    """Agent A writes probe2.py with Write, then runs it itself: allowed."""
+    fx = spo_fixture("c5")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "5", probe)] + spo_wrote(fx, "5", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_WRITER, "python3 %s" % probe)
+    problems.append(spo_allowed("5", got, reason))
+    return spo_result(problems, "agent A runs its own script and is allowed")
+
+
+def spo_case_6():
+    """probe2.py is made outside the guard, so no record names it; agent B runs it: allowed."""
+    fx = spo_fixture("c6")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    with open(probe, "w", encoding="utf-8") as handle:
+        handle.write(PY_TEXT)
+    problems = [spo_scope(fx, "6", probe)]
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_allowed("6", got, reason))
+    return spo_result(problems, "agent B runs a script with no record and is allowed")
+
+
+def spo_case_7():
+    """Agent A writes probe2.py with Write; a top-level call with no agent_id runs it: allowed."""
+    fx = spo_fixture("c7")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "7", probe)] + spo_wrote(fx, "7", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, None, "python3 %s" % probe)
+    problems.append(spo_allowed("7", got, reason))
+    return spo_result(problems, "the top-level session runs agent A's script and is allowed")
+
+
+def spo_case_8():
+    """Agent A writes probe2.py with Write; agent B reads it with cat: allowed."""
+    fx = spo_fixture("c8")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "8", probe)] + spo_wrote(fx, "8", SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "cat %s" % probe)
+    problems.append(spo_allowed("8", got, reason))
+    return spo_result(problems, "agent B reads agent A's script with cat and is allowed")
+
+
+def spo_case_9():
+    """Agent A's Write and its Bash redirect, both outside any scratchpad, create no file under this
+    session's scratchpad: the scratchpad's entries, sizes and times are unchanged."""
+    fx = spo_fixture("c9")
+    seed = os.path.join(fx["scratch"], "notes.txt")
+    with open(seed, "w", encoding="utf-8") as handle:
+        handle.write("seed\n")
+    before = spo_snapshot(fx["scratch"])
+    outside = os.path.join(fx["work"], "outside")   # a folder in no scratchpad
+    os.makedirs(outside, exist_ok=True)
+    got, reason = spo_call(fx, "Write", SPO_WRITER,
+                           file_path=os.path.join(outside, "out.txt"), content="x\n")
+    problems = [spo_allowed("9a", got, reason)]
+    got, reason = spo_run(fx, SPO_WRITER, "echo x > %s" % os.path.join(outside, "y.txt"))
+    problems.append(spo_allowed("9b", got, reason))
+    if spo_snapshot(fx["scratch"]) != before:
+        problems.append("9: a write outside the scratchpad changed the scratchpad")
+    return spo_result(problems, "agent writes outside any scratchpad leave the scratchpad unchanged")
+
+
+def spo_case_10():
+    """Full size: agent A writes forty scripts with Write, then agent B runs the oldest one: asked.
+    The record must hold the early files as well as the late ones."""
+    fx = spo_fixture("c10")
+    problems = []
+    for index in range(40):
+        path = os.path.join(fx["scratch"], "part%02d.py" % index)
+        problems += spo_wrote(fx, "10", SPO_WRITER, path, PY_TEXT)
+        if problems:
+            break
+    oldest = os.path.join(fx["scratch"], "part00.py")
+    problems.append(spo_scope(fx, "10", oldest))
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % oldest)
+    problems.append(spo_asked("10", got, reason, (fx["scratch"], "part00.py")))
+    return spo_result(problems, "agent B's run of the oldest of forty agent A scripts is asked")
+
+
+def spo_text_case(tag, name, command_of, passed):
+    """Agent A writes probe2.py; agent B's call holds the run's text as quoted text, a comment, a heredoc
+    body or a multi-line string, and runs nothing: allowed. `command_of(probe, outside)` builds the call."""
+    fx = spo_fixture(tag)
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, name, probe)] + spo_wrote(fx, name, SPO_WRITER, probe, PY_TEXT)
+    outside = os.path.join(fx["work"], "notes.txt")
+    got, reason = spo_run(fx, SPO_OTHER, command_of(probe, outside))
+    problems.append(spo_allowed(name, got, reason))
+    return spo_result(problems, passed)
+
+
+def spo_extra_quoted():
+    return spo_text_case("x1", "extra-quoted", lambda probe, outside: "echo 'python3 %s'" % probe,
+                         "a run inside single quotes is text and is allowed")
+
+
+def spo_extra_comment():
+    return spo_text_case("x2", "extra-comment", lambda probe, outside: "echo hi # python3 %s" % probe,
+                         "a run after a comment mark is text and is allowed")
+
+
+def spo_extra_heredoc():
+    return spo_text_case("x3", "extra-heredoc",
+                         lambda probe, outside: "cat > %s <<'EOF'\npython3 %s\nEOF" % (outside, probe),
+                         "a run in a heredoc body is text and is allowed")
+
+
+def spo_extra_apostrophe():
+    return spo_text_case("x4", "extra-apostrophe",
+                         lambda probe, outside: 'echo "don\'t" && cat %s' % probe,
+                         "a lone apostrophe in double quotes does not hide the read and is allowed")
+
+
+def spo_extra_multiline():
+    return spo_text_case("x5", "extra-multiline",
+                         lambda probe, outside: 'echo "first line\npython3 %s"' % probe,
+                         "a run on the second line of a double-quoted string is text and is allowed")
+
+
+def spo_register(label, check):
+    """Register one scratchpad-owner check. Each check builds only its own folders, so a family run
+    skips the fixture build. POSIX only: the cases use shell forms and POSIX paths."""
+    def run():
+        if os.name == "nt":
+            return SKIP, SPO_NT
+        return check()
+    FIXTURELESS_CHECKS.add(run)
+    LOG_CHECKS_EXTRA.append((label, run))
+
+
+spo_register("scratchpad-owner: 1 agent B runs agent A's script with python3, after A wrote it with Write: asked",
+             spo_case_1)
+spo_register("scratchpad-owner: 2 agent B runs agent A's script after cd into the scratchpad: asked",
+             spo_case_2)
+spo_register("scratchpad-owner: 3 agent B runs agent A's script through bash, after A wrote it by a heredoc: asked",
+             spo_case_3)
+spo_register("scratchpad-owner: 4 agent B runs agent A's script as the command word: asked", spo_case_4)
+spo_register("scratchpad-owner: 5 agent A runs its own script: allowed", spo_case_5)
+spo_register("scratchpad-owner: 6 agent B runs a script with no record, made outside the guard: allowed",
+             spo_case_6)
+spo_register("scratchpad-owner: 7 a top-level call with no agent_id runs agent A's script: allowed",
+             spo_case_7)
+spo_register("scratchpad-owner: 8 agent B reads agent A's script with cat: allowed", spo_case_8)
+spo_register("scratchpad-owner: 9 agent writes outside any scratchpad create no file under this session's "
+             "scratchpad: allowed", spo_case_9)
+spo_register("scratchpad-owner: 10 agent B runs the oldest of forty scripts agent A wrote: asked",
+             spo_case_10)
+spo_register("scratchpad-owner: extra, a run inside single quotes is text: allowed", spo_extra_quoted)
+spo_register("scratchpad-owner: extra, a run after a comment mark is text: allowed", spo_extra_comment)
+spo_register("scratchpad-owner: extra, a run in a heredoc body is text: allowed", spo_extra_heredoc)
+spo_register("scratchpad-owner: extra, a lone apostrophe in double quotes does not hide a read: allowed",
+             spo_extra_apostrophe)
+spo_register("scratchpad-owner: extra, a run on the second line of a double-quoted string is text: allowed",
+             spo_extra_multiline)
+
+
+# Rule scratchpad-owner, the overwrite form: an agent with a valid agent_id that writes over a file under
+# this session's scratchpad whose record names a different agent is asked. The writes are the ones the
+# record covers: Write, and a shell write target (a redirect, a heredoc `cat > f`, or an append). The
+# first write of a file, a rewrite by its own writer, a call with no agent_id and a read pass. Each case
+# builds its own session, as the cases above do.
+
+
+def ovw_case_1():
+    """Agent A writes msg.txt with Write; agent B writes the same file with Write: asked."""
+    fx = spo_fixture("o1")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o1", msg)] + spo_wrote(fx, "o1", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_asked("o1", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's Write over agent A's file is asked")
+
+
+def ovw_case_2():
+    """Agent A writes msg.txt with Write; agent B redirects echo over it: asked."""
+    fx = spo_fixture("o2")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o2", msg)] + spo_wrote(fx, "o2", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_run(fx, SPO_OTHER, "echo x > %s" % msg)
+    problems.append(spo_asked("o2", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's shell redirect over agent A's file is asked")
+
+
+def ovw_case_3():
+    """Agent A writes msg.txt with Write; agent B cds into the scratchpad and heredocs over it: asked."""
+    fx = spo_fixture("o3")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o3", msg)] + spo_wrote(fx, "o3", SPO_WRITER, msg, "from A\n")
+    heredoc = "cd %s && cat > msg.txt <<'EOF'\nfrom B\nEOF" % fx["scratch"]
+    got, reason = spo_run(fx, SPO_OTHER, heredoc)
+    problems.append(spo_asked("o3", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's heredoc after a cd over agent A's file is asked")
+
+
+def ovw_case_4():
+    """Agent A writes msg.txt, then rewrites it with Write: allowed."""
+    fx = spo_fixture("o4")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o4", msg)] + spo_wrote(fx, "o4", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", SPO_WRITER, file_path=msg, content="from A again\n")
+    problems.append(spo_allowed("o4", got, reason))
+    return spo_result(problems, "agent A's rewrite of its own file is allowed")
+
+
+def ovw_case_5():
+    """Agent B writes msg.txt, a file no agent wrote before: allowed."""
+    fx = spo_fixture("o5")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o5", msg)]
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_allowed("o5", got, reason))
+    return spo_result(problems, "agent B's first write of a file nobody wrote is allowed")
+
+
+def ovw_case_6():
+    """Agent A writes msg.txt; a top-level call with no agent_id overwrites it: allowed."""
+    fx = spo_fixture("o6")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o6", msg)] + spo_wrote(fx, "o6", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", None, file_path=msg, content="from the top session\n")
+    problems.append(spo_allowed("o6", got, reason))
+    return spo_result(problems, "a top-level call with no agent_id overwrites agent A's file and is allowed")
+
+
+def ovw_case_7():
+    """Agent A writes msg.txt; agent B appends to it with >>: asked."""
+    fx = spo_fixture("o7")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "o7", msg)] + spo_wrote(fx, "o7", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_run(fx, SPO_OTHER, "echo x >> %s" % msg)
+    problems.append(spo_asked("o7", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's append to agent A's file is asked")
+
+
+spo_register("scratchpad-owner: overwrite 1 agent B's Write over agent A's file: asked", ovw_case_1)
+spo_register("scratchpad-owner: overwrite 2 agent B's shell redirect over agent A's file: asked", ovw_case_2)
+spo_register("scratchpad-owner: overwrite 3 agent B's heredoc after a cd over agent A's file: asked",
+             ovw_case_3)
+spo_register("scratchpad-owner: overwrite 4 agent A rewrites its own file: allowed", ovw_case_4)
+spo_register("scratchpad-owner: overwrite 5 agent B's first write of a file nobody wrote: allowed",
+             ovw_case_5)
+spo_register("scratchpad-owner: overwrite 6 a top-level call overwrites agent A's file: allowed",
+             ovw_case_6)
+spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: asked", ovw_case_7)
+
+
+# Rule scratchpad-owner, more cases. Each case's label says asked, allowed or passes,
+# and each control beside it stays green: the writer runs the same call, so a red case names this rule's gap.
+
+# A different length from PY_TEXT, so a record keyed on size tells the two texts apart.
+SPO_OVERWRITE_TEXT = "print(1234)\n"
+# The owner entry points and the sidecar helpers they reach. The scratchpad-root helpers are not named: the
+# shared-tree rules call them too, and a call from those rules is not an owner call.
+SPO_HELPERS = ("scratchpad_agent", "scratchpad_writes", "scratchpad_owner_write", "scratchpad_owner_hit",
+               "scratchpad_writer_record", "scratchpad_record_writer", "scratchpad_writer_of")
+# The guard run as the harness runs it, with the disk calls of the scratchpad-owner helpers counted. A call
+# counts while a helper is on the stack, so the count holds whichever module imported the helper.
+SPO_COUNTING_GUARD = '''import atexit, builtins, json, os, runpy, sys, tempfile
+HELPERS = frozenset(os.environ["SPO_HELPERS"].split(","))
+FILES = ("guard.py", "guard_shared_tree.py")
+COUNTS = {"os.path.realpath": 0, "open": 0, "tempfile.gettempdir": 0}
+
+
+def in_helper():
+    frame = sys._getframe(2)
+    while frame is not None:
+        if frame.f_code.co_name in HELPERS and os.path.basename(frame.f_code.co_filename) in FILES:
+            return True
+        frame = frame.f_back
+    return False
+
+
+def counted(name, real):
+    def call(*args, **kwargs):
+        if in_helper():
+            COUNTS[name] += 1
+        return real(*args, **kwargs)
+    return call
+
+
+def save():
+    with builtins.open(os.environ["SPO_COUNTS"], "w", encoding="utf-8") as handle:
+        json.dump(COUNTS, handle)
+
+
+os.path.realpath = counted("os.path.realpath", os.path.realpath)
+builtins.open = counted("open", builtins.open)
+tempfile.gettempdir = counted("tempfile.gettempdir", tempfile.gettempdir)
+sys.path.insert(0, os.path.dirname(os.environ["SPO_GUARD"]))
+atexit.register(save)
+runpy.run_path(os.environ["SPO_GUARD"], run_name="__main__")
+'''
+
+
+def spo_outside(name, path):
+    """Scope before subject for a cost case: `path` names no scratchpad, by its real path or its text."""
+    if "scratchpad" in os.path.realpath(path) or "scratchpad" in path:
+        return "%s: setup, the path names a scratchpad: %s" % (name, path)
+    return ""
+
+
+def spo_counted(fx, tag, tool, agent, **tool_input):
+    """One guard call as `spo_call` makes it, through the counting wrapper. Returns (decision, reason, counts),
+    where counts maps each counted call to its number, or is None when the run wrote no count."""
+    folder = os.path.dirname(fx["work"])
+    wrapper = os.path.join(folder, "counting_guard.py")
+    write(wrapper, SPO_COUNTING_GUARD)
+    counts = os.path.join(folder, "counts-%s.json" % tag)
+    got, reason = decide({"raw": None, "tool": tool, "cwd": fx["work"], "session": fx["sid"],
+                          "env_path": None, "config": None, "agent_id": agent, "process_cwd": None,
+                          "temp": fx["tmp"], "tool_input": dict(tool_input), "guard": wrapper,
+                          "env": {"SPO_GUARD": GUARD, "SPO_COUNTS": counts,
+                                  "SPO_HELPERS": ",".join(SPO_HELPERS)}})
+    if not os.path.exists(counts):
+        return got, reason, None
+    with open(counts, encoding="utf-8") as handle:
+        return got, reason, json.load(handle)
+
+
+def spo_run_case(tag, name, script_name, command_of, passed, text=PY_TEXT):
+    """Agent A writes `script_name` with Write. Agent B's call `command_of(fx, path)` acts on the file and is
+    asked. Agent A's same call is the control, and is allowed."""
+    fx = spo_fixture(tag)
+    path = os.path.join(fx["scratch"], script_name)
+    problems = [spo_scope(fx, name, path)] + spo_wrote(fx, name, SPO_WRITER, path, text)
+    got, reason = spo_run(fx, SPO_OTHER, command_of(fx, path))
+    problems.append(spo_asked(name, got, reason, (fx["scratch"], script_name)))
+    got, reason = spo_run(fx, SPO_WRITER, command_of(fx, path))
+    problems.append(spo_allowed(name + ", control: agent A's own call", got, reason))
+    return spo_result(problems, passed)
+
+
+def spo_flag_1():
+    return spo_run_case("flag1", "flag 1", "probe2.py", lambda fx, p: "python3 -W ignore %s" % p,
+                        "agent B's python3 -W ignore run of agent A's script is asked")
+
+
+def spo_flag_2():
+    return spo_run_case("flag2", "flag 2", "probe2.py", lambda fx, p: "python3 -X dev %s" % p,
+                        "agent B's python3 -X dev run of agent A's script is asked")
+
+
+def spo_flag_3():
+    return spo_run_case("flag3", "flag 3", "x.js", lambda fx, p: "node --require /x %s" % p,
+                        "agent B's node --require run of agent A's script is asked", text="console.log(1)\n")
+
+
+def spo_variable_1():
+    return spo_run_case("var1", "variable 1", "probe2.py",
+                        lambda fx, p: 'S=%s; python3 "$S/probe2.py"' % os.path.dirname(p),
+                        "agent B's run of agent A's script by a shell variable path is asked")
+
+
+def spo_removal_1():
+    return spo_run_case("rm1", "removal 1", "msg.txt", lambda fx, p: "rm %s" % p,
+                        "agent B's rm of agent A's file is asked", text="from A\n")
+
+
+def spo_move_1():
+    return spo_run_case("mv1", "move 1", "msg.txt",
+                        lambda fx, p: "mv %s %s" % (p, os.path.join(fx["work"], "moved.txt")),
+                        "agent B's mv of agent A's file is asked", text="from A\n")
+
+
+def spo_approved_case():
+    """Agent A writes probe2.py. Agent B's overwrite is asked. The owner types `override 15m` at 30 s, and B's
+    overwrite at 60 s is lifted. Once the override has ended, B's run and B's rewrite pass with no override in
+    effect, so the approved overwrite must have moved the record to B. The approval is the override file, the
+    way the suite simulates an owner override for other rules."""
+    fx = spo_fixture("approved")
+    config = ov_config("spo-approved")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "approved", probe)] + spo_wrote(fx, "approved", SPO_WRITER, probe, PY_TEXT)
+
+    def call(tool, tool_input, seconds):
+        return ov_call(tool, tool_input, fx["work"], config, fx["sid"], seconds, agent_id=SPO_OTHER,
+                       temp=fx["tmp"])
+
+    overwrite = {"file_path": probe, "content": SPO_OVERWRITE_TEXT}
+    got, reason = call("Write", overwrite, 0)
+    problems.append(spo_asked("approved, B's overwrite before the override", got, reason,
+                              (fx["scratch"], "probe2.py")))
+    note = ov_type(config, fx["sid"], "override 15m", 30)
+    got, reason = call("Write", overwrite, 60)
+    problems.append(spo_allowed("approved, B's overwrite under the override", got, reason))
+    if got == "allow":
+        write(probe, SPO_OVERWRITE_TEXT)   # the approved act lands its bytes, as the tool would
+    later = OV_TIMED_SECONDS + 120   # the override typed at 30 s ends 15 min on
+    got, reason = call("Bash", {"command": "python3 %s" % probe}, later)
+    problems.append(spo_allowed("approved, B's run after the override ended", got, reason))
+    got, reason = call("Write", overwrite, later + 60)
+    problems.append(spo_allowed("approved, B's rewrite after the override ended", got, reason))
+    if got == "allow":
+        write(probe, SPO_OVERWRITE_TEXT)
+    if note and any(problems):
+        problems.append("the override was not typed through override.grant: " + note)
+    return spo_result(problems, "an approved overwrite moves the record: B's later run and rewrite are allowed")
+
+
+def spo_top_write(fx, probe, name):
+    return spo_wrote(fx, name, None, probe, SPO_OVERWRITE_TEXT)
+
+
+def spo_top_redirect(fx, probe, name):
+    return spo_wrote(fx, name, None, probe, SPO_OVERWRITE_TEXT, tool="Bash",
+                     command="echo 'print(1234)' > %s" % probe)
+
+
+def spo_top_level_case(tag, name, overwrite):
+    """Agent A writes probe2.py, and agent B's run is asked (the control). A call with no agent_id then overwrites
+    the file, and that call is allowed. Agent B's run after it passes: a top-level overwrite leaves no record."""
+    fx = spo_fixture(tag)
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, name, probe)] + spo_wrote(fx, name, SPO_WRITER, probe, PY_TEXT)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_asked(name + ", control before the overwrite", got, reason,
+                              (fx["scratch"], "probe2.py")))
+    problems += overwrite(fx, probe, name)
+    got, reason = spo_run(fx, SPO_OTHER, "python3 %s" % probe)
+    problems.append(spo_allowed(name + ", B's run after it", got, reason))
+    return spo_result(problems, "a top-level overwrite leaves no record: B's run after it is allowed")
+
+
+def spo_removed_case():
+    """Agent A writes probe2.py. The file is removed outside the guard before any agent B step, so A's record is
+    the only trace left. Agent B's Write of a new probe2.py at the same path is allowed. The record still names
+    A, so a rule that does not check the record against the file asks here: the case fails on that gap."""
+    fx = spo_fixture("removed")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "removed", probe)] + spo_wrote(fx, "removed", SPO_WRITER, probe, PY_TEXT)
+    os.remove(probe)
+    if os.path.exists(probe):
+        problems.append("removed, setup: probe2.py still exists after the removal")
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=probe, content=PY_TEXT)
+    problems.append(spo_allowed("removed, B's new probe2.py", got, reason))
+    return spo_result(problems, "a new file at a removed file's path is allowed")
+
+
+def spo_cost_case():
+    """Agent A writes probe2.py. Its own run is the control: the helpers read its record, so the counter is live.
+    Agent B's Write and B's run, outside any scratchpad and naming none, make no realpath, open or gettempdir call
+    inside a helper, and both are allowed."""
+    fx = spo_fixture("cost")
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, "cost", probe)] + spo_wrote(fx, "cost", SPO_WRITER, probe, PY_TEXT)
+    got, reason, counts = spo_counted(fx, "control", "Bash", SPO_WRITER, command="python3 %s" % probe)
+    problems.append(spo_allowed("cost, control: agent A's own run", got, reason))
+    if not counts or not any(counts.values()):
+        problems.append("cost, control: the scratchpad's own run counted no helper call, so the counter is not live")
+    notes = os.path.join(fx["work"], "notes.txt")
+    tool = os.path.join(fx["work"], "tool.py")
+    write(tool, PY_TEXT)
+    problems += [spo_outside("cost, notes.txt", notes), spo_outside("cost, tool.py", tool)]
+    outside = (("write", "Write", {"file_path": notes, "content": "x\n"}),
+               ("run", "Bash", {"command": "python3 %s" % tool}))
+    for label, tool_name, tool_input in outside:
+        got, reason, counts = spo_counted(fx, label, tool_name, SPO_OTHER, **tool_input)
+        problems.append(spo_allowed("cost, %s" % label, got, reason))
+        if counts is None:
+            problems.append("cost, %s: no count was written" % label)
+        elif any(counts.values()):
+            problems.append("cost, %s: a helper made disk calls on a call outside any scratchpad: %s"
+                            % (label, counts))
+    return spo_result(problems, "a call outside any scratchpad makes no helper realpath, open or gettempdir call")
+
+
+spo_register("scratchpad-owner: flag 1 agent B runs agent A's script past python3 -W ignore: asked", spo_flag_1)
+spo_register("scratchpad-owner: flag 2 agent B runs agent A's script past python3 -X dev: asked", spo_flag_2)
+spo_register("scratchpad-owner: flag 3 agent B runs agent A's script past node --require: asked", spo_flag_3)
+spo_register("scratchpad-owner: variable 1 agent B runs agent A's script by a shell variable path: asked",
+             spo_variable_1)
+spo_register("scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record: "
+             "B's later run and rewrite pass", spo_approved_case)
+spo_register("scratchpad-owner: top-level 1 a call with no agent_id overwrites agent A's file with Write: "
+             "B's later run passes", lambda: spo_top_level_case("top1", "top-level 1", spo_top_write))
+spo_register("scratchpad-owner: top-level 2 a call with no agent_id overwrites agent A's file with a shell "
+             "redirect: B's later run passes", lambda: spo_top_level_case("top2", "top-level 2", spo_top_redirect))
+spo_register("scratchpad-owner: removed 1 agent A's file removed outside the guard: B's new file at its path "
+             "is allowed", spo_removed_case)
+spo_register("scratchpad-owner: removal 1 agent B's rm of agent A's file: asked", spo_removal_1)
+spo_register("scratchpad-owner: move 1 agent B's mv of agent A's file: asked", spo_move_1)
+spo_register("scratchpad-owner: cost 1 a call outside any scratchpad makes no helper realpath, open or "
+             "gettempdir call", spo_cost_case)
+
+
+def spo_stdin_case():
+    """Agent A writes data.json. Agent B runs python3 with `-`, so the program is the heredoc on stdin, and passes
+    data.json as an argument: allowed. data.json is read as data, never run."""
+    fx = spo_fixture("stdin")
+    data = os.path.join(fx["scratch"], "data.json")
+    problems = [spo_scope(fx, "stdin", data)] + spo_wrote(fx, "stdin", SPO_WRITER, data, '{"a": 1}\n')
+    got, reason = spo_run(fx, SPO_OTHER, "python3 - %s <<'PY'\nprint(1)\nPY" % data)
+    problems.append(spo_allowed("stdin, agent B's python3 - with agent A's data.json as an argument", got, reason))
+    return spo_result(problems, "a file passed to python3 - as an argument is data, and the run is allowed")
+
+
+def spo_dashdash_1():
+    return spo_run_case("dash1", "dashdash 1", "x.py", lambda fx, p: "python3 -- %s" % p,
+                        "agent B's python3 -- run of agent A's script is asked")
+
+
+spo_register("scratchpad-owner: stdin 1 agent B's python3 - with a heredoc and agent A's data.json as an "
+             "argument: allowed", spo_stdin_case)
+spo_register("scratchpad-owner: dashdash 1 agent B's python3 -- run of agent A's script: asked", spo_dashdash_1)
 
 
 # =========================================================================== mask_script lexemes
