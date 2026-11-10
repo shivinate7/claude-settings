@@ -978,7 +978,7 @@ if [ "$CLOUD" = 1 ]; then
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
   HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
   if command -v jq >/dev/null 2>&1; then
-    # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
+    # merge/cloud_allow.json: the `merge --confirm` and `merge --role` rules plus the two `gh api` rules (PR close, PR comment) that only a cloud session gets (a local settings.json links to the repo's, which has none).
     # Read from the source checkout, never from main: launch.py's fallback and --dev run the checkout's own merge.py, and
     # the file landed in the same commit as that merge.py's role check. A checkout without the file gets no rules.
     ALLOW_FILE="$SRC/merge/cloud_allow.json"
@@ -990,7 +990,7 @@ if [ "$CLOUD" = 1 ]; then
       "$SRC/settings.json" > "$TARGET_JSON.tmp" && mv "$TARGET_JSON.tmp" "$TARGET_JSON"; then
       n=$(jq -s '[.[0].permissions.allow[]?] | length' "$ALLOW_FILE" 2>/dev/null)
       if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
-        log "wrote $TARGET_JSON (repo settings + cloud refresh hook + $n merge allow rules from $SRC at $SRC_SHA)"
+        log "wrote $TARGET_JSON (repo settings + cloud refresh hook + $n cloud allow rules from $SRC at $SRC_SHA)"
       else
         log "WARNING: wrote $TARGET_JSON with no merge allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/main, then resume the session."
       fi
