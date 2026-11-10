@@ -14150,8 +14150,8 @@ class ReviewRecordAncestorHead(ReviewEnv):
 class ReviewRecordRoundsOwnHead(ReviewEnv):
     """A Round line may name the head its reviewer read (decision pr-review-record). The write step refuses a named head that is not one of the
     pull request's own commits: an ancestor of the live head, or the live head itself, and not held by the base branch. Two compare reads prove it,
-    and the refusal exits 1 or 2 with no record printed. A record whose top round is all PASS on the head an earlier record's FAIL or PARTIAL top
-    round named is refused with exit 2, unless a fix check PASS follows that FAIL. A record that names no head keeps the equal-head rule."""
+    and the refusal exits 1 or 2 with no record printed. A record whose top round is all PASS and names the same head as an earlier record's FAIL
+    or PARTIAL top round is refused with exit 2, unless a fix check PASS follows that FAIL. A record that names no head keeps the equal-head rule."""
 
     HEAD_A = "3a" * 20  # the Head of an earlier record that holds the first round
     HEAD_B = "3b" * 20  # the Head of a later earlier record, which holds the second round
@@ -14187,8 +14187,8 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertTrue(any(sha[:9] in err for sha in shas), "the refusal does not name the head:\n" + err)
 
     def assert_pass_refused(self, host, rc, out, err, sha):
-        """A top round that passes on the head an earlier record's FAIL or PARTIAL top round named: exit 2, no record printed, no traceback, and stderr
-        names the head. The write must have read the comment list first, so a usage error from an old parser cannot pass as this refusal."""
+        """A top round that passes and names the same head as an earlier record's FAIL or PARTIAL top round: exit 2, no record printed, no traceback,
+        and stderr names the head. The write must have read the comment list first, so a usage error from an old parser cannot pass as this refusal."""
         self.assertTrue(any("comments" in rel for rel, _ in host.list_calls), "scope: the write did not read the comment list, so the rule did not run:\n" + err)
         self.assertEqual(rc, 2, "the PASS top round was not refused with exit 2:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "the refused PASS top round still printed a record")
@@ -16804,11 +16804,12 @@ class ReviewGuardHostFiles(unittest.TestCase):
             fn(7, 1)
 
 class ReviewGuardCost(ReviewEnv):
-    """`--review-record` without --fix-check makes exactly two gh reads, the pull request and then its files list. They are counted at the one seam
-    every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
+    """`--review-record` without --fix-check makes its gh reads in order: the pull request, its files list, the repo's issue comments for a plain
+    write, and one compare read for each sha its rounds name (decision `pr-review-record`, cost). They are counted at the one seam every call goes
+    through (PullsHost in count mode), as ReviewedList counts its reads."""
 
-    def test_the_record_makes_two_gh_reads(self):
-        # a PR of 100 files is one page, so its whole list is still one read: two reads for any PR of up to 100 files
+    def test_the_record_makes_its_gh_reads_with_one_compare_read_per_named_head(self):
+        # a PR of 100 files is one page, so its whole list is still one read: the same reads for any PR of up to 100 files
         hundred = [pr_file(f"docs/f{i}.md") for i in range(100)]
         for guard, files in (("no", None), ("yes", None), ("no", hundred)):
             with self.subTest(guard=guard, files=len(files) if files else 1):
@@ -16817,7 +16818,10 @@ class ReviewGuardCost(ReviewEnv):
                                              "--round", f"1:reviewer:sonnet:PASS:{REVIEW_HEAD}", host=host)
                 self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
-                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
+                # decision pr-review-record (cost): a plain write adds one paged read of the issue comments, and the one round names
+                # the live head, which adds one compare read
+                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files", f"compare/main...{REVIEW_HEAD}", "issues/comments"],
+                                 "the record's gh reads, in order: the pull request, its files, one compare read per named head, the comments")
 
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
 # from each --root string, exactly as given, to that root's Host. A root's header is the `repo` of its host, and its config is read by
