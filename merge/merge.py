@@ -145,6 +145,7 @@ MERGED_LINE = "merge: #{n} merged as {commit}."  # the one home of the merged li
 IDLE_SUMMARY = "merge: {n} lanes to archive"  # the start of merge --idle-lanes' summary line; lint/report_guard.py runner_hold reads it back
 NO_LIST = "No list was made."  # the end of each merge --idle-lanes line that says no list was made; runner_hold reads it back
 REVIEW_SEND_BACK = "send back: "  # the prefix of merge --reviewed's send-back line, read by lint/report_guard.py runner_hold
+NO_SESSION = "no session"  # the session id merge --reviewed's send-back line prints when it has none to message; runner_hold reads it back
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
 def resolve_program(name, env=None):
@@ -3666,9 +3667,9 @@ def read_rows(path, what):
     try:
         rows = unwrap_rows(json.loads(pathlib.Path(path).read_text(encoding="utf-8")), pages)
     except (OSError, ValueError) as e:
-        raise Stop(f"the {what} file {path} could not be read: {e}")
+        raise Stop(f"the {what} file {path} could not be read: {e} {UNKNOWN_CITE}")
     if pages and any(pages[-1].get(key) for key in CONTINUATION_KEYS):
-        raise Stop(f"unknown (the {what} file holds a partial page; read every page)")
+        raise Stop(f"unknown (the {what} file holds a partial page; read every page) {UNKNOWN_CITE}")
     return rows
 
 def lane_session_bound(build, sessions):

@@ -1550,9 +1550,11 @@ def pending_refusals(hook, text):
 
 
 def hold_reason(entries, runner=""):
-    """The refusal for the holds: the triage hold's, naming its `entries` (joined), then the runner hold's
-    own text (`runner`, from runner_hold). Either may be empty."""
-    return " ".join(part for part in (HOLD_REASON % entries if entries else "", runner) if part)
+    """The refusal for the triage hold, naming its `entries` (joined)."""
+    # `runner` is runner_hold's text, joined after it. Either may be empty.
+    if not entries:
+        return "" + runner  # a sum, not the bare name, so the refusal-cite audit reads the cited text of the other branch
+    return HOLD_REASON % entries + (" " if runner else "") + runner
 
 
 def _shown_flags(hook, flags):
@@ -3046,14 +3048,14 @@ COMPLETION_RE = re.compile(r"<tool-use-id>([^<\s]+)</tool-use-id>.*?<output-file
 
 
 def _merge_constants():
-    """(MERGED_LINE, IDLE_SUMMARY, NO_LIST, REVIEW_SEND_BACK) from merge/merge.py, the one emitter, loaded through
+    """(MERGED_LINE, IDLE_SUMMARY, NO_LIST, REVIEW_SEND_BACK, NO_SESSION) from merge/merge.py, the one emitter, loaded through
     guard_merge.merge_module(): beside the guard's real path, then in the checkout the global rules file points at. An
     installed copy has no merge/ beside it, so it reads the pointer's. No tool found raises, and the hold fails open."""
     from guard_merge import merge_module
     module = merge_module()
     if module is None:
         raise RuntimeError("merge/merge.py was not found beside the guard or in the pointer's checkout")
-    return module.MERGED_LINE, module.IDLE_SUMMARY, module.NO_LIST, module.REVIEW_SEND_BACK
+    return module.MERGED_LINE, module.IDLE_SUMMARY, module.NO_LIST, module.REVIEW_SEND_BACK, module.NO_SESSION
 
 
 def _line_re(template):
@@ -3168,9 +3170,9 @@ def runner_hold(hook, records, active):
         runs, sends = _merge_runs(records)
         if not runs:
             return ""
-        merged_line, idle_summary, no_list, back_prefix = _merge_constants()
+        merged_line, idle_summary, no_list, back_prefix, no_session = _merge_constants()
         merged_re, idle_re = _line_re(merged_line), _line_re(idle_summary)
-        back_re = re.compile(r"^%s#(\d+) (?!no session\b)(\S+) \(" % re.escape(back_prefix), re.M)
+        back_re = re.compile(r"^%s#(\d+) (?!%s\b)(\S+) \(" % (re.escape(back_prefix), re.escape(no_session)), re.M)
         idle_at, merges, backs = 0, [], {}
         for at, calls, text, refused in runs:
             text = text or ""
