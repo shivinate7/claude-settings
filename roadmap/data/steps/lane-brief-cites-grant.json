@@ -5,8 +5,8 @@
   "order": 1013,
   "owner": "triage",
   "why": "A lane brief sent by send_message carried no owner grant with a time, so the new lane main-merge-project-ops paused and asked the owner (13:08 CST Nov 10).",
-  "note": "Coordinator 13:10 CST Nov 10. Fix: the brief template in skill project-ops opens with a `Grant:` line (owner's words and time). The coordinator adds the line to its own briefs now; this step lands it in the template.",
-  "updatedAt": "2026-11-10T13:11:00-06:00",
+  "note": "Coordinator 13:10 CST Nov 10; widened by owner chat 13:10 CST via coordinator 13:18 CST (\"it needs to be mechanized either where things are placed or where things are checked\"). (placement) The coordinator starts a lane with create_session, effort set, and the whole brief as the prompt, opening with a `Grant: <owner words, time>` line, so the brief is the lane's own first turn, not a peer message; the project-ops brief template carries that line. (check) A guard refuses a create_session for a cs-build:lane session whose prompt lacks the Grant line. Incident: same brief, same model, 13:12 CST: two lanes acted, lane main-merge-project-ops paused as 'peer message, no grant'. Done when the guard goes red on a fixture.",
+  "updatedAt": "2026-11-10T13:13:00-06:00",
   "lane": "",
   "blockedBy": []
 }
