@@ -5841,19 +5841,19 @@ def judge(payload) -> None:
     # one of these tools gets the specific remedy. Each reads only its own tools, so none reorders with the spawn rules below.
     # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
     trust_transcript = payload.get("transcript_path")
-    archive_agent = payload.get("agent_id")
-    own_agent = archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None
-    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "", own_agent)
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
     if matched:
         refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
 
     # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", own_agent)
+    archive_agent = payload.get("agent_id")
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
     if archived:
         refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
 
     # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", own_agent)
+    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
