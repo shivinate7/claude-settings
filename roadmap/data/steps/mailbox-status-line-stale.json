@@ -1,0 +1,12 @@
+{
+  "title": "The mailbox decision and skill text stop saying it is \"built on smp-mailbox-build, not merged\"",
+  "phase": "build",
+  "status": "ready",
+  "order": 966,
+  "owner": null,
+  "why": "From lane session-messaging-plan (#2519), coordinator 04:37 CST Nov 10. The decision Status line and the skill text are stale. Cloud-buildable.",
+  "note": "MAILBOX_REPO default stays unset until plan step 2 (step session-mailbox-followups).",
+  "lane": null,
+  "blockedBy": [],
+  "updatedAt": "2026-11-10T04:37:00-06:00"
+}

@@ -486,3 +486,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - loop-while-until-dead (#2123): hooks/guard_frozen.py:812 and :909, `while` and `until` in `_LOOP_OPENERS` are dead code, so an inner while's `done` closes the outer for. Documented in session-tiers.
 - brace-expand-recursion (#2123): hooks/guard_frozen.py:844-858, `_brace_expand` recurses once per group; about 1500 `{a,b}` groups raise RecursionError, which fails open. Not reachable by mistake. Fix: cap the group count.
 - loop-body-cd-last-item (#2123): a `cd "$f"` in a loop body unrolls, so later words are judged in the last item's folder.
+- mail-body-file-missing-raises (lane session-messaging-plan, #2519, coordinator 04:37 CST Nov 10): a missing `--body-file` path still raises FileNotFoundError (pre-existing).
+- mail-utf8-proof-linux-only (#2519): the UTF-8 proof covers Linux with PYTHONIOENCODING only.
