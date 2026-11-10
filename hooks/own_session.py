@@ -96,8 +96,7 @@ def own_session_ccr(transcript, own_id):
 
 
 def _scan(transcript, own_id, created, applied=False):
-    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers.
-    `applied` is own_session_read's: it passes it, and own_session_ccr leaves it False."""
+    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers."""
     uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
     added = []  # tags the own set_session_tags calls added since the newest record, in order
     creates = {}  # tool_use id -> (tags, parent) a create_session call set

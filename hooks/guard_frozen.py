@@ -8,9 +8,9 @@ import re
 
 import guard_core
 from guard_core import (
-    PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, PowerShellScript, _expanded, _resolved,
-    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment, is_powershell,
-    nested_script, norm, resolve_command, segment_tokens, split_segments,
+    HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, PowerShellScript, _expanded,
+    _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment,
+    heredoc_delimiter, is_powershell, nested_script, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -363,48 +363,438 @@ def _sed_operands(raw):
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
-# sees only the word `$D`. One left-to-right pass in `_shell_write_hit` (it feeds the frozen and
-# project-config checks) keeps a table of simple assignments (`D=v`, `export A=1 D=v`, `declare`,
-# a PowerShell `$D = v`), and reads each `$D` or `${D}` as the value current at that point: the
-# last assignment wins, `unset D` clears it, a use before the assignment stays as written, and
-# single quotes do not expand. An unassigned variable stays unresolved and allowed. `$HOME` reads
-# as `~`: `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a
-# literal `$HOME/.claude/...` target was allowed.
-# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, `eval`, or an
-# interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call. A `for`
-# variable is read only in the forms of LOOPS AND BRACES, below.
-# Fixing that needs a shell parser, not a regex.
-_VAR_TOKEN = re.compile(
-    r"""'[^']*'"""                                                    # single quotes: no expansion
-    r"""|(?<![\w$.\-/:])(?P<n>[A-Za-z_]\w*)=(?!=)(?P<v>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
-    r"""|\$(?P<pn>[A-Za-z_]\w*)[ \t]*=(?!=)[ \t]*(?P<pv>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
-    r"""|\bunset\s+(?P<u>\w+)"""
-    r"""|\$(?:(?P<x>[A-Za-z_]\w*)|\{(?P<y>[A-Za-z_]\w*)\})""")
+# sees only the word `$D`. `_resolve_vars` (called first by `_shell_write_hit`, which feeds the frozen
+# and project-config checks) reads the command once, left to right, as the shell reads it: it splits
+# the text into words and quoted spans, keeps a table of simple assignments, and reads each `$D` or
+# `${D}` as the value current at that point. The table holds `D=v` at a command's start (a value is
+# the whole shell word, so `WT="$BASE"/../lane` is one path), the arguments of `export`, `declare`,
+# `typeset`, `local` and `readonly` (`export A=1 D=v`), and a PowerShell assignment: `$D = v` or `$D =v`
+# anywhere, and `$D=v`, `$D='v'` or `$D= v` at a statement's start only, so a bash `echo $D=x` sets
+# nothing. A backslash-newline joins two lines, so it reads as a blank. The text keeps its type: a
+# PowerShell text (a `pwsh -c` script, `PowerShellScript`, or any text in a PowerShell call) comes back
+# PowerShell, so a later reader judges it by the same rules. In PowerShell text a smart quote U+2018 to
+# U+201E is a quote (`_straight`): the words are read as if it were its ASCII twin, and the result
+# keeps the smart quote as written, so the scan for text that is no data still sees it. The last assignment
+# wins, `unset D` clears it, a use before the assignment stays as written, and single quotes do not
+# expand. An unassigned variable stays unresolved and allowed. `$HOME` reads as `~`:
+# `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a literal
+# `$HOME/.claude/...` target was allowed.
+# Text is not code, and code is not text. An assignment inside double quotes or after a `#` comment
+# is text, and a lone apostrophe in double quotes opens no span, because quotes are read in pairs
+# from the left. An unmated quote is one ordinary character, so the text after it is still read as
+# code, the fail-closed side: a variable read as code resolves, one read as text stays as written.
+# Every heredoc body is read alone, whatever its delimiter, so its quotes never pair with a quote
+# after it and its assignments end with it. A header with no closer (its body was dropped before this
+# read, or it runs to the end) is read on as code at the same level, so blocks in a row nest nothing;
+# past `_NEST_LIMIT` a nested body is read inline as code too. The body of `$(...)` or backticks is a
+# command even inside double quotes, and so is the argument of `eval "..."`. A prefix assignment
+# (`S=x cmd "$S"`) sets the variable for that one command and the environment of the child it starts:
+# the command's own words and all later text see the value from before it, and its heredoc body sees
+# the new one. `env S=x cmd` gives the child the same. A verbatim body (`<<'EOF'`) is the child's text,
+# so it sees each new value; the parent expands any other body, so it sees only names the table lacks.
+# A subshell `( ... )`, `$( ... )` or backtick pair gives its assignments back where it ends.
+# A redirect (`>/dev/null`, `2>f`, `<<'EOF'`) and the name after `function` leave the command's start
+# as it was, so `D=x >/dev/null` still sets D. An unquoted `$D` whose value holds two words is an
+# ambiguous redirect target that writes nothing, so it stays as written there (unless IFS is set).
+# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, a loop variable (read only in the
+# forms of LOOPS AND BRACES, below), `eval '...'`, or an interpreter (`python -c`) is not resolved, nor
+# is a variable set in a different tool call. An assignment in a pipeline stage or a background job
+# (`D=x | cat`, `D=x &`) is kept here, though the shell runs it in a subshell and keeps nothing, so a
+# later `$D` can read a value the shell does not.
+# An escaped `\$D` in an unquoted heredoc body reads the parent's value, not the child's.
+# Fixing these needs a shell parser, not this one pass.
+_WORD_STOP = frozenset(" \t\r\n;&|()`")
+_ASSIGN_WORD = re.compile(r"([A-Za-z_]\w*)(\+?)=")
+_VAR_USE = re.compile(r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})")
+_PS_NAME = re.compile(r"\$[A-Za-z_]\w*")
+_PS_EQUALS = re.compile(r"[ \t]*=(?!=)[ \t]*")
+_PS_ASSIGN = re.compile(r"\$([A-Za-z_]\w*)=(?!=)")
+_BLANKS = re.compile(r"[ \t]*")
+# `env` options whose next word is their argument, not the command or an assignment.
+_ENV_ARGUMENT_OPTIONS = frozenset(("-u", "--unset", "-C", "--chdir", "-S", "--split-string"))
+# A redirect operator at the start of a word (`>`, `>>`, `2>`, `>&`, `>|`, `<`, `<&`, `<>`).
+_REDIRECT_OP = re.compile(r"\d*(?:>>|>&|>\||<&|<>|[<>])")
+# Whitespace between two non-blank characters: the shell splits such a value into two words.
+_TWO_WORDS = re.compile(r"[^ \t\n][ \t\n]+[^ \t\n]")
+# Words after which the next word is still a command's start (`{ D=x; }`, `then D=x`, `eval D=x`).
+_COMMAND_STARTERS = frozenset((
+    "{", "!", "if", "then", "elif", "else", "do", "while", "until", "time", "eval", "function"))
+_DECLARERS = frozenset(("export", "declare", "typeset", "local", "readonly"))
+# Quotes nested in `$(...)` nested in quotes, or heredoc in heredoc; a deeper quoted body reads as plain
+# text, a deeper heredoc body as code at the cap's level. It bounds the reader's recursion.
+_NEST_LIMIT = 20
+
+
+def _subst_end(text: str, j: int, depth: int) -> int:
+    """Index of the `)` that ends the `$(` body starting at `j`, or -1 when it has no mate."""
+    if depth > _NEST_LIMIT:
+        return -1
+    level, n = 1, len(text)
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            j += 2
+            continue
+        if c == "'":
+            j = text.find("'", j + 1)
+            if j < 0:
+                return -1
+        elif c == '"':
+            j = _dq_end(text, j + 1, depth + 1)
+            if j < 0:
+                return -1
+        elif c == "(":
+            level += 1
+        elif c == ")":
+            level -= 1
+            if level == 0:
+                return j
+        j += 1
+    return -1
+
+
+def _dq_end(text: str, j: int, depth: int = 0) -> int:
+    """Index of the `"` that closes a double-quoted span whose text starts at `j`, or -1."""
+    n = len(text)
+    while j < n and text[j] != '"':
+        if text[j] == "\\":
+            j += 2
+        elif text[j] == "$" and text.startswith("(", j + 1):
+            j = _subst_end(text, j + 2, depth)   # no mate for the body: no mate for the quote either
+            if j < 0:
+                return -1
+            j += 1
+        else:
+            j += 1
+    return j if j < n else -1
+
+
+def _like(src: str, text: str) -> str:
+    """`text` with the type of `src`, so a slice of PowerShell text is still read as PowerShell."""
+    return text if type(src) is str else type(src)(text)
+
+
+def _read_word(cmd: str, i: int, src=None):
+    """(end, parts) of the shell word at `i`. `parts` are (kind, text, marks): kind `p` plain, `d` the
+    inside of a double-quoted span, `s` the inside of a single-quoted span; `marks` is the span's opening
+    and closing quote as written. Quotes are read in pairs; a quote with no mate is an ordinary character.
+    `cmd` is the text the quotes are read in. `src` is the text the parts are cut from, the same text
+    but for PowerShell's smart quotes (`_straight`): `cmd` has them as ASCII quotes, `src` as written."""
+    src = cmd if src is None else src
+    parts, plain, n = [], [], len(cmd)
+
+    def flush():
+        if plain:
+            parts.append(("p", _like(src, "".join(plain)), ""))
+            plain.clear()
+
+    while i < n and cmd[i] not in _WORD_STOP:
+        c = cmd[i]
+        if c == "\\" and i + 1 < n:
+            plain.append(src[i:i + 2])
+            i += 2
+            continue
+        if c == "'":
+            j = cmd.find("'", i + 1)
+            if j >= 0:
+                flush()
+                parts.append(("s", _like(src, src[i + 1:j]), src[i] + src[j]))
+                i = j + 1
+                continue
+        elif c == '"':
+            j = _dq_end(cmd, i + 1)
+            if j >= 0:
+                flush()
+                parts.append(("d", _like(src, src[i + 1:j]), src[i] + src[j]))
+                i = j + 1
+                continue
+        elif c == "$" and cmd.startswith("{", i + 1):
+            j = cmd.find("}", i + 2)
+            if j >= 0:
+                plain.append(src[i:j + 1])
+                i = j + 1
+                continue
+        plain.append(src[i])
+        i += 1
+    flush()
+    return i, parts
+
+
+def _expand(text: str, table: dict, as_target: bool = False) -> str:
+    """`text` with each `$VAR` read. `as_target` is an unquoted redirect target: a value of two words
+    is an ambiguous redirect that writes nothing, so its variable stays as written (fail closed when
+    IFS is set, which can change where the shell splits)."""
+    splits = as_target and "IFS" not in table
+
+    def read(use):
+        value = table.get(use.group(1) or use.group(2))
+        return use.group(0) if value is None or (splits and _TWO_WORDS.search(value)) else value
+    return _VAR_USE.sub(read, text)
+
+
+def _dq_text(text: str, table: dict, depth: int = 0) -> str:
+    """Double-quoted text with each `$VAR` read. A `$(...)` or backtick body is a command, read on a copy
+    of the table so its assignments end with it. Past `_NEST_LIMIT` levels a body is plain text."""
+    if depth >= _NEST_LIMIT:
+        return _expand(text, table)
+    out, i, start, n = [], 0, 0, len(text)
+    scan = _straight(text)   # the quotes inside a `$(...)` are read as PowerShell reads them
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == "$" and text.startswith("(", i + 1):
+            end, skip = _subst_end(scan, i + 2, 0), 2
+        elif c == "`":
+            end, skip = text.find("`", i + 1), 1
+        else:
+            i += 1
+            continue
+        if end < 0:
+            i += 1
+            continue
+        out.append(_expand(text[start:i], table))
+        body = _like(text, text[i + skip:end])
+        out.append(text[i:i + skip] + _resolve_into(body, dict(table), depth + 1)[0] + text[end])
+        i = start = end + 1
+    out.append(_expand(text[start:], table))
+    return "".join(out)
+
+
+def _rebuild(parts, table: dict, as_script: bool = False, depth: int = 0, as_target: bool = False):
+    """(the word's text with each `$VAR` outside single quotes read as its value, the table after it).
+    `as_script` reads a double-quoted span as a command that runs here (`eval "D=x"`). `as_target` is
+    a redirect target word (see `_expand`)."""
+    out = []
+    for kind, text, marks in parts:
+        if kind == "s":
+            out.append(marks[0] + text + marks[1])
+        elif kind == "d" and as_script and depth < _NEST_LIMIT:
+            text, table = _resolve_into(text, table, depth + 1)
+            out.append(marks[0] + text + marks[1])
+        elif kind == "d":
+            out.append(marks[0] + _dq_text(text, table, depth) + marks[1])
+        else:
+            out.append(_expand(text, table, as_target))
+    return "".join(out), table
+
+
+def _value_of(parts, table: dict) -> str:
+    """The value a shell gives an assignment's word: quotes removed, `$VAR` read, escapes dropped. A
+    backslash-newline outside single quotes joins two lines, so it adds nothing to the value."""
+    pieces = []
+    for kind, text, _marks in parts:
+        if kind == "s":
+            pieces.append(text)
+        elif kind == "d":
+            pieces.append(re.sub(r'\\(?:\n|(["\\$`]))', r"\1", _expand(text, table)))
+        else:
+            pieces.append(re.sub(r"\\(?:\n|(.))", r"\1", _expand(text, table), flags=re.S))
+    return "".join(pieces)
+
+
+def _assign(table: dict, name: str, plus: str, parts, opens_group: bool) -> None:
+    """Set `name` in `table` to the value `parts` read as. A value that holds `$` or a backtick, or that is
+    cut by a `(` or backtick (an array, `$(...)`), is not known: the name forgets its old value too."""
+    value = _value_of(parts, table)
+    if "$" in value or "`" in value or opens_group:
+        table.pop(name, None)
+    elif plus:
+        if name in table:
+            table[name] += value
+    else:
+        table[name] = value
+
+
+def _heredoc_at(parts) -> int:
+    """Offset in the word of an unquoted `<<` that opens a heredoc (not `<<<`), or -1."""
+    offset = 0
+    for kind, text, _marks in parts:
+        if kind != "p":
+            offset += len(text) + 2   # the quotes around the span
+            continue
+        found = re.search(r"(?<!<)<<(?!<)", text)
+        if found:
+            return offset + found.start()
+        offset += len(text)
+    return -1
+
+
+def _heredoc_end(cmd: str, start: int, delimiter: str):
+    """(index where the delimiter line starts, index where its text ends) for a heredoc body that
+    starts at `start`; both are the end of `cmd` when the delimiter never comes."""
+    n, pos = len(cmd), start
+    while pos < n:
+        eol = cmd.find("\n", pos)
+        eol = n if eol < 0 else eol
+        if cmd[pos:eol].strip() == delimiter:
+            return pos, eol
+        pos = eol + 1
+    return n, n
 
 
 def _resolve_vars(cmd: str) -> str:
     """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command. The text keeps its
     type, so a script that pwsh runs (PowerShellScript) is still read by PowerShell's rules after."""
-    table = {"HOME": "~"}
+    return type(cmd)(_resolve_into(cmd, {"HOME": "~"})[0])
 
-    def use(m):
-        return table.get(m.group("x") or m.group("y"), m.group(0))
 
-    def step(m):
-        if m.group("u"):
-            table.pop(m.group("u"), None)
-        name, raw = (m.group("n"), m.group("v")) if m.group("n") else (m.group("pn"), m.group("pv"))
-        if name:
-            value = raw if raw.startswith("'") else _VAR_TOKEN.sub(step, raw)
-            value = value.strip("'\"")
-            if "$" in value or "`" in value:
-                table.pop(name, None)  # not resolvable: forget any older value too
-            else:
-                table[name] = value
-            return m.group(0)
-        return use(m) if (m.group("x") or m.group("y")) else m.group(0)
-
-    return type(cmd)(_VAR_TOKEN.sub(step, cmd))
+def _resolve_into(cmd: str, table: dict, depth: int = 0):
+    """(`cmd` with each `$VAR` read, the table after it): `_resolve_vars` from a given table. In PowerShell
+    text a smart quote is a quote (`_straight`): the words are read on the text with ASCII quotes, and
+    every piece of the result is cut from the text as written, so the smart quotes stay in it."""
+    src = cmd
+    cmd = str(_straight(src))
+    # stack: (table to restore where the group ends, glued to a `$`, closer, the outer command's child names)
+    out, stack = [], []
+    n, i = len(cmd), 0
+    at_start, before, mode = True, None, ""   # before: the table from before this command's assignments
+    operand = ""   # "target": the next word names a redirect's file; "name": a function's name
+    # (delimiter, quoted?, the child's names) of the heredocs whose bodies start after the next newline
+    heredocs = []
+    child = {}   # names this command's prefix or `env NAME=v` words give its child: value, or None if unknown
+    while i < n:
+        c = cmd[i]
+        if c in " \t\r":
+            out.append(c)
+            i += 1
+        elif c == "\\" and cmd.startswith("\n", i + 1):   # a line join is a blank: the command goes on
+            out.append("\\\n")
+            i += 2
+        elif c == "&" and (cmd[i - 1:i] in ("<", ">") or cmd.startswith(">", i + 1)):
+            out.append(c)   # `>&1`, `<&-` and `&>f` are redirects, not a background job
+            i += 1
+        elif c in ";&|\n":
+            out.append(c)
+            i += 1
+            at_start, before, mode, operand, child = True, None, "", "", {}
+            while c == "\n" and heredocs:   # a body is read in itself: its quotes never pair outward
+                delimiter, quoted, names = heredocs.pop(0)
+                body_end, line_end = _heredoc_end(cmd, i, delimiter)
+                if body_end == n:   # no closer: the rest is read on here as code, and nests nothing
+                    heredocs.clear()
+                    break
+                scope = dict(table)
+                for name, value in names.items():
+                    if value is None and quoted:
+                        scope.pop(name, None)
+                    elif value is not None and (quoted or name not in table):
+                        scope[name] = value   # the child expands a verbatim body; the parent, any other
+                out.append(_resolve_into(_like(src, src[i:body_end]), scope, depth + 1)[0])
+                out.append(src[body_end:line_end])
+                i = line_end
+                if heredocs and cmd.startswith("\n", i):
+                    out.append("\n")
+                    i += 1
+        elif c == "(" or (c == "`" and not (stack and stack[-1][2] == "`")):
+            stack.append((dict(table), c == "`" or cmd[i - 1:i] == "$", ")" if c == "(" else "`", child))
+            out.append(c)
+            i += 1
+            at_start, before, mode, operand, child = True, None, "", "", {}
+        elif c == ")" or c == "`":   # `)` ends the nearest `(`; a second backtick ends the open one
+            glued, outer = False, {}
+            for level in range(len(stack) - 1, -1, -1):
+                if stack[level][2] == (")" if c == ")" else "`"):
+                    table, glued, _closer, outer = stack[level]
+                    del stack[level:]
+                    break
+            out.append(c)
+            i += 1
+            at_start, before, mode, operand = not glued, None, "", ""
+            child = outer if glued else {}   # `$(...)` ends inside a word of the outer command
+        elif c == "#":   # a comment: its text is read for uses and holds no assignment
+            j = cmd.find("\n", i)
+            j = n if j < 0 else j
+            out.append(_expand(src[i:j], table))
+            i = j
+        else:
+            end, parts = _read_word(cmd, i, src)
+            word = src[i:end]
+            if operand:   # a redirect's file or a function's name: a word, never a command or assignment
+                text, table = _rebuild(parts, table, False, depth, operand == "target")
+                out.append(text)
+                operand = ""
+                i = end
+                continue
+            at = _heredoc_at(parts)
+            if at >= 0 and depth < _NEST_LIMIT:   # past the cap a body is read on here as code
+                header = HEREDOC_HEADER.match(cmd, i + at)
+                if header:   # any quote or backslash in the delimiter makes the body verbatim
+                    heredocs.append((heredoc_delimiter(header.group(1))[1],
+                                     any(mark in header.group(1) for mark in "'\"\\"), child))
+            redirect = _REDIRECT_OP.match(word)
+            if redirect:   # a redirect is no command: it leaves the command's start as it was
+                text, table = _rebuild(parts, table, False, depth, True)
+                out.append(text)
+                if redirect.end() == len(word) or re.fullmatch(r"\d*<<<?-?", word):
+                    operand = "target"
+                i = end
+                continue
+            head = _ASSIGN_WORD.match(parts[0][1]) if parts and parts[0][0] == "p" else None
+            if head and (at_start or mode == "declare"):
+                if at_start and before is None:
+                    before = dict(table)
+                rest = parts[0][1][head.end():]
+                _assign(table, head.group(1), head.group(2), ([("p", rest, "")] if rest else []) + parts[1:],
+                        cmd.startswith(("(", "`"), end))
+                out.append(word)
+                i = end
+                continue
+            if head and mode == "env":   # `env NAME=v cmd`: the value reaches the child only
+                scope = dict(table)
+                scope.update((name, value) for name, value in child.items() if value is not None)
+                rest = parts[0][1][head.end():]
+                _assign(scope, head.group(1), head.group(2), ([("p", rest, "")] if rest else []) + parts[1:],
+                        cmd.startswith(("(", "`"), end))
+                child[head.group(1)] = scope.get(head.group(1))
+                out.append(word)
+                i = end
+                continue
+            ps = _PS_ASSIGN.match(parts[0][1]) if at_start and parts and parts[0][0] == "p" else None
+            if ps:   # PowerShell `$D=v`, `$D='v'` or `$D= v` at a statement's start
+                rest = parts[0][1][ps.end():]
+                vend, vparts = end, ([("p", rest, "")] if rest else []) + parts[1:]
+                if not vparts:   # `$D= v`: the value is the next word
+                    vend, vparts = _read_word(cmd, _BLANKS.match(cmd, end).end(), src)
+                for held in [table] + [level[0] for level in stack]:
+                    _assign(held, ps.group(1), "", vparts, cmd.startswith(("(", "`"), vend))
+                out.append(src[i:vend])
+                i = vend
+                continue
+            if head is None and len(parts) == 1 and parts[0][0] == "p" and _PS_NAME.fullmatch(parts[0][1]):
+                eq = _PS_EQUALS.match(cmd, end)
+                if eq:   # PowerShell `$D = v`. A paren is no scope there, so every level keeps it.
+                    vend, vparts = _read_word(cmd, eq.end(), src)
+                    for held in [table] + [level[0] for level in stack]:
+                        _assign(held, parts[0][1][1:], "", vparts, cmd.startswith(("(", "`"), vend))
+                    out.append(src[i:vend])
+                    i = vend
+                    continue
+            if at_start:
+                if word in _COMMAND_STARTERS:
+                    mode = "eval" if word == "eval" else mode
+                    operand = "name" if word == "function" else operand
+                    out.append(word)
+                    i = end
+                    continue
+                if before is not None:   # a prefix assignment reaches only its own command and its child
+                    child.update((name, table.get(name)) for name in set(table) | set(before)
+                                 if table.get(name) != before.get(name))
+                    table, before = before, None
+                at_start = False
+                mode = ("declare" if word in _DECLARERS else "unset" if word == "unset"
+                        else "env" if word.rsplit("/", 1)[-1] == "env" else mode if mode == "eval" else "")
+            elif mode == "unset" and re.fullmatch(r"\w+", word):
+                table.pop(word, None)
+            elif mode == "env-argument":
+                mode = "env"
+            elif mode == "env":   # an option goes on; the first other word is the command
+                mode = "env-argument" if word in _ENV_ARGUMENT_OPTIONS else "env" if word.startswith("-") else ""
+            text, table = _rebuild(parts, table, mode == "eval", depth)
+            out.append(text)
+            i = end
+    return "".join(out), table
 
 
 # LOOPS AND BRACES. `for NAME in WORDS; do ... "$NAME" ...; done` names the words NAME takes, and a brace list
