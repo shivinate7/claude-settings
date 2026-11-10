@@ -3,18 +3,20 @@
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history.
-Last rewrite: 2026-11-10 14:20 CST.
+Last rewrite: 2026-11-10 14:27 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
 ## The flow, in order
 
-1. **Drain.** In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we speak").
-   The freeze holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
+1. **Drain.** In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we speak"). The freeze holds
+   (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
 2. **Land this plan on main.** One prose PR holds every settled ruling below in the owner's words with
    its time. It is the first PR after the drain. Open: an express pass for prose (stage 5) would make
    this PR fast; until then it takes the normal docs-only route.
 3. **Change how every lane flows,** before any other lane starts. Each is one lane, in this order:
+   0. One glossary of roles, the same on local and cloud (rulings G1-G3; step
+      glossary-same-local-cloud). First because every later brief uses its terms.
    1. Checks that can refuse a merge run in CI (ruling R2).
    2. Time limits end hangs only (ruling R3). R2 and R3 together stop a green batch from being
       refused at merge.
@@ -50,7 +52,23 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   Replaces: merge/merge.py LINT_SECONDS 1200, lint/check_debt_retire.py TIMEOUT 600,
   hooks/mutate_guard.py and janitor/mutate_sweep.py 1200, lint/check_python_floor.py 300.
   Home: new decision time-limits-end-hangs-only; decision ci-job-caps rewritten to match.
-  Open: the silence window comes from measured runs; its value is not chosen.
+  Open: the silence window comes from measured runs; its value is not chosen. Four points from triage's
+  record-writer (coordinator 14:18 CST) wait on the owner.
+- **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
+  arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
+  The owner and an arbiter make grants and rulings. An arbiter's is marked as the arbiter's, ranks
+  below the owner's, and the owner can overturn it. Today an arbiter makes rulings only
+  (decision session-tiers, Arbiter); this adds grants. Home: decision session-tiers, GLOSSARY.md.
+- **G2. Session roles, the same on local and cloud: coordinator, triage, batch runner, lane, arbiter.**
+  Owner 14:23 CST Nov 10: "coordinator approved", "batch runner yes agreed", "lane yes agreed but solo
+  should be able to merge ideally like it can be a one stop shop sometimes", "this collapse feels good".
+  Solo, one lane and lane session collapse into one role, lane. A lane the owner starts, with no
+  coordinator above it, may merge its own PR under a merge grant. The terms shape, tier-as-separate-axis
+  and orchestrator drop. Home: decision session-tiers, decision lanes-start-as-agents, GLOSSARY.md.
+- **G3. The batch runner archives lanes.** Already ruled (owner 2026-11-06 11:38 CST, decision
+  session-tiers: "A is fine the batch runner keeps archiving more automatically"). Owner 14:23 CST
+  Nov 10 asked who and why; the coordinator also needs a part. Open: who archives a lane that never
+  merges (dropped, closed or abandoned).
 
 ## Directions, not yet settled
 
@@ -67,10 +85,25 @@ Judged by two priorities, in order: accurate, then as fast as possible without l
   the entirety of prose to be fast to review i'd be open to considering that". One idea: a PR that only
   adds owner words with their time is checked by machine against the inbox and merges without review.
 
+## Glossary points still open (topic 1)
+
+- Owner 14:23 CST: "idk what fix check even is; idk what review record is; inbox either". Proposed plain
+  names: fix check -> fix review; review record -> review log; the per-session inbox file -> feedback log
+  (the mailbox keeps its name).
+- The "Round N of 3" marker names the fix after round N-1 by the round it leads into. Proposed: number a
+  fix by the review it answers.
+- Page writer: three records define it three ways ("where triage runs", "a project with a triage
+  thread", "when no triage lives"). Proposed: triage always writes the page.
+- Tier proof: a session proves its role only by cloud tags (get_session); a local session has none.
+  Proposed: one roster both read, the Standing sessions list on the roadmap branch's CLAUDE.md.
+- Other local/cloud splits (15 found): two tests for "cloud" in the code; start_session vs
+  create_session judged by different guards; send_message vs SendMessage with the mailbox bridge off;
+  merge role file cloud-only; load brake local-only.
+
 ## Open topics, not yet discussed
 
-- How many lanes start: the owner said in the same answer "the limit isn't the problem, it's how the
-  limit batches that's the problem". Covered by stage 3.4 for now.
+- How many lanes start: the owner said in the same answer "the limit isn't the problem, it's how the limit
+  batches that's the problem". Covered by stage 3.4 for now.
 - Lane lint runs three times per lane (hand-off, join, batch head) against
   roles-each-layer-proves-once.
 - Guards with recorded false alarms: report guard 15, frozen-path 6, ask-alone 4, question-form 4,
