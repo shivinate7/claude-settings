@@ -956,10 +956,10 @@ class DoneFormatAndCiteTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_allowed(line + ITEM_DONE)
 
-    def test_item_cite_red_line_label_before_item_blocks(self):
-        # Catches: the label "the line:" before an item number passes as if it were a gloss. The word "line" is no
-        # gloss, so the id is refused as a bare id. Red on old code: no item rule exists yet.
-        self.assert_blocked("the line: item 12." + ITEM_DONE, "'item 12' is a record id")
+    def test_item_cite_red_line_word_away_from_item_blocks(self):
+        # Catches: the exemption for "line item" reaches past its own two words, so "a line, item 12." passes. Only
+        # the word right before "item" is exempt. Red on old code: no item rule exists yet.
+        self.assert_blocked("a line, item 12." + ITEM_DONE, "'item 12' is a record id")
 
     def test_item_cite_allowed_line_item_is_not_a_cite(self):
         # Catches: "line item 12", a PO or budget line, is read as a waiting-page item id. Green on old code.
