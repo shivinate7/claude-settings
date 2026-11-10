@@ -11,12 +11,12 @@ Owner ruling, 2026-11-10 11:06 CST, verbatim: "widen". Lane page-save-reaches-au
 A relayed act has the owner's grant only when all hold:
 
 - The receiving session fetched `answers/<id>` and `items/<id>` itself, with ArtifactData, from the registered waiting page, into an empty folder that `page_grant.py --new-fetch` made for that check. The checker proves it: the folder's stamp sits beside it, a check uses the stamp up, the folder holds only those two files, and neither is older than the stamp. A reused folder (a withdrawn answer stays in it, as a re-fetch of an absent doc saves no file) or a folder with no stamp is not counted. A check uses the stamp up as its first step, so every verdict uses the folder up. Measured 2026-11-06 11:45 CST (the fetched file's mtime): one `ArtifactData get` with `out_dir` wrote only `items/<id>.json`, timed after the stamp.
-- `skills/waiting-page/page_grant.py` printed `counted` for that item, run with `--pick` equal to the page's choice.
+- `skills/waiting-page/page_grant.py` printed `counted` for that item, run with `--pick` equal to the page's choice. The line ends with `label=<label>`: the picked option's label as one JSON string, a JSON list for a multi item, `null` for an overturn. The receiver reads the act from that label, not from the page.
 - The item is open. An arbiter overturn is the one exception.
 - The act is the one the picked option's label on the page names. Nothing wider.
-- One settings change counts as that act only when the label names the settings file and the entry (key) it changes.
+- One settings change counts as that act only when the label names `settings.json` and the entry by its exact title or key. One entry per grant.
 
-The receiver quotes the page, the item id and n, and the choice and `at`, from the `counted` line.
+The receiver quotes the page, the item id and n, the choice, `at` and the label, from the `counted` line.
 
 ## What never counts
 
@@ -31,8 +31,13 @@ The receiver quotes the page, the item id and n, and the choice and `at`, from t
 - A fetch folder that a check used before, or that `--new-fetch` did not make.
 - A change to permissions.
 - A settings change whose label does not name the file and entry.
+- A change to hooks.
+- A change to env.
+- A change to another `autoMode.allow` entry.
 - A change to the Relayed Grant entry itself. The entry may not widen itself.
 - Overrides.
+
+Never covers wins over Covers. A label that names one of these acts grants nothing.
 
 ## What a relay message carries
 
@@ -59,7 +64,7 @@ Auto mode trusts only words typed in the session's own chat. A relay is text ano
 
 ## Auto-mode entry
 
-`settings.json` `autoMode.allow` holds the "Relayed Grant:" entry, the owner's own PR #1293 (item 267). It keeps `$defaults`. No row goes into the "Current entries" table of decision auto-mode-owner-acts. `hooks/test_auto_mode_allow.py` pins it. It checks one entry. The entry quotes `page_grant.COMMAND` and `page_grant.COUNTED_LINE` in full, read from the checker. Its Never covers names each act in `RELAYED_REFUSED`. Two of them are "a settings change whose label does not name the file and entry" and "a change to the Relayed Grant entry itself". They replace the old blanket "settings". Its Covers text names "one settings change" and requires the label to name the settings file and entry. Whether the classifier reads the `counted` line is unmeasured (Gaps above).
+`settings.json` `autoMode.allow` holds the "Relayed Grant:" entry, the owner's own PR #1293 (item 267). It keeps `$defaults`. No row goes into the "Current entries" table of decision auto-mode-owner-acts. `hooks/test_auto_mode_allow.py` pins it. It checks one entry. The entry quotes `page_grant.COMMAND` and `page_grant.COUNTED_LINE` in full, read from the checker. Its Never covers names each act in `RELAYED_REFUSED`. They include "a settings change whose label does not name the file and entry", "a change to hooks", "a change to env", "a change to another autoMode.allow entry" and "a change to the Relayed Grant entry itself". Its Covers text names "one settings change" and requires the label to name `settings.json` and the entry by its exact title or key, one entry per grant. The entry says Never covers wins over Covers. Whether the classifier reads the `counted` line is unmeasured (Gaps above).
 
 ## Check and cost
 
