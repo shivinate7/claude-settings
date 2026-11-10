@@ -42,9 +42,16 @@ this repo (the `compliance-check` skill runs it). A row checked by hand is read 
 
 ## Folding the iPhone Duo simulator
 
-`simctl` cannot fold a simulator, and this Xcode has no Simulator app. Use the `hinge` command
-(artemnovichkov/hinge at commit `abd539d6`, at `~/.local/bin/hinge`, owner choice 2026-10-25). It
-opens no window. Never drive Device Hub to fold.
+`simctl` cannot fold a simulator, and this Xcode has no Simulator app. Fold with
+`bin/duo-fold <udid> <folded|open>`. It folds with `hinge` (artemnovichkov/hinge, owner choice
+2026-10-25), reads the angle back, and refuses unless the angle is within 0.5 of 0 (folded) or 180
+(open). Exit 0 passes. Exit 1 is a refusal, with a `duo-fold:` line on stderr. Exit 64 means wrong
+arguments. A hinge move that exits non-zero is noted on stderr, and the angle is still read. No
+retry. The tool runs only on an arm64 Mac; on any other machine it exits 1 before any hinge call.
+With `HINGE` unset, it fetches hinge v0.3.0 at its pinned commit,
+`afb8f0bd277cb12187f0844a79542cbac35e7385`. The tool's pin is the one to use.
+`~/.local/bin/hinge` (commit `abd539d6`) is for hand use. It opens no window. Never drive Device
+Hub to fold.
 
 - `hinge -d <udid> open|close|half|<degrees>|get|posture`. Run it outside the sandbox. When
   `-t 6` times out, read `posture`: the angle may be set already.
@@ -64,7 +71,7 @@ Every session on this Mac shares its builds, its simulators and its disk. Each r
 - **One build at a time** (the one-build rule, which widens degen `one-xcode-build-at-a-time` to every session on the Mac, at the coordinator's request on 2026-11-03). Each session on this Mac runs at most one Xcode build or test at a time, across all its agents. An Xcode build, `swift test` and `make native-check` each count. Load average does not limit a build (owner, 2026-11-02 21:28 CST). The owner then dropped the CPU and memory checks (owner, 2026-11-02 21:54 and 21:55 CST). A simulator crash means the Mac is overloaded: slow down and queue, and never retry at once (owner, 2026-10-27 19:33 CDT).
 - **Leased simulators** (the lease rule, degen `shared-sim-lease`). No repo creates a simulator. Each session leases a phone simulator through `bin/sim-lease`, the one home of the queue and the lease for all sessions on the Mac (owner, 2026-11-02 13:49 CST; decision `sim-lease-tool`). The Mac sim gatekeeper session reads `sim-lease status` and need not stay awake.
 - **Phone simulators.** Claude may use three (home's iPhone simulators rule: owner, 2026-10-11; widened 2026-10-14, 2026-10-26 and 2026-10-29). Optimize every app for the Duo and the 18 Pro, Duo first (owner, 2026-10-26).
-  - Slot 1, Duo 1: `3553660D-315C-4B9C-8614-039D7A5B637E`, iOS 27.1 (owner, 2026-10-11). The UDID is from owner, 2026-11-02 14:47 CST. Fold it with `hinge`, as above.
+  - Slot 1, Duo 1: `3553660D-315C-4B9C-8614-039D7A5B637E`, iOS 27.1 (owner, 2026-10-11). The UDID is from owner, 2026-11-02 14:47 CST. Fold it with `bin/duo-fold`, as above.
   - Slot 2, Duo 2: `801F55F4-F666-4C6D-AB04-7DF77C953974`.
   - iPhone 18 Pro: `86F9268A-A905-4B82-9BC0-D7EBB682D341`, iOS 27.0, which replaced the deleted 8787FE1C (owner, 2026-11-07 19:16 CST).
 - **Boot bars** (degen `shared-sim-lease`). One phone simulator boots at a time (owner, 2026-11-02 13:51 CST). The one exception is the two Duos, which may run together when the load allows (owner, 2026-11-02 14:23 CST), one per slot (Mac sim gatekeeper text). The next in line takes the first slot to become free. A phone simulator boots only while the 5-minute load is under 100. Slot 2 boots only while the 5-minute load is under 60 and slot 1 is in use (owner, 2026-11-02 14:28 CST). Boots go one at a time, and each needs a 1-minute load under 60 (Mac sim gatekeeper, 2026-11-02 14:34 CST). The 18 Pro never runs beside a Duo (owner, 2026-11-02 13:51 CST). `bin/sim-test`, the one simulator test script, boots it only with `--device pro`, only when no iPhone is booted, and only after `sim-lease take --device pro` grants it. `bin/sim-lease` enforces the load bars and the slot rules on each grant.
