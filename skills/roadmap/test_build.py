@@ -686,18 +686,6 @@ class UpkeepFixture(Fixture):
             prs[sid] = pr
         return prs
 
-    def no_trailer_on_main(self):
-        """Scope check: main holds no Step trailer, so a landed mark in the case must come from a landedPulls row."""
-        trailers = git(self.repo, "log", "main", "--format=%(trailers:key=Step,valueonly)").strip()
-        self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
-
-
-class LandedPulls(UpkeepFixture):
-    """Landed marks from the live file's landedPulls rows (closed or merged lane pulls). A row marks its step when its
-    branch is the step or lane/<step>, the step is open, and the row is merged or its head is an ancestor of main.
-    The cases run through build.main, which ignores the key today, so each red is a missing landed entry or a
-    missing printed line. A negative case shares its live file with a row that marks, so an empty result cannot pass."""
-
     def is_ancestor(self, sha, ref):
         done = subprocess.run(["git", "-C", str(self.repo), "merge-base", "--is-ancestor", sha, ref], capture_output=True)
         return done.returncode == 0
@@ -712,6 +700,18 @@ class LandedPulls(UpkeepFixture):
     def off_main(self):
         """The record branch's tip. Its history shares nothing with main, so main never reaches it."""
         return git(self.repo, "rev-parse", "roadmap").strip()
+
+    def no_trailer_on_main(self):
+        """Scope check: main holds no Step trailer, so a landed mark in the case must come from a landedPulls row."""
+        trailers = git(self.repo, "log", "main", "--format=%(trailers:key=Step,valueonly)").strip()
+        self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
+
+
+class LandedPulls(UpkeepFixture):
+    """Landed marks from the live file's landedPulls rows (closed or merged lane pulls). A row marks its step when its
+    branch is the step or lane/<step>, the step is open, and the row is merged or its head is an ancestor of main.
+    The cases run through build.main, which ignores the key today, so each red is a missing landed entry or a
+    missing printed line. A negative case shares its live file with a row that marks, so an empty result cannot pass."""
 
     def landed_build(self):
         """(page, out) of a build from main that reads the live file. A doing step with no lane exits 1."""
@@ -2691,6 +2691,53 @@ class WaitOnClosedPull(UpkeepFixture):
         self.assert_control_listed(out)
         self.assertNotIn("fix-check-chain (#46)", self.listed(out),
                          "a note that says a lane continued after #46 closed is listed as a wait on #46")
+
+    def test_history_after_a_merged_pull_is_not_a_wait(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("fix-check-chain", note="The fail-record-ancestor-head lane continues here after #46 merged.")
+        self.publish(landed=[self.closed(41), self.closed(46)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("fix-check-chain (#46)", self.listed(out),
+                         "a note that says a lane continued after #46 merged is listed as a wait on #46")
+
+    def test_wait_phrases_until_when_and_wait_on_are_listed_bare_and_with_PR(self):
+        # The PR form is the one the regex took later; each bare form is the control at every sha that has the row.
+        waits = (("until", "Held until #61 lands."), ("until PR", "Held until PR #62 lands."),
+                 ("when", "Ships when #63 lands."), ("when PR", "Ships when PR #64 lands."),
+                 ("after", "Ships after #65 lands."), ("once", "Runs once #66 lands."),
+                 ("wait on", "Wait on #67 to land."), ("wait on PR", "Wait on PR #68 to land."))
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        steps = {}
+        for n, (phrase, note) in enumerate(waits, start=61):
+            sid = "w-" + phrase.replace(" ", "-")
+            self.commit_step(sid, note=note)
+            steps[phrase] = (sid, n)
+        self.publish(landed=[self.closed(41)] + [self.closed(n) for _, n in steps.values()])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        for phrase, (sid, n) in steps.items():
+            with self.subTest(phrase=phrase):
+                self.assertIn("%s (#%d)" % (sid, n), self.listed(out),
+                              "the wait phrase %r on the closed unmerged #%d is not listed" % (phrase, n))
+
+    def test_closed_unmerged_pull_whose_head_is_on_main_is_not_listed(self):
+        # The lane's work reached main, though GitHub shows its pull closed and unmerged. The control's head is off main.
+        self.commit_step("c-landed", note="Waits on #47 to land.")
+        self.commit_step("c-off", note="Waits on #48 to land.")
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        off = self.off_main()
+        self.assertFalse(self.is_ancestor(off, "main"), "scope: the control's head must be off main")
+        behind = self.behind_main()
+        self.assertTrue(self.is_ancestor(behind, "main"), "scope: the head of #47 must be an ancestor of main")
+        self.no_trailer_on_main()
+        self.publish(landed=[self.closed(41), self.pull_row(47, "lane-47", head=behind, merged=False),
+                             self.pull_row(48, "lane-48", head=off, merged=False)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertIn("c-off (#48)", self.listed(out), "a closed unmerged #48 whose head is off main is not listed as a wait")
+        self.assertNotIn("c-landed (#47)", self.listed(out),
+                         "a closed unmerged #47 whose head is on main is listed as a wait, though its work landed")
 
 
 class ReadyAndDraftRows(UpkeepFixture):
