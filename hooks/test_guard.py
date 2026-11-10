@@ -3650,8 +3650,7 @@ sh("per-file allow: an ANSI-C commit message naming git push --force as text all
    VCS + " commit -m $'release git push --force notes'", "allow", cwd=GITWT)
 # THE FORM THAT ALLOWS, PINNED. A commit message whose quote never closes is a bash syntax error, so the
 # shell runs nothing. push_text blanks the open quote's tail (_push_scan), so the quoted `git push --force`
-# is text, not a push, and the call reads as a plain commit. Re-pointed from ask by coordinator ruling
-# 2026-11-09 20:44 CST.
+# is text, not a push, and the call reads as a plain commit.
 sh("per-file allow: a commit message whose quote never closes names git push --force, allows",
    VCS + " commit -m \"release git push --force notes", "allow", cwd=GITWT)
 
