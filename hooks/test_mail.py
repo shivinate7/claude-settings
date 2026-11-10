@@ -356,9 +356,10 @@ def snapshot(folder):
     return tree
 
 
-def run_cli(machine, *args):
+def run_cli(machine, *args, input_text=None):
+    """input_text goes to the child's stdin, encoded as UTF-8 (the encoding argument below)."""
     return subprocess.run([sys.executable, MAIL_CLI, *args], env=machine.env,
-                          cwd=machine.checkout, capture_output=True, text=True,
+                          cwd=machine.checkout, input=input_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=60)
 
 
@@ -988,6 +989,83 @@ class AgeUnknown(MailCase):
         listed = listed_with(lines, mid)
         self.assertEqual(len(listed), 1, "a timed-out git log hid the message from the turn start: %r" % lines)
         self.assertIn("age unknown", listed[0], "a timed-out git log did not print age unknown: %r" % listed[0])
+
+
+MARKER = "ascii-ok: flow → kept"  # U+2192 has no cp1252 code point
+ARROW = "→"
+BODY = "Body marker: %s\n" % MARKER  # the text MailCase.body writes for this marker
+
+
+class Cp1252Pipe(MailCase):
+    """Windows runs bin/mail on a cp1252 pipe (PYTHONIOENCODING=cp1252). A body with an arrow must be stored as
+    UTF-8 intact, and `mail read` must return it unchanged."""
+
+    def pair(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a")
+        receiver = self.machine("b", store, session="sess-b")
+        for machine in (sender, receiver):
+            machine.env["PYTHONIOENCODING"] = "cp1252"
+            self.assert_cp1252_pipe(machine)
+        return store, sender, receiver
+
+    def assert_cp1252_pipe(self, machine):
+        """Scope before subject: the child runs on a cp1252 stdin and stdout, so the cases test that pipe."""
+        probe = subprocess.run([sys.executable, "-c", "import sys; print(sys.stdin.encoding, sys.stdout.encoding)"],
+                               env=machine.env, capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(probe.stdout.split(), ["cp1252", "cp1252"],
+                         "control: the child does not run on a cp1252 pipe: %r" % probe.stdout)
+
+    def test_stdin_body_with_arrow_is_stored_intact_and_reads_back_unchanged(self):
+        store, sender, receiver = self.pair()
+        sent = run_cli(sender, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", "-",
+                       input_text=BODY)
+        self.assertEqual(sent.returncode, 0,
+                         "send from stdin under cp1252 exited %d: %s" % (sent.returncode, combined(sent)))
+        landed = store.files("mail/cloud/sess-b/")
+        self.assertEqual(len(landed), 1, "one send should land one message file: %r" % landed)
+        mid = message_id(landed[0])
+        stored = store.read(landed[0])
+        self.assertIn("ascii-ok", stored, "control: the stored message lacks the ASCII marker: %r" % stored)
+        self.assertIn(ARROW, stored, "send from stdin under cp1252 stored the body garbled, not as UTF-8: %r" % stored)
+        read = run_cli(receiver, "read", mid)
+        self.assertEqual(read.returncode, 0, "mail read under cp1252 exited %d: %s" % (read.returncode, combined(read)))
+        self.assertIn(BODY, read.stdout, "mail read under cp1252 did not return the body unchanged: %r" % read.stdout)
+
+    def test_body_file_with_arrow_reads_back_unchanged_under_cp1252(self):
+        store, sender, receiver = self.pair()
+        sent = run_cli(sender, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", self.body(MARKER))
+        self.assertEqual(sent.returncode, 0,
+                         "send from --body-file under cp1252 exited %d: %s" % (sent.returncode, combined(sent)))
+        landed = store.files("mail/cloud/sess-b/")
+        self.assertEqual(len(landed), 1, "one send should land one message file: %r" % landed)
+        mid = message_id(landed[0])
+        stored = store.read(landed[0])
+        self.assertIn(ARROW, stored, "control: the --body-file send did not store the arrow: %r" % stored)
+        read = run_cli(receiver, "read", mid)
+        self.assertEqual(read.returncode, 0,
+                         "mail read under cp1252 of a --body-file message exited %d, not 0: %s"
+                         % (read.returncode, combined(read)))
+        self.assertIn(BODY, read.stdout, "mail read under cp1252 did not return the body unchanged: %r" % read.stdout)
+
+
+class MailboxOff(MailCase):
+    """With MAILBOX_REPO unset the mailbox is off: a turn prints nothing, and `mail read` exits 2 rather than
+    reading the store as empty."""
+
+    def test_unset_mailbox_repo_gives_no_turn_lines_and_read_exits_2(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0123456789ab", "request", "cloud/sess-a", "Body marker: off-switch")
+        receiver = self.machine("b", store, session="sess-b")
+        control = turn(receiver)
+        self.assertEqual(len(listed_with(control, "0123456789ab")), 1,
+                         "control: with MAILBOX_REPO set the turn does not list the seeded message: %r" % control)
+        del receiver.env["MAILBOX_REPO"]
+        lines = turn(receiver)
+        self.assertEqual(lines, [], "MAILBOX_REPO unset: a turn start printed lines: %r" % lines)
+        read = run_cli(receiver, "read", "0123456789ab")
+        self.assertEqual(read.returncode, 2,
+                         "MAILBOX_REPO unset: mail read exited %d, not 2: %s" % (read.returncode, combined(read)))
 
 
 if __name__ == "__main__":
