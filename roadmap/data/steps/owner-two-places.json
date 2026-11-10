@@ -1,0 +1,12 @@
+{
+ "title": "In a larger build the owner talks in two places: the page for anything waiting on him, the coordinator's chat for anything new",
+ "phase": "now",
+ "status": "todo",
+ "order": 1039,
+ "owner": "triage",
+ "why": "Owner G15, 16:46 CST Nov 10 (relayed by the retrospective session): \"Yes that's approved\".",
+ "note": "Never a lane directly; side sessions hold rules talk only. Home: decision session-tiers; skill waiting-page. Plan stage 3.0, commit d467fbe4c. Open directions in the same message, not rulings: D2 \"the process of what's being woken, and how to pass words along / relays needs to be vastly improved as the current process is broken/flawed\"; D3 \"they do still type a whole fuckton of a lot, and that is tbd on whether we should have some sorta rules on how much a lane 'chirps'\".",
+ "updatedAt": "2026-11-10T16:56:00-06:00",
+ "lane": "",
+ "blockedBy": []
+}

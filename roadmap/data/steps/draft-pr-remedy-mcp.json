@@ -1,0 +1,12 @@
+{
+ "title": "The draft-PR refusal names the GitHub MCP form (draft: true), not the gh CLI draft flag",
+ "phase": "now",
+ "status": "todo",
+ "order": 1041,
+ "owner": "triage",
+ "why": "Coordinator 16:52 CST Nov 10, from lane guard-matcher-github-mcp (#2571, batch 75): DRAFT_PR_REASON in hooks/guard_merge.py names the gh CLI create command with its draft flag, but the cloud refuses gh writes; after #2571 lands this remedy shows on every non-draft MCP create.",
+ "note": "A debt once #2571 lands. Note from the same lane: the matcher test's scan skips other guard_*.py files and misses a tool compared to a constant until the constant joins GUARD_NAMES or MERGE_NAMES.",
+ "updatedAt": "2026-11-10T16:56:00-06:00",
+ "lane": "",
+ "blockedBy": []
+}
