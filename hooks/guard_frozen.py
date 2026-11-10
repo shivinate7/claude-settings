@@ -9,9 +9,10 @@ import re
 
 import guard_core
 from guard_core import (
-    LOOP_KEYWORDS, REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally,
-    _walk_wrappers, basename, checkout_root_by_stat, dir_before_segment, is_powershell, norm,
-    path_is_inside, resolve_command, segment_tokens, split_segments,
+    LOOP_KEYWORDS, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, PowerShellScript,
+    _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, _walk_wrappers, basename,
+    checkout_root_by_stat, dir_before_segment, is_powershell, nested_script, norm, path_is_inside,
+    resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words, _substitutions
 
@@ -320,7 +321,8 @@ _VAR_TOKEN = re.compile(
 
 
 def _resolve_vars(cmd: str) -> str:
-    """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command."""
+    """Read each `$VAR` or `${VAR}` as the value assigned earlier in the command. The text keeps its
+    type, so a script that pwsh runs (PowerShellScript) is still read by PowerShell's rules after."""
     table = {"HOME": "~"}
 
     def use(m):
@@ -340,7 +342,7 @@ def _resolve_vars(cmd: str) -> str:
             return m.group(0)
         return use(m) if (m.group("x") or m.group("y")) else m.group(0)
 
-    return _VAR_TOKEN.sub(step, cmd)
+    return type(cmd)(_VAR_TOKEN.sub(step, cmd))
 
 
 # DATA IS NOT A WRITE. A command that only names the cap key or a frozen path as text is not asked
@@ -357,7 +359,8 @@ def _resolve_vars(cmd: str) -> str:
 # FAIL CLOSED. No text is data when the command holds, outside single quotes, a backtick, `$(`,
 # `$'`, `$"`, `<(`, `>(`, a backslash before a quote, an unmated quote, a `<#` (a PowerShell block
 # comment, which hides its quotes), or anywhere a smart quote U+2018 to U+201E (PowerShell reads it
-# as a quote, even inside single quotes): the shell may then read its quotes differently from the
+# as a quote, even inside single quotes, so text with one is never data; a word that holds one is read
+# with it as a quote, `_unquoted`): the shell may then read its quotes differently from the
 # scanner. Bash text is read by bash's own rules: inside double quotes `\"` and `\\` are literal, and
 # a smart quote is an ordinary character. A newline and a `#` inside quotes are text. A backtick and
 # `$(` inside double quotes stay live and stay closed. PowerShell text keeps every mark above. A segment with an unquoted `&`, `(`, `)`, `{` or `}`
@@ -472,7 +475,7 @@ _GH_MESSAGE_CALLS = frozenset((
     ("pr", "create"), ("pr", "edit"), ("issue", "create"), ("issue", "edit")))
 _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
 # PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
-_SMART_QUOTES = frozenset("\u2018\u2019\u201a\u201b\u201c\u201d\u201e")
+_SMART_QUOTES = frozenset(PS_DOUBLE_QUOTES + PS_SINGLE_QUOTES)
 _GROUP_MARK = re.compile(r"[&(){}]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
@@ -580,11 +583,28 @@ def _data_words(kind: str, words):
     return data
 
 
+def _typed(text: str, like: str) -> str:
+    """`text` with the PowerShell type of `like`, so the reading follows a word to the next reader."""
+    return PowerShellScript(text) if isinstance(like, PowerShellScript) else text
+
+
+def _straight(word: str) -> str:
+    """In PowerShell text, the word with each smart quote spelled as its ASCII twin. Bash text is as it is."""
+    return _typed(word.translate(PS_STRAIGHT_QUOTES), word) if is_powershell(word) else word
+
+
+def _has_quote(word: str) -> bool:
+    """True when the word holds a quote mark: ASCII, or a smart quote in PowerShell text."""
+    return "'" in word or '"' in word or (is_powershell(word) and any(c in _SMART_QUOTES for c in word))
+
+
 def _unquoted(word: str) -> str:
     """The shell word after quote removal: `a/'b.py'` reads `a/b.py`. A quote inside the other
     kind of quote is text. The `$` of an unquoted `$'...'` or `$"..."` goes with the quote.
+    In PowerShell text a smart quote is a quote too (`_straight`).
     RESIDUAL GAP: a backslash escape inside `$'...'` (hex or octal) is not decoded."""
     out, quote = [], ""
+    word = _straight(word)
     for index, char in enumerate(word):
         if char == quote:
             quote = ""
@@ -599,8 +619,9 @@ def _words_of(word: str):
     """The words a word stands for with its quotes read: the word itself after quote removal, that
     text split as the shell splits it (a `bash -c` script), and each quote's text as its own words
     (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
-    inner = _unquoted(word)
-    out = [inner] + [_unquoted(w) for w in _quoted_words(inner)]   # a quoted script, read again
+    word = _straight(word)
+    inner = _typed(_unquoted(word), word)
+    out = [inner] + [_unquoted(_typed(w, word)) for w in _quoted_words(inner)]   # a quoted script, read again
     for piece in re.split(r"""['"()]""", word):
         out.extend(REDIRECT.sub(r" \1 ", piece).split())
     return out
@@ -629,40 +650,40 @@ _CP_LINK_LONG = ("link", "symbolic-link")
 _NULL_REDIRECT = re.compile(r"(?:\d*|&)>>?(?:/dev/null|nul|\$null)|\d*>" + _DESCRIPTOR, re.IGNORECASE)
 _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
+# A DEST that is one quoted variable (`"$f"`) stays one word, so it cannot split into `-t dir`. Its
+# value is unknown, but a DEST is only ever written, so the sources stay reads.
+_QUOTED_VAR = re.compile(r'"\$(?:\w+|\{\w+\})"')
 
 
-def _fixed_prefix_outside(prefix: str, stop: str, predicate, cwd) -> bool:
-    """True when a `cp` destination, cut at its first `$`, backtick, glob or brace character (`stop`),
-    has a literal prefix in a fixed directory that `predicate` does not accept. Whatever the rest of
-    the word expands to is read as one name in that directory. A redirect character, a prefix with no
-    directory (`bak_$x`, `$x`) and one inside a test root (`tests/$x`, `tests/bak_$x`) are not."""
-    if stop in "<>" or "/" not in prefix.replace("\\", "/"):
-        return False
-    return not (predicate(prefix + "x", cwd) or predicate(prefix.rstrip("/\\") + "/_", cwd))
+def _cp_start(raw) -> int:
+    """The index of the `cp` command word of a segment, past assignments, a loop keyword (`do`, `then`,
+    `else`, `{`) and a wrapper, by the one reader `resolve_command`; -1 when the segment runs no `cp`."""
+    start = resolve_command(tuple(raw))
+    return start if start is not None and _name(raw[start]) == "cp" else -1
 
 
-def _cp_start(raw, keywords=False):
-    """The index of the `cp` word of a segment, past its `VAR=value` words (and past `do`, `then` and
-    the other loop keywords when `keywords`), else None when the command is not `cp`."""
-    start = 0
-    while start < len(raw) and (_ASSIGNMENT.match(raw[start]) or keywords and raw[start] in LOOP_KEYWORDS):
-        start += 1
-    return start if _name(raw[start] if start < len(raw) else "") == "cp" else None
-
-
-def _copy_reads(raw, predicate, cwd, keywords=False, prefix=False):
-    """The indexes of the words of a `cp` segment that are only read, else an empty set. With `prefix`, a
-    destination that holds a `$`, a glob or a brace is read by its literal prefix (`_fixed_prefix_outside`)."""
+def _copy_reads(raw, predicate, cwd):
+    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
     words = [_unquoted(word) for word in raw]
-    start = _cp_start(raw, keywords)
-    if start is None:
+    start = _cp_start(raw)
+    if start < 0:
         return set()
-    operands, target, index = [], None, start + 1
+    operands, target, index, shown = [], None, start + 1, ""
     while index < len(words):
         word = words[index]
         if _NULL_REDIRECT.fullmatch(word):
             index += 1
             continue
+        if words[index:index + 2] in (["&", ">"], ["&", ">>"], [">", "&"]):
+            # `&>`, `&>>` and `>&` are one redirect: its `&` is no source, and a file it opens is no destination
+            # unless it is unsafe or the predicate hits it. Any other redirect leaves the segment judged.
+            out = words[index + 2:index + 3]
+            if out and (out[0].lower() in _NULL_TARGETS or re.fullmatch(_DESCRIPTOR, out[0]) or not (
+                    _CP_DEST_UNSAFE.search(out[0]) or predicate(out[0], cwd)
+                    or predicate(out[0].rstrip("/\\") + "/_", cwd))):
+                index += 3
+                continue
+            return set()
         if _OPEN_REDIRECT.fullmatch(word) and words[index + 1:index + 2] and \
                 (words[index + 1].lower() in _NULL_TARGETS or re.fullmatch(_DESCRIPTOR, words[index + 1])):
             index += 2
@@ -674,11 +695,12 @@ def _copy_reads(raw, predicate, cwd, keywords=False, prefix=False):
             target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
             if target is None:
                 return set()
+            shown = raw[index - 1]
             continue
         if word.startswith("--target-directory="):
-            target = word.split("=", 1)[1]
+            target, shown = word.split("=", 1)[1], ""
         elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
-            target = word[2:]
+            target, shown = word[2:], ""
         elif _CP_FLAGS.fullmatch(word):
             pass
         elif word.startswith("-") or ">" in word or "<" in word:
@@ -689,26 +711,23 @@ def _copy_reads(raw, predicate, cwd, keywords=False, prefix=False):
     if target is None:
         if len(operands) < 2:
             return set()
+        shown = raw[operands[-1]]
         target = words[operands.pop()]
-    if not operands or not target:
+    if not operands or not target or (_CP_DEST_UNSAFE.search(target) and not _QUOTED_VAR.fullmatch(shown)):
         return set()
-    unsafe = _CP_DEST_UNSAFE.search(target)
-    if unsafe:
-        return set(operands) if prefix and _fixed_prefix_outside(
-            target[:unsafe.start()], unsafe.group(), predicate, cwd) else set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
     return set(operands)
 
 
-def _cp_link_source(raw, holds, cwd, keywords=False) -> str:
+def _cp_link_source(raw, holds, cwd) -> str:
     """The word of a linking `cp` (`-l`, `-s`, `--link`, `--symbolic-link`, in any cluster) that
     `holds(word, cwd)` accepts, else ''. A link to a frozen file, or to a folder of them, gives the
     new name the frozen file itself, so a later write there writes it. Every operand but a plain
     DEST is judged; with `-t` every operand is, which fails closed."""
     words = [_unquoted(word) for word in raw]
-    start = _cp_start(raw, keywords)
-    if start is None:
+    start = _cp_start(raw)
+    if start < 0:
         return ""
     link = target = False
     operands = []
@@ -1395,19 +1414,20 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         if copy_outer:
             segments = [_copy_outer(segment) for segment in segments]
     scans = [_scan(segment) for segment in segments]
-    parsed = [_quoted_words(segment) for segment in segments]
+    parsed = [[_typed(word, segment) for word in _quoted_words(segment)] for segment in segments]
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
     # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
-    scripts = [_quoted_words(segment, True) for segment in segments] if command_position else parsed
+    scripts = ([[_typed(word, segment) for word in _quoted_words(segment, True)] for segment in segments]
+               if command_position else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
-        linked = _cp_link_source(raw, holds, cwd, bool(fed))
+        linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
-        data = set() if closed else _copy_reads(raw, predicate, cwd, bool(fed), command_position)
+        data = set() if closed else _copy_reads(raw, predicate, cwd)
         sed_targets = {}
         if command_position:
             sed_targets = _sed_script_words(scripts[number])   # the builder test check only: a script names no file but w, W, e, with or without -i; read with its newlines
@@ -1432,16 +1452,24 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
                 script.append('""')
+            elif word == "&" and (raw[index + 1:index + 2] in ([">"], [">>"]) or raw[index - 1:index] == [">"]):
+                continue   # the `&` of `&>` or `>&` ends no command, so the text reads `> PATH` whole
             elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
                 # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
                 shown.append("dup")
             else:
-                pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                # An unquoted `)` or backtick glued to the path (`( echo > F)`, `$(... > F)`) is not
+                # part of it. A quoted word ends in its quote, so it is never cut here.
+                word = _typed(word.rstrip(")`") or word, word)   # keeps the PowerShell type of the word
+                pieces = _words_of(word) if _has_quote(word) else [word]
+                # `_words_of` cuts a quote's text at a paren but not at a backtick: a `bash -c` script that
+                # holds a backtick substitution ends its path word with one.
+                pieces = [_typed(piece.rstrip("`") or piece, piece) for piece in pieces]
                 words.extend(pieces)
                 shown.extend(pieces)
                 kept = scripts[number][index]
-                script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
+                script.extend(_words_of(kept) if _has_quote(kept) else [kept])
             files, commands = sed_targets.get(index, ((), ()))
             # a sed script's w or W names a file, and its e runs a command: the words that command writes
             for target in [*files, *(word for command in commands for word in _sed_command_words(command))]:
@@ -1462,6 +1490,11 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 if hit:
                     return _from_cwd(hit, at, cwd) if follow_cd else hit
         verb = _segment_command(words)[0] if predicate_command else ""
+        for nested in _powershell_scripts_of(segments[number]):
+            # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
+            hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
+            if hit:
+                return hit
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
@@ -1701,6 +1734,25 @@ def _sed_script_words(raw):
     return {where: _sed_script_targets(scripts.get(where, "")) for where in skip}
 
 
+_PS_LAUNCHER = re.compile(r"pwsh|powershell|cmd|iex|invoke-expression", re.IGNORECASE)
+
+
+def _powershell_scripts_of(segment: str) -> list:
+    """The PowerShell scripts a segment hands on (`pwsh -c`, `powershell -Command`, `cmd /c`, `iex`), else [].
+    A shell the segment starts (`bash -c`, `sh -c`, `env -S`, `eval`) hands on text that is no PowerShell
+    itself: its segments are read the same way, so a `pwsh -c` inside one is found. Each step cuts the
+    text to the script the segment holds, so the walk ends."""
+    if not _PS_LAUNCHER.search(segment):
+        return []
+    tokens = segment_tokens(segment)
+    script = nested_script(tokens) if tokens else ""
+    if not script:
+        return []
+    if isinstance(script, PowerShellScript):
+        return [script]
+    return [found for inner in split_segments(script, []) for found in _powershell_scripts_of(inner)]
+
+
 def _segment_command(words):
     """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
     index = resolve_command(tuple(words))
@@ -1722,8 +1774,10 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
 
 # ------------------------------------------------------------------ an interpreter's own writes
 #
-# A python or node script, run from a heredoc body or from `-c` / `-e`, writes a file the shell
-# never names, so `_shell_write_hit` cannot see it. `interpreter_write_hit` reads the script itself.
+# A python or node script, run from a heredoc body, from `-c` / `-e`, or from a file named on the
+# command line, writes a file the shell never names, so `_shell_write_hit` cannot see it.
+# `interpreter_write_hit` reads the script itself. A script file is read from disk (bounded), or, when
+# the same command writes it with a heredoc first, from that heredoc body.
 # A quoted `<<'EOF'` body is read too: the interpreter runs it. Python is read with `ast`, so a path
 # in a printed string or a comment is text and a path held in a variable is still found. A body
 # `ast` cannot parse is read by a literal path beside a write call. Node is read by pattern.
@@ -1747,24 +1801,73 @@ def _join_path(head: str, tail: str) -> str:
     return head.rstrip("/") + "/" + tail if head else tail
 
 
+_PY_TEMP = "\0temp"   # a folder a python or node temp call made: no path of the repo, so nothing under it is judged
+_PY_TEMP_CALLS = ("mkdtemp", "mkstemp", "gettempdir", "TemporaryDirectory")
+
+
+def _py_call_name(node):
+    import ast
+    func = node.func
+    return func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+
+
+def _py_temp_head(node, env):
+    """True when the first piece of a path expression is a folder a temp call made: the call itself, a
+    name bound to one, its `.name`, or a join or `/` that starts with one. Any other head, such as
+    `sys.argv[1]` or `Path(__file__).parents[1]`, may name a folder of the repo, so it is no temp head.
+    A temp call given a folder (`dir=`, a third argument, `*args` or `**kwargs`) may make it in the repo."""
+    import ast
+    if isinstance(node, ast.Name):
+        return env.get(node.id) == [_PY_TEMP]
+    if isinstance(node, ast.Attribute) and node.attr == "name":   # `TemporaryDirectory().name`
+        return _py_temp_head(node.value, env)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _py_temp_head(node.left, env)
+    if isinstance(node, ast.Call):
+        name = _py_call_name(node)
+        if name in _PY_TEMP_CALLS:
+            return len(node.args) < 3 and not any(isinstance(arg, ast.Starred) for arg in node.args) \
+                and not any(keyword.arg in ("dir", None) for keyword in node.keywords)
+        if name in _PATH_CTORS or name == "join":
+            return bool(node.args) and _py_temp_head(node.args[0], env)
+        if name in _PATH_PASS and isinstance(node.func, ast.Attribute):
+            return _py_temp_head(node.func.value, env)
+    return False
+
+
+def _py_up(paths, steps: int):
+    """Each path `steps` folders up. A temp folder stays a temp folder: nothing under it is judged."""
+    out = []
+    for path in paths:
+        for _ in range(steps if path != _PY_TEMP else 0):
+            path = os.path.dirname(path)
+        out.append(path)
+    return out
+
+
 def _py_paths(node, env):
     """The path strings an expression can hold: a string, `Path(...)`, `a / b`, `os.path.join`, a
     name bound to one of those, or a chain of path calls. A part it cannot tell (`Path.cwd()`,
     `os.getcwd()`, `__file__`) is left out, so the literal pieces still join: `Path.cwd() / 'tests'`
-    reads `tests`. Empty when no piece is known."""
+    reads `tests`. A join that starts with a temp folder (`_py_temp_head`) holds only that folder.
+    Empty when no piece is known."""
     import ast
     if isinstance(node, ast.Constant):
         return [node.value] if isinstance(node.value, str) else []
     if isinstance(node, ast.Name):
         return list(env.get(node.id, ()))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        if _py_temp_head(node.left, env):
+            return [_PY_TEMP]
         left, right = _py_paths(node.left, env), _py_paths(node.right, env)
         if not right:
             return left
         return [_join_path(a, b) for a in (left or [""]) for b in right]
     if isinstance(node, ast.Call):
         func = node.func
-        name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+        name = _py_call_name(node)
+        if _py_temp_head(node, env):
+            return [_PY_TEMP]
         if name in _PATH_CTORS or name == "join":
             out = [""]
             for options in (_py_paths(arg, env) for arg in node.args):
@@ -1773,26 +1876,56 @@ def _py_paths(node, env):
             return out if out != [""] else []
         if isinstance(func, ast.Attribute) and func.attr in _PATH_PASS:
             return _py_paths(func.value, env)
+        if name in ("dirname", "abspath", "realpath", "normpath") and len(node.args) == 1:
+            inner = _py_paths(node.args[0], env)
+            return _py_up(inner, 1) if name == "dirname" else inner
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        return _py_up(_py_paths(node.value, env), 1)
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) \
+            and node.value.attr == "parents" and isinstance(node.slice, ast.Constant) \
+            and isinstance(node.slice.value, int) and node.slice.value >= 0:
+        return _py_up(_py_paths(node.value.value, env), node.slice.value + 1)
     return []
 
 
-def _py_env_at(tree):
-    """A function `env_at(node)`: the path each simple `name = <path>` assignment bound, as it stands
-    where `node` begins. One pass in source order; a later top-level assignment replaces the value, one
-    inside an `if`, loop, `try` or function adds to it, since either may not run."""
+def _py_bindings(tree):
+    """(end position, name, value expression, statement) of each name a script binds to a path: a simple
+    `name = <path>`, and a name taken from a temp call by a tuple (`fd, tmp = mkstemp()`) or by
+    `with TemporaryDirectory() as tmp`. In source order."""
     import ast
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            end = (node.end_lineno, node.end_col_offset)
+            if isinstance(target, ast.Name):
+                out.append((end, target.id, node.value, node))
+            elif isinstance(target, ast.Tuple) and isinstance(node.value, ast.Call) \
+                    and _py_call_name(node.value) in _PY_TEMP_CALLS:
+                out.extend((end, name.id, node.value, node) for name in target.elts if isinstance(name, ast.Name))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if isinstance(item.optional_vars, ast.Name) and isinstance(item.context_expr, ast.Call) \
+                        and _py_call_name(item.context_expr) in _PY_TEMP_CALLS:
+                    end = (item.context_expr.end_lineno, item.context_expr.end_col_offset)
+                    out.append((end, item.optional_vars.id, item.context_expr, node))
+    return sorted(out, key=lambda event: event[0])
+
+
+def _py_env_at(tree, script: str = ""):
+    """A function `env_at(node)`: the path each `name = <path>` binding gave, as it stands where `node`
+    begins. One pass in source order; a later top-level assignment replaces the value, one inside an
+    `if`, loop, `try` or function adds to it, since either may not run. `script` is the file the body
+    came from: `__file__` is that path, so `dirname(__file__)` is the script's own folder."""
     top = {id(statement) for statement in tree.body}
-    events = sorted(
-        (node for node in ast.walk(tree)
-         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)),
-        key=lambda node: (node.end_lineno, node.end_col_offset))
+    events = _py_bindings(tree)
 
     def env_at(call):
-        env = {}
-        for node in events:
-            if (node.end_lineno, node.end_col_offset) > (call.lineno, call.col_offset):
+        env = {"__file__": [script]} if script else {}
+        for end, name, value, node in events:
+            if end > (call.lineno, call.col_offset):
                 break
-            name, values = node.targets[0].id, _py_paths(node.value, env)
+            values = _py_paths(value, env)
             if id(node) in top:
                 env[name] = values
             else:
@@ -1846,12 +1979,44 @@ def _py_written(tree, env_at):
     return [(call, expression) for call, expression in out if expression is not None]
 
 
-def _py_hit(body: str, cwd: str, predicate) -> str:
+_PY_PREFIX_TRIES = 8   # parses of a cut script, at most; each is of no more than `_SCRIPT_READ_LIMIT` bytes
+
+
+def _py_prefix_tree(body: str):
+    """The tree of the longest run of whole lines from the start of a cut script that parses, else None.
+    The last line may be partial, so it goes first. A parse error names the line its statement opens
+    on (an open bracket or triple quote), so each try cuts there and the search ends in a few tries."""
+    import ast
+    lines = body.splitlines(keepends=True)[:-1]
+    for _ in range(_PY_PREFIX_TRIES):
+        if not lines:
+            return None
+        try:
+            return ast.parse("".join(lines))
+        except SyntaxError as error:
+            line = error.lineno or len(lines)
+            lines = lines[:min(line - 1, len(lines) - 1)]
+        except ValueError:
+            lines = lines[:-1]
+    return None
+
+
+def _py_hit(body: str, cwd: str, predicate, script: str = "", cut: bool = False) -> str:
+    """`cut` is True for a script file read only up to `_SCRIPT_READ_LIMIT`: it is judged by the part
+    that parses (`_py_prefix_tree`), never by the literal fallback, which would count every test-path
+    string in the file beside any write call."""
     import ast
     import textwrap
-    try:
-        tree = ast.parse(textwrap.dedent(body))
-    except (SyntaxError, ValueError):
+    if cut:
+        tree = _py_prefix_tree(body)
+        if tree is None:
+            return ""
+    else:
+        try:
+            tree = ast.parse(textwrap.dedent(body))
+        except (SyntaxError, ValueError):
+            tree = None
+    if tree is None:
         # Unparsable (a shell variable in an unquoted body, a Python 2 line): a literal path the
         # predicate accepts, beside a write call in the same body, counts.
         if _PY_WRITE_CALL.search(body):
@@ -1860,7 +2025,7 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
                 if predicate(text, cwd):
                     return text
         return ""
-    env_at = _py_env_at(tree)
+    env_at = _py_env_at(tree, script)
     for call, expression in _py_written(tree, env_at):
         for path in _py_paths(expression, env_at(call)):
             if predicate(path, cwd):
@@ -1868,14 +2033,52 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
     return ""
 
 
-_JS_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))"""
+_JS_STR = (r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)(?![\w$]|\s*[.(])"""
+           r"""|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))""")
 _JS_ONE = re.compile(
     r"\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\s*\(\s*" + _JS_STR)
 _JS_TWO = re.compile(
     r"(?:\b(?:copyFileSync|copyFile|renameSync|cpSync)|\bfs(?:\.promises)?\s*\.\s*(?:rename|cp))"
     r"\s*\(\s*" + _JS_STR + r"\s*,\s*" + _JS_STR)
-_JS_ASSIGN = re.compile(
-    r"""\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`)""")
+_JS_BIND = re.compile(r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*")
+_JS_VALUE = re.compile(_JS_STR)
+_JS_JOIN_PIECE = re.compile(r"""\s*(?:'([^']*)'|"([^"]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*))\s*$""")
+_JS_CWD = re.compile(r"process\s*\.\s*cwd\s*\(\s*\)")
+_JS_TEMP_STEP = re.compile(
+    r"\s*(?:await\s+)?(?:(?:[A-Za-z_$][\w$]*\s*\.\s*)*(tmpdir|mkdtempSync|mkdtemp)\s*\("
+    r"|path\s*\.\s*(?:join|resolve)\s*\(|([A-Za-z_$][\w$]*)(?![\w$]|\s*[.(]))")
+
+
+def _js_temp_head(body: str, at: int, env, depth: int = 0) -> bool:
+    """True when the expression at `at` starts with a folder a temp call made: `os.tmpdir()`, a name bound
+    to one, a `path.join` that starts with one, or `fs.mkdtempSync` given one. A mkdtemp prefix that starts
+    anywhere else makes the folder there, maybe in the repo, as python's `dir=` does: no temp head."""
+    match = _JS_TEMP_STEP.match(body, at)
+    if not match or depth > 4:
+        return False
+    if match.group(2):
+        return env.get(match.group(2)) == [_PY_TEMP]
+    if match.group(1) == "tmpdir":
+        return True
+    return _js_temp_head(body, match.end(), env, depth + 1)
+
+
+def _js_join(args: str, env) -> list:
+    """The paths `path.join(...)` or `path.resolve(...)` can hold: each quoted piece, and each name bound
+    to a path (`__dirname`, a `const`), joined in order. A later piece it cannot tell is left out, as for
+    python. A first piece it cannot tell may be any folder, the repo's or not, so nothing under it is
+    judged: empty. A temp folder stays a temp folder (`_PY_TEMP`)."""
+    out = [""]
+    for number, piece in enumerate(args.split(",")):
+        match = _JS_JOIN_PIECE.match(piece)
+        quoted = next((g for g in match.groups()[:3] if g is not None), None) if match else None
+        options = [quoted] if quoted is not None else list(env.get(match.group(4), ())) if match else []
+        if not options:
+            if number == 0:
+                return []
+            continue
+        out = [a if a == _PY_TEMP else _join_path(a, b.lstrip("/")) if a else b for a in out for b in options]
+    return out if out != [""] else []
 
 
 def _js_values(groups, env):
@@ -1886,15 +2089,24 @@ def _js_values(groups, env):
     if groups[3]:
         return list(env.get(groups[3], ()))
     if groups[4] is not None:
-        pieces = re.findall(r"""['"]([^'"]*)['"]""", groups[4])
-        return ["/".join(piece.strip("/") for piece in pieces)] if pieces else []
+        return _js_join(groups[4], env)
     return []
 
 
-def _js_hit(body: str, cwd: str, predicate) -> str:
-    env = {}
-    for match in _JS_ASSIGN.finditer(body):
-        env.setdefault(match.group(1), []).append(next(g for g in match.groups()[1:] if g is not None))
+def _js_hit(body: str, cwd: str, predicate, script: str = "") -> str:
+    """`script` is the file the body came from: `__filename` is that path and `__dirname` its folder."""
+    env = {"__filename": [script], "__dirname": [os.path.dirname(script)]} if script else {}
+    for match in _JS_BIND.finditer(body):
+        if _js_temp_head(body, match.end(), env):
+            values = [_PY_TEMP]
+        elif _JS_CWD.match(body, match.end()):
+            values = [""]   # the cwd itself, so a join from it reads repo-relative
+        else:
+            value = _JS_VALUE.match(body, match.end())
+            values = _js_values(value.groups(), env) if value else []
+        if values:
+            known = env.setdefault(match.group(1), [])
+            known.extend(v for v in values if v not in known)
     for match in _JS_ONE.finditer(body):
         for path in _js_values(match.groups(), env):
             if predicate(path, cwd):
@@ -1926,18 +2138,150 @@ def _inline_scripts(command: str):
                 break
 
 
-def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+_SCRIPT_READ_LIMIT = 256 * 1024
+_PY_VALUE_FLAGS = ("-W", "-X", "-Q", "--check-hash-based-pycs")
+_NODE_VALUE_FLAGS = ("-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions",
+                     "--env-file", "--input-type", "--title")
+_HEREDOC_TARGET = re.compile(
+    r"""(?<![\d&<>])>>?(?![&>])\s*(?:'([^']+)'|"([^"]+)"|([^\s'"<>|;&()]+))"""
+    r"""|\btee\s+(?:-\S+\s+)*(?:'([^']+)'|"([^"]+)"|([^\s'"<>|;&()-][^\s'"<>|;&()]*))""")
+
+
+def _script_file_arg(tokens, index: int, kind: str):
+    """The script file an interpreter command runs: its first argument that is no flag, else None.
+    `-c` / `-e` / `-m` / `-` (a body, a module, stdin) name no file. A flag that takes a value is skipped
+    with it; bun and deno name the file after `run`."""
+    values = _PY_VALUE_FLAGS if kind == "py" else _NODE_VALUE_FLAGS
+    at = index + 1
+    while at < len(tokens):
+        token = str(tokens[at])
+        at += 1
+        if token == "--":
+            return str(tokens[at]) if at < len(tokens) else None
+        if kind == "py" and (_PY_C_FLAG.match(token) or token.startswith("-m")):
+            return None
+        if kind == "js" and _NODE_EVAL_FLAG.match(token):
+            return None
+        if token.startswith("-"):
+            if token == "-":
+                return None
+            if token in values:
+                at += 1
+            continue
+        if kind == "js" and token == "run" and basename(str(tokens[index])).split(".")[0] in ("bun", "deno"):
+            continue
+        return token
+    return None
+
+
+def _script_path(name: str, where: str) -> str:
+    """The absolute path a script argument names from folder `where`, else '' (it holds a variable or
+    a command substitution, so it cannot be told)."""
+    if not name or "$" in name or "`" in name:
+        return ""
+    name = os.path.expanduser(name)
+    if not os.path.isabs(name):
+        if not where:
+            return ""
+        name = os.path.join(where, name)
+    return os.path.normpath(name)
+
+
+def _read_script(path: str):
+    """(text, cut): the first `_SCRIPT_READ_LIMIT` bytes of a script file, and True when the file runs past
+    them. ('', False) for a folder, a missing or an unreadable file."""
+    try:
+        if not os.path.isfile(path):
+            return "", False
+        with open(path, "rb") as handle:
+            data = handle.read(_SCRIPT_READ_LIMIT + 1)
+    except OSError:
+        return "", False
+    return data[:_SCRIPT_READ_LIMIT].decode("utf-8", "replace"), len(data) > _SCRIPT_READ_LIMIT
+
+
+def _heredoc_scripts(raw: str, segments, ends, cwd: str) -> dict:
+    """{absolute path: [(segment number, body), ...]} of each file a heredoc in `raw` writes (`cat > f <<EOF`,
+    `cat >> f <<EOF`, `tee [-a] f <<EOF`), in the order the bodies come: the script the run of that file
+    executes, when it runs after the write. Every body counts: an append adds to the file, it never hides it."""
+    written = {}
+    for reading in (False, True):
+        used = set()
+        for _quote, body, header in _split_heredocs(raw, reading)[1]:
+            for number, segment in enumerate(segments):
+                if number in used or "<<" not in segment or segment.strip() not in header:
+                    continue
+                match = _HEREDOC_TARGET.search(segment)
+                if not match:
+                    continue
+                used.add(number)
+                target = next(group for group in match.groups() if group)
+                at = dir_before_segment(segments, number, cwd, ends) or cwd
+                path = _script_path(target, at)
+                if path and (number, body) not in written.setdefault(path, []):
+                    written[path].append((number, body))
+                break
+    return written
+
+
+def _script_file_hit(raw: str, cwd: str, predicate) -> str:
+    """The test path a script file run by `python3 f.py` or `node f.js` writes: the file as it stands on
+    disk, and each heredoc body of the same command that writes it before the run. A folder, a missing or an
+    unreadable file is no hit. `__file__` and `__dirname` are the script's own path and folder."""
+    ends = []
+    segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
+    written = None
+    for number, segment in enumerate(segments):
+        if not (_PY_HEADER.search(segment) or _NODE_HEADER.search(segment)):
+            continue
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        name = basename(tokens[index])
+        kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
+        script = _script_file_arg(tokens, index, kind) if kind else None
+        if script is None:
+            continue
+        at = dir_before_segment(segments, number, cwd, ends) or cwd
+        path = _script_path(script, at)
+        if not path:
+            continue
+        if written is None:
+            written = _heredoc_scripts(raw, segments, ends, cwd) if "<<" in raw else {}
+        bodies = [(body, False) for made, body in written.get(path, ()) if made < number]
+        bodies.append(_read_script(path))
+        for body, cut in bodies:
+            if not body:
+                continue
+            hit = _py_hit(body, at, predicate, path, cut) if kind == "py" else _js_hit(body, at, predicate, path)
+            if hit:
+                return hit
+    return ""
+
+
+def interpreter_may_write(raw: str) -> bool:
+    """True when `raw` holds a heredoc or an inline flag and a write call an interpreter body could make:
+    the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
+    return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
+        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
+
+
+def interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False) -> str:
     """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
     Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
-    `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
+    `node -e` script. With `script_files`, also each script file a python or node command runs by name
+    (read from disk, and from each heredoc of the same command that writes it before the run). Only the
+    builder-test check asks for that: it reads files, which no other caller pays for. A script that only
+    reads a path, or names it in a string, hits nothing.
     A crash of the scan reads as no hit: it must never skip the rules after it."""
     try:
-        return _interpreter_write_hit(raw, cwd, predicate)
+        return _interpreter_write_hit(raw, cwd, predicate, script_files)
     except Exception:
         return ""
 
 
-def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
+def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False) -> str:
     if "<<" in raw:
         seen = set()
         for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
@@ -1959,7 +2303,7 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
             hit = (_py_hit if kind == "py" else _js_hit)(script, at, predicate)
             if hit:
                 return hit
-    return ""
+    return _script_file_hit(raw, cwd, predicate) if script_files else ""
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
