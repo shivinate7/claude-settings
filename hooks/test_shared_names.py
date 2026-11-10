@@ -672,6 +672,23 @@ def case_normalize_db_str_replace_with_no_text_has_no_new_str():
     return got in (None, ""), "new_str is %r, want none or empty for a call with no text" % (got,)
 
 
+def case_normalize_db_str_replace_keeps_old_text_out_of_new_str():
+    # old_str is the text a str_replace replaces, not the text it writes. A removal rule reads old text found in new_str
+    # as a line still present, so the scope is checked first: new_str holds the new text. The subject is then checked:
+    # the old text is absent from it.
+    old_text, new_text = "OLDTEXT_REMOVED_LINE", "NEWTEXT_KEPT_LINE"
+    tool_input = {"path": "items/it-1", "field": "context", "url": "https://claude.ai/artifact/x1",
+                  "old_str": old_text, "new_str": new_text}
+    out, note = _expect_normalised(MAC_PREFIX + "db_str_replace", dict(tool_input), "ArtifactData")
+    if out is None:
+        return False, note
+    new_str = out.get("new_str")
+    if not isinstance(new_str, str) or new_text not in new_str:
+        return False, "new_str is %r, want a string that holds the new text %r" % (new_str, new_text)
+    return old_text not in new_str, "new_str %r holds the old text %r, want the old text kept out" % (
+        new_str, old_text)
+
+
 def case_normalize_db_query_and_list_take_a_bare_collection():
     # The key that carries the bare collection is not named in item 440; `collection` is the ArtifactData key
     # the guards read, so the case pins that the collection reaches it.
@@ -729,6 +746,8 @@ MAC_CASES = [
      case_normalize_db_str_replace_keeps_unknown_text_in_new_str),
     ("(v3) a db_str_replace with no text has no new_str",
      case_normalize_db_str_replace_with_no_text_has_no_new_str),
+    ("(v4) a db_str_replace keeps its old text out of new_str, which holds the new text",
+     case_normalize_db_str_replace_keeps_old_text_out_of_new_str),
     ("(w) db_query and db_list take a bare collection as a query and a list",
      case_normalize_db_query_and_list_take_a_bare_collection),
     ("(x) a publish_files call is the Artifact page check",

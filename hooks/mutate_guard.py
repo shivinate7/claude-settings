@@ -3124,6 +3124,12 @@ MUTATIONS = [
      '_MAC_OPS = {"merge": "update"}',
      '_MAC_OPS = {"merge": "set"}',
      "guard", "mac db_write: a merge of a rank onto today's item is allowed"),
+    # The Mac db_str_replace's old_str stays out of the new text a judge reads (shared_names). Without it in the known
+    # keys, the Goal line the edit removes reads as still present, and the removal is allowed.
+    ('mac db_str_replace: old_str joins the new text, so a Goal line the edit removes reads as still present',
+     '_MAC_STR_REPLACE_KNOWN = ("path", "field", "url", "collection", "doc_id", "action", "old_str", "new_str")',
+     '_MAC_STR_REPLACE_KNOWN = ("path", "field", "url", "collection", "doc_id", "action", "new_str")',
+     "guard", "mac db_str_replace: old_str holds the Goal line and new_str drops it, so the removal is denied"),
 ]
 
 

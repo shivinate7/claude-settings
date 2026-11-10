@@ -25397,6 +25397,16 @@ add("mac db_str_replace: a call with no text is allowed", "allow",
 add("mac db_str_replace: new text that drops the phrase is allowed", "allow",
     tool=MAC_DB_STR_REPLACE, cwd=PQ_REPO, url=PQ_URL, path="items/" + RW_DOC, field="context",
     new="Options are ready.")
+# A Mac db_str_replace's old_str is the text it replaces, never the text it writes: shared_names keeps old_str out of
+# the new text a judge reads. Lose that and the removed line reads as still present, so a Mac edit that deletes the
+# Goal line passes. Each case has the form of its ArtifactData twin (the rework and owner-judge str_replace cases above)
+# with the waiting-page url the twin carries. Each name is the FAIL line the mutant in hooks/mutate_guard.py must show.
+add("mac db_str_replace: old_str holds the Goal line and new_str drops it, so the removal is denied", "deny",
+    "question-form", tool=MAC_DB_STR_REPLACE, cwd=PQ_REPO, url=PQ_URL, path="items/" + OJ_DOC, field="context",
+    old_str=OJ_GOOD, new_str=oj_ctx(goal=None))
+add("mac db_str_replace: old_str holds the rework phrase and new_str drops it, so the edit is allowed", "allow",
+    tool=MAC_DB_STR_REPLACE, cwd=PQ_REPO, url=PQ_URL, path="items/" + RW_DOC, field="context",
+    old_str=RW_TEXT, new_str="Options are ready.")
 
 
 # --------------------------------------------------------------------------- the reason hygiene
