@@ -6,12 +6,16 @@
 A decision, a debt or a roadmap step cites a claude.ai artifact as `artifact:<id>`, and the id must be
 in the registry (the "artifacts" key of the extras file, read by lint/layout.py artifacts()). A bare
 claude.ai/artifact or claude.ai/code/artifact link is red, even for a registered page, and even inside a
-code fence: a fence does not make a link safe. Briefs, handoffs and other folders are not read.
+code fence: a fence does not make a link safe. Briefs, handoffs and other folders are not read. A checkout with no
+registry file (a worktree on the record branch) judges each bare link and no cite: no cite is judged against an
+empty registry.
 
 Each case builds a temp repo: the record files on its working tree, and the record branch (roadmap by
 default) as one commit that holds the steps. It runs the real script with --root and reads its exit code
-and FAIL lines. ARTIFACT_CITES_UNDER_TEST overrides the script path.
+and FAIL lines. The pushed-head case loads the script in this process and calls pushed_step_findings().
+ARTIFACT_CITES_UNDER_TEST overrides the script path.
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -47,6 +51,14 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
+def load_script():
+    """The script loaded in this process (SCRIPT, the file the other cases run), so a case can call its functions."""
+    spec = importlib.util.spec_from_file_location("check_artifact_cites_under_test", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class CiteTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(SCRIPT), "script absent: lint/check_artifact_cites.py")
@@ -70,9 +82,24 @@ class CiteTests(unittest.TestCase):
     def decision(self, text):
         self.put("docs/decisions/x.md", text)
 
-    def steps(self, files, origin=False):
-        """The record branch: one commit on `roadmap` whose roadmap/data/steps holds each {name: text}. With origin,
-        the commit lives on a bare origin only, the state a fetch leaves: no local ref."""
+    def drop_registry(self):
+        """The option of a checkout with no registry file: a worktree on the record branch does not hold the untracked
+        .claude/layout-extras.json of the main checkout."""
+        path = os.path.join(self.root, *EXTRAS.split("/"))
+        os.remove(path)
+        self.assertFalse(os.path.exists(path), "the fixture kept its registry file")
+
+    def pushed(self, ref):
+        """pushed_step_findings for `ref`. A read that raises Unknown fails the case with its reason."""
+        checker = load_script()
+        try:
+            return checker.pushed_step_findings(self.root, ref)
+        except checker.Unknown as err:
+            self.fail("pushed_step_findings read %s as unknown: %s" % (ref, err))
+
+    def steps(self, files, origin=False, branch="roadmap"):
+        """The record branch: one commit on `branch` (roadmap by default) whose roadmap/data/steps holds each {name: text}.
+        With origin, the commit lives on a bare origin only, the state a fetch leaves: no local ref."""
         env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.root, ".git", "record-index"))
         self.git("read-tree", "--empty", env=env)
         for name, text in files.items():
@@ -80,16 +107,16 @@ class CiteTests(unittest.TestCase):
             self.git("update-index", "--add", "--cacheinfo", "100644,%s,roadmap/data/steps/%s" % (blob, name), env=env)
         tree = self.git("write-tree", env=env).strip()
         commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
-        self.git("update-ref", "refs/heads/roadmap", commit)
+        self.git("update-ref", "refs/heads/" + branch, commit)
         if origin:
             bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
             self.addCleanup(tracked_tree.rm_tree, bare)
             subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
             self.git("remote", "add", "origin", bare)
-            self.git("push", "-q", "origin", "roadmap")
-            self.git("update-ref", "-d", "refs/heads/roadmap")
-            self.assertTrue(self.ref_exists("refs/remotes/origin/roadmap"), "the fixture lost origin's record ref")  # scope: the fixture
-            self.assertFalse(self.ref_exists("refs/heads/roadmap"), "the fixture kept the local record ref")
+            self.git("push", "-q", "origin", branch)
+            self.git("update-ref", "-d", "refs/heads/" + branch)
+            self.assertTrue(self.ref_exists("refs/remotes/origin/" + branch), "the fixture lost origin's record ref")  # scope: the fixture
+            self.assertFalse(self.ref_exists("refs/heads/" + branch), "the fixture kept the local record ref")
 
     def ref_exists(self, ref):
         return subprocess.run(["git", "-C", self.root, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
@@ -155,6 +182,18 @@ class CiteTests(unittest.TestCase):
         self.steps({"c1.json": json.dumps({"note": URL})}, origin=True)
         self.assertRed("roadmap/data/steps/c1.json", "a bare link in a step on origin only was not refused")
 
+    def test_a_pushed_head_with_a_bare_link_is_listed_while_the_local_record_ref_is_clean(self):
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + REGISTERED})})
+        self.assertNotIn(URL, self.git("show", "roadmap:roadmap/data/steps/c1.json"),  # scope before the subject: the local ref is clean
+                         "the fixture's local record ref holds a bare link, so the pushed head is not the only one")
+        self.steps({"c1.json": json.dumps({"title": "Step", "note": "See " + URL + "."})}, branch="steps-bare")
+        checker = load_script()
+        self.assertTrue(hasattr(checker, "pushed_step_findings"),
+                        "lint/check_artifact_cites.py has no pushed_step_findings, so a pushed head is never judged")
+        found = checker.pushed_step_findings(self.root, "steps-bare")
+        self.assertEqual([rel for rel, _ in found], ["roadmap/data/steps/c1.json"],
+                         "the pushed head's bare link was not listed. Found: %r" % (found,))
+
     def test_a_bare_link_escaped_in_step_json_is_red(self):
         self.steps({"c1.json": '{"note": "\\u0068ttps://claude.ai/artifact/' + REGISTERED + '"}\n'})
         self.assertRed("roadmap/data/steps/c1.json", "a bare link escaped as \\u0068 in step JSON was not refused")
@@ -190,6 +229,32 @@ class CiteTests(unittest.TestCase):
         code, out = self.run_check()
         self.assertEqual(code, 1, "an unreadable registry passed. Output:\n" + out)
         self.assertTrue(self.flagged(out), "an unreadable registry printed no FAIL line. Output:\n" + out)
+
+    def test_no_registry_file_a_pushed_bare_link_is_still_listed(self):
+        self.drop_registry()
+        self.steps({"c1.json": json.dumps({"title": "Step", "note": "See " + URL + "."})}, branch="steps-link")
+        found = self.pushed("steps-link")
+        self.assertEqual([rel for rel, _ in found], ["roadmap/data/steps/c1.json"],
+                         "with no registry file, a pushed head's bare link was not listed. Found: %r" % (found,))
+
+    def test_no_registry_file_a_pushed_cite_is_not_judged(self):
+        self.drop_registry()
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + REGISTERED})}, branch="steps-cite")
+        self.assertEqual(self.pushed("steps-cite"), [],
+                         "with no registry file, an artifact:<id> cite in a pushed step was judged as unregistered")
+
+    def test_no_registry_file_a_pushed_bare_link_with_a_cite_lists_only_the_link(self):
+        self.drop_registry()
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + REGISTERED, "note": "See " + URL + "."})},
+                   branch="steps-both")
+        found = self.pushed("steps-both")
+        self.assertEqual(len(found), 1, "with no registry file, the cite beside the bare link was listed too. Found: %r" % (found,))
+        self.assertIn("bare artifact link", found[0][1], "with no registry file, the one find is not the bare link: %r" % (found,))
+
+    def test_registry_file_present_a_pushed_cite_of_a_registered_page_is_clean(self):
+        self.assertTrue(os.path.isfile(os.path.join(self.root, *EXTRAS.split("/"))), "scope: the registry file is absent")
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + REGISTERED})}, branch="steps-reg")
+        self.assertEqual(self.pushed("steps-reg"), [], "a pushed cite of a registered page was listed")
 
 
 if __name__ == "__main__":
