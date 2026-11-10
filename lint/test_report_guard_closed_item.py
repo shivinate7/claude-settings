@@ -7,10 +7,11 @@ branch>, through the one waiting-copy reader (feedback_guard's Homes.filed_numbe
 refuses an Input Needed line that cites a closed item. The rules the cases pin:
 
 - Cite forms, in the Input Needed section only: "item 214", "page item 214", "items 214, 381 and 383",
-  "Cockpit item 214", "item 214 a". Not in Done or Next, not inside backticks or quotes, not PR numbers
-  ("PR 214", "#214"), not a bare number.
-- A cited item whose status is `closed` in the copy refuses the Stop. The refusal names each closed item and
-  the page status read it asks for (ArtifactData, collection `items`) before a listing as open.
+  "items 214 or 381", "items 214/381", "items 214-216" (both ends), "Items: 214, 381", "item(s) 214",
+  "item **214**", "items:" then a bullet list, "Cockpit item 214", "item 214 a". Not in Done or Next, not inside
+  backticks or quotes, not PR numbers ("PR 214", "#214"), not a date ("item 2026-11-10"), not a bare number.
+- A cited item whose status is `closed` in the copy refuses the Stop. The refusal states that each closed item
+  reads closed in the waiting copy, and names no step for the session.
 - An open or missing item passes. A same-turn ArtifactData read of collection `items` that shows the item open
   skips the copy for that item. A read in an earlier turn does not.
 - Fails open: no record branch, no items folder, an item file that is not a JSON object, a git error. No refusal,
@@ -52,6 +53,9 @@ CLOSED_ALL = ((214, "closed"), (381, "closed"), (383, "closed"), (222, "closed")
 OPEN_214 = ((214, "open"), (381, "open"))
 PREFIX_2140 = ((2140, "closed"), (214, "open"))
 FORTY = ((214, "closed"),) + tuple((100 + i, "open") for i in range(39))
+CLOSED_RANGE = ((214, "closed"), (215, "open"), (216, "closed"))  # 215 is the middle of the range, an accepted gap
+CLOSED_2 = ((2, "closed"), (214, "open"))
+DATE_PARTS = ((2026, "closed"), (10, "closed"), (11, "closed"))  # every number of "2026-11-10" closed
 
 
 def setUpModule():
@@ -136,13 +140,17 @@ class ClosedItemFixture(unittest.TestCase):
         return [trg.human("look at the open items"), *calls, trg.assistant_text(reply)]
 
     def assert_refused(self, out, closed, what):
-        """A block that names each closed item, and the page status read the remedy asks for."""
+        """A block that names each closed item, then states the fact: the item reads closed in the waiting copy. The
+        numbers come first, so a cite the guard misses fails on the number, not on the wording."""
         self.assertIsNotNone(out, "%s: the Stop passed, so the closed item was not refused" % what)
         self.assertEqual(out.get("decision"), "block", "%s: no block: %r" % (what, out))
         reason = out.get("reason", "")
         for n in closed:
             self.assertRegex(reason, r"(?<!\d)%d(?!\d)" % n, "%s: the refusal does not name closed item %d" % (what, n))
-        self.assertIn("ArtifactData", reason, "%s: the refusal does not name the page status read" % what)
+        self.assertIn("closed", reason, "%s: the refusal does not say closed" % what)
+        self.assertIn("waiting copy", reason, "%s: the refusal does not say the waiting copy shows it" % what)
+        self.assertNotIn("get or query", reason, "%s: the refusal names a step (get or query)" % what)
+        self.assertNotIn("is read before", reason, "%s: the refusal names a step (is read before)" % what)
 
     def assert_passes(self, out, what):
         self.assertIsNone(out, "%s: expected no refusal and no note, got %r" % (what, out))
@@ -156,7 +164,7 @@ class ClosedItemFixture(unittest.TestCase):
 
 
 class ClosedItemRefusalTests(ClosedItemFixture):
-    """Red today: the report guard has no closed-item check, so each of these Stops passes."""
+    """Each of these Stops refuses a cited item that the waiting copy shows closed."""
 
     def test_item_form_refuses_a_closed_item(self):
         # Catches: "item 214" in Input Needed passing while the page holds item 214 closed.
@@ -223,13 +231,17 @@ class ClosedItemRefusalTests(ClosedItemFixture):
         self.assert_refused(out, [381], "items 214 and 381, 214 read open this turn, 381 closed in the copy")
 
     def test_read_back_from_an_earlier_turn_does_not_skip_the_copy(self):
-        # Catches: a read in an earlier turn clearing a cite in this one. Only the same turn's read counts.
+        # Catches: a read in an earlier turn clearing a cite in this one, including a turn slice that starts at the
+        # first human message. The read is in the turn before the last human message, so only the copy may decide.
         repo = copy_repo("closed214", CLOSED_214)
         self.assertEqual(copy_status(repo, 214), "closed", "the fixture copy must hold item 214 closed")
-        records = [*artifact_read(214, "open"), trg.human("look at the open items"),
+        records = [trg.human("look at the open items"), *artifact_read(214, "open"),
+                   trg.assistant_text("Here are the items."), trg.human("and item 214?"),
                    trg.assistant_text(report("item 214 is open."))]
         out = self.stop(records, repo)
         self.assert_refused(out, [214], "item 214 cited, read open in an earlier turn only")
+        self.assertNotIn("read this turn", out.get("reason", ""),
+                         "the refusal took the earlier turn's read as one of this turn's")
 
     def test_landed_turn_refuses_a_closed_item_too(self):
         # Catches: the check run only on an unlanded turn, so a report after a commit passes a closed cite.
@@ -239,6 +251,98 @@ class ClosedItemRefusalTests(ClosedItemFixture):
                   trg.tool_result_msg("g1", "[main abc123] step")]
         out = self.stop(self.turn(report("item 214 is open."), *commit), repo)
         self.assert_refused(out, [214], "item 214 cited in a landed turn")
+
+
+class ClosedItemCiteFormTests(ClosedItemFixture):
+    """Cite forms. Each one must name the page items it cites, and a closed one among them refuses the Stop. A case
+    asserts every number its form cites, so a guard that reads only the first number fails on the second."""
+
+    def test_or_list_names_every_item(self):
+        # Catches: "items 214 or 381" read as its first number only, so 381 closed passes.
+        repo = copy_repo("closed-all", CLOSED_ALL)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("items 214 or 381 are open.")), repo)
+        self.assert_refused(out, [214, 381], "items 214 or 381, both closed")
+
+    def test_slash_list_names_every_item(self):
+        # Catches: "items 214/381" read as its first number only.
+        repo = copy_repo("closed-all", CLOSED_ALL)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("items 214/381 are open.")), repo)
+        self.assert_refused(out, [214, 381], "items 214/381, both closed")
+
+    def test_or_before_the_last_item_names_it(self):
+        # Catches: "items 214, 381, or 383" with the "or" before the last item, so 383 closed passes.
+        repo = copy_repo("closed-all", CLOSED_ALL)
+        self.assertEqual(copy_status(repo, 383), "closed", "the fixture copy must hold item 383 closed")
+        out = self.stop(self.turn(report("items 214, 381, or 383 are open.")), repo)
+        self.assert_refused(out, [214, 381, 383], "items 214, 381, or 383, all closed")
+
+    def test_parenthetical_does_not_end_the_list(self):
+        # Catches: "items 214 (closed), 381 and 383" read as item 214 alone, so 381 and 383 closed pass.
+        repo = copy_repo("closed-all", CLOSED_ALL)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("items 214 (closed), 381 and 383 are open.")), repo)
+        self.assert_refused(out, [214, 381, 383], "items 214 (closed), 381 and 383, all closed")
+
+    def test_range_names_both_ends(self):
+        # Catches: "items 214-216" read as item 214 alone, so 216 closed passes. The middle, 215, is an accepted gap:
+        # it is not pinned here.
+        repo = copy_repo("closed-range", CLOSED_RANGE)
+        self.assertEqual(copy_status(repo, 216), "closed", "the fixture copy must hold item 216 closed")
+        out = self.stop(self.turn(report("items 214-216 are open.")), repo)
+        self.assert_refused(out, [214, 216], "items 214-216, 214 and 216 closed")
+
+    def test_colon_after_items_names_every_item(self):
+        # Catches: "Items: 214, 381" with a colon after the word, so 381 closed passes.
+        repo = copy_repo("closed-all", CLOSED_ALL)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("Items: 214, 381 are open.")), repo)
+        self.assert_refused(out, [214, 381], "Items: 214, 381, both closed")
+
+    def test_parenthesized_plural_names_the_item(self):
+        # Catches: "item(s) 214" read as no cite, so item 214 closed passes.
+        repo = copy_repo("closed214", CLOSED_214)
+        self.assertEqual(copy_status(repo, 214), "closed", "the fixture copy must hold item 214 closed")
+        out = self.stop(self.turn(report("item(s) 214 is open.")), repo)
+        self.assert_refused(out, [214], "item(s) 214 cited")
+
+    def test_bold_number_names_the_item(self):
+        # Catches: "item **214**" read as no cite, so item 214 closed passes.
+        repo = copy_repo("closed214", CLOSED_214)
+        self.assertEqual(copy_status(repo, 214), "closed", "the fixture copy must hold item 214 closed")
+        out = self.stop(self.turn(report("item **214** is open.")), repo)
+        self.assert_refused(out, [214], "item **214** cited")
+
+    def test_page_dash_item_names_the_item(self):
+        # Catches: "page-item 214" read as no cite, because the hyphen before "item" blocks the match.
+        repo = copy_repo("closed214", CLOSED_214)
+        self.assertEqual(copy_status(repo, 214), "closed", "the fixture copy must hold item 214 closed")
+        out = self.stop(self.turn(report("page-item 214 is open.")), repo)
+        self.assert_refused(out, [214], "page-item 214 cited")
+
+    def test_bullet_list_after_items_colon_names_every_item(self):
+        # Catches: "items:" followed by a bullet list of numbers read as no cite, so 381 closed passes. The bullets
+        # are blockquoted, as a report's lines are, so the Input Needed item holds them.
+        repo = copy_repo("closed-all", CLOSED_ALL)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("items:\n> - 214\n> - 381")), repo)
+        self.assert_refused(out, [214, 381], "items: then a bullet list of 214 and 381, both closed")
+
+    def test_item_2_in_a_plan_is_a_cite(self):
+        # Catches: "the item 2 in the diff plan" passing as no cite. It is a cite by design, a low false alarm.
+        repo = copy_repo("closed-2", CLOSED_2)
+        self.assertEqual(copy_status(repo, 2), "closed", "the fixture copy must hold item 2 closed")
+        out = self.stop(self.turn(report("the item 2 in the diff plan is open.")), repo)
+        self.assert_refused(out, [2], "the item 2 in the diff plan, item 2 closed")
+
+    def test_item_date_is_no_cite(self):
+        # Catches: "item 2026-11-10" read as item 2026 (and 11 or 10, in a range), so a closed 2026 refuses the Stop.
+        # Old code reads 2026 as a cite, so this case is red there.
+        repo = copy_repo("date-parts", DATE_PARTS)
+        self.assertEqual(copy_status(repo, 2026), "closed", "the fixture copy must hold item 2026 closed")
+        self.assert_passes(self.stop(self.turn(report("item 2026-11-10 is open.")), repo),
+                           "item 2026-11-10, with 2026, 10 and 11 closed in the copy")
 
 
 class ClosedItemPassTests(ClosedItemFixture):
@@ -316,7 +420,7 @@ class ClosedItemCostTests(ClosedItemFixture):
     """The copy is read once per Stop: the reader's one git grep, however many items the report cites."""
 
     def test_three_cites_read_the_copy_once(self):
-        # Catches: one git read of the copy per cited item. Red today: the guard reads no copy at all.
+        # Catches: one git read of the copy per cited item.
         repo = copy_repo("closed-all", CLOSED_ALL)
         trace = os.path.join(self.run_dir, "three.trace")
         self.stop(self.turn(report("items 214, 381 and 383 are open.")), repo, trace=trace)
@@ -331,8 +435,7 @@ class ClosedItemCostTests(ClosedItemFixture):
 
 
 class ClosedItemFailOpenTests(ClosedItemFixture):
-    """Red today: the guard prints no note, so each of these Stops has no systemMessage. Each one must pass the Stop
-    with a note that says the check was not run."""
+    """Each one must pass the Stop with a systemMessage that says the check was not run."""
 
     def test_no_record_branch_passes_with_a_not_checked_note(self):
         # Catches: a missing record branch read as a closed item, or as no note at all.
