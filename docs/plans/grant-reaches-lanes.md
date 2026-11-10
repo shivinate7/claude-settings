@@ -2,7 +2,11 @@
 
 Owner, 2026-11-01 22:37 CST, in the coordinator's chat: "a grant here should allow for a grant there."
 
-Status: signed off as written (owner, Cockpit item 152, pick a, 2026-11-03 18:21 CST). Ruling: decision grant-reaches-lanes. Revalidated 2026-11-06 (owner, page item 221, 12:36 CST: 'is this still valid? A is ok to do'). Build waits on question 3. Headless refused-act probe run 2026-11-10: no refusal produced (section 2, "Gate").
+Status: signed off as written (owner, Cockpit item 152, pick a, 2026-11-03 18:21 CST). Ruling: decision grant-reaches-lanes. Revalidated 2026-11-06 (owner, page item 221, 12:36 CST: 'is this still valid? A is ok to do'). Build waits on question 3.
+
+Refuter: refuter opus, 2026-11-10, holds with changes (section 7 holds the changes).
+
+Headless refused-act probe run 2026-11-10: no refusal produced (section 2, "Gate").
 
 ## The problem
 
@@ -98,7 +102,7 @@ and `opus builders 2h`:
 - `<act>` comes from a fixed catalogue in one home, a constant the gate reads (rule
   building-allow-list-is-the-constant). The act's full scope sits in the owner's grant or the
   constant, never in a record a model writes. First entries, one per incident:
-  - `merge <pr>`: superseded, pending question 3. Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. No "Merge Without Review" refusal is on record after 2026-11-01. Scope if kept: `~/.claude/bin/merge <pr> --confirm` for that PR number only, in the gate. The
+  - `merge <pr>`: superseded, pending question 3. Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. The classifier refused `merge 1421 --confirm` once more on 2026-11-07 13:05 CST (settings.json, entry "Relayed Merge Yes"). The "Relayed yes" grant in `.claude/CLAUDE.md` and that entry now cover it. Scope if kept: `~/.claude/bin/merge <pr> --confirm` for that PR number only, in the gate. The
     cloud rule still allows any PR (section 2, the gate). The PR is required. Only the session
     tagged `cs-build:batch-runner` for the repo, never its agents: on main, every other session
     hands its merge to the batch runner (session-start hook, merge role).
@@ -274,4 +278,11 @@ Design B: one file write per grant, one file read per tool call while the file e
 4. **Agents.** Moot under section 2: `self-edit` gates nothing as written. Options were: (a) `self-edit` reaches the target's agents, as a timed override does, and `merge` stays with the batch runner; (b) the lead session only. The `[Self-Modification]` refusal was a builder's.
 5. **The gate.** Answered (a) by the 2026-11-03 sign-off (item 152 a): probe the hook gate first, the mod gate second. Option (b), the mod gate only, rested on its documented skip. The hook gate is known to load in cloud sessions.
 6. **Computer sessions.** Answered (a) by the 2026-11-03 sign-off (item 152 a): Design A only, Design B if its probes fail. Option (b), both now, was not taken; (a) keeps one home.
-7. **The cloud merge rule.** Superseded, pending question 3. Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. No "Merge Without Review" refusal is on record after 2026-11-01. `merge/cloud_allow.json` allows `merge * --confirm` for every PR.
+7. **The cloud merge rule.** Superseded, pending question 3. Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. The classifier refused `merge 1421 --confirm` once more on 2026-11-07 13:05 CST, and the "Relayed Merge Yes" entry now covers it. `merge/cloud_allow.json` allows `merge * --confirm` for every PR.
+
+## 7. Changes from the refuter (2026-11-10)
+
+- The step note's Nov 8 sighting was an override lift that triage relayed to batch runner 9. The runner refused it, because an override covers only the session where it was typed (decision `owner-override`). That is a guard-layer case, so the line in "The problem" that the guard layer is solved holds only for typed words. The fix the step names is a relay that names the acting session and gives the owner the exact line to type there, as a page task. Step `page-grant-typed-line` builds it.
+- A simpler route exists for the `Agent` spawn, which is the only refused act on record (2026-11-03). That refusal predates the "Relayed Grant" entry (2026-11-06). The coordinator can put the grant on the waiting page naming the spawn, and the lane counts the pick with `page_grant.py`. It needs no new gate or grant word. It gives up one-step typing, per-session expiry and computer-to-cloud reach. Whether the classifier reads the `counted` line is unmeasured. Question 3 should name this route beside options a and b.
+- Question 3 option a defines no act or scope for the `Agent` spawn. The catalogue entry (a spawn, the files its brief may name) is part of the owner's ruling, not a guess made here.
+- The headless probe rewrote the user `permissions.allow` list. Guard, queued: every nested `claude -p` probe sets a scratch `CLAUDE_CONFIG_DIR`, so the session-start hook cannot reach the real user settings. Step id `probe-scratch-config`, unfiled.
