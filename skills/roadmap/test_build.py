@@ -2739,6 +2739,32 @@ class WaitOnClosedPull(UpkeepFixture):
         self.assertNotIn("c-landed (#47)", self.listed(out),
                          "a closed unmerged #47 whose head is on main is listed as a wait, though its work landed")
 
+    def distinct_head(self, number):
+        """A root commit of its own, off main. Its message names the pull, so no two heads share a sha."""
+        tree = git(self.repo, "rev-parse", "roadmap^{tree}").strip()
+        return git(self.repo, "commit-tree", tree, "-m", "closed lane %d" % number).strip()
+
+    def test_closed_row_no_open_step_waits_on_runs_no_merge_base(self):
+        # The roadmap skill's upkeep row states the cost: one git merge-base for the closed row an open step waits on,
+        # and none for a closed row no step waits on. Each row has its own head, so the per-sha cache cannot merge calls.
+        # lane-N matches no step and the file has no pulls row, so pull_landed_marks and the draft-pull check
+        # reach head_on_main with nothing to check here.
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        heads = {n: self.distinct_head(n) for n in range(41, 48)}
+        self.assertEqual(len(set(heads.values())), 7, "scope: the seven heads must be distinct, or the per-sha cache hides the cost")
+        self.publish(landed=[self.pull_row(n, "lane-%d" % n, head=heads[n], merged=False) for n in range(41, 48)])
+        with mock.patch.object(build, "git", wraps=build.git) as spy:
+            out = self.out_with_live()
+        self.assert_control_listed(out)
+        merge_bases = [c.args for c in spy.call_args_list if c.args[1:2] == ("merge-base",)]
+        checked = [a[3] for a in merge_bases if len(a) > 3]
+        unwaited = [n for n in range(42, 48) if heads[n] in checked]
+        if unwaited:
+            self.fail("the closed-pull wait ran git merge-base on the head of closed #%s, which no open step waits on "
+                      "(%d merge-base processes in all)" % (", #".join(str(n) for n in unwaited), len(merge_bases)))
+        self.assertEqual(len(merge_bases), 1, "the closed-pull wait ran %d git merge-base processes, not one, though one closed "
+                         "row is waited on" % len(merge_bases))
+
 
 class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
