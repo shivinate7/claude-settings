@@ -35,7 +35,7 @@ Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane han
 among them, and no full suite. A red lane does not hand off.
 Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 
-A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
+A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees). Its brief has a `Keep:` line: each earlier lane commit, by short sha and subject, whose lines the builder keeps (decision `silent-undo-check-design`).
 
 ## Report
 
