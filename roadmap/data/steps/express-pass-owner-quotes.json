@@ -1,0 +1,12 @@
+{
+  "title": "A PR whose owner quotes match the feedback log word for word skips the review round",
+  "phase": "now",
+  "status": "todo",
+  "order": 1026,
+  "owner": "triage",
+  "why": "Owner 15:22 CST Nov 10 (R7, relayed by the retrospective session): \"this is very key yes\".",
+  "note": "Rewrite decision docs-only-prs-skip-review in place (item 205 b): an exact-quote match against the feedback log skips the docs-only review round. Its first user is the restart plan's own PR.",
+  "updatedAt": "2026-11-10T15:30:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}

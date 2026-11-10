@@ -1,0 +1,12 @@
+{
+  "title": "Probe GitHub Projects as the in-progress table, from local and cloud",
+  "phase": "now",
+  "status": "todo",
+  "order": 1024,
+  "owner": "triage",
+  "why": "Owner 15:22 CST Nov 10 (D1, relayed by the retrospective session): \"i think at that point we should just integrate github's pr tracker thing there's like a whole connector it has doesn't it it's kinda like a table that shows stuff in progress\".",
+  "note": "First a probe: which connector or API reads and writes a GitHub Projects table from both a local and a cloud session. Sits beside decision stalled-steps (doing is derived from live work). The build waits for the probe.",
+  "updatedAt": "2026-11-10T15:30:00-06:00",
+  "lane": "",
+  "blockedBy": []
+}
