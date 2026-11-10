@@ -25,7 +25,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
-  relayed-grant-read-from-page).
+  relayed-grant-read-from-page). Its Never covers no longer names the blanket "permissions,
+  settings or overrides". Its Covers text names the one settings change, whose label must name
+  the settings file and entry (owner ruling 2026-11-10 11:06 CST, "widen").
 - One "Own Branch Lease Push:" entry quotes the lease push with a named sha and the guard remedy's
   command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
   the branch was pushed earlier in this session, and binds the sha to the tip this session last
@@ -101,14 +103,24 @@ MERGE_GO_SCOPE = (("sender tag cs-build:coordinator", "`cs-build:coordinator` ma
                   ("standing-merge-grant", "standing-merge-grant"), ("merge go", "merge go"),
                   ("named PR", "for a named PR"))
 # Each act the Relayed Grant entry's "Never covers" sentence must name (decision relayed-grant-read-from-page).
+# The two settings rows follow owner ruling 2026-11-10 11:06 CST ("widen"): one settings change is covered
+# only when its label names the file and entry, so a settings change without that naming, and the entry's own
+# change, stay refused.
 RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page comment", "a page comment"),
                    ("lastAnswer", "lastAnswer"), ("reply", "reply"),
                    ("answer for another item", "an answer for another item"), ("choice none", "choice none"),
                    ("task answer", "any task answer"), ("time with no zone", "time has no zone"),
                    ("older than added", "an answer older than the item's added"),
                    ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
-                   ("permissions", "permissions"), ("settings", "settings"), ("overrides", "overrides"),
+                   ("permissions", "permissions"), ("overrides", "overrides"),
+                   ("settings change without file and entry",
+                    "a settings change whose label does not name the file and entry"),
+                   ("Relayed Grant entry itself", "a change to the Relayed Grant entry itself"),
                    ("no counted line", "no `counted` line in this session"))
+# Each term the Relayed Grant entry's Covers text names for its one settings change (owner ruling
+# 2026-11-10 11:06 CST).
+RELAYED_SETTINGS_COVERS = (("one settings change", "one settings change"),
+                           ("label names the settings file and entry", r"label.*?settings file.*?entry"))
 # Each act the Relayed Merge Yes entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
                          ("not tagged cs-build:coordinator", "not tagged `cs-build:coordinator`"),
@@ -297,6 +309,15 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
         missing = unnamed_terms(clause, RELAYED_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_never_covers_drops_the_blanket_permissions_settings_overrides(self):
+        clause = entry_part(self, RELAYED, never=True)
+        self.assertNotRegex(clause, r"(?i)permissions,?\s+settings,?\s+(or|and)\s+overrides",
+                            "Never covers still names the blanket 'permissions, settings or overrides'")
+
+    def test_covers_names_the_one_settings_change(self):
+        missing = unnamed_terms(entry_part(self, RELAYED), RELAYED_SETTINGS_COVERS)
+        self.assertFalse(missing, "Covers text does not name %r" % missing)
 
 
 class RelayedMergeYesIsAllowed(unittest.TestCase):
