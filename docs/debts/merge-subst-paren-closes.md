@@ -1,14 +1,16 @@
-# A command substitution in a merge hides its flags from the guard
+# A quoted `)` or a pipe inside a command substitution hides merge flags from the guard
 
-**What.** The merge-confirm-repo clause reads an unquoted `$(…)` as the command's closing `)`. Two forms get through, at the head of PR #1166 and at this head alike:
+**What.** The merge-confirm-repo clause finds the end of a `$(…)` in shlex-unquoted text, so two forms close the span early and get through:
 
-- (a) `merge 5 --confirm --base-red-ok $(date) -C /other` is judged in the cwd repo, not `/other`. A quoted `"$(date)"` is denied.
-- (b) `merge -C /other $(echo 5) --confirm` is not judged at all, because the cut drops `--confirm`. Form (b) is a likely mistake: a PR number taken from `$(gh pr list …)`.
+- (a) A quoted `)` inside it: `merge -C /other $(echo ')') --confirm` is not judged at all, because the cut drops `--confirm`. `$(echo ")")` does the same.
+- (b) A pipe inside it: `merge 5 --confirm --base-red-ok $(date | cat) -C /other` is judged in the cwd repo, not `/other`. A value piped inside `$(…)`, such as a PR number from `gh pr list`, is a likely shape.
 
-**Where.** `hooks/guard_merge.py`, `_command_words` and `_glued_counts`, used by `_unproved_confirm`.
+A plain, nested or quoted `$(…)` is already denied.
+
+**Where.** `hooks/guard_merge.py`, `_command_words` and `_open_substitutions`, used by `_unproved_confirm`.
 
 **Decision.** merge-confirm-repo (a cloud merge acts only in a repo its own record names).
 
-**Retire.** The clause skips a `)` that closes a `$(` opened in the same segment. A case in `hooks/test_guard.py` denies both commands above when the own record names only the cwd repo.
+**Retire.** The three cases in `hooks/test_guard.py` section 5h that deny the forms above, when the own record names only the cwd repo, pass.
 
 Fix: step:merge-subst-paren (a queued roadmap step). Until: 2026-11-21
