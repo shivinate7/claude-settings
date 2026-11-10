@@ -222,6 +222,13 @@
         "test": "merge/test_merge.py::GhHalf.test_red_required_check_reverts_the_claim_and_merges_nothing"
       }
     },
+    "gh-write-cloud": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "gh-write-cloud"
+      },
+      "test": "hooks/test_guard.py::gh-write-cloud: a pull request opened without --draft is refused in a cloud session"
+    },
     "git-ci-wait-checks-in": {
       "mechanism": {
         "kind": "unmechanized",
@@ -360,7 +367,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "check-tail",
-        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint` or `merge --review-record` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes). A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
+        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint` or `merge --review-record` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes), and it reads the check through `uv run`, a versioned python such as `python3.11`, and an `env` or python wrapper. A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
       },
       "test": "hooks/test_guard.py::check-tail: the incident line, backgrounded, is refused"
     },
