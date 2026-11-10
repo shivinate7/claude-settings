@@ -219,7 +219,7 @@ def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None):
              "The job was not stopped, and the session cannot stop it: the job is not its child.",
              "Diagnose it from this report. To stop the job, ask the owner to stop pid=%s, in order."
              % pids,
-             "To wait on the job without a loop, run `wait-pid %s` (bin/wait-pid; it never stops the job)."
+             "To wait on the job without a loop, run `bin/wait-pid %s` (it never stops the job)."
              % pid,
              "A long wait runs with run_in_background: Bash's default foreground timeout is 120 s.",
              "Processes (pid state elapsed command):"]

@@ -70,8 +70,8 @@ LIVE_STREAM_REASON = (
     "this command follows a stream and never ends on its own, so it outlives the turn "
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
-    "wait for its completion notice. To wait on a pid, use `wait-pid PID [--timeout SECS]`. "
-    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`."
+    "wait for its completion notice. To wait on a pid, use `bin/wait-pid PID [--timeout SECS]`. "
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`."
 )
 
 
@@ -92,7 +92,7 @@ TRUNCATING_FILTERS = ("tail", "head")
 # its file is the only copy of the stream, as with `> file`.
 # Compared on the word `basename` gives, with `.exe` stripped as in `_roster_word`.
 FILE_WRITER_STAGES = ("tee", "tee-object", "out-file")
-SCRIPT_INTERPRETERS = ("python", "python3", "py")
+SCRIPT_INTERPRETER = re.compile(r"(?:python[\d.]*w?|py)$")
 
 
 def narrating_stage(segment: str) -> str:
@@ -106,19 +106,54 @@ def narrating_stage(segment: str) -> str:
     return _roster_word(tokens, index)
 
 
+# The interpreter flags that take the next word as their value, so `python -W ignore run.py` skips `ignore`.
+INTERPRETER_VALUE_FLAGS = ("-W", "-X")
+
+
+def _script_operand(tokens, index: int) -> str:
+    """The script an interpreter at `index` runs: its first word that is no flag. '' for `-m <module>`
+    and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
+    at = index + 1
+    while at < len(tokens) and tokens[at].startswith("-"):
+        flag = tokens[at]
+        if flag in ("-m", "-c"):
+            return ""
+        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
+    return _whole_word(tokens, at) if at < len(tokens) else ""
+
+
+def _whole_word(tokens, at: int) -> str:
+    """The word at `at`, joined across the tokens an unquoted substitution split. A `$(` or a backtick
+    opens a substitution that reads as several tokens, so the word reads on to the token that closes it
+    and the roster tail is judged on the joined word. A quoted substitution is one token and joins nothing."""
+    word = tokens[at]
+    depth = word.count("$(") - word.count(")")
+    ticks = word.count("`") % 2
+    while (depth > 0 or ticks) and at + 1 < len(tokens):
+        at += 1
+        word += " " + tokens[at]
+        depth += tokens[at].count("$(") - tokens[at].count(")")
+        ticks = (ticks + tokens[at].count("`")) % 2
+    return word
+
+
 def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
     a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
-    NARRATING_SCRIPT_TAILS. By default a word carrying a script path counts, so `python3.11` and
-    `uv run python` both match. `interpreter_only` (the check rule) keeps the word to python, python3
-    or py, or the script run by its own path, so `grep -n x merge/merge.py` is no run of the script, and `python3.11` and `uv run`
-    do not match. The follow-up branch check-tail-wrapper-forms adds both."""
+    NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
+    both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER) and the path
+    to its script operand: the check rule needs it, so `grep -n x merge/merge.py` and
+    `python3 -m pytest -k merge/merge.py` are no run of the script."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
-    if interpreter_only and word.removesuffix(".exe") not in SCRIPT_INTERPRETERS:
-        # A script run by its own path (`./merge/merge.py`) is the same run as `python merge/merge.py`.
-        return word if tokens[index].replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS) else ""
+    if interpreter_only:
+        script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+        if not script and word.endswith(".py"):
+            script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
+        if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
+            return word + " " + basename(script)
+        return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(token)
@@ -146,11 +181,48 @@ NARRATED_TAIL_REASON = (
 # after the run can cut or hide the verdict line, the one useful line, so it can be lost or never read. `verdict <cmd>` keeps the whole log and prints the
 # verdict itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
 # cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
-# (`--lane-lint`, `--review-record`, in each spelling of the roster above) are refused in the
-# foreground too. `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused
-# twice. `ci-job` is refused in the background only, and a trailing `&` is the background.
+# (`--lane-lint`, `--review-record`) are refused in the foreground too. They count as `merge`,
+# `merge.cmd`, or `merge/merge.py` or `merge/launch.py` run by `python`, a `python3.N`, `pythonw` or
+# `py`, behind a wrapper or `uv run`. A call through `verdict` is verdict-pipe's, never read here.
+# `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused twice.
+# `ci-job` is refused in the background only, and a trailing `&` is the background.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record")
+CHECK_SCRIPT_TAIL = "bin/ci-job"
+# The `uv` and `uv run` flags that take the next word as their value (`uv run --help`, uv 0.11), so
+# `uv run -w pytest python x.py` skips `pytest`. The global flags that sit before `run` are in this list too.
+UV_VALUE_FLAGS = frozenset((
+    "--allow-insecure-host", "--cache-dir", "--color", "--config-file", "--config-setting",
+    "--config-settings-package", "--default-index", "--directory", "--env-file", "--exclude-newer",
+    "--exclude-newer-package", "--extra", "--extra-index-url", "--find-links", "--fork-strategy",
+    "--group", "--index", "--index-strategy", "--index-url", "--keyring-provider", "--link-mode",
+    "--no-binary-package", "--no-build-isolation-package", "--no-build-package",
+    "--no-editable-package", "--no-extra", "--no-group", "--no-sources-package", "--only-group",
+    "--package", "--prerelease", "--project", "--python", "--python-platform",
+    "--refresh-package", "--reinstall-package", "--resolution", "--upgrade-group",
+    "--upgrade-package", "--with", "--with-editable", "--with-requirements",
+    "-C", "-P", "-f", "-i", "-p", "-w",
+))
+
+
+def _skip_uv_run(tokens, index: int) -> int:
+    """The index of the command `uv [flags] run [flags] ...` starts, read through `resolve_command`
+    again, else `index`. `uv` is no entry of COMMAND_WRAPPERS: adding it would move every rule that
+    reads the command word, and only the check rule needs it."""
+    while index < len(tokens) and basename(tokens[index]) == "uv":
+        run = index + 1
+        while run < len(tokens) and tokens[run].startswith("-"):
+            run += 2 if tokens[run] in UV_VALUE_FLAGS else 1
+        if tokens[run:run + 1] != ["run"]:
+            break
+        start = run + 1
+        while start < len(tokens) and tokens[start].startswith("-"):
+            start += 2 if tokens[start] in UV_VALUE_FLAGS else 1
+        at = resolve_command(tokens[start:])
+        if at is None:
+            break
+        index = start + at
+    return index
 
 
 def check_stage(segment: str, background: bool) -> str:
@@ -162,8 +234,12 @@ def check_stage(segment: str, background: bool) -> str:
     index = resolve_command(tokens)
     if index is None:
         return ""
+    index = _skip_uv_run(tokens, index)
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
+    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
+            tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
+        return CHECK_COMMANDS[0] if background else ""
     if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
         return ""
     return _roster_word(tokens, index, interpreter_only=True)
@@ -279,7 +355,8 @@ def _verdict_pipe_in(text: str) -> str:
         at = resolve_command(tokens)
         if at is None and _is_lookup(tokens):
             continue
-        reach = tokens if at is None else tokens[:at + 1]
+        # `uv` is no wrapper, so `uv run verdict x` names `uv`; _skip_uv_run reads on to the program.
+        reach = tokens if at is None else tokens[:_skip_uv_run(tokens, at) + 1]
         if any(basename(token.lstrip("(")) in VERDICT_WORDS for token in reach):
             return "verdict |"
     # A shell's script (`bash -c '...'`) is its own command text, read the way the live-stream rule reads it.
@@ -507,8 +584,8 @@ def waiter_verdict(segments, background: bool) -> str:
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: wait for the CI-wake notice that follows gh pr ready. "
-    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
-    "that has a zone. To wait on one pid, use `wait-pid PID [--timeout SECS]`. "
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
+    "that has a zone. To wait on one pid, use `bin/wait-pid PID [--timeout SECS]`. "
     "To wait for another condition, run the long command in the background and wait for its completion "
     "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
     "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
@@ -677,8 +754,8 @@ PATTERN_POLLER_REASON = (
     "the loop's own condition polls for a process by name or by pattern. That pattern can match "
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
-    "Remedy: wait on one pid with `wait-pid PID [--timeout SECS]`, which also takes a job a stall "
-    "left behind. To wait until a clock time, use `wait-until TIME [--timeout SECS]`. "
+    "Remedy: wait on one pid with `bin/wait-pid PID [--timeout SECS]`, which also takes a job a stall "
+    "left behind. To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. "
     "To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 
