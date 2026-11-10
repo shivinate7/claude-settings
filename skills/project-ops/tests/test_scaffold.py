@@ -94,16 +94,33 @@ def rotation_steps(rule):
                     [" ".join(t.split()) for t in re.split(r"(?m)^\s+\d+\.\s", rule)[1:]]))
 
 
-def near(flat, anchor, *needs, span=300):
-    """True when the text `span` characters either side of an `anchor` match holds every `needs` pattern.
+# The lane brief's claims are judged one sentence at a time, so a neighbour's words cannot supply one.
+NEGATION = r"\b(?:never|not|no|neither|nor|cannot|can't|won't)\b"
+SHARING = r"\b(?:shar(?:e|es|ed|ing)|same (?:checkout|worktree)|one (?:checkout|worktree))\b"
+# A sentence with no negation at all: the affirmative form of a claim, so its inverse cannot pass.
+NO_NEGATION = r"^(?!.*" + NEGATION + r")"
+# The builder may do the act: a permission word sits right before the verb, with no negation between.
+PERMITS = (r"\bbuilders?\s+(?:may|can|could|might|(?:is|are)\s+(?:allowed|free)\s+to)\s+(?:also\s+)?"
+           r"(?:cherry|amend|rewrit|rebas|squash|reword)")
+# The builder never does it: the negation sits right before the verb, so a clause after the verb cannot supply it.
+NEVER_REWRITES = (r"(?:\bbuilders?\s+(?:(?:must|do|does|shall|will)\s+)?(?:never|not|neither|cannot|can't|won't)\s+"
+                  r"|\bno builders?\s+(?:(?:may|can|should)\s+)?)(?:cherry|amend|rewrit|rebas|squash|reword)")
 
-    A passage, not one sentence, so a rewording that splits the rule over two sentences still passes.
-    """
-    for m in re.finditer(anchor, flat, re.I):
-        window = flat[max(0, m.start() - span):m.end() + span]
-        if all(re.search(need, window, re.I) for need in needs):
-            return True
-    return False
+
+def sentences(text):
+    """The text, whitespace flattened and split after each sentence end."""
+    return re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+
+
+def has_sentence(sents, *patterns):
+    """True when one sentence matches every pattern. No sentence at all is False, never an error."""
+    return any(all(re.search(p, s, re.I) for p in patterns) for s in sents)
+
+
+def denies_sharing(sentence):
+    """True when the sentence says the agents never share a checkout: a negation, then `share` within a few words, or `share no`."""
+    return (re.search(NEGATION + r"\W+(?:\w+\W+){0,3}?" + SHARING, sentence, re.I) is not None
+            or re.search(SHARING + r"\s+(?:no|none)\b", sentence, re.I) is not None)
 
 
 class TempDest(unittest.TestCase):
@@ -282,31 +299,54 @@ class Scaffold(TempDest):
         flat = " ".join(tree(SKILL)["templates/brief.md"].split())
         self.assertIn("tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`", flat)
 
+    def brief_sentences(self):
+        """The lane brief as sentences. The scope comes first: a wrong file fails here, once."""
+        text = tree(SKILL)["templates/brief.md"]
+        self.assertIn("Lane brief:", text, "scope: templates/brief.md is not the lane brief")
+        return sentences(text)
+
     def test_brief_isolates_test_author_and_builder(self):
-        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
-        self.assertIn("Lane brief:", flat, "scope: templates/brief.md is not the lane brief")
-        self.assertTrue(
-            near(flat, r"\bbuilder", r"test[- ]author", r"\bworktrees?\b", r"\b(own|separate|isolated)\b",
-                 r"\b(never|not|neither|no)\b", r"\b(shar\w*|same checkout|one checkout)\b"),
-            "brief does not say the test-author and the builder each get their own isolated worktree, "
-            "never one shared checkout")
+        sents = self.brief_sentences()
+        with self.subTest(claim="own isolated worktree"):
+            self.assertTrue(
+                has_sentence(sents, r"test[- ]author", r"\bbuilders?\b", r"\b(?:each|both|separately)\b",
+                             r"\b(?:own|separate|dedicated)\b", r"\b(?:isolated|separate|dedicated)\b",
+                             r"\b(?:worktrees?|checkouts?)\b"),
+                "no sentence says the test-author and the builder each get their own isolated worktree")
+        with self.subTest(claim="never share"):
+            self.assertTrue(
+                any(re.search(SHARING, s, re.I) and denies_sharing(s) for s in sents),
+                "no sentence says the test-author and the builder never share a worktree")
 
     def test_brief_lands_test_commits_before_builder_starts(self):
-        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
-        self.assertIn("Lane brief:", flat, "scope: templates/brief.md is not the lane brief")
-        self.assertTrue(
-            near(flat, r"\bbuilder", r"test[- ]author", r"\bbranch\b", r"\b(tip|head)\b",
-                 r"\b(before|after|once|prior|first|then)\b", r"\b(land\w*|push\w*|commit\w*)\b"),
-            "brief does not say the test-author's commits land on the lane branch before the builder's "
-            "worktree starts, from that tip")
+        sents = self.brief_sentences()
+        with self.subTest(claim="test commit lands first"):
+            self.assertTrue(
+                has_sentence(sents, r"\btest[- ]commits?\b", r"\b(?:lands?|landed|pushed|committed)\b",
+                             r"\b(?:on|onto|to) the (?:lane )?branch\b",
+                             r"\b(?:before|ahead of|prior to)\b.*\bbuilders?\b.*\bstart", NO_NEGATION),
+                "no sentence says a test commit lands on the lane branch before the builder starts")
+        with self.subTest(claim="builder starts from the branch head"):
+            self.assertTrue(
+                has_sentence(sents, r"\bbuilders?\b", r"\bworktrees?\b", r"\bstart\w*", r"\bfrom\b",
+                             r"\b(?:head|tip)\b", NO_NEGATION),
+                "no sentence says the builder's worktree starts from the branch head")
 
     def test_brief_forbids_builder_rewriting_test_commits(self):
-        flat = " ".join(tree(SKILL)["templates/brief.md"].split())
-        self.assertIn("Lane brief:", flat, "scope: templates/brief.md is not the lane brief")
+        sents = self.brief_sentences()
         self.assertTrue(
-            near(flat, r"\bbuilder", r"\b(never|not|no|neither|cannot|can't)\b", r"cherry[- ]?pick\w*",
-                 r"\bamend\w*", r"\b(rewrit\w*|rebas\w*|reword\w*|squash\w*)\b", r"\btests?\b"),
-            "brief does not say the builder never cherry-picks, amends or rewrites a test commit")
+            has_sentence(sents, NEVER_REWRITES, r"\bamend\w*", r"\b(?:rewrit|rebas|reword|squash)\w*",
+                         r"\btest[- ]commits?\b"),
+            "no sentence says the builder never cherry-picks, amends or rewrites a test commit")
+
+    def test_brief_grants_no_shared_checkout_and_no_builder_rewrite(self):
+        sents = self.brief_sentences()
+        shared = [s for s in sents if re.search(SHARING, s, re.I) and not denies_sharing(s)]
+        grants = [s for s in sents if re.search(PERMITS, s, re.I)]
+        with self.subTest(claim="shared checkout"):
+            self.assertEqual(shared, [], "a sentence says the test-author and the builder share a checkout")
+        with self.subTest(claim="builder rewrite"):
+            self.assertEqual(grants, [], "a sentence lets the builder cherry-pick, amend or rewrite a test commit")
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
