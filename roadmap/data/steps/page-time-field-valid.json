@@ -1,0 +1,8 @@
+{
+ "id": "page-time-field-valid",
+ "title": "Refuse a page or step write with a blank or non-ISO time",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "why": "On 2026-11-10 triage read the wrong columns from the clock tool and wrote about 190 blank times, then repaired them from commits. skills/waiting-page/SKILL.md:30 says read ISO times from now-central --iso, but nothing checks it. A guard refuses an ArtifactData write or a roadmap step write whose time field (added, replied, ruled, read, filed, answered, updatedAt) is blank or does not parse as ISO, with now-central --iso as the remedy.",
+ "source": "retrospective session 17:03 CST Nov 10 (R16, mistake names its guard); not an owner ruling"
+}
