@@ -1,11 +1,11 @@
 {
   "title": "A lane brief names the coordinator, triage and batch runner session ids, and a check refuses one sent without them",
   "why": "Lanes cannot find triage, because list_sessions has no tag filter in cloud sessions. Three sightings in one hour on Nov 8: lanes verdict-instruction-false-alarm, the lane on #1593, and reviewer-model-hook-latest (coordinator, 04:55 CST).",
-  "note": "Checked Nov 8 on main (FETCH_HEAD, 04:59 CST): skills/project-ops/templates/brief.md names no role session ids; templates/roster.md has <session id> slots for the roles. Fix: the brief template gains a Roles line with the coordinator's, triage's and the batch runner's session ids, filled from the roster; a check refuses a lane brief sent without them; red case first. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 04:59 CST Nov 8; the coordinator assigns a lane. Cause found 05:47 CST Nov 8: no roster existed on the roadmap branch or on main; the old triage 12 id survived only in handoffs/freeze-2026-10-30.md and six old page item owner fields. Triage added a Standing sessions roster to the roadmap CLAUDE.md; the brief template fills its Roles line from there. Doing in lane session_013NEJL3otrRs5sCK9CN5FpB (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane).",
+  "note": "Checked Nov 8 on main (FETCH_HEAD, 04:59 CST): skills/project-ops/templates/brief.md names no role session ids; templates/roster.md has <session id> slots for the roles. Fix: the brief template gains a Roles line with the coordinator's, triage's and the batch runner's session ids, filled from the roster; a check refuses a lane brief sent without them; red case first. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 04:59 CST Nov 8; the coordinator assigns a lane. Cause found 05:47 CST Nov 8: no roster existed on the roadmap branch or on main; the old triage 12 id survived only in handoffs/freeze-2026-10-30.md and six old page item owner fields. Triage added a Standing sessions roster to the roadmap CLAUDE.md; the brief template fills its Roles line from there. Doing in lane session_013NEJL3otrRs5sCK9CN5FpB (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane). Not done (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10): open PR #2049 carries it; its lane session has ended.",
   "phase": "now",
   "status": "doing",
   "order": 611,
   "owner": "triage",
-  "lane": "session_013NEJL3otrRs5sCK9CN5FpB",
-  "updatedAt": "2026-11-08T06:21:00-06:00"
+  "lane": "open PR #2049",
+  "updatedAt": "2026-11-10T04:58:00-06:00"
 }

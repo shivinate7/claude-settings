@@ -1,11 +1,11 @@
 {
   "title": "session_wording strips backtick spans before it splits at commas, with a two-tool control",
-  "note": "",
+  "note": " Done: on main by #1439, fe7f412d6 (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10).",
   "lane": "session_013NEJL28p5zwNuUCG1kkJmF",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 0.9,
   "owner": "coordinator",
   "why": "Coordinator, 13:50 CST Nov 7.",
-  "updatedAt": "2026-11-07T14:00:00-06:00"
+  "updatedAt": "2026-11-10T04:58:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "install-no-gap test: a skill folder that recovers on retry lands",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 266.5,
   "owner": "coordinator",
   "lane": "session_013NEJL3kdQhQRttX7boZUwM",
   "why": "Debt install-skill-recover-untested: the recovery path of the skill install has no test (coordinator, 15:43 CST Nov 7). #1537 drops that debt, and this step replaces it.",
-  "note": "Done check: the new case is red on main in the Windows CI job, and green with the fix. PR #1604, stacked on #1537 (step install-skill-fail-exit).",
-  "updatedAt": "2026-11-07T16:15:00-06:00"
+  "note": "Done check: the new case is red on main in the Windows CI job, and green with the fix. PR #1604, stacked on #1537 (step install-skill-fail-exit). Done: on main by #1604 (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10).",
+  "updatedAt": "2026-11-10T04:58:00-06:00"
 }

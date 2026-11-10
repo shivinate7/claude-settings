@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "session_013NEJKzLjdrBsFWzoCdBwG7",
+  "lane": "open PR #2151",
   "why": "The command_indexes callers (guard_stream, guard_wsl, guard_push_delete, question_form) miss glued substitutions, plus the inner cd root and rm after cd.",
-  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Stacked on #1506.",
-  "updatedAt": "2026-11-07T18:32:00-06:00"
+  "note": "Filed from lane notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc) via the coordinator, 18:31 CST Nov 7. The note on its PR names this step. Stacked on #1506. Not done (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10): open PR #2151 carries it; its lane session has ended.",
+  "updatedAt": "2026-11-10T04:58:00-06:00"
 }

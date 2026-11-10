@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 265.7,
   "owner": "coordinator",
-  "lane": "session_013NEJL1UMoM1VHADdYGDUZz",
+  "lane": "open PR #1640",
   "why": "Gap found by lane task-names-check-line-not-truth: on a waiting-page task, a str_replace that swaps only part of a cite token (the route id alone, the date alone) or removes the whole cite passes the task-why-cited guard, because the hook sees only old_str and new_str.",
-  "note": "Coordinator ruling, 15:19 CST: the guard reads the stored item once per page str_replace on a cite field, and only then. The cost goes in the record, with a test. A failed stored read reads unknown and asks; it never passes silently. Stacked PR on the lane's own PR, after the hand-off. Home: decision task-names-its-check, Known limit.",
-  "updatedAt": "2026-11-07T15:21:00-06:00"
+  "note": "Coordinator ruling, 15:19 CST: the guard reads the stored item once per page str_replace on a cite field, and only then. The cost goes in the record, with a test. A failed stored read reads unknown and asks; it never passes silently. Stacked PR on the lane's own PR, after the hand-off. Home: decision task-names-its-check, Known limit. Not done (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10): open PR #1640 carries it; its lane session has ended.",
+  "updatedAt": "2026-11-10T04:58:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "CI coverage counts a test as covered only when its run step can fail the job",
   "phase": "next",
-  "status": "doing",
+  "status": "done",
   "order": 653,
   "owner": "lane test-file-in-ci",
   "lane": "session_013NEJL1Jppd2FVccVbedcuG",
   "why": "CiCoverage counts a test as covered when its only run step has continue-on-error: true or if: false, so its red blocks nothing (lane test-file-in-ci, 07:32 CST Nov 8).",
-  "note": "Follow-up PR with Merge after: #1686. Debt ci-coverage-ungated-run points its Fix line at that PR. Doing in lane test-file-in-ci at the coordinator's ask (07:32 CST Nov 8). Title by triage.",
-  "updatedAt": "2026-11-08T07:28:00-06:00"
+  "note": "Follow-up PR with Merge after: #1686. Debt ci-coverage-ungated-run points its Fix line at that PR. Doing in lane test-file-in-ci at the coordinator's ask (07:32 CST Nov 8). Title by triage. Done: on main by #2004 via #2236 (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10).",
+  "updatedAt": "2026-11-10T04:58:00-06:00"
 }
