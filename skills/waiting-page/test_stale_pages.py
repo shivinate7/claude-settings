@@ -3,7 +3,9 @@
 STALE_PAGES_UNDER_TEST names the command to run (default: stale_pages.py beside this file), so the
 same cases run red against a checkout that lacks it.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -1562,8 +1564,11 @@ PARKED_W = {"id": "windows-live-checks", "ref": "Step windows-live-checks, the W
 PARKED_GONE = {"id": "no-such-item", "ref": "Step no-such-item, a line whose item is gone", "note": "Gone."}
 
 
-def item_entry(item_id, status):
-    return {"id": item_id, "data": {"id": item_id, "kind": "decision", "status": status, "n": 10, "title": "Windows live checks"}}
+def item_entry(item_id, status, **extra):
+    """An item doc. `extra` sets or overrides its data fields."""
+    data = {"id": item_id, "kind": "decision", "status": status, "n": 10, "title": "Windows live checks"}
+    data.update(extra)
+    return {"id": item_id, "data": data}
 
 
 def park_answer_entry(item_id, at):
@@ -1580,45 +1585,40 @@ def pick_answer_entry(item_id, at):
     return {"id": item_id, "data": {"item": item_id, "n": 27, "at": at, "choice": "a", "note": ""}}
 
 
+def without_field(entry, key):
+    """The same entry with no `key` field."""
+    del entry["data"][key]
+    return entry
+
+
 def without_at(entry):
     """The same entry with no `at` field."""
-    del entry["data"]["at"]
-    return entry
+    return without_field(entry, "at")
 
 
 def output_lines(out):
     return [line for line in out.splitlines() if line.strip()]
 
 
-class ParkedStale(unittest.TestCase):
-    """The --parked mode. Each case writes its own three files, then runs the script on them."""
+class FolderCase(unittest.TestCase):
+    """A folder of saved store files, one folder per case. The store modes share this base: the run-folder temp, the file writer, the unknown check and the tree."""
+    FOLDER = "folder"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
-        self.folder = os.path.join(self.tmp.name, "parked")
+        self.folder = os.path.join(self.tmp.name, self.FOLDER)
         os.mkdir(self.folder)
 
-    def store(self, meta=None, items=(), answers=()):
-        """Writes the three files the mode reads, each from its entries."""
-        self.store_raw(meta, list(items), list(answers))
+    def write_store(self, files):
+        """Writes each file (name -> value) as JSON exactly as given: a name left out is a file that is not there."""
+        for name, value in files.items():
+            write_text(os.path.join(self.folder, name + ".json"), json.dumps(value))
 
-    def store_raw(self, meta=None, items=None, answers=None):
-        """Writes the three files exactly as given (a file left out is empty), so a case can hand the mode a value of the wrong shape."""
-        meta = {"writer": "triage", "parked": []} if meta is None else meta
-        items = [] if items is None else items
-        answers = [] if answers is None else answers
-        write_text(os.path.join(self.folder, "meta.json"), json.dumps(meta))
-        write_text(os.path.join(self.folder, "items.json"), json.dumps(items))
-        write_text(os.path.join(self.folder, "answers.json"), json.dumps(answers))
-
-    def run_parked(self, now=NOW, codes=(0, 1)):
-        """Runs the mode on the folder. Stale.run_script is the one runner of CMD in this file; it reads no state of its case.
-        Without the mode, the script runs its batch mode on the folder, so that output is named as the cause."""
-        r = Stale.run_script(self, "--parked", self.folder, "--now", now)
-        self.assertNotIn("waiting pages:", r.stdout + r.stderr, "the --parked mode did not run: stale_pages.py ran its batch mode")
-        self.assertIn(r.returncode, codes, "the --parked mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
-        return r.returncode, r.stdout
+    def clear_store(self):
+        """Empties the folder, so a case with several subtests starts each one from no files."""
+        shutil.rmtree(self.folder)
+        os.mkdir(self.folder)
 
     def assert_unknown(self, rc, out, *names):
         """The run exits 2 and prints an unknown line naming each of `names`: never a clean or a stale line for the same cause."""
@@ -1629,14 +1629,6 @@ class ParkedStale(unittest.TestCase):
         for name in names:
             self.assertTrue(any(name in line for line in unknown), "the unknown line does not name %s: %r" % (name, unknown))
 
-    def assert_unknown_key(self, entry, key):
-        """A park answer with no readable `at` is unknown and names its key. It is not named old."""
-        self.store(answers=[entry])
-        rc, out = self.run_parked(codes=(0, 1, 2))
-        self.assert_unknown(rc, out, key)
-        self.assertEqual([line for line in output_lines(out) if line.startswith("park-answer-old")], [],
-                         "a park answer with no readable at was named old, not unknown: " + out)
-
     def tree(self):
         """Every file under the test folder, as {relative path: bytes}."""
         out = {}
@@ -1646,6 +1638,38 @@ class ParkedStale(unittest.TestCase):
                 with open(path, "rb") as f:
                     out[os.path.relpath(path, self.tmp.name)] = f.read()
         return out
+
+
+class ParkedStale(FolderCase):
+    """The --parked mode. Each case writes its own three files, then runs the script on them."""
+    FOLDER = "parked"
+
+    def store(self, meta=None, items=(), answers=()):
+        """Writes the three files the mode reads, each from its entries."""
+        self.store_raw(meta, list(items), list(answers))
+
+    def store_raw(self, meta=None, items=None, answers=None):
+        """Writes the three files exactly as given (a file left out is empty), so a case can hand the mode a value of the wrong shape."""
+        meta = {"writer": "triage", "parked": []} if meta is None else meta
+        items = [] if items is None else items
+        answers = [] if answers is None else answers
+        self.write_store({"meta": meta, "items": items, "answers": answers})
+
+    def run_parked(self, now=NOW, codes=(0, 1)):
+        """Runs the mode on the folder. Stale.run_script is the one runner of CMD in this file; it reads no state of its case.
+        Without the mode, the script runs its batch mode on the folder, so that output is named as the cause."""
+        r = Stale.run_script(self, "--parked", self.folder, "--now", now)
+        self.assertNotIn("waiting pages:", r.stdout + r.stderr, "the --parked mode did not run: stale_pages.py ran its batch mode")
+        self.assertIn(r.returncode, codes, "the --parked mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
+        return r.returncode, r.stdout
+
+    def assert_unknown_key(self, entry, key):
+        """A park answer with no readable `at` is unknown and names its key. It is not named old."""
+        self.store(answers=[entry])
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, key)
+        self.assertEqual([line for line in output_lines(out) if line.startswith("park-answer-old")], [],
+                         "a park answer with no readable at was named old, not unknown: " + out)
 
     def test_an_open_item_under_a_parked_entry_is_named_and_the_mode_exits_1(self):
         self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")])
@@ -1740,6 +1764,276 @@ class ParkedStale(unittest.TestCase):
         self.assertEqual(r.stderr, "", "the --parked mode wrote to stderr, so it needs a process it does not own: " + r.stderr)
         self.assertEqual(output_lines(r.stdout), ["parked-open windows-live-checks"], "the mode did not read its three files")
         self.assertEqual(self.tree(), before, "the --parked mode wrote or removed a file")
+
+
+# --unread: the on-demand pass over the answers the writer has not read back (waiting-page SKILL.md). It reads four saved
+# files in one folder and writes none. Each list file holds [{"id", "data"}] entries, the shape an ArtifactData list returns.
+#   meta.json      {"writer": ..., "woke": "<ISO time>"}   the meta/page data, an object; `woke` is the writer's previous wake
+#   items.json     [{"id": "<item id>", "data": {"status": "open" | "closed", "n": <number>, "owner": ..., ...}}, ...]
+#   answers.json   [{"id": "<item id>", "data": {"item", "n", "at", ...}}, ...]   an item's answer, under its item's id
+#   receipts.json  [{"id": "<answer id>", "data": {"read": "<ISO time>", "filed": "<ISO time>"}}, ...]
+# An answer is listed when it is an item answer (not park.<id>, not parked, not act park), its item exists (open, or closed
+# with the answer kept), its `at` is before `woke`, and no receipt for it has a `read` at or after `at`. With no `woke`
+# (absent or null), every answer with no such receipt is listed. One line per listed answer, in answers.json order, then
+# exit 1: `answer-unread <id> (item <n>, owner <owner>, answered <at>, before wake <woke>)`, with `before wake: none recorded`
+# as the last field when there is no woke, and `?` for a missing n or owner. With none, `unread: clean` and exit 0. A file
+# missing or of the wrong shape, an unreadable `woke`, an unreadable `at`, or an unreadable `read` of a receipt that is
+# compared prints `unknown: <what>` and exits 2: the mode never calls such a thing clean or listed. Times are ISO strings
+# with a Z, as the store writes them. The mode reads no clock: what it lists depends on the saved files alone.
+WOKE = "2026-11-05T13:10:00Z"
+EARLY = "2026-11-05T02:40:00Z"  # 10.5 hours before WOKE: the shape of item 143's answer, which stayed unread that long
+UNREAD_LINE = re.compile(r"answer-unread \S+ \(|unread: clean$|unknown: ")  # the mode's own line shapes
+
+
+def good_files(meta=None):
+    """The four files of a store with nothing to list and the wake WOKE. A shape case changes one of them."""
+    return {"meta": {"writer": "triage", "woke": WOKE} if meta is None else meta, "items": [], "answers": [], "receipts": []}
+
+
+def unread_line(item_id, n, owner, at, woke=WOKE):
+    """The line the mode prints for a listed answer. A `woke` of None is the no-wake form."""
+    before = "before wake %s" % woke if woke else "before wake: none recorded"
+    return "answer-unread %s (item %s, owner %s, answered %s, %s)" % (item_id, n, owner, at, before)
+
+
+def receipt_entry(item_id, **fields):
+    """A receipt, under the id of the answer it reads back."""
+    return {"id": item_id, "data": fields}
+
+
+def parked_data_answer(item_id, at):
+    """An item's answer under its own key that carries parked: true and no act: the third form a park answer takes."""
+    return {"id": item_id, "data": {"parked": True, "item": item_id, "n": 27, "at": at, "note": "Later."}}
+
+
+class UnreadStale(FolderCase):
+    """The --unread mode. Each case writes its own four files, then runs the script on them."""
+    FOLDER = "unread"
+
+    def store(self, meta=None, items=(), answers=(), receipts=()):
+        """Writes the four files the mode reads. The meta carries the wake WOKE unless `meta` is given."""
+        files = good_files(meta)
+        files.update(items=list(items), answers=list(answers), receipts=list(receipts))
+        self.write_store(files)
+
+    def assert_mode_lines(self, out, detail=""):
+        """The output is the mode's own lines. Without the mode, the script runs its batch mode, whose output is not these lines."""
+        lines = output_lines(out)
+        self.assertTrue(lines and all(UNREAD_LINE.match(line) for line in lines),
+                        "the --unread mode did not run: its output is not its lines: %r; %s" % (out, detail))
+
+    def assert_no_listed_line(self, out, why):
+        self.assertEqual([line for line in output_lines(out) if line.startswith("answer-unread")], [], "%s: %s" % (why, out))
+
+    def run_unread(self, codes=(0, 1)):
+        """Runs the mode on the folder through Stale.run_script, the one runner of CMD in this file."""
+        r = Stale.run_script(self, "--unread", self.folder)
+        self.assert_mode_lines(r.stdout, r.stderr)
+        self.assertIn(r.returncode, codes, "the --unread mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
+        return r.returncode, r.stdout
+
+    def run_main(self, *argv):
+        """main(argv) in this process, with stdout captured. Each process start is refused and recorded, at the start itself, so
+        `starts` lists every one the run asked for. Returns (exit code, stdout, starts, error); error is the exception text when
+        the run raised instead of answering, else ""."""
+        stale = load_stale_pages()
+        starts = []
+
+        def refuse(*args, **kwargs):
+            starts.append(args[0] if args else kwargs.get("args"))
+            raise OSError("process start refused")
+
+        out, code, error = io.StringIO(), None, ""
+        with mock.patch.object(subprocess, "Popen", side_effect=refuse), mock.patch.object(os, "system", side_effect=refuse), \
+                contextlib.redirect_stdout(out):
+            try:
+                code = stale.main(list(argv))
+            except SystemExit as err:
+                code = err.code
+            except Exception as err:  # a run that raised answered nothing; the caller names it
+                error = repr(err)
+        return code, out.getvalue(), starts, error
+
+    def test_the_item_143_style_answer_is_listed_with_its_exact_line_and_exits_1(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "the old answer with no receipt was not listed: " + out)
+
+    def test_an_answer_one_second_before_the_wake_is_listed(self):
+        at = "2026-11-05T13:09:59Z"
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", at)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", at)]), "an answer one second before the wake was not listed: " + out)
+
+    def test_an_answer_at_the_wake_or_after_it_is_not_listed(self):
+        self.store(items=[item_entry("at-wake", "open"), item_entry("after-wake", "open")],
+                   answers=[pick_answer_entry("at-wake", WOKE), pick_answer_entry("after-wake", "2026-11-05T13:10:01Z")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an answer at or after the wake was listed: " + out)
+
+    def test_a_receipt_read_at_or_after_the_answer_clears_it(self):
+        self.store(items=[item_entry("same-time", "open"), item_entry("read-later", "open")],
+                   answers=[pick_answer_entry("same-time", EARLY), pick_answer_entry("read-later", EARLY)],
+                   receipts=[receipt_entry("same-time", read=EARLY), receipt_entry("read-later", read="2026-11-05T13:00:00Z")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a receipt read at or after the answer did not clear it: " + out)
+
+    def test_a_receipt_read_before_the_answer_does_not_clear_it(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", read="2026-11-05T02:00:00Z")])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "a receipt read before the answer cleared it: " + out)
+
+    def test_a_receipt_with_only_filed_does_not_clear_it(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", filed="2026-11-05T02:50:00Z")])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "a receipt with only filed cleared the answer: " + out)
+
+    def test_with_no_wake_every_answer_with_no_receipt_read_back_is_listed(self):
+        items = [item_entry("recent", "open", n=1, owner="ops"), item_entry("old", "open", n=2, owner="ops"), item_entry("read", "open", n=3, owner="ops")]
+        answers = [pick_answer_entry("recent", "2026-11-05T13:09:00Z"), pick_answer_entry("old", EARLY), pick_answer_entry("read", EARLY)]
+        receipts = [receipt_entry("read", read=EARLY)]
+        expected = [unread_line("recent", 1, "ops", "2026-11-05T13:09:00Z", woke=None), unread_line("old", 2, "ops", EARLY, woke=None)]
+        for meta in ({"writer": "triage"}, {"writer": "triage", "woke": None}):
+            with self.subTest(meta=meta):
+                self.store(meta=meta, items=items, answers=answers, receipts=receipts)
+                rc, out = self.run_unread()
+                self.assertEqual((rc, output_lines(out)), (1, expected), "with no wake, the answers with no receipt were not all listed: " + out)
+
+    def test_a_park_answer_is_never_listed_under_any_of_its_three_forms(self):
+        self.store(items=[item_entry("colour-pick", "open"), item_entry("parked-entry", "open"), item_entry("ci-cap-raise", "open")],
+                   answers=[park_answer_entry("colour-pick", EARLY), parked_data_answer("parked-entry", EARLY), item_answer_entry("ci-cap-raise", EARLY)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a park answer was listed as unread: " + out)
+
+    def test_an_answer_for_a_missing_item_is_skipped(self):
+        self.store(answers=[pick_answer_entry("ghost-item", EARLY)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an answer with no item was listed: " + out)
+
+    def test_a_closed_item_with_its_answer_kept_is_listed(self):
+        self.store(items=[item_entry("colour-pick", "closed", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "a closed item's kept answer was not listed: " + out)
+
+    def test_a_missing_n_or_owner_prints_a_question_mark(self):
+        item = without_field(without_field(item_entry("colour-pick", "open", n=143, owner="ops"), "n"), "owner")
+        self.store(items=[item], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", "?", "?", EARLY)]), "a missing n or owner did not print ?: " + out)
+
+    def test_listed_answers_print_in_answers_order(self):
+        self.store(items=[item_entry("bee", "open", n=2, owner="ops"), item_entry("ay", "open", n=1, owner="ops")],
+                   answers=[pick_answer_entry("bee", EARLY), pick_answer_entry("ay", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("bee", 2, "ops", EARLY), unread_line("ay", 1, "ops", EARLY)]),
+                         "the listed answers were not in answers.json order: " + out)
+
+    def test_a_full_store_lists_each_unread_answer_and_no_other(self):
+        count = 120  # a full page of answers, every third one read back
+        items = [item_entry("item-%03d" % i, "open", n=i, owner="ops") for i in range(count)]
+        answers = [pick_answer_entry("item-%03d" % i, EARLY) for i in range(count)]
+        receipts = [receipt_entry("item-%03d" % i, read=EARLY) for i in range(0, count, 3)]
+        self.store(items=items, answers=answers, receipts=receipts)
+        rc, out = self.run_unread()
+        expected = [unread_line("item-%03d" % i, i, "ops", EARLY) for i in range(count) if i % 3]
+        self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each unread answer, in order: " + out[:300])
+
+    def test_an_empty_store_is_clean(self):
+        self.store()
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an empty store was not clean: " + out)
+
+    def test_a_receipt_with_an_unreadable_read_is_unknown_when_its_answer_is_compared(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", read="not-a-time")])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "colour-pick")
+        self.assert_no_listed_line(out, "an answer whose receipt has no readable read was listed beside its unknown")
+
+    def test_a_receipt_with_an_unreadable_read_is_not_read_for_a_skipped_answer(self):
+        self.store(items=[item_entry("colour-pick", "open")],
+                   answers=[pick_answer_entry("ghost-item", EARLY), park_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("ghost-item", read="not-a-time"), receipt_entry("park.colour-pick", read="not-a-time")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a receipt of a skipped answer was read as unknown: " + out)
+
+    def test_an_answer_with_an_unreadable_at_is_unknown_and_names_its_id(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", "not-a-time")])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "colour-pick")
+        self.assert_no_listed_line(out, "an answer with an unreadable at was listed")
+
+    def test_an_answer_with_no_at_is_unknown_and_names_its_id(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[without_at(pick_answer_entry("colour-pick", EARLY))])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "colour-pick")
+        self.assert_no_listed_line(out, "an answer with no at was listed")
+
+    def test_an_unreadable_woke_is_unknown_and_exits_2(self):
+        self.store(meta={"writer": "triage", "woke": "not-a-time"}, items=[item_entry("colour-pick", "open")],
+                   answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "woke")
+        self.assert_no_listed_line(out, "an answer was listed against an unreadable woke")
+
+    def test_a_missing_file_is_unknown_and_exits_2(self):
+        for name in ("meta", "items", "answers", "receipts"):
+            with self.subTest(missing=name):
+                self.clear_store()
+                files = good_files()
+                del files[name]
+                self.write_store(files)
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assert_unknown(rc, out, name + ".json")
+
+    def test_a_file_that_is_not_json_is_unknown_and_exits_2(self):
+        for name in ("meta", "items", "answers", "receipts"):
+            with self.subTest(unreadable=name):
+                self.clear_store()
+                self.write_store(good_files())
+                write_text(os.path.join(self.folder, name + ".json"), "{ not json")
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assert_unknown(rc, out, name + ".json")
+
+    def test_a_file_of_the_wrong_shape_is_unknown_and_exits_2(self):
+        wrong = {"meta": ["woke", WOKE], "items": {}, "answers": {}, "receipts": {}}
+        for name, value in wrong.items():
+            with self.subTest(shape=name):
+                self.clear_store()
+                files = good_files()
+                files[name] = value
+                self.write_store(files)
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assert_unknown(rc, out, name + ".json")
+
+    def test_the_mode_writes_no_file(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        before = self.tree()
+        self.run_unread(codes=(1,))
+        self.assertEqual(self.tree(), before, "the --unread mode wrote or removed a file")
+
+    def test_the_mode_starts_no_process_in_process(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        _, out, starts, error = self.run_main("--unread", self.folder)
+        self.assert_mode_lines(out, error)
+        self.assertEqual(starts, [], "the --unread mode asked for a process: %r" % starts)
+
+    def test_the_mode_runs_with_no_path_so_it_starts_no_git(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        # No PATH: a git or gh start would fail, so a clean run shows the mode starts none.
+        r = subprocess.run([sys.executable, CMD, "--unread", self.folder], capture_output=True, text=True, timeout=30,
+                           env={"PATH": "", "PYTHONDONTWRITEBYTECODE": "1", "HOME": self.tmp.name})
+        self.assert_mode_lines(r.stdout, r.stderr)
+        self.assertEqual((r.returncode, r.stderr), (1, ""), "the --unread mode failed with no PATH, or wrote to stderr: " + r.stderr)
+        self.assertEqual(output_lines(r.stdout), [unread_line("colour-pick", 143, "ops", EARLY)], "the mode did not read its files with no PATH: " + r.stdout)
+
+    def test_main_sends_unread_to_its_mode(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        code, out, _, error = self.run_main("--unread", self.folder)
+        self.assert_mode_lines(out, error)
+        self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
 
 
 if __name__ == "__main__":
