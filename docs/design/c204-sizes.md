@@ -26,12 +26,7 @@ Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's 
    - Both: the wrap gets tabindex −1 and `aria-hidden="true"`. The card's iframe gets `inert`.
    - Why, measured on a copy of the card's DOM shape (a `role=button` > wrap > sizer > sandboxed iframe that holds a button), not on page.html itself: Chromium makes a scroller with no focusable child a tab stop. A tab stop in a `role=button` is an axe `nested-interactive` violation. With tabindex −1 only, axe reports `scrollable-region-focusable`. With `aria-hidden` added, `@axe-core/playwright` 4.10 (which runs axe in each frame) reports 0 violations, with the iframe as it is, with tabindex −1, or with `inert`. `aria-hidden` is true to the content: a button's children are presentational, its label names the option, and View holds the same mockup.
    - Why `inert` on the iframe: in that copy, Tab went radio, picture, into the frame, then the next control. With tabindex −1 or `inert`, Tab skips the frame. `inert` also makes the frame's document inert, so no browser tabs into it. Departs from: today's tab order, where the frame is a stop. This is a fix, so no grant is needed.
-6. The scale in the scroll case. Ruling: 5B (owner, 2026-10-30 14:45 CDT, waiting item 84 pick b).
-   - 5B (built): the scroll case draws the width of a 390 × 844 phone picture, min(221.8, column − 2 − gutter), where 221.8 = 480 × 390 / 844. Measured on the mockup: 222 at 390, 219 at 1280 and 2200, and 188 at 1065. Gain: the picture is as wide as the phone pictures beside it, and its text is 1.85 times larger. Loss: the width jumps at the threshold. A 1550px mockup draws 120.8 × 480 whole, and a 1570px mockup draws 221.8 wide and scrolls.
-   - Whether a picture scrolls is still decided at today's scale (item 1). Only the scroll case widens. Every picture that fits keeps today's scale.
-   - Not picked: 5A, today's scale, min(w, 120) wide, a 132 × 480 box.
-   - Departs from: `fitFrame`'s scale and `MIN_PIC` in the scroll case.
-   - Replaced by decision `page-pic-fills-card` (an option picture fills its card), owner 2026-11-09 21:26 CST.
+6. The scale in the scroll case. Decision `page-pic-fills-card` (docs/decisions/page-pic-fills-card.md, owner 2026-11-09 21:26 CST): the scroll case draws as wide as the card less the scrollbar gutter, at sc = min(2, W / w). If the gutter alone makes it fit, it draws whole at the narrower width.
 7. Builder rules.
    - The change applies only to `optPic`'s call (maxH 480). `designPreview` and `stageFrame` do not change.
    - DOM of a capped wrap: wrap > `.dtop`, `.dsizer` > iframe, `.dcue` > `.dmore`. `.dsizer` is display block, position relative, overflow hidden, and pw × ceil(bh × sc), where bh is the focus box height, else the mockup height. The iframe keeps today's position and transform inside the sizer.
@@ -48,7 +43,7 @@ Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's 
 9. Also in this lane: a task card's `ol.steps` takes `min-width: 0; overflow-wrap: anywhere;`, so an unbroken URL in a step stays inside the card at 360, 390 and 430 wide. The coordinator added it on Oct 29 at 14:45 CDT, after the tests for it went red.
 10. Measured verdicts. Each state was measured at each size, light and dark: `long`, `long-end`, `focus-in`, `focus-whole`, `fits`, `keys` and `wide`.
    - Checks per picture: whole, at most F + 1 high; scrolling, 480 high; inside its card and column, and above `.head`.
-   - Scroll case: 480 high. The picture width equals the content width, so the gutter takes none of it. No sideways scroll. It opens at the right place. The cue shows before the end and hides at it. It is not a tab stop. Its width is min(221.8, column − 2 − gutter) (5B).
+   - Scroll case: 480 high. The picture width equals the content width, so the gutter takes none of it. No sideways scroll. It opens at the right place. The cue shows before the end and hides at it. It is not a tab stop. Its width is column − 2 − gutter (decision `page-pic-fills-card`).
    - Fit case: width, height and transform equal today's formula, computed again in the measure script apart from the mockup's code.
    - Page: scrollWidth = clientWidth.
    - Each check went red on a broken copy: one without the gutter in the width, and one with a fit picture 1px wider and with no translate.
