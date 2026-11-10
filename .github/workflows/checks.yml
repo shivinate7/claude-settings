@@ -78,7 +78,8 @@ jobs:
     # Cap 52 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 22.8 min
     # is 44% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
-    timeout-minutes: 52
+    # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go). Was 52; the measured figures above are for 52.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -946,7 +947,8 @@ jobs:
     # is 55% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
     # checks-macos and checks-macos-b. A push runs the janitor sweep mutation test and a pull request does not:
     # push median 20.5 min, pull request median 18.7 (n 13 each).
-    timeout-minutes: 55
+    # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go). Was 55; the measured figures above are for 55.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
@@ -1365,7 +1367,8 @@ jobs:
     # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound.
     # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving, so the
     # cap is 45, a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
-    timeout-minutes: 45
+    # Now 75, above the 3600 s suite cap in hooks/mutate_guard.py, so the suite cap fires first (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go). Was 45.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1646,7 +1649,8 @@ jobs:
   checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
-    timeout-minutes: 40
+    # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go). Was 40.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request' }}
