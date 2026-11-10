@@ -3343,11 +3343,11 @@ const dropGeo = (page, id) => page.evaluate((id) => {
   const tb = box(text.getBoundingClientRect());
   const raw = [], walk = document.createTreeWalker(text, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n; n = walk.nextNode()) { const rg = document.createRange(); rg.selectNodeContents(n); raw.push(...rg.getClientRects()); }
-  const top = Math.min(...raw.map((r) => r.top)), first = raw.filter((r) => Math.abs(r.top - top) < 2);
   const runs = raw.map((r) => ({ l: Math.max(r.left, tb.l), t: Math.max(r.top, tb.t), r: Math.min(r.right, tb.r), b: Math.min(r.bottom, tb.b) })).filter((b) => b.r - b.l > 0.5 && b.b - b.t > 0.5);
   const gb = box(glyph.getBoundingClientRect());
+  const textTop = Math.min(...runs.map((b) => b.t)), textBottom = Math.max(...runs.map((b) => b.b));
   return { text: line.textContent.replace(/\s+/g, " ").trim(), pressName: press ? press.textContent.trim() : "", press: press ? box(press.getBoundingClientRect()) : null,
-    runs, textBottom: Math.max(...runs.map((b) => b.b)), glyphMid: (gb.t + gb.b) / 2, lineMid: (Math.min(...first.map((r) => r.top)) + Math.max(...first.map((r) => r.bottom))) / 2 };
+    runs, glyphMid: (gb.t + gb.b) / 2, blockMid: (textTop + textBottom) / 2 };
 }, id);
 // The Restore press does not cover the Dismissed line's text, at 280 and 180 wide and at 360 with the root font size doubled.
 const DROP_OVERLAP = [[280, false, "280 wide"], [180, false, "180 wide"], [360, true, "360 wide with the root font size doubled"]];
@@ -3363,19 +3363,18 @@ for (const [width, zoom, label] of DROP_OVERLAP) for (const scheme of SCHEMES) {
     assert.ok(!hit, `the Restore press at ${spanOf(g.press)} covers the Dismissed line's text at ${hit && spanOf(hit)}, at ${label}`);
   });
 }
-// Where the press is under the text (280, 240 and 180 wide, and 360 with the root font size doubled), the glyph sits on the first text line's
-// middle. At 360 wide with the default text the press is beside the text, so the glyph is not read there.
+// The glyph sits on the middle of the Dismissed line's text block, as main draws it. At these sizes (280, 240 and 180 wide, and 360 with the
+// root font size doubled) the text takes three lines, so a glyph centred on the first line would sit a line-height off the middle.
 const DROP_STACKED = [[280, false, "280 wide"], [240, false, "240 wide"], [180, false, "180 wide"], [360, true, "360 wide with the root font size doubled"]];
 for (const [width, zoom, label] of DROP_STACKED) for (const scheme of SCHEMES) {
-  layoutTest(`press rows, ${scheme}: at ${label} the Dismissed line's glyph sits on the middle of its first text line`, async (t) => {
+  layoutTest(`press rows, ${scheme}: at ${label} the Dismissed line's glyph sits on the middle of the text block`, async (t) => {
     const page = await droppedPage(t, width, scheme); if (!page) return;
     if (zoom) await zoomText(page);
     const g = await dropGeo(page, FOLD_ROWS.dismiss.ask.id);
     assert.ok(g.text.startsWith("Dismissed. "), `the line reads ${JSON.stringify(g.text.slice(0, 40))} at ${label}, not Dismissed`);
     assert.ok(g.press, "the Dismissed line has no press at " + label);
-    assert.ok(g.press.t >= g.textBottom - 1, `the Restore press is beside the text at ${label}, not under it, so the glyph case does not read this layout`);
-    const off = g.glyphMid - g.lineMid;
-    assert.ok(Math.abs(off) <= 2, `the glyph's centre is ${Math.round(Math.abs(off))} px ${off > 0 ? "below" : "above"} the first text line's middle at ${label}, not within 2 px`);
+    const off = g.glyphMid - g.blockMid;
+    assert.ok(Math.abs(off) <= 2, `the glyph's centre is ${Math.round(Math.abs(off))} px ${off > 0 ? "below" : "above"} the text block's middle at ${label}, not within 2 px`);
   });
 }
 
