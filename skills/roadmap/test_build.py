@@ -730,8 +730,13 @@ class LiveThreadsOptional(UpkeepFixture):
         value = self.publish(threads=_ABSENT, pulls=[self.draft(7, "c1")])
         page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
         self.assertEqual(self.panel(page)["read"], value["readAt"])
-        self.assertEqual(build_info(page)["live"]["skipped"], [])
+        live = build_info(page)["live"]
+        self.assertEqual(live["skipped"], [])
+        self.assertEqual(live["threadsWhy"], self.NO_THREADS)
         self.assertNotIn("live threads naming no open step: 0", out)
+        row = re.search(r"^  live threads naming no open step: (.*)$", out, re.M)
+        self.assertIsNotNone(row, "the upkeep output has no live threads row with its reason:\n%s" % out)
+        self.assertEqual(row.group(1), self.NO_THREADS)
 
     def test_threads_list_present_leaves_threads_why_none(self):
         # A control: a missing key reads as None, so this case holds on the old code too, and guards the new one.
