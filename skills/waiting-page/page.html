@@ -980,7 +980,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, withdrawn: new Set(), more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -1231,7 +1231,9 @@ const waitsOf = (it) => {
   if (num(w.pr)) return { repo: w.repo, pr: w.pr };
   return null;
 };
-const answeredByWait = (it) => (!!waitsOf(it) || !!laneOf(it)) && !!lastOf(it);
+// A Withdraw on this visit puts the id in state.withdrawn, so the card is drawn open (no Sent pill) while it keeps its place in Answered (isSunk is fixed at load).
+// Undo takes it out. A reload, before the owning session drops `lane` or `waits`, draws it as sent again: the page cannot clear a field the session writes.
+const answeredByWait = (it) => (!!waitsOf(it) || !!laneOf(it)) && !!lastOf(it) && !state.withdrawn.has(it.id);
 // Drawn as answered on the page: a saved answer, or answered by its wait. A Change on either draws it as open again, until the next Send.
 const isByWait = (it) => !isRuling(it) && answeredByWait(it) && !savedOf(it) && !state.changing[it.id];
 const isAnswered = (it) => isSaved(it) || isByWait(it);
@@ -1780,7 +1782,7 @@ async function withdrawAll() {
       if (cur.exists && (cur.data() || {}).at !== prior.at) { state.notice[it.id] = "This answer changed since this page read it. Reload before you withdraw it."; continue; }
       await ref.delete();
     } catch (e) { state.notice[it.id] = "Not withdrawn (" + (e && e.code || "error") + "). Paste it in chat instead: " + it.n + " withdraw"; continue; }
-    delete state.answers[it.id]; delete state.changing[it.id]; delete state.notice[it.id];
+    delete state.answers[it.id]; delete state.changing[it.id]; delete state.notice[it.id]; state.withdrawn.add(it.id);
     done.push({ it, prior, draft: null, changing: false, withdrawn: true, act: prior.act });
   }
   saveDraft();
@@ -2246,6 +2248,7 @@ async function undoSend() {
       if (w.prior) await ref.set(w.prior); else await ref.delete();
     } catch (e) { todo.slice(i).forEach((x) => failed.push(x.it.n)); state.barNote = "Undo failed (" + (e && e.code || "error") + "). Not undone: " + nList(failed) + "."; break; }
     if (w.prior) state.answers[w.it.id] = w.prior; else delete state.answers[w.it.id];
+    if (w.withdrawn) state.withdrawn.delete(w.it.id);
     if (w.draft) { state.draft[w.it.id] = w.draft; if (isRuling(w.it)) state.rulingsOpen = true; } if (w.changing) state.changing[w.it.id] = true;
     undone.push(w);
     // A stale receipt must not show on a re-sent answer, but a failed delete here stops nothing else, and the old receipt leaves the page state either way.

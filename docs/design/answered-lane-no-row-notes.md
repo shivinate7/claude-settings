@@ -7,7 +7,7 @@ from the brief. The screen CSS is page.html's own `<style>` (lines 8 to 914 at 6
 screen CSS; only the harness and the dashed sample labels have their own.
 
 The sample: the page loaded Nov 10 at 09:00 CST. No. 63 carries `lane` (glossary-pass) and `lastAnswer` (sent 08:48) and has
-no answers row. No. 23 is open. Answered already holds No. 58 (lane and a wait), No. 52 (a kept answer with `lane`) and No. 44
+no answers record. No. 23 is open. Answered already holds No. 58 (lane and a wait), No. 52 (a kept answer with `lane`) and No. 44
 (waits on a PR).
 
 The ruling: owner, page item 477 (Nov 10, 09:06 CST). An answered item whose grant is relayed stays open but leaves the
@@ -15,17 +15,17 @@ questions area. It stays open, so page_grant.py reads it unchanged.
 
 ## 1. No. 63 sinks into Answered at load
 
-- What: an item with `lane` and `lastAnswer` and no answers row (`isSaved` false, `isByWait` false) sinks at load, folded,
+- What: an item with `lane` and `lastAnswer` and no answers record (`isSaved` false, `isByWait` false) sinks at load, folded,
   as an answered-by-wait card does. States `before` (today: open in Blocking) and `after`.
 - Gain: the questions tiers hold only questions the owner has not answered. The Blocking count, the Questions tab count and
   the bar's "N stay open" drop by one.
-- Loss: a withdrawn answer reads as sent for a while. Withdraw on a kept-answer lane card (No. 52's kind) deletes its answers
-  row and leaves `lane` and `lastAnswer` (page.html `withdrawAll`). Until the owning session's next re-read drops `lane`
-  (waiting-page SKILL.md, "Route and close", Withdrawn), the item matches the new predicate. On a reload in that gap it sinks
-  as "Sent <time>", though the owner withdrew it. On the same visit it stays open in Answered, as a Change does. The page data
-  cannot tell this gap from a relayed grant. A closer fix is a writer-side field that marks the relay; that is outside this
-  lane. Unmeasured how long the gap lasts.
-- A Change still reopens the card in place in Answered, as on any sunk card. A Send then writes an answers row, and the card
+- Loss: on a reload, a withdrawn answer reads as sent for a while. Withdraw on a kept-answer lane card (No. 52's kind) deletes
+  its answers record and leaves `lane` and `lastAnswer` (page.html `withdrawAll`). Until the owning session's next re-read drops
+  `lane` (waiting-page SKILL.md, "Route and close", Withdrawn), a reload sinks the item as "Sent <time>", though the owner
+  withdrew it. The page data cannot tell this gap from a relayed grant. A closer fix is a writer-side field that marks the
+  relay; that is outside this lane. Unmeasured how long the gap lasts. On the same visit the card stays in Answered, drawn open
+  with no Sent pill, as a withdrawn saved card does: `withdrawAll` adds its id to `state.withdrawn`, which `answeredByWait` reads.
+- A Change still reopens the card in place in Answered, as on any sunk card. A Send then writes an answers record, and the card
   becomes a kept-answer lane card ("Filing pending, sent"). Today's open card allows the same answer again, so this is no departure.
 - Pick: sink. Owner grant: yes (granted, page item 477, Nov 10 09:06 CST).
 - Departs from: `lane-answered-sink-notes.md`, "Settled", first line: "A lane item sinks only when its answers record
@@ -44,13 +44,13 @@ questions area. It stays open, so page_grant.py reads it unchanged.
 
 ## 2. The pill: "Sent <lastAnswer.at>"
 
-- What: the folded card's pill. There is no answers row, so its time is `lastAnswer.at`.
+- What: the folded card's pill. There is no answers record, so its time is `lastAnswer.at`.
 - Option "Sent" (state `after`, the pick): the by-wait pill, "Sent Nov 10, 08:48 CST". Gain: it is true. The top row already
   says "waits on lane glossary-pass", so the pill names only the send. It matches No. 58 and No. 44, which also have no
-  answers row. Loss: No. 63 and No. 52 both wait on a lane but read differently ("Sent" against "Filing pending, sent").
-  That difference is true: only No. 52 has a row the page can file.
+  answers record. Loss: No. 63 and No. 52 both wait on a lane but read differently ("Sent" against "Filing pending, sent").
+  That difference is true: only No. 52 has an answers record the page can file.
 - Option "Filing pending, sent" (state `filing`): the kept-answer pill. Gain: both lane cards read alike. Loss: it is false.
-  `receipt()` (line 1514) reads receipts only with an answers row (`rc = savedOf(it) ? rcOf(it) : {}`), so the pill can never
+  `receipt()` (line 1514) reads receipts only with an answers record (`rc = savedOf(it) ? rcOf(it) : {}`), so the pill can never
   turn into "Filed in ...". It promises a step the page never shows (ux-statements-are-true).
 - Pick: "Sent". Each option has a Hide control in the toolbar.
 - The fold: the answer line is `lastAnswer`, so the fold holds the note and the reply only ("Show your note and the reply"),
@@ -72,7 +72,7 @@ questions area. It stays open, so page_grant.py reads it unchanged.
 
 ## 5. An item with a lane and a wait: no change (regression state)
 
-- What: No. 58 (`lane`, `waits.pr`, `lastAnswer`, no answers row) already sinks by its wait today. It reads "Sent Nov 10,
+- What: No. 58 (`lane`, `waits.pr`, `lastAnswer`, no answers record) already sinks by its wait today. It reads "Sent Nov 10,
   07:30 CST" and "waits on lane ci-cache-pin and PR #1402". State `both` focuses on it.
 - Verdict: the widened predicate is true for it already, so nothing changes. The design reviewer checks it as a regression state.
 
