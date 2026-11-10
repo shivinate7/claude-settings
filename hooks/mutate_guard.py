@@ -46,7 +46,8 @@ plants each listed defect in a checkout of HEAD, installs the profile's packages
 catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
 `Known-defect-removed: <id>` trailer in REF..HEAD, else `MISSING <id>`; an entry that differs from REF's needs a
 `Known-defect-changed: <id>` trailer, else `CHANGED <id>`. Exit 1 when any defect is MISS, UNKNOWN, MISSING or CHANGED.
-`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile.
+`--tests-for PATH` prints the suites that test one file: the select command of the `claude_settings` profile. A guard module
+with a family row also prints its `hooks/test_guard.py::<family>` lines beside the suites that import it.
 """
 
 import contextlib
@@ -62,6 +63,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  git's tracked files under a folder, suites left out (testing/tracked_tree.py)
 GUARD = os.path.join(HERE, "guard.py")
 SUITE = os.path.join(HERE, "test_guard.py")
 WATCH = os.path.join(HERE, "config_watch.py")
@@ -124,6 +127,20 @@ MUTATIONS = [
     ("pointer-head: call every tree the pointer checkout",
      '    return mine == theirs',
      '    return True', "guard", 'pointer: checkout of a branch in another checkout is allowed'),
+    # RULE pointer-edit, a write into the pointer checkout's own files. Each mutant breaks one arm.
+    ("pointer-edit: the pointer's own .git is judged like a file of the checkout",
+     '                and path_is_inside(resolved, git_dir) is not True\n',
+     '', "guard", 'pointer-edit: Write into the pointer\'s own .git is not judged'),
+    ("pointer-edit: a linked worktree nested under the pointer is judged like a file of the checkout",
+     '                and path_is_inside(resolved, worktree_dir) is not True)',
+     '                and True)', "guard", 'pointer-edit: Write into a linked worktree nested under the pointer is allowed'),
+    ("pointer-edit: no write is ever judged",
+     '    pointer = pointer_checkout()\n    if not pointer:\n        return ""\n    git_dir',
+     '    return ""\n    pointer = pointer_checkout()\n    if not pointer:\n        return ""\n    git_dir', "guard", 'pointer-edit: Write of a tracked file in the pointer checkout is refused'),
+    # The gate is WRITE_TOOLS. Artifact and ArtifactData carry a file_path too, and both allow cases go red when it drops.
+    ("pointer-edit: the write-tool gate is dropped, so Artifact and ArtifactData are judged like writes",
+     '    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd) if tool in WRITE_TOOLS else ""',
+     '    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd)', "guard", 'with a pointer file as file_path is not a write and is allowed'),
     ("pointer-head: lose the exemption for a move to main",
      '    if target == PROTECTED_BASE:\n        return ""',
      '    if target == "no-such-branch":\n        return ""', "guard", 'pointer: a move back to main restores the invariant and passes'),
@@ -152,6 +169,22 @@ MUTATIONS = [
      '            if agent_owned_worktree(root) is True:',
      '            if False:', "guard",
      'agent-owned worktree is allowed and noted, not asked'),
+    ("shared-tree: a lone operand that is also a revision still reads as a dirty file",
+     '    if rev.returncode == 0:\n        return False\n',
+     '    if False:\n        return False\n', "guard",
+     'per-file bare: checkout of a dirty file that is also a branch in the shared checkout allows'),
+    ("shared-tree: a lone operand with no tracked change still reads as a dirty file",
+     '    return any(line[:2] != "??" for line in lines)\n',
+     '    return True\n', "guard",
+     'per-file bare: checkout of an untracked extensionless file in the shared checkout allows'),
+    ("shared-tree: a revision read that gets no answer is no longer logged as subject-unread",
+     '    if rev is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
+     '    if rev is None:\n        pass\n', "guard",
+     'a bare checkout of a dirty file with no git on PATH is allowed and logged once as subject-unread'),
+    ("shared-tree: a status read that gets no answer is no longer logged as subject-unread",
+     '    if lines is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
+     '    if lines is None:\n        pass\n', "guard",
+     'a bare checkout of a dirty file whose status git cannot read is allowed and logged once as subject-unread'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the safety hole in this rule.
@@ -907,7 +940,7 @@ MUTATIONS = [
     ("per-file: the allow ignores a second distinct -C target in the command",
      '    return len(targets) <= 1',
      '    return True', "guard",
-     'per-file ask: two -C targets, lane then a second linked worktree, both per-file restores'),
+     'per-file ask: two -C targets in one checkout'),
     ("config-edit: stop noting project config edits, shell tool",
      '    matched = project_config_shell_hit(stripped, cwd)\n'
      '    if matched:\n'
@@ -993,6 +1026,14 @@ MUTATIONS = [
      '    return any(os.path.normcase(parts[i + 1]) == "scratchpad"',
      '    return False and any(os.path.normcase(parts[i + 1]) == "scratchpad"', "guard",
      "audit-high paths: test-author Edit of another session's scratchpad outside a repo is refused"),
+    ("scratchpad-commit-msg-owner: the rule never fires",
+     "matched = agent and scratchpad_message_file(segment, cite_where)",
+     "matched = False and scratchpad_message_file(segment, cite_where)", "guard",
+     "scratchpad-message: an agent's commit -F of a scratchpad file is refused"),
+    ("scratchpad-commit-msg-owner: an orchestrator's call is refused too",
+     "matched = agent and scratchpad_message_file(segment, cite_where)",
+     "matched = scratchpad_message_file(segment, cite_where)", "guard",
+     "scratchpad-message: an orchestrator's commit -F of the same scratchpad file is allowed"),
     ("shared-tree: restore collapses back to a name match, --staged or not",
      '    staged = "--staged" in args or "-S" in args\n'
      '    worktree = "--worktree" in args or "-W" in args\n'
@@ -1742,6 +1783,75 @@ MUTATIONS = [
      '            folder = None if _unexpanded(named) else shell_abs(named, folder)\n        if not folder:\n            continue\n        for verb, args in verbs:',
      '            folder = where\n        if not folder:\n            continue\n        for verb, args in verbs:',
      "guard", "session-home: while lost, git verbs"),
+    # RULE scratchpad-owner: the `spo_case_*` log checks.
+    ("scratchpad-owner: a run of another agent's file is never asked",
+     '        if writer and writer != agent:\n            return "agent %s runs',
+     '        if False and writer != agent:\n            return "agent %s runs',
+     "guard", "scratchpad-owner: 1 agent B runs agent A's script with python3"),
+    ("scratchpad-owner: an agent's run of its own file is asked too",
+     '        if writer and writer != agent:\n            return "agent %s runs',
+     '        if writer:\n            return "agent %s runs',
+     "guard", "scratchpad-owner: 5 agent A runs its own script"),
+    ("scratchpad-owner: a call with no agent_id is judged",
+     '    if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):',
+     '    if not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):',
+     "guard", "scratchpad-owner: 7 a top-level call with no agent_id"),
+    ("scratchpad-owner: a read of the file reads as a run",
+     '        if _RUNNER(basename(word)):',
+     '        if True:',
+     "guard", "scratchpad-owner: 8 agent B reads agent A's script with cat"),
+    ("scratchpad-owner: the heredoc body is read as run text",
+     '    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)\n    for number, segment in enumerate(segments):\n        tokens = segment_tokens(segment)\n        index = resolve_command(tokens) if tokens else None',
+     '    segments = split_segments(_resolve_vars(command), ends)\n    for number, segment in enumerate(segments):\n        tokens = segment_tokens(segment)\n        index = resolve_command(tokens) if tokens else None',
+     "guard", "scratchpad-owner: extra, a run in a heredoc body is text"),
+    ("scratchpad-owner: a relative path ignores the cd ahead of it",
+     '        full = shell_abs(script, dir_before_segment(segments, number, cwd, ends))',
+     '        full = shell_abs(script, cwd)',
+     "guard", "scratchpad-owner: 2 agent B runs agent A's script after cd"),
+    ("scratchpad-owner: a Write family target is not listed as a write",
+     '                if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session):\n                    files.append(full)',
+     '                if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session) and False:\n                    files.append(full)',
+     "guard", "scratchpad-owner: 1 agent B runs agent A's script with python3"),
+    ("scratchpad-owner: a passing write records no writer",
+     '    for full in files:\n        if full not in removed:\n            scratchpad_record_writer(full, session, agent)',
+     '    for full in files:\n        if full not in removed:\n            pass',
+     "guard", "scratchpad-owner: 3 agent B runs agent A's script through bash"),
+    ("scratchpad-owner: a write over another agent's file is never asked",
+     '        if writer and writer != agent and not taken:',
+     '        if False and writer != agent and not taken:',
+     "guard", "scratchpad-owner: overwrite 1 agent B's Write over agent A's file"),
+    ("scratchpad-owner: an agent's rewrite of its own file is asked too",
+     '        if writer and writer != agent and not taken:',
+     '        if writer and not taken:',
+     "guard", "scratchpad-owner: overwrite 4 agent A rewrites its own file"),
+    ("scratchpad-owner: a shell write target is not listed as a write",
+     '                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):',
+     '                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session) and "x" == "y":',
+     "guard", "scratchpad-owner: overwrite 2 agent B's shell redirect over agent A's file"),
+    ("scratchpad-owner: an interpreter's value flag is read as the script",
+     '            at = workflow_script_index(args)   # past the interpreter\'s flags and their values',
+     '            at = 0 if args else None   # past the interpreter\'s flags and their values',
+     "guard", "scratchpad-owner: flag 1 agent B runs agent A's script past python3 -W ignore"),
+    ("scratchpad-owner: a lone - before the script position is read as a script",
+     '            script = args[at] if at is not None and "-" not in args[:at] else ""',
+     '            script = args[at] if at is not None else ""',
+     "guard", "scratchpad-owner: stdin 1 agent B's python3 - with a heredoc"),
+    ("scratchpad-owner: a shell variable in a run path is not read",
+     '    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)',
+     '    segments = split_segments(strip_heredoc_bodies(command), ends)',
+     "guard", "scratchpad-owner: variable 1 agent B runs agent A's script by a shell variable path"),
+    ("scratchpad-owner: an overwrite ask leaves the old record",
+     '        if full not in removed:\n            scratchpad_record_writer(full, session, agent)\n    if taken:',
+     '        if full not in removed and not taken:\n            scratchpad_record_writer(full, session, agent)\n    if taken:',
+     "guard", "scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record"),
+    ("scratchpad-owner: a top-level write keeps the record",
+     '            scratchpad_clear_writer(full, session)\n        return',
+     '            pass\n        return',
+     "guard", "scratchpad-owner: top-level 1 a call with no agent_id overwrites agent A's file with Write"),
+    ("scratchpad-owner: an rm or mv records its writer",
+     '        if full not in removed:\n            scratchpad_record_writer(full, session, agent)\n    if taken:',
+     '        if True:\n            scratchpad_record_writer(full, session, agent)\n    if taken:',
+     "guard", "scratchpad-owner: removal 1 agent B's rm of agent A's file"),
     ("write-target deny loop judges only the first path field, so a later field's deny is skipped",
      '    for target in targets:\n        # 0b.',
      '    for target in targets[:1]:\n        # 0b.',
@@ -1903,19 +2013,19 @@ MUTATIONS = [
      'ENTRY_OWN = re.compile(r"^never-seen:")', "guard",
      "builder-refuse: a reset to a commit that holds the builder's own test edit is denied at push"),
     ("role-diff: a merge commit is judged against its first parent, not git's own merge",
-     '        old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")',
-     '        old = parents[0] if parents else ""', "guard",
+     '            merged = merge_tree(root, *parents)',
+     '            merged = (parents[0], ())', "guard",
      "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at push and stop"),
     ("role-diff: a merge in progress is judged against HEAD, not git's own merge",
-     '        old = merge_tree(root, "HEAD", merging.stdout.strip())', '        old = "HEAD"', "guard",
+     '        merged = merge_tree(root, "HEAD", merging.stdout.strip())', '        merged = ("HEAD", ())', "guard",
      "builder-refuse: a merge of main with a product-file conflict, while main changed a test file, is allowed at commit"),
     ("role-diff: a rebase pick is read as the builder's resolved replay",
      'REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")',
      'REBASE_PLAIN_STEPS = ("start", "finish", "abort", "reword", "edit")', "guard",
      "builder-refuse: a rebase onto main where a test-author's commit and main change the same test file in different hunks"),
     ("role-diff: a replay in progress is refused as the builder's own work",
-     '    changes.append((old, None, paths, NOTED if replaying else OWN))',
-     '    changes.append((old, None, paths, OWN))', "guard",
+     '    changes.append((old, None, paths, NOTED if replaying else OWN, conflicts))',
+     '    changes.append((old, None, paths, OWN, conflicts))', "guard",
      "builder-refuse: a builder's cherry-pick of a test-author's commit with --no-commit is allowed at commit"),
     ("role-diff: a write of the upstream side after a rebase is logged only",
      '            if not builder or kind == OWN:',
@@ -1929,12 +2039,29 @@ MUTATIONS = [
      '        if sha in lost:\n            continue', '        if False:\n            continue', "guard",
      "builder-refuse: a builder's conflicted merge of a test file, which it then resets away, is allowed and logs no builder-diff line"),
     ("role-diff: every path a builder changes offends",
-     '            bad = any(is_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
+     '            bad = any(is_builder_test_rel(n) for n in names) or (', '            bad = True or (', "guard",
      "builder-refuse: a builder's conflicted merge of a product file, both sides changed it, is allowed and logs no builder-diff line"),
     ("role-diff: a test-author's change is judged as a builder's",
      '        elif role == AUTHOR_ROLE:\n            bad = not all(author_path_ok(n) for n in names)',
      '        elif False:\n            bad = not all(author_path_ok(n) for n in names)', "guard",
-     "builder-refuse: a test-author's conflicted merge of a test file is never refused and logs nothing"),
+     "builder-refuse: a test-author's ordinary commit of a test file is never refused and logs no author-diff line"),
+    ("role-diff: a test-author's conflicted path is judged like any other",
+     '        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):', '        if False:', "guard",
+     "builder-refuse: a test-author's merge commit that resolves a conflicted test file and a conflicted product file"),
+    ("test-author: the write tool refuses a product path its merge left conflicted",
+     '            if where and norm(rel).lstrip("/") in merge_route_paths(merge_conflicts(where) or ()):', '            if False:', "guard",
+     "test-author: Edit of a product file its merge conflicts is allowed"),
+    ("test-author: the merge route is given to a merge with no test path conflicted",
+     '    if not any(is_test_rel(path) for path in conflicts):', '    if False:', "guard",
+     "test-author: Edit of a product file its merge conflicts, with no test path conflicted, is refused"),
+    ("role-diff: a test-author's commit gives the merge route to a merge with no test path conflicted",
+     '        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):',
+     '        if role == AUTHOR_ROLE and all(norm(n) in conflicts for n in names):', "guard",
+     "builder-refuse: a test-author's merge commit that resolves a product-only conflict logs author-diff"),
+    ("test-author: the merge route covers a conflicted workflow, test config or manifest",
+     '    return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]',
+     '    return list(conflicts)', "guard",
+     "test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused"),
     ("role-diff: a flag on a line that calls a runner is not read",
      'any(TEST_RUNNER_CONTEXT.search(near) for near', 'any(False for near', "guard", "builder-test: addopts --deselect added to pytest.ini is refused"),
     ("role-diff: --deselect no longer disables tests",
@@ -1982,7 +2109,7 @@ MUTATIONS = [
     ("test-author: the scope is never enforced in the diff",
      '            bad = not all(author_path_ok(n) for n in names)', '            bad = False', "guard", "builder-diff: the diff check refuses a builder's test change and logs a test-author's diff"),
     ("test-author: the write tool lets any path through",
-     '        return "" if repo_rel(target, cwd, outside=False) is None else target', '        return ""', "guard",
+     '                return ""\n        return target\n    if role == WRITER_ROLE:', '                return ""\n        return ""\n    if role == WRITER_ROLE:', "guard",
      "test-author: Edit of product code is refused"),
     ("test-author: test config is not its own",
      '    return (is_test_rel(rel) or is_test_config_rel(rel) or basename(rel) in AUTHOR_BASENAMES',
@@ -2012,8 +2139,14 @@ MUTATIONS = [
      '    while index < len(args) and args[index].startswith("-"):', "    while False:", "guard",
      "builder-test: python3 -u in place of python3 on a test run is allowed"),
     ("test-author: a mutation test is not its own",
-     '            or norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS)', '            or False)', "guard",
+     '            or is_mutation_test_rel(rel))', '            or False)', "guard",
      "test-author: Edit of mutation test hooks/mutate_guard.py is allowed"),
+    ("builder-test: is_builder_test_rel drops the mutation tests",
+     '    return is_test_rel(rel) or is_mutation_test_rel(rel)', '    return is_test_rel(rel)', "guard",
+     "builder-test: Edit of mutation test hooks/mutate_guard.py is refused"),
+    ("builder-test: is_mutation_test_rel stops folding case",
+     '    return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS', '    return norm(rel).lstrip("/") in AUTHOR_MUTATION_TESTS', "guard",
+     "builder-test: Edit of HOOKS/mutate_guard.py is refused (case folds)"),
     ("role-diff: the builder reason drops the remedy",
      '"report. The orchestrator assigns it to a test-author."', '"report."', "guard",
      "builder-test: Write of a test file is refused"),
@@ -2728,6 +2861,46 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # records-page: a commit of MERGE_HEAD's page is allowed on origin/<base>'s first-parent line, or for a stacked
+    # lane (some best merge base of HEAD and MERGE_HEAD is off origin/<base>).
+    ("records-page: MERGE_HEAD is not read against origin/<base>, so another branch's page is allowed",
+     '    return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""',
+     '    return ids[1]',
+     "guard", "a test-author commit of a non-base merge's page, the feature branch's, origin/main moved on"),
+    ("records-page: the line is not first-parent only, so a branch merged into the base is allowed",
+     '"rev-list", "--first-parent", origin)',
+     '"rev-list", origin)',
+     "guard", "off its first-parent line"),
+    ("records-page: the page is not compared with MERGE_HEAD's, so a rebuilt page is allowed",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if not page_id or not _merge_head_page(top, base):',
+     "guard", "a test-author commit of a page rebuilt after the merge, origin/main moved on"),
+    ("records-page: MERGE_HEAD's page is never read, so the merge's own page is refused",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if True:',
+     "guard", "a test-author commit of the merge's own page, after origin/main moved on"),
+    # An absent page (a deletion staged in the index) is refused unless no merge brings one. Without the check, a
+    # deleted page with no merge in progress compares '' with '' and is allowed.
+    ("records-page: the absent-page check is dropped, so a commit that deletes the page is allowed with no merge",
+     '            if not page_id or page_id != _merge_head_page(top, base):',
+     '            if page_id != _merge_head_page(top, base):',
+     "guard", "a commit that deletes the page, with no merge in progress"),
+    # The stacked clause of `_merge_head_page` (guard_merge.py): a lane stacked on an unmerged base passes for
+    # MERGE_HEAD's page. Each label starts "records-page: stacked clause", so that prefix selects these three.
+    ("records-page: stacked clause, an is-ancestor exit of 0 or an error passes, so a failed read is a pass",
+     "if seen is not None and seen.returncode == 1:",
+     "if seen is not None and seen.returncode != 0:",
+     "guard", "so the is-ancestor read fails"),
+    ("records-page: stacked clause, merge-base without --all reads one best base, so a criss-cross base is missed",
+     '    meet = _git(top, "merge-base", "--all", "HEAD", "MERGE_HEAD")',
+     '    meet = _git(top, "merge-base", "HEAD", "MERGE_HEAD")',
+     "guard", "a lane's merge of a criss-cross stacked base, with the base's page staged"),
+    ("records-page: stacked clause, the page passes with no is-ancestor read, so a branch cut from main passes",
+     '        seen = _git(top, "merge-base", "--is-ancestor", best, origin)\n'
+     '        if seen is not None and seen.returncode == 1:   # 1 is "not an ancestor"; 0 is one, other is a failure\n'
+     '            return ids[1]',
+     '        return ids[1]',
+     "guard", "an unrelated unmerged branch, whose merge bases are both on origin/main"),
     # Rule brief-destructive-git: the check reads no brief, so an ordered discard passes.
     ("brief-destructive-git: the check finds no ordered discard, so a brief that orders a reset passes",
      "                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
@@ -3048,12 +3221,14 @@ MUTATIONS = [
 ]
 
 
-# REPORT MODE. File -> the suites that exercise it or name it. A suite not listed here (hooks/test_guard.py,
-# merge/test_merge.py, lint/test_ci_scope.py) is not run against that file: test_guard.py and test_merge.py
-# take minutes each per mutant, and test_ci_scope.py only passes the file's path to the scope detector.
+# REPORT MODE. File -> the suites that exercise it or name it. A suite not listed here (merge/test_merge.py,
+# lint/test_ci_scope.py) is not run against that file: test_merge.py takes minutes per mutant, and
+# test_ci_scope.py only passes the file's path to the scope detector. hooks/test_guard.py runs only as the
+# families of GUARD_MODULE_FAMILIES, or whole against REPORT_GOLD's file: a whole run takes minutes per mutant.
 # Add a verdict-deciding file here, with the suites that name it, to put it in the report.
 REPORT_TARGETS = [
     ("lint/report_guard.py", ["lint/test_report_guard.py", "lint/test_report_guard_route.py",
+                             "lint/test_report_guard_stamped.py",
                              "lint/test_report_guard_landing.py",
                              "lint/test_report_guard_refusal.py", "lint/test_report_guard_handoff.py",
                              "lint/test_report_guard_cannot.py",
@@ -3067,6 +3242,27 @@ REPORT_TARGETS = [
                               "janitor/test_session_end_sweep.py", "lint/test_settings_matcher.py"]),
     ("lint/check_silent_undo.py", ["lint/test_check_silent_undo.py"]),
 ]
+# hooks/guard_<x>.py -> the families of hooks/test_guard.py (FAMILIES there) that exercise it. `--tests-for` prints a row as
+# `hooks/test_guard.py::<family>` lines beside the other suites that load the module, which the engine runs with
+# GUARD_FAMILY=<family> for a family line. A mutant meets only the families that reach its module, since the whole file takes
+# minutes. A guard module is a row, REPORT_GOLD's file, or in
+# GUARD_MODULE_EXEMPT (a test checks this).
+GUARD_MODULE_FAMILIES = {
+    "hooks/guard_kill.py": ["kill", "git-env"],
+    "hooks/guard_env.py": ["env", "git-env"],
+    "hooks/guard_frozen.py": ["frozen"],
+    "hooks/guard_pointer.py": ["pointer"],
+    "hooks/guard_rm_var.py": ["rm-var"],
+    "hooks/guard_shared_tree.py": ["shared-tree"],
+    "hooks/guard_stream.py": ["stream"],
+    "hooks/guard_push_delete.py": ["push-delete"],
+    "hooks/guard_branch_worktree.py": ["branch-worktree"],
+    "hooks/guard_merge.py": ["merge"],
+    "hooks/guard_mask_script.py": ["mask-script"],
+}
+GUARD_MODULE_EXEMPT = {
+    "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
+}
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
 # one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor
 # fails the CI job), which an ast sample of other files cannot be held against.
@@ -3623,8 +3819,9 @@ def _loads_module(source: str, stem: str) -> bool:
 def tests_for_main(argv) -> int:
     """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
     suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). Any other file
-    prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
+    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A file with a row
+    in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
+    `hooks/test_guard.py`. Any other file prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
     `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     import re
@@ -3659,6 +3856,10 @@ def tests_for_main(argv) -> int:
                     continue
                 if _loads_module(source, stem):
                     names.add(item)
+        if path in GUARD_MODULE_FAMILIES:
+            # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
+            names.discard("hooks/test_guard.py")
+            names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
     for name in sorted(names):
         print(name)
     return 0
@@ -3741,10 +3942,7 @@ def run_mutant(sources, work: str, entry):
     _path, suite, variable, stem = TARGETS[target]
     if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
-        # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
-        # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
-        # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
-        # Without them every simulator arm would be judged against a guard that allows everything.
+        # module that holds it. The suite loads the copied guard.py, which finds its siblings.
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
@@ -3757,13 +3955,12 @@ def run_mutant(sources, work: str, entry):
             mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
-        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
-        for name in ("sweep.py", "temp_sweep.py"):
-            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
-        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
-        # it the role-model table reads as unread and every role-model arm passes unjudged.
-        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
+        # The guard family reads the folders beside its hooks folder as a checkout has them: ../lint (layout.py,
+        # the role-model table: without it every role-model arm passes unjudged), ../janitor (the simulator
+        # refusal fails open without sweep.py) and ../skills (waiting-page, impeccable). Git's own list of each
+        # folder fills them, so a file the guard starts to read cannot be left out. git is read from the source
+        # checkout, never from this scaffold.
+        tracked_tree.copy_tracked(root, "lint", "janitor", "skills", root=os.path.dirname(HERE))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -3893,8 +4090,7 @@ def main() -> int:
     # The override and calljudge copies sit one folder below `work`, so their `../lint` is work/lint:
     # override.py reads it, and so does the decision_watch.py beside a calljudge copy. The ruling and
     # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
-    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
-                    ignore=shutil.ignore_patterns("__pycache__"))
+    tracked_tree.copy_tracked(work, "lint", root=os.path.dirname(HERE))
 
     try:
         return mutate_shared.run_mutants(
