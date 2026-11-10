@@ -27442,7 +27442,7 @@ def _remedy_problems(label, got, reason):
 def worktree_home_other_checkout_remedy_case():
     """Rule 0, `other-checkout`, the remedy on both refusals: a write into a sibling checkout, and a
     `cd` into one, each name the EnterWorktree call with `path` set to the checkout, and neither names
-    `cd` or `env -C` as a route. Ruling: coordinator, 2026-11-09 21:18 CST."""
+    `cd` or `env -C` as a route. A refusal must not name the route it refused, or the agent takes that route."""
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocd")
     in_b = os.path.join(lane_b, "src", "app.py")
     problems = []
@@ -28888,7 +28888,7 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir=<path> add in t
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C then git -C, two relative folders that together reach "
                          "the primary checkout, is refused",
                          _gcx_row("deny", "home", "env -C ../../.. git -C . rm f")))
-# Green on main too: these pin the allows the fix must keep, so each is a guard, not a red case.
+# These rows pin the allows the guard must keep, so each is a guard, not a red case.
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C status of the primary checkout is allowed",
                          _gcx_row("allow", "home", "env -C @PRIMARY git status")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into a variable folder is allowed",
@@ -28965,7 +28965,7 @@ LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir lets a cd after an env -C dec
                          _run_dir_row("env -C %s git status && cd %s && git status"
                                       % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
                                       RUN_DIR_PRIM, "an env -C folder beat the cd after it")))
-# A guard, green on head: the env -C of the primary checkout alone is already read as the primary.
+# A guard row: an env -C of the primary checkout alone must be read as the primary, or the guard judges the wrong checkout.
 LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads an env -C of the primary checkout as the primary",
                          _run_dir_row("env -C %s git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
                                       "an env -C of the primary checkout was read as something else")))
