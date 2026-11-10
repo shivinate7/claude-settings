@@ -4,7 +4,7 @@
 
 Owner, 2026-11-08 17:09 CST (Degen page item 157, pick b), confirmed 2026-11-09 03:35 CST (item 164, pick a): a Degen build reaches the phone by a box-served install first. TestFlight with auto-update is the fallback. The owner's note: "box-servered auto update / install into testflight with autoupdate as a back lane update". For Degen, it replaces the Mac-first install.
 
-- The other apps: owner, 2026-10-22 19:40 CDT, for every app: when the phone is on Wi-Fi and the Mac can install, install from the Mac, with TestFlight as the fallback. That ruling stands for each app but Degen. Whether the box-served install covers them too is open: asked through the Degen coordinator on 2026-11-09.
+- The other apps: owner, 2026-10-22 19:40 CDT, for every app: when the phone is on Wi-Fi and the Mac can install, install from the Mac, with TestFlight as the fallback. That ruling stands for each app but Degen. Owner, 2026-11-09 19:31 CST (Degen item 171): box-first applies only to an app that has a box-served install path; today that is Degen alone. Every other app stays Mac first.
 - The route that puts a CI build on the box is not built (Degen spec `cloud-move`, Phase 3). Until it exists, TestFlight carries each install from CI. `make phone` and `make testflight` stay on the Mac holdover until a CI build reaches the phone with no Mac (same spec, the Mac holdover table).
 - The ship tool runs on the Mac today (decision `ios-ship-is-one-shared-tool`, one shared ship tool).
 - When to install after a merge is not part of this ruling. It waits on the owner.
