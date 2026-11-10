@@ -746,14 +746,15 @@ class EmittedRuleIdsTests(unittest.TestCase):
 # A refusal prints a cite: `decision <slug>` for a file in docs/decisions/, or `rule <anchor>` for
 # a `<!-- rule:<anchor> -->` in CLAUDE.md or output-styles/*.md. Both sets are read live. A refusal
 # site is a refuse() or ask_command() call, a raw permissionDecision dict, a raise or return of a
-# Stop, or a refuse print (a decision "block" that reaches the output), whatever the hook event.
+# Stop, a refuse print (a decision "block" that reaches the output), or a block dict that a call passes
+# to a helper which prints that parameter. Whatever the hook event.
 # The scan reads hooks/*.py, merge/merge.py and each .py script settings.json wires. A refusal id
 # with a site that prints no cite, or whose reason the scan cannot read, fails unless it is in
 # REFUSAL_UNCITED_EXEMPT with its home. The exempt list only shrinks.
 
 CITE_RE = re.compile(r"\b(decision|rule) ([a-z0-9][a-z0-9-]*)\b")
 HOME_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
-MAX_DEPTH = 12
+MAX_DEPTH = 24  # hops a read may follow: report_guard's 3100 needs 16. Scan time grows steeply above 32.
 PENDING_ASK = "PENDING_ASK"  # filled only by ask_command(), whose literal call sites are scanned
 EXEMPT_REASON_WORDS = 6  # the least words an exempt entry's reason may have
 
@@ -952,6 +953,28 @@ def _enclosing_defs(node, mod):
     return out
 
 
+def _holds(outer, node, mod):
+    """True when `node` is `outer` or sits inside it."""
+    cur = node
+    while cur is not None:
+        if cur is outer:
+            return True
+        cur = mod.parents.get(id(cur))
+    return False
+
+
+def _runs_on_every_path(at, read, mod, scope):
+    """True when the statement `at` runs on every path to `read` in `scope`: no branch, loop or handler between them
+    holds `at` and not `read`. A loop or handler that holds `at` is never every path, so its target does not count."""
+    node = at
+    while node is not None and node is not scope:
+        if isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.ExceptHandler)) \
+                and not _holds(node, read, mod):
+            return False
+        node = mod.parents.get(id(node))
+    return True
+
+
 def _reaching(entries, read, mod):
     """The bindings a read sees. Where a read runs in a lambda or a generator expression, all of them: it may run after any of them. Else
     one reaches the read when it sits in the read's own statement, or when it takes effect before the read and is not
@@ -1122,6 +1145,7 @@ class _Module:
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
                 self.name_loads.setdefault(node.id, []).append(node)
         self.stops = _stop_classes(self)  # the Stop classes of this module, read below
+        self.flow_memo = {}  # the output reads of this module, once each (see _reaches_output)
 
 
 class _Reasons:
@@ -1131,13 +1155,28 @@ class _Reasons:
     def __init__(self, world):
         self.world = world
         self._locals = {}
+        self._memo = {}  # (read, ids of its node, module, locals, depth) -> (result, the objects those ids name)
+        self._no_locals = {}  # the locals of a module-level value; never written, so one object serves every read
 
     def locals_of(self, fdef, mod):
         if id(fdef) not in self._locals:
             self._locals[id(fdef)] = _locals(fdef, mod)
         return self._locals[id(fdef)]
 
+    def _memo_read(self, key, keep, compute):
+        """The result of one read, computed once per key. A read repeats the same sub-reads once per branch it
+        takes, so without this the cost grows with the depth cap. `keep` holds the objects whose ids the key
+        names, so no id is reused while the memo lives. A list result is copied, so no caller can change it."""
+        if key not in self._memo:
+            self._memo[key] = (compute(), keep)
+        result = self._memo[key][0]
+        return None if result is None else list(result)
+
     def alts(self, expr, mod, locs, depth=0):
+        return self._memo_read(("alts", id(expr), id(mod), id(locs), depth), (expr, mod, locs),
+                               lambda: self._alts(expr, mod, locs, depth))
+
+    def _alts(self, expr, mod, locs, depth):
         if depth > MAX_DEPTH:
             return None
         d = depth + 1
@@ -1256,6 +1295,10 @@ class _Reasons:
 
     def _elt(self, expr, i, mod, locs, depth):
         """The text of element `i` of a tuple-valued expression."""
+        return self._memo_read(("elt", id(expr), i, id(mod), id(locs), depth), (expr, mod, locs),
+                               lambda: self._elt_of(expr, i, mod, locs, depth))
+
+    def _elt_of(self, expr, i, mod, locs, depth):
         if depth > MAX_DEPTH:
             return None
         d = depth + 1
@@ -1293,7 +1336,7 @@ class _Reasons:
         if home is None:
             return None
         hmod, values = home
-        return _union([self._value(v, None, index, hmod, {}, depth) for v in values])
+        return _union([self._value(v, None, index, hmod, self._no_locals, depth) for v in values])
 
     def _home(self, mod, name, depth=0):
         """(module, values) where a module-level name is bound, following `from` imports."""
@@ -1315,6 +1358,10 @@ class _Reasons:
     def _call(self, call, mod, locs, depth, index):
         """The reason a call returns: each return value, or element `index` of each return tuple. The
         parameters the call passes read as their arguments, read in the caller's scope."""
+        return self._memo_read(("call", id(call), id(mod), id(locs), depth, index), (call, mod, locs),
+                               lambda: self._call_of(call, mod, locs, depth, index))
+
+    def _call_of(self, call, mod, locs, depth, index):
         if not isinstance(call.func, ast.Name) or depth > MAX_DEPTH:
             return None
         found = self._function(call.func.id, mod)
@@ -1346,7 +1393,7 @@ class _Reasons:
         hmod, table = home[0], home[1][0]
         for key, value in zip(table.keys, table.values):
             if self._key_text(key, hmod) == sub.slice.value:
-                return self.alts(value, hmod, {}, depth + 1)
+                return self.alts(value, hmod, self._no_locals, depth + 1)
         return None
 
     def _key_text(self, key, mod):
@@ -1480,42 +1527,59 @@ def _pairs(node):
     return {k.arg: k.value for k in node.keywords if k.arg}
 
 
-def _name_reaches(name, mod, scope, depth):
-    """True when a read of `name` in `scope` reaches the output (see _reaches_output)."""
-    return any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
-               and _reaches_output(n, mod, scope, depth + 1) for n in _own(scope))
+def _name_reaches(name, mod, scope, depth, returns=True):
+    """True when a read of `name` in `scope` reaches the output (see _reaches_output). Memoized like it."""
+    key = ("name", name, id(scope), depth, returns)
+    if key not in mod.flow_memo:
+        found = any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, ast.Load)
+                    and _reaches_output(n, mod, scope, depth + 1, returns) for n in _own(scope))
+        mod.flow_memo[key] = (found, scope)
+    return mod.flow_memo[key][0]
 
 
-def _bound_reaches(target, mod, scope, depth):
+def _bound_reaches(target, mod, scope, depth, returns=True):
     """True when a value bound to `target` reaches the output: a name, or an item of a name."""
     item = _item(target)
     if item is not None:
-        return _name_reaches(item[0], mod, scope, depth)
-    return isinstance(target, ast.Name) and _name_reaches(target.id, mod, scope, depth)
+        return _name_reaches(item[0], mod, scope, depth, returns)
+    return isinstance(target, ast.Name) and _name_reaches(target.id, mod, scope, depth, returns)
 
 
-def _reaches_output(node, mod, scope, depth=0):
+def _reaches_output(node, mod, scope, depth=0, returns=True):
     """True when the value of `node` reaches the output of `scope`: it is printed (`print(...)`, or a `json.dumps(...)`
     or `dict(...)` that is printed), returned, passed to `name.update(...)`, or bound to a name that reaches the
-    output. An `name.update(...)` call reaches the output when its name does."""
+    output. An `name.update(...)` call reaches the output when its name does. A value that is an operand of `or`,
+    `and` or a conditional expression reaches it as that expression does. `returns` false leaves out a return: a
+    printing helper prints its parameter, and a parameter that is only returned is printed by no one. Memoized per
+    (node, scope, depth, returns), so a name that is rebound many times is read once per depth, not once per path."""
     if depth > MAX_DEPTH:
         return False
+    key = ("node", id(node), id(scope), depth, returns)
+    if key not in mod.flow_memo:
+        mod.flow_memo[key] = (_output_of(node, mod, scope, depth, returns), node, scope)
+    return mod.flow_memo[key][0]
+
+
+def _output_of(node, mod, scope, depth, returns):
+    """The uncached read behind _reaches_output."""
     target = _update_target(node)
-    if target is not None and _name_reaches(target, mod, scope, depth):
+    if target is not None and _name_reaches(target, mod, scope, depth, returns):
         return True
     parent = mod.parents.get(id(node))
+    if isinstance(parent, ast.BoolOp) or (isinstance(parent, ast.IfExp) and parent.test is not node):
+        return _reaches_output(parent, mod, scope, depth + 1, returns)  # `p or {}`, `p if p else {}`: one of its values
     if isinstance(parent, ast.Return):
-        return True
+        return returns
     if isinstance(parent, ast.Call) and parent.func is not node:
         func = parent.func
         if isinstance(func, ast.Name) and func.id == "print":
             return True
         if (isinstance(func, ast.Attribute) and func.attr == "dumps") or (isinstance(func, ast.Name) and func.id == "dict"):
-            return _reaches_output(parent, mod, scope, depth + 1)
+            return _reaches_output(parent, mod, scope, depth + 1, returns)
         target = _update_target(parent)
-        return target is not None and _name_reaches(target, mod, scope, depth)
+        return target is not None and _name_reaches(target, mod, scope, depth, returns)
     if isinstance(parent, ast.Assign) and parent.value is node:
-        return any(_bound_reaches(t, mod, scope, depth) for t in parent.targets)
+        return any(_bound_reaches(t, mod, scope, depth, returns) for t in parent.targets)
     return False
 
 
@@ -1533,13 +1597,45 @@ def _refuse_print(node, scope, mod, locs, reasons):
         decision, reason = node.value, _key_value(scope, item[0], "reason")
     else:
         return None
-    if decision is None or "block" not in (reasons.alts(decision, mod, locs) or []):
+    if not _reads_block(decision, mod, locs, reasons):
         return None
     if isinstance(node, (ast.Dict, ast.Call)):
         reached = _reaches_output(node, mod, scope)
     else:
         reached = _name_reaches(item[0], mod, scope, 0)
     return reason if reached else None
+
+
+def _reads_block(decision, mod, locs, reasons):
+    """True when a decision expression reads as "block" in some branch: the one test of a block, for a refuse
+    print and for a block dict a call passes to a printing helper."""
+    return decision is not None and "block" in (reasons.alts(decision, mod, locs) or [])
+
+
+def _is_dict_node(node):
+    """A dict literal, or `dict(key=value, ...)` with keywords only: the two spellings of one dict."""
+    return isinstance(node, ast.Dict) or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                                          and node.func.id == "dict" and not node.args)
+
+
+def _dict_options(expr):
+    """The dict nodes a call's argument can be: the dict itself, or the dicts of an `A if c else B` branch."""
+    if _is_dict_node(expr):
+        return [expr]
+    if isinstance(expr, ast.IfExp):
+        return _dict_options(expr.body) + _dict_options(expr.orelse)
+    return []
+
+
+def _block_reason(node, mod, locs, reasons):
+    """The reason expression of a dict node whose decision reads as "block", NO_REASON when it has no reason
+    key, else None."""
+    if not _is_dict_node(node):
+        return None
+    pairs = _pairs(node)
+    if not _reads_block(pairs.get("decision"), mod, locs, reasons):
+        return None
+    return pairs.get("reason", NO_REASON)
 
 
 def _base_name(base):
@@ -1709,6 +1805,18 @@ class _Helpers:
             if (self.refs.get(id(d)) and id(d) not in self.hidden and d.name not in unseen
                     and not isinstance(mod.parents.get(id(d)), ast.ClassDef) and self._reaches(d)):
                 self.helpers[id(d)] = d
+        self.printers = {}  # id(def) -> the parameters whose values its output prints
+        candidates = [d for d in self.defs if self.refs.get(id(d)) and id(d) not in self.hidden
+                      and d.name not in unseen and not isinstance(mod.parents.get(id(d)), ast.ClassDef)]
+        grown = True
+        while grown:  # a parameter passed on to a printer is printed too, so a pass can add names to another def
+            grown = False
+            for d in candidates:
+                old = self.printers.get(id(d), frozenset())
+                new = old | self._printed_params(d)
+                if new != old:
+                    self.printers[id(d)] = new
+                    grown = True
 
     def lexical(self, name, node):
         """The def `name` refers to at `node`: the nearest enclosing def that binds it, else a module-level def."""
@@ -1821,6 +1929,60 @@ class _Helpers:
             rows.append(_judge(self.reasons.alts(msg, self.mod, flocs), homes, fallback))
         return rows
 
+    def _printed_params(self, d):
+        """The parameters of `d` that its output prints: a read of one that prints it, or a call that passes it to a
+        parameter a printer prints. Only the argument counts, not a rebinding to another value (see _reads_argument)."""
+        params = set(_param_names(d))
+        locs = self.reasons.locals_of(d, self.mod)
+        found = set()
+        for node in _own(d):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in params:
+                if _reaches_output(node, self.mod, d, 0, returns=False) and self._reads_argument(node, node.id, d, locs):
+                    found.add(node.id)
+            elif isinstance(node, ast.Call) and not any(isinstance(a, ast.Starred) for a in node.args):
+                g = self.printer(node)
+                for name, arg in (_call_args(node, g) if g is not None else []):
+                    if name in self.printers[id(g)] and isinstance(arg, ast.Name) and arg.id in params \
+                            and self._reads_argument(arg, arg.id, d, locs):
+                        found.add(arg.id)
+        return frozenset(found)
+
+    def _reads_argument(self, read, name, scope, locs):
+        """True when a read of parameter `name` in `scope` sees its argument. A rebinding that runs on every path to the
+        read hides the argument, unless its value names the argument (it derives from it). A rebinding in a branch or
+        a loop that the read is not in hides nothing: the other path still holds the argument."""
+        seen = _reaching(locs.get(name, []), read, self.mod)
+        # `name[key] = ...` stores into the value the name holds: it rebinds nothing, so it is no rebinding.
+        hiding = [value for value, _, at in seen if at is not None
+                  and not (isinstance(at, ast.Assign) and all(isinstance(t, ast.Subscript) for t in at.targets))
+                  and _runs_on_every_path(at, read, self.mod, scope)]
+        return all(value is not None and name in {n.id for n in ast.walk(value) if isinstance(n, ast.Name)}
+                   for value in hiding)
+
+    def printer(self, call):
+        """The printing def a call runs, read as the def the call's name refers to at the call; else None."""
+        if not isinstance(call.func, ast.Name):
+            return None
+        d = self.lexical(call.func.id, call)
+        return d if d is not None and id(d) in self.printers else None
+
+    def print_rows(self, call, locs, homes):
+        """(status, spellings) for each block dict that a call passes to a parameter its def prints. Each such
+        dict is a refusal site of the caller: its reason is read at the call, in the caller's scope, as a refuse
+        print's reason is. A dict that the call's argument holds only by a name is not read here."""
+        d = self.printer(call)
+        if d is None or any(isinstance(a, ast.Starred) for a in call.args):
+            return []
+        rows = []
+        for name, arg in _call_args(call, d):
+            if name not in self.printers[id(d)]:
+                continue
+            for dict_node in _dict_options(arg):
+                reason = _block_reason(dict_node, self.mod, locs, self.reasons)
+                if reason is not None:
+                    rows.append(self.printed_site(reason, call, locs, homes))
+        return rows
+
 
 def _add(statuses, rid, where, status, spellings):
     statuses.setdefault(rid, []).append((where, status, spellings))
@@ -1833,7 +1995,8 @@ def refusal_status(sources, homes, scope, guards=None):
     names the modules whose refusals count, and `guards` the guard modules among them (all of `scope` when
     None). A guard module's refuse() and ask_command() calls name their id. Any module in scope also counts a
     raw refusal dict, a refuse print (see _refuse_print), a `raise Stop(...)`, `return Stop(...)` or
-    `raise kind(...)` (see _kind_params) of its own, and each call of a helper; their id is
+    `raise kind(...)` (see _kind_params) of its own, each call of a helper, and each block dict a call passes to a
+    printing helper (see _Helpers.print_rows); their id is
     `module:function`, the function that makes the refusal. A helper's own message is no site, and a hook that
     is no guard module (a judge hook) prints its refusal in its own refuse(), so only that print counts there.
     unattributed: the calls whose id the scan cannot read."""
@@ -1862,6 +2025,8 @@ def refusal_status(sources, homes, scope, guards=None):
                     for h in helpers.targets(site, fdef):
                         for status, spellings in helpers.instance_rows(h, site, locs, homes):
                             _add(statuses, rid, where, status, spellings)
+                    for status, spellings in helpers.print_rows(site, locs, homes):
+                        _add(statuses, rid, where, status, spellings)
                     continue
                 stop = _stop_reason(site, mod.stops, _kind_params(fdef, mod.stops))
                 expr = _raw_refuse_reason(site) or stop
@@ -2910,6 +3075,213 @@ class RefusePrintTests(unittest.TestCase):
                'def main(short):\n'
                '    print(json.dumps({"decision": "block", "reason": (TAIL if not short else "")}))\n')
         self.assertEqual(status_of(src, "guard:main"), ["cited"])
+
+
+RULE_HOMES = ({"alpha"}, {"anchor-one", "reports-order-of-labels"})  # the rule anchor that report_guard's block reasons end with
+UNCITED_BLOCK = '{"decision": "block", "reason": "held, see decision beta, don\'t # or /* or //"}'
+CITED_BLOCK = '{"decision": "block", "reason": "held, see decision alpha, don\'t # or /* or //"}'
+UNCITED_TERNARY = '{"decision": "block", "reason": "held, see decision beta"} if hold else None'
+CITED_TERNARY = '{"decision": "block", "reason": "held, see decision alpha"} if hold else None'
+CITED_LINES = '{"decision": "block", "reason": (\n        "held, "\n        "see decision alpha"\n    )}'
+# report_guard.main()'s finish(payload) as a closure, its body as there; `route` is a parameter of main.
+FINISH_CLOSURE = ('    def finish(payload):\n'
+                  '        if route:\n'
+                  '            payload = dict(payload or {})\n'
+                  '            payload["systemMessage"] = " ".join(filter(None, [payload.get("systemMessage"), *route]))\n'
+                  '        if payload:\n'
+                  '            print(json.dumps(payload))\n')
+EMIT_MODULE = 'def emit(p):\n    if p:\n        print(json.dumps(p))\n'  # the same print as a module-level helper
+
+
+def call_of(name, arg):
+    """One line of main's body: a call of `name` with `arg` as its argument."""
+    return "    %s(%s)\n" % (name, arg)
+
+
+def closure_src(call):
+    """report_guard.main() with its closure `finish`, and the lines `call` of main's body."""
+    return "import json\ndef main(route, hold, pick):\n" + FINISH_CLOSURE + call
+
+
+def module_src(call):
+    """The print as a module-level helper `emit`, and the lines `call` of main's body."""
+    return "import json\n" + EMIT_MODULE + "def main(route, hold, pick):\n" + call
+
+
+def call_rows(src, homes=HOMES):
+    """-> {refusal id: [status]} for one guard module's source."""
+    statuses, _ = refusal_status({"guard": src}, homes, SCOPE)
+    return {rid: [s for _, s, _ in rows] for rid, rows in statuses.items()}
+
+
+REACH_BUDGET = 400  # calls of _reaches_output that a scan of the six-rebind fixtures may make, with room to spare
+
+
+def reach_calls(src, budget=REACH_BUDGET):
+    """-> (calls, rows): the calls a scan of `src` makes to _reaches_output, and its rows. Past `budget` a call
+    returns at once with no output, so a read that grows past it fails the count and stops there."""
+    real = _reaches_output
+    calls = [0]
+
+    def counted(node, mod, scope, depth=0, returns=True):
+        calls[0] += 1
+        return False if calls[0] > budget else real(node, mod, scope, depth, returns)
+
+    with mock.patch.object(sys.modules[__name__], "_reaches_output", counted):
+        rows = call_rows(src)
+    return calls[0], rows
+
+
+SIX_REBINDS = "".join("    out = dict(out, a%d=%d)\n" % (i, i) for i in range(1, 7))
+
+
+class RefuseHelperArgumentTests(unittest.TestCase):
+    """A block dict passed to a helper that prints its parameter is a refuse site, read at each call as a refuse
+    print is: its id is the caller's `module:function`, and its reason is read at the call. The dict may be a
+    literal, a `dict(key=value)` call, or either branch of an `A if c else B`. A helper that passes its parameter to
+    a printing helper prints it too. A helper that only stores its parameter, a parameter rebound to another
+    value, a value that is only returned, and a dict that is not a block, are no site.
+
+    Known gaps, not built: a block dict bound to a name first, and then passed to a printing helper, is not read.
+    A dict literal that holds the parameter, such as `{"hookSpecificOutput": p}`, is not read. A rebinding in both
+    branches of an if/else hides nothing, so a block dict that both branches replace reads as printed (a false
+    alarm). No case here covers these."""
+
+    def assertReadAtCall(self, src, status, homes=HOMES):
+        """The scope first: main is the only refusal id. Then the subject: the call's reason reads as `status`."""
+        rows = call_rows(src, homes)
+        self.assertEqual(sorted(rows), ["guard:main"], "the call is no refuse site of main")
+        self.assertEqual(rows.get("guard:main"), [status], "the call's reason does not read as %s" % status)
+
+    def test_a_closure_that_prints_a_block_dict_argument_reads_an_uncited_call(self):
+        for form, arg in (("plain", UNCITED_BLOCK), ("ternary", UNCITED_TERNARY)):
+            with self.subTest(form=form):
+                self.assertReadAtCall(closure_src(call_of("finish", arg)), "no cite")
+
+    def test_a_closure_that_prints_a_block_dict_argument_passes_a_cited_call(self):
+        for form, arg in (("plain", CITED_BLOCK), ("ternary", CITED_TERNARY), ("two lines", CITED_LINES)):
+            with self.subTest(form=form):
+                self.assertReadAtCall(closure_src(call_of("finish", arg)), "cited")
+
+    def test_a_module_helper_that_prints_a_block_dict_argument_reads_an_uncited_call(self):
+        for form, arg in (("plain", UNCITED_BLOCK), ("ternary", UNCITED_TERNARY)):
+            with self.subTest(form=form):
+                self.assertReadAtCall(module_src(call_of("emit", arg)), "no cite")
+
+    def test_a_module_helper_that_prints_a_block_dict_argument_passes_a_cited_call(self):
+        for form, arg in (("plain", CITED_BLOCK), ("ternary", CITED_TERNARY), ("two lines", CITED_LINES)):
+            with self.subTest(form=form):
+                self.assertReadAtCall(module_src(call_of("emit", arg)), "cited")
+
+    def test_a_helper_that_only_stores_a_block_dict_argument_is_no_site(self):
+        # A control: a stored argument is never printed, so no refusal is read.
+        src = ("LOG = []\ndef record(p):\n    if p:\n        LOG.append(p)\n"
+               "def main(route, hold, pick):\n" + call_of("record", UNCITED_BLOCK))
+        self.assertEqual(call_rows(src), {}, "a helper that stores its argument is read as a refusal")
+
+    def test_a_helper_that_prints_a_dict_that_is_no_block_is_no_site(self):
+        # A control: a dict that is no block is no refusal, however the helper prints it.
+        for form, arg in (("systemMessage", '{"systemMessage": "held, no cite"}'),
+                          ("approve", '{"decision": "approve", "reason": "held, no cite"}')):
+            with self.subTest(form=form):
+                self.assertEqual(call_rows(closure_src(call_of("finish", arg))), {},
+                                 "a dict that is no block is read as a refusal")
+
+    def test_a_block_reason_joined_with_a_rule_tail_reads_cited(self):
+        call = ('    reason = " ".join(pick) + " (rule reports-order-of-labels)"\n'
+                '    finish({"decision": "block", "reason": reason})\n')
+        src = closure_src(call)
+        self.assertReadAtCall(src, "cited", RULE_HOMES)
+        # The twin: the same reason, with homes that do not name the tail's anchor, reads no cite.
+        self.assertEqual(call_rows(src).get("guard:main"), ["no cite"], "the tail's rule anchor does not decide the cite")
+
+
+    def test_a_dict_call_passed_to_a_printing_helper_reads_its_reason(self):
+        for arg, status in (('dict(decision="block", reason="held, no cite")', "no cite"),
+                            ('dict(decision="block", reason="held, see decision alpha")', "cited")):
+            with self.subTest(arg=arg):
+                self.assertReadAtCall(closure_src(call_of("finish", arg)), status)
+
+    def test_a_helper_that_passes_its_parameter_to_a_printing_helper_reads_the_call(self):
+        relay = ("import json\ndef emit(p):\n    if p:\n        print(json.dumps(p))\n"
+                 "def finish(p):\n    emit(p)\ndef main(route, hold, pick):\n")
+        for arg, status in ((UNCITED_BLOCK, "no cite"), (CITED_BLOCK, "cited")):
+            with self.subTest(arg=status):
+                self.assertReadAtCall(relay + call_of("finish", arg), status)
+
+    def test_a_block_dict_passed_to_a_parameter_that_is_never_printed_is_no_site(self):
+        # A control: the dict is stored one call down, and the other parameter is the one printed.
+        src = ("import json\nLOG = []\ndef keep(p):\n    LOG.append(p)\n"
+               "def finish(p, q):\n    keep(p)\n    if q:\n        print(json.dumps(q))\n"
+               "def main(route, hold, pick):\n" + call_of("finish", UNCITED_BLOCK + ", None"))
+        self.assertEqual(call_rows(src), {}, "a block dict in a parameter that is never printed is read as a refusal")
+
+    def test_a_block_dict_returned_by_a_helper_and_never_printed_is_no_site(self):
+        # A control: the returned dict is appended to a list that nothing prints.
+        src = ("import json\nLOG = []\ndef tag(p):\n    return p\n"
+               "def main(route, hold, pick):\n    LOG.append(tag(" + UNCITED_BLOCK + "))\n")
+        self.assertEqual(call_rows(src), {}, "a returned block dict that is never printed is read as a refusal")
+
+    def test_a_parameter_rebound_to_another_value_before_its_print_is_no_site(self):
+        rebound = ("import json\ndef finish(p):\n    p = {\"systemMessage\": \"held, no cite\"}\n"
+                   "    if p:\n        print(json.dumps(p))\ndef main(route, hold, pick):\n")
+        self.assertEqual(call_rows(rebound + call_of("finish", UNCITED_BLOCK)), {},
+                         "the caller's block dict is read as printed after the parameter was rebound")
+        # The real finish() rebinds its parameter from itself, and what it prints still holds the caller's dict.
+        derived = ("import json\ndef finish(p):\n    p = dict(p or {})\n"
+                   "    if p:\n        print(json.dumps(p))\ndef main(route, hold, pick):\n")
+        self.assertReadAtCall(derived + call_of("finish", UNCITED_BLOCK), "no cite")
+
+
+    def test_a_parameter_passed_around_a_cycle_of_helpers_reads_the_call(self):
+        # Mutual recursion: the printer table must reach its fixed point and stop, not loop.
+        cycle = ("import json\ndef b(p):\n    a(p)\n    print(json.dumps(p))\n"
+                 "def a(p):\n    b(p)\ndef main(route, hold, pick):\n")
+        self.assertReadAtCall(cycle + call_of("a", UNCITED_BLOCK), "no cite")
+
+
+    def test_a_dict_rebound_six_times_by_a_helper_that_returns_it_is_read_in_bounded_work(self):
+        src = ("import json\ndef helper(p):\n    out = dict(p)\n" + SIX_REBINDS + "    return out\n"
+               "def main(route, hold, pick):\n" + call_of("helper", UNCITED_BLOCK))
+        calls, rows = reach_calls(src)
+        self.assertLessEqual(calls, REACH_BUDGET, "the printer read walks more paths than six rebinds need")
+        self.assertEqual(rows, {}, "a returned dict that nothing prints is read as a refusal")
+
+    def test_a_block_dict_rebound_six_times_and_only_appended_is_read_in_bounded_work(self):
+        src = ("import json\nLOG = []\ndef main(route, hold, pick):\n"
+               '    out = dict(decision="block", reason="held, no cite")\n' + SIX_REBINDS + "    LOG.append(out)\n")
+        calls, rows = reach_calls(src)
+        self.assertLessEqual(calls, REACH_BUDGET, "the refuse read of a dict walks more paths than six rebinds need")
+        self.assertEqual(rows, {}, "a block dict that nothing prints is read as a refusal")
+
+    def test_a_rebinding_inside_one_branch_hides_nothing_from_the_print(self):
+        for form, branch in (("if", "    if not p:\n        p = {\"systemMessage\": \"held, no cite\"}\n"),
+                             ("if-else", "    if not p:\n        p = {\"systemMessage\": \"held, no cite\"}\n"
+                                         "    else:\n        pass\n")):
+            with self.subTest(form=form):
+                src = ("import json\ndef finish(p):\n" + branch + "    print(json.dumps(p))\n"
+                       "def main(route, hold, pick):\n" + call_of("finish", UNCITED_BLOCK))
+                self.assertReadAtCall(src, "no cite")
+
+    def test_a_parameter_printed_through_or_or_a_conditional_expression_reads_the_call(self):
+        for form in ("json.dumps(p or {})", "json.dumps(p if p else {})"):
+            with self.subTest(form=form):
+                src = ("import json\ndef finish(p):\n    print(%s)\n" % form
+                       + "def main(route, hold, pick):\n" + call_of("finish", UNCITED_BLOCK))
+                self.assertReadAtCall(src, "no cite")
+
+
+class RefuseReasonDepthTests(unittest.TestCase):
+    """A reason is read through the names that bind it, one hop each, up to MAX_DEPTH. A cite past the old cap of
+    12 hops reads cited."""
+
+    def test_a_cite_twenty_name_hops_from_the_reason_reads_cited(self):
+        chain = '    r0 = "held, see decision alpha"\n' + "".join("    r%d = r%d\n" % (i, i - 1) for i in range(1, 21))
+        src = closure_src(chain + call_of("finish", '{"decision": "block", "reason": r20}'))
+        rows = call_rows(src)
+        self.assertEqual(sorted(rows), ["guard:main"], "the call is no refuse site of main")
+        self.assertEqual(rows.get("guard:main"), ["cited"],
+                         "a cite 20 name hops from the reason does not read as cited (the depth cap)")
 
 
 class SettingsScriptFormTests(unittest.TestCase):

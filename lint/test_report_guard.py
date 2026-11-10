@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import runpy
 import shutil
 import subprocess
@@ -31,6 +32,7 @@ GUARD_PY = os.path.join(HOOKS, "guard.py")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)  # guard_core, loaded by path below, imports its sibling modules
 import ste_lint  # noqa: E402
+import report_guard as RG  # noqa: E402  session_wording, the one detector for an order to the session (lint/report_guard.py)
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
@@ -5221,6 +5223,60 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(out.get("decision"), "block")
                 self.assertIn(self.BASH, out["reason"], "the block does not name the orchestrator refusal")
                 self.assertEqual(self.pending_tools(), [self.BASH], "a blocked Stop cleared the orchestrator row")
+
+    def test_t_block_reason_names_both_clearing_forms_as_facts(self):
+        # Catches: the block reason says a refused tool is unanswered but not how it clears, so the session cannot
+        # tell that naming the tool under Input Needed, or writing the phrase after its name, clears it. The phrase
+        # is quoted with the placeholder <tool_name>, as the decision says (refusals-reach-the-owner): quoting it
+        # with the real tool name would clear the row. The reason is facts only: no order to the session. It says
+        # "clears when", never "clears only when": an MCP tool also clears by its full name, and "refusal is right"
+        # also clears, so "only" would be false.
+        for label, tools in (("one tool", [self.BASH]), ("two tools", [self.BASH, self.ARCHIVE])):
+            with self.subTest(refused=label):
+                self.use_fresh_config()
+                self.write_refusals(tools)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "the Stop passed with a pending refusal")
+                reason = out["reason"]
+                for tool in tools:  # scope first: the reason names each refused tool in backticks
+                    self.assertIn("`%s`" % tool, reason, "scope: the block does not name refused tool %s" % tool)
+                order = RG.session_wording(reason)
+                checks = (
+                    ("the block does not say when a refused tool clears", "clears when" in reason),
+                    ("the block says 'only' about clearing, which is false: other forms clear a tool too",
+                     not re.search(r"\bonly\b", reason, re.I)),
+                    ("the block does not give the Input Needed clearing form", "under Input Needed" in reason),
+                    ("the block does not give the phrase clearing form `<tool_name>`: refusal was right",
+                     "`<tool_name>`: refusal was right" in reason),
+                    ("the block quotes the phrase with a real tool name, so quoting it would clear the row",
+                     not any("`%s`: refusal was right" % tool in reason for tool in tools)),
+                    ("the block holds an order to the session: %r" % order, not order),
+                )
+                for cause, passed in checks:
+                    with self.subTest(cause=cause):
+                        self.assertTrue(passed, cause)
+
+    def test_t_block_reason_says_an_mcp_tool_counts_by_full_name(self):
+        # Catches: the block reason gives the clearing forms but not that an MCP tool counts by its full name, so a
+        # session that refused an MCP call cannot tell that naming its full name, in backticks or not, clears the row.
+        # The reason is facts only: no order to the session.
+        self.write_refusals([self.ARCHIVE])
+        out = self.blocked(self.stop(self.PROSE))
+        self.assertIsNotNone(out, "the Stop passed with a pending refusal")
+        reason = out["reason"]
+        self.assertIn("`%s`" % self.ARCHIVE, reason, "scope: the block does not name the refused MCP tool")
+        flat = " ".join(reason.split()).lower()  # a line break in the reason does not hide the wording
+        order = RG.session_wording(reason)
+        checks = (
+            ("the block does not say an MCP tool counts by its full name",
+             "mcp tool counts by its full name" in flat),
+            ("the block does not say the full name counts with or without backticks",
+             "with or without backticks" in flat),
+            ("the block holds an order to the session: %r" % order, not order),
+        )
+        for cause, passed in checks:
+            with self.subTest(cause=cause):
+                self.assertTrue(passed, cause)
 
 
 # building-mistake-names-its-guard (decision mistake-means-missing-guard): a Deviations admission of a
