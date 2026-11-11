@@ -700,3 +700,8 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - 10:57 CST, decision builders-cannot-edit-tests Known gap (coordinator 10:55 CST): a write through an imported helper module is caught only at commit, push and stop (excel-ui-kit, local/ed/edhelp.py). A record-writer adds it when the next lane touches that record; else it rides the plan follow-up.
 - 10:57 CST, fresh start after the drain (owner 10:52 CST, plan c97ebb9): the owner archives the coordinator, the batch runner and every claude-settings session but the retrospective, and respawns them. Before that, the plan follow-up PR merges and each session writes its handoff with what it holds open (triage: this outbox, open page items, steps in doing). The retrospective session rewrites stored session ids by hand (R22's guard not built).
 - 10:57 CST, R30 (owner 10:54 CST, "Add consultant role", plan 8fcb942 under item 3.0): a sixth session role, the consultant, started by the owner on demand in claude-settings; talks with the owner, runs read-only audits, keeps one plan file rewritten in place, sends each ruling to triage; builds, merges and decides nothing; ends when its plan lands. Not named advisor. Home: docs/decisions/session-tiers.md and GLOSSARY.md, with 3.0's lane. Plan follow-up PR now copies restart-plan 8fcb942.
+
+## 2026-11-11 11:07 CST: #2586 round 3 notes (follow-up after it lands)
+
+- Debt scratchpad-owner-cp-mv-dest: name the sequence "a refused overwrite, then a write the guard cannot see (cp, touch, dd of=, curl -o)", so A's run passes where main asked. Round 3 (reviewer sonnet), comment 6802189443.
+- docs/decisions/scratchpad-owner.md:5 "opens no safety hole" overstates; say "opens no unconditional hole".
