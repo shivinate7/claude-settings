@@ -114,11 +114,17 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
+  push-all-main        deny. A non-forced `--all`, `--branches` or glob refspec (`refs/heads/*:refs/heads/*`)
+                       to a network remote that may update main or master there: local main or master
+                       exists and `refs/remotes/<remote>/<name>` is missing or differs from it. A
+                       matching ref is trusted, and the remote is never contacted. It never asks. The
+                       same verdict from a main, lane, detached or agent checkout, except `--all` from
+                       an agent checkout, which is push-agent-branch's. A dry run and a local path pass.
   push-main            ask. A non-forced push whose destination is literally main or master, to a
-                       network remote: `main` alone, `main` with a lane-named branch, and `--all` or
-                       `--branches` from a checkout that is not an agent's. An agent-named destination
-                       in the same push is push-agent-branch's, which refuses. A remote the shell has
-                       not expanded counts as one. The remote's HEAD is not read. A dry run passes.
+                       network remote: `main` alone, and `main` with a lane-named branch. An
+                       agent-named destination in the same push is push-agent-branch's, which refuses.
+                       A remote the shell has not expanded counts as one. The remote's HEAD is not
+                       read. A dry run passes.
   push-stray-branch    ask. An implied push (bare, `HEAD`, `@`, or a colon-less refspec naming the
                        current branch) that writes a name other than the branch's upstream. It is silent
                        when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
@@ -526,7 +532,7 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_AGENT_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
+            PUSH_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
             parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
@@ -4505,13 +4511,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
-                # A non-forced push that writes main or master (rule push-main, asks), an agent-worktree
+                # A non-forced push of every branch that may update main or master (rule push-all-main, refuses), one
+                # that writes main or master by name (rule push-main, asks), an agent-worktree
                 # branch name (rule push-agent-branch, refuses), or an implied destination off the branch's
                 # upstream (rule push-stray-branch, asks). A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
                                 "push to the default branch")
+                elif kind == "all":
+                    refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON, "git push " + " ".join(args))
                 elif kind == "agent":
                     refuse(tool, "deny", "push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args))
                 elif kind == "stray":
