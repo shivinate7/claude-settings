@@ -15,7 +15,7 @@ Owner, 2026-11-10 14:07 CST, typed in the retrospective session. The coordinator
 
 - A clean merge of main keeps a review record valid. The merge tool proves the merge mechanically.
 - Batch CI catches what the merge breaks.
-- A conflicted merge after a PASS fix check takes one more fix check (a chain).
+- A conflicted merge after a PASS fix check takes one more fix check (a fix after a merge of main).
 - Any other difference keeps today's rules.
 
 ## The incident
@@ -73,11 +73,11 @@ The review a changed head owes. The first three bullets are the owner's ruling o
 
 - Owner's ruling. A clean merge of main keeps the record. A record stays valid for a live head that differs from its reviewed head only by clean merges of main (no conflict, the lane's own diff unchanged). Every commit after the record's Head, up to the live head, is a merge commit with two parents. Its second parent is on origin/main. Its tree equals `git merge-tree --write-tree` run on its two parents. The merge tool proves this. The record then reads as it did for its reviewed head. No fix check and no fresh review are owed. Batch CI catches what the merge breaks. `merge --reviewed` and the report guard run the check through one function (`live_review_state`). A read or a merge-tree that cannot run keeps the record stale, and the `--reviewed` line says the check is unknown and why. A parent that the checkout lacks is unknown, never a conflict and never clean. The tool fetches origin's branch heads once a run, only when a parent is missing.
 - Coordinator's reading of the owner's ruling (2026-11-10, after incident #2562, an empty commit on a reviewed head that read stale). An empty commit keeps the record too: a commit with one parent whose tree equals that parent's tree. It leaves the lane's diff unchanged.
-- Owner's ruling. A conflicted merge of main after a PASS fix check takes one more fix check (a chain). Its prior record must be a PASS that `review_state` accepts. Its reviewed head is that record's Head.
+- Owner's ruling. A conflicted merge of main after a PASS fix check takes one more fix check (a fix after a merge of main). Its prior record must be a PASS that `review_state` accepts. Its reviewed head is that record's Head.
 - Owner's ruling. Any other difference keeps today's rules, below.
-- Coordinator pick. A chain gets one fix check.
+- Coordinator pick. A fix after a merge of main gets one fix check.
 - Coordinator pick. The PR gets one fresh full review at the live head when any of these holds. A clean merge of main adds none.
-  - the newest record holds a fix check, unless its fix check PASSed and the live head is a conflicted merge of main into the fixed head (the chain above);
+  - the newest record holds a fix check, unless its fix check PASSed and the live head is a conflicted merge of main into the fixed head (the fix after a merge of main above);
   - a fix check failed;
   - a round read an older head than the live one;
   - the record was made or edited by hand;

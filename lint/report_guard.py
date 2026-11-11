@@ -2570,6 +2570,7 @@ REVIEW_HISTORY_RE = re.compile(
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
+REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply: under the Stop hook's 80 s timeout (settings.json), so the hook is never killed before it prints
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
     "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
@@ -2617,11 +2618,21 @@ def review_claims(text):
     return claims
 
 
-def _gh_json(args, cwd):
-    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer."""
+def _time_left(end):
+    """Seconds left of the whole-check budget that ends at `end`, or raises: no time left is a read that could not run."""
+    import time
+    left = end - time.monotonic()
+    if left <= 0:
+        raise TimeoutError("the review check's time budget is spent")
+    return left
+
+
+def _gh_json(args, cwd, end):
+    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer. The read ends at REVIEW_READ_TIMEOUT or
+    at `end`, the end of the whole check's budget, whichever is first."""
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
     run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
-                        timeout=REVIEW_READ_TIMEOUT)
+                        timeout=min(REVIEW_READ_TIMEOUT, _time_left(end)))
     if run.returncode:
         raise RuntimeError("gh api exited %d" % run.returncode)
     return json.loads(run.stdout)
@@ -2653,6 +2664,8 @@ def review_record_problem(hook, text):
     claims = review_claims(text)
     if not claims:
         return "", ""
+    import time
+    end = time.monotonic() + REVIEW_CHECK_BUDGET  # one budget for every claimed PR and every read, so the hook ends under its timeout
     _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
@@ -2668,9 +2681,9 @@ def review_record_problem(hook, text):
             if merge_mod is None:
                 raise ImportError("merge/merge.py not found")
             cwd = hook.get("cwd")
-            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)["head"]["sha"]
+            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd, end)["head"]["sha"]
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
-                              "--paginate", "--slurp"], cwd)
+                              "--paginate", "--slurp"], cwd, end)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
             rec, body = _newest_record(n, comments, merge_mod)
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
@@ -2682,7 +2695,7 @@ def review_record_problem(hook, text):
         elif not rec or rec["n"] != n:
             reasons.append(REVIEW_NO_RECORD % (n, n, n))
         else:
-            state, why = _live_state(merge_mod, rec, live, cwd)
+            state, why = _live_state(merge_mod, rec, live, cwd, end)
             if state in ("open", "held"):
                 reasons.append(REVIEW_NOT_DONE % (n, state, why))
             elif state != "done":
@@ -2692,12 +2705,12 @@ def review_record_problem(hook, text):
     return " ".join(reasons), " ".join(notes)
 
 
-def _live_state(merge_mod, rec, live, cwd):
+def _live_state(merge_mod, rec, live, cwd, end):
     """(state, why) of `rec` for the live head, from merge/merge.py live_review_state: the one read `merge --reviewed` makes, so the guard and
-    the list agree on a record that survives clean merges of main. Its reads share one REVIEW_READ_TIMEOUT budget. Any error reads as stale, so
+    the list agree on a record that survives clean merges of main. Its reads share the time left of the whole check's budget (`end`). Any error reads as stale, so
     a record this check cannot prove done still blocks, as a stale record did before the clean-merge read."""
     try:
-        with merge_mod.shared_deadline(REVIEW_READ_TIMEOUT):
+        with merge_mod.shared_deadline(_time_left(end)):
             return merge_mod.live_review_state(merge_mod.Host(cwd=cwd or None), rec, live)
     except Exception as err:  # never a pass: the record is not proven done
         return "stale", "%s: %s" % (getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", "the clean-merge read is unknown"), type(err).__name__)
