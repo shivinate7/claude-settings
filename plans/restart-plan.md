@@ -701,8 +701,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   Home: decision question-form; decision reply-judge-samples-never-refuses; rule
   outcomes-stale-decision-protocol.
 
-- **R41 (proposed, waits for the owner's yes). Mods, skills and the output style: keep all, fix six
-  defects.** Owner 13:25 CST Nov 11: "tell me how my mods and skills work ... are they even good to keep
+- **R41. Mods, skills and the output style: keep all, fix seven defects.** Owner 13:36 CST Nov 11:
+  "r41 yes on all". Owner 13:25 CST Nov 11: "tell me how my mods and skills work ... are they even good to keep
   around anymore, are they under the right folders/locations". Read 13:33 CST (two read-only audits,
   scratchpad mods-skills-audit.md and decision-watch-audit.md): all 5 mods, 11 skills and shiv-stylisms
   are in the right folders and earn their place. Decision watch runs in cloud too (167 turns logged in
