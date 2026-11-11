@@ -342,8 +342,13 @@ After 3.11, because its third part uses the same owner grant route.
   1. Read on main, 19:02 CST: `settings.json` already allows `mcp__claude-artifacts__db_write` and the
      other page tools. The cloud card shows anyway. Cause unproven. Suspects: the cloud tool is named
      `ArtifactData` and no allow entry names it, or auto mode asks despite the entry.
-  2. The fix lane first reproduces the card in a cloud session. It then adds the name the card checks,
-     for page reads and writes only. A test proves a page write in a cloud session shows no card.
+  2. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
+     im guessing we need to add too now to the allow list". `ArtifactData` now has nine actions: get,
+     list, query, profiles, set, update, str_replace, delete, batch. The allow list names six tools.
+     A web search found no public list of the new tool names.
+  3. The fix lane first reproduces the card in a cloud session. It reads the real tool names from that
+     session's tool listing, never from a guess. It then allows every page database action under each
+     name the card checks. A test proves a page write in a cloud session shows no card.
 - **D3. How much a lane writes (open).** Owner 16:46 CST Nov 10: "lane's own chat never reaches me
   anyway, pretty true -- but they do still type a whole fuckton of a lot, and that is tbd on whether we
   should have some sorta rules on how much a lane "chirps" in a snese". Open: measure lane output per
