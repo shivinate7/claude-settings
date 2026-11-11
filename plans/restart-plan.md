@@ -936,6 +936,10 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   roadmap step's status from live PRs on the roadmap branch; no Projects table. The owner's token is not
   needed. The docs say the relay blocks deletes, tags and GraphQL for every token; only a self-hosted
   environment skips the relay.
+  Scope ruled k, owner 15:31 CST Nov 11: "sure k is fine". One shared branch-sweep action in claude-settings,
+  called from each repo's existing CI at each push to main, with that repo's own token; the R44 child-repo
+  sweep adds the call. Auto-delete of merged PR branches is on in all 8 shivinate7 repos and all 7
+  ssemwal-cdc repos (owner's gh runs, 15:26 and 15:31 CST).
   Home: decision for the delete route (new); D1 for the table.
 
 - **R34. The page shows how the system works and how healthy each part is.** Owner 11:35 CST Nov 11:
