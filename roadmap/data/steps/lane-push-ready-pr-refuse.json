@@ -1,0 +1,8 @@
+{
+  "id": "lane-push-ready-pr-refuse",
+  "repo": "shivinate7/claude-settings",
+  "source": "triage, 2026-11-10 19:01 CST, incident on #2483",
+  "status": "todo",
+  "title": "Refuse a lane push to a PR that is not a draft",
+  "why": "Incident 2026-11-10 18:47 CST: a triage builder pushed a main merge to #2483, which had been ready since 2026-11-09 21:14 CST. The push started a CI run that blocked the merge of batch 74. Only the batch runner starts a PR's run (git-integration-branch-merge). The guard refuses a lane or triage push to a branch whose open PR is not a draft. Its remedy: mark the PR draft first, or hand it to the batch runner."
+}
