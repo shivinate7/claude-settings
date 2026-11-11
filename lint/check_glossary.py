@@ -13,7 +13,7 @@ GLOSSARY.md holds one table under the `## Terms` heading: term, meaning, home, n
   `HandoverNote.py`, not `docs/handoverly.md`.
 
 - Each line the change adds has no "not" name in a name of code, read by the
-  same word rule as a path segment:
+  same word rule as a path segment, a kept name apart (see below):
   - an identifier: a Python name, a bare word of a JS, shell, PowerShell or YAML file, or a JSON key;
   - a rule anchor: `rule:<id>`, in a comment too;
   - a record slug: a backticked id of three hyphen words or more in a Markdown file;
@@ -29,8 +29,8 @@ Comments, docstrings and every other string are prose, and a reviewer reads pros
 names a "not" word passes. A "not" word inside its own term, plural too (`hole` in `safety_holes`),
 is the term. A line that holds `glossary-ok` is skipped, with its reason beside it.
 A row keeps a name when its meaning holds the backticked name, then ` stays` (the review log row keeps its
-slug so). A name of code is kept when its whole words equal a kept name of the row whose "not" name it holds,
-read as a path segment is, and only in that spelling: `--fix-check` passes, and `FixCheck`, `FIX_CHECK`, `fix_check`,
+slug so). A name of code is kept only when it is, letter for letter, a kept name of the row whose "not" name
+it holds, so the whole-word match above does not save it: `--fix-check` passes, and `FixCheck`, `FIX_CHECK`, `fix_check`,
 `fix-check` and "Fix check." are still flagged. A kept flag also keeps its argparse attribute: `--fix-check` keeps
 `args.fix_check`, any `.fix_check` attribute access in Python, since argparse derives it. A longer name that holds
 a kept name (`fix_check_line`) and a kept name of another row are still flagged. The kept names are read from
