@@ -101,7 +101,7 @@ Cost: no new long-lived process or file. The reads run per push, in the guard's 
   - `--all` to a named network remote: config 2, symbolic-ref 2, for-each-ref 2, rev-parse 1. The second
     `for-each-ref` lists the local branches. It runs only when no tracking ref shows an update.
   - `--all` to a local-path remote: config 2, symbolic-ref 1, rev-parse 1.
-  - A glob refspec: config 1, for-each-ref 2, rev-parse 2, symbolic-ref 1, diff 3. The second
+  - A glob refspec: config 1, for-each-ref 2, rev-parse 2, symbolic-ref 1, diff 3, rev-list 1. The second
     `for-each-ref` runs under the same condition.
   - Nothing contacts the remote. No `ls-remote`, `fetch` or `push` runs.
 - Added by the other pushes' reads: a literal destination of main or master reads the remote's URL with
