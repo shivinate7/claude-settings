@@ -1,0 +1,14 @@
+{
+  "id": "question-form-departs-every",
+  "title": "Decision question-form matches the code: a Departs from line on every question",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "The decision text and the code disagree on when a Departs from line is required.",
+  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 5). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. Decision question-form matches the code: a Departs from line on every question.",
+  "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:39:00-06:00",
+  "blockedBy": []
+}
