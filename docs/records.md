@@ -152,6 +152,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `config-watch-fast-exit` | Owner, 2026-10-20. | [`docs/decisions/config-watch-fast-exit.md`](../docs/decisions/config-watch-fast-exit.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`docs/decisions/copy-mode-overwrites-no-backup.md`](../docs/decisions/copy-mode-overwrites-no-backup.md) |
 | `cross-repo-question-checked` | An open decision or task on a repo's waiting page names the repo it is about. | [`docs/decisions/cross-repo-question-checked.md`](../docs/decisions/cross-repo-question-checked.md) |
+| `cull-guard-wrong-refusals` | It sits beside decision `cull-rules` (how a cull runs, owner ruling 2026-10-17). | [`docs/decisions/cull-guard-wrong-refusals.md`](../docs/decisions/cull-guard-wrong-refusals.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`docs/decisions/cull-rules.md`](../docs/decisions/cull-rules.md) |
 | `debt-close-runs-retire` | A PR closes a debt when it deletes the debt file, or renames it out of `docs/debts/`. | [`docs/decisions/debt-close-runs-retire.md`](../docs/decisions/debt-close-runs-retire.md) |
 | `decision-watch-mod-limits` | The decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`docs/decisions/decision-watch-mod-limits.md`](../docs/decisions/decision-watch-mod-limits.md) |
@@ -287,6 +288,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `waiting-data-in-repo` | Git is each artifact's home. | [`docs/decisions/waiting-data-in-repo.md`](../docs/decisions/waiting-data-in-repo.md) |
 | `when-a-worktree-may-be-removed` | Four idle limits. | [`docs/decisions/when-a-worktree-may-be-removed.md`](../docs/decisions/when-a-worktree-may-be-removed.md) |
 | `windows-temp-sweep` | A session's temp folder goes after its transcript is idle 24 hours | [`docs/decisions/windows-temp-sweep.md`](../docs/decisions/windows-temp-sweep.md) |
+| `workflow-args-shape-check` | The guard refuses a `Workflow` call whose `args` is a placeholder (rule `workflow-args-shape-check`). | [`docs/decisions/workflow-args-shape-check.md`](../docs/decisions/workflow-args-shape-check.md) |
 | `worktree-setup-is-per-repo` | Each repo sets up the untracked state (node_modules, venv, caches) of a worktree itself. | [`docs/decisions/worktree-setup-is-per-repo.md`](../docs/decisions/worktree-setup-is-per-repo.md) |
 | `wsl-allow-list` | The guard allows a WSL command only when every condition holds: | [`docs/decisions/wsl-allow-list.md`](../docs/decisions/wsl-allow-list.md) |
 
@@ -403,6 +405,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `old-merge-tool-refuses-stamp` | A merge tool older than this change refuses main's `stamp.json`, which has the unknown field `keepBranches`. | [`docs/debts/old-merge-tool-refuses-stamp.md`](../docs/debts/old-merge-tool-refuses-stamp.md) |
 | `opus-ask-exclusion-words` | A plain Opus ask that names two or more roles, joined to an exclusion the scope read does not list, grants exactly the excluded roles for 2h. | [`docs/debts/opus-ask-exclusion-words.md`](../docs/debts/opus-ask-exclusion-words.md) |
 | `opus-ask-scheduled-text` | A plain Opus ask is refused when the UserPromptSubmit payload's `source` names a non-owner origin, such as `loop_wakeup`. | [`docs/debts/opus-ask-scheduled-text.md`](../docs/debts/opus-ask-scheduled-text.md) |
+| `orchestrator-rule-half-guarded` | `lint/rule_mechanisms.json` marks rule `roles-orchestrator-never-builds` as a guard (`coordinator-scope`). | [`docs/debts/orchestrator-rule-half-guarded.md`](../docs/debts/orchestrator-rule-half-guarded.md) |
 | `other-checkout-cwd-outside` | `other_checkout_hit` returns `""` when the call's `cwd` is in no checkout of the clone. | [`docs/debts/other-checkout-cwd-outside.md`](../docs/debts/other-checkout-cwd-outside.md) |
 | `page-answer-second-click` | One waiting-page answer needed a second approval. | [`docs/debts/page-answer-second-click.md`](../docs/debts/page-answer-second-click.md) |
 | `page-only-copy-of-mockup` | A mockup lives only inside the `designData` block of the waiting page. | [`docs/debts/page-only-copy-of-mockup.md`](../docs/debts/page-only-copy-of-mockup.md) |
@@ -433,6 +436,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `scratchpad-owner-cp-mv-dest` | The destination of `cp X <scratchpad>/f`, `touch`, `dd of=`, `curl -o` and `>\|` is not recorded, so A copies a script in, B runs it, and no one is asked. | [`docs/debts/scratchpad-owner-cp-mv-dest.md`](../docs/debts/scratchpad-owner-cp-mv-dest.md) |
 | `scratchpad-owner-record-flip` | The record is written before the overwrite ask, so a denied ask still moves the record to the asker. | [`docs/debts/scratchpad-owner-record-flip.md`](../docs/debts/scratchpad-owner-record-flip.md) |
 | `scratchpad-owner-runners` | The scratchpad-owner check does not read these forms as a run of another agent's script, so an agent can run that script through one and not be asked. | [`docs/debts/scratchpad-owner-runners.md`](../docs/debts/scratchpad-owner-runners.md) |
+| `sed-wrapped-inplace-missed` | Rules `frozen-path` and `coordinator-scope` read sed's operands only when `sed` is the command word of its segment. | [`docs/debts/sed-wrapped-inplace-missed.md`](../docs/debts/sed-wrapped-inplace-missed.md) |
 | `session-home-lane-visit` | A top-level session whose `cwd` enters a non-agent lane tree gets a session-home record naming it, and a return to the primary does not clear it. | [`docs/debts/session-home-lane-visit.md`](../docs/debts/session-home-lane-visit.md) |
 | `session-start-handoff-text` | `hooks/session_start.sh` line 18 tells a session that wants a merge to hand the branch, head and PR to the batch runner. | [`docs/debts/session-start-handoff-text.md`](../docs/debts/session-start-handoff-text.md) |
 | `sharables-adopts-the-stamp` | claude-sharables claims record ids with its own `scripts/check_records.py --claim-ids --apply`. | [`docs/debts/sharables-adopts-the-stamp.md`](../docs/debts/sharables-adopts-the-stamp.md) |
