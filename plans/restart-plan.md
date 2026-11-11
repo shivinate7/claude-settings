@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 12:40 CST. The owner's list closed at 18:43 CST; R21 to R35 came after.
+the history. Last rewrite: 2026-11-11 12:42 CST. The owner's list closed at 18:43 CST; R21 to R35 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -382,7 +382,10 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   as a best practice for other hooks that make you regurgitate output again".
   guard-remedy-not-to-owner:177 already says "post only the corrected lines ... Never send the report
   again", but no refusal text says it. Each Stop-hook refusal ends with that line. Home: decision
-  guard-remedy-not-to-owner.
+  guard-remedy-not-to-owner. Recurred 12:41 CST Nov 11: the report-shape refusal led this session to
+  post its whole report again. Owner 12:42 CST: "i really dislike when the hook makes my sesison
+  repeat everyhting and add an edit in to the output, i really want that each of these hooks/guards
+  only adds the necessary additional text".
 - **R14. A fix to a session's own notes prints nothing.** Owner 16:22 CST Nov 10: "fixed my notes
   question: yes". A Stop-hook refusal about a session's own notes (feedback log, handoff) is fixed with
   no line to the owner, since the reply did not change; guard.log still records it. A builder first
