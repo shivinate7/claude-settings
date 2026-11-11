@@ -715,3 +715,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Copy restart-plan at the head the retrospective names (at least 0d78ca9: R32 lever is the per-model key or CLAUDE_CODE_AUTO_COMPACT_WINDOW, never /autocompact; intro counts four waiting items; plans 2736d70, e1c6814 add item 506's answers and the lane-model-recheck fold).
 - Decision idle-resume-compacts: rewrite its /autocompact lever line to match precompact-handoff rule 1 (retrospective 11:34 CST).
 - docs/todo.md line 9: point at step model-table-one-home.
+- Decision waiting-data-in-repo: fix two stale claims in place (retrospective audit 11:42 CST): it says this repo has only the old `waiting-page` key (main has 20 `artifacts` entries), and that export saves no page HTML (page.html is in all five copies).

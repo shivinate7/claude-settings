@@ -6,9 +6,9 @@
  "phase": "next",
  "lane": "",
  "why": "The repo copy of the waiting page went 11 hours stale (last copy 00:27 CST Nov 11). This triage session wrote item 506 at 11:20 CST and updated it at 11:27, and no Stop blocked, though meta/page names this session as writer. Without the copy a lost page loses its items (decision waiting-data-in-repo).",
- "note": "Found by the retrospective session 11:37 CST Nov 11; copy run by triage 11:40 (roadmap de0e92ffe, changed 4). Both missed: triage skipped the copy at each wake, and the export check in hooks/feedback_guard.py did not block. Suspect, unproven: the writer match compares meta/page's writer id with the CLI session id and override.remote_session_id(); the page names the cloud session id inside \"Triage (...)\". Red case first: a transcript with a page write after the last copy commit, writer named by cloud id, must block.",
+ "note": "Found by the retrospective session 11:37 CST Nov 11; copy run by triage 11:40 (roadmap de0e92ffe, changed 4). Both missed: triage skipped the copy at each wake, and the export check in hooks/feedback_guard.py did not block. Suspect, unproven: the writer match compares meta/page's writer id with the CLI session id and override.remote_session_id(); the page names the cloud session id inside \"Triage (...)\". Red case first: a transcript with a page write after the last copy commit, writer named by cloud id, must block. Home: R28 (plan 416aae9), step prose-tending-contract.",
  "source": "retrospective session 11:37 CST Nov 11",
  "owner": "triage",
- "updatedAt": "2026-11-11T11:39:00-06:00",
+ "updatedAt": "2026-11-11T11:43:00-06:00",
  "blockedBy": []
 }
