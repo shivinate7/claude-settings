@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 10:50 CST. The owner's list closed at 18:43 CST; R21 to R29 came after.
+the history. Last rewrite: 2026-11-11 10:53 CST. The owner's list closed at 18:43 CST; R21 to R29 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -24,6 +24,11 @@ no stage.
 ## What happens next
 
 1. The drain finishes (stage 1); the H1 lane lands as the one exception.
+   Then a fresh start. Owner 10:52 CST Nov 11: "once the drain completes i'll archive coordinator,
+   batch runner, and all other claude-settings sessions except you. and respawn the others as new".
+   Before he archives: the plan follow-up PR is merged, and each session writes its handoff with
+   what it holds open. R22's guard is not built yet, so after the respawn the retrospective session
+   finds the new sessions by their tags and rewrites every stored session id by hand.
 2. Stage 2 is done (#2575, #2579). Later rulings land in the next plan follow-up PR, which the
    coordinator opens. The retrospective session opens no PRs.
 3. Stage 3 starts with 3.0, then the test file split; then every other item may start, with stage 4
