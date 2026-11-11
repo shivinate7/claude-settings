@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:40 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
+the history. Last rewrite: 2026-11-11 11:45 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -507,7 +507,13 @@ then R29.
   Nov 11 adds the git copies of each repo's page and the mailbox: "i agree the fix is in r28". Case:
   claude-settings' copy fell about 11 h behind its live page (read 11:30 CST); the copy step and the
   Stop check both missed (triage, 11:39 CST). A copy's "still true?" test compares it with its live
-  source. Step waiting-export-miss-cloud fixes the check; a read-only audit measures the other repos. Box
+  source. Step waiting-export-miss-cloud fixes the check. Audit 11:40 CST: degen, home and
+  mailaudit copies 35-40 h old, banchi 5 days; q_max, joyous and ios-adblock have no copy. Owner
+  11:45 CST: "is the live page being used correctly then if the data in there needs to be manually
+  copied in and out? i figured it's just temporally same as with git? it feels weird that it's
+  partitioned steps". Decision waiting-data-in-repo rules git the home and the page a view, but
+  today sessions and the owner write the page first and git copies it later. The design pass makes
+  git the first write, and names how an owner answer reaches git with no session awake. Box
   answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
   pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
   1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
