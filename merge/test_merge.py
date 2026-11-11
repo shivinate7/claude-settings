@@ -17046,6 +17046,12 @@ def block_base(body):
     return next((m.group(1) for x in block_raw(body) or [] if (m := re.fullmatch(r"Base: ([0-9a-f]{40})", x))), None)
 
 
+def sentences_of(text):
+    """The sentences of `text`. A full stop, question mark or exclamation mark that a space or a line break follows ends one; a line break
+    inside a sentence is part of it, so a condition on the line above a printed command sits in that command's sentence."""
+    return re.split(r"(?<=[.!?])\s+", text)
+
+
 LINT_STATES = {  # what ci-job answers for the batch head's lint, as ci_job_run returns it: state, lines, log, liftable
     "pass": ("pass", [], [], False),
     "fail": ("fail", ["FAIL: lint-marker"], [], False),
@@ -17146,6 +17152,25 @@ class BatchFreeze(CloudSession):
         x = self.frozen_batch("x", [101, 102], blamed=blamed)
         nightly = self.frozen_batch("nightly", [104], on="batch-x")
         return x, nightly, self.head("batch-nightly")
+
+    def stacked_refusal_run(self, stacked):
+        """Lane #101 is open, and each lane in `stacked` is stacked on it. Those lanes are frozen in a draft batch-nightly, which is then reset
+        to main with no lane, so a --ready must rebuild it and the stacked check runs; the lint of the head would pass. -> (pull request number,
+        rc, output, snapshot taken before the run)."""
+        self.lane(101)
+        for n in stacked:
+            self.lane(n, on=101)  # each lane's head contains #101's head
+        pr = self.frozen_batch("nightly", list(stacked), draft=True)
+        self.drift_batch("nightly", [])  # batch-nightly is reset to main with no lane, so --ready must rebuild it, and the stacked check runs
+        for n in stacked:
+            self.assertTrue(self.ancestor(self.heads[101], self.heads[n]), "setup: lane #%d does not contain lane #101's head" % n)
+            self.assertFalse(self.on_origin(self.heads[n], "batch-nightly"), "setup: batch-nightly still holds lane #%d's head, so no rebuild runs" % n)
+        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        return pr, rc, out, snap
 
     def ancestor(self, old, new):
         """True when commit `old` is `new` or an ancestor of it. Both are shas on origin, or refs origin holds."""
@@ -17287,6 +17312,20 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", name, "--ready")
         self.assertEqual(self.drop_pr_numbers(out, name), [str(n)], "setup: the red run did not blame lane #%d: %s" % (n, out))
         return rc, out
+
+    def refused_blame_run(self):
+        """Lanes #101 and #102 in a draft batch-nightly, and a --ready whose lint FAILs on lanes/102.txt, so the red run blames #102. The blame
+        write that FAIL makes is refused, so #102 stores no blame. -> (pull request number, rc, output)."""
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
+        self.fail_the_next_body_write()  # the blame a lint FAIL stores is the first body write of this run
+        with self.blame_spy() as seen, self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt")):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertTrue(seen, "setup: the lint FAIL never reached the blame: %s" % out)
+        self.assertEqual(sorted(seen[-1] or {}), [102], "setup: the lint FAIL did not blame #102 alone: %s" % out)
+        return pr, rc, out
 
     def read_run(self, url):
         """The host's run read, as Host.cited_run answers it: (conclusion, head sha) of a scripted run, None as the conclusion while it runs.
@@ -17574,15 +17613,7 @@ class BatchFreeze(CloudSession):
 
     def test_a_lint_fail_whose_blame_write_is_refused_says_so_and_the_lane_cannot_be_dropped(self):
         # re-pointed: was "the red run prints `merge --batch-drop nightly 102`", a drop that the refused blame write leaves refused
-        for n in (101, 102):
-            self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
-        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
-        self.fail_the_next_body_write()  # the blame a lint FAIL stores is the first body write of this run
-        with self.blame_spy() as seen, self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt")):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
-        self.assertTrue(seen, "setup: the lint FAIL never reached the blame: %s" % out)
-        self.assertEqual(sorted(seen[-1] or {}), [102], "setup: the lint FAIL did not blame #102 alone: %s" % out)
+        pr, rc, out = self.refused_blame_run()
         self.assertIn("the blame could not be stored", out, "a refused blame write is not said: %s" % out)
         self.assertEqual(rc, 1, "the red run exited %s, not 1: %s" % (rc, out))
         self.assertEqual(self.drop_commands(out, "nightly"), [],
@@ -17596,6 +17627,14 @@ class BatchFreeze(CloudSession):
         self.assertIn("no red run of its head blamed it", out, "a drop of #102 is not refused after its blame was not stored: %s" % out)
         self.assertEqual(rc, 1, "the drop of #102 exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
+
+    def test_a_refused_blame_route_names_its_failed_head_condition_in_the_sentence_that_holds_it(self):
+        _, _, out = self.refused_blame_run()
+        self.assertIn("the blame could not be stored", out, "setup: the blame write was not refused: %s" % out)
+        blame = [s for s in sentences_of(out) if "--blame" in s]
+        self.assertTrue(blame, "scope: the refused blame names no --blame route for #102: %s" % out)
+        self.assertTrue(any(re.search(r"\bfailed\b", s) and re.search(r"\bhead\b", s) for s in blame),
+                        "the --blame route for #102 is printed without its condition, a failed run of the batch head, in the same sentence: %s" % out)
 
     def test_ready_with_a_pr_list_other_than_the_frozen_set_is_refused_as_a_build_is(self):
         for n in (101, 102):
@@ -17938,22 +17977,30 @@ class BatchFreeze(CloudSession):
         self.assert_untouched(pr, snap, out)
 
     def test_a_stacked_refusal_prints_no_drop_for_an_unblamed_lane_and_names_the_blame_route(self):
-        self.lane(101)
-        self.lane(102, on=101)  # lane #102 is stacked on open lane #101: its head contains #101's head
-        pr = self.frozen_batch("nightly", [102], draft=True)
-        self.drift_batch("nightly", [])  # batch-nightly is reset to main with no lane, so --ready must rebuild it, and the stacked check runs
-        self.assertTrue(self.ancestor(self.heads[101], self.heads[102]), "setup: lane #102 does not contain lane #101's head")
-        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "setup: batch-nightly still holds lane #102's head, so no rebuild runs")
-        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
-        snap = self.snapshot(pr)
-        self.record_pushes()
-        with self.no_lint_or_ready_check(ready_state="pass"):
-            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        pr, rc, out, snap = self.stacked_refusal_run([102])  # lane #102 is stacked on open lane #101
         self.assertIn("holds a commit of #101", out, "scope: the refusal is not the stacked check that names #101: %s" % out)
         self.assertEqual(rc, 1, "the stacked refusal exited %s, not 1: %s" % (rc, out))
         self.assertEqual(self.drop_commands(out, "nightly"), [],
                          "the stacked refusal prints a drop for lane #102, which no red run blamed, so the drop is refused: %s" % out)
         self.assertIn("--blame", out, "the stacked refusal does not name the --blame route for lane #102: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_stacked_refusal_names_no_route_that_keeps_the_lane_in_the_batch(self):
+        pr, rc, out, snap = self.stacked_refusal_run([102])
+        self.assertIn("holds a commit of #101", out, "scope: the refusal is not the stacked check that names #101: %s" % out)
+        self.assertEqual(rc, 1, "the stacked refusal exited %s, not 1: %s" % (rc, out))
+        self.assertNotRegex(out, r"(?i)\b(leave|keep)\b[^.\n]*\bin\b[^.\n]*\bbatch\b|\bships\b",
+                            "the stacked refusal names a route that keeps lane #102 in the batch, and the next --ready stops at this same refusal: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_stacked_refusal_for_two_unblamed_lanes_does_not_say_caused_by_it(self):
+        pr, rc, out, snap = self.stacked_refusal_run([102, 103])  # lanes #102 and #103 are both stacked on open lane #101
+        self.assertIn("#102 holds a commit of #101", out, "scope: the refusal does not name lane #102 as stacked on #101: %s" % out)
+        self.assertIn("#103 holds a commit of #101", out, "scope: the refusal does not name lane #103 as stacked on #101: %s" % out)
+        self.assertEqual(self.drop_commands(out, "nightly"), [],
+                         "setup: a drop is printed, so a lane has a stored blame and the lanes are not both unblamed: %s" % out)
+        self.assertNotIn("caused by it", out,
+                         "the stacked refusal for two unblamed lanes says 'caused by it', which does not say which lane a failed run blames: %s" % out)
         self.assert_untouched(pr, snap, out)
 
     def test_a_ready_check_fail_that_names_a_lane_stores_its_blame_so_the_drop_goes_through(self):
