@@ -76,8 +76,9 @@
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
-                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
-                          measured once on one PR head), one worktree.
+                          and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
+                          (the join and --reviewed count only an owner's); any session may run it, cloud included. Cost per call: one
+                          ci-job run (about 550 s, measured once on one PR head), one worktree, and on a PASS one comment post.
                           A PR number is also checked, before the ci-job run, against each other open PR of its lane (a draft counts; a
                           PR whose body holds a session URL the linted PR's body holds) with `git merge-tree --write-tree`. A conflict
                           FAILs, naming each PR and file, with its remedy (--lint-unknown-ok never lifts it). PRs in one stack (one head
@@ -106,7 +107,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, contextlib, datetime, functools, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, contextlib, datetime, fnmatch, functools, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -1021,16 +1022,31 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
-    def review_records(self, since):
-        """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: one list read of the repo's issue comments
-        updated since `since`. A body counts only when the review record marker is its whole first line. The number comes from the comment's
-        issue_url. A timestamp the read did not give is None. A failed read is a Stop."""
-        found = {}
+    def issue_comments(self, since):
+        """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
+        records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
+        marker is its whole first line. A timestamp the read did not give is None.
+        lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
+        A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
+        records, lints = {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-            if m and body.splitlines()[:1] == [REVIEW_MARKER]:
-                found.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
-        return found
+            first = body.splitlines()[:1]
+            if m and first == [REVIEW_MARKER]:
+                records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
+            elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
+                lints.setdefault(int(m.group(1)), []).append(body)
+        return records, lints
+
+    def review_records(self, since):
+        """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
+        return self.issue_comments(since)[0]
+
+    def post_comment(self, n, body):
+        """Post `body` as a comment on pull request n (REST POST issues/n/comments, through gh). A failed post is a Stop."""
+        c, out = self.api(f"issues/{n}/comments", method="POST", body={"body": body})
+        if c:
+            raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: review_records without the timestamps."""
@@ -1640,14 +1656,14 @@ def stamp_stop(what, out):
     reason = errs[-1] if errs else lines[0] if lines else "no output"
     return Stop(f"{what}: {reason} (full output: {log})")
 
-def base_stamp_config(wt, tmp, cfgrel, base_ref):
-    """The stamp config as the base branch holds it, never the pull request's tree (ios-adblock #28).
-    -> a file path outside the worktree, or None when the base has no config or no stamp kinds."""
+def base_stamp(wt, cfgrel, base_ref):
+    """-> (text, kinds) of the stamp config as the base branch holds it, never the pull request's tree (ios-adblock #28);
+    (None, None) when the base has no config or no stamp kinds. The one read of it: base_stamp_config and claim_only call it."""
     c, listed = git(wt, "ls-tree", "--name-only", base_ref, "--", cfgrel)
     if c:  # an unreadable base is not an absent file
         raise Unread(f"cannot read {base_ref} to look for {cfgrel} {STAMP_CFG_CITE}: {listed}")
     if not listed:
-        return None
+        return None, None
     try:
         c, text = git(wt, "show", f"{base_ref}:{cfgrel}")
         if c:
@@ -1655,6 +1671,11 @@ def base_stamp_config(wt, tmp, cfgrel, base_ref):
         kinds = json.loads(text).get("kinds")
     except (ValueError, AttributeError) as e:
         raise Stop(f"cannot read the config {cfgrel} on {base_ref} {STAMP_CFG_CITE}: {e}")
+    return (text, kinds) if kinds else (None, None)
+
+def base_stamp_config(wt, tmp, cfgrel, base_ref):
+    """The stamp config of base_stamp as a file path outside the worktree, or None when the base has no config or no stamp kinds."""
+    text, kinds = base_stamp(wt, cfgrel, base_ref)
     if not kinds:
         return None
     path = os.path.join(tmp, "base-stamp.json")
@@ -1662,9 +1683,33 @@ def base_stamp_config(wt, tmp, cfgrel, base_ref):
         f.write(text)
     return path
 
-def head_claim(wt):
-    """The Record-claim ids on HEAD's last commit, or ''."""
-    return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "HEAD")[1].strip()
+def head_claim(wt, rev="HEAD"):
+    """The Record-claim ids on the last commit of `rev` (HEAD by default), or ''."""
+    return git(wt, "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", rev)[1].strip()
+
+def claim_only(root, cfgrel, base, linted, live):
+    """True when `linted` is an ancestor of `live` and each commit after it is a claim: one parent, a Record-claim trailer (head_claim), and only
+    record files touched. A record file is a direct child of a stamp kind's folder that matches its filePattern, or the records page. Any
+    read that fails is False. Commits come from the clone, so the caller fetches the branch first."""
+    try:
+        _, kinds = base_stamp(root, cfgrel, f"origin/{base}")
+    except Stop:
+        return False
+    if not kinds or git(root, "merge-base", "--is-ancestor", linted, live)[0]:
+        return False
+    c, rows = git(root, "rev-list", "--parents", f"{linted}..{live}")
+    if c or not rows.strip():
+        return False
+
+    def is_record(path):
+        folder, _, name = path.rpartition("/")
+        return path == RECORDS_PAGE or any(folder == k["folder"] and fnmatch.fnmatch(name, k.get("filePattern", "*.md")) for k in kinds)
+    for row in rows.splitlines():
+        sha, *parents = row.split()
+        c, files = git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
+        if len(parents) != 1 or c or not head_claim(root, sha) or not all(is_record(f) for f in files.splitlines()):
+            return False
+    return True
 
 def claim_under_head(wt, base_ref):
     """The sha of a claim this branch holds below its head (a merge commit sits on it), or None. A claim a later revert undid is not held."""
@@ -2841,10 +2886,11 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     then cross_measure checks the head against the lane's other open PRs and `with_prs`.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
-    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
+    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
+    A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
+    prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing."""
     host = host or Host()
     if target.isdigit():
-        host = host or Host()
         n = int(target)
         info = host.pr(n)
         base = info["base"]
@@ -2865,7 +2911,15 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     short = head[:9]
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
-        say(f"PASS: lint of {short} against {base} passes{named}. The batch runner may take this head, or join it to a batch.", *pin_notes)
+        tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
+        say(f"PASS: lint of {short} against {base} passes{named}. {tail}", *pin_notes)
+        if target.isdigit():  # a ref or commit has no pull request to carry the comment
+            n = int(target)
+            try:
+                host.post_comment(n, lint_body(n, head))
+            except Stop as e:  # the lint stands; only the proof on the PR is missing, so say how to get it
+                say(f"merge: the lane-lint comment was not posted on #{n}: {' '.join(str(e).split())} The join and `merge --reviewed` read no PASS for {short} until it is. "
+                    f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
         return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
@@ -3261,7 +3315,7 @@ HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that 
 
 BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, the batch runner merges the head its CI ran on). Nothing was claimed or pushed."
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -3279,6 +3333,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         refuse_bad_pr(info)
         if expected_head and not relayed_head_holds(root, info["branch"], expected_head, info["head"]):  # moved between main's read and the lock: still before any claim
             raise Stop(HEAD_MOVED.format(n=n))
+        if linted_head and info["head"] != linted_head:  # the lane-lint PASS names linted_head; a push since then was not linted
+            raise Stop(f"the head of #{n} moved from {linted_head[:9]} to {info['head'][:9]} after its lane-lint was read. Run `merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
@@ -3518,6 +3574,34 @@ def default_lock(root):
 
 # The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
+
+# The lane-lint comment (decision lanes-run-no-full-ci-job): `merge --lane-lint <pr>` posts it on a PASS, and `--reviewed` and the join read it. The one home of its form.
+LANE_LINT_MARKER = "<!-- lane-lint -->"
+LANE_LINT_AUTHOR = "OWNER"  # the check trusts the comment's author, not its text
+
+def lint_body(n, head, result="PASS"):
+    """-> the lane-lint comment text: the marker, the pull request, the head the lint read, and its result, one per line."""
+    return "\n".join([LANE_LINT_MARKER, f"PR: #{n}", f"Head: {head}", f"Result: {result}"]) + "\n"
+
+def lint_state(bodies, head):
+    """-> "pass", "fail", "unknown" or "none": what the newest lane-lint comment of `bodies` (oldest first) that names `head` says. A comment for
+    another head never counts. "unknown": that comment has no readable Result line. "none": no comment names `head`."""
+    for body in reversed(bodies):
+        lines = body.splitlines()
+        if f"Head: {head}" in lines:
+            got = [m.group(1) for m in (re.fullmatch(r"Result: (PASS|FAIL)", l) for l in lines) if m]
+            return got[0].lower() if got else "unknown"
+    return "none"
+
+def lint_heads(bodies):
+    """-> the distinct heads the lane-lint comments of `bodies` (oldest first) name, newest first."""
+    seen = []
+    for body in reversed(bodies):
+        seen += [m.group(1) for m in (re.fullmatch(rf"Head: ({REVIEW_SHA})", l) for l in body.splitlines()) if m and m.group(1) not in seen]
+    return seen
+
+LINT_NOT_READY = {"none": ("no lint", "no lane-lint PASS names this head"), "fail": ("lint fail", "the lane-lint at this head is FAIL"),
+                  "unknown": ("lint unknown", "the lane-lint comment for this head has no readable Result")}  # lint_state -> (state word, why)
 REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state
 REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "no")
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
@@ -3659,6 +3743,25 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
+def lint_check(h, n, info, root, cfgrel):
+    """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
+    review record uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
+    is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
+    linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
+    the join's own claim push, resumed, moves the head by exactly that."""
+    try:
+        lints = h.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
+    except Stop as e:
+        raise Stop(f"lane lint unknown for #{n}: the comments could not be read ({' '.join(str(e).split())}). Run `merge --lane-lint {n}` when GitHub answers, then join again. {LANE_LINT_CITE}")
+    lint = lint_state(lints.get(n, []), info["head"])
+    if lint == "none":
+        older = [x for x in lint_heads(lints.get(n, [])) if lint_state(lints[n], x) == "pass"]
+        if older and not git(root, "fetch", "-q", "origin", f"+refs/heads/{info['branch']}:refs/remotes/origin/{info['branch']}")[0]:
+            if any(claim_only(root, cfgrel, info["base"], x, info["head"]) for x in older):
+                return
+    if lint != "pass":
+        raise Stop(f"#{n} at {info['head'][:9]} is not ready to join: {LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`, then join again. {LANE_LINT_CITE}")
+
 REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when no ready pull request on the base has CI running
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
@@ -3667,11 +3770,14 @@ def reviewed_read(h):
     """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
     each pull request whose newest record reads done; and the open pull request rows. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
-    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request."""
+    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
+    The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
+    names `merge --lane-lint <n>`; no extra call."""
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."], [], pulls
-    records = h.review_comments(min(d["created_at"] for d in pulls))
+    rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
+    records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
     lines, bare, done = [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
@@ -3681,7 +3787,11 @@ def reviewed_read(h):
         rec = parse_review(bodies[-1])
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
         if state == "done":
-            done.append((n, d["base"]["ref"]))
+            lint = lint_state(lints.get(n, []), sha)
+            if lint == "pass":
+                done.append((n, d["base"]["ref"]))
+            else:  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
+                state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
@@ -4302,9 +4412,13 @@ def main(argv, host=None, lock=None, hosts=None):
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
             h.refuse_pinned_mismatch()
+        checked = None  # the head the lane-lint PASS names; confirm refuses any other
+        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
+            lint_check(h, a.pr, info, root, a.config)
+            checked = info["head"]
         if a.confirm:
             with release_on_signals():
-                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head) or 0
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
