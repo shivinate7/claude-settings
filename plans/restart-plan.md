@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 10:22 CST. The owner's list closed at 18:43 CST; R21 to R28 came after.
+the history. Last rewrite: 2026-11-11 10:24 CST. The owner's list closed at 18:43 CST; R21 to R29 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -303,6 +303,17 @@ it's how the limit batches that's the problem". How many lanes start is left to 
      user.
   3. A deeper audit, then each other store moves over when a lane next touches it.
   Home: a new decision for the shared contract; R27's step waits on step 2.
+- **R29. One job, one shared home, across all repos.** Owner 10:22 CST Nov 11: "it would be optimal if
+  something identified shared savings opportunities like this in a sense across my repos
+  retroactively and proactively". Answer 10:24 CST: "A" (file it after R28's deeper audit). Today
+  lint/find_copies.py finds only word-for-word copies of this repo's files, and only in the compliance
+  check; the plan refuter reads only its own repo.
+  1. Looking back: at each compliance check, a meaning match finds the same job built twice across
+     repos. Each find goes to this repo's triage as a candidate for one shared home.
+  2. Looking ahead: the plan refuter asks "does this job already exist?" before a build starts.
+  3. Both read one list of jobs and their homes.
+  It reuses R28's deeper-audit way of reading stores. It adds no new process. The cross-repo read needs a
+  session on the owner's computer, or each repo attached to a cloud session. Starts after R28 step 3.
 - **R20. A pass claim needs a verdict line.** Owner 17:17 CST Nov 10, quoting a session: "I told you
   several earlier lane lint runs "passed". They did not. Every run exited 1, and I misread my own echo
   exit code as the lint's"; 18:36 CST: "yes". Rule tokens-run-through-verdict is enforced by nothing on
