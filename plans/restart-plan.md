@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 10:24 CST. The owner's list closed at 18:43 CST; R21 to R29 came after.
+the history. Last rewrite: 2026-11-11 10:50 CST. The owner's list closed at 18:43 CST; R21 to R29 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -11,26 +11,30 @@ in the owner's words with the time. Ids (R1, G1, D1) are stable names, not an or
 
 ## Why this order
 
-The words come first, because every later brief uses them (3.0, G1-G15). The rest of stage 3 then
-may run in parallel (3.4 sets how many lanes start); only two items wait on another (3.2 runs with 3.1; 3.12 after 3.11). It covers what
-loses whole CI runs (3.1, 3.2, 3.4, 3.5), the loop that sends lanes back (3.3, 3.7, 3.8), and trust in
-guards (3.6, 3.9-3.12), and the express pass for prose (3.13). Stage 4 makes the owner's side mechanical: one home and one wake per answer, easy
-relays, debts and notes kept in place, session ids that survive a restart. Each is fixed once, before
-lanes resume, so the resumed lanes run under it. An item still open (D1, D3) holds no stage.
+The words come first, because every later brief uses them (3.0, G1-G15). Next comes the split of the
+guard test file (R26 part 4), while few lanes are open. The rest of stage 3 then runs in parallel, and
+stage 4 runs beside it (R25). Only three items wait on another: 3.2 runs with 3.1, 3.12 after 3.11,
+and 3.14 in R28's order. Stage 3 covers what loses whole CI runs (3.1, 3.2, 3.4, 3.5) and the loop
+that sends lanes back (3.3, 3.7, 3.8). It also covers trust in guards (3.6, 3.9-3.12), the express pass
+for prose (3.13), and prose that tends itself (3.14). Stage 4 makes the owner's side mechanical: one home and one wake
+per answer, easy relays, debts and notes kept in place, session ids that survive a restart. Each is
+fixed once, before lanes resume, so the resumed lanes run under it. An item still open (D1, D3) holds
+no stage.
 
 ## What happens next
 
 1. The drain finishes (stage 1); the H1 lane lands as the one exception.
-2. The coordinator opens one PR that lands this file on main (stage 2). The retrospective session
-   opens no PRs. Each ruling's home is rewritten later by the lane that builds it.
-3. Stage 3 starts with 3.0; once it lands, every other item may start, except the two that wait
-   (see Why this order). How many lanes start, and how they batch, is left to 3.4. Triage has every
-   ruling filed as a step.
+2. Stage 2 is done (#2575, #2579). Later rulings land in the next plan follow-up PR, which the
+   coordinator opens. The retrospective session opens no PRs.
+3. Stage 3 starts with 3.0, then the test file split; then every other item may start, with stage 4
+   beside it. Batches follow R26 (3.4). Triage has every ruling filed as a step.
 
 ## Stage 1. Drain
 
 In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we speak"). The freeze
-holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
+holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main. Left at 10:50 CST
+Nov 11 (GitHub read): #2379 and #2431 in batch 79 (#2587, draft, CI not started), then #1099, and
+#1166, #2563, #2378 stacked on #2431. Last merge: batch 78, 08:26 CST.
 
 - **R23. The drain ends at the named queue.** Owner 19:23 CST Nov 10 picked "Named queue". Outcome:
   with 682 open and 95 merged since 00:00 CST (GitHub search, coordinator, 2026-11-10 19:23 CST), draining all of them would hold the plan for about a week.
@@ -277,43 +281,6 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   Cause that led here: the feedback-log hook writes a message heading without telling the session, so
   it wrote a second one twice (step inbox-dup-heading-merge). Home: CLAUDE.md
   building-mistake-names-its-guard; decision guard-remedy-not-to-owner.
-- **R27. The feedback log tends itself.** Owner 10:16 CST Nov 11: "this should've been a trigger for
-  something that should've been mechanizable remember, we can't have sesisons fualting themselves for
-  something that could bve cvorrected?" and "it seems like basically this was a good idea but it's
-  execution was a little half baked in that it's never cleaned up after or tended to?". Case: the Stop
-  check asked this session to keep 17 settled items in its handoff. Its remedy named only "put them in
-  the handoff", never "mark [closed]". So the session copied ids to pass the check. Measured 10:17 CST in
-  this session's log: 126 items, 57 rulings and 9 standing items still open, none closed by a tool.
-  1. A ruling or task item closes itself when its home holds it on main. The Stop check already proves
-     the home; it marks the line [closed] in the same rewrite that marks repeats.
-  2. Each refusal of the check names [closed] as a way out, beside the handoff (R24).
-  3. The compaction reminder lists only items that still need work.
-  4. Owner words that reach a session by the question box or by relay are saved like a typed message.
-  Home: decision owner-feedback-inbox. Runs with R16, which files a told mistake as a missing guard.
-- **R28. Every prose store is tended one shared way.** Owner 10:19 CST Nov 11: "everything that marks
-  prose should share the same "tending" mechanism ... it should be more uniform, standardized, and
-  shared as much as possible to avoid stale duplication and to ensure shared best practrices". Stores:
-  decisions, rules, docs and README, debts, handoffs, the feedback log, the roadmap and queue. Box
-  answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
-  pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
-  1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
-  2. A design pass sets one shared contract in lint/layout.json: per store, the item shape, a "still
-     true?" test, and a close step. One runner calls it from points that already run: the merge
-     check, the Stop hooks, compaction and triage status. No new timer or process. R27 is its first
-     user.
-  3. A deeper audit, then each other store moves over when a lane next touches it.
-  Home: a new decision for the shared contract; R27's step waits on step 2.
-- **R29. One job, one shared home, across all repos.** Owner 10:22 CST Nov 11: "it would be optimal if
-  something identified shared savings opportunities like this in a sense across my repos
-  retroactively and proactively". Answer 10:24 CST: "A" (file it after R28's deeper audit). Today
-  lint/find_copies.py finds only word-for-word copies of this repo's files, and only in the compliance
-  check; the plan refuter reads only its own repo.
-  1. Looking back: at each compliance check, a meaning match finds the same job built twice across
-     repos. Each find goes to this repo's triage as a candidate for one shared home.
-  2. Looking ahead: the plan refuter asks "does this job already exist?" before a build starts.
-  3. Both read one list of jobs and their homes.
-  It reuses R28's deeper-audit way of reading stores. It adds no new process. The cross-repo read needs a
-  session on the owner's computer, or each repo attached to a cloud session. Starts after R28 step 3.
 - **R20. A pass claim needs a verdict line.** Owner 17:17 CST Nov 10, quoting a session: "I told you
   several earlier lane lint runs "passed". They did not. Every run exited 1, and I misread my own echo
   exit code as the lint's"; 18:36 CST: "yes". Rule tokens-run-through-verdict is enforced by nothing on
@@ -461,6 +428,49 @@ After 3.11, because its third part uses the same owner grant route.
   quotes match the feedback log word for word skips the review round that decision
   docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling. First user:
   the follow-up plan PR. Home: decision docs-only-prs-skip-review, rewritten in place.
+
+### 3.14 Prose stores tend themselves
+
+R28 sets the order: the shared contract first (R27 is its first user), then the deeper audit,
+then R29.
+
+- **R27. The feedback log tends itself.** Owner 10:16 CST Nov 11: "this should've been a trigger for
+  something that should've been mechanizable remember, we can't have sesisons fualting themselves for
+  something that could bve cvorrected?" and "it seems like basically this was a good idea but it's
+  execution was a little half baked in that it's never cleaned up after or tended to?". Case: the Stop
+  check asked this session to keep 17 settled items in its handoff. Its remedy named only "put them in
+  the handoff", never "mark [closed]". So the session copied ids to pass the check. Measured 10:17 CST in
+  this session's log: 126 items, 57 rulings and 9 standing items still open, none closed by a tool.
+  1. A ruling or task item closes itself when its home holds it on main. The Stop check already proves
+     the home; it marks the line [closed] in the same rewrite that marks repeats.
+  2. Each refusal of the check names [closed] as a way out, beside the handoff (R24).
+  3. The compaction reminder lists only items that still need work.
+  4. Owner words that reach a session by the question box or by relay are saved like a typed message.
+  Home: decision owner-feedback-inbox. Runs with R16, which files a told mistake as a missing guard.
+- **R28. Every prose store is tended one shared way.** Owner 10:19 CST Nov 11: "everything that marks
+  prose should share the same "tending" mechanism ... it should be more uniform, standardized, and
+  shared as much as possible to avoid stale duplication and to ensure shared best practrices". Stores:
+  decisions, rules, docs and README, debts, handoffs, the feedback log, the roadmap and queue. Box
+  answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
+  pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
+  1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
+  2. A design pass sets one shared contract in lint/layout.json: per store, the item shape, a "still
+     true?" test, and a close step. One runner calls it from points that already run: the merge
+     check, the Stop hooks, compaction and triage status. No new timer or process. R27 is its first
+     user.
+  3. A deeper audit, then each other store moves over when a lane next touches it.
+  Home: a new decision for the shared contract; R27's step waits on step 2.
+- **R29. One job, one shared home, across all repos.** Owner 10:22 CST Nov 11: "it would be optimal if
+  something identified shared savings opportunities like this in a sense across my repos
+  retroactively and proactively". Answer 10:24 CST: "A" (file it after R28's deeper audit). Today
+  lint/find_copies.py finds only word-for-word copies of this repo's files, and only in the compliance
+  check; the plan refuter reads only its own repo.
+  1. Looking back: at each compliance check, a meaning match finds the same job built twice across
+     repos. Each find goes to this repo's triage as a candidate for one shared home.
+  2. Looking ahead: the plan refuter asks "does this job already exist?" before a build starts.
+  3. Both read one list of jobs and their homes.
+  It reuses R28's deeper-audit way of reading stores. It adds no new process. The cross-repo read needs a
+  session on the owner's computer, or each repo attached to a cloud session. Starts after R28 step 3.
 
 ## Stage 4. Make the roadmap and triage mechanical
 
