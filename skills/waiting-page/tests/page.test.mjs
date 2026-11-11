@@ -3324,7 +3324,7 @@ const RPL_TEXT = "Did round 3 change the rail guard?";
 // ASK_ANSWERED is answered after RPL_NEW, so it opens as a new answer. Every answer is before RPL_SEEN, so each one folds.
 const RPL_NEW = { "waiting.askSeen": "2026-10-29T00:00:00Z" };
 const RPL_SEEN = { "waiting.askSeen": "2026-10-31T00:00:00Z" };
-// Seen after AP_ASK's answer (18:01Z, 2026-11-10), so that answer folds. RPL_SEEN is before it, so it reads the answer as new.
+// RPL_SEEN_AP is after AP_ASK's answer, so that answer folds. RPL_SEEN is before it, so it reads the answer as new.
 const RPL_SEEN_AP = { "waiting.askSeen": "2026-11-10T19:00:00Z" };
 const RPL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 // An answer a session gave to a reply: a reply to it names this record in re, not the root ask.
