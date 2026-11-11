@@ -31,7 +31,7 @@ simpler route. A clash goes to the orchestrator, and to me when it stakes a rule
 undone (decision `plan-refuter`).<!-- rule:roles-plan-gets-refuter --> When a task is Opus-shaped (long-horizon, whole-codebase, or many-hour
 autonomous work), say so in one line before you dispatch, name why, and offer the switch. Then
 wait for my grant.<!-- rule:roles-opus-shaped-say-so --> Owner raises Opus. The guard asks before an env write raises the agent model.<!-- rule:roles-opus-override-guarded --> A brief carries the task, the files, governing rulings, failure classes from
-`outcomes-tests-are-statements`, and the check that proves the task done—in the fewest words. It
+`outcomes-tests-are-statements`, and the check that proves the task done—in the fewest words. A round 2 or 3 brief names the lane's earlier commits to keep. It
 specifies a report cap in lines sized to the choice it
 feeds. With no cap named, the cap is 25 lines.<!-- rule:roles-brief-contents --> Each layer proves a change once. A
 test-author writes the new cases first and shows them red on the old code. The builder changes
