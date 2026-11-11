@@ -714,7 +714,7 @@ def live_work(path, steps, slug=None):
     # `merged` is the JSON true or false the publisher read from GitHub; text such as "true" is a wrong shape, not a guess.
     landed_pulls = keep("landedPull", raw["landedPulls"], lambda r: type(r.get("number")) is int
                         and isinstance(r.get("branch"), str)
-                        and ("merged" not in r or isinstance(r["merged"], bool))) if "landedPulls" in raw else []
+                        and ("merged" not in r or isinstance(r["merged"], bool))) if "landedPulls" in raw else None
     landed_skipped = len(skipped) - before_landed
     for row in threads:
         sid = row.get("step") or None
@@ -951,7 +951,7 @@ def main(argv=None):
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
-           slug, repo, args.main_branch, unread)
+           slug, repo, args.main_branch, unread, ref)
     lines = stalled_lines(info["stalled"])
     if lines:
         print("\n".join(lines))
@@ -1194,6 +1194,40 @@ def stale_drafts(work):
         elif (read - at).total_seconds() > STALE_DRAFT_HOURS * 3600:
             out.append("#%d (%s)" % (p["number"], p.get("branch") or p["title"]))
     return out
+
+
+# The words that say a step waits on pull request #N. One list, so a placement check can share it.
+WAIT_ON_PULL_PHRASES = ("after", "once", "until", "when", "blocked on", "stacked on", "stacks on", "stack on",
+                        "built on", "wait on", "waits on", "wait for", "waits for", "waiting on", "waiting for",
+                        "lands with")
+# `PR ` may sit before #N. A match followed by closed or merged is history ("continues here after #46 closed"), not a wait.
+WAIT_ON_PULL = re.compile(r"\b(?:%s)\s+(?:PR\s+)?#(\d+)\b(?!\s+(?:closed|merged)\b)"
+                          % "|".join(r"\s+".join(map(re.escape, ph.split())) for ph in WAIT_ON_PULL_PHRASES), re.I)
+
+
+def waits_on_closed_pulls(open_, work, repo=None, ref=None):
+    """Entries `step (#N)` for each open step whose title, why or note waits on a pull request #N that the live file
+    shows closed and not merged (a landedPulls row with merged false, and no pulls row or merged row for N), or one
+    unknown entry (also when the live file has no landedPulls key). A merged-false row whose head is an ancestor of
+    `ref` (head_on_main) is skipped: its work landed, as pull_landed_marks reads it. With no `ref` none is skipped.
+    The live file holds only the closed pulls the publisher reads, so a PR closed earlier is not seen."""
+    why = pair_why(work)
+    if why:
+        return [why]
+    if work["landedPulls"] is None:
+        return ["unknown (the live file has no landedPulls list)"]
+    dead = {r["number"] for r in work["landedPulls"] if r.get("merged") is False}
+    dead -= {r["number"] for r in work["landedPulls"] if r.get("merged") is True}
+    dead -= {p["number"] for p in work["pulls"]}
+    waits = []
+    for k, d in open_:
+        text = " ".join(str(d.get(f) or "") for f in ("title", "why", "note"))
+        waits.append((k, {int(m) for m in WAIT_ON_PULL.findall(text)} & dead))
+    waited = set().union(*(ns for _, ns in waits)) if waits else set()
+    seen = {}
+    dead -= {r["number"] for r in work["landedPulls"]
+             if r["number"] in waited and head_on_main(repo, ref, r.get("head"), seen)}
+    return ["%s (#%d)" % (k, n) for k, ns in waits for n in sorted(ns & dead)]
 
 
 def lane_live(work, lane, item=False):
@@ -1575,7 +1609,7 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     return idle_lanes(work, steps, marks, slug, repo, main_branch, unread)
 
 
-def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None):
+def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
     live = {d.get("phase") for _, d in open_ if d.get("status") == "active"}
@@ -1621,6 +1655,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", [])),
+            ("open step waits on a closed unmerged PR", waits_on_closed_pulls(open_, work, repo, ref)),
             ("done without check", done_without_check(steps))]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:
