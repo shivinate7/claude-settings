@@ -183,14 +183,17 @@ class CiWake(Quiet):
                          % ("no longer watches" if want else "now watches", command))
 
     @staticmethod
-    def payload(command, tool="Bash", response="", response_first=False, indent=None, description="d"):
-        """A PostToolUse payload as the harness sends it, tool_response included."""
+    def payload(command, tool="Bash", response="", response_first=False, indent=None, description="d",
+                compact=False):
+        """A PostToolUse payload as the harness sends it, tool_response included. compact drops the spaces
+        after the colons and commas, so the row's case reads "tool_name":"Bash" with no space."""
         parts = [("session_id", "abc"), ("transcript_path", "/t.jsonl"), ("cwd", "/x"),
                  ("hook_event_name", "PostToolUse"), ("tool_name", tool)]
         call = ("tool_input", {"command": command, "description": description})
         reply = ("tool_response", {"stdout": response, "stderr": "", "interrupted": False})
         parts += [reply, call] if response_first else [call, reply]
-        return json.dumps(dict(parts + [("tool_use_id", "toolu_1")]), indent=indent)
+        return json.dumps(dict(parts + [("tool_use_id", "toolu_1")]), indent=indent,
+                          separators=(",", ":") if compact else None)
 
     def test_command_without_ready_starts_no_python(self):
         for command in ("ls -la", "gh pr view 12", "git push origin HEAD:x"):
@@ -214,7 +217,7 @@ class CiWake(Quiet):
                 self.assert_does_nothing(run_row(self.command(), self.script, payload))
 
     def test_ready_only_in_tool_response_starts_no_python(self):
-        # The phrase itself in the response must not start python either: the row reads tool_input only.
+        # The phrase itself in the response must not start python either: the row reads tool_name and tool_input only.
         for first in (False, True):
             for out in ("Already up to date.", "Ready to merge", "READY", "Next: gh pr ready 12"):
                 with self.subTest(response_first=first, out=out):
@@ -263,6 +266,19 @@ class CiWake(Quiet):
                 self.assert_reaches_python(result, self.script)
                 self.assertEqual(result[2], payload.encode("utf-8"))
 
+    def test_compact_shell_ready_reaches_python_with_same_bytes(self):
+        # Compact JSON has no space after "tool_name":, so the row's case must match the Bash and PowerShell
+        # names with no space. Each case checks the payload is compact before the row runs on it.
+        for command, tool in (("gh pr ready 12", "Bash"), ("gh pr ready 7", "PowerShell")):
+            for first in (False, True):
+                with self.subTest(command=command, tool=tool, response_first=first):
+                    self.assert_watch(command, tool)
+                    payload = self.payload(command, tool, "ok", first, compact=True)
+                    self.assertIn('"tool_name":"%s"' % tool, payload)
+                    result = run_row(self.command(), self.script, payload)
+                    self.assert_reaches_python(result, self.script)
+                    self.assertEqual(result[2], payload.encode("utf-8"))
+
     def test_undo_reaches_python_and_python_decides(self):
         # The row finds the phrase and leaves flags to ci_wake.ready_call, the one home of that parse.
         command = "gh pr ready --undo 12"
@@ -289,7 +305,7 @@ class CiWake(Quiet):
 
     @staticmethod
     def mcp_payload(tool_input, tool=MCP_READY, compact=False):
-        """A PostToolUse payload for an MCP call, as the harness sends it. The row reads tool_input only.
+        """A PostToolUse payload for an MCP call, as the harness sends it. The row reads tool_name and tool_input only.
         compact drops the spaces after the colons and commas, so a draft field reads "draft":false."""
         return json.dumps({"session_id": "abc", "transcript_path": "/t.jsonl", "cwd": "/x",
                            "hook_event_name": "PostToolUse", "tool_name": tool,
@@ -315,8 +331,8 @@ class CiWake(Quiet):
                         "no ci_wake matcher covers %s: %r" % (MCP_READY, matchers))
 
     def test_mcp_ready_call_reaches_python_with_same_bytes(self):
-        # The cloud's ready route (ci-wake-mcp-ready). The row's grep reads tool_input for gh, pr and ready,
-        # and this MCP call's tool_input holds none, so the call must pass the grep to reach python.
+        # The cloud's ready route (ci-wake-mcp-ready). The row's gh, pr, ready grep never applies to an MCP
+        # call. This call passes the draft false pattern, because its draft field is false.
         payload = self.mcp_payload({"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12,
                                     "draft": False})
         result = run_row(self.command(), self.script, payload)
@@ -338,8 +354,8 @@ class CiWake(Quiet):
         return payload, run_row(self.command(), self.script, payload)
 
     def test_mcp_ready_call_without_draft_starts_no_python(self):
-        # Finding 1: the row's grep reads all of tool_input, so ready words in the body start python
-        # for a call that marks no PR ready.
+        # The draft pattern reads tool_input, not the ready words in the body, so a call that marks no
+        # PR ready starts no python.
         tool_input = {"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12,
                       "body": "Next: gh pr ready 12 after review."}
         self.assertNotIn("draft", tool_input)
