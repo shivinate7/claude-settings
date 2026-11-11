@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 10:18 CST. The owner's list closed at 18:43 CST; R21 to R27 came after.
+the history. Last rewrite: 2026-11-11 10:22 CST. The owner's list closed at 18:43 CST; R21 to R28 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -290,6 +290,19 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   3. The compaction reminder lists only items that still need work.
   4. Owner words that reach a session by the question box or by relay are saved like a typed message.
   Home: decision owner-feedback-inbox. Runs with R16, which files a told mistake as a missing guard.
+- **R28. Every prose store is tended one shared way.** Owner 10:19 CST Nov 11: "everything that marks
+  prose should share the same "tending" mechanism ... it should be more uniform, standardized, and
+  shared as much as possible to avoid stale duplication and to ensure shared best practrices". Stores:
+  decisions, rules, docs and README, debts, handoffs, the feedback log, the roadmap and queue. Box
+  answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
+  pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
+  1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
+  2. A design pass sets one shared contract in lint/layout.json: per store, the item shape, a "still
+     true?" test, and a close step. One runner calls it from points that already run: the merge
+     check, the Stop hooks, compaction and triage status. No new timer or process. R27 is its first
+     user.
+  3. A deeper audit, then each other store moves over when a lane next touches it.
+  Home: a new decision for the shared contract; R27's step waits on step 2.
 - **R20. A pass claim needs a verdict line.** Owner 17:17 CST Nov 10, quoting a session: "I told you
   several earlier lane lint runs "passed". They did not. Every run exited 1, and I misread my own echo
   exit code as the lint's"; 18:36 CST: "yes". Rule tokens-run-through-verdict is enforced by nothing on
