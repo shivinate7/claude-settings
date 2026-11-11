@@ -525,14 +525,18 @@ class LiveWork(Fixture):
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertEqual(self.panel(page)["read"], "unknown (the live file's readAt is not an ISO time: None)")
 
-    def test_missing_threads_or_pulls_list_reads_unknown(self):
+    def test_missing_pulls_list_reads_unknown_whatever_threads_is(self):
+        # Only the pulls list makes the whole read unknown. A threads list that is missing does not (LiveThreadsOptional).
         self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": []})
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertEqual(self.panel(page)["read"], "unknown (the live file has no pulls list)")
         self.assertNotIn("threads", build_info(page)["live"])
         self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": None, "pulls": {}})
         page, _ = self.build_from_main("--live", str(self.live))
-        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no threads or pulls list)")
+        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no pulls list)")
+        self.write_live({"readAt": "2026-10-26T21:00:00Z"})
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no pulls list)")
 
     def test_read_at_that_is_not_a_time_reads_unknown(self):
         self.write_live({"readAt": "yesterday", "threads": [], "pulls": []})
@@ -574,9 +578,13 @@ class UpkeepFixture(Fixture):
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
     def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None):
-        """Write the --live file. The sessions, items and landedPulls keys appear only when given, and landed is written
+        """Write the --live file. threads=_ABSENT leaves the threads key out. The sessions, items and landedPulls keys
+        appear only when given, and landed is written
         as given (a case may send a value that is not a list). readAt is five minutes old by default."""
-        value = {"readAt": read_at or iso_ago(5), "threads": list(threads), "pulls": list(pulls)}
+        value = {"readAt": read_at or iso_ago(5)}
+        if threads is not _ABSENT:
+            value["threads"] = list(threads)
+        value["pulls"] = list(pulls)
         if sessions is not None:
             value["sessions"] = list(sessions)
         if items is not None:
@@ -686,18 +694,6 @@ class UpkeepFixture(Fixture):
             prs[sid] = pr
         return prs
 
-    def no_trailer_on_main(self):
-        """Scope check: main holds no Step trailer, so a landed mark in the case must come from a landedPulls row."""
-        trailers = git(self.repo, "log", "main", "--format=%(trailers:key=Step,valueonly)").strip()
-        self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
-
-
-class LandedPulls(UpkeepFixture):
-    """Landed marks from the live file's landedPulls rows (closed or merged lane pulls). A row marks its step when its
-    branch is the step or lane/<step>, the step is open, and the row is merged or its head is an ancestor of main.
-    The cases run through build.main, which ignores the key today, so each red is a missing landed entry or a
-    missing printed line. A negative case shares its live file with a row that marks, so an empty result cannot pass."""
-
     def is_ancestor(self, sha, ref):
         done = subprocess.run(["git", "-C", str(self.repo), "merge-base", "--is-ancestor", sha, ref], capture_output=True)
         return done.returncode == 0
@@ -712,6 +708,18 @@ class LandedPulls(UpkeepFixture):
     def off_main(self):
         """The record branch's tip. Its history shares nothing with main, so main never reaches it."""
         return git(self.repo, "rev-parse", "roadmap").strip()
+
+    def no_trailer_on_main(self):
+        """Scope check: main holds no Step trailer, so a landed mark in the case must come from a landedPulls row."""
+        trailers = git(self.repo, "log", "main", "--format=%(trailers:key=Step,valueonly)").strip()
+        self.assertEqual(trailers, "", "main holds a Step trailer, so the case would not show the landedPulls read")
+
+
+class LandedPulls(UpkeepFixture):
+    """Landed marks from the live file's landedPulls rows (closed or merged lane pulls). A row marks its step when its
+    branch is the step or lane/<step>, the step is open, and the row is merged or its head is an ancestor of main.
+    The cases run through build.main, which ignores the key today, so each red is a missing landed entry or a
+    missing printed line. A negative case shares its live file with a row that marks, so an empty result cannot pass."""
 
     def landed_build(self):
         """(page, out) of a build from main that reads the live file. A doing step with no lane exits 1."""
@@ -948,6 +956,71 @@ class LandedPulls(UpkeepFixture):
         landed = build_info(page)["landed"]
         self.assertEqual(landed.get("c3"), ["#23"], "control: the merged row on lane/c3 marks c3")
         self.assertNotIn("c2", landed, "LANE/c2 and C2 are not lane/c2 or c2 and mark nothing")
+
+
+class LiveThreadsOptional(UpkeepFixture):
+    """A live file with no threads list reads the rest valid: pulls, sessions and items work as they do with threads.
+    Only the thread count reads unknown (threads is None, threadsWhy says why). The pulls list alone makes the whole
+    read unknown (LiveWork)."""
+
+    NO_THREADS = "unknown (the live file has no threads list)"
+
+    def test_no_threads_list_keeps_the_read_valid(self):
+        value = self.publish(threads=_ABSENT, pulls=[self.draft(7, "c1")])
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+
+    def test_pulls_sessions_and_items_work_without_threads(self):
+        session = self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")
+        for pulls in ([], [self.draft(7, "c1")]):  # an empty and a full pulls list
+            with self.subTest(pulls=len(pulls)):
+                value = self.publish(threads=_ABSENT, pulls=pulls, sessions=[session], items=[self.item(12, lane=None)])
+                page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.panel(page)["read"], value["readAt"])
+                live = build_info(page)["live"]
+                self.assertEqual([p["number"] for p in live["pulls"]], [p["number"] for p in pulls])
+                self.assertIsNone(live["pullWhy"])
+                self.assertIsNone(live["staleWhy"])
+                self.assertIsNone(live["itemsWhy"])
+                self.assertEqual(live["pageItems"], [self.item(12, lane=None)])
+                self.assertEqual([s["id"] for s in live["laneSessions"]], ["session_test01"])
+                self.assertEqual(live["sessionSteps"], ["c1"])
+                self.assertEqual(live["liveSteps"], ["c1"])
+                pair = [line for line in out.splitlines() if line.startswith(build.PAIR_LINE)]
+                self.assertEqual(pair, [build.PAIR_LINE + ": c1 (#7)"] if pulls else [])
+
+    def test_threads_that_is_not_a_list_reads_only_the_thread_count_unknown(self):
+        value = self.publish(threads=_ABSENT, pulls=[self.draft(7, "c1")])
+        for name, threads in (("missing", _ABSENT), ("null", None), ("an object", {})):
+            with self.subTest(threads=name):
+                self.write_live(dict(value, threads=threads) if threads is not _ABSENT else value)
+                page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.panel(page)["read"], value["readAt"])
+                live = build_info(page)["live"]
+                self.assertIsNone(live["threads"])
+                self.assertEqual(live["threadsWhy"], self.NO_THREADS)
+                self.assertEqual([p["number"] for p in live["pulls"]], [7])
+
+    def test_missing_threads_list_is_no_skipped_entry_and_no_zero_count(self):
+        value = self.publish(threads=_ABSENT, pulls=[self.draft(7, "c1")])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+        live = build_info(page)["live"]
+        self.assertEqual(live["skipped"], [])
+        self.assertEqual(live["threadsWhy"], self.NO_THREADS)
+        self.assertNotIn("live threads naming no open step: 0", out)
+        row = re.search(r"^  live threads naming no open step: (.*)$", out, re.M)
+        self.assertIsNotNone(row, "the upkeep output has no live threads row with its reason:\n%s" % out)
+        self.assertEqual(row.group(1), self.NO_THREADS)
+
+    def test_threads_list_present_leaves_threads_why_none(self):
+        # A control: a missing key reads as None, so this case holds on the old code too, and guards the new one.
+        value = self.publish(threads=[{"title": "Build a", "state": "working"}], pulls=[self.draft(7, "c1")])
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))  # the open pull on todo c1 is a red line
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+        live = build_info(page)["live"]
+        self.assertEqual([t["title"] for t in live["threads"]], ["Build a"])
+        self.assertIsNone(live.get("threadsWhy"))
 
 
 class StaleInProgress(UpkeepFixture):
@@ -2561,6 +2634,209 @@ class TodoWithOpenPull(UpkeepFixture):
                                          {"number": 90, "title": "r9 lane", "branch": "r9"}])
         _, out = self.build_from_main("--live", str(self.live), expect=(1,))
         self.assertEqual(self.pair_lines(out), ["r8 (#80)", "r9 (#90)"], "a ready step is a todo step for the pair line")
+
+
+class WaitOnClosedPull(UpkeepFixture):
+    """The upkeep row for an open step whose title, why or note waits on a pull request that GitHub shows closed and
+    unmerged (roadmap step dead-pr-waits, a wait on a dead PR). The build reads GitHub's answer from the --live file and never calls GitHub: a
+    closed pull is a landedPulls row with merged false, and an open pull is a pulls row. Each negative case shares its
+    live file with a control that the row must name, so an empty row cannot pass."""
+
+    LABEL = "open step waits on a closed unmerged PR"
+    CONTROL = "c-closed"
+
+    def closed(self, number):
+        return self.pull_row(number, "lane-%d" % number, merged=False)
+
+    def merged(self, number):
+        return self.pull_row(number, "lane-%d" % number, merged=True)
+
+    def listed(self, out):
+        return self.entries(self.row(out, self.LABEL)[1])
+
+    def assert_control_listed(self, out):
+        self.assertIn("%s (#41)" % self.CONTROL, self.listed(out),
+                      "the control step, which waits on the closed unmerged #41, is not in the %r row:\n%s" % (self.LABEL, out))
+
+    def test_open_step_waiting_on_a_closed_unmerged_pull_is_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.publish(landed=[self.closed(41)])
+        out = self.out_with_live()
+        self.assertEqual(self.listed(out), ["c-closed (#41)"], "the closed unmerged #41 is not listed as its waiting step")
+
+    def test_wait_in_title_or_why_is_listed_like_one_in_the_note(self):
+        self.commit_step("c-title", title="Waits on #51 to land", note="n")
+        self.commit_step("c-why", why="Blocked on #52 for its fix.", note="n")
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.publish(landed=[self.closed(41), self.closed(51), self.closed(52)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        for sid, pr in (("c-title", 51), ("c-why", 52)):
+            with self.subTest(field=sid):
+                self.assertIn("%s (#%d)" % (sid, pr), self.listed(out),
+                              "a wait on closed unmerged #%d in the step %s is not listed" % (pr, sid))
+
+    def test_open_pull_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-open", note="Waits on #42 to land.")
+        self.publish(landed=[self.closed(41)], pulls=[{"number": 42, "title": "lane 42", "branch": "lane-42"}])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-open (#42)", self.listed(out), "a step that waits on the open #42 is listed as waiting on a closed PR")
+
+    def test_merged_pull_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-merged", note="Waits on #43 to land.")
+        self.publish(landed=[self.closed(41), self.merged(43)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-merged (#43)", self.listed(out), "a step that waits on the merged #43 is listed as waiting on a closed PR")
+
+    def test_done_step_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-done", status="done", note="Waits on #44 to land.")
+        self.publish(landed=[self.closed(41), self.closed(44)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-done (#44)", self.listed(out), "a done step that waits on #44 is listed; a done step is not open")
+
+    def test_each_wait_phrase_the_roadmap_writes_is_listed(self):
+        # One step per phrase, each waiting on its own closed unmerged pull (#61 on). Each subtest names one phrase.
+        waits = (("stacked on", "Stacked on #61 for its base."), ("stacks on", "This stacks on #62."),
+                 ("stack on", "Stack on #63 for its base."), ("built on", "Built on #64 and its fix."),
+                 ("waits for", "Waits for #65 to land."), ("wait for", "Wait for #66 to land."),
+                 ("waiting on", "Waiting on #67 to land."), ("lands with", "Lands with #68 in one batch."),
+                 ("after PR", "Ships after PR #69 lands."), ("once PR", "Runs once PR #70 lands."))
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        steps = {}
+        for n, (phrase, note) in enumerate(waits, start=61):
+            sid = "w-" + phrase.replace(" ", "-")
+            self.commit_step(sid, note=note)
+            steps[phrase] = (sid, n)
+        self.publish(landed=[self.closed(41)] + [self.closed(n) for _, n in steps.values()])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        for phrase, (sid, n) in steps.items():
+            with self.subTest(phrase=phrase):
+                self.assertIn("%s (#%d)" % (sid, n), self.listed(out),
+                              "the wait phrase %r on the closed unmerged #%d is not listed" % (phrase, n))
+
+    def test_live_file_with_no_landed_pulls_key_reads_the_row_unknown(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.publish(pulls=[])  # no landedPulls key: the closed #41 is unknown, not known to be absent
+        out = self.out_with_live()
+        count, detail = self.row(out, self.LABEL)
+        self.assertTrue(detail.startswith("unknown ("),
+                        "the row reads %r when the live file has no landedPulls key, not unknown:\n%s" % (detail, out))
+        self.assertEqual(count, 1, "the unknown row counts %d entries, not one:\n%s" % (count, out))
+
+    def test_empty_landed_pulls_list_reads_the_row_none(self):
+        # The control for the unknown case: a present, empty list is a known none.
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.publish(pulls=[], landed=[])
+        out = self.out_with_live()
+        self.assertEqual(self.row(out, self.LABEL), (0, ""), "an empty landedPulls list does not read as none:\n%s" % out)
+
+    def test_open_pull_with_a_closed_row_for_its_number_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-open-dup", note="Waits on #42 to land.")
+        self.publish(landed=[self.closed(41), self.closed(42)],
+                     pulls=[{"number": 42, "title": "lane 42", "branch": "lane-42"}])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-open-dup (#42)", self.listed(out),
+                         "a step that waits on #42, which is open now, is listed as waiting on a closed pull")
+
+    def test_pull_number_with_no_wait_word_is_not_listed(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("c-no-word", note="Same area as #45.")
+        self.publish(landed=[self.closed(41), self.closed(45)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("c-no-word (#45)", self.listed(out),
+                         "a note that names #45 with no wait word is listed as waiting on the closed #45")
+
+    def test_history_after_a_closed_pull_is_not_a_wait(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("fix-check-chain", note="The fail-record-ancestor-head lane continues here after #46 closed.")
+        self.publish(landed=[self.closed(41), self.closed(46)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("fix-check-chain (#46)", self.listed(out),
+                         "a note that says a lane continued after #46 closed is listed as a wait on #46")
+
+    def test_history_after_a_merged_pull_is_not_a_wait(self):
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        self.commit_step("fix-check-chain", note="The fail-record-ancestor-head lane continues here after #46 merged.")
+        self.publish(landed=[self.closed(41), self.closed(46)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertNotIn("fix-check-chain (#46)", self.listed(out),
+                         "a note that says a lane continued after #46 merged is listed as a wait on #46")
+
+    def test_wait_phrases_until_when_and_wait_on_are_listed_bare_and_with_PR(self):
+        # The PR form is the one the regex took later; each bare form is the control at every sha that has the row.
+        waits = (("until", "Held until #61 lands."), ("until PR", "Held until PR #62 lands."),
+                 ("when", "Ships when #63 lands."), ("when PR", "Ships when PR #64 lands."),
+                 ("after", "Ships after #65 lands."), ("once", "Runs once #66 lands."),
+                 ("wait on", "Wait on #67 to land."), ("wait on PR", "Wait on PR #68 to land."))
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        steps = {}
+        for n, (phrase, note) in enumerate(waits, start=61):
+            sid = "w-" + phrase.replace(" ", "-")
+            self.commit_step(sid, note=note)
+            steps[phrase] = (sid, n)
+        self.publish(landed=[self.closed(41)] + [self.closed(n) for _, n in steps.values()])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        for phrase, (sid, n) in steps.items():
+            with self.subTest(phrase=phrase):
+                self.assertIn("%s (#%d)" % (sid, n), self.listed(out),
+                              "the wait phrase %r on the closed unmerged #%d is not listed" % (phrase, n))
+
+    def test_closed_unmerged_pull_whose_head_is_on_main_is_not_listed(self):
+        # The lane's work reached main, though GitHub shows its pull closed and unmerged. The control's head is off main.
+        self.commit_step("c-landed", note="Waits on #47 to land.")
+        self.commit_step("c-off", note="Waits on #48 to land.")
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        off = self.off_main()
+        self.assertFalse(self.is_ancestor(off, "main"), "scope: the control's head must be off main")
+        behind = self.behind_main()
+        self.assertTrue(self.is_ancestor(behind, "main"), "scope: the head of #47 must be an ancestor of main")
+        self.no_trailer_on_main()
+        self.publish(landed=[self.closed(41), self.pull_row(47, "lane-47", head=behind, merged=False),
+                             self.pull_row(48, "lane-48", head=off, merged=False)])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertIn("c-off (#48)", self.listed(out), "a closed unmerged #48 whose head is off main is not listed as a wait")
+        self.assertNotIn("c-landed (#47)", self.listed(out),
+                         "a closed unmerged #47 whose head is on main is listed as a wait, though its work landed")
+
+    def distinct_head(self, number):
+        """A root commit of its own, off main. Its message names the pull, so no two heads share a sha."""
+        tree = git(self.repo, "rev-parse", "roadmap^{tree}").strip()
+        return git(self.repo, "commit-tree", tree, "-m", "closed lane %d" % number).strip()
+
+    def test_closed_row_no_open_step_waits_on_runs_no_merge_base(self):
+        # The roadmap skill's upkeep row states the cost: one git merge-base for the closed row an open step waits on,
+        # and none for a closed row no step waits on. Each row has its own head, so the per-sha cache cannot merge calls.
+        # lane-N matches no step and the file has no pulls row, so pull_landed_marks and the draft-pull check
+        # reach head_on_main with nothing to check here.
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        heads = {n: self.distinct_head(n) for n in range(41, 48)}
+        self.assertEqual(len(set(heads.values())), 7, "scope: the seven heads must be distinct, or the per-sha cache hides the cost")
+        self.publish(landed=[self.pull_row(n, "lane-%d" % n, head=heads[n], merged=False) for n in range(41, 48)])
+        with mock.patch.object(build, "git", wraps=build.git) as spy:
+            out = self.out_with_live()
+        self.assert_control_listed(out)
+        merge_bases = [c.args for c in spy.call_args_list if c.args[1:2] == ("merge-base",)]
+        checked = [a[3] for a in merge_bases if len(a) > 3]
+        unwaited = [n for n in range(42, 48) if heads[n] in checked]
+        if unwaited:
+            self.fail("the closed-pull wait ran git merge-base on the head of closed #%s, which no open step waits on "
+                      "(%d merge-base processes in all)" % (", #".join(str(n) for n in unwaited), len(merge_bases)))
+        self.assertEqual(len(merge_bases), 1, "the closed-pull wait ran %d git merge-base processes, not one, though one closed "
+                         "row is waited on" % len(merge_bases))
 
 
 class ReadyAndDraftRows(UpkeepFixture):

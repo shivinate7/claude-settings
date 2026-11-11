@@ -855,7 +855,7 @@ def renumber(fresh, entries, held):
             highest += 1
             numbers.setdefault(str(n), highest)
             n = highest
-            moved[entry["doc_id"]] = (n, entry["data"].get("id") if isinstance(entry["data"].get("id"), str) else entry["doc_id"])
+            moved[entry["doc_id"]] = (n, entry["doc_id"])
         taken.add(n)
     result = []
     for entry in fresh:
