@@ -63,9 +63,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    each lane head before the build starts, once per lane. A red lane does not join. Before it marks
    the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
    on the batch head, after the draft step's page push. A ref target posts no comment, so it cannot
-   satisfy the join. A FAIL keeps it a draft. The lint measures each head against its base, and a clash
-   between two heads counts only when both merge clean with that base, so a clash that comes through
-   main is a report line, and an integration head counts none (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
+   satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only if both
+   merge clean with their base, and an integration head counts none (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
