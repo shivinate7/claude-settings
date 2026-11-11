@@ -75,6 +75,7 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
    UTF-8, so a lone surrogate never reaches git(). StdinNotUtf8 pins it.
 14. A git call that reports "Ignoring path" on stderr and exits 0 is an error. The stub kind warn keeps every
    index entry and writes the warning to stderr. IgnoredPathStderr pins that the send then says not sent.
+   Any other stderr line is not an error: the same class's allow case pins that the send still prints sent.
 
 Every machine gets a git identity, as a configured Mac does. A machine with no identity is not covered.
 """
@@ -1252,6 +1253,18 @@ class IgnoredPathStderr(MailCase):
         self.assertIn("not sent: ", sent.stderr, "a failed send printed no 'not sent:' line: %r" % sent.stderr)
         self.assertEqual(len(store.files("mail/cloud/sess-b/")), landed_before,
                          "the send landed a message after git printed 'Ignoring path'")
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_benign_stderr_line_from_git_still_lets_the_send_print_sent(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        sender.stub_actions({"update-index": {"kind": "warn",
+                                              "stderr": "hint: a benign git note, not an ignored path\n"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "benign")
+        self.assert_stub_intercepted(sender)
+        self.assertEqual(sent.returncode, 0, "git printed a benign stderr line and the send exited %d: %s"
+                         % (sent.returncode, combined(sent)))
+        self.assert_send_is_honest(sent, store, "cloud/sess-b", None)
 
 
 MARKER ="ascii-ok: flow → kept"  # U+2192 has no cp1252 code point
