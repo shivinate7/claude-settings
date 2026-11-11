@@ -15119,6 +15119,28 @@ class ReviewCleanMainMerge(ReviewEnv):
         self.reviewed_line(self.reviewed_host(fx, fx.clean, comments=[record, lint_of(7, fx.fixed)]), fx.clean, "no lint",
                            "a lane-lint PASS of the reviewed head must not make a clean merge of main read done: the lint names the live head")
 
+    def test_g_a_clean_merge_of_main_after_a_conflict_fixed_by_hand_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        main4 = self.git_commit(fx.main3, {"z.txt": "z\n"})
+        fx.on_main[(main4, "main")] = "ahead"  # main4 is local only, so its compare is scripted as main's answer, as clean_merges_after_fixed does
+        top = self.git_commit(fx.conflicted, {"z.txt": "z\n"}, main4)
+        self.facts(fx, [main4, top])
+        host = self.reviewed_host(fx, top)
+        out = self.reviewed_line(host, top, "stale", "a clean merge of main after a conflict fixed by hand must not read done: the walk stops at the conflicted merge")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the conflicted merge")
+        self.assertIn((fx.main3, "main"), host.compare_reads, "the walk did not reach the conflicted merge, so the case tests nothing")
+
+    def test_h_an_empty_commit_after_a_conflict_fixed_by_hand_reads_stale(self):
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        top = self.git_commit(fx.conflicted, {})
+        self.facts(fx, [top])
+        host = self.reviewed_host(fx, top)
+        out = self.reviewed_line(host, top, "stale", "an empty commit after a conflict fixed by hand must not read done: the walk stops at the conflicted merge")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the conflicted merge")
+        self.assertIn((fx.main3, "main"), host.compare_reads, "the walk did not reach the conflicted merge, so the case tests nothing")
+
 
 class ReviewUnknownReads(ReviewEnv):
     """A commit the checkout lacks reads unknown, never a conflict. A main-only clone fetches origin's heads once when a parent is missing, so a
