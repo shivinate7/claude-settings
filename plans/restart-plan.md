@@ -913,6 +913,20 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      when it sends. A guard refuses a page write that stores a session id.
   4. Fits R18 point 2: each item names who wakes, by slug or role.
   Home: skill project-ops; skill waiting-page.
+- **R45. Cloud sessions delete branches and write the Projects table with the owner's GitHub token.** Owner
+  14:25 CST Nov 11: "im good with either an actions workflow or a github token -- github token seems
+  better? im very ambivalent to tokens being in all my cloud sessions its just a github token".
+  Measured 14:21 CST: the cloud relay drops a branch-delete push; a new-branch push works. Origin holds
+  2,338 branches (331 under archive/), because a cloud archive push adds a branch and the delete fails.
+  Probe github-projects-probe, 14:23 CST: the cloud cannot read or write GitHub Projects.
+  1. The owner makes one GitHub token (repo and project scopes) and adds it to the cloud environment as
+     SHIV_GITHUB_TOKEN.
+  2. A session tests one branch delete and one Projects read with it. The relay, not GitHub, refuses
+     today, so the test may fail.
+  3. If the relay passes it, deletes go through one home that applies the Oct 30 grant (last commit on
+     main or an archive branch), and the guard reads that route. If it refuses, the same token becomes a
+     GitHub repository secret, and an Actions workflow does the deletes and the table on GitHub's side.
+  Home: decision for the delete route (new); D1 for the table.
 
 - **R34. The page shows how the system works and how healthy each part is.** Owner 11:35 CST Nov 11:
   "i more or less don't understand what i've built and how well built it is as i care about how it
