@@ -32,6 +32,7 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "rank": 2,
   "ref": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "repo": "shivinate7/claude-settings",
   "short": "cloud branch deletes",
   "status": "open",
   "title": "How should cloud sessions delete old branches?",

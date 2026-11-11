@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-11T20:28:00Z",
+  "context": "Goal: a PR whose own changes did not move keeps its review, so the merge queue does not stall.\nProblem (rule): a ruling covers only the act it names. Yours names a clean merge of main, and the empty commit is a reading of it.\nBased on (read): your Nov 10 14:07 CST ruling: \"a review log survives a clean main merge\"; any other difference keeps today's rules.\nBased on (read): incident #2562: an empty commit on a reviewed head made its review read stale.\nBased on (measured): round 2 (reviewer sonnet, 14:26 CST) found no way for an empty commit to change the lane's diff.\nDeparts from: main, where an empty commit after review makes the log stale \u2014 adds the empty commit to the pushes the log survives.\nMeanwhile: #2563's test fix goes on; its merge waits on this answer.",
+  "holds": "Whether a commit that changes no file, pushed after review, keeps the PR's review log.",
+  "home": "docs/decisions/pr-review-record.md (PR #2563)",
+  "id": "empty-commit-keeps-review",
+  "kind": "decision",
+  "n": 514,
+  "options": [
+    {
+      "gain": "A push that changes nothing never costs a fresh review.",
+      "how": "An empty commit keeps the review log, as #2563 builds it.",
+      "key": "a",
+      "label": "Keep it (Recommended)",
+      "lose": "One more case the merge tool must prove."
+    },
+    {
+      "gain": "The rule stays exactly as you said it.",
+      "how": "#2563 removes the empty-commit case. An empty commit makes the log stale, as today.",
+      "key": "b",
+      "label": "Drop it",
+      "lose": "An empty commit costs a fix check, as in incident #2562."
+    }
+  ],
+  "owner": "triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "rank": 3,
+  "ref": "PR #2563 (fix-check-after-main-merge)",
+  "repo": "shivinate7/claude-settings",
+  "short": "empty commit keeps review",
+  "status": "open",
+  "title": "Should an empty commit after review keep the review log valid?",
+  "why": "Your Nov 10 14:07 ruling covers a clean merge of main only. #2563 also keeps the review log after an empty commit, on the coordinator's reading."
+}
