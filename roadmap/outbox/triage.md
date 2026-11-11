@@ -709,3 +709,9 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 ## 2026-11-11 11:14 CST: docs/todo.md line 9 (follow-up PR)
 
 - Line 9 (measure one step down per role, step c201) is now one lane with R33's evaluation on step model-table-one-home. Point the line at that step, or delete it when the step's lane opens (retrospective 11:15 CST).
+
+## 2026-11-11 11:34 CST: next plan follow-up PR (after #2590 lands)
+
+- Copy restart-plan at the head the retrospective names (at least 0d78ca9: R32 lever is the per-model key or CLAUDE_CODE_AUTO_COMPACT_WINDOW, never /autocompact; intro counts four waiting items; plans 2736d70, e1c6814 add item 506's answers and the lane-model-recheck fold).
+- Decision idle-resume-compacts: rewrite its /autocompact lever line to match precompact-handoff rule 1 (retrospective 11:34 CST).
+- docs/todo.md line 9: point at step model-table-one-home.
