@@ -5291,11 +5291,21 @@ caseM10() {
 # under it: m11_trap_check shows that a naive ancestor check against FETCH_HEAD reads the fast-forwarded main as not behind origin.
 # A setup returns 1 with fix_why set on a fixture fault. It runs without a subshell, so it sets the globals the cases read.
 
-# mirror_first_install NAME: move_fixture NAME, a session checkout on branch lane (so the first install makes the mirror, as
+# advance_dated FX NAME DATE: advance_github_fixture, with the new commit's committer date set to DATE (git's ISO 8601 form). The
+# variable is set for that one call, so every later commit keeps its own date. The mirror's window reads committer dates.
+advance_dated() {
+  GIT_COMMITTER_DATE="$3"; export GIT_COMMITTER_DATE
+  advance_github_fixture "$1" "$2" claudemd
+  unset GIT_COMMITTER_DATE
+}
+
+# mirror_first_install NAME [DATE]: move_fixture NAME, a session checkout on branch lane (so the first install makes the mirror, as
 # caseM8 does), and that first cloud install. Sets mirror, co_branch and co_head. The mirror must be a shallow clone at
-# origin's main, with mirrorSha set to it.
+# origin's main, with mirrorSha set to it. With DATE, origin's main first moves to one commit committed at DATE, and that
+# commit is the main the mirror is cloned at (want is set to it).
 mirror_first_install() {
   move_fixture "$1"
+  if [ -n "${2:-}" ]; then advance_dated "$fx" "$1-first" "$2"; want=$(fixture_sha "$fx"); fi
   git -C "$co" checkout -q -b lane
   co_branch=$(git -C "$co" symbolic-ref -q HEAD); co_head=$(git -C "$co" rev-parse HEAD)
   move_install
@@ -5435,6 +5445,81 @@ caseM14() {
     bad "$name" "the output names no installed commit (want $short): $(printf '%s\n' "$out" | tail -n 2)"; return
   fi
   ok "$name"
+}
+
+# caseM15 and caseM16: the refresh's window starts a day before the mirror's main F, by F's committer date. Origin's history is
+# F, L, C, T in parent order, so F is a true ancestor of the tip T. F is dated 2026-10-20 and L 2026-11-01, later than F. The walk
+# from T stops at a commit dated before the window's start. caseM15 has C, clock-skewed, dated 2026-10-01, before that start, so
+# the window fetch never reaches F: the refresh reads F as local commits and keeps the mirror. caseM16 is the control: C is dated
+# 2026-10-25, inside the window, and the same refresh goes ahead.
+
+# mirror_window_setup NAME C_DATE: mirror_first_install NAME 2026-10-20T12:00:00Z, then origin's main gains L (dated 2026-11-01), C
+# (dated C_DATE) and the tip T (dated 2026-11-02). Sets mirror, want (T), mw_f, mw_c and mw_l (the shas of F, C and L), and the
+# committer dates mw_fd, mw_cd and mw_ld. Returns 1 with fix_why set on a fixture fault.
+mirror_window_setup() {
+  mirror_first_install "$1" 2026-10-20T12:00:00Z || return 1
+  mw_f=$(git -C "$mirror" rev-parse HEAD)
+  advance_dated "$fx" "$1-late" 2026-11-01T12:00:00Z
+  advance_dated "$fx" "$1-skew" "$2"
+  advance_dated "$fx" "$1-tip" 2026-11-02T12:00:00Z
+  want=$(fixture_sha "$fx")
+  mw_c=$(git -C "$fx/bare.git" rev-parse "$want~1")
+  mw_l=$(git -C "$fx/bare.git" rev-parse "$want~2")
+  if [ "$(git -C "$fx/bare.git" rev-parse "$want~3")" != "$mw_f" ]; then
+    fix_why="origin's history is not F, L, C, T in parent order"; return 1
+  fi
+  if ! git -C "$fx/bare.git" merge-base --is-ancestor "$mw_f" "$want"; then
+    fix_why="F [$mw_f] is not an ancestor of origin's tip [$want]"; return 1
+  fi
+  mw_fd=$(git -C "$fx/bare.git" log -1 --format=%ct "$mw_f")
+  mw_cd=$(git -C "$fx/bare.git" log -1 --format=%ct "$mw_c")
+  mw_ld=$(git -C "$fx/bare.git" log -1 --format=%ct "$mw_l")
+  if [ "$mw_ld" -le "$mw_fd" ]; then fix_why="L [$mw_l] is not later-dated than F [$mw_f]"; return 1; fi
+  return 0
+}
+
+# window_refresh_problem: prints why the last install did not refresh the mirror to want, or nothing when it did. Reads rc, out,
+# mirror and want. The first failing check is the one printed.
+window_refresh_problem() {
+  if [ "$rc" -ne 0 ]; then printf 'install.sh exited %s: %s' "$rc" "$(install_problems)"; return; fi
+  wl=$(printf '%s\n' "$out" | grep -F "$mirror" | grep 'local commits')
+  if [ -n "$wl" ]; then printf 'a WARN says the mirror holds local commits, though it holds none that origin lacks: %s' "$wl"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ]; then
+    printf 'the mirror is at [%s], not the origin main [%s]' "$(git -C "$mirror" rev-parse HEAD)" "$want"; return
+  fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$want" ]; then
+    printf 'mirrorSha is [%s], not the origin main [%s]' "$(git -C "$mirror" config --get claude-settings.mirrorSha)" "$want"; return
+  fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then printf '%s' "$mm"; fi
+}
+
+# caseM15: the commit between F and the tip is clock-skewed, dated before the window's start, so the refresh must not read F as
+# local commits: the mirror is refreshed to the tip with no such WARN.
+caseM15() {
+  name="caseM15: a mirror whose main is an ancestor of origin's tip, with a clock-skewed commit between them dated before the refresh window, is refreshed to the tip with no WARN"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_window_setup m15 2026-10-01T12:00:00Z; then bad "$name" "FIXTURE $fix_why"; return; fi
+  if [ "$mw_cd" -ge $((mw_fd - 86400)) ]; then
+    bad "$name" "FIXTURE the skewed commit [$mw_c] is not dated before the window's start (F's date minus a day)"; return
+  fi
+  move_install
+  why=$(window_refresh_problem)
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
+}
+
+# caseM16 (control): the same mirror with the commit between F and the tip dated inside the window. The refresh goes ahead, so
+# caseM15 fails on the date and not on the fixture's shape.
+caseM16() {
+  name="caseM16 (control): the same mirror with the commit between F and the tip dated inside the refresh window is refreshed to the tip with no WARN"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_window_setup m16 2026-10-25T12:00:00Z; then bad "$name" "FIXTURE $fix_why"; return; fi
+  if [ "$mw_cd" -lt $((mw_fd - 86400)) ]; then
+    bad "$name" "FIXTURE the commit between F and the tip [$mw_c] is dated before the window's start, so this control is the trap"; return
+  fi
+  move_install
+  why=$(window_refresh_problem)
+  if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
 }
 
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
@@ -5596,6 +5681,8 @@ run caseM11
 run caseM12
 run caseM13
 run caseM14
+run caseM15
+run caseM16
 run pinmove1
 run pinmove2
 run pinmove3
