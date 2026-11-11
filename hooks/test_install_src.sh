@@ -4097,7 +4097,8 @@ merge_run_check() {
 }
 
 # mergepin1: a cloud merge from a plain clone, with local main behind origin/main. The helper fast-forwards main to
-# origin's, and the live pin moves to it by the rename.
+# origin's, and the live pin moves to it by the rename. Per owner ruling 2026-11-11 14:19 CST: the installer fetches and
+# uses origin's main.
 mergepin1() {
   name="mergepin1: cloud merge, plain clone, local main behind origin: main fast-forwards to origin's and the live pin moves to it"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
@@ -4106,6 +4107,7 @@ mergepin1() {
 }
 
 # mergepin2: the same with the clone marked cloudMirror. The mirror resume is the other cloud block that can move the pin.
+# Per owner ruling 2026-11-11 14:19 CST: the installer fetches and uses origin's main.
 mergepin2() {
   name="mergepin2: cloud merge, clone marked cloudMirror, local main behind origin: main fast-forwards to origin's and the live pin moves to it"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
@@ -4115,6 +4117,7 @@ mergepin2() {
 
 # mergepin3: local main is one commit past origin/main, a commit origin/main lacks. The helper refuses: it exits 1
 # with one 'install not run' line, runs no install, and moves neither the clone's main nor the pin.
+# Per owner ruling 2026-11-11 14:19 CST: the installer fetches and uses origin's main.
 mergepin3() {
   name="mergepin3: cloud merge, local main one commit past origin: refused with exit 1 and one 'install not run' line; main and the pin do not move"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
