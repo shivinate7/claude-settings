@@ -112,6 +112,7 @@ FAMILIES = {
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a single- or double-quoted value); a time in prose, another field or collection, or a value with no offset passes",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
@@ -3599,8 +3600,8 @@ chained_ask("per-file ask: two -C targets in one checkout, the lane by path then
 
 # FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
 # the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
-# verdict is the one each row below pins: deny for 1 to 4 (4 is a Set-Location move, read as a cd),
-# ask for 5 (main reads the lane for 5, so it asks and does not deny; the branch must not allow).
+# verdict is the one each row below pins: deny for all five (4 is a Set-Location move, read as a cd;
+# 5 is an env -C or --chdir, read as the run folder, so other-checkout denies it as it denies git -C).
 # Controls that stay allowed are pinned above: "per-file allow: restore of one modified file"
 # (cwd lane) and "one -C target repeated".
 # 1. --work-tree names the shared checkout, whatever -C says.
@@ -3628,23 +3629,40 @@ for _cd in ("sl", "chdir", "Push-Location"):
     sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout"
        % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
        "deny", "other-checkout", tool="PowerShell", cwd=GITWT)
-# 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
-sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
-   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
-sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree",
-   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
+# 5. env's own chdir flags. The guard reads env -C and env --chdir as the run folder, the folder git
+# then runs in, so other-checkout denies each one as it denies a git -C into the shared checkout.
+sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
+   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
+sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
+   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout",
    cwd=GITWT)
+# A `cd` after an `env -C` sets the folder the restore runs in, so the restore is judged in the shared
+# checkout, as the plain `cd` form is. The control is the same chain without the env wrapper, which the
+# reader already reads the way the rule needs, so it stays green.
+sh("per-file deny: env -C into the lane, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
+   "env -C " + slash(GITWT) + " " + VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
+sh("per-file deny: control, a plain status, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
+   VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
+# A bare restore of the whole tree is a discard the lane's own dirty tracked file would lose, so it asks in the
+# lane, and chained with a status it denies. The control is that chain with no env wrapper. The decision row puts
+# an env -C on a clean checkout ahead of the status. The shell's folder stays the lane, so the restore must still
+# deny. The verb is restore ., not restore f.txt: a restore of one modified file in the lane is allowed by design
+# (the per-file allow rows), so that verb cannot tell the two readings apart.
+chained_ask("per-file deny: control, a status and a bare restore of the whole tree in a lane with a dirty file, denies as a chained ask command",
+            VCS + " status && " + VCS + " restore .", cwd=GITWT)
+chained_ask("per-file deny: env -C into a clean checkout, then a bare restore of the whole tree in the lane, denies as a chained ask command",
+            "env -C " + slash(SUBJCLEAN) + " " + VCS + " status && " + VCS + " restore .", cwd=GITWT)
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
-# per-file restore in the shared checkout from the lane by a spelling the guard must still read.
-# The chdir flags only name the shared checkout, so they still ask. The control stays allowed.
+# per-file restore in the shared checkout from the lane. env -vC is read as env -C, so other-checkout
+# denies it. The --ch= abbreviation is not read as --chdir, so it still asks. The control stays allowed.
 _SH = slash(GITMAIN)
-for _label, _cmd in (
-    ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
-    ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
-):
-    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
-       "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: late probe, env -vC names the shared checkout, from a worktree, denies by other-checkout",
+   "env -vC " + _SH + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
+sh("per-file ask: late probe, env --ch= abbreviation names the shared checkout, from a worktree",
+   "env --ch=" + _SH + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
    "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
 
@@ -5067,6 +5085,8 @@ TEMP_DIR = None   # back to the system temp for the sections below
 HM_REFUSED_PATH = "hm-text-lane"
 # The call shape every EnterWorktree remedy names. A `path` makes Claude Code ask the owner to approve the worktree.
 ENTER_WORKTREE_SHAPE = "with a `name` and no `path`"
+# An existing checkout needs `path`, not `name`; the approval prompt a `path` triggers is the accepted cost.
+OTHER_CHECKOUT_ENTER_SHAPE = "call the EnterWorktree tool with `path` set to"
 
 
 def hand_made_refusal_text_case():
@@ -7002,6 +7022,24 @@ sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
 sh("check-tail: a verdict call with no pipe in the foreground is allowed",
    "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
+# `merge --release-check` prints one verdict line per pull request, so tail or head cuts it like a lint verdict.
+# The lane-lint row is the control: its refusal is the one these rows must match.
+sh("check-tail: merge --lane-lint 5 piped to tail -2 in the foreground is refused (control)",
+   "merge --lane-lint 5 | tail -2", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check piped to tail in the foreground is refused",
+   "merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check piped to head in the foreground is refused",
+   "merge --release-check 5 6 | head -1", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: the bin merge --release-check piped to tail in the foreground is refused",
+   "~/.claude/bin/merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check with no pipe in the foreground is allowed (control)",
+   "merge --release-check 5 6", "allow", cwd=NOGIT)
+add("check-tail: merge --release-check piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --release-check 5 6 2>&1 | tail -3")
+add("check-tail: merge --release-check with no pipe, backgrounded, is allowed (control)", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --release-check 5 6")
 
 # =========================================================================== 2c. waiter loops
 #
@@ -13234,10 +13272,12 @@ def gh_verb(command):
     return " ".join(command.split()[:3])
 
 
-def gh_write_refused(name, command, **fixture):
-    """One gh write refused in a cloud session, and the same write allowed outside one."""
+def gh_write_refused(name, command, lacks_verb="", **fixture):
+    """One gh write refused in a cloud session, and the same write allowed outside one. `lacks_verb` is the
+    verb the refusal must not print; it defaults to the command's first three words."""
     sh("gh-write-cloud: %s is refused in a cloud session" % name, command, "deny", GH_WRITE_RULE,
-       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(gh_verb(command),), **fixture)
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(lacks_verb or gh_verb(command),),
+       **fixture)
     sh("gh-write-cloud: %s is allowed outside a cloud session" % name, command, "allow", cwd=NOGIT, **fixture)
 
 
@@ -13268,6 +13308,46 @@ GH_WRITES = (
 for _name, _command in GH_WRITES:
     gh_write_refused(_name, _command)
 gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
+
+# A repo flag after the group word (`gh pr -R o/r comment 5`) is valid gh, and the verb comes after it. Each
+# write above is repeated with the flag in each of gh's four forms, after `pr` or `issue`. The name of each row
+# carries "after the group word", so MUTATE_ONLY="after the group word" selects these rows alone.
+GH_REPO_FLAGS = ("-R o/r", "--repo o/r", "--repo=o/r", "-Ro/r")
+GH_GROUP_WRITES = [(name, command, {}) for name, command in GH_WRITES if command.split()[1] in ("pr", "issue")]
+GH_GROUP_WRITES.append(("pr merge", "gh pr merge 12 --squash", GH_MERGE_FIXTURE))
+for _flag in GH_REPO_FLAGS:
+    for _name, _command, _fixture in GH_GROUP_WRITES:
+        _words = _command.split()
+        _flagged = " ".join(_words[:2] + _flag.split() + _words[2:])
+        gh_write_refused("%s, %s after the group word" % (_name, _flag), _flagged,
+                         lacks_verb=" ".join(_words[:3]), **_fixture)
+# A repo value that reads as a verb is a value. The verb after it is the one judged, in both directions: a read
+# verb never hides a write, and a write-looking value never makes a read a write. The reads are the controls.
+sh("gh-write-cloud: a repo value named like a read verb does not hide a comment after the group word",
+   "gh pr -R list comment 5 --body hi", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr comment",))
+for _command in ("gh pr -R o/r view 5", "gh pr -R o/r list", "gh issue --repo o/r list", "gh pr -R comment list"):
+    sh("gh-write-cloud: a read after the group word, %s, is allowed in a cloud session" % _command.split(" ", 2)[2],
+       _command, "allow", cwd=NOGIT, env=GH_WRITE_CLOUD)
+# The local verdicts outside a cloud session: a merge with a pending head is judged by merge-checks, and a
+# create without --draft is refused by draft-pr, with the flag after the group word. Each has a green twin.
+sh("merge-checks: pr merge, -R o/r after the group word, is judged, and a pending head denies",
+   "gh pr -R o/r merge 12", "deny", "merge-checks", carries="pending", cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: pr merge, -R o/r after the group word, is allowed on a green head",
+   "gh pr -R o/r merge 12", "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+# The control for the rows above: the same repo flag after the verb is already read, so this head read must answer
+# for the repo the flag names. A red on the rows above with "could not run" would mean the fake answers no read
+# for that repo.
+sh("merge-checks: pr merge 12 -R o/r, a flag after the verb, denies a pending head: the control for the "
+   "rows after the group word",
+   "gh pr merge 12 -R o/r", "deny", "merge-checks", carries="pending", cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("draft-pr: pr create, -R o/r after the group word, without --draft is refused",
+   "gh pr -R o/r create --title x --body y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY,
+   lacks=DRAFT_LACKS)
+sh("draft-pr: pr create, -R o/r after the group word, with --draft is allowed",
+   "gh pr -R o/r create --draft --title x", "allow", cwd=NOGIT)
 
 # A write that another rule also refuses gets the gh-write-cloud verdict in a cloud session. Its remedy
 # names an MCP tool, never the refused form. Each refusal has a twin outside a cloud session.
@@ -14969,7 +15049,578 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+# A brief opens with the owner's Grant line, then the marker line. The guard skips the Grant line, so the marker line is
+# judged as the marker case above is: topic colors to a lane on topic icons is refused, on the topic's reason.
+step_refuse("a Grant line, then a brief for topic colors to a lane on topic icons, is refused: the Grant line is skipped",
+            role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nLane brief: icon-a. Topic: colors.",
+            carries=("names a topic the lane does not hold",))
+# Passes, the green control beside the refusal above: a Grant line, then plain text with no marker, passes as plain
+# text does with no Grant line. The Grant line alone is not a refusal.
+step_allow("a Grant line, then plain status text with no marker, is allowed",
+           role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nStatus: PR #12 merged for icon-a.")
+# Refused: a placeholder Grant line is no grant, as on create_session. The brief's topic matches the lane, so only the
+# placeholder can refuse it.
+step_refuse("a Grant line that holds a placeholder is refused, though the brief's topic matches the lane",
+            role_path("step-topic-lane"), "Grant: <owner words>, <time>\nLane brief: icon-a. Topic: icons.")
 
+
+# =========================================================================== a header stamp matches the clock
+FAMILY = "message-time-matches-clock"
+#
+# Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
+# with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
+# then `,`, `:`, or a dash spaced on both sides (` - `, ` — `), then an optional date `YYYY-MM-DD `, then `H:MM` or
+# `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any letter case. Anything may follow it. The zone must
+# be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
+# A dated stamp is an instant with its zone's offset, refused when it is more than 1 minute ahead, with no upper
+# limit. An undated stamp is a signed minute-of-day offset mod 1440, refused only when it is 2 to 60 minutes ahead:
+# more than 60 ahead reads as a quote from an earlier day, and passes. A stamp behind the clock passes. The wrap reads
+# the short way: 00:01 at a clock of 23:59 is 2 minutes ahead. The clock is LOCAL_TIME_NOW. The rule reads no
+# transcript and only the first line, so the cases here need no transcript, except the one lane brief, which needs a
+# lane that lane-one-topic allows.
+MTC_RULE = "message-time-matches-clock"
+MTC_TOOL = "mcp__claude-code-remote__send_later"  # a tool with a message field that is not send_message
+MTC_CLOCK = "2026-11-07T13:22:00-06:00"           # 13:22 CST, the clock of most cases below
+MTC_NEXT_DAY = "2026-11-08T00:01:00-06:00"        # 00:01 CST, the clock of the midnight pair
+MTC_BODY = "detail " * 2500                       # a long body after the first line: about 17,500 characters
+MTC_MORNING = "2026-11-08T07:08:00-06:00"        # 07:08 CST, the clock of the header-form, zone and window cases
+MTC_CDT = "2026-10-30T13:22:00-05:00"            # 13:22 CDT, the clock of the CDT-season cases
+
+
+def mtc_env(clock):
+    """The guard's environment with its clock fixed, so a verdict never depends on the real time."""
+    return dict(ROLE_ENV, LOCAL_TIME_NOW=clock)
+
+
+def mtc_refuse(name, message, clock=MTC_CLOCK, carries=(), lacks=()):
+    """A send_message whose header stamp is off the clock. The guard refuses it, and the reason names the rule."""
+    add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=SEND_MESSAGE, cwd=NOGIT,
+        env=mtc_env(clock), session_id=ROLE_OTHER, message=message, carries=carries, lacks=lacks)
+
+
+def mtc_allow(name, message, clock=MTC_CLOCK, transcript=None):
+    """A send_message the guard lets through silently."""
+    add("message-time-matches-clock: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True,
+        env=mtc_env(clock), session_id=ROLE_OTHER, message=message, transcript=transcript)
+
+
+# Refused: an incident stamp 18 minutes ahead. The reason prints the real time, so the sender can fix the stamp.
+mtc_refuse("an incident stamp 18 minutes ahead is refused, and the reason prints the real time 13:22 CST",
+           "Coordinator, 13:40 CST: pick 1 taken", carries=("13:22 CST",))
+# Refused: 24 minutes ahead, on a clock that is not the default.
+mtc_refuse("a stamp 24 minutes ahead, at a clock of 13:26, is refused",
+           "Coordinator, 13:50 CST", clock="2026-11-07T13:26:00-06:00")
+# Passes: 10 minutes behind. A stamp behind the clock passes.
+mtc_allow("a stamp 10 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:12 CST: pick 1 taken")
+# Refused: 4 minutes ahead. The limit is 1 minute, so this sits past it.
+mtc_refuse("a stamp 4 minutes ahead is refused: the limit is 1 minute",
+           "Coordinator, 13:26 CST")
+# Passes: 4 minutes behind. A stamp behind the clock passes.
+mtc_allow("a stamp 4 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:18 CST")
+# Refused: `Now` is a label like any other, so `Now: 13:30 CST` is a header 8 minutes ahead.
+mtc_refuse("a Now: header 8 minutes ahead, Now: 13:30 CST, is refused",
+           "Now: 13:30 CST")
+# Refused: markdown lead chars are read past, so the bold and quote forms carry the header too.
+mtc_refuse("a bold header, **Coordinator, 13:40 CST**, is refused",
+           "**Coordinator, 13:40 CST**")
+mtc_refuse("a quoted header, > Coordinator, 13:40 CST, is refused",
+           "> Coordinator, 13:40 CST: pick 1 taken")
+# Refused: a date in the stamp is read, and the stamp is judged as the instant it names.
+mtc_refuse("a dated header, 2026-11-07 13:40 CST, 18 minutes ahead is refused",
+           "Coordinator, 2026-11-07 13:40 CST")
+# Passes: dated the day before, the stamp is behind the clock. The date counts toward how far behind.
+mtc_allow("a header dated the day before, at the clock's own minute, is allowed: a stamp behind the clock passes",
+          "Coordinator, 2026-11-06 13:22 CST")
+# Refused: dated the day after, the stamp is 1440 minutes ahead. A reader that ignores the date sees 0 and allows it.
+mtc_refuse("a header dated the day after, at the clock's own minute, is refused: a date counts",
+           "Coordinator, 2026-11-08 13:22 CST")
+# Refused: 14:22 CDT is the instant 13:22 CST, but CDT is the wrong zone label in CST season, so it is refused.
+mtc_refuse("a CDT header in CST season at the same instant, 14:22 CDT at 13:22 CST, is refused: the zone is wrong",
+           "Coordinator, 14:22 CDT")
+# Refused: 15:22 CDT is 14:22 CST, 60 minutes ahead. The reason prints the clock in CST, not CDT.
+mtc_refuse("a CDT header in CST season, 60 minutes ahead, is refused, and the reason prints 13:22 CST, not CDT",
+           "Coordinator, 15:22 CDT", carries=("13:22 CST",), lacks=("13:22 CDT",))
+# Refused: only the header stamp is judged. A right stamp later on the line does not save an off header.
+mtc_refuse("a header 18 minutes off is refused though a right stamp follows it on the line",
+           "Coordinator, 13:40 CST: pick 1 taken (13:22 CST)")
+# Refused: the marker is the first non-blank line, so blank lines above it do not hide the header.
+mtc_refuse("a header after two blank lines is the first non-blank line, and is refused",
+           "\n\nCoordinator, 13:40 CST: pick 1 taken")
+# Passes: 23:50 is 11 minutes behind 00:01 across midnight. A stamp behind the clock passes.
+mtc_allow("a header of 23:50 CST at 00:01 CST, 11 minutes behind across midnight, is allowed",
+          "Coordinator, 23:50 CST", clock=MTC_NEXT_DAY)
+# Refused: 00:01 at a clock of 23:59 is 2 minutes ahead across midnight. The mirror of the pair above.
+mtc_refuse("a header of 00:01 CST at 23:59 CST, 2 minutes ahead across midnight, is refused",
+           "Coordinator, 00:01 CST", clock="2026-11-07T23:59:00-06:00")
+# Refused: a long body after an off header changes nothing. The first line is judged at full message size.
+mtc_refuse("a header 18 minutes off with a long body after it is refused, however long the message",
+           "Coordinator, 13:40 CST: pick 1 taken\n" + MTC_BODY)
+
+# Refused: the incident. A header 2 minutes ahead is past the 1-minute limit.
+mtc_refuse("a header 2 minutes ahead is refused: the incident, pick taken at 13:24 CST",
+           "Coordinator, 13:24 CST: pick taken")
+# Refused: 3 minutes ahead is past the limit.
+mtc_refuse("a header 3 minutes ahead is refused: the limit is 1 minute",
+           "Coordinator, 13:25 CST")
+# Passes: exactly 1 minute ahead is inside the limit. The limit is inclusive.
+mtc_allow("a header exactly 1 minute ahead is allowed: the limit is inclusive",
+          "Coordinator, 13:23 CST")
+# Passes: 3 minutes behind is behind the clock, so it passes.
+mtc_allow("a header 3 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:19 CST")
+# Passes: 23:59 at 00:01 is 2 minutes behind across midnight, so it passes.
+mtc_allow("a header of 23:59 CST at 00:01 CST, 2 minutes behind across midnight, is allowed",
+          "Coordinator, 23:59 CST", clock=MTC_NEXT_DAY)
+# Passes: a dated header exactly 1 minute ahead is inside the limit.
+mtc_allow("a dated header exactly 1 minute ahead is allowed",
+          "Coordinator, 2026-11-07 13:23 CST")
+# Passes: a ruling quoted mid-line carries its own stamp. Only the header stamp is read.
+mtc_allow("a quoted ruling mid-line is allowed: the owner's stamp sits inside the line",
+          'Coordinator, 13:22 CST: owner ruled (owner 2026-10-30 16:20 CDT) yes')
+# Passes: a second stamp on the header line is not judged. The header stamp is the one that counts.
+mtc_allow("a second stamp on the header line is allowed: only the header stamp is judged",
+          "Coordinator, 13:22 CST: first offered 13:40 CST, pick 1 taken")
+# Passes: a stamp only on line 2. The first line is a status line with no stamp.
+mtc_allow("a stamp only on line 2 is not read: the first line is a status line",
+          "Status: PR #12 merged.\nCoordinator, 13:40 CST: pick 1 taken")
+# Passes: a stamp mid-line on a status line is not a header.
+mtc_allow("a status line with a stamp mid-line is allowed",
+          "Status: PR #12 merged (owner 16:36 CST).")
+# Passes: a lane brief's first line holds no stamp, so the later stamp is not judged. The lane fixture lets the
+# brief through lane-one-topic, so this case isolates this rule.
+mtc_allow("a lane brief whose first line holds no stamp is allowed, though a stamp follows it",
+          "Lane brief: icon-a. Topic: icons.\nCoordinator, 13:40 CST: go",
+          transcript=role_path("step-topic-lane"))
+# Refused: a label of four words is a header, so this stamp 18 minutes ahead is refused.
+mtc_refuse("a label of four words, Owner of the lane, 13:40 CST, is a header and is refused",
+           "Owner of the lane, 13:40 CST: pick 1 taken")
+# Passes: a label with no comma, colon or dash is not a header, so the line passes.
+mtc_allow("a label with no comma, colon or dash is not a header, so the line passes",
+          "Coordinator 13:40 CST: pick 1 taken")
+# Passes: the empty states. No first line means nothing to judge.
+mtc_allow("an empty message passes: there is no first line to judge",
+          "")
+mtc_allow("a message of blank lines only passes: there is no first line to judge",
+          "\n  \n\n")
+# Passes: the full-size pair of the refusal above. A header 1 minute ahead with a long body is allowed.
+mtc_allow("a header 1 minute ahead with a long body after it is allowed, however long the message",
+          "Coordinator, 13:23 CST: pick 1 taken\n" + MTC_BODY)
+# Passes: the rule judges send_message only. Another tool with a message field and the same stamp is not judged.
+add("message-time-matches-clock: a send_later with a header 18 minutes off is not judged: the rule is send_message's",
+    "allow", tool=MTC_TOOL, cwd=NOGIT, silent=True, env=mtc_env(MTC_CLOCK),
+    message="Coordinator, 13:40 CST: pick 1 taken", delay_minutes=5)
+# Passes: a dated header behind the clock passes, with seconds on the clock. 13:22 against 13:25:30 is 3 minutes behind.
+mtc_allow("a dated header 3 minutes behind, at a clock of 13:25:30, is allowed: a stamp behind the clock passes",
+          "Coordinator, 2026-11-07 13:22 CST", clock="2026-11-07T13:25:30-06:00")
+# Passes: 16:36 is 9 hours 28 minutes ahead at 07:08. More than 60 minutes ahead reads as a quote from an earlier day.
+mtc_allow("a header quoting another label's time, Owner, 16:36 CST, 9 hours 28 minutes ahead, is allowed: past 60 minutes it passes",
+          "Owner, 16:36 CST: go", clock=MTC_MORNING)
+# Refused: a header quoting another label's time, 18 minutes ahead. The reason tells the sender to open with its own label.
+mtc_refuse("a header quoting another label's time, Owner, 13:40 CST, is refused, and the reason names your own label",
+           "Owner, 13:40 CST: go", carries=("your own label",))
+
+# The wider header form. Each form is refused at a stamp 32 minutes ahead of 07:08, and passes at the clock's own minute.
+# Refused: a 1-digit hour.
+mtc_refuse("a 1-digit hour header, Triage, 7:40 CST, 32 minutes ahead at 07:08, is refused",
+           "Triage, 7:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a 1-digit hour header at the clock's own minute, Triage, 7:08 CST, is allowed",
+          "Triage, 7:08 CST: x", clock=MTC_MORNING)
+# Refused: a spaced em dash in place of the comma.
+mtc_refuse("a spaced em-dash header, 07:40 CST after the label, 32 minutes ahead at 07:08, is refused",
+           "Coordinator — 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a spaced em-dash header at the clock's own minute, 07:08 CST after the label, is allowed",
+          "Coordinator — 07:08 CST: x", clock=MTC_MORNING)
+# Refused: a spaced hyphen in place of the comma.
+mtc_refuse("a spaced hyphen header, 07:40 CST after the label, 32 minutes ahead at 07:08, is refused",
+           "Coordinator - 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a spaced hyphen header at the clock's own minute, 07:08 CST after the label, is allowed",
+          "Coordinator - 07:08 CST: x", clock=MTC_MORNING)
+# Refused: a label of four words.
+mtc_refuse("a four-word label header, Coordinator for the lane, 07:40 CST, 32 minutes ahead at 07:08, is refused",
+           "Coordinator for the lane, 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a four-word label header at the clock's own minute, Coordinator for the lane, 07:08 CST, is allowed",
+          "Coordinator for the lane, 07:08 CST: x", clock=MTC_MORNING)
+# Refused: seconds after the time.
+mtc_refuse("a header with seconds, Coordinator, 07:40:00 CST, 32 minutes ahead at 07:08, is refused",
+           "Coordinator, 07:40:00 CST: x", clock=MTC_MORNING)
+mtc_allow("a header with seconds at the clock's own minute, Coordinator, 07:08:00 CST, is allowed",
+          "Coordinator, 07:08:00 CST: x", clock=MTC_MORNING)
+# Refused: a lowercase zone.
+mtc_refuse("a lowercase zone header, Coordinator, 07:40 cst, 32 minutes ahead at 07:08, is refused",
+           "Coordinator, 07:40 cst: x", clock=MTC_MORNING)
+mtc_allow("a lowercase zone header at the clock's own minute, Coordinator, 07:08 cst, is allowed",
+          "Coordinator, 07:08 cst: x", clock=MTC_MORNING)
+
+# The zone must be the clock's own. A wrong zone label is refused whatever the minutes.
+# Refused: a CDT stamp at the clock's own minute, in CST season. The instant is an hour behind, so only the label is wrong.
+mtc_refuse("a CDT header at the clock's own minute in CST season, Coordinator, 07:08 CDT, is refused: the zone is wrong",
+           "Coordinator, 07:08 CDT: x", clock=MTC_MORNING)
+# Refused: a CST stamp in CDT season. 12:22 CST is the instant 13:22 CDT, so only the zone label is wrong.
+mtc_refuse("a CST header in CDT season at the same instant, Coordinator, 12:22 CST at 13:22 CDT, is refused: the zone is wrong",
+           "Coordinator, 12:22 CST: x", clock=MTC_CDT)
+# Passes: the CDT-season pair. A CDT stamp at the clock's own minute in CDT season is allowed.
+mtc_allow("a CDT header at the clock's own minute in CDT season, Coordinator, 13:22 CDT, is allowed",
+          "Coordinator, 13:22 CDT: x", clock=MTC_CDT)
+
+# The undated window: 2 to 60 minutes ahead is refused, and past 60 it reads as a quote from an earlier day.
+# Refused: 60 minutes ahead at 07:08 is the window's upper edge, and the edge is inside it.
+mtc_refuse("a header 60 minutes ahead at 07:08 is refused: the window's upper edge is inside it",
+           "Coordinator, 08:08 CST: x", clock=MTC_MORNING)
+# Passes: 61 minutes ahead at 07:08 is past the window, so it reads as a quote from an earlier day.
+mtc_allow("a header 61 minutes ahead at 07:08 is allowed: past 60 minutes it reads as a quote from an earlier day",
+          "Coordinator, 08:09 CST: x", clock=MTC_MORNING)
+# Refused: a dated stamp has no window. 16:36 on the same day is 9 hours 28 minutes ahead at 07:08, and is refused.
+mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
+
+
+# ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
+# The same rule on more tools. Only these written values are judged, as ISO-8601 instants with an offset (`Z` or
+# +-HH:MM): `added` in an ArtifactData write (set, update, each write of a batch) to collection `items`; `updatedAt`
+# in a Write (the content's JSON) or an Edit (the new_string) to a roadmap step file; and a literal `updatedAt` in a
+# Bash command, read as text, inside shell quotes or not. A value more than 1 minute ahead of the clock is refused.
+# A value behind the clock passes, because a kept old value is always behind. Quoted times in prose and other fields pass.
+# The cases mirror the incident in decision local-time-central: `added` 20:16Z written to items at a clock of 20:14Z,
+# and a roadmap step `updatedAt` ahead of the clock, in the shape 2026-11-07T14:15:00-06:00.
+MTC_WRITE_CLOCK = "2026-11-07T14:14:00-06:00"  # 14:14 CST, which is 20:14Z: the clock of every case below
+MTC_WRITE_CARRIES = ("14:14 CST", "2026-11-07T14:14-06:00", "2026-11-07T20:14Z")  # the real time, with its offset, both ways
+MTC_CDT_CLOCK = "2026-07-08T09:26:00-05:00"  # 09:26 CDT, which is 14:26Z: a clock in the other daylight season
+MTC_CDT_CARRIES = ("09:26 CDT", "2026-07-08T09:26-05:00", "2026-07-08T14:26Z")  # the real time, with its -05:00 offset
+MTC_ITEM_URL = "https://claude.ai/artifact/mtcwrites"  # the page whose items the ArtifactData cases write
+MTC_STEP = os.path.join(NOGIT, "roadmap", "data", "steps", "silent-undo-edit-pass.json")  # a roadmap step file
+MTC_NOT_STEP = os.path.join(NOGIT, "docs", "silent-undo-edit-pass.json")  # a path that is not a step file
+MTC_OFF_STEP = '{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00-06:00"}\n'  # 16 minutes ahead
+
+
+def mtc_write(name, expected, tool, clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, lacks=(), **tool_input):
+    """One case of the written-value rule: `tool_input`, run as `tool`, against `clock` (default MTC_WRITE_CLOCK).
+    A deny must print each of `carries` and none of `lacks`."""
+    if expected == "deny":
+        add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=tool, cwd=NOGIT,
+            env=mtc_env(clock), carries=carries, lacks=lacks, **tool_input)
+    else:
+        add("message-time-matches-clock: " + name, "allow", tool=tool, cwd=NOGIT, silent=True,
+            env=mtc_env(clock), **tool_input)
+
+
+def mtc_set(name, expected, data, action="set", collection="items", doc_id="silent-undo-edit-pass",
+            clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, lacks=()):
+    """An ArtifactData write of one document: `data` to `collection`, on the page the cases name, at `clock`."""
+    mtc_write(name, expected, "ArtifactData", clock=clock, carries=carries, lacks=lacks, url=MTC_ITEM_URL,
+              action=action, collection=collection, doc_id=doc_id, data=data)
+
+
+def mtc_batch(name, expected, writes):
+    """An ArtifactData batch of `writes`, each one a dict of op, collection, doc_id and data."""
+    mtc_write(name, expected, "ArtifactData", url=MTC_ITEM_URL, action="batch", writes=writes)
+
+
+def mtc_bash(name, expected, command, clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, transcript=None):
+    """A Bash command whose text carries, or does not carry, a literal updatedAt value. A case whose command needs
+    another clock, or a transcript for another rule to allow it, names both; the rest keep the 14:14 CST clock."""
+    mtc_write(name, expected, "Bash", clock=clock, carries=carries, command=command, transcript=transcript)
+
+
+# Refused: an `added` in items 4 minutes ahead. The limit is 1 minute, so this is past it.
+mtc_set("an added 4 minutes ahead in items is refused", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:18:00Z"})
+# Passes: an `added` 5 minutes behind is behind the clock, so it passes.
+mtc_set("an added 5 minutes behind in items is allowed: a value behind the clock passes", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:09:00Z"})
+# Refused: the offset form, 11 minutes ahead (14:25 CST is 20:25Z).
+mtc_set("an added 14:25 at -06:00, 11 minutes ahead, in items is refused", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:25:00-06:00"})
+# Passes: 14:14 at -05:00 is 19:14Z, 60 minutes behind the clock, so it passes.
+mtc_set("an added of 14:14 at -05:00 in items is allowed: 60 minutes behind, a value behind passes", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-05:00"})
+# Refused: 14:14 at -07:00 is 21:14Z, 60 minutes ahead. A reader that drops the offset sees 0 and allows it.
+mtc_set("an added of 14:14 at -07:00 in items is refused: 60 minutes ahead, the offset counts", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-07:00"})
+# Refused: an update is judged as a set is.
+mtc_set("an update that sets an added 4 minutes ahead in items is refused", "deny",
+        {"added": "2026-11-07T20:18:00Z"}, action="update")
+# Passes: an update that sets a value 10 minutes behind passes.
+mtc_set("an update that sets an added 10 minutes behind in items is allowed", "allow",
+        {"added": "2026-11-07T20:04:00Z"}, action="update")
+# Refused: each write of a batch is judged. The first is exact, the second 16 minutes ahead.
+mtc_batch("a batch whose second write sets an added 16 minutes ahead is refused", "deny", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"}},
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-next",
+     "data": {"id": "silent-undo-edit-next", "added": "2026-11-07T20:30:00Z"}}])
+# Refused: a step Write, judged on the content's JSON, 16 minutes ahead.
+mtc_write("a roadmap step Write with updatedAt 14:30 at -06:00 is refused", "deny", "Write",
+          file_path=MTC_STEP, content=MTC_OFF_STEP)
+# Refused: the stamp sits after a full-size note. The whole content is read, however long it is.
+mtc_write("a roadmap step Write whose updatedAt follows a full-size note is refused, however long the content",
+          "deny", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "note": "' + MTC_BODY + '", "updatedAt": "2026-11-07T14:30:00-06:00"}\n')
+# Refused: a step Edit, judged on its new_string. The old_string holds an exact time and is not the one judged.
+mtc_write("a roadmap step Edit whose new_string holds updatedAt 14:30 at -06:00 is refused", "deny", "Edit",
+          file_path=MTC_STEP, old_string='"updatedAt": "2026-11-07T14:14:00-06:00"',
+          new_string='"updatedAt": "2026-11-07T14:30:00-06:00"')
+# Refused: the literal form in a Bash heredoc, the shape the incident's writes took.
+mtc_bash("a Bash heredoc with updatedAt=\"2026-11-07T14:30:00-06:00\" is refused", "deny",
+         'cat > "$D/silent-undo-edit-pass.txt" <<\'EOF\'\nupdatedAt="2026-11-07T14:30:00-06:00"\nEOF')
+# Refused: the JSON form in a Bash heredoc.
+mtc_bash("a Bash heredoc of JSON with \"updatedAt\": 14:30 at -06:00 is refused", "deny",
+         'cat > "$D/silent-undo-edit-pass.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00-06:00"}\nEOF')
+# Refused: a comment opener, `#`, inside a double-quoted string does not hide the literal after it on the line.
+mtc_bash("a Bash literal after a # inside a double-quoted string is refused", "deny",
+         r"""echo "step #2 of 4"; printf '%s\n' 'updatedAt="2026-11-07T14:30:00-06:00"'""")
+# Refused: a lone apostrophe in unquoted text does not hide the literal, though a quote-aware reader would skip it.
+mtc_bash("a Bash literal after a lone apostrophe in unquoted text is refused", "deny",
+         r"""echo Owner's step; printf '%s\n' 'updatedAt="2026-11-07T14:30:00-06:00"'""")
+# Refused: an escaped JSON form in a double-quoted string is the same literal once the shell reads it.
+mtc_bash("an escaped JSON updatedAt 14:30 at -06:00 in a double-quoted string is refused", "deny",
+         r'''printf "%s\n" "{\"id\": \"silent-undo-edit-pass\", \"updatedAt\": \"2026-11-07T14:30:00-06:00\"}" > "$D/silent-undo-edit-pass.json"''')
+# Refused: a literal on the second line of a multi-line single-quoted string is still a literal in the command.
+mtc_bash("a Bash literal on line 2 of a multi-line single-quoted string is refused", "deny",
+         r"""printf '%s\n' 'step one
+updatedAt="2026-11-07T14:30:00-06:00"'""")
+
+# Refused: 20:16Z is 2 minutes ahead, past the 1-minute limit. This is the incident's own value.
+mtc_set("an added 20:16Z, 2 minutes ahead, in items is refused: the incident value is past the limit", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:16:00Z"})
+# Passes: 20:15Z is 1 minute ahead, inside the limit. The limit is inclusive.
+mtc_set("an added 20:15Z, 1 minute ahead, in items is allowed: the limit is inclusive", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:15:00Z"})
+# Refused: the clock is 20:14:59Z, whose minute is 20:14, so 20:16Z is 2 minutes ahead. Kept to the second, the gap
+# is 61 seconds, one whole minute, so the value would pass. The clock's seconds are cut to the minute first.
+mtc_set("an added 20:16Z in items is refused at a clock of 20:14:59: the clock's seconds are cut to the minute",
+        "deny", {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:16:00Z"},
+        clock="2026-11-07T14:14:59-06:00")
+# Passes: 14:14 CST exact, in each form. The Z form first.
+mtc_set("an added exactly 20:14Z in items is allowed", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"})
+mtc_set("an added exactly 14:14 at -06:00 in items is allowed", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-06:00"})
+# Passes: `added` is judged in collection items only. Answers and receipts are not judged, though 36 minutes off.
+mtc_set("an added 36 minutes ahead in answers is allowed: only collection items is judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="answers")
+mtc_set("an added 36 minutes ahead in receipts is allowed: only collection items is judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="receipts")
+# Passes: other fields are not judged. `replied` in answers and `ruled` in items are 3 hours off, and pass.
+mtc_set("a replied 3 hours off in answers is allowed: replied is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "replied": "2026-11-07T23:14:00Z"}, collection="answers")
+mtc_set("a ruled 3 hours off in items is allowed: ruled is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "ruled": "2026-11-07T17:14:00Z"})
+# Passes: a time in prose, HH:MM CST inside note or why, is not a written value.
+mtc_set("an HH:MM CST time inside note and why in items is allowed: quoted times in prose pass", "allow",
+        {"id": "silent-undo-edit-pass", "note": "Owner ruled at 13:40 CST: pick b.", "why": "Asked at 13:40 CST."})
+# Passes: a value with no offset is not judged.
+mtc_set("an added with no offset in items is allowed: a value with no offset is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:30:00"})
+# Passes: an update that carries no added is not judged, the empty case of the field.
+mtc_set("an update that carries no added is allowed", "allow", {"status": "closed"}, action="update")
+# Passes: a batch of right writes, one of them in answers, is allowed.
+mtc_batch("a batch of right writes, one in answers 36 minutes off, is allowed", "allow", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"}},
+    {"op": "set", "collection": "answers", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}}])
+# Passes: a step Write at 14:14 exact, in each form, and a step with no updatedAt at all.
+mtc_write("a roadmap step Write at 20:14Z exact is allowed", "allow", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T20:14:00Z"}\n')
+mtc_write("a roadmap step Write at 14:14 at -06:00 exact is allowed", "allow", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:14:00-06:00"}\n')
+mtc_write("a roadmap step Write with no updatedAt is allowed: the empty case", "allow", "Write",
+          file_path=MTC_STEP, content='{"id": "silent-undo-edit-pass"}\n')
+mtc_write("a roadmap step Write with an updatedAt that has no offset is allowed", "allow", "Write",
+          file_path=MTC_STEP, content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00"}\n')
+# Passes: a Write to a path that is not a step file is not judged, though its updatedAt is 16 minutes ahead.
+mtc_write("a Write to a non-step path holding updatedAt 14:30 at -06:00 is allowed", "allow", "Write",
+          file_path=MTC_NOT_STEP, content=MTC_OFF_STEP)
+# Passes: a step Edit at exact time, in each form.
+mtc_write("a roadmap step Edit whose new_string holds 20:14Z exact is allowed", "allow", "Edit", file_path=MTC_STEP,
+          old_string='"updatedAt": "2026-11-07T14:14:00-06:00"', new_string='"updatedAt": "2026-11-07T20:14:00Z"')
+mtc_write("a roadmap step Edit whose new_string holds 14:14 at -06:00 exact is allowed", "allow", "Edit",
+          file_path=MTC_STEP, old_string='"updatedAt": "2026-11-07T20:14:00Z"',
+          new_string='"updatedAt": "2026-11-07T14:14:00-06:00"')
+# Passes: the literal forms at exact time, in each form.
+mtc_bash("a Bash heredoc with updatedAt=\"2026-11-07T20:14:00Z\" exact is allowed", "allow",
+         'cat > "$D/silent-undo-edit-pass.txt" <<\'EOF\'\nupdatedAt="2026-11-07T20:14:00Z"\nEOF')
+mtc_bash("a Bash heredoc of JSON with updatedAt 14:14 at -06:00 exact is allowed", "allow",
+         'cat > "$D/silent-undo-edit-pass.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:14:00-06:00"}\nEOF')
+# Passes: `updatedAt=$T` is a shell variable, not a literal, so the value the variable takes is not read.
+mtc_bash("a Bash updatedAt=$T from a shell variable is allowed: a variable is not a literal", "allow",
+         'T=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo updatedAt=$T')
+
+
+# Passes: an old updatedAt or added that a write keeps, resends or quotes is behind the clock, so it passes.
+mtc_write("a roadmap step Write that changes note and keeps an old updatedAt 2026-11-06T18:00Z is allowed", "allow",
+          "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "note": "Changed the note.", "updatedAt": "2026-11-06T18:00:00Z"}\n')
+mtc_write("a roadmap step Edit whose new_string carries the old updatedAt 2026-11-06T18:00Z is allowed", "allow",
+          "Edit", file_path=MTC_STEP, old_string='"note": "Old note."',
+          new_string='"note": "New note.",\n  "updatedAt": "2026-11-06T18:00:00Z"')
+mtc_set("an ArtifactData set that resends an old added 2026-11-01T10:00Z in items is allowed", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-01T10:00:00Z", "note": "Resent."})
+mtc_bash("a Bash git log -S for the old updatedAt literal is allowed", "allow",
+         """git log -S '"updatedAt": "2026-11-06T18:00:00Z"' --oneline -- roadmap/data/steps""")
+mtc_bash("a Bash grep for the old updatedAt literal is allowed", "allow",
+         """grep -rn '"updatedAt": "2026-11-06T18:00:00Z"' roadmap/data/steps""")
+mtc_bash("a Bash heredoc fixture holding the old updatedAt literal is allowed", "allow",
+         'cat > "$D/fixture.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-06T18:00:00Z"}\nEOF')
+
+
+# Passes: a repair that rewrites an ahead value to the clock. The command holds the ahead value first and the right
+# time last. Only the last literal is the value the command leaves, so only that one is judged.
+mtc_bash("a Bash sed repair of updatedAt from 14:30 to 14:14 at -06:00 is allowed: the last literal is the clock", "allow",
+         r"""sed -i 's/"updatedAt": "2026-11-07T14:30:00-06:00"/"updatedAt": "2026-11-07T14:14:00-06:00"/' roadmap/data/steps/x.json""")
+mtc_bash("a Bash Python string replace of updatedAt from 14:30 to 14:14 at -06:00 is allowed: the last literal is the clock",
+         "allow",
+         r'''python3 -c "import json; p='roadmap/data/steps/x.json'; s=open(p).read(); open(p,'w').write(s.replace('\"updatedAt\": \"2026-11-07T14:30:00-06:00\"', '\"updatedAt\": \"2026-11-07T14:14:00-06:00\"'))"''')
+# Passes: `==` is a comparison, not a write, so the regex skips it. Only the assignment's value, 14:10 CST, is judged.
+mtc_bash("a Bash Python == check of updatedAt 14:30 at -06:00, then an = write of 14:10, is allowed: a comparison is not judged",
+         "allow",
+         r"""python3 -c 'import json; d=json.load(open("roadmap/data/steps/x.json")); assert d["updatedAt"] == "2026-11-07T14:30:00-06:00"; d["updatedAt"] = "2026-11-07T14:10:00-06:00"; json.dump(d, open("roadmap/data/steps/x.json","w"))'""")
+# Refused: the last literal is 14:30 at -06:00, 16 minutes ahead. The earlier 14:00 is behind, and does not hide it.
+mtc_bash("a Bash sed that sets updatedAt 14:00 to 14:30 at -06:00, the last literal ahead, is refused", "deny",
+         r"""sed -i 's/"updatedAt": "2026-11-07T14:00:00-06:00"/"updatedAt": "2026-11-07T14:30:00-06:00"/' roadmap/data/steps/x.json""")
+
+
+# ---- the document through file_path, and the str_replace action: `added` written two more ways
+# A set, an update or a batch entry may pass the document through `file_path`, a local JSON file, instead of `data`.
+# A str_replace edits one top-level string field in place. Both can carry `added` into collection items, so both
+# are judged. The refuse cases hold a value 10 minutes ahead (20:24Z); each pair holds the exact value (20:14Z).
+MTC_FILE_DIR = os.path.join(ROOT, "mtc")  # a folder of the run folder, for the document files below
+os.makedirs(MTC_FILE_DIR, exist_ok=True)
+
+
+def mtc_doc_file(name, added):
+    """A local JSON file holding one item document with `added`, under the run folder."""
+    path = os.path.join(MTC_FILE_DIR, name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"id": "silent-undo-edit-pass", "added": added}, f)
+    return path
+
+
+MTC_FILE_AHEAD = mtc_doc_file("ahead.json", "2026-11-07T20:24:00Z")  # 10 minutes ahead of the clock
+MTC_FILE_EXACT = mtc_doc_file("exact.json", "2026-11-07T20:14:00Z")  # the clock itself
+
+# Refused: a set whose document comes through file_path, 10 minutes ahead. The guard reads the file, not only data.
+mtc_write("a set that passes an item through file_path with added 10 minutes ahead is refused", "deny",
+          "ArtifactData", url=MTC_ITEM_URL, action="set", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_AHEAD)
+mtc_write("an update that passes an item through file_path with added 10 minutes ahead is refused", "deny",
+          "ArtifactData", url=MTC_ITEM_URL, action="update", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_AHEAD)
+mtc_batch("a batch entry that passes an item through file_path with added 10 minutes ahead is refused", "deny", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass", "file_path": MTC_FILE_AHEAD}])
+# Passes: the same three with added at the clock itself, 20:14Z.
+mtc_write("a set that passes an item through file_path with added exactly 20:14Z is allowed", "allow",
+          "ArtifactData", url=MTC_ITEM_URL, action="set", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_EXACT)
+mtc_write("an update that passes an item through file_path with added exactly 20:14Z is allowed", "allow",
+          "ArtifactData", url=MTC_ITEM_URL, action="update", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_EXACT)
+mtc_batch("a batch entry that passes an item through file_path with added exactly 20:14Z is allowed", "allow", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass", "file_path": MTC_FILE_EXACT}])
+
+# Refused: a str_replace of the added field in items, which moves its value to 10 minutes ahead (20:24Z).
+mtc_write("a str_replace that moves added in items to 10 minutes ahead is refused", "deny", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:04:00Z", new_str="2026-11-07T20:24:00Z")
+# Passes: the same str_replace to the clock itself, 20:14Z.
+mtc_write("a str_replace that moves added in items to exactly 20:14Z is allowed", "allow", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:04:00Z", new_str="2026-11-07T20:14:00Z")
+
+# ---- written forms the check judges: a value with no updatedAt key in a roadmap step Edit, a date-less fragment in a
+# str_replace, and a shell assignment with a single-quoted pair. The check judges the value a write lands, not the key
+# beside it. A shell command is judged only through a literal updatedAt key with a quoted value. An unquoted value, or a
+# value with no key, is still missed.
+# Refused: an Edit of a step file that writes 14:30 at -06:00 over an older instant. Its new_string has no key.
+mtc_write("a roadmap step Edit that writes 14:30 at -06:00 over an older instant, with no updatedAt key, is refused",
+          "deny", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T14:30:00-06:00")
+# Refused: the same write as one entry of a MultiEdit. The entry's new_string has no updatedAt key.
+mtc_write("a roadmap step MultiEdit entry that writes 14:30 at -06:00 over an older instant, with no key, is refused",
+          "deny", "MultiEdit", file_path=MTC_STEP,
+          edits=[{"old_string": "2026-11-07T13:00:00-06:00", "new_string": "2026-11-07T14:30:00-06:00"}])
+# Refused: the same entry with its updatedAt key, the form the check already reads. A control for the case above.
+mtc_write("a roadmap step MultiEdit entry whose new_string holds updatedAt 14:30 at -06:00 is refused", "deny",
+          "MultiEdit", file_path=MTC_STEP,
+          edits=[{"old_string": '"updatedAt": "2026-11-07T13:00:00-06:00"',
+                  "new_string": '"updatedAt": "2026-11-07T14:30:00-06:00"'}])
+# Passes: the keyless Edit at a value 10 minutes behind the clock, and at the clock itself.
+mtc_write("a roadmap step Edit that writes 14:04 at -06:00 over an older instant, with no updatedAt key, is allowed",
+          "allow", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T14:04:00-06:00")
+mtc_write("a roadmap step Edit that writes exactly 20:14Z over an older instant, with no updatedAt key, is allowed",
+          "allow", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T20:14:00Z")
+# Refused: a str_replace that sets added to the fragment T20:24:00Z. A fragment has no full instant to read.
+mtc_write("a str_replace that sets added in items to the fragment T20:24:00Z is refused", "deny", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="T20:04:00Z", new_str="T20:24:00Z")
+# Passes: a str_replace that sets added to a full instant 10 minutes behind the clock.
+mtc_write("a str_replace that moves added in items to 10 minutes behind is allowed", "allow", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:02:00Z", new_str="2026-11-07T20:04:00Z")
+# Refused: a python3 -c dict assignment with a double-quoted key. A `]` sits between the key and the `=`.
+mtc_bash("a Bash python3 -c dict assignment of updatedAt 14:30 at -06:00 is refused", "deny",
+         r"""python3 -c 'd["updatedAt"] = "2026-11-07T14:30:00-06:00"'""")
+# Refused: the same with a single-quoted key, d['updatedAt']=, and the value double-quoted.
+mtc_bash("a Bash python3 -c assignment with a single-quoted updatedAt key, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "d['updatedAt']=\"2026-11-07T14:30:00-06:00\""''')
+# Refused: a jq |= assignment of updatedAt 14:30 at -06:00. The `|` sits between the key and the value.
+mtc_bash("a Bash jq |= assignment of updatedAt 14:30 at -06:00 is refused", "deny",
+         r"""jq '.updatedAt |= "2026-11-07T14:30:00-06:00"' roadmap/data/steps/silent-undo-edit-pass.json""")
+# Refused: a single-quoted key and value, 16 minutes ahead. The scan reads the command as text, not as shell tokens,
+# so the quote style does not hide the literal from the clock.
+mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:30:00-06:00'"''')
+# Passes: the same assignment 4 minutes behind the clock. A value behind the clock passes.
+mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:10 at -06:00, is allowed", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:10:00-06:00'"''')
+# Passes: the value opens on a single quote and closes on a double one, 16 minutes ahead. The `\1` backreference holds
+# the close to the open quote, so this mismatched pair is not a literal the scan reads.
+mtc_bash("a Bash value opened on a single quote and closed on a double, 14:30 at -06:00, is allowed: the pair must match",
+         "allow", r'''d['updatedAt']='2026-11-07T14:30:00-06:00"''')
+# Refused: a dict literal with a single-quoted key and value, 16 minutes ahead.
+mtc_bash("a Bash python3 -c dict literal with a single-quoted updatedAt, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "d={'updatedAt': '2026-11-07T14:30:00-06:00'}"''')
+# Passes: the same dict literal 4 minutes behind the clock.
+mtc_bash("a Bash python3 -c dict literal with a single-quoted updatedAt, 14:10 at -06:00, is allowed", "allow",
+         r'''python3 -c "d={'updatedAt': '2026-11-07T14:10:00-06:00'}"''')
+# Refused: the incident's Python write as written. Its value, 05:40Z on Nov 2, is 23:40 CST, which is 10 minutes ahead
+# of a 23:30 CST clock. At the 14:14 CST clock that value is days behind, so that clock cannot refuse this command.
+mtc_bash("the incident Python write, a single-quoted updatedAt 10 minutes ahead at 23:30 CST, is refused", "deny",
+         INCIDENT_PYTHON_WRITE, clock="2026-11-01T23:30:00-06:00",
+         carries=("23:30 CST", "2026-11-01T23:30-06:00", "2026-11-02T05:30Z"), transcript=TRIAGE_TRANSCRIPT)
+# Passes: the same write at 23:41 CST, a minute after its value. A value behind the clock passes.
+mtc_bash("the incident Python write at 23:41 CST, a minute after its value, is allowed", "allow",
+         INCIDENT_PYTHON_WRITE, clock="2026-11-01T23:41:00-06:00", transcript=TRIAGE_TRANSCRIPT)
+# Passes: a single-quoted repair from 14:30 to 14:10 at -06:00, the behind value last. Only the last keyed literal is
+# judged, and it is behind the clock.
+mtc_bash("a Bash single-quoted repair from 14:30 to 14:10 at -06:00, the behind value last, is allowed", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:30:00-06:00'.replace(\"'updatedAt': '2026-11-07T14:30:00-06:00'\", \"'updatedAt': '2026-11-07T14:10:00-06:00'\")"''')
+# Passes: a grep for a single-quoted key holds no instant, so no written value is judged.
+mtc_bash("a Bash grep for a single-quoted updatedAt key with no instant is allowed", "allow",
+         r'''grep "'updatedAt'" roadmap/data/steps/x.json''')
+# Passes: // and /* inside quoted strings, beside an updatedAt 20 minutes behind. The scan must not crash or refuse.
+mtc_bash("a Bash command with // and /* inside quoted strings, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "see http://claude.ai/x /* note */" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: a JSX-like text, <p>Don't</p>, beside a behind updatedAt. A lone apostrophe must not stop the scan.
+mtc_bash("a Bash command with <p>Don't</p> text, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "<p>Don't</p>" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: an instant 16 minutes ahead in prose, beside a behind updatedAt. Only a literal updatedAt value is judged.
+mtc_bash("a Bash command with an instant 16 minutes ahead in prose, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "due 2026-11-07T14:30:00-06:00 for the step" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: `!=` is a compare, not a write, so the value after it is not judged, even 16 minutes ahead at 14:14 CST.
+mtc_bash("a Bash != compare of updatedAt to 14:30 at -06:00 is allowed: a compare writes no value", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); print(d['updatedAt'] != '2026-11-07T14:30:00-06:00')"''')
+# Passes: `>` is a compare too, so the value after it is not judged, even 16 minutes ahead at 14:14 CST.
+mtc_bash("a Bash > compare of updatedAt to 14:30 at -06:00 is allowed: a compare writes no value", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); print(d['updatedAt'] > '2026-11-07T14:30:00-06:00')"''')
+# Refused at a CDT clock: the reason prints the clock with its -05:00 offset, and no CST offset.
+mtc_set("an added 14 minutes ahead in items, at a CDT clock of 09:26, is refused: the reason prints -05:00", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-07-08T14:40:00Z"},
+        clock=MTC_CDT_CLOCK, carries=MTC_CDT_CARRIES, lacks=("-06:00",))
 
 # =========================================================================== 5i. SendMessage to a cloud session
 FAMILY = "sendmessage-session-id"
@@ -20278,7 +20929,6 @@ def _mirror_names_tie():
 LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
                          _mirror_names_tie))
 
-
 # ---- resolve-vars: `_resolve_vars` of guard_frozen, read as the shell reads each assignment. A check reads
 # the use site (the last `;` segment, double quotes removed), so a fix that rewrites an assignment's own text
 # still passes. The guard under test is loaded as every check loads it (GUARD_UNDER_TEST is honoured).
@@ -20366,21 +21016,22 @@ RESOLVE_CASES = (
 for _label, _command, _want in RESOLVE_CASES:
     LOG_CHECKS_EXTRA.append((_label, resolve_case(_command, _want)))
 
-# ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
-# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
-# verb from each of them. One check per root flag form, called on gh_call_of directly.
+# ---- merge: gh_call_of reads the pr verb past a repo flag. Its callers (merge_call_of, the draft-PR read,
+# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front of the verb,
+# or after the group word, hides the verb from each of them. One check per flag form, called on gh_call_of directly.
 FAMILY = "merge"
 
 
 def gh_root_flag_verb_check(segment, verb):
-    """True when gh_call_of's first two words are the verb, so the root flag before it is read past."""
+    """True when gh_call_of's first two words are the verb, so a repo flag in front of the verb, or after the
+    group word, is read past."""
     guard = _load_guard_module()
     rest = guard.gh_call_of(segment)
     if rest is None:
         return False, "gh_call_of reads no gh call in %r" % segment
     if rest[:2] != verb:
         return False, "gh_call_of(%r) gives %r, so its first two words are not %r" % (segment, rest, verb)
-    return True, "gh_call_of(%r) reads %r past the root flag" % (segment, verb)
+    return True, "gh_call_of(%r) reads %r past the repo flag" % (segment, verb)
 
 
 def gh_root_dash_r_check():
@@ -20395,12 +21046,104 @@ def gh_root_repo_spaced_check():
     return gh_root_flag_verb_check("gh --repo o/r pr create --fill", ["pr", "create"])
 
 
-FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check))
+# The same flag after the group word (`gh pr -R o/r merge`): gh reads it there too. Each form has a check. A repo
+# value that reads as a verb is the value, never the verb.
+def gh_group_dash_r_check():
+    return gh_root_flag_verb_check("gh pr -R o/r merge 12", ["pr", "merge"])
+
+
+def gh_group_repo_equals_check():
+    return gh_root_flag_verb_check("gh pr --repo=o/r merge 12", ["pr", "merge"])
+
+
+def gh_group_repo_spaced_check():
+    return gh_root_flag_verb_check("gh issue --repo o/r comment 3 --body x", ["issue", "comment"])
+
+
+def gh_group_joined_dash_r_check():
+    return gh_root_flag_verb_check("gh pr -Ro/r merge 12", ["pr", "merge"])
+
+
+def gh_group_value_verb_check():
+    return gh_root_flag_verb_check("gh pr -R list comment 5", ["pr", "comment"])
+
+
+FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check,
+                           gh_group_dash_r_check, gh_group_repo_equals_check, gh_group_repo_spaced_check,
+                           gh_group_joined_dash_r_check, gh_group_value_verb_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R root flag", gh_root_dash_r_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> root flag",
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R flag after the group word",
+                         gh_group_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> flag after the group word",
+                         gh_group_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the issue verb past a spaced --repo <repo> flag after the group word",
+                         gh_group_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a joined -R<repo> flag after the group word",
+                         gh_group_joined_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a repo value that looks like a verb, "
+                         "after the group word", gh_group_value_verb_check))
+
+
+# ---- merge: merge_call_of reads the repo value, not only the verb. A repo flag joined to its value (-Ro/r) gave
+# repo '', which is the working directory's repo, so the merge check read the wrong repo. The spaced and equals forms
+# are controls: they read the repo already. Each check asserts the selector (scope) before the repo (subject).
+def merge_call_repo_check(segment, want_repo):
+    """True when merge_call_of reads the pull request '12' and the repo `want_repo` from a `gh pr merge` segment."""
+    guard = _load_guard_module()
+    got = guard.merge_call_of(segment)
+    if got is None:
+        return False, "merge_call_of reads no gh pr merge in %r" % segment
+    selector, repo = got
+    if selector != "12":
+        return False, "merge_call_of(%r) gives selector %r, not '12'" % (segment, selector)
+    if repo != want_repo:
+        return False, "merge_call_of(%r) gives repo %r, not %r" % (segment, repo, want_repo)
+    return True, "merge_call_of(%r) reads repo %r" % (segment, want_repo)
+
+
+def merge_repo_joined_before_verb_check():
+    return merge_call_repo_check("gh -Ro/r pr merge 12", "o/r")
+
+
+def merge_repo_joined_after_group_check():
+    return merge_call_repo_check("gh pr -Ro/r merge 12", "o/r")
+
+
+def merge_repo_joined_after_verb_check():
+    return merge_call_repo_check("gh pr merge 12 -Ro/r", "o/r")
+
+
+def merge_repo_spaced_dash_r_check():
+    return merge_call_repo_check("gh pr merge 12 -R o/r", "o/r")
+
+
+def merge_repo_spaced_repo_check():
+    return merge_call_repo_check("gh pr merge 12 --repo o/r", "o/r")
+
+
+def merge_repo_equals_check():
+    return merge_call_repo_check("gh pr merge 12 --repo=o/r", "o/r")
+
+
+FIXTURELESS_CHECKS.update((merge_repo_joined_before_verb_check, merge_repo_joined_after_group_check,
+                           merge_repo_joined_after_verb_check, merge_repo_spaced_dash_r_check,
+                           merge_repo_spaced_repo_check, merge_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag before the verb",
+                         merge_repo_joined_before_verb_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag after the group word",
+                         merge_repo_joined_after_group_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag after the verb",
+                         merge_repo_joined_after_verb_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a spaced -R <repo> flag after the verb",
+                         merge_repo_spaced_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a spaced --repo <repo> flag after the verb",
+                         merge_repo_spaced_repo_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a --repo=<repo> flag after the verb",
+                         merge_repo_equals_check))
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
@@ -24305,6 +25048,47 @@ def pd_budget_case():
 LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
 
 
+def pd_batch_miss_case():
+    """A batch of three pictured items: the first is unknown, the second misses, the third would pass. The deny names
+    the second, the checker is not run on the third (the loop ends at the first miss), and the first's unknown is one
+    noted line. The checker is a stand-in that answers by item, so nothing renders and the case stays fast."""
+    seen = []
+    ids = ["miss-1", "miss-2", "miss-3"]
+
+    def stand_in(page_file, item):
+        seen.append(item["id"])
+        if item["id"] == "miss-1":
+            return 3, "checker cannot run for item one"
+        if item["id"] == "miss-2":
+            return 1, "item two's mockup draws no focus"
+        return 0, ""
+    repo = pd_repo("batch-miss", PD_PAGE)
+    writes = [{"op": "set", "collection": "items", "doc_id": doc, "data": pd_item(id=doc)} for doc in ids]
+    payload = {"tool_name": "ArtifactData", "cwd": repo,
+               "tool_input": {"url": PQ_URL, "action": "batch", "writes": writes}}
+    _calls, out, rows = pd_judged(payload, "batch-miss", seam=stand_in)
+    decision, reason = read_decision(out)
+    noted = pd_noted(rows)
+    problems = []
+    if seen != ids[:2]:
+        problems.append("the checker ran on %s, want %s: one call per item up to the first miss, none for item three"
+                        % (seen, ids[:2]))
+    if decision != "deny":
+        problems.append("want deny, got %s: %s" % (decision, reason[:160]))
+    elif "item two's mockup draws no focus" not in reason:
+        problems.append("the deny does not name item two: %s" % reason[:160])
+    if len(noted) != 1:
+        problems.append("want one noted/page-item-design line for item one's unknown, found %d" % len(noted))
+    elif "checker cannot run for item one" not in "\t".join(noted[0]):
+        problems.append("the noted line does not carry item one's unknown: %r" % noted[0])
+    return (not problems), ("; ".join(problems)
+                            or "the deny names item two, the checker stops there, one noted line for item one")
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: a batch whose second item misses is denied there, with no run of the third",
+                         pd_batch_miss_case))
+
+
 # --------------------------------------------------------------------------- a design names its file, in a mockup home
 
 # Rule mockup-home (the file of a waiting item's design, judged at write). The one mockup home is the repo's design
@@ -27732,10 +28516,10 @@ LOG_CHECKS_EXTRA.append(("agent-remote-tools: REMOTE_OUTWARD_TOOLS holds exactly
                          pinned_outward_check))
 FAMILY = "rule9"  # the family the cases below had before this section
 
-# ---- Lane effort pin. A lane session runs Sonnet at medium effort. On a cloud session the only
-# prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
-# command. So a create_session that tags a lane must carry that prompt alone. Calls without the
-# lane tag are not judged by this rule.
+# ---- Lane effort pin. A lane session runs Sonnet at medium effort. A create_session that tags a lane
+# names that effort in its `effort` field, and its prompt opens with the owner's grant: the first
+# non-blank line is `Grant: <owner words>, <time>`, and the brief follows it. A prompt that is only
+# the effort command is refused. Calls without the lane tag are not judged by this rule.
 LANE_TOOL = "mcp__claude-code-remote__create_session"
 # A lane call also tags the repo it works on (rule lane-repo-tag). Each lane case names its checkout by
 # `cwd`, and carries the origin repo's tag, so this rule judges only the effort pin.
@@ -27759,6 +28543,11 @@ RAW_ORIGIN_ENV = {name: None for name in os.environ if name.startswith("GIT_CONF
 OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
 # A lane call names the model it starts on and the repo it starts from. Each allow case below carries both.
 LANE_SOURCE_URL = "https://github.com/shivinate7/claude-settings"
+# The lane start's prompt: the owner's grant as its first non-blank line, then the brief. The lane's effort is
+# the `effort` field. Every lane case below carries both, so a case that expects another rule names only its own cause.
+LANE_GRANT = "Grant: B is good, 13:19 CST Nov 10"
+LANE_PROMPT = LANE_GRANT + "\nDo the task in the brief file."
+LANE_EFFORT_FIELD = "medium"
 
 
 def _build_lane_origins():
@@ -27772,21 +28561,42 @@ def _build_lane_origins():
 
 
 lazy_fixture(list(LANE_ORIGINS), _build_lane_origins)
+add("lane-effort-pin: lane tag with a grant line first and effort medium is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with blank lines before the grant line is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="\n  \n" + LANE_PROMPT,
+    effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with the effort command alone is denied, even at effort medium", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium",
+    effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with a grant line that is not first is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt="Do the task in the brief file.\n" + LANE_GRANT, effort=LANE_EFFORT_FIELD,
+    carries="Grant", model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-effort-pin: lane tag with a brief after the effort command is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\nbrief")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\nbrief",
+    effort=LANE_EFFORT_FIELD, carries="Grant")
 add("lane-effort-pin: lane tag with a prompt that is not the effort command is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="do the task")
 add("lane-effort-pin: lane tag with /effort high is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort high")
 add("lane-effort-pin: lane tag with no prompt is denied", "deny", "lane-effort-pin",
     tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS)
-add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium",
-    model="sonnet", source_url=LANE_SOURCE_URL)
-add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
-    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n")
-add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n")
+# The refusal of a missing or other effort names the field, and never the old two-step start (the effort
+# command, then the brief by send_message), which the owner disowned.
+add("lane-effort-pin: lane tag with no effort field is denied, even with the grant line first", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=LANE_PROMPT,
+    lacks="send_message", model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with effort high is denied, even with the grant line first", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=LANE_PROMPT,
+    effort="high", lacks="send_message", model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with the effort command padded by space and a newline, and no grant, is denied",
+    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n",
+    effort=LANE_EFFORT_FIELD, carries="Grant")
+add("lane-effort-pin: lane tag with the effort command and a trailing newline, and no grant, is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n",
+    effort=LANE_EFFORT_FIELD, carries="Grant")
 add("lane-effort-pin: lane tag with a trailing space and a wrong prompt is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
     tags=["cs-build:lane ", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
@@ -27797,8 +28607,30 @@ add("lane-effort-pin: lane tag given as a string with a wrong prompt is denied",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags="cs-build:lane", prompt="do the task")
 add("lane-effort-pin: triage tag with any prompt is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
+add("lane-effort-pin: a create_session with no lane tag passes unchanged, with the effort command alone", "allow",
+    tool=LANE_TOOL, tags=["cs-build:triage"], prompt="/effort medium")
 add("lane-effort-pin: create_session with no tags is allowed", "allow",
     tool=LANE_TOOL, prompt="do the task")
+# Grant start. The owner ruled ("B is good"): a lane starts with the effort field at
+# medium and its whole brief as the prompt, opening with the Grant line. The brief's Topic must match the lane's cs-topic tag
+# at create_session, as it must at send_message (rule lane-one-topic). A Grant line with no owner words is no grant: a
+# template placeholder, or punctuation alone, is refused.
+add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic colors is denied", "deny",
+    "lane-one-topic", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
+    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: colors.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic alpha is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
+    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: alpha.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with a grant line that holds a template placeholder is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt="Grant: <owner words>, <time>\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with a grant line that is only a comma is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt="Grant: ,\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
 
 # ---- Lane repo tag. A lane call tags the repo it works on: `cs-repo:<owner>/<name>`, equal (casefolded) to
 # the calling checkout's origin repo. The origin repo is the last two segments of the origin's PATH, `.git`
@@ -27807,36 +28639,36 @@ add("lane-effort-pin: create_session with no tags is allowed", "allow",
 # The proxy and `.git` origins each pair an allow with a deny for another repo, so a rule that fails open
 # on an origin it cannot parse turns a case red.
 add("lane-repo-tag: lane tag with no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
 add("lane-repo-tag: lane tag with the short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: lane tag with only another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: lane tag given as a string with no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags="cs-build:lane")
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane")
 add("lane-repo-tag: origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: origin repo tag in other case is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: roll-out lane with its target repo and the origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"],
     model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: non-lane call with no repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:triage"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:triage"])
 add("lane-repo-tag: proxy-host origin, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: proxy-host origin, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: origin with a .git suffix, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: origin with a .git suffix, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
 # No readable origin: a git checkout with no origin remote, and a folder that is no checkout at all (NOGIT).
@@ -27852,55 +28684,55 @@ def _build_lane_no_origin():
 
 lazy_fixture([LANE_NO_ORIGIN], _build_lane_no_origin)
 add("lane-repo-tag: a checkout with no origin, full repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a checkout with no origin, short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: a checkout with no origin, no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
 add("lane-repo-tag: a folder that is not a checkout, full repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a folder that is not a checkout, short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: a folder that is not a checkout, no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
 
 # Strict tag reading, the one the roadmap uses (repo_tag_names): the exact prefix, no strip, owner/name
 # without case. A stray space or an upper-case prefix names no repo, so it is denied, even the origin's own.
 add("lane-repo-tag: origin repo tag with a trailing space is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
 add("lane-repo-tag: origin repo tag with a leading space is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", " cs-repo:shivinate7/claude-settings"])
 add("lane-repo-tag: origin repo tag with an upper-case prefix is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "CS-REPO:shivinate7/claude-settings"])
 add("lane-repo-tag: origin repo tag with a trailing space is denied, from a checkout with no origin", "deny",
-    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
 
 # A local-path origin, with no scheme, names its repo by the path itself. Its own tag passes; another's does not.
 add("lane-repo-tag: a local-path origin, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
 # The origin forms that the parse arms read. Each pins its arm with the raw origin: see RAW_ORIGIN_ENV.
 add("lane-repo-tag: an scp origin, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an scp origin, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: an ssh origin with a port, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an ssh origin with a port, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
 # An extras file names the GitHub repo: the roadmap reads its "roadmap" object's "github" first (skills/roadmap/build.py
@@ -27920,15 +28752,15 @@ def _build_lane_extras():
 
 lazy_fixture([LANE_EXTRAS], _build_lane_extras)
 add("lane-repo-tag: an extras file names the GitHub repo, its tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:org/name"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an extras file names the GitHub repo, the origin's path is no repo tag", "deny",
-    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:x/y"])
 
 # A denial names the tag the call must carry, so the agent can add it.
 add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"],
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"],
     carries="cs-repo:shivinate7/claude-settings")
 
 
@@ -27981,7 +28813,7 @@ def lane_cost_check(label, body, want_git, want_decision):
 
 lane_cost_check("lane-repo-tag: a lane create_session starts one git process, to read the origin",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-lane", "cwd": LANE_REPO,
-                 "tool_input": {"prompt": "/effort medium", "tags": OWN_LANE_TAGS,
+                 "tool_input": {"prompt": LANE_PROMPT, "effort": LANE_EFFORT_FIELD, "tags": OWN_LANE_TAGS,
                                 "model": "sonnet", "source_url": LANE_SOURCE_URL}}, 1, "allow")
 lane_cost_check("lane-repo-tag: a non-lane create_session starts no git process",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-triage", "cwd": LANE_REPO,
@@ -27995,69 +28827,69 @@ lane_cost_check("lane-repo-tag: a Read call starts no git process",
 # starts from (`source_url`). A lane call with no model, or no source_url, or either as an empty or blank string or as
 # a value that is not text (null, a number, a list), is denied.
 # A lane call with both passes. A call with no lane tag is never judged by this rule. Each lane case below carries
-# the effort command and the origin repo tag, so the older lane rules pass it and only this rule decides it.
+# the grant line, effort medium and the origin repo tag, so the other lane rules pass it and only this rule decides it.
 add("lane-start-settings: lane tag with no model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS, source_url=LANE_SOURCE_URL)
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS, source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with no source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS, model="sonnet")
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS, model="sonnet")
 add("lane-start-settings: lane tag with neither model nor source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS)
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS)
 add("lane-start-settings: lane tag with an empty model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="", source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with an empty source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url="")
 add("lane-start-settings: lane tag with an empty model and an empty source_url is denied", "deny",
-    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="", source_url="")
 add("lane-start-settings: lane tag with a whitespace-only model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="   ", source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a whitespace-only source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=" \t\n ")
 add("lane-start-settings: lane tag with a non-text model (null) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model=None, source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a non-text model (number) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model=5, source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a non-text model (list) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model=["x"], source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a non-text source_url (null) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=None)
 add("lane-start-settings: lane tag with a non-text source_url (number) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=5)
 add("lane-start-settings: lane tag with a non-text source_url (list) is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=["x"])
 add("lane-start-settings: lane tag with a no-break-space-only model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="\u00a0", source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag with a no-break-space-only source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url="\u00a0")
 add("lane-start-settings: upper-case lane tag with no model is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag among several tags with no source_url is denied", "deny", "lane-start-settings",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"], model="sonnet")
 add("lane-start-settings: a denied lane with no source_url names source_url in its reason", "deny",
-    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", carries="source_url")
 add("lane-start-settings: a denied lane with no model names model in its reason", "deny",
-    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     source_url=LANE_SOURCE_URL, carries="model")
 add("lane-start-settings: lane tag with a model and a source_url is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-start-settings: lane tag among several tags with a model and a source_url is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"],
     model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-start-settings: coordinator call with no model and no source_url is allowed", "allow",
@@ -28073,20 +28905,20 @@ add("lane-start-settings: batch-runner call with no model and no source_url is a
 # create_session with no lane tag keep the no-model remedy, so a builder cannot drop it for everyone.
 LANE_FLOOR_LACKS = ("name no model", "let the default apply")
 add("floor lane: a lane create_session on haiku is denied with the lane remedy, not the no-model one", "deny",
-    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
 add("floor lane: a lane refused below the floor names source_url in its reason", "deny",
-    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="haiku", source_url=LANE_SOURCE_URL, carries="source_url")
 add("floor lane: an upper-case lane tag on haiku gets the lane remedy", "deny", "agent-model-floor",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"],
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
 add("floor lane: a lane tag given as one string on haiku gets the lane remedy", "deny", "agent-model-floor",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags="cs-build:lane",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane",
     model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
-add("floor lane: a lane start on the remedy's inputs, model sonnet, source_url, the repo tag and /effort medium, "
-    "is allowed", "allow", tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=OWN_LANE_TAGS,
+add("floor lane: a lane start on the remedy's inputs, model sonnet, source_url, the repo tag, the grant line and "
+    "effort medium, is allowed", "allow", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
     model="sonnet", source_url=LANE_SOURCE_URL)
 # Controls: the no-model remedy holds wherever no lane is. These pass on the old code and must keep passing.
 for _name, _call in (
@@ -29544,6 +30376,38 @@ def worktree_home_cd_into_other_checkout_case():
     return True, "every cd into another checkout is refused, bare or chained, and names no path"
 
 
+def _remedy_problems(label, got, reason):
+    """The other-checkout remedy names OTHER_CHECKOUT_ENTER_SHAPE, and no `cd` or `env -C` route.
+    A verdict other than deny is one problem, and the remedy is not read."""
+    if got != "deny":
+        return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
+    problems = []
+    if OTHER_CHECKOUT_ENTER_SHAPE not in reason:
+        problems.append("%s: the remedy does not say %r: %s" % (
+            label, OTHER_CHECKOUT_ENTER_SHAPE, reason[:160]))
+    if "`cd`" in reason:
+        problems.append("%s: the remedy names `cd`: %s" % (label, reason[:160]))
+    if "env -C" in reason:
+        problems.append("%s: the remedy names env -C: %s" % (label, reason[:160]))
+    return problems
+
+
+def worktree_home_other_checkout_remedy_case():
+    """Rule 0, `other-checkout`, the remedy on both refusals: a write into a sibling checkout, and a
+    `cd` into one, each name the EnterWorktree call with `path` set to the checkout, and neither names
+    `cd` or `env -C` as a route. A refusal must not name the route it refused, or the agent takes that route."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocd")
+    in_b = os.path.join(lane_b, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Write", lane_a, file_path=in_b, content="x")
+    problems += _remedy_problems("write into a sibling checkout", got, reason)
+    got, reason = _decide_full("Bash", lane_a, command="cd " + slash(lane_b))
+    problems += _remedy_problems("cd into a sibling checkout", got, reason)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the write and the cd refusals name the EnterWorktree call with path, and no cd or env -C route"
+
+
 def worktree_home_cd_parse_forms_case():
     """Rule 0, other-checkout, the `cd` act's parse: a relative climb, a subshell and a PowerShell
     `Set-Location` each move into another checkout, and each is refused."""
@@ -30964,6 +31828,139 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a sibli
                          _gcx_row("deny", "primary", "git -C @SIB commit -m x", agent=None,
                                   session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
 
+# env -C and env --chdir set the folder the git after them runs in, so a git verb that env moves into a
+# checkout is judged there, as the git -C form is. Each row is one spelling, so a failure names one form.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into the primary checkout is refused",
+                         _gcx_row("deny", "home", "env -C @PRIMARY git commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir add in the primary checkout is refused",
+                         _gcx_row("deny", "home", "env --chdir @PRIMARY git add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir=<path> add in the primary checkout is refused",
+                         _gcx_row("deny", "home", "env --chdir=@PRIMARY git add f")))
+# Read from the agent's home, the git -C part alone stays inside the home, so only the env -C climb reaches
+# the primary checkout.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C then git -C, two relative folders that together reach "
+                         "the primary checkout, is refused",
+                         _gcx_row("deny", "home", "env -C ../../.. git -C . rm f")))
+# These rows pin the allows the guard must keep, so each is a guard, not a red case.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C status of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "env -C @PRIMARY git status")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into a variable folder is allowed",
+                         _gcx_row("allow", "home", 'env -C "$WT" git commit -m x')))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into its own home is allowed",
+                         _gcx_row("allow", "home", "env -C @HOME git commit -m x")))
+def _guard_core_under_test():
+    """The guard_core module the run-folder rows read: the folder of GUARD, loaded fresh on each call, so a
+    GUARD_UNDER_TEST copy is the one read."""
+    import importlib.util
+    folder = os.path.dirname(GUARD)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    spec = importlib.util.spec_from_file_location("guard_core_under_test", os.path.join(folder, "guard_core.py"))
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+    return core
+
+
+def run_dir_env_c_case():
+    """_run_dir returns the folder an `env -C <dir>` names, as it returns the folder a `git -C <dir>` names.
+    The git -C form is the control and pins the reader's answer; the env -C form must match it, not the cwd.
+    guard_core loads from the folder of GUARD, so a GUARD_UNDER_TEST copy is the one read. Both folders are
+    named under ROOT, the run folder, and nothing is read or written on disk."""
+    core = _guard_core_under_test()
+    target = os.path.join(ROOT, "run-dir-target")
+    cwd = os.path.join(ROOT, "run-dir-cwd")
+    control = core._run_dir("git -C \"%s\" status" % slash(target), cwd)
+    if os.path.normpath(control) != os.path.normpath(target):
+        return False, "control: git -C reads %s, want %s" % (control, target)
+    got = core._run_dir("env -C \"%s\" git status" % slash(target), cwd)
+    if os.path.normpath(got) != os.path.normpath(target):
+        return False, "env -C reads %s, want %s (the cwd is %s)" % (got, target, cwd)
+    return True, "env -C and git -C both read the named folder"
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads the folder an env -C names, as it reads a git -C",
+                         run_dir_env_c_case))
+
+
+# THE RUN FOLDER OF A COMMAND TYPED FROM A LINKED LANE. _run_dir names the folder each spelling runs in: a
+# relative env -C joins onto the folder the earlier cd left, not the shell cwd, and a cd after an env -C sets
+# the folder over it. Each row is one spelling, so a failure names one form. Scope before subject (P7): the
+# plain cd into the primary is read first, and a row reports on its own spelling only when that cd reads right.
+RUN_DIR_PRIM = os.path.join(ROOT, "run-dir-prim")   # the primary checkout
+RUN_DIR_LANE = os.path.join(ROOT, "run-dir-lane")   # the linked lane the command is typed from
+RUN_DIR_CLEAN = os.path.join(ROOT, "run-dir-clean")  # another folder, neither the primary nor the lane
+
+
+def _run_dir_names(command, want, cause):
+    """_run_dir of `command`, typed from RUN_DIR_LANE, names `want`. `cause` is the one misreading a miss shows."""
+    core = _guard_core_under_test()
+    scope = core._run_dir("cd %s && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE)
+    if os.path.normpath(scope) != os.path.normpath(RUN_DIR_PRIM):
+        return False, "scope: a plain cd into the primary checkout reads %s, want %s" % (scope, RUN_DIR_PRIM)
+    got = core._run_dir(command, RUN_DIR_LANE)
+    if os.path.normpath(got) != os.path.normpath(want):
+        return False, "%s: _run_dir reads %s, want %s" % (cause, got, want)
+    return True, "_run_dir reads %s for: %s" % (want, command)
+
+
+def _run_dir_row(command, want, cause):
+    """One row: a zero-argument case that runs _run_dir_names on one spelling."""
+    return lambda: _run_dir_names(command, want, cause)
+
+
+_RELATIVE_ENV_C = "a relative env -C joined onto the shell cwd, not onto the folder the earlier cd left"
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir joins a relative env -C onto the folder an earlier cd left",
+                         _run_dir_row("cd %s && env -C . git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      _RELATIVE_ENV_C)))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir joins a relative env -C sub onto the folder an earlier cd left",
+                         _run_dir_row("cd %s && env -C sub git status" % slash(RUN_DIR_PRIM),
+                                      os.path.join(RUN_DIR_PRIM, "sub"), _RELATIVE_ENV_C)))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir lets a cd after an env -C decide the folder over the env -C",
+                         _run_dir_row("env -C %s git status && cd %s && git status"
+                                      % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
+                                      RUN_DIR_PRIM, "an env -C folder beat the cd after it")))
+# A guard row: an env -C of the primary checkout alone must be read as the primary, or the guard judges the wrong checkout.
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads an env -C of the primary checkout as the primary",
+                         _run_dir_row("env -C %s git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      "an env -C of the primary checkout was read as something else")))
+
+# An env -C moves only the program it runs. Its folder reaches a bare git that follows it only when EVERY git
+# segment of the command carries an env -C folder. Otherwise a bare git runs in the shell's folder: the cwd,
+# or the folder the last cd left. The three red rows are the three places a bare git can sit beside an env -C
+# into another folder: after it, after a cd and it, and ahead of it. Each row is one spelling, so a failure
+# names one form.
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git after an env -C into another folder in the shell's folder",
+                         _run_dir_row("env -C %s git status && git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
+                                      "a bare git after an env -C reads the env folder, as if the env -C moved the shell")))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git after a cd and an env -C in the cd's folder",
+                         _run_dir_row("cd %s && env -C %s git status && git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
+                                      RUN_DIR_PRIM,
+                                      "a bare git after a cd and an env -C reads the env folder, as if the env -C moved the shell past the cd")))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git ahead of an env -C into another folder in the shell's folder",
+                         _run_dir_row("git status && env -C %s git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
+                                      "a bare git ahead of an env -C reads the env folder, as if the env -C moved the shell for it")))
+# The guards below pin what each red row must keep. A git -C under an env -C joins onto that env folder, and a
+# relative one chains onto it. A non-git env -C moves nothing. A relative git -C after a cd reads the shell's
+# folder, and a git -C ahead of a cd keeps its folder over the cd. With an env -C on every git segment, the last
+# env -C folder is read.
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir joins a git -C onto the env -C folder of its own segment",
+                         _run_dir_row("env -C a git -C b status", os.path.join(RUN_DIR_LANE, "a", "b"),
+                                      "a git -C under an env -C was not joined onto that env folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git after an env -C of a non-git program as the shell's folder",
+                         _run_dir_row("env -C %s true && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
+                                      "an env -C of a non-git program moved the shell's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a relative git -C after a cd in the shell's folder",
+                         _run_dir_row("cd %s && git -C . status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
+                                      "a relative git -C after a cd joined onto the cd folder, not the shell's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git -C ahead of a cd in its own folder, not the cd's",
+                         _run_dir_row("git -C %s status && cd %s && git status" % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
+                                      RUN_DIR_LANE,
+                                      "a cd after a git -C decided the folder over the git -C")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads the last env -C folder when every git segment carries one",
+                         _run_dir_row("env -C %s git status && env -C %s git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
+                                      RUN_DIR_CLEAN,
+                                      "with an env -C on every git segment, the first env -C folder was read, not the last")))
+
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
@@ -31060,6 +32057,9 @@ LOG_CHECKS = (
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
+    ("worktree-home: the other-checkout refusal names the EnterWorktree call with `path` for a write "
+     "and for a cd, and names neither `cd` nor env -C as a route",
+     worktree_home_other_checkout_remedy_case),
     ("worktree-home: a cd into another checkout is refused when it is a relative climb, a subshell or "
      "a PowerShell Set-Location", worktree_home_cd_parse_forms_case),
     ("worktree-home: an agent's cd into a sibling agent tree, or into a folder that only starts with "
@@ -40336,6 +41336,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a cd into another checkout of the clone is refused", "worktree-home"),
+    ("worktree-home: the other-checkout refusal names the EnterWorktree call", "worktree-home"),
     ("worktree-home: a cd into another checkout is refused when it is a relative climb", "worktree-home"),
     ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),

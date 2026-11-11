@@ -16,11 +16,10 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `outcomes-tests-are-statements` | A failing test is a claim, not law. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-grant-covers-named-act` | My grant covers the act it names, never a variant. | [`CLAUDE.md`](../CLAUDE.md) |
 | `outcomes-mechanize-rules` | Once ready, turn each rule below into a hook or check. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-pick-mode-from-request` | Pick the session's shape from my request: solo, one lane, or coordinator (`session-tiers`, the session shapes). | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-solo-builds-short-edit-list` | Solo: the request is a short list of edits with nothing to run in parallel. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-solo-reviews-logic-diffs-only` | In solo, a fresh reviewer reads the diff before merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic, or a record that files an owner ruling (round 1 checks two things only, decision `docs-only-prs-skip-review`). | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-solo-grows-switch-to-orchestrate` | A shape can grow: solo to one lane, one lane to coordinator. | [`CLAUDE.md`](../CLAUDE.md) |
-| `roles-orchestrator-never-builds` | Every session that spawns agents is an orchestrator. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-pick-mode-from-request` | Pick the session's role from my request: coordinator for a standing build, else lane (`session-tiers`, the session roles). | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-solo-reviews-logic-diffs-only` | In a run with one lane, a fresh reviewer reads the diff before merge only when it touches a rule's behaviour, a guard's or check's verdict, or program logic. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-solo-grows-switch-to-orchestrate` | A lane may grow to a coordinator. | [`CLAUDE.md`](../CLAUDE.md) |
+| `roles-orchestrator-never-builds` | A lane builds a short list of edits itself when nothing can run in parallel, whoever started it. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-one-role-per-agent` | Each agent is one role: builder, reviewer, designer, design reviewer, refuter, or Explore, never two. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-model-per-role-table` | A workflow agent takes the builder or reviewer role through `agentType`. | [`CLAUDE.md`](../CLAUDE.md) |
 | `roles-sonnet-is-the-ceiling` | Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, the refuter, and a builder's third try (`roles-third-round-steps-up`), which run Opus. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -105,7 +104,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `reports-done-format` | Done: one line per item, BUILT, RECORDED, or OTHER. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-done-names-models` | A Done item that agents built or reviewed names each one's role and model, such as "(builder sonnet, reviewer sonnet)". | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-drop-unused-label` | Drop a label that does not apply. | [`CLAUDE.md`](../CLAUDE.md) |
-| `reports-name-unstarted-items` | An orchestrator's report holds an `Unstarted:` line under Next: each queued item with every question answered that it left unstarted, with its reason, or `none`. | [`CLAUDE.md`](../CLAUDE.md) |
+| `reports-name-unstarted-items` | A report from a session that spawns agents holds an `Unstarted:` line under Next: each queued item with every question answered that it left unstarted, with its reason, or `none`. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-no-report-when-nothing-landed` | No report when nothing landed. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-batch-pace-numbers` | At each batch merge, the report also gives four pace numbers, as OTHER items under Done. | [`CLAUDE.md`](../CLAUDE.md) |
 | `reports-offer-sweep-after-merge` | When a session's last PR has merged and no lane is open, its final report offers one command under Next: `python3 ~/.claude/janitor/sweep.py --root <repo> --attended --fast`, preview first, then with `--confirm`. | [`CLAUDE.md`](../CLAUDE.md) |
@@ -220,6 +219,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `opus-grant-expires` | An Opus agent is enabled for one repository, on the owner's grant in chat (`roles-opus-override-guarded`). | [`docs/decisions/opus-grant-expires.md`](../docs/decisions/opus-grant-expires.md) |
 | `owner-feedback-inbox` | A hook writes every owner message to a per-session inbox. | [`docs/decisions/owner-feedback-inbox.md`](../docs/decisions/owner-feedback-inbox.md) |
 | `owner-judge-test` | A session asks the owner a decision only when he can judge it from what he already knows. | [`docs/decisions/owner-judge-test.md`](../docs/decisions/owner-judge-test.md) |
+| `page-check-at-export` | Owner ruling, item 298 (14:17 CST Nov 6 2026): build both the check at export and the `--check` mode. | [`docs/decisions/page-check-at-export.md`](../docs/decisions/page-check-at-export.md) |
 | `page-item-design` | An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. | [`docs/decisions/page-item-design.md`](../docs/decisions/page-item-design.md) |
 | `page-stale-publish` | Every republish of a waiting page is main's `skills/waiting-page/page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (decision `questions-go-to-owner`, skill `waiting-page`, "Keep the page on main's code"). | [`docs/decisions/page-stale-publish.md`](../docs/decisions/page-stale-publish.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`docs/decisions/plain-prose-lint.md`](../docs/decisions/plain-prose-lint.md) |
@@ -378,6 +378,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `lane-model-recheck` | Lane sessions run Sonnet for now. | [`docs/debts/lane-model-recheck.md`](../docs/debts/lane-model-recheck.md) |
 | `layout-kind-repeats-extras` | When `lint/layout.json` gains a kind that a rolled-out repo already lists in its `.claude/layout-extras.json`, `layout.kinds()` refuses that repo's extras file and ste_lint exits 2 on every lane there. | [`docs/debts/layout-kind-repeats-extras.md`](../docs/debts/layout-kind-repeats-extras.md) |
 | `layout-legacy-repos` | The layout's `legacy-repos` map lets two named repos keep their `todo` kind in a place of their own: q_max at `specs/todo.md`, home at `records`. | [`docs/debts/layout-legacy-repos.md`](../docs/debts/layout-legacy-repos.md) |
+| `layout-writer-key-stale` | The extras key `page-writer` holds the page writer's session id. | [`docs/debts/layout-writer-key-stale.md`](../docs/debts/layout-writer-key-stale.md) |
 | `linked-nm-prefix-workspace` | `npm ci -w sub`, and a plain `npm ci` run inside a workspace member, write the root's `node_modules` (npm 10). | [`docs/debts/linked-nm-prefix-workspace.md`](../docs/debts/linked-nm-prefix-workspace.md) |
 | `lint-past-bash-cap` | Cloud `./bin/verdict ./bin/ci-job checks --lint` took 630-649 s over 2 runs on 2026-11-07 (514-547 s over 4 runs on 2026-11-06). | [`docs/debts/lint-past-bash-cap.md`](../docs/debts/lint-past-bash-cap.md) |
 | `local-triage-tier-proof` | The guard takes a session's tier only from its cloud tags, read from its own get_session record. | [`docs/debts/local-triage-tier-proof.md`](../docs/debts/local-triage-tier-proof.md) |
@@ -423,6 +424,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `refresh-lock-untested` | The SessionStart refresh holds a lock directory in the config dir. | [`docs/debts/refresh-lock-untested.md`](../docs/debts/refresh-lock-untested.md) |
 | `refusal-route-around-guard` | A test-author gets a refusal on an Edit of a path, then writes the same file with Bash and Python. | [`docs/debts/refusal-route-around-guard.md`](../docs/debts/refusal-route-around-guard.md) |
 | `refusal-settle-reads` | When the refusals file holds a row with a `tool_use_id`, each Stop reads the whole transcript and every `<session>/subagents/*.jsonl` file, to tell an agent's refused call from the orchestrator's. | [`docs/debts/refusal-settle-reads.md`](../docs/debts/refusal-settle-reads.md) |
+| `review-record-model-not-served` | `merge --review-record` refuses a non-Sonnet fix check or round 2/3 line, but only reads the model as typed. | [`docs/debts/review-record-model-not-served.md`](../docs/debts/review-record-model-not-served.md) |
 | `route-flag-stop-untested` | No test feeds a refusal row that carries `route_flag` through the Stop read, so that path has no test. | [`docs/debts/route-flag-stop-untested.md`](../docs/debts/route-flag-stop-untested.md) |
 | `ruling-pr-kind-unchecked` | The merge tool takes the lane's Kind claim. | [`docs/debts/ruling-pr-kind-unchecked.md`](../docs/debts/ruling-pr-kind-unchecked.md) |
 | `scan-key-and-root-ip` | In the 2026-11-08 export of the personal accounts' pages, the scan refused two pages for shapes that held no secret. | [`docs/debts/scan-key-and-root-ip.md`](../docs/debts/scan-key-and-root-ip.md) |

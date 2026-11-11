@@ -156,14 +156,33 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        an open or merged pull request's head. An `archive/<branch>` copy holding the tip covers. No record of the target, a lane with no cs-step or cs-repo
                        tag, and a read that fails (gh missing too) are refusals. A target with no lane tag passes.
                        An override lifts it.
-  lane-one-topic      deny. A send_message whose first non-blank line starts with the marker
+  lane-one-topic      deny. A send_message whose first non-blank line, or the first after a leading `Grant:` line
+                       (shared_names.LANE_GRANT_MARKER), starts with the marker
                        `Lane brief: <step>. Topic: <topic>.` (guard_merge.LANE_BRIEF_MARKER), when the target's newest
                        record (get_session, or the create_session that made it, read from the transcript) is tagged
                        cs-build:lane and its cs-topic tag differs from the brief's Topic, or the brief names none. A lane
                        with no cs-topic is judged by its cs-step tags: the brief's step must be one. The marker matches
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
-                       its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
+                       its record, and a marker brief with no record of the target, are refusals. A `Grant:` line before the marker
+                       that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
+                       line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
+  message-time-matches-clock
+                       deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
+                       then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
+                       optional `:SS`, and `CST` or `CDT` in any case, after optional markdown lead characters. The
+                       refusal fires when the zone name is not the clock's own (local_time's DST rule), whatever the
+                       minutes; when a dated stamp is more than 1 minute ahead of the clock (local_time.clock); or
+                       when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An
+                       undated stamp more than 60 minutes ahead reads as a quote from an earlier day, and passes; so
+                       does a stamp behind. The reason steers to your own label and prints the real time. No
+                       transcript or process; a missing clock module passes the message. A dated limit of 1 minute ahead also judges
+                       three written values, each an ISO instant with an offset: `added` in an ArtifactData set,
+                       update or batch write to collection items (inline, through `file_path`, one local file read
+                       only for an items write with no inline data, or as a str_replace's new text or time
+                       fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
+                       Edit's or MultiEdit's new text; the last literal `updatedAt` in a Bash command, single- or double-quoted, read as text. The reason prints the time in Central and ISO. One clock read only when
+                       a judged value is present. An override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
                        tool in shared_names.REMOTE_OUTWARD_TOOLS or shared_names.AGENT_DENIED_DESKTOP_TOOLS (the desktop
@@ -296,8 +315,11 @@ Other tools, in `judge` order:
                        `Add a case:` before the span; a span with never, do not, don't or no in its own clause
                        (no `;`, `.` or `,` between) within 4 words before it. Prose with no span is not read. Any
                        role. An override lifts it. (brief-destructive-git)
-  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
-                       not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
+  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
+                       exactly `medium` (LANE_EFFORT), or whose prompt's first non-blank line does not
+                       start `Grant: ` (LANE_GRANT_MARKER) with the owner's words after it: a letter or digit, and no `<`
+                       (shared_names.grant_line_holds_words). The prompt is
+                       the whole brief, the Grant line first. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
                        string. A call with no lane tag passes. An override lifts it.
                        `session_home_keep` skips this tool. (agent-model-cap)
@@ -513,7 +535,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -1265,16 +1287,16 @@ OTHER_CHECKOUT_REASON = (
     "Rule (other checkout): this write lands in another checkout of this clone, not the one this "
     "session stands in. "
     "Remedy: write only inside your own checkout, or report the change to the session that owns "
-    "the other one. To remove a whole worktree, use `git worktree remove`, or leave it to the "
-    "janitor sweep."
+    "the other one. To work in a checkout you own, call the EnterWorktree tool with `path` set to "
+    "it. To remove a whole worktree, use `git worktree remove`, or leave it to the janitor sweep."
 )
 
 OTHER_CHECKOUT_CD_DETAIL = "cd into another checkout: "
 OTHER_CHECKOUT_CD_REASON = (
     "Rule (other checkout): this command changes directory into another checkout of this clone, "
     "not the one this session stands in. "
-    "Remedy: stay in your own checkout. To read another one, use `git -C <dir>` or a path, never "
-    "`cd`."
+    "Remedy: stay in your own checkout. To work in a checkout you own, call the EnterWorktree tool "
+    "with `path` set to it. To read another one, use `git -C <dir>` or a path."
 )
 
 OTHER_CLONE_DETAIL = "write into another clone: "
@@ -2803,9 +2825,10 @@ def judge_stop(payload) -> None:
 
 
 SPAWN_TOOLS = ("Agent", "Task")
-from shared_names import AGENT_DENIED_DESKTOP_TOOLS, DESKTOP_START_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
+from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
+    AGENT_DENIED_DESKTOP_TOOLS, CREATE_SESSION_TOOL, DESKTOP_START_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
+)
 SESSION_TOOL = DESKTOP_START_TOOL
-CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
@@ -2814,21 +2837,21 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with lint/report_guard.py
+from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
-    "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
-    "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
-    % LANE_EFFORT
+    "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
+    "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
+    "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % LANE_EFFORT
 )
 # A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
 # when no repo reads.
 LANE_REPO_TAG_REASON = (
-    "A lane session carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
+    "A lane carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
     "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
 )
 # A lane start names the model and the repo it works in. The reason names both fields and says why.
 LANE_START_SETTINGS_REASON = (
-    "A lane session's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
+    "A lane's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
     "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
     "`model` (the model that row names) and `source_url` (the repo) on create_session."
 )
@@ -2842,7 +2865,7 @@ MODEL_FLOOR_REASON = (
 )
 # A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
 LANE_MODEL_FLOOR_REASON = (
-    "Sonnet is the floor for a lane session. Start the lane with model sonnet and the source_url of its repo."
+    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -2964,30 +2987,22 @@ def floor_hit(tool: str, tool_input) -> str:
     return ""
 
 
-def lane_tags(tool_input) -> list:
-    """The `tags` of a call as a list: one string is a list of one; anything else that is not a list is empty."""
-    tags = tool_input.get("tags")
-    if isinstance(tags, str):
-        return [tags]
-    return tags if isinstance(tags, list) else []
-
-
-def is_lane_create_session(tool: str, tool_input) -> bool:
-    """True for a create_session call that tags a lane: any tag that, stripped and casefolded, is LANE_TAG. The one
-    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
-    return tool == CREATE_SESSION_TOOL and any(
-        isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
-
-
 def lane_effort_hit(tool: str, tool_input) -> str:
-    """The prompt of a create_session call that tags a lane and is not the effort command exactly, or "".
-    A slash command runs only as the whole prompt, so the compare is exact: no strip. A lane tag is any
-    tag that, stripped and casefolded, is LANE_TAG; `tags` may be one string. A call with no lane tag
-    is not judged. A missing prompt is not the command."""
+    """What breaks the lane start of a create_session call that tags a lane, or "": the effort field when it
+    is not exactly LANE_EFFORT, else the prompt's first non-blank line when it is not a Grant line
+    (LANE_GRANT_MARKER, then the owner's words: grant_line_holds_words). A lane tag is any tag that, stripped and casefolded, is
+    LANE_TAG; `tags` may be one string. A call with no lane tag is not judged. A missing prompt has no
+    Grant line."""
     if not is_lane_create_session(tool, tool_input):
         return ""
+    effort = tool_input.get("effort")
+    if effort != LANE_EFFORT:
+        return "effort: " + str(effort if effort else "(none)")
     prompt = tool_input.get("prompt")
-    return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
+    first = next((ln.strip() for ln in prompt.splitlines() if ln.strip()), "") if isinstance(prompt, str) else ""
+    if grant_line_holds_words(first):
+        return ""
+    return "prompt: " + (first[:80] or "(none)")
 
 
 def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
@@ -3959,7 +3974,7 @@ def running_agent_hit(payload, tool: str) -> tuple:
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
 
 
-LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane session: end your turn now and send this "
+LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane: end your turn now and send this "
                             "reading to your parent with send_message to @parent, which frees space or waits for the "
                             "load to drop. " + LOAD_LANE_CITE)
 
@@ -4718,49 +4733,33 @@ def page_stale_hit(tool_input, cwd):
 # file the last allowed publish stamped (stale_pages.PUBLISHED). The checker runs the page's own code, so the
 # sentence a miss quotes is the page's. A miss denies. Unknown (no node, no stamp, the file gone, the checker
 # unable to render, a run past its cap) allows and logs one `noted` line. A write with no picture starts no node.
-CHECK_DESIGNS = "check_designs.mjs"
-CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
 # One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
 PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
 _design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
 PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
+def _page_check_module():
+    """skills/waiting-page/page_check.py, the one home of the picture check, or None when it is not found."""
+    folder = _waiting_page_folder("page_check.py")
+    if folder is None:
+        return None
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    return importlib.import_module("page_check")
+
+
 def _run_check_designs(page_file, item):
     """(code, text) from the checker on `item` (a dict) against `page_file`: code 0 pass, 1 miss with the page's
-    sentence as text, 3 unknown with the reason as text. The one seam that starts node."""
-    import shutil
-    import subprocess  # TimeoutExpired only; the child starts through _nowindow
-    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
-    import tempfile
-    node = shutil.which("node")
-    folder = _waiting_page_folder(CHECK_DESIGNS)
-    if node is None or folder is None:
-        return 3, "node is not installed" if node is None else CHECK_DESIGNS + " not found"
-    cap = CHECK_DESIGNS_CAP
+    sentence as text, 3 unknown with the reason as text. The seam of the guard; skills/waiting-page/page_check.py
+    is the one home that starts node, and this call only sets the cap from the call's deadline."""
+    page_check = _page_check_module()
+    if page_check is None:
+        return 3, "page_check.py not found"
+    cap = page_check.CHECK_DESIGNS_CAP
     if _design_deadline[0] is not None:
         cap = max(1.0, min(cap, _design_deadline[0] - time.monotonic()))
-    with tempfile.TemporaryDirectory() as scratch:
-        item_file = os.path.join(scratch, "item.json")
-        with open(item_file, "w", encoding="utf-8") as handle:
-            json.dump(item, handle)
-        try:
-            run = _nowindow.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
-                                capture_output=True, text=True, timeout=cap)
-        except subprocess.TimeoutExpired:
-            return 3, "no answer in %d s" % cap
-        except OSError as err:
-            return 3, str(err.strerror or err)
-    lines = run.stdout.strip().splitlines()
-    try:
-        problem = json.loads(lines[-1]).get("problem") if lines else None
-    except ValueError:
-        return 3, "no answer line; exit %d" % run.returncode
-    if run.returncode == 1 and isinstance(problem, str) and problem:
-        return 1, problem
-    if run.returncode == 0:
-        return 0, ""
-    return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
+    return page_check.run_check_designs(page_file, item, cap)
 
 
 # ------------------------------------------------------------------ a design names its file, in a mockup home
@@ -4820,25 +4819,36 @@ def page_design_hit(writes, tool_input, cwd):
         record(DATA_TOOL, "noted", "page-item-design",
                "unknown: " + ("no published page stamped" if not page_file else "the stamped page file is gone"))
         return None
-    deadline = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
-    _design_deadline[0] = deadline
     try:
-        for done, (doc_id, data) in enumerate(pictured):
-            if time.monotonic() >= deadline:
-                record(DATA_TOOL, "noted", "page-item-design",
-                       "unknown: the %d s budget of this call is spent, %d item(s) not checked"
-                       % (PAGE_ITEM_DESIGN_BATCH_SECONDS, len(pictured) - done))
-                return None
-            try:
-                code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
-            except Exception as err:
-                code, text = 3, type(err).__name__ + ": " + str(err)
-            if code == 1:
-                return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
-            if code != 0:
-                record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+        page_check = _page_check_module()
+    except Exception as err:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if page_check is None:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: page_check.py not found")
+        return None
+
+    def run_one(entry):
+        doc_id, data = entry
+        try:
+            return _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
+        except Exception as err:
+            return 3, type(err).__name__ + ": " + str(err)
+
+    _design_deadline[0] = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
+    try:
+        results, left = page_check.run_within_budget(pictured, PAGE_ITEM_DESIGN_BATCH_SECONDS, run_one, stop_on_miss=True)
     finally:
         _design_deadline[0] = None
+    for (doc_id, data), code, text in results:
+        if code == 1:
+            return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
+        if code != 0:
+            record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+    if left:
+        record(DATA_TOOL, "noted", "page-item-design",
+               "unknown: the %d s budget of this call is spent, %d item(s) not checked"
+               % (PAGE_ITEM_DESIGN_BATCH_SECONDS, left))
     return None
 
 
@@ -6015,8 +6025,9 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
-    # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
+    # 9b2. The lane effort pin: a lane session starts with the effort field at medium and the whole brief as its
+    # prompt, the owner's Grant line first. An override lifts it: it is not in never_lifted, because the owner
+    # may mean another start.
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
@@ -6094,6 +6105,16 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+
+    # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
+    stamped = stamp_hit(tool, tool_input)
+    if stamped:
+        refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
+    written = written_time_hit(tool, tool_input, cwd)
+    if written:
+        refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
