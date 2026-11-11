@@ -944,6 +944,11 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   computer moves every repo's main to a ruleset that requires only all-jobs-passed and blocks deletion
   and force-push of main. Cause: a classic rule with many checks failed to save (owner, 16:39 CST). The
   grant names rulesets, so it lands in the repo's standing grants beside the Oct 30 grant.
+  No GitHub Issues, ruled p', owner 16:44 CST Nov 11: "agreed on p" (after a refuter's revise). g is
+  mostly built: skills/roadmap/build.py derives live and done from PRs (decision stalled-steps). 1. Nobody
+  types doing; triage's build sets status from live PRs. 2. Triage closes the stale drafts on build.py's
+  list once, then at each batch. 3. A guard refuses a lane PR whose branch or title names no step id
+  (45 of the newest 100 open PRs named one by branch).
   Home: decision for the delete route (new); D1 for the table.
 
 - **R34. The page shows how the system works and how healthy each part is.** Owner 11:35 CST Nov 11:
