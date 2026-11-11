@@ -30,8 +30,10 @@ names a "not" word passes. A "not" word inside its own term, plural too (`hole` 
 is the term. A line that holds `glossary-ok` is skipped, with its reason beside it.
 A row keeps a name when its meaning holds the backticked name, then ` stays` (the review log row keeps its
 slug so). A name of code is kept when its whole words equal a kept name of the row whose "not" name it holds,
-read as a path segment is: `--fix-check`, `fix_check` and `fix-check` are one name. A longer name that holds a
-kept name (`fix_check_line`) and a kept name of another row are still flagged. The kept names are read from
+read as a path segment is, and only in that spelling: `--fix-check` passes, and `FixCheck`, `FIX_CHECK`, `fix_check`,
+`fix-check` and "Fix check." are still flagged. A kept flag also keeps its argparse attribute: `--fix-check` keeps
+`args.fix_check`, any `.fix_check` attribute access in Python, since argparse derives it. A longer name that holds
+a kept name (`fix_check_line`) and a kept name of another row are still flagged. The kept names are read from
 GLOSSARY.md on each run, never copied here.
 A "not" name written `word (this sense)` retires one sense of an everyday word (`block`, `issue`):
 it is read in paths, anchors and slugs, never in identifiers, strings or hook messages, where code
@@ -137,7 +139,7 @@ def items(cell):
 
 
 class Names(list):
-    """The "not" names of one row. `kept` holds the word lists of the names the row's meaning keeps."""
+    """The "not" names of one row. `kept` holds the exact spellings of the names the row's meaning keeps."""
     kept = ()
 
 
@@ -159,7 +161,7 @@ def numbered_rows(text):
         if c[0].lower() == "term":  # the header row
             continue
         names = Names([] if c[3] in NONE else items(c[3]))
-        names.kept = [words(k) for k in KEPT_RE.findall(c[1])]
+        names.kept = KEPT_RE.findall(c[1])
         out.append((number, (c[0].strip("`"), items(c[2]), names)))
     return out
 
@@ -214,12 +216,23 @@ _PREPARED = []
 tick = None  # a callable that lib users set to stop a long read: it is called inside the name loop and raises to stop
 
 
+class Attr(str):
+    """The name of an attribute access (`args.fix_check`): a kept flag keeps the attribute argparse derives."""
+
+
+def flag_attribute(kept):
+    """The argparse attribute of a kept flag spelling (`--fix-check` gives `fix_check`), else None."""
+    return kept[2:].replace("-", "_") if kept.startswith("--") and len(kept) > 2 else None
+
+
 def name_problems(where, text, table, plain=False, spans=()):
     """One problem per "not" name that the whole words of `text` hold.
 
     `plain` is a name of code that a person may spell for another sense (`block`, `entry`): a
     "not" name tagged (this sense) is then left to the reviewer. `spans`: word lists of terms of the
-    checked repo's own glossary; a "not" word inside one of them is that term, like a term of the table."""
+    checked repo's own glossary; a "not" word inside one of them is that term, like a term of the table.
+    A name that is exactly a spelling its row keeps passes, and so does an `Attr` name that is a kept flag's
+    attribute."""
     out = []
     if tick:
         tick()
@@ -234,8 +247,8 @@ def name_problems(where, text, table, plain=False, spans=()):
         tagged, n = names[k]
         if plain and tagged:
             continue
-        if any(w == k_ for w in forms for k_ in kept):
-            continue  # the whole name is one this row keeps: `--fix-check`, `fix_check`, not `fix_check_line`
+        if text in kept or (isinstance(text, Attr) and any(text == flag_attribute(k_) for k_ in kept)):
+            continue  # exactly a spelling this row keeps: `--fix-check`, not `fix_check` or `fix_check_line`
         if any(same(w[i:i + len(n)], n) and not any(inside(w, i, len(n), t) for t in (spelled, *spans))
                for w in forms for i in range(len(w) - len(n) + 1)):
             name = table[r][2][k]
@@ -310,7 +323,7 @@ def scan_python(text):
         for field in ("id", "attr", "name", "arg", "asname", "module"):
             v = getattr(node, field, None)
             if isinstance(v, str) and line:
-                idents.append((line, v))
+                idents.append((line, Attr(v) if field == "attr" else v))
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             idents += [(line, v) for v in node.names]
         if isinstance(node, ast.JoinedStr) and id(node) not in skip:
