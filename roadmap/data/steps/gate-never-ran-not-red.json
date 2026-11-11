@@ -1,0 +1,13 @@
+{
+  "id": "gate-never-ran-not-red",
+  "title": "The merge tool tells a gate job that never ran from a red one",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "lane": null,
+  "blockedBy": [],
+  "why": "A GitHub fault left batch 81's gate jobs with no runner; the merge tool read the roll-up as red, offered no way out, and GitHub refused a re-run of failed jobs.",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "source": "Coordinator 15:48 CST Nov 11 (batch 81, run 43088666860)",
+  "note": "Batch 81, run 43088666860: every needed job passed, but all-jobs-passed and ci-done never got a runner (GitHub internal error). The owner allowed --base-red-ok at 15:39 CST; the merge tool still refused on the run's red roll-up with no override; \"Re-run failed jobs\" got 403 \"This workflow run cannot be retried\". Ask: the merge tool tells a gate job that never got a runner from a red job, and names the way out (a full re-run, or the owner's named act). A test goes red on today's code. Waits for the fan-out (owner 13:51).",
+  "updatedAt": "2026-11-11T15:48:00-06:00"
+}
