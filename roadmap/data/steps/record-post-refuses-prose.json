@@ -1,0 +1,8 @@
+{
+ "id": "record-post-refuses-prose",
+ "title": "A review record is posted with no prose after its CI line",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Incident twice on 2026-11-10/11: #2571 (20:30 CST) and #2559 (04:38 CST). merge --reviewed parses a record only when the 'CI: read live by merge --reviewed' line is the last before the footer, and reads a record with findings after it as 'bad: the newest record does not parse'. Triage put findings after the CI line in five records the same night (#2559, #2379, #2582, #2378), so a handed-over PR was not released. Fix: whatever posts a review record (merge --review-record, and a guard on the comment post) refuses or splits prose after the CI line before posting.",
+ "source": "coordinator 2026-11-11 04:38 CST (stage 3)"
+}
