@@ -62,7 +62,7 @@
                           A PR number is also checked against each other open PR of its lane (a draft counts; a PR whose body holds a
                           session URL the linted PR's body holds). Order: the stack stop, the base check, the cross-measure, then the ci-job
                           run. An unknown in the first three stops before the ci-job run, and --lint-unknown-ok never lifts it. A FAIL in the base
-                          check or the cross-measure does not stop the run: ci-job still runs, and one refusal lists every FAIL block, with
+                          check or the cross-measure stops there too: the ci-job never runs beside it, and one refusal lists every FAIL block, with
                           no PASS line and no comment. Two heads clash when `git merge-tree` of them conflicts. A clash counts only when both
                           heads merge clean with the base. A clash that comes through the base is a report line after the PASS line, and it
                           names the PR that conflicts with the base. On an integration head (it merged the head of another open PR) no clash
@@ -2860,8 +2860,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
     Then every head, a ref or commit too, is merged into origin/<base> with merge_reason: a conflict is a FAIL that names the base, and an unknown is a Stop.
-    Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: a unknown there is a Stop too, before the ci-job run.
-    The ci-job run follows a FAIL, so one refusal lists every FAIL block: the base conflict, the clashes that count, and ci-job's own lines.
+    Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
+    A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
@@ -2879,7 +2879,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        pin_notes, fails, reports = [], [], []
+        pin_notes, fails, reports, stop = [], [], [], ""
         if target.isdigit():
             refuse_unstacked_head(root, head, base)
         fetched = {}
@@ -2893,16 +2893,13 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None)
             fails += cross_fails
-            if stop:
-                raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop]))
+        if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
+            raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop or LANE_LINT_REMEDY]))
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
-    if fails:  # one verdict: every FAIL block, then ci-job's own lines. A counted clash is never lifted by --lint-unknown-ok
-        rest = [*lines, *log] if state == "fail" else ["the ci-job lint also read unknown, not a pass:", *lines, *log] if state == "unknown" else []
-        raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *fails, *rest, LANE_LINT_REMEDY]))
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
