@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 12:52 CST. The owner's list closed at 18:43 CST; R21 to R36 came after.
+the history. Last rewrite: 2026-11-11 12:56 CST. The owner's list closed at 18:43 CST; R21 to R36 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -26,8 +26,10 @@ no stage.
 1. The drain finishes (stage 1); the H1 lane lands as the one exception.
    Then a fresh start. Owner 10:52 CST Nov 11: "once the drain completes i'll archive coordinator,
    batch runner, and all other claude-settings sessions except you. and respawn the others as new".
-   Before he archives: the plan follow-up PR is merged, and each session writes its handoff with
-   what it holds open. R22's guard is not built yet, so after the respawn the retrospective session
+   Before he archives: the plan follow-up PR is merged, #2591 (Windows guard shard caps) lands (owner
+   12:55 CST Nov 11, to the coordinator: "yes land #2591 before archive"), and each session writes its
+   handoff with what it holds open. #2593 (cloud CI-done wake) and lane mail-send-no-file carry over in
+   the handoffs if they have not landed. R22's guard is not built yet, so after the respawn the retrospective session
    finds the new sessions by their tags and rewrites every stored session id by hand.
 2. Stage 2 is done (#2575, #2579). Later rulings land in the next plan follow-up PR, which the
    coordinator opens. The retrospective session opens no PRs.
