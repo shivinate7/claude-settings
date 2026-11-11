@@ -13842,17 +13842,20 @@ def role_said(text):
 
 
 # An Agent spawn in the parent transcript, in the shape a session writes: the assistant line that calls Agent with
-# its subagent_type, and the user line that answers it. The answer's toolUseResult carries the agentId that a
-# SendMessage names in `to` (rule message-role-scope). Field names are copied from a real session transcript.
+# its subagent_type and, when the spawn is named, its name; and the user line that answers it. The answer's
+# toolUseResult carries the agentId. A SendMessage names its receiver in `to`, as the agentId or as the name, with an
+# optional ` [ref]` suffix (rule message-role-scope). Field names are copied from a real session transcript.
 SPAWN_TOOL = "Agent"
 SPAWN_PROMPT = "Task: a red case for one role's scope."
 
 
-def spawn_use(tool_id, subagent_type):
-    """The assistant line that calls Agent for one agent of `subagent_type`."""
-    return role_use(tool_id, SPAWN_TOOL, {"description": "Red cases", "subagent_type": subagent_type,
-                                          "isolation": "worktree", "run_in_background": True,
-                                          "prompt": SPAWN_PROMPT})
+def spawn_use(tool_id, subagent_type, name=None):
+    """The assistant line that calls Agent for one agent of `subagent_type`, named `name` when it is given."""
+    spawn = {"description": "Red cases", "subagent_type": subagent_type, "isolation": "worktree",
+             "run_in_background": True, "prompt": SPAWN_PROMPT}
+    if name is not None:
+        spawn["name"] = name
+    return role_use(tool_id, SPAWN_TOOL, spawn)
 
 
 def spawn_result(tool_id, agent_id):
@@ -13864,9 +13867,9 @@ def spawn_result(tool_id, agent_id):
                           "description": "Red cases"}})
 
 
-def spawn_call(tool_id, agent_id, subagent_type):
+def spawn_call(tool_id, agent_id, subagent_type, name=None):
     """One Agent spawn, its call and its answer, paired by `tool_id`."""
-    return [spawn_use(tool_id, subagent_type), spawn_result(tool_id, agent_id)]
+    return [spawn_use(tool_id, subagent_type, name), spawn_result(tool_id, agent_id)]
 
 
 # The agent ids the message-role fixtures name. Each has 17 hex digits, as a spawn's agentId does.
@@ -13875,6 +13878,7 @@ SENDTO_AUTHOR = "c3e9a0f17d4b82a6e"
 SENDTO_REVIEWER = "d91f2a6e0c7b53f48"
 SENDTO_OTHER = "e0a4b8c2d16f97e3a"
 SENDTO_UNKNOWN = "f7b2c4d9e1a05c6b8"  # no spawn record names it
+SENDTO_NAME = "lane-builder"  # the name the builder spawn is given, the usual address in `to`
 
 
 def sendto_full_lines():
@@ -14052,6 +14056,7 @@ ROLE_LINES = {
     "msg-reviewer": spawn_call("s1", SENDTO_REVIEWER, "reviewer"),
     "msg-other": spawn_call("s1", SENDTO_OTHER, "builder"),
     "msg-newest-builder": spawn_call("s1", SENDTO_BUILDER, "test-author") + spawn_call("s2", SENDTO_BUILDER, "builder"),
+    "msg-named-builder": spawn_call("s1", SENDTO_BUILDER, "builder", name=SENDTO_NAME),
     "msg-full": sendto_full_lines(),
     "msg-empty": [],
     # A get_session result whose record nests too deep to parse: the call line, then the result, as a read returns it.
@@ -20394,6 +20399,8 @@ FAMILY = "message-role"
 SENDTO_RULE = "message-role-scope"
 SENDTO_TOOL = "SendMessage"
 SENDTO_MSG1 = "Edit hooks/test_guard.py: add a case for the empty brief."  # a test edit: refused to a builder
+SENDTO_INCIDENT = ("merge/test_lane_lint.py ~683: `assertIn(\"unknown\", ...)` holds for any Liftable. "
+                   "Replace it with an assert on \"no lint CI step ran\".")  # the path in the sentence before the verb
 T_SENDTO_BUILDER = role_path("msg-builder")
 T_SENDTO_AUTHOR = role_path("msg-author")
 T_SENDTO_REVIEWER = role_path("msg-reviewer")
@@ -20401,6 +20408,7 @@ T_SENDTO_OTHER = role_path("msg-other")
 T_SENDTO_NEWEST = role_path("msg-newest-builder")
 T_SENDTO_FULL = role_path("msg-full")
 T_SENDTO_EMPTY = role_path("msg-empty")
+T_SENDTO_NAMED = role_path("msg-named-builder")
 
 
 def sendto_refuse(name, to, message, transcript, send_to, lacks=()):
@@ -20421,10 +20429,7 @@ sendto_refuse("a test edit to a builder is refused, and the refusal names test-a
               SENDTO_BUILDER, SENDTO_MSG1, T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
 # Refused: the incident form, the path in the sentence before the verb.
 sendto_refuse("the incident form, the path before the verb, to a builder is refused",
-              SENDTO_BUILDER,
-              "merge/test_lane_lint.py ~683: `assertIn(\"unknown\", ...)` holds for any Liftable. "
-              "Replace it with an assert on \"no lint CI step ran\".",
-              T_SENDTO_BUILDER, "test-author", lacks=("merge/test_lane_lint.py",))
+              SENDTO_BUILDER, SENDTO_INCIDENT, T_SENDTO_BUILDER, "test-author", lacks=("merge/test_lane_lint.py",))
 sendto_refuse("a failing case in a test file, sent to a builder, is refused",
               SENDTO_BUILDER, "Fix the failing case in tests/test_app.py.", T_SENDTO_BUILDER, "test-author",
               lacks=("tests/test_app.py",))
@@ -20567,6 +20572,35 @@ sendto_refuse("a test path joined to a product path by and, to a builder, is ref
               SENDTO_BUILDER, "Edit hooks/a.py and tests/b.py.", T_SENDTO_BUILDER, "test-author", lacks=("tests/b.py",))
 sendto_refuse("a read of a test path, then Fix the case, is refused to a builder, naming test-author",
               SENDTO_BUILDER, "Read tests/x.py. Fix the case.", T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+# A builder spawn is named, and `to` may name it instead of its agentId, with an optional ` [ref]` suffix. The name is the
+# usual address, so the role is read by name too. The agentId case on the same fixture is the control: it resolves today.
+sendto_refuse("an incident-form message to the spawn's name, lane-builder, is refused to a builder",
+              SENDTO_NAME, SENDTO_INCIDENT, T_SENDTO_NAMED, "test-author", lacks=("merge/test_lane_lint.py",))
+sendto_refuse("the same message to the spawn's name with a ref suffix, lane-builder [3fa9c1], is refused to a builder",
+              SENDTO_NAME + " [3fa9c1]", SENDTO_INCIDENT, T_SENDTO_NAMED, "test-author", lacks=("merge/test_lane_lint.py",))
+sendto_refuse("the control: the same message to the spawn's agentId, on the named fixture, is refused to a builder",
+              SENDTO_BUILDER, SENDTO_INCIDENT, T_SENDTO_NAMED, "test-author", lacks=("merge/test_lane_lint.py",))
+# False-alarm control: a name no spawn holds, and a prefix of the spawn's name, pass as they do today. A substring match
+# on the name would take the prefix for the builder and refuse it.
+sendto_allow("the incident-form message to a name no spawn holds passes",
+             "lane-ghost", SENDTO_INCIDENT, T_SENDTO_NAMED)
+sendto_allow("the incident-form message to a prefix of the spawn's name, lane, passes",
+             "lane", SENDTO_INCIDENT, T_SENDTO_NAMED)
+# The verbs `correct` and `implement` govern a path as the other edit verbs do. Each case is addressed by agentId, so the
+# missing verb is the only cause a red case can show. Each has a control on the same path that the guard judges today.
+sendto_refuse("a correct message to a builder is refused, naming test-author",
+              SENDTO_BUILDER, "Correct the assertion in hooks/test_guard.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("hooks/test_guard.py",))
+sendto_refuse("the control: a fix message on the same path to a builder is refused, naming test-author",
+              SENDTO_BUILDER, "Fix the assertion in hooks/test_guard.py.", T_SENDTO_BUILDER, "test-author",
+              lacks=("hooks/test_guard.py",))
+sendto_refuse("an implement message to a test-author is refused, naming builder",
+              SENDTO_AUTHOR, "Implement the fix in hooks/guard.py.", T_SENDTO_AUTHOR, "builder", lacks=("hooks/guard.py",))
+sendto_allow("the control: an implement message for a test edit, to a test-author, is allowed",
+             SENDTO_AUTHOR, "Implement the case in hooks/test_guard.py.", T_SENDTO_AUTHOR)
+# False-alarm control for `correct`: an adjective is no edit verb, so a path said to be correct stays allowed.
+sendto_allow("a test path said to be correct, with no edit verb, is allowed to a builder",
+             SENDTO_BUILDER, "tests/x.py is correct.", T_SENDTO_BUILDER)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
