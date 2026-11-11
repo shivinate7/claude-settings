@@ -764,8 +764,10 @@ def _glob_reach(spec: str):
     found = []
     for name in DEFAULT_BRANCH_FALLBACK:
         full = "refs/heads/" + name
+        # `*` may match an empty string, so a name equal to prefix + suffix is reached. The length check only rejects a
+        # prefix and suffix that overlap inside the name.
         if (full.startswith(target_pre) and full.endswith(target_suf)
-                and len(full) > len(target_pre) + len(target_suf)):
+                and len(full) >= len(target_pre) + len(target_suf)):
             middle = full[len(target_pre):len(full) - len(target_suf)]
             found.append((source_pre + middle + source_suf, name))
     return found
