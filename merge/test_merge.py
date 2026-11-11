@@ -16466,6 +16466,25 @@ class TouchesRead(Env):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(out.splitlines(), [touch_head(2430, "guard-tests", "ready") + "case kept line"], out)
 
+    def test_an_added_line_that_starts_with_three_pluses_is_matched_by_its_case(self):
+        pull = touch_pull(2440, "count-alpha")
+        files = {2440: [touch_file("src/count_alpha.c", "@@ -1,1 +1,2 @@", "+++count_alpha_case();")]}  # an added line, not a `+++ ` header: no space after the pluses
+        host = TouchesHost([pull], files)
+        rc, out, err = self.run_args("--touches", "--case", "count_alpha_case", host=host)
+        self.assertIn(2440, host.file_calls, "the read never reached the files of #2440")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2440, "count-alpha", "ready") + "case count_alpha_case"],
+                         "an added line that starts with +++ and no space was skipped as a header:\n" + out + err)
+
+    def test_a_real_plus_plus_plus_b_file_header_is_still_skipped(self):
+        pull = touch_pull(2441, "header-only")
+        files = {2441: [touch_file("src/count_alpha_case.c", "+++ b/src/count_alpha_case.c")]}  # the only `+` line is a file header; its path holds the case
+        host = TouchesHost([pull], files)
+        rc, out, err = self.run_args("--touches", "--case", "count_alpha_case", host=host)
+        self.assertIn(2441, host.file_calls, "the read never reached the files of #2441")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [TOUCH_NONE], "a `+++ b/` file header matched a case:\n" + out + err)
+
     def test_no_match_prints_the_none_line_and_exits_0(self):
         host = TouchesHost([])  # the empty state: no open pull, so no file is read
         rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host)
@@ -16601,12 +16620,15 @@ class TouchesRead(Env):
                 self.assertEqual(rc, 1, out + err)
                 self.assertIn("merge: unknown", err, f"a {conclusion} red job read clear beside --file:\n" + out + err)
 
-    def touches_run(self, rows, *argv):
-        """`merge --touches --run RUN` beside argv, over the run of `rows` (run_jobs) and the incident's open pulls. -> (rc, out, err). The scope
-        is read first: the run's jobs were listed, and the log of each failed job was read (the rollup job's log is not asked for), so a verdict
-        below is about the log lines and never about a read that did not run."""
+    def touches_run(self, rows, *argv, pulls=None, files=None):
+        """`merge --touches --run RUN` beside argv, over the run of `rows` (run_jobs) and the open pulls: the incident's, unless `pulls` and `files`
+        name others. -> (rc, out, err). The scope is read first: the run's jobs were listed, and the log of each failed job was read (the rollup
+        job's log is not asked for), so a verdict below is about the log lines and never about a read that did not run."""
         jobs, logs = run_jobs(*rows)
-        host = incident_host(jobs=jobs, job_logs=logs, count_gh=True)
+        if pulls is None:
+            host = incident_host(jobs=jobs, job_logs=logs, count_gh=True)
+        else:
+            host = TouchesHost(pulls, files, jobs=jobs, job_logs=logs, count_gh=True)
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, *argv, host=host)
         self.assertIn(f"actions/runs/{TOUCH_RUN}/jobs", host.gh_calls, "the run's jobs were not listed")
         for i, name, conclusion, _log in rows:
@@ -16650,6 +16672,23 @@ class TouchesRead(Env):
         self.assertNotIn(TOUCH_NONE, out + err, "the clear line printed beside a failed job with an empty log")
         self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"],
                          "the matches on stdout changed beside the unknown:\n" + out)
+
+    def test_a_failing_line_that_names_no_case_beside_a_parsed_one_in_one_job_is_unknown(self):
+        pull7 = touch_pull(7, "wrapper-cases")  # open pull 7 adds the unparsed line's case to hooks/test_wrappers.py
+        files = {7: [touch_file("hooks/test_wrappers.py", '+    check("test_wrappers name without bracket")')]}
+        one_job = ((201, "tests", "failure", failed_case("case alpha") + "  (note)\nFAIL  name without bracket  (note)"),)  # one log, two failing lines
+        rc, out, err = self.touches_run(one_job, pulls=[pull7], files=files)
+        self.assertEqual(rc, 1, "a failing line that names no case read clear beside a parsed one in the same job:\n" + out + err)
+        self.assertIn("merge: unknown", err, "a failing line that names no case printed no unknown beside a parsed one in the same job:\n" + out + err)
+        self.assertNotIn(TOUCH_NONE, out + err, "the clear line printed beside a failing line that names no case")
+
+    def test_a_job_with_only_the_parsed_line_still_gives_its_answer(self):
+        pull7 = touch_pull(7, "wrapper-cases")
+        files = {7: [touch_file("hooks/test_wrappers.py", '+    check("test_wrappers name without bracket")')]}
+        rc, out, err = self.touches_run(((201, "tests", "failure", failed_case("case alpha") + "  (note)"),), pulls=[pull7], files=files)
+        self.assertEqual(rc, 0, "a job whose only failing line names a case read as unknown:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "a job whose only failing line names a case printed unknown:\n" + err)
+        self.assertEqual(out.splitlines(), [TOUCH_NONE], "the job with only the parsed line did not give its answer:\n" + out)
 
     def test_success_skipped_and_neutral_jobs_beside_a_parsed_failure_read_clear(self):
         for conclusion in ("success", "skipped", "neutral"):
