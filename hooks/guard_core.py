@@ -1226,14 +1226,118 @@ def shell_abs(path: str, base):
     return path
 
 
+# Commands that cannot set a variable of the shell they run in. A segment whose command is not here
+# (unset, read, printf -v, export, a loop, eval, a function, `R+=x`) may, so the walk forgets every
+# variable after it.
+_VARIABLE_SAFE_WORDS = frozenset(CD_WORDS + POP_WORDS + (
+    "echo", "true", "false", "git", "gh", "ls", "cat", "pwd", "mkdir", "rm", "grep", "test", "[", "sleep",
+    "python", "python3"))
+_VARIABLE_SET_IN_ARGS = re.compile(r"\$\(\(|\$\{[^}]*=")   # `$((R=1))` and `${R:=x}` set R from an argument
+
+
+def _variable_text(known, text: str) -> str:
+    """`text` with each `$VAR` read as the value in `known`. The values go through `_resolve_vars`, the
+    one resolver, as assignments written ahead of the text; it is imported late (guard_frozen imports
+    this file). A variable not in `known` stays as written."""
+    from guard_frozen import _resolve_vars
+    mark = " ;\x00; "
+    given = "".join('%s="%s"%s' % (name, value, mark) for name, value in known.items())
+    return _resolve_vars(given + text).split(mark)[-1]
+
+
+def _track_variables(known, segment: str, tokens, ran: bool) -> bool:
+    """Update `known`, the variables the shell holds, for one segment the walk passes. Only a segment of
+    plain `NAME=value` words that surely ran here (`ran`: not in a pipe, not after `||`, not after an `&&`
+    whose left side may fail) sets a variable. A value holding a substitution, a quote, a backslash or an
+    unread variable, an empty value, and a quoted `~` (bash does not expand it) leave the variable unknown.
+    A segment that is not an assignment keeps `known` only when its command cannot set a variable.
+    True when the segment is plain assignments with no substitution: its exit status is 0, so an `&&`
+    after it runs."""
+    if tokens and all(ASSIGNMENT.match(token) for token in tokens):
+        for token in tokens:
+            name, value = token.split("=", 1)
+            read = None
+            if (ran and value and not set(value) & set("`'\"(\\")
+                    and not ("~" in value and "%s=~" % name not in segment)):
+                read = _variable_text(known, value)
+                if not read or "$" in read:
+                    read = None
+            if read is None:
+                known.pop(name, None)
+            else:
+                known[name] = read
+        return not any("$(" in token or "`" in token for token in tokens)
+    index = resolve_command(tokens) if tokens else None
+    if (index is None or basename(tokens[index]) not in _VARIABLE_SAFE_WORDS
+            or _VARIABLE_SET_IN_ARGS.search(segment)):
+        known.clear()
+    return False
+
+
+def _command_text(segment: str, tokens) -> str:
+    """`segment` from its command word on, or None when that word cannot be found unquoted. Bash expands
+    a command's words before its prefix assignments (`R=A cd "$R"`) take effect, so the resolver must not
+    see them."""
+    index = resolve_command(tokens)
+    if index is None or not any(ASSIGNMENT.match(token) for token in tokens[:index]):
+        return segment
+    word = tokens[index]
+    for at, _, quote in walk_quotes(segment):
+        if (not quote and segment.startswith(word, at) and (at == 0 or segment[at - 1].isspace())
+                and (at + len(word) == len(segment) or segment[at + len(word)].isspace())):
+            return segment[at:]
+    return None
+
+
+def _subshell_opens(segment: str, marks):
+    """The indexes of the `(` in `marks` that open a subshell group: the first word of the segment, or
+    inside another such group. A `$(`, `<(`, `((` or a group after a keyword is not read as one, so its
+    `)` keeps what the segment itself did to a variable (`R=$(cmd)` leaves R unknown)."""
+    opens = set()
+    for at, char in marks:
+        if char != "(" or segment[at + 1:at + 2] == "(":
+            continue
+        before = segment[:at].rstrip()
+        if not before or (before[-1] == "(" and len(before) - 1 in opens):
+            opens.add(at)
+    return opens
+
+
+def _close_paren(stack, known):
+    """Pop one `( ... )` level: the folder state comes back, and so does `known` after a subshell group.
+    After any other paren (a substitution, arithmetic), only the variables the segment left unchanged
+    stay known: the snapshot is from before the segment, so restoring it would undo the segment's own
+    clear."""
+    where, prev, saved, group = stack.pop()
+    if group:
+        return where, prev, dict(saved)
+    return where, prev, {name: value for name, value in known.items() if saved.get(name) == value}
+
+
+def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
+    """The folder a `cd` names with each variable read from `known`, or `move` unchanged when it cannot be
+    read: a `cd` that may not run (`ran` False), a command word not found in the text, or a result that is
+    empty, which would be taken for home. A prefix assignment on the cd is not read (`_command_text`)."""
+    text = _command_text(segment, segment_tokens(segment)) if ran else None
+    if text is None:
+        return move
+    tokens = segment_tokens(_variable_text(known, text))
+    read = _segment_cd_move(tokens) if tokens else None
+    return read if isinstance(read, str) and read else move
+
+
 def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
-    back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
-    where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
+    back, a `cd` inside `( ... )` ends with the parenthesis, and `popd` is not tracked. A `cd` to
+    `$VAR`, `"$VAR"` or `"${VAR}"` is read as the value a plain `NAME=value` segment set in this shell
+    (`_track_variables`); a prefix assignment, one in a pipe, a subshell, after `||` or after an `&&` whose
+    left side may fail, and any step that may set a variable (`unset`, `read`, a loop, `$(...)`) leave it
+    unknown. A path that still holds `$` after that
+    (unassigned, a substitution), or holds `%` or a backtick, is not tracked. A `cd` into a folder that does not exist is not trusted (the
+    shell stays where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
@@ -1242,29 +1346,47 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
+    doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
+    unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    last_end = ""      # the operator that ended the last non-empty segment
     for at, segment in enumerate(segments[:number + 1]):
-        marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
-        stack.extend([(where, prev)] * marks.count("("))
+        marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
+        groups = _subshell_opens(segment, marks)
+        stack.extend((where, prev, dict(known), index in groups) for index, char in marks if char == "(")
+        closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
         if at == number:
             return None if skipping else where
+        if not segment.strip():
+            continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
         if skipping:
+            last_end = end
             skipping = end in ("&&", "|")
-            for _ in range(marks.count(")")):
+            unsure = True
+            for _ in range(closes):
                 if stack:
-                    where, prev = stack.pop()
+                    where, prev, known = _close_paren(stack, known)
                     skipping = False
             continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
-        if move is not None and not is_powershell(segment) and "|" in (
-                ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
+        before = last_end
+        last_end = end
+        piped = "|" in (end, before)
+        if move is not None and not is_powershell(segment) and piped:
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        ran = not (doubt or piped or before == "||")   # this segment runs in the shell, as itself
+        sure = ran and not (unsure and before == "&&")
+        assigned = _track_variables(known, segment, tokens, sure)
+        doubt = doubt and end == "&&"
         if tokens is None:
             where = None
         elif move is not None:
             old = where
+            if move is not CD_UNKNOWN and "$" in move:
+                move = _read_cd_variable(known, segment, move, sure)
             if move is CD_UNKNOWN:
                 where = None
             elif move == "-":
@@ -1280,10 +1402,14 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
                     where = None
+            doubt = doubt or (where is None and end == "&&")
             prev = old
-        for _ in range(marks.count(")")):
+        # Only a plain assignment or a cd into a folder the walk trusts surely succeeds.
+        unsure = not (sure and (assigned or (move is not None and move is not CD_UNKNOWN and where is not None
+                                                  and not skipping)))
+        for _ in range(closes):
             if stack:
-                where, prev = stack.pop()
+                where, prev, known = _close_paren(stack, known)
     return where
 
 
