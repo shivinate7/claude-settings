@@ -1,0 +1,16 @@
+{
+ "id": "shared-job-finder",
+ "title": "Find the same job built twice across repos, looking back and looking ahead",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "why": "Each repo builds its own copy of a job that one shared home could serve, so fixes and best practice drift apart. lint/find_copies.py finds only word-for-word copies, not the same job in other words. Owner 10:22 CST Nov 11: \"it would be optimal if something identified shared savings opportunities like this in a sense across my repos retroactively and proactively\".",
+ "note": "Ruling R29 (owner answer 10:24 CST, \"A\"; relayed 10:24-10:25 CST; plan 574d1b5 under item 3.6, after R28). Parts: (1) looking back: at each compliance check a meaning match finds the same job built twice across repos, and each find goes to claude-settings triage as a candidate for one shared home (extends lint/find_copies.py); (2) looking ahead: the plan refuter asks \"does this job already exist?\" before a build; (3) both read one list of jobs and their homes. No new process. The cross-repo read needs a session on the owner's computer, or each repo attached. Starts after the R28 deeper audit.",
+ "source": "owner 2026-11-11 10:22-10:24 CST, relayed by the retrospective session and the coordinator",
+ "owner": "triage",
+ "updatedAt": "2026-11-11T10:29:00-06:00",
+ "blockedBy": [
+  "prose-tending-move-stores"
+ ]
+}

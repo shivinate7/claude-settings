@@ -694,3 +694,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - 2026-11-11 10:10 CST, note (triage mistake): guard message-time-matches-clock let through updatedAt times 3-5 min ahead of the clock when set in a shell variable (T=2026-11-11T10:09:00-06:00 at 10:06 CST; commits 2a001b7c3, 5be320cf0); it refused the literal form. Guard owed: read a time assigned to a shell variable.
 - R27 (owner 10:16 CST Nov 11, plan 6e0c790 under 3.6): new step feedback-log-tends-itself. Add 6e0c790 to the owed plan follow-up PR.
 - R28 (owner 10:19-10:22 CST Nov 11, plan a96d4a3 under 3.6): steps prose-tending-contract and prose-tending-move-stores; feedback-log-tends-itself waits on the contract. Add a96d4a3 to the owed plan follow-up PR.
+- R29 (owner 10:22-10:24 CST Nov 11, plan 574d1b5 under 3.6): step shared-job-finder, blocked by prose-tending-move-stores. Add 574d1b5 to the owed plan follow-up PR.
