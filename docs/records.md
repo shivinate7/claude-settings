@@ -152,6 +152,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `config-watch-fast-exit` | Owner, 2026-10-20. | [`docs/decisions/config-watch-fast-exit.md`](../docs/decisions/config-watch-fast-exit.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`docs/decisions/copy-mode-overwrites-no-backup.md`](../docs/decisions/copy-mode-overwrites-no-backup.md) |
 | `cross-repo-question-checked` | An open decision or task on a repo's waiting page names the repo it is about. | [`docs/decisions/cross-repo-question-checked.md`](../docs/decisions/cross-repo-question-checked.md) |
+| `cull-guard-wrong-refusals` | It sits beside decision `cull-rules` (how a cull runs, owner ruling 2026-10-17). | [`docs/decisions/cull-guard-wrong-refusals.md`](../docs/decisions/cull-guard-wrong-refusals.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`docs/decisions/cull-rules.md`](../docs/decisions/cull-rules.md) |
 | `debt-close-runs-retire` | A PR closes a debt when it deletes the debt file, or renames it out of `docs/debts/`. | [`docs/decisions/debt-close-runs-retire.md`](../docs/decisions/debt-close-runs-retire.md) |
 | `decision-watch-mod-limits` | The decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`docs/decisions/decision-watch-mod-limits.md`](../docs/decisions/decision-watch-mod-limits.md) |
@@ -287,6 +288,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `waiting-data-in-repo` | Git is each artifact's home. | [`docs/decisions/waiting-data-in-repo.md`](../docs/decisions/waiting-data-in-repo.md) |
 | `when-a-worktree-may-be-removed` | Four idle limits. | [`docs/decisions/when-a-worktree-may-be-removed.md`](../docs/decisions/when-a-worktree-may-be-removed.md) |
 | `windows-temp-sweep` | A session's temp folder goes after its transcript is idle 24 hours | [`docs/decisions/windows-temp-sweep.md`](../docs/decisions/windows-temp-sweep.md) |
+| `workflow-args-shape-check` | The guard refuses a `Workflow` call whose `args` is a placeholder (rule `workflow-args-shape-check`). | [`docs/decisions/workflow-args-shape-check.md`](../docs/decisions/workflow-args-shape-check.md) |
 | `worktree-setup-is-per-repo` | Each repo sets up the untracked state (node_modules, venv, caches) of a worktree itself. | [`docs/decisions/worktree-setup-is-per-repo.md`](../docs/decisions/worktree-setup-is-per-repo.md) |
 | `wsl-allow-list` | The guard allows a WSL command only when every condition holds: | [`docs/decisions/wsl-allow-list.md`](../docs/decisions/wsl-allow-list.md) |
 
