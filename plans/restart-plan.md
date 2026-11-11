@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:13 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:18 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -537,6 +537,12 @@ then R29.
   So: a read-only measuring session (Sonnet, started 11:13 CST) sums spend by day, role, repo and
   model over every session. No cut is ruled before it reports. A cut that slows work is weighed
   against the speed it costs, and speed wins a close call.
+  Measured 11:17 CST (800 sessions back to Nov 3; costs are each session's whole life): sessions
+  active Nov 7-9 cost at least $22,075. Opus lanes, all started before the Sonnet lane ruling (owner
+  2026-11-08 12:21 CST), are $19,889 of it, 387 lanes; no Opus lane started after it. Cost per lane:
+  Opus median $22.9, mean $51.4; Sonnet median $11.9, mean $16.1. Lane life, start to archive: Opus
+  median 64 h, Sonnet 28 h. Standing sessions, both Opus and missed by that listing: coordinator
+  $1,839 and triage $1,567 since Nov 3. Not seen: hook judges, local sessions, the other account.
   Compaction, owner 11:09 CST: "i frankly dont mind compacting sooner given we have such good handoff
   hooks". Today the coordinator compacts at 441,600 tokens and lanes at 384,000; why they differ is
   unmeasured (decision idle-resume-compacts). Every standing session and lane compacts sooner. The audit
