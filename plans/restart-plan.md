@@ -340,13 +340,17 @@ After 3.11, because its third part uses the same owner grant route.
   on a card for an act that is always allowed, so the owner's answers wait. The hooks that judge a page
   write (call_judge.py, guard.py) still run, so no check is lost.
   1. Read on main, 19:02 CST: `settings.json` already allows `mcp__claude-artifacts__db_write` and the
-     other page tools. The cloud card shows anyway. Cause unproven. Suspects: the cloud tool is named
-     `ArtifactData` and no allow entry names it, or auto mode asks despite the entry.
-  2. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
+     other page tools. The cloud card shows anyway. Owner 19:13 CST, a second card in a Degen session:
+     "even this artifact write needed my permission". That card names the tool as `claude-artifacts:
+     db write`, the allowed name, so a missing name is not the whole cause. Suspects: that session's
+     settings lack the entry, or the card comes from claude.ai and no settings file can lift it.
+  2. The page hooks match `ArtifactData` only, so they skip a write named `mcp__claude-artifacts__db_write`.
+     Open PR #2549 (artifact-guard-matcher-names) adds those names. It lands with this fix.
+  3. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
      im guessing we need to add too now to the allow list". `ArtifactData` now has nine actions: get,
      list, query, profiles, set, update, str_replace, delete, batch. The allow list names six tools.
      A web search found no public list of the new tool names.
-  3. The fix lane first reproduces the card in a cloud session. It reads the real tool names from that
+  4. The fix lane first reproduces the card in a cloud session. It reads the real tool names from that
      session's tool listing, never from a guess. It then allows every page database action under each
      name the card checks. A test proves a page write in a cloud session shows no card.
 - **D3. How much a lane writes (open).** Owner 16:46 CST Nov 10: "lane's own chat never reaches me
