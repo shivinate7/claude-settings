@@ -8414,6 +8414,10 @@ sh("silent-write [cdvar-unread]: control: R=<throwaway> && cd \"$R\", then a dis
 sh("silent-write [cdvar-unread]: R=<throwaway>; ls <missing> && cd \"$R\", then a discarded commit from the real checkout, is refused",
    "R=" + TSLASH + "; ls " + slash(os.path.join(ROOT, "no-such-folder")) + " && cd \"$R\"; " + VCS
    + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
+# A value that starts with a quoted ~ is not a tilde the shell expands, so it stays unknown, and an unknown folder is
+# refused for a commit from the real checkout.
+sh("silent-write [cdvar-unread]: control: R=\"~/tilde~dir\" quoted, cd \"$R\", then a discarded commit from the real checkout, is refused",
+   "R=\"~/tilde~dir\"; cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
 sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged there",
    VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",
@@ -10422,6 +10426,7 @@ NMTARGET = os.path.join(ROOT, "nmtarget")    # stands in for main's install, out
 NMLINKED = os.path.join(ROOT, "nmlinked")    # a working folder whose node_modules is a link
 NMREAL = os.path.join(ROOT, "nmreal")        # a working folder whose node_modules is a real folder
 NMABSENT = os.path.join(ROOT, "nmabsent")    # a working folder with no node_modules
+NMTILDE = os.path.join(ROOT, "nmlinked~dir")  # a working folder whose name holds a ~, and whose node_modules is a link
 NMSHIM = os.path.join(ROOT, "nmshim")        # a folder whose sitecustomize drops os.path.isjunction
 NM_PKG = ('{"name": "app", "scripts": {"setup": "node setup.js", "build": "node build.js",'
           ' "test": "node test.js"}}\n')
@@ -10456,17 +10461,18 @@ def _make_dir_link(target, link):
 
 
 def _build_linked_nm():
-    """The four working folders of this section, and the shim folder. One folder is a link to the target,
-    one holds a real folder."""
-    for folder in (NMTARGET, NMLINKED, NMREAL, NMABSENT):
+    """The five working folders of this section, and the shim folder. NMLINKED and NMTILDE hold a link to
+    the target, NMREAL holds a real folder, NMABSENT holds none."""
+    for folder in (NMTARGET, NMLINKED, NMREAL, NMABSENT, NMTILDE):
         write(os.path.join(folder, "package.json"), NM_PKG)
     write(os.path.join(NMTARGET, "pkg.js"), "module.exports = {};\n")
     _make_dir_link(NMTARGET, os.path.join(NMLINKED, "node_modules"))
+    _make_dir_link(NMTARGET, os.path.join(NMTILDE, "node_modules"))
     write(os.path.join(NMREAL, "node_modules", "pkg.js"), "module.exports = {};\n")
     write(os.path.join(NMSHIM, "sitecustomize.py"), NM_SHIM_SOURCE)
 
 
-lazy_fixture([NMTARGET, NMLINKED, NMREAL, NMABSENT, NMSHIM], _build_linked_nm)
+lazy_fixture([NMTARGET, NMLINKED, NMREAL, NMABSENT, NMTILDE, NMSHIM], _build_linked_nm)
 
 
 def nm_case(name, command, expected, cwd, tool="Bash"):
@@ -10516,6 +10522,13 @@ nm_case("linked-nm: a variable folder linked, cd \"$R\" then npm ci, is refused,
         "R=" + slash(NMLINKED) + "; cd \"$R\" && npm ci", "deny", NMABSENT)
 nm_case("linked-nm: the literal twin, a cd to the linked folder then npm ci, is refused",
         "cd " + slash(NMLINKED) + " && npm ci", "deny", NMABSENT)
+# A ~ inside a folder's name is a plain character, so the variable naming it is read. The literal twin comes
+# first: it must deny on the same folder before the variable form means anything. The Windows temp folder
+# (RUNNER~1) is the real case; this folder's name carries the same ~ on every platform.
+nm_case("linked-nm: the literal twin, a cd to a linked folder whose name holds ~, then npm ci, is refused",
+        "cd " + slash(NMTILDE) + " && npm ci", "deny", NMABSENT)
+nm_case("linked-nm: a variable folder linked, whose name holds ~, cd \"$R\" then npm ci, is refused, as its literal twin is",
+        "R=" + slash(NMTILDE) + "; cd \"$R\" && npm ci", "deny", NMABSENT)
 
 # THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
 # not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
