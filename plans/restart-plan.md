@@ -71,6 +71,10 @@ step.
 ### 3.0 One glossary of roles, the same on local and cloud
 
 Step glossary-same-local-cloud. First because every later brief uses its terms.
+Owner 13:54 CST Nov 11: "a": 3.0's records half (GLOSSARY.md, decision session-tiers, the CLAUDE.md
+lines; G1-G3, G6, G7, G9, G10, G12, G13, G15) starts now as one lane, before the fresh start, so the
+respawned sessions run on it. Its code half (G11's local and cloud splits, which touch the guards) waits
+for the guard test file split.
 
 - **G1. Who acts.** Owner 14:23 CST Nov 10: "the who is good, but i can make a grant or ruling, so can
   arbiter (marked as such, and a tier below)". Three kinds of actor: the owner, a session, an agent.
