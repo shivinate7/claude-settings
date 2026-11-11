@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:25 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:33 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -13,8 +13,8 @@ in the owner's words with the time. Ids (R1, G1, D1) are stable names, not an or
 
 The words come first, because every later brief uses them (3.0, G1-G15). Next comes the split of the
 guard test file (R26 part 4), while few lanes are open. The rest of stage 3 then runs in parallel, and
-stage 4 runs beside it (R25). Only three items wait on another: 3.2 runs with 3.1, 3.12 after 3.11,
-and 3.14 in R28's order. Stage 3 covers what loses whole CI runs (3.1, 3.2, 3.4, 3.5) and the loop
+stage 4 runs beside it (R25). Only four items wait on another: 3.2 runs with 3.1, 3.12 after 3.11,
+3.14 in R28's order, and R33 in 3.7 after R32's audit. Stage 3 covers what loses whole CI runs (3.1, 3.2, 3.4, 3.5) and the loop
 that sends lanes back (3.3, 3.7, 3.8). It also covers trust in guards (3.6, 3.9-3.12), the express pass
 for prose (3.13), prose that tends itself (3.14), and token spend (3.15). Stage 4 makes the owner's side mechanical: one home and one wake
 per answer, easy relays, debts and notes kept in place, session ids that survive a restart. Each is
@@ -573,9 +573,11 @@ then R29.
      caught.
   Compaction, owner 11:09 CST: "i frankly dont mind compacting sooner given we have such good handoff
   hooks". Today the coordinator compacts at 441,600 tokens and lanes at 384,000; why they differ is
-  unmeasured (decision idle-resume-compacts). Every standing session and lane compacts sooner. The audit
-  proposes the size from its per-turn cost data. The lever is `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the
-  cloud environment, or `/autocompact` per session. Home: decision precompact-handoff, rule 1.
+  unmeasured (decision idle-resume-compacts). Cut 1 below narrows it: only a session that stays on Opus
+  compacts sooner, at a size set from measured per-turn cost. The lever is the per-model key or
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, never `/autocompact` (decision precompact-handoff, rule 1,
+  coordinator pick 2026-11-01 17:45). Decision idle-resume-compacts, which lists `/autocompact` as a
+  cloud lever, is rewritten to match. Home: decision precompact-handoff, rule 1.
 
 ## Stage 4. Make the roadmap and triage mechanical
 
