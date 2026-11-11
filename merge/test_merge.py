@@ -19084,9 +19084,9 @@ class BatchFreeze(CloudSession):
             self.assertEqual(got, "alt.json", "batch_build got config %r, not the --config path: %s" % (got, out))
 
     def test_each_option_outside_the_batch_route_is_refused_beside_batch_build(self):
-        """Each option that does not go with --batch-build is refused beside it with the stand-alone text, and batch_build never runs. The
-        control is the build with no extra option: it reaches batch_build. --release-check goes last, so its value is not read as a PR."""
-        real = merge.batch_build
+        """The nine options in `refused` are each refused beside --batch-build with the stand-alone text, and batch_build never runs for
+        them. The control is the build with no extra option: it reaches batch_build. --release-check goes last, so its value is not read
+        as a PR."""
         refused = (
             ("7", "--batch-build", "nightly", "101"),
             ("--batch-build", "nightly", "101", "--confirm"),
