@@ -5131,16 +5131,8 @@ m8_check() {
 caseM8() {
   name="caseM8: later cloud installs in the same HOME, after origin/main gains commits: the mirror refreshes in place by the pointer route and by the checkout fallback, and the installed files match it"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
-  move_fixture m8
-  git -C "$co" checkout -q -b lane
-  co_head=$(git -C "$co" rev-parse HEAD); co_branch=$(git -C "$co" symbolic-ref -q HEAD)
-  move_install
-  first=$want; mirror="$h/claude-settings-main"
-  if [ "$rc" -ne 0 ]; then bad "$name" "FIXTURE the first install exited $rc: $(install_problems)"; return; fi
-  if [ "$(git -C "$mirror" rev-parse HEAD 2>/dev/null)" != "$first" ] \
-     || [ "$(git -C "$mirror" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
-    bad "$name" "FIXTURE the first install did not leave a marked mirror at main [$first]"; return
-  fi
+  if ! mirror_first_install m8; then bad "$name" "FIXTURE $fix_why"; return; fi
+  first=$want
   # A file inside the mirror's .git that only an in-place refresh keeps: a mirror that is cloned again loses it.
   : > "$mirror/.git/caseM8-sentinel"
 
@@ -5281,6 +5273,159 @@ caseM10() {
   if msg=$(m10_run stalefetch); then ok "$name"; else bad "$name" "$msg"; fi
   name="caseM10 (stalekeep): origin unreachable with HEAD at the origin/main record: one WARN names the failed fetch, the log says last fetched main, no tip is claimed, and the checkout is the source"
   if msg=$(m10_run stalekeep); then ok "$name"; else bad "$name" "$msg"; fi
+}
+
+# ---- caseM11-M14: the mirror refresh (install.sh mirror_refresh). The mirror's main can move on its own: a fast-forward to a
+# commit origin holds, as the SessionStart hook's `merge --ff-only origin/main` does, while mirrorSha stays at the commit the
+# install last set. That holds no local commit, so the refresh must go ahead. A mirror with real local commits on main is kept,
+# and its WARN counts them. The mirror is a depth-1 clone, as install.sh makes it, so a depth-1 FETCH_HEAD holds no history
+# under it: m11_trap_check shows that a naive ancestor check against FETCH_HEAD reads the fast-forwarded main as not behind origin.
+# A setup returns 1 with fix_why set on a fixture fault. It runs without a subshell, so it sets the globals the cases read.
+
+# mirror_first_install NAME: move_fixture NAME, a session checkout on branch lane (so the first install makes the mirror, as
+# caseM8 does), and that first cloud install. Sets mirror, co_branch and co_head. The mirror must be a shallow clone at
+# origin's main, with mirrorSha set to it.
+mirror_first_install() {
+  move_fixture "$1"
+  git -C "$co" checkout -q -b lane
+  co_branch=$(git -C "$co" symbolic-ref -q HEAD); co_head=$(git -C "$co" rev-parse HEAD)
+  move_install
+  mirror="$h/claude-settings-main"
+  if [ "$rc" -ne 0 ]; then fix_why="the first install exited $rc: $(install_problems)"; return 1; fi
+  if [ "$(git -C "$mirror" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    fix_why="the first install left no marked mirror at [$mirror]"; return 1
+  fi
+  if [ "$(git -C "$mirror" rev-parse --is-shallow-repository)" != true ]; then
+    fix_why="the mirror [$mirror] is not shallow, so the fixture is not as in production"; return 1
+  fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ] || [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$want" ]; then
+    fix_why="the first install left the mirror at [$(git -C "$mirror" rev-parse HEAD)], not origin's main [$want]"; return 1
+  fi
+  return 0
+}
+
+# mirror_ff_setup NAME: mirror_first_install, then origin's main moves to a1, and the mirror's main fast-forwards to it with no
+# local commit, as the SessionStart hook moves it (a full fetch of origin's main, then --ff-only). Then origin moves three more
+# commits, one a merge, to want. The mirror's main is a1 and mirrorSha stays at the first install's commit.
+mirror_ff_setup() {
+  mirror_first_install "$1" || return 1
+  first_sha=$(git -C "$mirror" config --get claude-settings.mirrorSha)
+  advance_github_fixture "$fx" a1 claudemd
+  a1=$(fixture_sha "$fx")
+  if ! HOME="$h" git -C "$mirror" fetch -q origin main; then fix_why="the full fetch of origin's main into the mirror failed"; return 1; fi
+  if ! HOME="$h" git -C "$mirror" merge -q --ff-only origin/main; then fix_why="the --ff-only merge into the mirror's main failed"; return 1; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$a1" ]; then
+    fix_why="the mirror main is [$(git -C "$mirror" rev-parse HEAD)], not a1 [$a1]"; return 1
+  fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$first_sha" ]; then fix_why="the fast-forward moved mirrorSha"; return 1; fi
+  advance_github_fixture "$fx" a2 claudemd
+  advance_github_fixture "$fx" a3 merge
+  advance_github_fixture "$fx" a4 claudemd
+  want=$(fixture_sha "$fx")
+  m11_trap_check || return 1
+  return 0
+}
+
+# m11_trap_check: on this fixture the mirror's main is behind origin's main, yet a depth-1 FETCH_HEAD cannot show it. Origin's
+# own history says main is an ancestor of want, and the naive check against the depth-1 FETCH_HEAD says it is not. Reads mirror
+# and want. Returns 1 with fix_why set when the fixture does not show the trap.
+m11_trap_check() {
+  ff=$(git -C "$mirror" rev-parse HEAD)
+  if ! git -C "$fx/bare.git" merge-base --is-ancestor "$ff" "$want"; then
+    fix_why="main [$ff] is not an ancestor of origin's main [$want] in origin's own history"; return 1
+  fi
+  if ! git -C "$mirror" fetch -q --depth 1 "$fx/bare.git" main; then fix_why="the depth-1 fetch into the mirror failed"; return 1; fi
+  if git -C "$mirror" merge-base --is-ancestor "$ff" FETCH_HEAD 2>/dev/null; then
+    fix_why="a depth-1 FETCH_HEAD reads main as an ancestor, so the fixture does not show the trap"; return 1
+  fi
+  return 0
+}
+
+# caseM11 (a): a mirror whose main fast-forwarded past mirrorSha, with no local commit, is refreshed to origin's main.
+caseM11() {
+  name="caseM11: a mirror whose main fast-forwarded past mirrorSha, with no local commit, is refreshed to origin's main, mirrorSha moves with it, and no WARN names the mirror"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_ff_setup m11; then bad "$name" "FIXTURE $fix_why"; return; fi
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror")
+  if [ -n "$wl" ]; then bad "$name" "a WARN names the mirror, though it holds no local commit: $wl"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "the mirror is at $(git -C "$mirror" rev-parse HEAD), not origin's main [$want]"; return
+  fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$want" ]; then
+    bad "$name" "mirrorSha is [$(git -C "$mirror" config --get claude-settings.mirrorSha)], not origin's main [$want]"; return
+  fi
+  mm=$(main_mismatch "$want" "$h/.claude-cfg" "$h")
+  if [ -n "$mm" ]; then bad "$name" "$mm"; return; fi
+  ok "$name"
+}
+
+# caseM12 (b): a mirror holding two local commits on main that origin lacks is kept, and its WARN names the two commits.
+caseM12() {
+  name="caseM12: a mirror holding two local commits on main that origin lacks is kept, and its WARN names the two commits"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_first_install m12; then bad "$name" "FIXTURE $fix_why"; return; fi
+  kept=$(git -C "$mirror" rev-parse HEAD)
+  git -C "$mirror" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local one"
+  git -C "$mirror" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local two"
+  local_head=$(git -C "$mirror" rev-parse HEAD)
+  if [ "$(git -C "$mirror" rev-list --count "$kept..HEAD")" != 2 ]; then bad "$name" "FIXTURE the mirror main does not hold two commits past [$kept]"; return; fi
+  advance_github_fixture "$fx" b1 claudemd; want=$(fixture_sha "$fx")
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$local_head" ]; then
+    bad "$name" "the mirror's main moved off its two local commits: now [$(git -C "$mirror" rev-parse HEAD)]"; return
+  fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$kept" ]; then
+    bad "$name" "mirrorSha moved to [$(git -C "$mirror" config --get claude-settings.mirrorSha)], want [$kept]"; return
+  fi
+  wl=$(printf '%s\n' "$out" | grep WARN | sed "s|$mirror|MIRROR|g")
+  if ! printf '%s\n' "$wl" | grep -Eq '(^|[^0-9A-Za-z])2 ([a-z]+ )?commits?'; then
+    bad "$name" "no WARN names the 2 local commits: $(printf '%s\n' "$wl" | head -n 2)"; return
+  fi
+  ok "$name"
+}
+
+# caseM13 (b, after a fast-forward): the mirror fast-forwards past mirrorSha, then gains two local commits on main. Those two are
+# what origin lacks, so the WARN counts two. A count of the commits past mirrorSha would read three.
+caseM13() {
+  name="caseM13: a mirror fast-forwarded past mirrorSha, then holding two local commits, is kept, and its WARN counts the two commits origin lacks"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_ff_setup m13; then bad "$name" "FIXTURE $fix_why"; return; fi
+  git -C "$mirror" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local one"
+  git -C "$mirror" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local two"
+  local_head=$(git -C "$mirror" rev-parse HEAD)
+  if [ "$(git -C "$mirror" rev-list --count "$a1..HEAD")" != 2 ]; then bad "$name" "FIXTURE the mirror main does not hold two commits past a1 [$a1]"; return; fi
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$local_head" ]; then
+    bad "$name" "the mirror's main moved off its local commits: now [$(git -C "$mirror" rev-parse HEAD)]"; return
+  fi
+  wl=$(printf '%s\n' "$out" | grep WARN | sed "s|$mirror|MIRROR|g")
+  if ! printf '%s\n' "$wl" | grep -Eq '(^|[^0-9A-Za-z])2 ([a-z]+ )?commits?'; then
+    bad "$name" "no WARN counts the 2 local commits origin lacks: $(printf '%s\n' "$wl" | head -n 2)"; return
+  fi
+  ok "$name"
+}
+
+# caseM14 (control, d for install.sh): a cloud install that refreshes the mirror prints the short sha of the commit it installed.
+# Green on main: the settings line names "from <source> at <sha>" when jq is present. It guards that line against a fix that drops it.
+caseM14() {
+  name="caseM14 (control): a cloud install that refreshes the mirror prints the short sha of the commit it installed"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_first_install m14; then bad "$name" "FIXTURE $fix_why"; return; fi
+  advance_github_fixture "$fx" d1 claudemd; want=$(fixture_sha "$fx")
+  move_install
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "FIXTURE the mirror did not refresh to [$want]: it is at [$(git -C "$mirror" rev-parse HEAD)]"; return
+  fi
+  short=$(printf '%s' "$want" | cut -c1-7)
+  if ! printf '%s\n' "$out" | grep -q "$short"; then
+    bad "$name" "the output names no installed commit (want $short): $(printf '%s\n' "$out" | tail -n 2)"; return
+  fi
+  ok "$name"
 }
 
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
@@ -5438,6 +5583,10 @@ run caseM7
 run caseM8
 run caseM9
 run caseM10
+run caseM11
+run caseM12
+run caseM13
+run caseM14
 run pinmove1
 run pinmove2
 run pinmove3
