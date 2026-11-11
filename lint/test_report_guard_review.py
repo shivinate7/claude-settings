@@ -36,6 +36,7 @@ run folder are lint/test_report_guard.py's, imported and not copied.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -866,52 +867,64 @@ class ReviewRecordTests(unittest.TestCase):
                     return hook["timeout"]
         self.fail("settings.json holds no Stop hook for lint/report_guard.py")
 
-    def review_check_on_fake_clock(self, seconds):
-        """-> (refusal, elapsed, gh_calls): the review check of a lane's PASS claim on PR 12, run in this process on a FakeClock whose every gh
-        call takes `seconds`. The newest record is for an earlier head, so the check runs the clean-merge walk: the live head's commit read,
-        then its parent's. The parent's tree differs, so the record stays stale and the claim is refused."""
+    def review_check_on_fake_clock(self, seconds, numbers=(PR,)):
+        """-> (refusal, note, elapsed, gh_calls): the review check of a lane's PASS claim on each PR in `numbers`, run in this process on a FakeClock
+        whose every gh call takes `seconds`. Each PR's newest record is for an earlier head, so the check runs that PR's clean-merge walk: the live
+        head's commit read, then its parent's. The parent's tree differs, so each record stays stale and each PR's claim is refused."""
         parent = "2b" * 20
         trees = {LIVE: "3c" * 20, parent: "4d" * 20}
         parents = {LIVE: [parent], parent: []}
 
         def answer(args):
-            route = next(a for a in args if "/pulls/" in a or "/issues/" in a or "/commits/" in a or "/compare/" in a)
-            if "/pulls/" in route:
+            route = next(a for a in args if re.search(r"/(pulls|issues|commits|compare)/", a))
+            pull = re.search(r"/pulls/(\d+)$", route)
+            if pull:
                 return {"head": {"sha": LIVE}}
-            if "/issues/" in route:
-                return [[{"body": record(head=OLD)}]]
+            issue = re.search(r"/issues/(\d+)/comments$", route)
+            if issue:
+                return [[{"body": record(head=OLD, n=int(issue.group(1)))}]]
             if "/commits/" in route:
                 sha = route.rsplit("/", 1)[1]
                 return {"sha": sha, "parents": [{"sha": p} for p in parents[sha]], "commit": {"tree": {"sha": trees[sha]}}}
             return {"status": "diverged"}
 
+        claim = "OTHER: round 2 PASS on " + " and ".join("PR #%d" % n for n in numbers) + "."
         clock = FakeClock(seconds, answer)
-        path = trg.write_transcript(self.lane_turn(report(CLAIM)), self.run_dir)
+        path = trg.write_transcript(self.lane_turn(report(claim)), self.run_dir)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo}
         merge_tool = guard_merge.merge_module()
         self.assertIsNotNone(merge_tool, "fixture: merge/merge.py does not load")
+        # Every clock the check reads is the fake one: the merge tool's, and the process's, for a read in report_guard.py.
         with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE_SESSION_ID": LANE_ENV}), \
                 mock.patch.object(_nowindow, "run", clock.run), \
+                mock.patch("time.monotonic", clock.monotonic), \
                 mock.patch.object(merge_tool, "time", clock.time_module()):
-            refusal, _note = rg.review_record_problem(hook, report(CLAIM))
-        return refusal, clock.now, clock.gh_calls
+            refusal, note = rg.review_record_problem(hook, report(claim))
+        return refusal, note, clock.now, clock.gh_calls
 
     def test_slow_gh_reads_keep_the_review_check_inside_the_hook_budget(self):
-        # Catches: the walk's deadline starting only after the two reads of the PR, so slow reads of a stale record run the check past the Stop
-        # hook's timeout. The hook is killed there and prints no block, so the check must end inside that timeout.
-        refusal, elapsed, calls = self.review_check_on_fake_clock(rg.REVIEW_READ_TIMEOUT)
-        self.assertTrue(any("/commits/" in a for argv in calls for a in argv),
-                        "the check did not reach the clean-merge walk, so its slow reads test nothing: %r" % (calls,))
+        # Catches: the walk's deadline starting only after the two reads of each PR, so slow reads of stale records run the check past the Stop
+        # hook's timeout. The hook is killed there and prints no block, so the check must end inside that timeout. One claimed PR and two
+        # claimed PRs: the budget is for the whole check of a claim, not for each PR. The verdict must still block, or say UNKNOWN: never a silent pass.
         budget = self.hook_budget()
-        self.assertLessEqual(elapsed, budget,
-                             "the review check ran %.2f s on the fake clock, past the %d s Stop hook budget" % (elapsed, budget))
+        for numbers in ((PR,), (PR, PR + 1)):
+            with self.subTest(claimed=numbers):
+                refusal, note, elapsed, calls = self.review_check_on_fake_clock(rg.REVIEW_READ_TIMEOUT, numbers)
+                self.assertTrue(any("/commits/" in a for argv in calls for a in argv),
+                                "the check did not reach the clean-merge walk, so its slow reads test nothing: %r" % (calls,))
+                self.assertTrue(("PR #%d" % PR) in (refusal or "") or "unknown" in (note or "").lower(),
+                                "the slow check passed PR #%d with neither a block nor an UNKNOWN note: %r / %r" % (PR, refusal, note))
+                self.assertLessEqual(elapsed, budget,
+                                     "the review check ran %.2f s on the fake clock, past the %d s Stop hook budget" % (elapsed, budget))
 
     def test_fast_reads_reach_the_walk_and_block_inside_the_hook_budget(self):
-        # Control: the same stale record with reads that take no time reaches the walk and blocks the claim, so the time of the slow case is its reads'.
-        refusal, elapsed, calls = self.review_check_on_fake_clock(0)
+        # Control: the same stale records with reads that take no time reach each walk and block each claimed PR, so the time of the slow case
+        # is its reads'.
+        refusal, _note, elapsed, calls = self.review_check_on_fake_clock(0, (PR, PR + 1))
         self.assertTrue(any("/commits/" in a for argv in calls for a in argv),
                         "the check did not reach the clean-merge walk: %r" % (calls,))
-        self.assertIn("PR #12", refusal or "", "the stale record did not block the PASS claim: %r" % (refusal,))
+        for n in (PR, PR + 1):
+            self.assertIn("PR #%d" % n, refusal or "", "the stale record of PR #%d did not block its PASS claim: %r" % (n, refusal))
         self.assertLessEqual(elapsed, self.hook_budget(), "the fast check ran past the Stop hook budget: %.2f s" % elapsed)
 
 
