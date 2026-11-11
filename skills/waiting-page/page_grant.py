@@ -30,7 +30,7 @@ Counted only when all hold:
      with its old time (`cp -p`) is not counted. A plain copy gets a new time, so the checker cannot see it.
      A check uses the folder up first, so every verdict uses it up: a retry fetches again into a new folder.
      answers/ID.json and items/ID.json exist. Relay text alone never counts.
-  3. The answer's `item` is --item and the item's `id`, and the answer's `n` is the item's `n`.
+  3. The answer's `item` is --item (the item is read by its key, which is its id), and the answer's `n` is the item's `n`.
   4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
      item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`.
   5. The answer's `at` is later than the item's `added`: an earlier answer belongs to an earlier ask. Both carry a
@@ -238,7 +238,7 @@ def judge(args):
     if item is None:
         raise not_counted("no saved item to read the answer against")
 
-    if answer.get("item") != args.item or item.get("id") != args.item:
+    if answer.get("item") != args.item:
         raise not_counted("answer is for item %s, not %s" % (json.dumps(answer.get("item")), args.item))
     n = answer.get("n")
     if isinstance(n, bool) or not isinstance(n, int) or n != item.get("n"):

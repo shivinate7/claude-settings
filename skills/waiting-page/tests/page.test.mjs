@@ -4585,12 +4585,18 @@ test("distinct pictures with a focus that matches show no alert; extra widths an
 });
 
 // ---------------------------------------------------------------- the database key is the item's key
+// The key of items/<key> is the item's id. The id field is optional and ignored, so a missing one or a differing one is no warning.
 
 const { id: _noId, ...DECISION_NO_ID } = DECISION;
 const warn = (page, key) => card(page, { id: key }).locator(".status.broken");
 
-test("an item stored with no id field is answered under its database key", async (t) => {
-  const page = await open(t, { items: [], rawItems: { k29: { ...DECISION_NO_ID, n: 29 } } }); if (!page) return;
+// The doc key is the item id (roadmap step page-item-id-check).
+test("an item stored with no id field shows no warning, sorts by n, and is answered under its database key", async (t) => {
+  const rawItems = { low: { ...DECISION, id: "low", n: 20 }, k29: { ...DECISION_NO_ID, n: 29 }, high: { ...DECISION, id: "high", n: 40 } };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.equal(await card(page, { id: "k29" }).count(), 1, "no card for the item");
+  assert.equal(await warn(page, "k29").count(), 0, "a warning shows for an item with no id field");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["low", "k29", "high"], "the card is not sorted by n among its items");
   await choose(page, { id: "k29" }, "b");
   await send(page);
   await written(page);
@@ -4599,12 +4605,14 @@ test("an item stored with no id field is answered under its database key", async
   assert.equal(log[0][2], "k29", "the answer key");
   assert.equal(log[0][3].item, "k29");
   assert.equal(log[0][3].choice, "b");
-  assert.match(await warn(page, "k29").textContent(), /no id field.*fix item 29/s);
 });
 
-test("an item whose id field differs from its key warns and is answered under the key", async (t) => {
-  const page = await open(t, { items: [], rawItems: { k30: { ...DECISION, id: "other-id", n: 30 } } }); if (!page) return;
-  assert.match(await warn(page, "k30").textContent(), /id field that differs.*fix item 30/s);
+test("an item whose id field differs from its key shows no warning, sorts by n, and is answered under the key", async (t) => {
+  const rawItems = { low: { ...DECISION, id: "low", n: 20 }, k30: { ...DECISION, id: "other-id", n: 30 }, high: { ...DECISION, id: "high", n: 40 } };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.equal(await card(page, { id: "k30" }).count(), 1, "no card for the item");
+  assert.equal(await warn(page, "k30").count(), 0, "a warning shows for an id field that differs from the key");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["low", "k30", "high"], "the card is not sorted by n among its items");
   await choose(page, { id: "k30" }, "a");
   await send(page);
   await written(page);
@@ -4667,7 +4675,7 @@ test("a blocked card says it cannot be sent, disables its controls, and Copy ans
   assert.equal(await page.evaluate(() => answerLine()), "43 a");
 });
 
-test("an item with no id field and a duplicate option key is blocked from Send and Copy, and names the key", async (t) => {
+test("an item with a duplicate option key is blocked from Send and Copy, and names the key", async (t) => {
   const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
   const rawItems = {
     "k50": { ...DECISION_NO_ID, n: 50, options: [opt("x"), opt("x")], pick: "x" },
