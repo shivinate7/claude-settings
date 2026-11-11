@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R42 came after.
+the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R43 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -700,6 +700,16 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      or fix. It flags, like its other items, and never refuses.
   Home: decision question-form; decision reply-judge-samples-never-refuses; rule
   outcomes-stale-decision-protocol.
+
+- **R43. A usage brake on accounts with a rate limit.** Owner 13:48 CST Nov 11: "it might just be
+  somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was
+  basically just that after usage hits 90% everything looks to gently wind down and 94% is a hard
+  brake". Read 13:49 CST: no record, hook or page item holds it; page item 169 cites his Nov 1 17:56 CST
+  ruling "no usage limit; a standing session runs until autocompact", which is about session length.
+  Reading, for him to correct: at 90% of an account's 5-hour or weekly limit, no new lane or agent
+  starts and running work finishes and writes its handoff; at 94%, every session stops new work. An
+  account with no limit never brakes. First a lane measures whether a hook can read the percentages.
+  Home: a new decision record, usage-brake.
 
 - **R42. Rulings get acted on, and main moves the way Anthropic moves its own.** Owner 13:39 CST Nov 11: "a report is still just a report yanno that's something for
   me to read rather than something to act upon". Read 13:41 CST: Anthropic's post "Redesigning source
