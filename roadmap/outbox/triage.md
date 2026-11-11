@@ -735,3 +735,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Still open on the page, by audit (Explore, 13:57 CST): owner asked us back on 240, 328, 354, 398; still live 264, 324, 468, 469, 476, 501.
 
 - Note mutate-ci-merge-row-literal (fix check sonnet on #2563, 14:07 CST): at hooks/test_mutate_ci.py:1878 the merge family reads guard_table(), so nothing pins the guard_merge row with a literal. Possible fix: a literal ["hooks/test_guard.py::merge"]. A note, not a debt.
+- Note probe-deletes-first (retrospective 14:24 CST): a probe that pushes a branch first checks that it can delete one. The retrospective's probe pushed test/retro-delete-probe-1418 (at main 6745ade70) and could not delete it. The Oct 30 grant covers that branch (its last commit is on main). Page item 513 (cloud-branch-delete) asks how cloud sessions delete.
