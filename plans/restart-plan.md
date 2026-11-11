@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:24 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:25 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -362,6 +362,10 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   Each case is shown red on a dropped or weakened test before the route opens. Until then the old route
   stays. It changes a guard, so the rounds and the net-value rule apply. Home: decision
   builders-cannot-edit-tests, rewritten in place.
+  Beside it, the same root (triage 11:26 CST Nov 11, from an incident the owner shared in another
+  repo): a test-author briefed to write red checks needed new tooling, was refused, and had to ask
+  the owner. Step brief-role-scope-check catches a brief whose paths do not fit its role at spawn,
+  and sends tooling to a builder first, whose red run is its proof.
 
 ### 3.9 A hook refusal gets a short correction
 
