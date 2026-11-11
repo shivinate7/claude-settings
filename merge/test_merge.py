@@ -10115,8 +10115,10 @@ class ReadyPageState(RecordsEnv):
         self.cut("feat-bad", "main", {"debts/bad.md": "# Bad\n\n- **Where.** x\n"})
         self.host.branch = "feat-bad"
         self.assertNotIn("**What.**", self.origin_text("feat-bad", "debts/bad.md"))  # scope: the record has no What, so the generator refuses it
-        with self.assertRaises(merge.Stop):
+        with self.assertRaises(merge.Stop) as cm:
             self.ready_state()
+        # A bare Stop would pass on any refusal; the rebuild refusal is the one that names "cannot be rebuilt".
+        self.assertIn("cannot be rebuilt", str(cm.exception), "the Stop is not the rebuild refusal: " + str(cm.exception))
 
     def test_an_ancestry_read_that_cannot_answer_stops_the_read(self):
         """A shallow clone holds main's tip and cuts its path to the head, so the ancestry read answers unknown, never False.
