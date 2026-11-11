@@ -414,6 +414,13 @@ lacked lane-effort-pin (10e38b0ae, 13:40 CST Nov 10) until a reinstall at 12:50 
 lanes read started with a bare "/effort medium" and the brief came later. Owner 12:59 CST: "its weird
 a lane can be spawned without its brief first preprovided". A session whose installed hooks are older
 than main says so at its next turn and reinstalls; the fresh start clears it once.
+Owner 13:10 CST: "maybe we enforce cloud sessions to restart often mechanically based on certain
+conditions like certain items landing on main". Read 13:12 CST (decision idle-resume-compacts): the
+cloud reruns the install at each worker restart, which follows an idle gap. A busy session never
+restarts, so only it goes stale. Proposed, waits for the owner's yes: when hooks or settings on main
+changed since the install, the session reinstalls at its next turn, in place, with no restart. It
+restarts only for a change a reinstall cannot load. Whether a new hook entry in settings.json loads
+without a restart is unmeasured; a lane measures it first.
 
 ### 3.11 One override route, with a receipt
 
@@ -576,6 +583,14 @@ data about how we do things". get_session already returns each session's cost. T
 it at each batch merge, a process already running, and writes one line per session to the record
 branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer, no new process.
 
+Owner 13:10 CST Nov 11: "we need to figure out how to avoid container restarts for long running
+sessions (keep them warm)". Read 13:12 CST (chatter audit; decision idle-resume-compacts): the cost is
+not the restart, which adds about 4,000 tokens. It is the prompt cache, which expires after an hour
+idle. The next wake then rewrites the whole context, about 200K tokens for a lane. Proposed, waits for
+the owner's yes: no keep-warm pings, since they are timers (rule outcomes-mechanize-rules) and cost a
+cache read each. A lane whose PR merged is archived at once. A message to an idle session that asks
+for no act waits for its next wake.
+
 - **R32. A token audit, then cuts.** Owner 10:57 CST Nov 11: "i also wonder when the coordinator spawns
   lanes if there's ways to be more token efficient (here, and elsewhere tbh -- worried i overuse tokens
   in some ways)". Box answer 11:02 CST: "Audit now". Measured 10:58 CST from each session's totals: the
@@ -639,8 +654,11 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   scratchpad chatter-audit.md): narration plus final reply is 19-32% of visible output in standing
   sessions and 9% in a lane, so the line ships. It cuts context growth more than money: cache reads
   dominate cost. Each wake of an idle lane re-wrote about 200K tokens of cache for a short answer; that
-  goes to 3.15. Home: agents/*.md; decision
-  agent-model-cap.
+  goes to 3.15. Owner 13:10 CST: "how to keep their prose from staying tight (maybe in their
+  claude.md or mechanically idk or a judge that scans and says hey you yappin too much)". The reply
+  judge gains one item: a reply longer than its reader needs, judged by who reads it, never by a word
+  count (R37). It flags and never refuses. Home: agents/*.md; decisions agent-model-cap and
+  reply-judge-samples-never-refuses.
 
 - **R38. The repeat judge skips its own thread and marks without blocking.** Read 13:00 CST Nov 11:
   decision owner-feedback-inbox, Repeats (owner 2026-11-01 17:57 CST, "a model's meaning match, no
@@ -653,7 +671,7 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   The meaning match stays, so a repeat in other words (the carousel and wheel incident) is still caught.
   Home: decision owner-feedback-inbox, Repeats, rewritten in place.
 
-- **R39 (proposed, waits for the owner's yes). A past ruling is challenged, never deferred to.** Owner
+- **R39. A past ruling is challenged, never deferred to.** Owner 13:10 CST Nov 11: "yes on r39". Owner
   13:01 CST Nov 11: "my rules are to be challenged/questioned and never read as absolutes given im
   imperfect". Owner 13:03 CST: "how can we fix the defference in claude.md or whever it is taht's
   causing it". Read 13:04 CST: the past-ruling check (hooks/call_judge.py, item 8; hooks/question_form.py,
@@ -684,6 +702,10 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   2. The lint, its action, its codes and the rule anchor drop "STE" from their names.
   3. A read-only census (started 12:57 CST) lists every fixed number that refuses or fails. Each one
      the owner did not rule is retired, or derived from measured runs as in 3.2.
+  Owner 13:10 CST: "on fixed numbers A". The census (scratchpad limits-census.md) lists about 45
+  numbers; item 3 covers each one the owner did not rule. Two contradictions go in too: merge.py warns
+  at 70% of a job cap where decision ci-job-caps says 80%, and bin/sim-lease refuses on load average,
+  which decision machine-load-brake forbids.
   Home: decision plain-prose-lint, rewritten in place.
 
 - **R35. The global CLAUDE.md loads only what each session needs.** Owner 12:38 CST Nov 11: "im
