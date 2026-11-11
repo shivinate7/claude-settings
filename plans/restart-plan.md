@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 10:55 CST. The owner's list closed at 18:43 CST; R21 to R30 came after.
+the history. Last rewrite: 2026-11-11 11:03 CST. The owner's list closed at 18:43 CST; R21 to R32 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -16,7 +16,7 @@ guard test file (R26 part 4), while few lanes are open. The rest of stage 3 then
 stage 4 runs beside it (R25). Only three items wait on another: 3.2 runs with 3.1, 3.12 after 3.11,
 and 3.14 in R28's order. Stage 3 covers what loses whole CI runs (3.1, 3.2, 3.4, 3.5) and the loop
 that sends lanes back (3.3, 3.7, 3.8). It also covers trust in guards (3.6, 3.9-3.12), the express pass
-for prose (3.13), and prose that tends itself (3.14). Stage 4 makes the owner's side mechanical: one home and one wake
+for prose (3.13), prose that tends itself (3.14), and token spend (3.15). Stage 4 makes the owner's side mechanical: one home and one wake
 per answer, easy relays, debts and notes kept in place, session ids that survive a restart. Each is
 fixed once, before lanes resume, so the resumed lanes run under it. An item still open (D1, D3) holds
 no stage.
@@ -330,6 +330,23 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   after a clean round 2; the net-value hold caught 6 real holes. Deferred: Sonnet round 1 for every
   logic change (Haiku round 1 fails 79% vs 38%; noise share unknown). Home: decision
   hold-unsafe-after-round-3; CLAUDE.md roles-review-cap-three and roles-third-round-steps-up rewritten.
+- **R31. A builder resolves a test merge conflict; a check proves no test was lost.** Owner 11:02 CST
+  Nov 11, box answer: "as long as it's well defined and doesn't create loop holes builder plus check
+  definitely seems ideal no?"; and in chat: "yea that check should just protect it as the hand off
+  happens usper often and it's for sure a point of contetnion". It changes page items 420 a (Nov 8
+  10:05 CST) and 437 a (Nov 8 12:16 CST) in decision builders-cannot-edit-tests. Today a test conflict
+  in a merge stops the builder; a fresh test-author takes the whole merge, and a review round follows.
+  The outcome those rulings protect stays: no side's tests are silently dropped. A check now protects
+  it, and the builder resolves the merge. The check reads test files with the language's own parser.
+  At the merge commit it refuses each of these:
+  1. A test case from either parent is missing, renamed or moved to another file.
+  2. A test case's body differs from both parents' versions.
+  3. A skip or expected-fail mark, or a changed assertion, that neither parent had.
+  4. New test content that neither parent had. That stays a test-author's work.
+  5. A change to test config or a mutation test beyond one parent's version.
+  Each case is shown red on a dropped or weakened test before the route opens. Until then the old route
+  stays. It changes a guard, so the rounds and the net-value rule apply. Home: decision
+  builders-cannot-edit-tests, rewritten in place.
 
 ### 3.9 A hook refusal gets a short correction
 
@@ -486,6 +503,21 @@ then R29.
   3. Both read one list of jobs and their homes.
   It reuses R28's deeper-audit way of reading stores. It adds no new process. The cross-repo read needs a
   session on the owner's computer, or each repo attached to a cloud session. Starts after R28 step 3.
+
+### 3.15 Spend fewer tokens, measured first
+
+- **R32. A token audit, then cuts.** Owner 10:57 CST Nov 11: "i also wonder when the coordinator spawns
+  lanes if there's ways to be more token efficient (here, and elsewhere tbh -- worried i overuse tokens
+  in some ways)". Box answer 11:02 CST: "Audit now". Measured 10:58 CST from each session's totals: the
+  coordinator (Opus, since Nov 3) spent $1,838 and runs at 349k of 500k context; it compacts at 442k.
+  One small lane spent $8.31. Every turn re-reads the whole context, so a large context times many
+  wakes is the likely biggest cost (unmeasured). A read-only audit (started by 11:03 CST) splits spend by
+  session role and by source: context per turn, wakes, text loaded every turn, and hook judges. It also
+  checks why lanes show a bare "/effort medium" first message (owner 11:02 CST: "the first message in
+  cloud sessions spawns is often just "/effort medium" and then they get messaged their brief rather
+  htan it being preloaded"), against decision agent-model-cap, which sets effort by the start call and
+  sends the brief as the first message. The cuts are ruled on its report. Home: decision
+  agent-model-cap.
 
 ## Stage 4. Make the roadmap and triage mechanical
 
