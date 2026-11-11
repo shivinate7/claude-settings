@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 19:24 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
+the history. Last rewrite: 2026-11-10 19:27 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -356,13 +356,21 @@ After 3.11, because its third part uses the same owner grant route.
      settings lack the entry, or the card comes from claude.ai and no settings file can lift it.
      Owner 19:15 CST, a third card (home triage restoring its page, 18 writes): "only allow once for
      these". The card offers no "always allow", which points at the second suspect.
-  2. The page hooks match `ArtifactData` only, so they skip a write named `mcp__claude-artifacts__db_write`.
+     Owner 19:27 CST, on home triage reloading its page: "so the triage session pulled it off subagents
+     which sskrf for permission on every repopulate and instead did it in batches of like hundred each
+     but each batch still need my approvsl". And: "thats still not optimal". The card shows once per
+     call even with `db_write` allowed. That session also showed two tool names the allow list lacks:
+     `mcp__claude-artifacts__db_usage` and `mcp__claude-artifacts__read_artifact`. Auto mode rightly
+     refused its try to write its own allow list.
+  2. Until the fix lands, a page writer sends its writes in the main session, as `batch` calls of up to
+     50 writes each, one card per call. It never writes the page from a subagent.
+  3. The page hooks match `ArtifactData` only, so they skip a write named `mcp__claude-artifacts__db_write`.
      Open PR #2549 (artifact-guard-matcher-names) adds those names. It lands with this fix.
-  3. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
+  4. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
      im guessing we need to add too now to the allow list". `ArtifactData` now has nine actions: get,
      list, query, profiles, set, update, str_replace, delete, batch. The allow list names six tools.
      A web search found no public list of the new tool names.
-  4. The fix lane first reproduces the card in a cloud session. It reads the real tool names from that
+  5. The fix lane first reproduces the card in a cloud session. It reads the real tool names from that
      session's tool listing, never from a guess. It then allows every page database action under each
      name the card checks. A test proves a page write in a cloud session shows no card.
 - **D3. How much a lane writes (open).** Owner 16:46 CST Nov 10: "lane's own chat never reaches me
