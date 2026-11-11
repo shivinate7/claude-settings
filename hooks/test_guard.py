@@ -34592,6 +34592,57 @@ def spo_top_level_case(tag, name, overwrite):
     return spo_result(problems, "a top-level overwrite leaves no record: B's run after it is allowed")
 
 
+def spo_lifted_removal_case(tag, name, command_of, land, passed):
+    """Agent A writes probe2.py. Agent B's removal of it is refused: `command_of` names the rm or mv. The owner types
+    `override 15m` at 30 s, and B's removal at 60 s is lifted, so it lands: `land` acts on the file as the tool would.
+    A removal records no writer, so the record stays with agent A. The file then comes back outside the guard, as an
+    editor's save would. Once the override has ended, B's run is refused and A's run is allowed."""
+    fx = spo_fixture(tag)
+    config = ov_config("spo-" + tag)
+    probe = os.path.join(fx["scratch"], "probe2.py")
+    problems = [spo_scope(fx, name, probe)] + spo_wrote(fx, name, SPO_WRITER, probe, PY_TEXT)
+
+    def call(agent, command, seconds):
+        return ov_call("Bash", {"command": command}, fx["work"], config, fx["sid"], seconds, agent_id=agent,
+                       temp=fx["tmp"])
+
+    removal = command_of(fx, probe)
+    got, reason = call(SPO_OTHER, removal, 0)
+    problems.append(spo_denied(name + ", B's removal before the override", got, reason,
+                              (fx["scratch"], "probe2.py")))
+    note = ov_type(config, fx["sid"], "override 15m", 30)
+    got, reason = call(SPO_OTHER, removal, 60)
+    problems.append(spo_allowed(name + ", B's removal under the override", got, reason))
+    if got == "allow":
+        land(fx, probe)   # the approved removal lands, as the tool would
+    write(probe, PY_TEXT)   # the file comes back outside the guard, as an editor's save would
+    later = OV_TIMED_SECONDS + 120   # the override typed at 30 s has ended by then
+    got, reason = call(SPO_OTHER, "python3 %s" % probe, later)
+    problems.append(spo_denied(name + ", B's run after the override ended", got, reason,
+                              (fx["scratch"], "probe2.py")))
+    got, reason = call(SPO_WRITER, "python3 %s" % probe, later)
+    problems.append(spo_allowed(name + ", control: agent A's own run", got, reason))
+    if note and any(problems):
+        problems.append("the override was not typed through override.grant: " + note)
+    return spo_result(problems, passed)
+
+
+def spo_moved_path(fx):
+    return os.path.join(fx["work"], "moved.txt")
+
+
+def spo_approved_rm_case():
+    return spo_lifted_removal_case("lrm", "approved 2 rm", lambda fx, p: "rm %s" % p,
+                                   lambda fx, p: os.remove(p),
+                                   "an approved rm keeps the record with agent A: B's later run is denied")
+
+
+def spo_approved_mv_case():
+    return spo_lifted_removal_case("lmv", "approved 3 mv", lambda fx, p: "mv %s %s" % (p, spo_moved_path(fx)),
+                                   lambda fx, p: os.rename(p, spo_moved_path(fx)),
+                                   "an approved mv keeps the record with agent A: B's later run is denied")
+
+
 def spo_removed_case():
     """Agent A writes probe2.py. The file is removed outside the guard before any agent B step, so A's record is
     the only trace left. Agent B's Write of a new probe2.py at the same path is allowed. The record still names
@@ -34642,6 +34693,10 @@ spo_register("scratchpad-owner: variable 1 agent B runs agent A's script by a sh
              spo_variable_1)
 spo_register("scratchpad-owner: approved 1 agent B's overwrite the owner approves moves the record: "
              "B's later run and rewrite pass", spo_approved_case)
+spo_register("scratchpad-owner: approved 2 agent B's rm the owner approves keeps the record with agent A: "
+             "B's later run is denied", spo_approved_rm_case)
+spo_register("scratchpad-owner: approved 3 agent B's mv the owner approves keeps the record with agent A: "
+             "B's later run is denied", spo_approved_mv_case)
 spo_register("scratchpad-owner: top-level 1 a call with no agent_id overwrites agent A's file with Write: "
              "B's later run passes", lambda: spo_top_level_case("top1", "top-level 1", spo_top_write))
 spo_register("scratchpad-owner: top-level 2 a call with no agent_id overwrites agent A's file with a shell "
@@ -34678,7 +34733,7 @@ spo_register("scratchpad-owner: dashdash 1 agent B's python3 -- run of agent A's
 # Rule scratchpad-owner, the refusal's remedy and the record. A refused call is a deny, and its remedy names a
 # fresh file name of the agent's own. It never tells the agent to ask or to overwrite. The `Remedy:` clause is
 # judged on its own: the decision gloss and the override offer line, which follow it, never count. A refused
-# call leaves the record with the first writer (debt scratchpad-owner-record-flip).
+# call leaves the record with the first writer, and only a call the owner lifts moves it.
 SPO_FRESH_NAME = re.compile(r"\b(fresh|new)\b[^.;()]{0,24}?\bnames?\b", re.IGNORECASE)
 SPO_FORBIDDEN_ROUTE = re.compile(r"\b(ask\w*|overwrit\w*)\b", re.IGNORECASE)
 
