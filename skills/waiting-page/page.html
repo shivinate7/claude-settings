@@ -2087,12 +2087,14 @@ function answeredEl(items, place, lines, read) {
   body.push(...readItemsEls(read));
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: all.filter((it) => !itemDropped(it)).length, open: on, listId: "ab", btnId: "b-answered", body,
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
-    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " Each line leaves when you mark it read." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
+    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " A line you mark read stays as Marked read until the next load." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
 }
 // The closed lines that show in the Answered section: not read at load. The rail's Answered row reads the same list, so its count is the section's.
 const shownLines = () => state.lines.filter((it) => !itemAway(it));
 function renderList() {
   const list = $("list"), by = sorted(), want = [];
+  // As renderAskList does: a focused element that a rebuild or a move drops gets its focus back by id (a Mark read press, and the Marked read line after it). Read first: the section builders move nodes while `want` is built.
+  const a0 = document.activeElement, focusId = a0 && a0.id && list.contains(a0) ? a0.id : "";
   if (!state.items.length) {
     want.push(h("div", { class: "empty" }, !state.loaded ? "Loading the items waiting on you…" : state.db === false ? "This view cannot reach the page's store. Paste your answers in chat instead." : "Nothing on this page waits on you. Sessions add an item here when they need your word."));
   }
@@ -2129,10 +2131,9 @@ function renderList() {
     want.push(h("p", { class: "checked" }, "Checked against " + (state.meta.checked || "")));
     const pk = parkedEl(); if (pk) want.push(pk);
   }
-  const a0 = document.activeElement, focusId = a0 && a0.closest && a0.closest("#parked") ? a0.id : "";
   reconcile(list, want);
-  // The block is rebuilt on each render, so a press keeps its focus here. Change leaves the line for its toggles.
-  if (focusId) { const f = $(focusId) || $(focusId.replace(/^pk-change-/, "pk-unpark-")); if (f) f.focus({ preventScroll: true }); }
+  // The parked block is rebuilt on each render, so a press keeps its focus here. Change leaves the line for its toggles.
+  if (focusId && document.activeElement !== a0) { const f = $(focusId) || $(focusId.replace(/^pk-change-/, "pk-unpark-")); if (f) f.focus({ preventScroll: true }); }
 }
 // park is no line act (it is not in ACTS): it names the card press and its receipt.
 const ACT_NAME = { unpark: "Unpark", drop: "Drop", park: "Park" }, ACT_SENT = { unpark: "Unpark sent", drop: "Drop sent" }, ACT_DONE = { unpark: "Unparked", drop: "Dropped", park: "Parked" };
