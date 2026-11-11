@@ -1,0 +1,8 @@
+{
+ "id": "glossary-kept-slug",
+ "title": "The glossary check reads a kept slug as allowed",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "GLOSSARY.md row 'review log' says 'Its slug `pr-review-record` stays', but check_glossary flags every changed line that backticks that slug, and every new code line that names the existing `--review-record` flag (`review_record`). Incidents 2026-11-11: #2431 lint (merge.py), #2378 (merge.py), #2563 (pr-ledger.md, 5 lines). Each lane spent a fix round working around it. Harm: false alarms teach lanes to scroll past the check. Fix: the check reads a 'stays' slug or a kept flag name from the glossary row and allows it.",
+ "source": "triage, from lane lint runs on #2431, #2378, #2563"
+}
