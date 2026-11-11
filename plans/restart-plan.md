@@ -635,7 +635,11 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   each agent role file and the lane start text, which load on their own, never in each brief. Briefs
   carry only task facts. A check proves each role file holds the line. Reasoning and tool inputs are
   never cut. The brief audit (started 12:48 CST) measures brief length and the narration share of lane
-  output first; the line ships if narration is a real share. Home: agents/*.md; decision
+  output first; the line ships if narration is a real share. Measured 13:06 CST (read-only audit,
+  scratchpad chatter-audit.md): narration plus final reply is 19-32% of visible output in standing
+  sessions and 9% in a lane, so the line ships. It cuts context growth more than money: cache reads
+  dominate cost. Each wake of an idle lane re-wrote about 200K tokens of cache for a short answer; that
+  goes to 3.15. Home: agents/*.md; decision
   agent-model-cap.
 
 - **R38. The repeat judge skips its own thread and marks without blocking.** Read 13:00 CST Nov 11:
