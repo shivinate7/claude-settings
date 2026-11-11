@@ -597,7 +597,7 @@ def single_page(argv):
     if args.items is not None:
         try:
             items, complete = load_docs(args.items, keyed=True)
-            lines = wait_lines([data for _, data in items], complete)
+            lines = wait_lines([dict(d, id=k) if k and isinstance(d, dict) else d for k, d in items], complete)
         except ValueError as err:
             items, lines = None, ["wait: the items cannot be read: unknown (%s)" % err]
         if args.answers is not None:

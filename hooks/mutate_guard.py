@@ -40,7 +40,9 @@ CI MODES (decision mutation-report-scores-suites, owner item mutation-ci-job): t
 action actions/mutation-report.
 `--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
 [--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
-lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
+lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 1 when mutants were made and none ran,
+or when none ran because the run stopped first (the diff could not be read, a file did not parse, the checkout or the
+install was refused, or the replay raised). A `no mutant ran: ...` line says so, with the cause. Exit 0 otherwise, whatever the share.
 `--known-defects FILE --repo REPO (--profile NAME | --profile-file JSON) [--base REF] [--suite-timeout S] [--log PATH]`
 plants each listed defect in a checkout of HEAD, installs the profile's packages into it as `--changed` does, and runs its
 catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
@@ -3527,8 +3529,10 @@ def load_profile(args) -> dict:
 
 def changed_main(argv) -> int:
     """The CI report of a change: mutate the product lines it adds past the merge base, run the suites the profile's `select`
-    lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share:
-    a low share is a report, never a failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
+    lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 1 when mutants were made
+    and none ran, or when none ran because the run stopped first (`no_run_cause` in `replay_pr`'s row), after a
+    `no mutant ran: ...` line that names the cause. Exit 0 otherwise, whatever the share: a low share is a report, never a
+    failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
     import argparse
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --changed")
@@ -3569,6 +3573,19 @@ def changed_main(argv) -> int:
         total.update({"base": base, "head": head, "profile": args.profile or args.profile_file})
         with open(args.log, "w", encoding="utf-8") as handle:
             json.dump(total, handle, indent=1)
+    made = sum(row.get("made", 0) for row in rows)
+    not_run = sum(row.get("not_run", 0) for row in rows)
+    # A run that stopped before any mutant ran is a run where no mutant ran, whatever its count. A part that ran mutants
+    # keeps the exit 0 of a run in which some mutant ran: the rule is that no mutant ran at all.
+    stopped = [row["no_run_cause"] for row in rows if row.get("no_run_cause")]
+    if made - not_run == 0 and stopped:
+        print("no mutant ran: %s" % "; ".join(stopped))
+        return 1
+    if made > 0 and made - not_run == 0:
+        why = ("the budget ran out, or no selected suite reaches the changed files" if args.budget is not None
+               else "no selected suite reaches the changed files")
+        print("no mutant ran: %d of %d mutants not run (%s)" % (not_run, made, why))
+        return 1
     return 0
 
 
