@@ -344,6 +344,8 @@ After 3.11, because its third part uses the same owner grant route.
      "even this artifact write needed my permission". That card names the tool as `claude-artifacts:
      db write`, the allowed name, so a missing name is not the whole cause. Suspects: that session's
      settings lack the entry, or the card comes from claude.ai and no settings file can lift it.
+     Owner 19:15 CST, a third card (home triage restoring its page, 18 writes): "only allow once for
+     these". The card offers no "always allow", which points at the second suspect.
   2. The page hooks match `ArtifactData` only, so they skip a write named `mcp__claude-artifacts__db_write`.
      Open PR #2549 (artifact-guard-matcher-names) adds those names. It lands with this fix.
   3. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
