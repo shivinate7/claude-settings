@@ -756,7 +756,8 @@ def _push_goes_to_network(remote: str, cwd: str, current, overrides=None, resolv
 def _glob_reach(spec: str):
     """[(source ref, default branch)] a glob refspec sends to main or master, [] when it sends none, None when the
     pattern is not one `*` on each side. A side that is not a full ref name is read under `refs/heads/`."""
-    source, _colon, target = spec.partition(":")
+    source, colon, target = spec.partition(":")
+    target = target if colon else source
     if source.count("*") != 1 or target.count("*") != 1:
         return None
     source_pre, _, source_suf = _qualified(source).partition("*")
@@ -779,8 +780,8 @@ def _qualified(ref: str) -> str:
 
 def _push_updates_default(cwd: str, remote: str, reach) -> bool:
     """True when a push may update main or master on `remote`, for `reach`, the (local source ref, default branch)
-    pairs the push sends. A source that does not exist sends nothing. A source equal to `refs/remotes/<remote>/<name>`
-    is trusted to match the remote: nothing is fetched. A missing tracking ref, a different one, or a failed read
+    pairs the push sends. A source that does not exist sends nothing. A source whose sha equals the sha of the tracking
+    ref `refs/remotes/<remote>/<name>` is trusted to match the remote: nothing is fetched. A missing tracking ref, a different one, or a failed read
     is an update, since unknown is never safe. One `git for-each-ref` reads every ref the pairs name."""
     if not reach:
         return False
