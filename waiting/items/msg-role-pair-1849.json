@@ -30,9 +30,11 @@
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "coordinator 20:23 CST Nov 10",
+  "replied": "2026-11-11T15:22:00Z",
+  "reply": "You answered in chat at 09:12 CST (relayed by the coordinator): \"q2 B\". So #1805 (the guard that stops an agent being told mid-task to do another role's work) and #1849 (its false-alarm fix) both wait for stage 3 of the plan. Both are parked with their branches kept.",
   "repo": "shivinate7/claude-settings",
   "short": "Add #1849 so #1805 ships working?",
-  "status": "open",
+  "status": "closed",
   "title": "May #1849 join your named drain queue, so #1805 (the message-role guard) ships only together with its false-alarm fix?",
   "why": "Alone, #1805 would refuse about 2 of every 3 ordinary messages between sessions."
 }
