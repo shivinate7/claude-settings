@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""After `gh pr ready <N>`, waits for CI on that PR head. Then wakes the session with one line: green, red, cancelled or unknown, with the names of failing jobs.
+"""After the shell ready command `gh pr ready <N>` (Bash or PowerShell), or an `mcp__github__update_pull_request` call with `draft` false, waits for CI on that PR head. Then wakes the session with one line: green, red, cancelled or unknown, with the names of failing jobs.
 
 PostToolUse hook for the Bash and PowerShell tools and for the GitHub MCP `update_pull_request` tool,
 registered with `asyncRewake: true`. Two calls start a watch: `gh pr ready <N>`, and an MCP `update_pull_request`
