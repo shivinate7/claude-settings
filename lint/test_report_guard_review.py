@@ -36,17 +36,23 @@ run folder are lint/test_report_guard.py's, imported and not copied.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "merge"))
 import test_report_guard as trg  # noqa: E402  the Stop runner, transcript records and run folder (one home)
 import merge as merge_mod  # noqa: E402  the review record's form and parser (one home, merge/merge.py)
+import report_guard as rg  # noqa: E402  the Stop hook's review check, run in this process for the budget cases (one home)
+import guard_merge  # noqa: E402  the merge tool's loader: the check's merge module is the one the budget cases patch
+import _nowindow  # noqa: E402  the one no-window child start, where every read of the check goes
 
 LINT_DIR = HERE
 HOOKS_DIR = os.path.join(HERE, "..", "hooks")
@@ -118,6 +124,8 @@ def not_found():
 
 pull = re.fullmatch(r"(?:repos/[^/]+/[^/]+/)?pulls/(\d+)", path)
 issue = re.fullmatch(r"(?:repos/[^/]+/[^/]+/)?issues/(\d+)/comments", path)
+commit = re.fullmatch(r"(?:repos/[^/]+/[^/]+/)?commits/([0-9a-f]{40})", path)
+compare = re.fullmatch(r"(?:repos/[^/]+/[^/]+/)?compare/(.+)", path)
 if pull:
     if state["fail_pulls"]:
         fail(state["fail_pulls"])
@@ -150,6 +158,14 @@ elif issue:
         print(json.dumps([c for p in chosen for c in p]))
     else:
         print(json.dumps(chosen[0]))
+elif commit:
+    sha = commit.group(1)
+    if sha not in state["commits"]:
+        not_found()
+    spec = state["commits"][sha]
+    print(json.dumps({"sha": sha, "parents": [{"sha": p} for p in spec["parents"]], "commit": {"tree": {"sha": spec["tree"]}}}))
+elif compare:
+    print(json.dumps({"status": state["compares"].get(compare.group(1), "diverged")}))
 else:
     not_found()
 '''
@@ -192,6 +208,34 @@ def incident(note):
     return body.rstrip("\n") + ("\n\n" + INCIDENT_NOTE if note else "") + FOOTER
 
 
+class FakeClock:
+    """The clock of the review check, when the check runs in this process. Each gh call takes `seconds` of fake time; a call longer than its
+    timeout ends at that timeout, as subprocess.run does. A local git call takes no fake time. `now` is the only clock the check's deadlines read,
+    and no assert reads the real clock."""
+
+    def __init__(self, seconds, answer):
+        self.now, self.seconds, self.answer, self.gh_calls = 0.0, seconds, answer, []
+        self.real_run = _nowindow.run  # captured before a case patches it
+
+    def monotonic(self):
+        return self.now
+
+    def time_module(self):
+        """A stand-in for merge/merge.py's `time`: its deadlines read `now`, and nothing sleeps."""
+        return types.SimpleNamespace(monotonic=self.monotonic, time=lambda: self.now, sleep=lambda s: None)
+
+    def run(self, args, **kw):
+        if os.path.basename(args[0]) not in ("gh", "gh.exe"):
+            return self.real_run(args, **kw)
+        self.gh_calls.append(list(args))
+        timeout = kw.get("timeout")
+        if timeout is not None and self.seconds > timeout:
+            self.now += timeout
+            raise subprocess.TimeoutExpired(args, timeout)
+        self.now += self.seconds
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(self.answer(args)), stderr="")
+
+
 def setUpModule():
     trg.setUpModule()
 
@@ -218,13 +262,15 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIsNotNone(shutil.which("gh", path=self.gh_dir), "the stand-in gh is not on its own PATH")
         self.serve()
 
-    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None):
+    def serve(self, comments=(), fail_pulls=None, fail_comments=None, prs=None, commits=None, compares=None):
         """The stand-in's answers: each PR's live head and its comments, oldest first, and any read to break.
-        `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without it, PR 12 has `comments`."""
+        `prs` maps a PR number to {"head": sha, "comments": [bodies]}; without it, PR 12 has `comments`. `commits` maps a sha to
+        {"parents": [shas], "tree": sha}, the commit read's answer; `compares` maps "<head>...<base>" to the status compare gives."""
         if prs is None:
             prs = {PR: {"head": LIVE, "comments": list(comments)}}
         state = {"prs": {str(n): {"head": p["head"], "comments": list(p["comments"])} for n, p in prs.items()},
-                 "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments}
+                 "count_file": self.count, "fail_pulls": fail_pulls, "fail_comments": fail_comments,
+                 "commits": dict(commits or {}), "compares": dict(compares or {})}
         with open(os.path.join(self.gh_dir, "state.json"), "w", encoding="utf-8") as handle:
             json.dump(state, handle)
 
@@ -649,6 +695,76 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_two_rest_reads()
         self.assertIsNone(out, out)
 
+    # Clean merges of main keep a record (decision pr-review-record). The check reads the merge through merge/merge.py.
+
+    def git_in_repo(self, *args):
+        """Run git in this run's repo, with a fixed identity. -> its stdout, stripped. A failed command fails the case."""
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        run = subprocess.run(["git", "-C", self.repo, "-c", "commit.gpgsign=false", *args], capture_output=True, text=True, env=env)
+        self.assertEqual(run.returncode, 0, "git %s failed: %s" % (" ".join(args), run.stderr))
+        return run.stdout.strip()
+
+    def commit_file(self, path, text, message):
+        """Write `path` in this run's repo and commit it. -> the new commit's sha. A commit during a merge completes that merge."""
+        with open(os.path.join(self.repo, path), "w", encoding="utf-8") as handle:
+            handle.write(text)
+        self.git_in_repo("add", path)
+        self.git_in_repo("commit", "-q", "-m", message)
+        return self.git_in_repo("rev-parse", "HEAD")
+
+    def clean_merge_repo(self, edited=False):
+        """Commits in this run's repo: `old`, the reviewed head, and `main`, a commit on a branch off the same root. `live` merges the two: git's own
+        clean merge, or with one file more when `edited`. -> the shas by name, with `commits` and `compares` in the form serve() takes."""
+        root = self.commit_file("root.txt", "root\n", "root")
+        self.git_in_repo("checkout", "-q", "-b", "feat")
+        old = self.commit_file("a.txt", "a\n", "reviewed head")
+        self.git_in_repo("checkout", "-q", "-b", "side", root)
+        main = self.commit_file("b.txt", "b\n", "main")
+        self.git_in_repo("checkout", "-q", "feat")
+        if edited:
+            self.git_in_repo("merge", "-q", "--no-ff", "--no-commit", "side")
+            live = self.commit_file("x.txt", "x\n", "merge of main, with one edit")
+        else:
+            self.git_in_repo("merge", "-q", "--no-ff", "--no-edit", "side")
+            live = self.git_in_repo("rev-parse", "HEAD")
+        commits = {}
+        for sha in (root, old, main, live):
+            parents = self.git_in_repo("rev-list", "--parents", "-n", "1", sha).split()[1:]
+            commits[sha] = {"parents": parents, "tree": self.git_in_repo("rev-parse", sha + "^{tree}")}
+        git_tree = subprocess.run(["git", "-C", self.repo, "merge-tree", "--write-tree", old, main], capture_output=True, text=True).stdout.split()[:1]
+        if edited:
+            self.assertNotEqual(git_tree, [commits[live]["tree"]], "fixture: the edited merge has git's clean merge tree")
+        else:
+            self.assertEqual(git_tree, [commits[live]["tree"]], "fixture: git's merge of old and main is not the live merge's tree")
+        return {"old": old, "main": main, "live": live, "commits": commits, "compares": {f"{main}...main": "ahead"}}
+
+    def serve_merge(self, merged):
+        """The stand-in serves pull request 12 at the merge's live head, with a record for its reviewed head, and the merge's commits and compares."""
+        self.serve(prs={PR: {"head": merged["live"], "comments": [record(head=merged["old"])]}}, commits=merged["commits"],
+                   compares=merged["compares"])
+
+    def test_clean_main_merge_after_the_reviewed_head_does_not_block(self):
+        # Catches: a clean merge of main after the reviewed head read stale, so a PASS claim on its PR is refused.
+        self.serve_merge(self.clean_merge_repo())
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assertIsNone(out, "a clean merge of main after the reviewed head blocked the PASS claim: %r" % (out,))
+
+    def test_edited_merge_of_main_after_the_reviewed_head_still_blocks(self):
+        # Control: the same merge with one file more than git's clean merge reads stale, so the claim is still refused.
+        self.serve_merge(self.clean_merge_repo(edited=True))
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_a_clean_merge_read_is_one_commit_read_and_one_compare(self):
+        # Catches: the check reading a clean merge with more routes than its PR reads, its commit read and its compare, or with fewer.
+        merged = self.clean_merge_repo()
+        self.serve_merge(merged)
+        self.stop(self.lane_turn(report(CLAIM)))
+        routes = sorted(a.split("?", 1)[0].split("/", 3)[3] for argv in self.gh_calls() for a in argv if a.startswith("repos/"))
+        expected = sorted([f"pulls/{PR}", f"issues/{PR}/comments", f"commits/{merged['live']}", f"compare/{merged['main']}...main"])
+        self.assertEqual(routes, expected, "the check read %r, not the two PR reads, one commit read and one compare" % (routes,))
+
     # Controls: no block, and no read, where the check does not apply.
 
     def test_non_lane_pass_claim_is_not_read_or_blocked(self):
@@ -738,6 +854,78 @@ class ReviewRecordTests(unittest.TestCase):
                 message = (out or {}).get("systemMessage", "")
                 self.assertIn("UNKNOWN", message, out)
                 self.assertNotRegex(message, r"(?i)\bclear\b", out)
+
+    # The budget: the check ends inside the Stop hook's timeout. The hook is killed at that timeout and prints no block.
+
+    def hook_budget(self):
+        """The Stop hook's timeout for lint/report_guard.py, read from settings.json: the budget a hook run is killed at."""
+        with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as handle:
+            settings = json.load(handle)
+        for entry in settings["hooks"]["Stop"]:
+            for hook in entry["hooks"]:
+                if "/lint/report_guard.py" in hook["command"]:
+                    return hook["timeout"]
+        self.fail("settings.json holds no Stop hook for lint/report_guard.py")
+
+    def review_check_on_fake_clock(self, seconds, numbers=(PR,)):
+        """-> (refusal, note, elapsed, gh_calls): the review check of a lane's PASS claim on each PR in `numbers`, run in this process on a FakeClock
+        whose every gh call takes `seconds`. Each PR's newest record is for an earlier head, so the check runs that PR's clean-merge walk: the live
+        head's commit read, then its parent's. The parent's tree differs, so each record stays stale and each PR's claim is refused."""
+        parent = "2b" * 20
+        trees = {LIVE: "3c" * 20, parent: "4d" * 20}
+        parents = {LIVE: [parent], parent: []}
+
+        def answer(args):
+            route = next(a for a in args if re.search(r"/(pulls|issues|commits|compare)/", a))
+            pull = re.search(r"/pulls/(\d+)$", route)
+            if pull:
+                return {"head": {"sha": LIVE}}
+            issue = re.search(r"/issues/(\d+)/comments$", route)
+            if issue:
+                return [[{"body": record(head=OLD, n=int(issue.group(1)))}]]
+            if "/commits/" in route:
+                sha = route.rsplit("/", 1)[1]
+                return {"sha": sha, "parents": [{"sha": p} for p in parents[sha]], "commit": {"tree": {"sha": trees[sha]}}}
+            return {"status": "diverged"}
+
+        claim = "OTHER: round 2 PASS on " + " and ".join("PR #%d" % n for n in numbers) + "."
+        clock = FakeClock(seconds, answer)
+        path = trg.write_transcript(self.lane_turn(report(claim)), self.run_dir)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "cwd": self.repo}
+        merge_tool = guard_merge.merge_module()
+        self.assertIsNotNone(merge_tool, "fixture: merge/merge.py does not load")
+        # Every clock the check reads is the fake one: the merge tool's, and the process's, for a read in report_guard.py.
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_REMOTE_SESSION_ID": LANE_ENV}), \
+                mock.patch.object(_nowindow, "run", clock.run), \
+                mock.patch("time.monotonic", clock.monotonic), \
+                mock.patch.object(merge_tool, "time", clock.time_module()):
+            refusal, note = rg.review_record_problem(hook, report(claim))
+        return refusal, note, clock.now, clock.gh_calls
+
+    def test_slow_gh_reads_keep_the_review_check_inside_the_hook_budget(self):
+        # Catches: the walk's deadline starting only after the two reads of each PR, so slow reads of stale records run the check past the Stop
+        # hook's timeout. The hook is killed there and prints no block, so the check must end inside that timeout. One claimed PR and two
+        # claimed PRs: the budget is for the whole check of a claim, not for each PR. The verdict must still block, or say UNKNOWN: never a silent pass.
+        budget = self.hook_budget()
+        for numbers in ((PR,), (PR, PR + 1)):
+            with self.subTest(claimed=numbers):
+                refusal, note, elapsed, calls = self.review_check_on_fake_clock(rg.REVIEW_READ_TIMEOUT, numbers)
+                self.assertTrue(any("/commits/" in a for argv in calls for a in argv),
+                                "the check did not reach the clean-merge walk, so its slow reads test nothing: %r" % (calls,))
+                self.assertTrue(("PR #%d" % PR) in (refusal or "") or "unknown" in (note or "").lower(),
+                                "the slow check passed PR #%d with neither a block nor an UNKNOWN note: %r / %r" % (PR, refusal, note))
+                self.assertLessEqual(elapsed, budget,
+                                     "the review check ran %.2f s on the fake clock, past the %d s Stop hook budget" % (elapsed, budget))
+
+    def test_fast_reads_reach_the_walk_and_block_inside_the_hook_budget(self):
+        # Control: the same stale records with reads that take no time reach each walk and block each claimed PR, so the time of the slow case
+        # is its reads'.
+        refusal, _note, elapsed, calls = self.review_check_on_fake_clock(0, (PR, PR + 1))
+        self.assertTrue(any("/commits/" in a for argv in calls for a in argv),
+                        "the check did not reach the clean-merge walk: %r" % (calls,))
+        for n in (PR, PR + 1):
+            self.assertIn("PR #%d" % n, refusal or "", "the stale record of PR #%d did not block its PASS claim: %r" % (n, refusal))
+        self.assertLessEqual(elapsed, self.hook_budget(), "the fast check ran past the Stop hook budget: %.2f s" % elapsed)
 
 
 if __name__ == "__main__":
