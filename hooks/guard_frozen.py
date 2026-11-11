@@ -1186,12 +1186,13 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
         hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True, per_body=True), cwd, predicate, holds,
                            script_data=True)
         texts = []
-        for lang, body, quote in interpreter_bodies(raw):
+        resolved = _resolve_vars(raw)   # each body and `-c` script reads `$F` as the command's own assignment
+        for lang, body, quote in interpreter_bodies(resolved):
             texts += script_spots(body, lang)
             if not quote:
                 texts += [text for text, _ in _substitutions(body, heredoc=True)[0][:-1]]   # bash runs these
         if _has_inline_flag(raw):
-            for kind, script, *_ in _inline_scripts(_resolve_vars(raw)):
+            for kind, script, *_ in _inline_scripts(resolved):
                 texts += script_spots(script, kind)
         for text in texts:
             hit = hit or _shell_write_hit(text, cwd, predicate, holds)
