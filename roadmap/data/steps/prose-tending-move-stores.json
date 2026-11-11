@@ -6,10 +6,10 @@
  "phase": "next",
  "lane": "",
  "why": "Once the shared contract exists, the other stores still tend themselves their own way until each one moves over.",
- "note": "Ruling R28 (plan a96d4a3 under item 3.6, after R27). Owner 10:19 CST: \"everything that marks prose should share the same \\\"tending\\\" mechanism ... it should be more uniform, standardized, and shared as much as possible to avoid stale duplication and to ensure shared best practrices\". Order (box answer before 10:22 CST): a read-only skim audit (the retrospective session, running now), then this shared contract, then a deeper audit and moves. Home: a new decision for the shared contract. A deeper audit first; then each store moves when a lane next touches it.",
+ "note": "Ruling R28 (plan a96d4a3 under item 3.14 (moved from 3.6 by plan 7e04144, 10:52 CST), after R27). Owner 10:19 CST: \"everything that marks prose should share the same \\\"tending\\\" mechanism ... it should be more uniform, standardized, and shared as much as possible to avoid stale duplication and to ensure shared best practrices\". Order (box answer before 10:22 CST): a read-only skim audit (the retrospective session, running now), then this shared contract, then a deeper audit and moves. Home: a new decision for the shared contract. A deeper audit first; then each store moves when a lane next touches it.",
  "source": "owner 2026-11-11 10:19-10:22 CST, relayed by the retrospective session 10:23 CST",
  "owner": "triage",
- "updatedAt": "2026-11-11T10:23:00-06:00",
+ "updatedAt": "2026-11-11T10:52:00-06:00",
  "blockedBy": [
   "prose-tending-contract"
  ]
