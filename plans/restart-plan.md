@@ -940,6 +940,10 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   called from each repo's existing CI at each push to main, with that repo's own token; the R44 child-repo
   sweep adds the call. Auto-delete of merged PR branches is on in all 8 shivinate7 repos and all 7
   ssemwal-cdc repos (owner's gh runs, 15:26 and 15:31 CST).
+  Rulesets, ruled r, owner 16:43 CST Nov 11: "r". In the R44 child-repo sweep, a session on the owner's
+  computer moves every repo's main to a ruleset that requires only all-jobs-passed and blocks deletion
+  and force-push of main. Cause: a classic rule with many checks failed to save (owner, 16:39 CST). The
+  grant names rulesets, so it lands in the repo's standing grants beside the Oct 30 grant.
   Home: decision for the delete route (new); D1 for the table.
 
 - **R34. The page shows how the system works and how healthy each part is.** Owner 11:35 CST Nov 11:
