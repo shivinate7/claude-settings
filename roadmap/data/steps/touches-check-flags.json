@@ -1,0 +1,8 @@
+{
+ "id": "touches-check-flags",
+ "title": "The output guard keeps the exit of merge --touches",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "hooks/guard_stream.py CHECK_FLAGS lacks `--touches`, so `merge --touches ... | tail` hides its exit 1, while `--release-check | tail` is refused. Harm: a coordinator reads a failed read as clear and starts a duplicate lane. Found by #2431 round 3 (reviewer sonnet, 2026-11-11 07:38 CST). Guard change, own lane, after #2431 lands.",
+ "source": "triage, from #2431 round 3 findings comment 6797411744"
+}

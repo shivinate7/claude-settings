@@ -1,0 +1,8 @@
+{
+ "id": "tilde-control-pins-nothing",
+ "title": "The tilde control case in test_guard pins the variable read",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "The control `R=\"~/tilde~dir\"` (hooks/test_guard.py about 8417) denies because the folder is missing, not because the variable is unknown, so dropping either tilde arm in guard_core.py survives. Fix: point HOME at a real checkout folder in the control, and add `R=a:~/x` for the `:~` arm. Found by #2379 fix check (reviewer sonnet, 2026-11-11 07:39 CST). Test-only lane, after #2379 lands.",
+ "source": "triage, from #2379 fix check comment 6797403064"
+}
