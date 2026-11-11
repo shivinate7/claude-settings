@@ -14440,8 +14440,8 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assert_listed_done(earlier, body, why="round 1 is FAIL, and the fix check passed", live=fx.conflicted)
 
     def test_g_a_conflicted_merge_of_main_after_a_clean_merge_takes_a_fix_check_on_the_reviewed_head(self):
-        # The owner's ruling of 14:07 CST, Nov 10: a record survives a clean merge of main, and a conflicted merge of main after the review takes one
-        # more fix check. The merges after the reviewed head F are M1, a clean merge of main, and M2, a merge of main on M1 that conflicts and is resolved
+        # A record survives a clean merge of main. A conflicted merge of main after the review takes one more fix check.
+        # The merges after the reviewed head F are M1, a clean merge of main, and M2, a merge of main on M1 that conflicts and is resolved
         # by hand. The fix check names F, so the fix diff is F..M2.
         fx = self.real_commits()
         m2 = self.git_commit(fx.clean, {"a.txt": "resolved\n", "c.txt": "c\n"}, fx.main3)
@@ -15363,7 +15363,7 @@ class ReleaseCheck(ReviewEnv):
         self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
 
     def test_b_the_reviewed_head_passes_the_release_check_on_the_same_base(self):
-        # Control: the record at its own head passes on the base the case above uses, so that case's FAIL is the clean merge's alone.
+        # Control: the release check gives PASS for the record at its own head, on the base the case above uses, so that case's FAIL is the clean merge's alone.
         fx = self.real_commits()
         self.base_tip(fx.main2)
         rc, lines, err = self.release_at(fx, fx.fixed, fx.fixed)
