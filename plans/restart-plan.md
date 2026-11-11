@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R40 came after.
+the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R41 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -700,6 +700,31 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      or fix. It flags, like its other items, and never refuses.
   Home: decision question-form; decision reply-judge-samples-never-refuses; rule
   outcomes-stale-decision-protocol.
+
+- **R41 (proposed, waits for the owner's yes). Mods, skills and the output style: keep all, fix six
+  defects.** Owner 13:25 CST Nov 11: "tell me how my mods and skills work ... are they even good to keep
+  around anymore, are they under the right folders/locations". Read 13:33 CST (two read-only audits,
+  scratchpad mods-skills-audit.md and decision-watch-audit.md): all 5 mods, 11 skills and shiv-stylisms
+  are in the right folders and earn their place. Decision watch runs in cloud too (167 turns logged in
+  this session).
+  1. When the given path fails, decision watch finds the transcript by session id. Its UNKNOWN names
+     the path and shows once per session, and so does the silent "no transcript" case. Red cases first:
+     Windows backslash, drive letter, `~`, Git Bash `/c/`, a second config dir, a long folder name.
+  2. The cloud installer skips `__pycache__` when it hashes a skill, so it stops backing up waiting-page
+     at each start (23 copies, 38 MB here).
+  3. waiting-page SKILL.md (883 lines) splits by topic and drops its PR history.
+  4. The rule map counts the reply judge's four style rules; the 20-line hand-off bullet in
+     shiv-stylisms splits.
+  5. Decision question-form says what the code does: a Departs from line on every question.
+  6. One stale note and the unused ponytail marketplace go.
+  7. Owner 13:33 CST: "i also frankly dont see some mods that i do see on local claude like the
+     weather context thing". His screenshot shows the weather band on a local session and none on this
+     cloud one. The mods are installed here and their hooks run (decision watch logs each turn), so the
+     gap is in the drawing. The plugin docs say a cloud session draws in no screen of its own. A lane
+     reads the debug log of one cloud session to find whether the band hook runs and what the app drops.
+     A platform limit goes in a record and upstream; a defect of ours gets fixed.
+  Homes: decision decision-watch-mod-limits; install.sh; skills/waiting-page; lint/rule_mechanisms.json;
+  decision question-form.
 
 - **R40. Compaction trigger tested higher.** Read 13:05 CST Nov 11 (decision precompact-handoff, item 2):
   the cloud sets CLAUDE_AUTOCOMPACT_PCT_OVERRIDE per session, 80 here, so compaction starts at 384K of a
