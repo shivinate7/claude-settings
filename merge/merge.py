@@ -35,7 +35,7 @@
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
                           the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
                           new process, file or timer.
-  merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
+  merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
                           (and, for a pytest `FAILED path::name` or unittest `FAIL: name (module.Class.name)` line, the file; a run by path logs
@@ -227,6 +227,14 @@ HTTP_DENIED = re.compile(r"\bHTTP 40[13]\b")  # GitHub answered a read with a re
 REFUSED_CITE = "(decision standing-merge-grant, only a proven refusal reverts the claim: a refusal reply with the pull request still OPEN)"
 READ_CITE = "(decision no-merge-during-batch-ci, a failed read refuses, and unknown is red)"
 GREEN_CITE = "(rule git-never-merge-failing-ci, a head whose checks are not green never merges)"
+RUN_URL_ID = re.compile(r"/actions/runs/(\d+)")
+
+def run_id(run):
+    """-> the id of a workflow run named by its id or its Actions run URL: the one place a `--run` value becomes an id. A value that is no URL
+    stays as given, so the read of that run reports it. The blame route reads the run by its URL (Host.cited_run) and takes the value as given."""
+    m = RUN_URL_ID.search(run)
+    return m.group(1) if m else run
+
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
@@ -1082,7 +1090,7 @@ class Host:
 
     def cited_run(self, url):
         """-> (conclusion, head sha) of the workflow run at `url`, one read. A failed read is a Stop, never a green run."""
-        m = re.search(r"/actions/runs/(\d+)", url)
+        m = RUN_URL_ID.search(url)
         if not m:
             raise Stop(f"{url} is not a workflow run URL {DEBT_CITE}")
         c, out = self.api(f"actions/runs/{m.group(1)}")
@@ -4966,7 +4974,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
-    p.add_argument("--run", default=None, metavar="RUN_ID", help="with --touches: a workflow run whose failing log lines name the cases")
+    p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases. With --batch-build NAME --blame PR: the failed run of the batch's current head that blames the lane")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
     a = p.parse_args(argv)
@@ -4976,8 +4984,8 @@ def main(argv, host=None, lock=None, hosts=None):
                 else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
     if a.ready and not a.batch_build:
         p.error("--ready goes with --batch-build")
-    if a.run is not None and a.blame is None:
-        p.error("--run goes with --batch-build NAME --blame PR")
+    if a.run is not None and a.blame is None and not a.touches:
+        p.error("--run goes with --touches, or with --batch-build NAME --blame PR")
     if a.blame is not None:
         if not a.batch_build:
             p.error("--blame goes with --batch-build NAME")
@@ -4987,8 +4995,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--batch-build NAME --blame PR --run URL takes no PR list, --ready, --on, --base or --lint-unknown-ok")
     if any(not v.strip() for v in [*a.case, *a.file, *([a.run] if a.run is not None else [])]):
         p.error("--run, --case and --file take a value that is not empty")
-    if (a.run or a.case or a.file) and not a.touches:
-        p.error("--run, --case and --file go with --touches")
+    if (a.case or a.file) and not a.touches:
+        p.error("--case and --file go with --touches")
     if a.touches:
         if any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("touches", "run", "case", "file")):
             p.error("--touches stands alone")  # any other option set, a mode flag or not
@@ -5023,8 +5031,10 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--lint-unknown-ok goes with --lane-lint or --batch-build --ready")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if batch and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record
-                  or a.lane_lint or a.idle_lanes or a.release_check or (a.batch_build and a.batch_drop)):
+    # A batch route takes only these options; any other option set (a mode flag or a modifier) means it does not stand alone.
+    if batch and (any(v != p.get_default(k) for k, v in vars(a).items()
+                      if k not in ("batch_build", "batch_drop", "ready", "on", "base", "lint_unknown_ok", "blame", "run"))
+                  or (a.batch_build and a.batch_drop)):
         p.error("--batch-build and --batch-drop each stand alone")
     if a.idle_lanes or a.touches or a.release_check:
         pass  # stands alone: checked above
@@ -5082,7 +5092,7 @@ def main(argv, host=None, lock=None, hosts=None):
         refuse_closing_reason(a.undo_check_unknown_ok, a.base_red_ok)  # first: before the role check, any lock, host read or write
         if a.touches:  # before the role check and any lock: it reads, merges and posts nothing
             try:
-                lines, unknown = touches_lines(host or Host(), a.run, a.case, a.file)
+                lines, unknown = touches_lines(host or Host(), run_id(a.run) if a.run else None, a.case, a.file)
             except (Stop, OSError) as e:  # an OSError is a read whose program cannot start (no gh): unknown, never a traceback
                 why = " ".join(str(e).split())
                 print("merge: " + (why if why.startswith("unknown") else f"unknown ({why}) {UNKNOWN_CITE}"), file=sys.stderr)
