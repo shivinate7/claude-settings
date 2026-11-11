@@ -425,8 +425,9 @@ def snapshot(folder):
 
 
 def run_cli(machine, *args, stdin=None, env_extra=None, input_text=None, input_bytes=None):
-    """bin/mail in a subprocess as one machine. stdin, or input_bytes, when given, is bytes piped to the CLI unchanged,
-    and the result's stdout and stderr are then decoded as UTF-8 with replace, so a case reads the bytes the CLI wrote.
+    """bin/mail in a subprocess as one machine. stdin, or input_bytes (its alias, which StdinNotUtf8 passes), when given,
+    is bytes piped to the CLI unchanged, and the result's stdout and stderr are then decoded as UTF-8 with replace, so
+    a case reads the bytes the CLI wrote.
     input_text goes to the child's stdin, encoded as UTF-8 (the encoding argument below). env_extra overrides the
     machine's env for this run only."""
     env = dict(machine.env, **(env_extra or {}))
