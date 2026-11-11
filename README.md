@@ -191,9 +191,14 @@ A flag prefix is an error, not the flag it starts (`merge 5 --conf` fails; write
   2026-11-03 16:56 CST in a cloud auto-mode session: the foreground call matched the allow rule
   and ran. The same call in the background went to the auto-mode classifier, which refused it. In a
   cloud session the guard reads the checkout from the flag, else the `cd`, else the working
-  directory. It allows `--confirm` only when a `cs-repo` tag of the session's own `get_session`
-  record names that checkout's repo (guard rule `merge-confirm-repo`, claude-settings decision
-  `merge-confirm-repo`). A path that is no checkout stops the merge tool before any read.
+  directory (`hooks/guard_merge.py` `_merge_target_repo`). It allows `--confirm` only when a
+  `cs-repo` tag of the session's own `get_session` record names that checkout's repo.
+  `hooks/guard_merge.py` `repo_proof_hit` makes that check. Its tag reader is
+  `hooks/shared_names.py` `repo_tag_names`. Guard rule `merge-confirm-repo` (`hooks/guard.py`
+  `judge_shell`) refuses a merge that fails the check. Decision `merge-confirm-repo`: a cloud
+  merge confirm acts only in a repo its own record names. A `-C` value that names no folder stops
+  the merge tool before any read. A `-C` value that is no git checkout stops it before its lock
+  and any pull request read (`merge/merge.py` `main`).
 * **Fresh code.** Each run fetches `origin main` and runs from a temporary worktree at that
   SHA. It prints the SHA it ran. If it cannot prove fresh code, such as when offline, it
   prints a warning block and runs the code it has. `--dev` skips all of this and runs the
