@@ -108,6 +108,8 @@ Cost: no new long-lived process or file. The reads run per push, in the guard's 
   one `config`. A HEAD push or a bare push adds one `symbolic-ref` and one `config`. A refspec push such
   as `origin lane/foo` adds one `symbolic-ref`. One whose destination differs from its upstream adds one
   `rev-parse`, a local read of the remote-tracking ref. A remote given as a URL or path reads nothing.
+- The octopus-push check (decision `octopus-push-refused`) adds one `rev-list` for each pushed ref other
+  than main or master. `--all` and `--branches` name no ref.
 
 ## The mistakes
 
