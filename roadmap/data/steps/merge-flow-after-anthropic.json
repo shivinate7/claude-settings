@@ -1,0 +1,14 @@
+{
+  "id": "merge-flow-after-anthropic",
+  "title": "Design a merge flow after Anthropic's: lanes merge on own green checks, main bisects and reverts, sessions install from a stable branch",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "Batch CI holds every merge behind one run; the owner is open to a radical redesign.",
+  "note": "R42 part 2 (owner 13:39 CST Nov 11, \"i'm pretty open to this radical approach -- A\", relayed by the retrospective; plan 7a78c5c). In stage 3 a Plan agent and a refuter design the flow after the post \"Redesigning source control at Anthropic\" (Oct 13): a lane merges on its own green checks and a review sized by risk; main's CI runs after merge, and a red run bisects and reverts the breaking commit; sessions install from a stable branch that moves only when main is green. The design goes back to the owner before any build. Needs main to finish a CI run first (#2591). Once the design is ruled, it would retire rule git-no-merge-during-batch-ci.",
+  "source": "owner 2026-11-11 13:39-13:43 CST, relayed by the retrospective session",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:44:00-06:00",
+  "blockedBy": []
+}

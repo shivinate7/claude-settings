@@ -1,0 +1,14 @@
+{
+  "id": "ruled-step-coordinator-queue",
+  "title": "A step that holds an owner ruling and has no lane is the coordinator's queue, started under parallelism-keep-going",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "Ruled steps waited as report lines; a report is for the owner to read, not a queue to act on.",
+  "note": "R42 part 1 (owner 13:39 and 13:43 CST Nov 11, relayed by the retrospective; plan 7a78c5c). 13:39: \"A seems fine but a report is still just a report yanno that's something for me to read rather than something to act upon\". 13:43: \"lanes compete more for the machine isn't a real problem on cloud sessions where each spawns its own machine right? ... which is why we have load brakes for local\". The coordinator starts such a step under rule parallelism-keep-going. The receiver's reply naming the step is the receipt; the sender's log item points to it.",
+  "source": "owner 2026-11-11 13:39-13:43 CST, relayed by the retrospective session",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-11T13:44:00-06:00",
+  "blockedBy": []
+}
