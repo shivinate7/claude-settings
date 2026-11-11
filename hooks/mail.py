@@ -87,6 +87,9 @@ def must(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     code, out, err = git(args, env, cache, timeout, input_text)
     if code:
         raise MailError(reason(err))
+    # git exits 0 when core.protectNTFS skips an index path and prints only "Ignoring path" on stderr.
+    if "Ignoring path" in (err or ""):
+        raise MailError("git ignored a path")
     return out
 
 

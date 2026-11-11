@@ -115,6 +115,9 @@ Design:
   `bin/mail`, with `bin/mail.cmd` beside it. The cache is a bare clone: `MAILBOX_CACHE`, else
   `~/.claude/mail.git`. It uses plumbing only: read-tree into a temporary index, hash-object,
   update-index, write-tree, commit-tree, then push to refs/heads/mail. It never uses a working tree.
+  Git reads stdin as bytes, so Windows adds no CR to an index path. Before the push, it reads the new tree
+  back: each added path must hold the blob of its text. A git call that prints "Ignoring path" on stderr
+  is an error, because git then exits 0 and skips the path. Either failure prints "not sent".
   Push race: file names are unique. On a non-fast-forward push, it syncs and rebuilds on the new tip. It
   makes six tries in all: the first push and at most five retries. Any other refusal, such as a hook or
   ACL refusal, is not retried. On failure it prints "not sent: <reason>" and exits 1. On success it
