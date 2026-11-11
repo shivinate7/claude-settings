@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:54 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
+the history. Last rewrite: 2026-11-11 11:56 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -527,7 +527,11 @@ then R29.
   outcome: one store, no copy step, no lag; the design pass picks the route. Read 11:52 CST: a page can
   call the viewer's claude.ai connectors (capability mcp), the built-in Claude Code Remote one included.
   So an answer can wake its writer today. This account has no GitHub connector, so a page cannot write
-  git directly yet. The other account is unread. Box
+  git directly yet. The other account is unread. Owner 11:55 CST: "The fallback is moving off artifacts to your own
+  site ... this doesnt sound so bad tho tbh" and "maybe a PAT or a github API resolves this and we just
+  go via that?". A token must never sit in a page: every viewer can read the page and its data. So a
+  token route is a small server that holds it, such as a Cloudflare Worker that writes git through the
+  GitHub API. That is the own-site route, now a full option beside the other two. Box
   answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
   pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
   1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
@@ -550,6 +554,11 @@ then R29.
   session on the owner's computer, or each repo attached to a cloud session. Starts after R28 step 3.
 
 ### 3.15 Spend fewer tokens, measured first
+
+Owner 11:55 CST Nov 11: "spend should also be logged if literally free to do so since it gives us more
+data about how we do things". get_session already returns each session's cost. The batch runner reads
+it at each batch merge, a process already running, and writes one line per session to the record
+branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer, no new process.
 
 - **R32. A token audit, then cuts.** Owner 10:57 CST Nov 11: "i also wonder when the coordinator spawns
   lanes if there's ways to be more token efficient (here, and elsewhere tbh -- worried i overuse tokens
