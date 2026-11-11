@@ -36,9 +36,10 @@
   "pick": "a",
   "port": false,
   "ref": "decision lanes-start-in-tool-worktrees",
-  "reply": "Your pick b stands. Reopened 13:29 CST Nov 9 so lane stop-push-skips-merged can read your answer from the page (decision relayed-grant-read-from-page). It closes when that lane reports done. Home: step stop-push-skips-merged.",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You picked b on the page at 13:09 CST Nov 9. Home: roadmap step stop-push-skips-merged.",
   "repo": "shivinate7/claude-settings",
   "short": "Patch the cloud Stop hook's unpushed-commits nudge",
-  "status": "open",
+  "status": "closed",
   "title": "How should lanes stop re-pushing branches already merged into main, when the cloud's Stop-hook script wrongly calls them unpushed?"
 }

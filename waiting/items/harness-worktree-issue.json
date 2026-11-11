@@ -26,8 +26,10 @@
   "pick": "a",
   "port": false,
   "ref": "anthropics/claude-code issue (draft below)",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You parked this on the page at 09:14 CST Nov 10. Home: roadmap step harness-worktree-git-probe (waits on this park) and step guard-shard-value-no-slash.",
   "repo": "shivinate7/claude-settings",
   "short": "Report the worktree refusal to Claude Code",
-  "status": "open",
+  "status": "closed",
   "title": "File this report on anthropics/claude-code? It posts a public GitHub issue in your name, which cannot be undone."
 }

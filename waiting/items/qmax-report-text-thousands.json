@@ -27,9 +27,10 @@
   "pick": "a",
   "rank": 2,
   "ref": "item 195; lane qmax-totals-in-thousands, review round 1",
-  "reply": "Deferred (16:53 CST): keep whatever is built, and leave the question open. Sent to the coordinator, which tells lane qmax-totals-in-thousands to go on to review round 2 with what it built.",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You answered on the page at 16:53 CST Nov 6: \"pick whichever is built for now and leave the question open/deferred\". Parked as deferred; home: q_max decision D-632 and the triage outbox list of parked items.",
   "short": "q_max: report text in thousands?",
-  "status": "open",
+  "status": "closed",
   "title": "On a q_max dashboard card, should the reconcile report text also show thousands?",
   "why": "Recommended: a. One card shows one unit, which is what your 195 a asked for; RFI and export text keep exact dollars."
 }

@@ -39,10 +39,11 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "pick": "d",
   "ref": "decision grant-reaches-lanes; docs/plans/grant-reaches-lanes.md section 2; PR #2517; lane session_013NEJL3K9EJKrLHccAdQtmi",
-  "reply": "Reopened 09:10 CST Nov 10: your order question is answered in the context, and option d is new.",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You answered on the page at 09:06 CST Nov 10: \"why does the order matter?\" It does not. Your later ruling R12 (\"i dont want to do such rigid word grants\") and R18 (a relay carries your exact words) replace the fixed word list. Home: the restart plan R12 and R18.",
   "repo": "shivinate7/claude-settings",
   "short": "Acts a grant reaches",
-  "status": "open",
+  "status": "closed",
   "title": "Which acts should a grant reach in a lane: the agent spawn and merge, not self-edit?",
   "why": "Recommended: d. It covers every refused act on record with a typed line."
 }

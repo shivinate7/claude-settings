@@ -41,9 +41,10 @@
   "pick": "a",
   "rank": 4,
   "ref": "step 3d-browser-dummy",
-  "reply": "Fixed at 14:05 CST. The mockups built their markup from a script, so the page's check found no #pickview. Each now has its focus element in plain markup. The pictures did not change. Page republished (lane commit c82aa09a).",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You parked this on the page at 12:06 CST Nov 7. Home: the triage outbox list of parked items, for the 3D dummy's follow-up.",
   "short": "3D dummy phone panel",
-  "status": "open",
+  "status": "closed",
   "title": "3D dummy on a phone: where does an item's detail panel sit?",
   "why": "Recommended a: the scene stays in view while you read."
 }

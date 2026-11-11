@@ -27,9 +27,10 @@
   "pick": "b",
   "port": false,
   "ref": "#2378 (head 4b714a03f); settings.json autoMode.allow entry \"Merge Tool Read Checks\"",
-  "reply": "Your pick a stands. Reopened 13:21 CST Nov 9 so that lane batch-freeze-lane-set-enforce can read your answer from the page: page_grant.py (decision relayed-grant-read-from-page) counts an answer only on an open item. This item closes when the lane reports that the settings edit has landed. Home: step batch-freeze-lane-set-enforce.",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You picked a on the page at 13:09 CST Nov 9. Home: roadmap step batch-freeze-lane-set-enforce, which lands the settings change.",
   "repo": "shivinate7/claude-settings",
   "short": "Allow the three new batch flags without asking?",
-  "status": "open",
+  "status": "closed",
   "title": "Should the merge tool's allow rule in settings.json also cover the three new batch flags from #2378, so the batch runner is not asked before each batch step?"
 }

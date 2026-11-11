@@ -25,8 +25,10 @@
   "pick": "a",
   "rank": 4,
   "ref": "step 3d-browser-dummy",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You parked this on the page at 12:06 CST Nov 7. Home: the triage outbox list of parked items; notes at docs/design/3d-browser-dummy-notes.md.",
   "short": "3D dummy differences",
-  "status": "open",
+  "status": "closed",
   "title": "3D dummy: are these three differences from the Cockpit fine?",
   "why": "Recommended a: a copy you look at, not one you answer on, stays small and cannot drift from the page."
 }

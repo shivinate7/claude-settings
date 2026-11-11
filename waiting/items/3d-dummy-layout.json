@@ -41,8 +41,10 @@
   "pick": "a",
   "rank": 4,
   "ref": "step 3d-browser-dummy; item 277",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You parked this on the page at 12:06 CST Nov 7. Home: the triage outbox list of parked items, for the 3D dummy's follow-up (step 3d-browser-dummy is done).",
   "short": "3D dummy layout",
-  "status": "open",
+  "status": "closed",
   "title": "3D dummy: how should the scene lay out the page's items?",
   "why": "Recommended a: what still needs you stands in front, and closed work steps back."
 }

@@ -32,10 +32,11 @@
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "decision relayed-grant-read-from-page (\"What counts\"); skills/waiting-page/page_grant.py; lane session_013NEJL1tSPqSx7QonoVwudz",
-  "reply": "Coordinator, 09:26 CST Nov 10. Read as: the item stays open, so a relayed grant still counts with no second form, and it sinks into Answered (lane answered-leaves-page adds the lane+lastAnswer sink). Correct me if wrong.",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "You answered on the page at 09:06 CST Nov 10: \"relayed grants can just stay running\". The restart plan's R18 (a relay carries your exact words, with no page round trip) replaces the open question. Home: the restart plan R18 and step answered-leaves-page.",
   "repo": "shivinate7/claude-settings",
   "short": "Closed items and relayed grants",
-  "status": "open",
+  "status": "closed",
   "title": "When an answer is routed and its item closes, should a relayed grant on it still count?",
   "why": "Your earlier pick and the grant reader disagree, so one of them must change."
 }

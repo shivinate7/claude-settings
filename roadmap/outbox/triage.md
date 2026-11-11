@@ -726,3 +726,10 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - fix-verifier-after-main-merge (triage 13:27 CST): #2563 needed a second fix verifier after a main merge forced code edits; merge --review-record refuses --fix-check when the newest record already has a Fix check line, so it was recorded as a new-lane round 1 (comment 6805259149). Under decision pr-review-record.
 - merge-resolve-drops-lines (triage 13:47 CST): triage resolved a main-merge conflict in #2552 at 12:58 by folding main's run_cli input_bytes path into the lane's helper and left no Drops-lines trailer; the silent-undo check caught it at lane lint. Gap: no step tells a conflict resolver to add the trailer in the same commit. Under decision silent-undo-check.
 - question-form-widen-false-alarm (coordinator 13:06 CST, a note under decision question-form, not a debt): the question-form hook flagged #2593's option a as widening a shared tool. It does not: cloud gh writes stay refused, the option only routes the wake through the MCP tool.
+
+## 2026-11-11 13:59 CST: page items the owner parked (closed on the page; this list is their home)
+
+- 252 qmax-report-text-thousands: "pick whichever is built for now and leave the question open/deferred" (Nov 6). For the next q_max build session; q_max D-632.
+- 291 3d-dummy-layout, 292 3d-dummy-phone, 293 3d-dummy-departs: parked Nov 7. For the 3D dummy's follow-up; notes at docs/design/3d-browser-dummy-notes.md.
+- 428 qmax-pastrates-bar-1440-pics: "can be parked and addressed at a q_max session that actually builds" (Nov 8).
+- Still open on the page, by audit (Explore, 13:57 CST): owner asked us back on 240, 328, 354, 398; still live 264, 324, 468, 469, 476, 501.

@@ -30,9 +30,11 @@
   ],
   "owner": "retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "ref": "retrospective session 14:09 CST Nov 10",
+  "replied": "2026-11-11T19:59:00Z",
+  "reply": "Not answered here; your 15:22 CST Nov 10 ruling R6 decided it: a check reads each repo's outbox against main and lists each ruling and whether its home holds your words, and R27 closes a ruling's item when its home holds it. Home: the restart plan R6 and R27.",
   "repo": "shivinate7/claude-settings",
   "short": "How should a ruling prove it landed?",
-  "status": "open",
+  "status": "closed",
   "title": "How should an owner ruling prove it reached its record?",
   "why": "It moves each ruling to its record in the turn it is heard, so no queue can lose it."
 }
