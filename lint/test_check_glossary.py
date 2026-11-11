@@ -595,7 +595,7 @@ class CodeNameTests(Fixture):
 class KeptNameTests(Fixture):
     """A kept name passes, and only the names a row keeps. A row keeps the exact spellings its meaning marks, as
     the review log row keeps its slug: the backticked name, then ` stays`. A kept flag also keeps its argparse
-    attribute: `--fix-check` keeps `args.fix_check` (triage pick, 2026-11-11 10:15 CST). Every other spelling of
+    attribute: `--fix-check` keeps `args.fix_check`. Every other spelling of
     the words stays flagged, and a kept name of one row never unflags another row's "not" name."""
     KEPT = ("| review log | A reviewer's PR comment with the rounds. Its slug `pr-review-record` stays. "
             "Its function `review_record` stays. Its function `review_record_problem` stays. "
