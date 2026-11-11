@@ -9899,8 +9899,29 @@ all_refused("glob refspec refs/heads/*:refs/heads/* from a detached checkout, lo
             "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADDET)
 all_refused("glob refspec refs/heads/*:refs/heads/* from an agent checkout, local main ahead, refuses",
             "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADAGENT)
+# git's `*` matches an empty name, so `main*` and `*main` each name main itself and reach it as `*` does. The lane
+# checkout keeps PUSHAHEADLANE's fixture: local main ahead of its tracking ref, on a network origin.
+all_refused("glob refspec refs/heads/main*:refs/heads/main* from a lane checkout, local main ahead, refuses",
+            "origin refs/heads/main*:refs/heads/main*", cwd=PUSHAHEADLANE)
+all_refused("glob refspec refs/heads/*main:refs/heads/*main from a lane checkout, local main ahead, refuses",
+            "origin refs/heads/*main:refs/heads/*main", cwd=PUSHAHEADLANE)
+all_refused("quoted glob refspec refs/heads/main*:refs/heads/main* from a lane checkout, local main ahead, refuses",
+            "origin 'refs/heads/main*:refs/heads/main*'", cwd=PUSHAHEADLANE)
+# Master is the other default name: a glob that names master itself refuses, with no local main.
+all_refused("glob refspec refs/heads/master*:refs/heads/master* from a master checkout, local master ahead, refuses",
+            "origin refs/heads/master*:refs/heads/master*", cwd=PUSHMASTERAHEAD)
+all_refused("glob refspec refs/heads/*master:refs/heads/*master from a master checkout, local master ahead, refuses",
+            "origin refs/heads/*master:refs/heads/*master", cwd=PUSHMASTERAHEAD)
 all_allowed("glob refspec refs/heads/*:refs/heads/* with local main equal to origin/main is silent",
             "origin refs/heads/*:refs/heads/*", cwd=PUSHFEAT)
+# A star that cannot name main stays silent: lane* matches no default branch, with the refusals' own lane fixture.
+all_allowed("glob refspec refs/heads/lane*:refs/heads/lane* from a lane checkout, local main ahead, is silent",
+            "origin refs/heads/lane*:refs/heads/lane*", cwd=PUSHAHEADLANE)
+# A main-matching glob is silent when local main equals its tracking ref: the push writes nothing to main.
+all_allowed("glob refspec refs/heads/main*:refs/heads/main* with local main equal to origin/main is silent",
+            "origin refs/heads/main*:refs/heads/main*", cwd=PUSHMAIN)
+all_allowed("glob refspec refs/heads/*main:refs/heads/*main with local main equal to origin/main is silent",
+            "origin refs/heads/*main:refs/heads/*main", cwd=PUSHMAIN)
 # A glob to a local-path origin is no network push, however far local main is ahead of its tracking ref.
 all_allowed("glob refspec refs/heads/*:refs/heads/* to a local-path origin with local main ahead, is silent",
             "origin refs/heads/*:refs/heads/*", cwd=PUSHLOCALAHEAD)
