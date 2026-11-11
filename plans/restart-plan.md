@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 18:37 CST.
+the history. Last rewrite: 2026-11-10 18:45 CST. The owner's list is complete for now (owner 18:43 CST).
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -11,11 +11,20 @@ in the owner's words with the time. Ids (R1, G1, D1) are stable names, not an or
 
 ## Why this order
 
-The words come first, because every later brief uses them. Then the two causes of lost CI runs (checks
-that refuse a green batch at merge, and fixed time limits). Then the review loop that sends lanes back
-(stale review logs, repeated lint, rounds). Then the trust in guards (wrong refusals, a long reply after
-each refusal, unseen holes, an override that feels like a loophole). Last, a lane never stalls on a
-popup nobody sees. Each is fixed once, before lanes resume, so the resumed lanes run under it.
+The words come first, because every later brief uses them (3.0, G1-G15). Then what loses whole CI runs:
+checks that refuse a green batch at merge, fixed time limits, a repo with no CI (3.1-3.2). Then the
+loop that sends lanes back: stale review logs, repeated lint, extra rounds, one model table (3.3-3.8).
+Then trust in guards: wrong refusals, mistakes filed as missing guards, pass claims with proof, short
+corrections, one catalog, one override route, no lane popups (3.6-3.12). Stage 4 then makes the
+owner's side mechanical: one home and one wake per answer, easy relays, debts and notes kept in place.
+Each is fixed once, before lanes resume, so the resumed lanes run under it.
+
+## What happens next
+
+1. The drain finishes (stage 1); the H1 lane lands as the one exception.
+2. The coordinator opens one PR that lands this file on main (stage 2). The retrospective session
+   opens no PRs. Each ruling's home is rewritten later by the lane that builds it.
+3. Stage 3 lanes start in order, 3.0 first; triage has every ruling filed as a step.
 
 ## Stage 1. Drain
 
