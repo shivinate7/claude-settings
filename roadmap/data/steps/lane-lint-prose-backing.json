@@ -1,0 +1,8 @@
+{
+ "id": "lane-lint-prose-backing",
+ "title": "The lanes-run-no-full-ci-job record backs each claim with a cite that reaches the lint",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "At the batch 78 merge (main c85a832e2, 2026-11-11 08:28 CST), the prose judge marked docs/decisions/lanes-run-no-full-ci-job.md lines 13, 17, 19, 21 and 23 unbacked: each has no cite, or cites merge.py text that never reaches lint_check or --lane-lint. 131 more lines read UNKNOWN past the judge's call cap. Harm: a lane trusts a lint claim that no code holds. File for the sort; no build under the freeze.",
+ "source": "runner 8 batch 78 merge-tool notes, relayed by the coordinator 2026-11-11 08:30 CST"
+}
