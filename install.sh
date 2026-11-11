@@ -361,14 +361,12 @@ cloud_git() {
 
 # Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
 # person's own: this block never moves it, and the block below moves it only when clean and detached. The clone keeps its
-# main only when main holds a commit the fetched ref lacks, because moving main would drop that commit. A main that only
-# fast-forwarded (the SessionStart hook's `merge --ff-only`) holds none, though it differs from mirrorSha, the sha this
-# script last set main to. The first fetch is depth 1, so FETCH_HEAD holds no history under the tip, and an ancestor check
-# against it would read a fast-forwarded main as ahead of the ref. When that check fails, a second fetch takes the ref's
-# full history and the check runs again on that tip. No commit date decides it: a clock-skewed commit would hide main from a
-# date window. A third fetch, depth 1, then shortens the clone; its tip is ignored, because origin may have moved since the
-# check, and main moves only to the tip the check ran on. A failed full fetch or an erroring check cannot tell, and keeps the
-# clone with a WARN. A failed first fetch keeps the clone as it was. The live pin skips it.
+# main only when main holds a commit the fetched ref lacks, because moving main would drop that commit. Only this script
+# writes mirrorSha, so a main still at mirrorSha holds no local commit and needs no check; a check there would fetch full
+# history on nearly every refresh, since a depth-1 tip never holds the old main. A main that moved off mirrorSha without a
+# local commit can be told from one with a local commit only on the ref's full history, so that check fetches it. The
+# depth-1 fetch after it only shortens the clone; main moves to the tip the check ran on, since origin may have moved
+# since. A clone the check cannot decide is kept with a WARN. The live pin skips it.
 # mirror_refresh DIR does the refresh; use_main_mirror below also calls it. A failed refresh keeps the clone at
 # its older main, with a WARN: older reviewed files are safer than a checkout's branch.
 mirror_refresh() {
@@ -383,7 +381,9 @@ mirror_refresh() {
     log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
     return
   fi
-  if [ -n "$mr_main" ] && [ "$mr_main" != "$mr_tip" ] && ! git -C "$mr_dir" merge-base --is-ancestor "$mr_main" "$mr_tip" 2>/dev/null; then
+  mr_sha=$(git -C "$mr_dir" config --get claude-settings.mirrorSha 2>/dev/null)
+  if [ -n "$mr_main" ] && [ "$mr_main" != "$mr_tip" ] && [ "$mr_main" != "$mr_sha" ] \
+     && ! git -C "$mr_dir" merge-base --is-ancestor "$mr_main" "$mr_tip" 2>/dev/null; then
     if ! cloud_git -C "$mr_dir" fetch -q --depth=2147483647 origin "$REF"; then
       log "WARN: could not tell whether the clone $mr_dir holds local commits on main that $REF lacks; keeping it as it is"
       return
