@@ -6,9 +6,9 @@
  "phase": "now",
  "lane": "triage builder",
  "why": "Main's push runs of checks.yml ended cancelled 11 times since run 42669400649 (Nov 9 11:56 CST); run 43038567637 cancelled at checks-windows-guard's 20-minute cap. No completed main push run since Nov 9 (retrospective health map 11:50 CST).",
- "note": "Owner 11:53 CST Nov 11 (plan f8b11c2, 3.2): the stopgap raise does not wait for the drain; he had already asked for it. Guard: step main-job-cap-alarm. Coordinator 11:56 CST Nov 11: a fix of a landed CI item, which the freeze allows. Per decision ci-job-caps (owner stopgap 2026-11-10 12:11 CST: raise caps generously), raise each checks-windows-guard shard cap to 75 min, add its row to the ci-job-caps table with the measured cap-end runs, close or update debt windows-shards-outgrow-caps. Weaken no test. CI-only. Own batch or a non-busy batch. Note: PR CI never runs shards -2/-3 (checks.yml near 1442-1444), so a PR cannot show a Windows guard cap end.",
+ "note": "Owner 11:53 CST Nov 11 (plan f8b11c2, 3.2): the stopgap raise does not wait for the drain; he had already asked for it. Guard: step main-job-cap-alarm. Coordinator 11:56 CST Nov 11: a fix of a landed CI item, which the freeze allows. Per decision ci-job-caps (owner stopgap 2026-11-10 12:11 CST: raise caps generously), raise each checks-windows-guard shard cap to 75 min, add its row to the ci-job-caps table with the measured cap-end runs, close or update debt windows-shards-outgrow-caps. Weaken no test. CI-only. Own batch or a non-busy batch. Note: PR CI never runs shards -2/-3 (checks.yml near 1442-1444), so a PR cannot show a Windows guard cap end. Coordinator 11:58 CST: link step capped-job-hides-red; before hand-over run the Windows guard slice in full on the lane head and report failures by case; the first completed main run after the merge is the real proof; any real red becomes its own fix lane before the next merge.",
  "source": "coordinator 2026-11-11 11:56 CST",
  "owner": "triage",
- "updatedAt": "2026-11-11T11:55:00-06:00",
+ "updatedAt": "2026-11-11T11:56:00-06:00",
  "blockedBy": []
 }

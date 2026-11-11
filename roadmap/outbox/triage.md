@@ -716,3 +716,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Decision idle-resume-compacts: rewrite its /autocompact lever line to match precompact-handoff rule 1 (retrospective 11:34 CST).
 - docs/todo.md line 9: point at step model-table-one-home.
 - Decision waiting-data-in-repo: fix two stale claims in place (retrospective audit 11:42 CST): it says this repo has only the old `waiting-page` key (main has 20 `artifacts` entries), and that export saves no page HTML (page.html is in all five copies).
+- Decision session-messages: rewrite its status lines (8-10, 23, 207-208) to the measured truth: Windows read auth OK (ls-remote exit 0, 1.1 s, 11-10 11:00 CST), Windows push unproven (empty commit 587de9e), Mac round trip 08c14103ba2b (11-10 18:41 CST) (retrospective 11:55 CST).
