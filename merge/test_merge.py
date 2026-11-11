@@ -13270,6 +13270,50 @@ class RepoDirFlag(RepoDirRuns, Env):
                          "--reviewed read the process directory's checkout, not the -C one: %r" % (seen["locks"],))
         self.assertTrue(any(line.startswith("#7 ") for line in out.splitlines()), "--reviewed printed no line for #7:\n" + out)
 
+    def release_check_stand_in(self):
+        """-> (calls, fake). `fake` stands in for merge.release_check and keeps the (root, host, numbers) main gives it. It answers one PASS line,
+        so the case reads only what main hands the check: the real check's reads run in that root and through that host."""
+        calls = []
+
+        def fake(root, h, numbers, lints, root_why=None):
+            calls.append((root, h, list(numbers)))
+            return ["#7 PASS"], True
+
+        return calls, fake
+
+    def test_release_check_with_c_reads_the_named_checkout_or_refuses_it(self):
+        """`merge -C <other> --release-check 7` names the checkout the check reads: release_check gets that checkout as its root, and a host built
+        in it. Or -C is refused with a usage error that names -C and --release-check, and nothing is read. Before the fix, -C was parsed and the
+        process directory's checkout was read."""
+        for argv in self.spellings("--release-check", "7"):
+            with self.subTest(spelling=argv[0]):
+                calls, fake = self.release_check_stand_in()
+                with unittest.mock.patch.object(merge, "release_check", fake):
+                    rc, out, seen = self.run_from(self.co, argv)
+                if rc == 2:  # refused by a usage error: the refusal names the flag and its mode, and nothing was read
+                    error = "\n".join(line for line in out.splitlines() if "error:" in line)
+                    self.assertTrue(re.search(r"-C|--repo-dir", error) and "--release-check" in error,
+                                    "the refusal does not name -C and --release-check: " + out)
+                    self.assertEqual(seen["hosts"], [], "merge built a host before it refused -C")
+                    self.assertEqual(calls, [], "merge read a checkout before it refused -C")
+                    continue
+                self.assertEqual(len(calls), 1, "release_check did not run once (rc %r): %s" % (rc, out))  # scope first: the check ran
+                root, h, _ = calls[0]
+                self.assertEqual(checkout_key(root), checkout_key(self.b_co),
+                                 "release-check read the process directory's checkout, not the -C one: %r" % (root,))
+                self.assertEqual(checkout_key(getattr(h, "built_with", {}).get("cwd")), checkout_key(self.b_co),
+                                 "release-check's host reads ran in %r, not the -C checkout" % (getattr(h, "built_with", {}).get("cwd"),))
+
+    def test_release_check_without_c_reads_the_process_directory(self):
+        """A control for the case above: with no -C, release_check's root is the process directory's checkout. The process directory is the
+        second checkout here, so a root fixed at self.co would fail."""
+        calls, fake = self.release_check_stand_in()
+        with unittest.mock.patch.object(merge, "release_check", fake):
+            rc, out, seen = self.run_from(self.b_co, ["--release-check", "7"])
+        self.assertEqual(len(calls), 1, "release_check did not run with no -C (rc %r): %s" % (rc, out))
+        self.assertEqual(checkout_key(calls[0][0]), checkout_key(self.b_co),
+                         "without -C, release-check read %r, not the process directory" % (calls[0][0],))
+
     def test_a_path_that_is_no_checkout_stops_before_any_read(self):
         probe = subprocess.run(["git", "-C", self.plain, "rev-parse", "--show-toplevel"], capture_output=True)
         self.assertNotEqual(probe.returncode, 0, "fixture: the plain folder sits inside a checkout")
