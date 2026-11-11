@@ -1,0 +1,8 @@
+{
+  "id": "drain-sort-against-plan",
+  "title": "Sort every open PR outside the named queue against the restart plan",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "why": "R23, owner pick 19:23 CST Nov 10 (\"Named queue\"). The drain ends when the named queue lands: batch 74b (#2574); batch 75 (#2568, #2571, #2570, #1099, #1338, #2573, #2559); and #2563, #2566, the ten former #2563 waiters (#1186, #1805, #2534, #2431, #2268, #2378, #1166, #2366, #2379, #2562), #2575, #2542. Triage sorts every other open PR (about 650) against the plan. It closes a PR whose purpose a plan ruling replaces, keeps its branch so it can reopen, and leaves the rest as stage 3 input. Stage 2 starts once #2575 is on main, not after the sort. Open: #2572 and #2483 sit outside the named queue (the coordinator closes #2483 as replaced by gh-write-cloud). A cloud session closes through the GitHub tools, since gh writes are refused there.",
+  "source": "retrospective session relay 19:24 CST and coordinator 19:25 CST Nov 10 (R23); plan stage 1, commit 5d0baed"
+}
