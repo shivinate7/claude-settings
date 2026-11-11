@@ -23,9 +23,11 @@
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "ref": "retrospective 13:00 CST Nov 11",
+  "replied": "2026-11-11T19:11:00Z",
+  "reply": "You answered in chat at 13:03 CST (relayed by the retrospective): \"yes on the fix !\". The check that flags a repeated owner remark skips a match on the item's own home or the same message, gives each item its own matches, prints one line, and never blocks. It still matches by meaning. Home: the decision on the owner feedback inbox (its Repeats part), rewritten in place; roadmap step repeat-judge-never-blocks.",
   "repo": "shivinate7/claude-settings",
   "short": "Stop the repeat judge's false alarms how?",
-  "status": "open",
+  "status": "closed",
   "title": "The repeat judge marked 8 items today and none were repeats. Should its marks stop blocking?",
   "why": "Each false mark blocks a Stop and costs a turn."
 }

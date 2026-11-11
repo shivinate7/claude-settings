@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-11T19:11:00Z",
+  "context": "Goal: sessions question your rules when the facts call for it, instead of deferring to them.\nProblem (rule): the check that refuses a repeat of a settled question also refuses a measured challenge to a past ruling, so changing that check needs your yes.\nBased on (ruling): your 13:01 CST words \"my rules are to be challenged/questioned and never read as absolutes given im imperfect\", and 13:04 CST: the checks should flag deference \"just like how it identifies when shared mistakes and other stuff happens\".\nBased on (read): the check that refuses a repeat of a settled question cannot tell a nag from a challenge.\nDeparts from: main refuses any question on a settled point \u2014 a challenge that brings the ruling's text, a measure, what the ruling protected and a fix passes; a repeat with no new fact is still refused; the check that reads replies flags one that names a flaw in a ruling but defers with no measure or fix.\nMeanwhile: nothing changes until your yes; it is planned work after the fresh start.",
+  "home": "the restart plan (its item on challenging past rulings); the decision on the one form every question to you takes; the rule on how a session challenges a stale ruling",
+  "id": "ruling-challenge-not-defer",
+  "kind": "decision",
+  "n": 511,
+  "options": [
+    {
+      "gain": "Sessions bring you measured challenges to your rules, and deference gets flagged.",
+      "how": "A lane changes the check to pass a measured challenge, rewrites its refusal text, adds a test that proves both paths, and adds one flag to the check that reads replies.",
+      "key": "a",
+      "label": "Yes, build it (Recommended)",
+      "lose": "Some questions on settled points reach you again, when they bring a new fact."
+    },
+    {
+      "gain": "No change to how questions are checked.",
+      "how": "Nothing changes.",
+      "key": "b",
+      "label": "No",
+      "lose": "Sessions keep deferring to rules they could challenge."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 13:05 CST Nov 11; restart plan",
+  "repo": "shivinate7/claude-settings",
+  "short": "Let sessions challenge your rules, and flag deference?",
+  "status": "open",
+  "title": "Should the checks let a session challenge a past ruling with a measure and a fix, and flag replies that defer?",
+  "why": "The check that stops repeat questions also stops measured challenges."
+}
