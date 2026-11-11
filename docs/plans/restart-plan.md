@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 23:59 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
+the history. Last rewrite: 2026-11-11 11:19 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -11,31 +11,41 @@ in the owner's words with the time. Ids (R1, G1, D1) are stable names, not an or
 
 ## Why this order
 
-The words come first, because every later brief uses them (3.0, G1-G15). The rest of stage 3 then
-may run in parallel (3.4 sets how many lanes start); only two items wait on another (3.2 runs with 3.1; 3.12 after 3.11). It covers what
-loses whole CI runs (3.1, 3.2, 3.4, 3.5), the loop that sends lanes back (3.3, 3.7, 3.8), and trust in
-guards (3.6, 3.9-3.12), and the express pass for prose (3.13). Stage 4 makes the owner's side mechanical: one home and one wake per answer, easy
-relays, debts and notes kept in place, session ids that survive a restart. Each is fixed once, before
-lanes resume, so the resumed lanes run under it. An item still open (D1, D3) holds no stage.
+The words come first, because every later brief uses them (3.0, G1-G15). Next comes the split of the
+guard test file (R26 part 4), while few lanes are open. The rest of stage 3 then runs in parallel, and
+stage 4 runs beside it (R25). Only three items wait on another: 3.2 runs with 3.1, 3.12 after 3.11,
+and 3.14 in R28's order. Stage 3 covers what loses whole CI runs (3.1, 3.2, 3.4, 3.5) and the loop
+that sends lanes back (3.3, 3.7, 3.8). It also covers trust in guards (3.6, 3.9-3.12), the express pass
+for prose (3.13), prose that tends itself (3.14), and token spend (3.15). Stage 4 makes the owner's side mechanical: one home and one wake
+per answer, easy relays, debts and notes kept in place, session ids that survive a restart. Each is
+fixed once, before lanes resume, so the resumed lanes run under it. An item still open (D1, D3) holds
+no stage.
 
 ## What happens next
 
 1. The drain finishes (stage 1); the H1 lane lands as the one exception.
-2. The coordinator opens one PR that lands this file on main (stage 2). The retrospective session
-   opens no PRs. Each ruling's home is rewritten later by the lane that builds it.
-3. Stage 3 starts with 3.0; once it lands, every other item may start, except the two that wait
-   (see Why this order). How many lanes start, and how they batch, is left to 3.4. Triage has every
-   ruling filed as a step.
+   Then a fresh start. Owner 10:52 CST Nov 11: "once the drain completes i'll archive coordinator,
+   batch runner, and all other claude-settings sessions except you. and respawn the others as new".
+   Before he archives: the plan follow-up PR is merged, and each session writes its handoff with
+   what it holds open. R22's guard is not built yet, so after the respawn the retrospective session
+   finds the new sessions by their tags and rewrites every stored session id by hand.
+2. Stage 2 is done (#2575, #2579). Later rulings land in the next plan follow-up PR, which the
+   coordinator opens. The retrospective session opens no PRs.
+3. Stage 3 starts with 3.0, then the test file split; then every other item may start, with stage 4
+   beside it. Batches follow R26 (3.4). Triage has every ruling filed as a step.
 
 ## Stage 1. Drain
 
 In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we speak"). The freeze
-holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
+holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main. Left at 10:50 CST
+Nov 11 (GitHub read): #2379 and #2431 in batch 79 (#2587, draft, CI not started), then #1099, and
+#1166, #2563, #2378 stacked on #2431. Last merge: batch 78, 08:26 CST.
 
 - **R23. The drain ends at the named queue.** Owner 19:23 CST Nov 10 picked "Named queue". Outcome:
   with 682 open and 95 merged since 00:00 CST (GitHub search, coordinator, 2026-11-10 19:23 CST), draining all of them would hold the plan for about a week.
   1. The drain ends when the named queue lands: batch 74b (#2574), batch 75, and the coordinator's
      next-to-release list at 19:23 CST (#2563, #2566, the ten former #2563 waiters, #2575, #2542).
+     #1805 left the queue for item 3.6 (owner 09:12 CST Nov 11).
   2. Triage sorts the other open PRs (662 at 23:51 CST, coordinator) against this plan. It closes a PR whose purpose a ruling here
      replaces, with its branch kept so it can reopen. The rest wait as stage 3 input.
   3. Stage 2 starts as soon as #2575 is on main, without waiting for the sort.
@@ -141,6 +151,16 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
   the wrong session or role: one line saying whose job it is and why, then route it. The word fits two
   terms: ask before acting. Home: CLAUDE.md speak-one-name-per-thing and the output style's
   style-wrong-tier-one-line, rewritten in place.
+- **R30. A consultant role, started by the owner.** Owner 10:54 CST Nov 11: "im able to spawn a
+  retrospective or a consultant, basically someone like you who's literally a course correction vehicle
+  for me to chat with from a more outsider lens -- or realistically should i be working wiht a
+  coordinator for this". Box answer before 10:58 CST: "Add consultant role". A sixth session role, the
+  consultant. The owner starts it on demand in claude-settings; no coordinator starts it. It talks with
+  the owner, runs read-only audits, keeps one plan file rewritten in place, and sends each ruling to
+  triage. A finding about another repo goes to that repo's triage. It builds, merges and decides
+  nothing; an arbiter decides, a consultant helps the owner decide. It ends when its plan lands. The
+  name "advisor" is not used, since the built-in advisor (`advisorModel`) has it. Home: decision
+  session-tiers and GLOSSARY.md.
 
 ### 3.1 Checks that can refuse a merge run in CI
 
@@ -213,6 +233,27 @@ With 3.1, this stops a green batch from being refused at merge.
 Step batch-freeze-lane-set-enforce, already doing. Owner, same answer: "the limit isn't the problem,
 it's how the limit batches that's the problem". How many lanes start is left to this step for now.
 
+- **R26. Batches stop wasting CI.** Owner 09:20 CST Nov 11: "i need a review and then a strategy that
+  makes me parallelize as much as possible, without losing time when things start merging into main".
+  And 09:21 CST: "batch merges themselves were made to avoid CI waits and to have things go faster". In
+  the question box, answered by 10:00 CST, he picked these parts.
+  1. A lane's own checks run what made batches red: the Windows slice, mutation tests on the files it
+     touches, and signed-commit cases (folds into 3.5).
+  2. A lane dropped from two batches leaves the queue for a fix lane.
+  3. No self-made reruns: the merge tool stops the records-page push after a green run, and a red main
+     is fixed before the next merge, not waited out.
+  4. Busy files in turn (box answer 10:05 CST, "Both"). The batch runner puts lanes that touch the
+     same busy file (the main guard file, its tests, its mutation tests) into back-to-back stacked
+     batches, never one batch. The guard test file is split into one file per rule. The split runs
+     first in stage 3, while few lanes are open.
+  Stays as ruled: decision batch-freeze-lane-set (owner 2026-11-08 20:24 and 20:31 CST): the set freezes
+  at build, the next batch stacks on the running one, a red run drops only the blamed lane. Its tool
+  check is this item's step. One batch runner: merging is one at a time under one lock (merge.py).
+  Evidence (audit 09:37 CST, last 15 batch merges, 256 lanes): 3030 CI minutes, 677 on merged heads.
+  74 builds became 15 merges, with 147 lane drops; two lanes were dropped in 5+ batches each. Lane
+  wait, last commit to merge, has a median of 536 min, 397 of it before the build. A lone CI run takes 33-38 min (5 runs). Merge
+  queue: GitHub offers it to organization repos only.
+
 ### 3.5 Lane lint runs once per lane; batch CI fails fast
 
 - **R4.** Owner 14:54 CST Nov 10: "is there no truly fast way that retains accuracy?"; 14:56 CST: "yes D
@@ -235,6 +276,13 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   list. After it, wrong refusals are notes only. If they turn out to be a problem again, revisit a
   threshold (a guard with 3 recorded wrong refusals gets its own lane). Home: new decision
   cull-guard-wrong-refusals, beside cull-rules (PR #2568, branch cull-false-alarms-once).
+  The cull also judges the message guard between sessions, #1805, with its fix #1849, as one pair.
+  Owner 09:12 CST Nov 11, in the coordinator's chat: "q2 B" (take #1805 out of the drain; both go to
+  stage 3). Alone, #1805 wrongly refuses 136 of 204 ordinary coordinator messages; with #1849, 13 of 204
+  (#1849's round 3).
+- **R24. Every refusal names a way out that works.** Owner 09:16 CST Nov 11, in the coordinator's chat:
+  "yes file it for stage 3". Every guard refusal and ask names an allowed way out, and a test proves each
+  named way out passes the guard. Step refusal-names-way-out. Runs beside the cull.
 - **R16. A mistake is filed as a missing guard, by a hook.** Owner 16:22 CST Nov 10: "i thought i've
   already set something really high up in claude.md or elsewhere that sessions/agents should never
   assume an error is their own and instead should strongly be raised awareness that any error they make
@@ -267,6 +315,18 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   markers and checks read the table. Each model ruling lands in one lane that changes the table and
   every reader together. Cause: rulings 279 d, 439 and 444 a reached main 12-57 h late and in pieces;
   359 a, 359 b, 289 and 295 a are not on main. Home: decision agent-model-cap.
+- **R33. Every role has a chosen model and effort, with a reason.** Owner 11:09 CST Nov 11: "i do
+  think these roles that have defaults need to have decided models and why -- similarly maybe an
+  evaluation of what else can be a first try haiku vs what needs to go higher and at what effort
+  levels". Rows in the model table that no ruling chose today: main session, coordinator, triage,
+  batch runner (through "separate sessions"), general-purpose agents, and every skill. Each gets a
+  model, an effort and a one-line reason. An evaluation then tests each role on the cheapest model
+  that passes its checks. It reads measured outcomes per role and model: review pass rates, fix
+  rounds, builder third tries, and cost from R32's audit. Known data: Haiku round 1 fails 79% of
+  reviews, Sonnet 38% (R9; the share that is noise is unknown). A row moves only on a measured pass
+  rate. A move above Sonnet needs the owner's grant (rule roles-sonnet-is-the-ceiling). Runs after
+  R32's audit, and folds in docs/todo.md line 9 (roadmap step c201: one lane per role on the
+  next model down). Home: decision agent-model-cap.
 
 ### 3.8 One rounds record; no round 3 after a pass
 
@@ -282,6 +342,25 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   after a clean round 2; the net-value hold caught 6 real holes. Deferred: Sonnet round 1 for every
   logic change (Haiku round 1 fails 79% vs 38%; noise share unknown). Home: decision
   hold-unsafe-after-round-3; CLAUDE.md roles-review-cap-three and roles-third-round-steps-up rewritten.
+- **R31. A builder resolves a test merge conflict; a check proves no test was lost.** Owner 11:02 CST
+  Nov 11, box answer: "as long as it's well defined and doesn't create loop holes builder plus check
+  definitely seems ideal no?"; and in chat: "yea that check should just protect it as the hand off
+  happens usper often and it's for sure a point of contetnion". It changes page items 420 a (Nov 8
+  10:05 CST) and 437 a (Nov 8 12:16 CST) in decision builders-cannot-edit-tests. Today a test conflict
+  in a merge stops the builder; a fresh test-author takes the whole merge, and a review round follows.
+  The outcome those rulings protect stays: no side's tests are silently dropped. A check now protects
+  it, and the builder resolves the merge. The check reads test files with the language's own parser.
+  At the merge commit it refuses each of these:
+  1. A test case from either parent is missing, renamed or moved to another file.
+  2. A test case's body differs from both parents' versions.
+  3. A skip or expected-fail mark, or a changed assertion, that neither parent had.
+  4. New test content that neither parent had. That stays a test-author's work.
+  5. A change to test config beyond one parent's version, or any change to a mutation test. Page
+     item 447 a (owner 2026-11-08 17:19 CST) stands: a merge that conflicts in a mutation test
+     still goes to a test-author.
+  Each case is shown red on a dropped or weakened test before the route opens. Until then the old route
+  stays. It changes a guard, so the rounds and the net-value rule apply. Home: decision
+  builders-cannot-edit-tests, rewritten in place.
 
 ### 3.9 A hook refusal gets a short correction
 
@@ -316,12 +395,20 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   want to do such rigid word grants moreso like if i say send a swarm of opus agents that just works too
   yanno? A is good though but it should be override <anytime> or override not just override and
   override 4h". One route reads the owner's own typed words for overrides and Opus asks alike, judged
-  and fail closed; agent or pasted text never grants. Fast path, no model call: `override` (one act) or
+  and fail closed. Agent or pasted text never grants, except a relay in R18 point 5's form (owner 09:10
+  CST Nov 11, below). Fast path, no model call: `override` (one act) or
   `override` with any length (15, 15m, 90 minutes, 2 hours, 4h). Any other wording is judged. Every
   grant prints one receipt line the owner sees (what it lifts, one act or until when); today a grant
   prints nothing. A refusal no override can lift says so. Departs from: decision owner-override, where
   a longer phrase such as "override 15m please" grants nothing; under R12 the judge reads it. Home:
   decision owner-override, rewritten in place.
+  An override may travel by relay. Owner 09:10 CST Nov 11, in the coordinator's chat, to the question
+  "may an override travel by relay?": "q1 -- yes". A relay counts only in R18 point 5's form: his exact
+  words, their time, and the one session and act they cover, checked against the sender's feedback log.
+  The receiving session prints the same receipt line. Until R18 point 5's check is built (stage 4), only
+  his typed words and a page save grant an override. This changes decision owner-override's sentence
+  "An override covers only the session where the owner typed it": a relay in that form reaches the
+  one session it names.
 
 ### 3.12 A lane never stalls on a popup
 
@@ -341,8 +428,8 @@ After 3.11, because its third part uses the same owner grant route.
      the parent like a question. A builder first confirms the cloud `dontAsk` mode refuses rather than
      prompts (unverified).
   3. An act that needs the owner's typed word (an override, a guarded settings write) becomes a page
-     item; his save on the page is the grant (skill waiting-page). Agent text and a coordinator relay
-     never grant.
+     item; his save on the page is the grant (skill waiting-page). A relay in R18 point 5's form also
+     grants it (R12); any other agent text never grants.
   4. Cards no mode can stop (repository trust, computer folder, owner-approval cards): a guard refuses
      those tools in a lane, and the lane routes the act to its parent.
   Replaces CLAUDE.md questions-go-to-owner, "The started session may wait on it." Unmeasured: how often
@@ -390,7 +477,87 @@ After 3.11, because its third part uses the same owner grant route.
   docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling. First user:
   the follow-up plan PR. Home: decision docs-only-prs-skip-review, rewritten in place.
 
+### 3.14 Prose stores tend themselves
+
+R28 sets the order: the shared contract first (R27 is its first user), then the deeper audit,
+then R29.
+
+- **R27. The feedback log tends itself.** Owner 10:16 CST Nov 11: "this should've been a trigger for
+  something that should've been mechanizable remember, we can't have sesisons fualting themselves for
+  something that could bve cvorrected?" and "it seems like basically this was a good idea but it's
+  execution was a little half baked in that it's never cleaned up after or tended to?". Case: the Stop
+  check asked this session to keep 17 settled items in its handoff. Its remedy named only "put them in
+  the handoff", never "mark [closed]". So the session copied ids to pass the check. Measured 10:17 CST in
+  this session's log: 126 items, 57 rulings and 9 standing items still open, none closed by a tool.
+  1. A ruling or task item closes itself when its home holds it on main. The Stop check already proves
+     the home; it marks the line [closed] in the same rewrite that marks repeats.
+  2. Each refusal of the check names [closed] as a way out, beside the handoff (R24).
+  3. The compaction reminder lists only items that still need work.
+  4. Owner words that reach a session by the question box or by relay are saved like a typed message.
+  Home: decision owner-feedback-inbox. Runs with R16, which files a told mistake as a missing guard.
+- **R28. Every prose store is tended one shared way.** Owner 10:19 CST Nov 11: "everything that marks
+  prose should share the same "tending" mechanism ... it should be more uniform, standardized, and
+  shared as much as possible to avoid stale duplication and to ensure shared best practrices". Stores:
+  decisions, rules, docs and README, debts, handoffs, the feedback log, the roadmap and queue. Box
+  answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
+  pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
+  1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
+  2. A design pass sets one shared contract in lint/layout.json: per store, the item shape, a "still
+     true?" test, and a close step. One runner calls it from points that already run: the merge
+     check, the Stop hooks, compaction and triage status. No new timer or process. R27 is its first
+     user.
+  3. A deeper audit, then each other store moves over when a lane next touches it.
+  Home: a new decision for the shared contract; R27's step waits on step 2.
+- **R29. One job, one shared home, across all repos.** Owner 10:22 CST Nov 11: "it would be optimal if
+  something identified shared savings opportunities like this in a sense across my repos
+  retroactively and proactively". Answer 10:24 CST: "A" (file it after R28's deeper audit). Today
+  lint/find_copies.py finds only word-for-word copies of this repo's files, and only in the compliance
+  check; the plan refuter reads only its own repo.
+  1. Looking back: at each compliance check, a meaning match finds the same job built twice across
+     repos. Each find goes to this repo's triage as a candidate for one shared home.
+  2. Looking ahead: the plan refuter asks "does this job already exist?" before a build starts.
+  3. Both read one list of jobs and their homes.
+  It reuses R28's deeper-audit way of reading stores. It adds no new process. The cross-repo read needs a
+  session on the owner's computer, or each repo attached to a cloud session. Starts after R28 step 3.
+
+### 3.15 Spend fewer tokens, measured first
+
+- **R32. A token audit, then cuts.** Owner 10:57 CST Nov 11: "i also wonder when the coordinator spawns
+  lanes if there's ways to be more token efficient (here, and elsewhere tbh -- worried i overuse tokens
+  in some ways)". Box answer 11:02 CST: "Audit now". Measured 10:58 CST from each session's totals: the
+  coordinator (Opus, since Nov 3) spent $1,838 and runs at 349k of 500k context; it compacts at 442k.
+  One small lane spent $8.31. Every turn re-reads the whole context, so a large context times many
+  wakes is the likely biggest cost (unmeasured). A read-only audit (started by 11:03 CST) splits spend by
+  session role and by source: context per turn, wakes, text loaded every turn, and hook judges. It also
+  checks why lanes show a bare "/effort medium" first message (owner 11:02 CST: "the first message in
+  cloud sessions spawns is often just "/effort medium" and then they get messaged their brief rather
+  htan it being preloaded"), against decision agent-model-cap, which sets effort by the start call and
+  sends the brief as the first message. The cuts are ruled on its report. Home: decision
+  agent-model-cap.
+  First report, 11:10 CST: partial, because agents have no session tools. Owner box answer 11:12 CST:
+  "given my spend says i spent like thousands of dollars on like nov 8 -- i feel like u didn't properly
+  catch where all my spend has gone. also remember, dollar savings shouldn't come at the cost of speed
+  -- speed is more important (but it's all relative and not absolute)", and "Finish measuring first".
+  So: a read-only measuring session (Sonnet, started 11:13 CST) sums spend by day, role, repo and
+  model over every session. No cut is ruled before it reports. A cut that slows work is weighed
+  against the speed it costs, and speed wins a close call.
+  Measured 11:17 CST (800 sessions back to Nov 3; costs are each session's whole life): sessions
+  active Nov 7-9 cost at least $22,075. Opus lanes, all started before the Sonnet lane ruling (owner
+  2026-11-08 12:21 CST), are $19,889 of it, 387 lanes; no Opus lane started after it. Cost per lane:
+  Opus median $22.9, mean $51.4; Sonnet median $11.9, mean $16.1. Lane life, start to archive: Opus
+  median 64 h, Sonnet 28 h. Standing sessions, both Opus and missed by that listing: coordinator
+  $1,839 and triage $1,567 since Nov 3. Not seen: hook judges, local sessions, the other account.
+  Compaction, owner 11:09 CST: "i frankly dont mind compacting sooner given we have such good handoff
+  hooks". Today the coordinator compacts at 441,600 tokens and lanes at 384,000; why they differ is
+  unmeasured (decision idle-resume-compacts). Every standing session and lane compacts sooner. The audit
+  proposes the size from its per-turn cost data. The lever is `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the
+  cloud environment, or `/autocompact` per session. Home: decision precompact-handoff, rule 1.
+
 ## Stage 4. Make the roadmap and triage mechanical
+
+- **R25. Stage 4 runs with stage 3.** Owner 09:20 CST Nov 11: "with stage 3, but i think we should in
+  the planning stage itself maybe define how batches will be built". Stage 4's lanes start with the rest
+  of stage 3, once 3.0 lands. How batches are built is settled before stage 3 starts (R26, item 3.4).
 
 - **D1. The roadmap is mechanical (open).** Owner 14:14 CST Nov 10: "realistically we have the actual
   roadmap be mechanizable like the status/queue/asks/etc". Already ruled: decision stalled-steps (owner
