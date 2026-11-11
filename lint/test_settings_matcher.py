@@ -3,7 +3,7 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
 """
-import json, os, re, sys, unittest
+import ast, glob, json, os, re, sys, unittest
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -64,6 +64,162 @@ class RemoteOutwardMatcher(unittest.TestCase):
                                 "%r is not a full claude-code-remote tool name" % tool)
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                                 "no guard matcher covers %s" % tool)
+
+
+# Every tool a guard judges. The guard.py entry's matcher must match each one, or the guard never sees that call.
+HOOKS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+GUARD_SOURCE = os.path.join(HOOKS, "guard.py")
+GUARD_MERGE_SOURCE = os.path.join(HOOKS, "guard_merge.py")
+# The constants that name the tools each file dispatches on, read by import and never copied here.
+# READ_ONLY_TOOLS is left out: guard.py returns at once for Read and Grep ("no rule judges them"), so a matcher
+# that skips them is right, and requiring them would be a false alarm. decision_watch's MERGE_TOOLS is left out
+# too: no PreToolUse entry runs decision_watch.py, and its mod reads the tool calls from the transcript after a turn.
+GUARD_NAMES = ("SPAWN_TOOLS", "START_TOOLS", "SESSION_TOOL", "CREATE_SESSION_TOOL", "SIM_MCP", "PAGE_TOOL",
+               "DATA_TOOL", "REMOTE_OUTWARD_TOOLS", "SHELL_TOOLS", "WRITE_TOOLS")
+MERGE_NAMES = ("MERGE_TOOLS", "TRUST_TOOLS", "ARCHIVE_TOOL", "BRIEF_TOOL")
+# The six GitHub MCP write tools the owner named. Each one must be matched, whether or not a guard judges it yet.
+GITHUB_WRITE_TOOLS = tuple("mcp__github__" + short for short in (
+    "merge_pull_request", "create_pull_request", "push_files", "create_or_update_file", "delete_file",
+    "update_pull_request"))
+
+
+def load_hook(name, path):
+    """Import one hook file by path. hooks/ goes first on sys.path, so its sibling imports resolve."""
+    import importlib.util
+    if HOOKS not in sys.path:
+        sys.path.insert(0, HOOKS)
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def flatten(value):
+    """A tool-name constant as a list of names: one string, or a tuple of strings and tuples."""
+    if isinstance(value, str):
+        return [value]
+    return [name for part in value for name in flatten(part)]
+
+
+def literal_names(side):
+    """The string constants a comparison side holds: one constant, or the constants of a tuple, list or set of them."""
+    if isinstance(side, ast.Constant) and isinstance(side.value, str):
+        return [side.value]
+    if isinstance(side, (ast.Tuple, ast.List, ast.Set)):
+        return [name for elt in side.elts for name in literal_names(elt)]
+    return []
+
+
+def compared_with_tool(source):
+    """The string constants compared with `tool` in one source text (==, !=, in, not in). ast parses code only, so a
+    name inside a string or a comment is never read as a comparison."""
+    found = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Compare):
+            continue
+        sides = [node.left] + node.comparators
+        if not any(isinstance(side, ast.Name) and side.id == "tool" for side in sides):
+            continue
+        for side in sides:
+            found.update(literal_names(side))
+    return found
+
+
+# Files where `tool` is the PreToolUse tool name, so each string compared with it is a tool name. The other guard_*.py
+# files reuse `tool` for a shell word (`pkill` in guard_kill.py, `ps` in guard_argv.py), so only their GitHub names count.
+TOOL_NAME_FILES = ("guard.py", "guard_merge.py")
+
+
+def judged_names_in_guard_files():
+    """Every tool name that guard.py or a guard_*.py rule family compares with `tool`."""
+    found = set()
+    for path in glob.glob(os.path.join(HOOKS, "guard*.py")):
+        with open(path, encoding="utf-8") as f:
+            names = compared_with_tool(f.read())
+        if os.path.basename(path) not in TOOL_NAME_FILES:
+            names = {name for name in names if name.startswith("mcp__github__")}
+        found |= names
+    return found
+
+
+class JudgedToolMatcher(unittest.TestCase):
+    """The guard.py PreToolUse entry's matcher covers every tool the guard family judges."""
+
+    def setUp(self):
+        self.matchers = guard_matchers()
+
+    def unmatched(self, tools):
+        return [tool for tool in tools if not any(re.fullmatch(m, tool) for m in self.matchers)]
+
+    def judged_tools(self):
+        guard = load_hook("guard_judged", GUARD_SOURCE)
+        merge = load_hook("guard_merge_judged", GUARD_MERGE_SOURCE)
+        names = []
+        for module, constants in ((guard, GUARD_NAMES), (merge, MERGE_NAMES)):
+            for constant in constants:
+                self.assertTrue(hasattr(module, constant),
+                                "%s has no %s: a renamed constant hides its tools from this test"
+                                % (os.path.basename(module.__file__), constant))
+                names += flatten(getattr(module, constant))
+        names += list(GITHUB_WRITE_TOOLS) + sorted(judged_names_in_guard_files())
+        return sorted(set(names))
+
+    def test_guard_matcher_covers_every_judged_tool(self):
+        self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
+        self.assertTrue(judged_names_in_guard_files(),
+                        "the scan found no tool name compared with `tool` in the guard files: the scan is broken")
+        missed = self.unmatched(self.judged_tools())
+        if missed:
+            self.fail("no guard matcher covers: %s" % ", ".join(missed))
+
+    def test_guard_files_scan_leaves_out_shell_words(self):
+        # Scope first: the scan reads guard.py's string comparisons at all. Then guard_kill.py's and guard_argv.py's
+        # shell words are left out, since their `tool` is no tool name.
+        with open(GUARD_SOURCE, encoding="utf-8") as f:
+            self.assertTrue(compared_with_tool(f.read()), "guard.py has no string compared with `tool`: nothing is read")
+        found = judged_names_in_guard_files()
+        for word in ("pkill", "ps", "npm"):
+            with self.subTest(word=word):
+                self.assertNotIn(word, found, "the scan reads the shell word %r as a tool name" % word)
+
+    def test_guard_matcher_covers_the_six_github_write_tools(self):
+        self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
+        missed = self.unmatched(GITHUB_WRITE_TOOLS)
+        if missed:
+            self.fail("no guard matcher covers: %s" % ", ".join(missed))
+
+    def test_scan_reads_code_and_not_strings_or_comments(self):
+        # Each line is a real comparison, or text that only looks like one: a comment line, a trailing comment, a
+        # comment opener (#, /*, //) in a string, a multi-line string, a lone quote in text, and a comparison with
+        # another name.
+        sample = "\n".join([
+            'if tool == "mcp__github__planted_eq": pass',
+            'if tool in ("mcp__github__planted_in_a",',
+            '            "mcp__github__planted_in_b"): pass',
+            'if name == "mcp__github__not_a_tool": pass',
+            'TEXT = "# tool == \'mcp__github__hash_in_string\'"',
+            'NOTE = """',
+            'if tool == "mcp__github__in_a_string": pass',
+            'if tool == "Edit": pass',
+            '"""',
+            'WORDS = "don\'t"',
+            'OPEN, FOUND = "/*", tool == "mcp__github__after_block_opener"',
+            'URL, FOUND2 = "http://x", tool == "mcp__github__after_double_slash"',
+            '# if tool == "mcp__github__in_a_comment": pass',
+            '# if tool == "Bash": pass',
+            'FLAG = tool == "mcp__github__before_trailing_comment"  # tool == "mcp__github__in_trailing_comment"',
+            'if tool == "mcp__github__after_lone_quote": pass',
+            'if tool not in ("Skill", "ExitWorktree"): pass',
+            'if tool != "Write": pass',
+        ])
+        self.assertEqual(compared_with_tool(sample), {
+            "mcp__github__planted_eq", "mcp__github__planted_in_a", "mcp__github__planted_in_b",
+            "mcp__github__after_block_opener", "mcp__github__after_double_slash",
+            "mcp__github__before_trailing_comment", "mcp__github__after_lone_quote",
+            "Skill", "ExitWorktree", "Write"})
+
+    def test_scan_of_empty_source_finds_nothing(self):
+        self.assertEqual(compared_with_tool(""), set())
 
 
 class Matcher(unittest.TestCase):
