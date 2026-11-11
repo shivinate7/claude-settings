@@ -593,9 +593,10 @@ class CodeNameTests(Fixture):
 
 
 class KeptNameTests(Fixture):
-    """A kept name passes, and only the names a row keeps. A row keeps a name in its meaning, as the review
-    log row keeps its slug: the backticked name, then ` stays`. A kept name is a whole name, so a longer name
-    that holds it is still a "not" name. The fixture keeps names the same way a real row does."""
+    """A kept name passes, and only the names a row keeps. A row keeps the exact spellings its meaning marks, as
+    the review log row keeps its slug: the backticked name, then ` stays`. A kept flag also keeps its argparse
+    attribute: `--fix-check` keeps `args.fix_check` (triage pick, 2026-11-11 10:15 CST). Every other spelling of
+    the words stays flagged, and a kept name of one row never unflags another row's "not" name."""
     KEPT = ("| review log | A reviewer's PR comment with the rounds. Its slug `pr-review-record` stays. "
             "Its function `review_record` stays. Its function `review_record_problem` stays. "
             "| `rule:one-rule` | `review record` |\n"
@@ -628,7 +629,49 @@ class KeptNameTests(Fixture):
             "def review_record_problem(run):\n    return None\n")
         self.assertEqual(code, 0, out)
 
+    def test_a_kept_flag_read_as_an_attribute_of_any_object_passes(self):
+        code, out = self.change(
+            "merge/merge_probe.py",
+            'import argparse\n\nP = argparse.ArgumentParser()\nP.add_argument("--fix-check", action="store_true")\n'
+            "a = P.parse_args()\nif a.fix_check:\n    pass\n")
+        self.assertEqual(code, 0, out)
+
     # Controls: names the rows do not keep stay flagged, and a kept name unflags nothing beside it
+
+    def test_other_spellings_of_a_kept_name_stay_flagged(self):
+        """The fix verifier keeps `--fix-check` and its argparse attribute only. Any other spelling of the
+        same words is its "not" name, in code, a path, an anchor and a hook message alike."""
+        cases = (
+            ("merge/spell_class.py", "class FixCheck:\n    pass\n",
+             "merge/spell_class.py:1: name FixCheck uses 'fix check'; the glossary name is 'fix verifier'"),
+            ("merge/spell_upper.py", "FIX_CHECK = 1\n",
+             "merge/spell_upper.py:1: name FIX_CHECK uses 'fix check'; the glossary name is 'fix verifier'"),
+            ("merge/spell_def.py", "def fix_check():\n    return 1\n",
+             "merge/spell_def.py:1: name fix_check uses 'fix check'; the glossary name is 'fix verifier'"),
+            ("merge/spell_bare.py", "fix_check = 1\n",
+             "merge/spell_bare.py:1: name fix_check uses 'fix check'; the glossary name is 'fix verifier'"),
+            ("CLAUDE.md", CLAUDE_MD + "Two.<!-- rule:fix-check -->\n",
+             "CLAUDE.md:4: anchor fix-check uses 'fix check'; the glossary name is 'fix verifier'"),
+            ("docs/review-record/x.md", "A note.\n",
+             "docs/review-record/x.md uses 'review record'; the glossary name is 'review log'"),
+            ("hooks/spell_msg.py", 'MSG = "Fix check."\n',
+             "hooks/spell_msg.py:1: message 'Fix check.' uses 'fix check'; the glossary name is 'fix verifier'"),
+        )
+        for rel, text, problem in cases:
+            with self.subTest(path=rel):
+                _code, out = self.change(rel, text)
+                self.assertIn(problem, out)
+
+    def test_a_row_not_name_sharing_words_with_a_kept_name_stays_flagged(self):
+        """Row batch log's "not" name `pr review` shares words with the review log's kept slug. The kept slug keeps
+        only the review log's own names, so the slug still flags for batch log. A line with no slug passes first,
+        so the glossary itself is clean."""
+        self.put("GLOSSARY.md", HEAD + ROWS + self.KEPT
+                 + "| batch log | Lane PRs that merge together. | `rule:one-rule` | `pr review` |\n")
+        code, out = self.change("docs/control.md", "Each PR keeps its review log.\n")
+        self.assertEqual(code, 0, out)
+        _code, out = self.change("docs/notes.md", "Each PR keeps its `pr-review-record`.\n")
+        self.assertIn("docs/notes.md:1: slug pr-review-record uses 'pr review'; the glossary name is 'batch log'", out)
 
     def test_a_longer_name_holding_a_kept_name_is_still_flagged(self):
         code, out = self.change("merge/merge_probe.py", "fix_check_helper = 1\nreview_record_helper = 2\n")
@@ -644,11 +687,14 @@ class KeptNameTests(Fixture):
         self.assertIn("review-record-helper", out)
 
     def test_a_kept_name_on_a_line_does_not_unflag_another_rows_not_name(self):
-        """The kept slug is row review log's; `handover` is row handoff's "not" name, so it stays flagged."""
-        code, out = self.change("merge/merge_probe.py", 'label = "pr-review-record"; handover = 1\n')
+        """The kept slug is row review log's. `handover` is row handoff's "not" name, and a bare `fix_check` is the
+        fix verifier's flag spelled as a name. Both stay flagged beside the slug."""
+        code, out = self.change("merge/merge_probe.py", 'label = "pr-review-record"; handover = 1; fix_check = 1\n')
         self.assertEqual(code, 1, out)
         self.assertIn("merge/merge_probe.py:1", out)
         self.assertIn("handover", out)
+        self.assertIn("merge/merge_probe.py:1: name fix_check uses 'fix check'; the glossary name is 'fix verifier'",
+                      out)
 
     # The kept list comes from the glossary file
 
