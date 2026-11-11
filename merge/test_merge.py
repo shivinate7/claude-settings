@@ -17068,6 +17068,8 @@ class BatchFreeze(CloudSession):
     def setUp(self):
         super().setUp()
         self.heads = {}  # lane PR number -> its head sha on origin, as lane() and advance() leave it
+        self.runs = {}  # run URL -> (conclusion, head sha): the answers the host's one run read gives
+        self.host.cited_run = self.read_run  # the real Host.cited_run, scripted per case (as the cases at merge/test_merge.py's cited_run do)
 
     def lane(self, n, on=None):
         """Lane PR #n: a branch on origin with one commit of its own, off origin/main (or, with `on`, off lane #on, so its head contains
@@ -17279,6 +17281,27 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", name, "--ready")
         self.assertEqual(self.drop_pr_numbers(out, name), [str(n)], "setup: the red run did not blame lane #%d: %s" % (n, out))
         return rc, out
+
+    def read_run(self, url):
+        """The host's run read, as Host.cited_run answers it: (conclusion, head sha) of a scripted run, None as the conclusion while it runs.
+        A URL no case scripted is a Stop, as a failed read is: never a default answer."""
+        if url not in self.runs:
+            raise merge.Stop(f"no run was scripted for {url}")
+        return self.runs[url]
+
+    def scripted_run(self, n, conclusion, sha):
+        """Run n's URL, scripted to conclude `conclusion` on commit `sha`. -> the URL."""
+        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{n}"
+        self.runs[url] = (conclusion, sha)
+        return url
+
+    def stored_blamed(self, n):
+        """The lanes pull request n's frozen block stores as Blamed, in order."""
+        return [int(x[len("Blamed: #"):]) for x in (block_lines(self.body(n)) or []) if x.startswith("Blamed: #")]
+
+    def frozen_lanes(self, n):
+        """The lanes pull request n's frozen block lists as Lane, in order."""
+        return [int(x.split()[1][1:]) for x in (block_lines(self.body(n)) or []) if x.startswith("Lane: ")]
 
     def ready_checks_on_main(self):
         """origin's main names one ready check, so a --ready run must run it (merge.readyChecks)."""
@@ -17801,6 +17824,121 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [pr], "the --ready after the drop did not mark the batch PR ready once: %s" % out)
         self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
         self.assertEqual(rc, 0, "the --ready after the drop exited %s: %s" % (rc, out))
+
+    # Blame by route: a red run names the lane a drop may take off (decision batch-freeze-lane-set). The route is
+    # `--batch-build NAME --blame N --run URL`. Each refusal case's first assert is one phrase of the refusal's own text, so its red
+    # names the missing refusal and not a parser's error.
+
+    def test_a_blame_of_a_failed_run_on_the_head_is_stored_and_lets_a_later_drop_through(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])  # ready: a red CI run is a run on a ready batch
+        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
+        url = self.scripted_run(7001, "failure", self.head("batch-nightly"))
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
+        self.assertEqual(self.stored_blamed(pr), [102], "a failed run on the batch's head did not store Blamed: #102: %s" % out)
+        self.assertEqual(rc, 0, "the blame of #102 from a failed run on the head exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.pushes(), [], "the blame pushed to origin, though it writes only the frozen block: %s" % out)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 0, "the drop of #102, which the failed run blamed, exited %s: %s" % (rc, out))
+        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
+
+    def test_a_blame_from_a_run_on_an_older_head_is_refused_and_stores_nothing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        older = self.head("batch-nightly")
+        self.bump("batch-nightly")  # the batch's head moves on: the red run below ran on `older`
+        url = self.scripted_run(7002, "failure", older)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
+        self.assertRegex(out, r"current head|older head", "a blame from a run on an older head is not refused as one: %s" % out)
+        self.assertEqual(rc, 1, "a blame from a run on an older head exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_blame_from_a_green_run_is_refused_and_stores_nothing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.scripted_run(7003, "success", self.head("batch-nightly"))
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
+        self.assertRegex(out, r"success|green|not (a )?failed", "a blame from a green run is not refused as one that is not failed: %s" % out)
+        self.assertEqual(rc, 1, "a blame from a green run exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_blame_from_a_run_still_running_is_refused_and_stores_nothing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.scripted_run(7004, None, self.head("batch-nightly"))  # a run that is still running has no conclusion yet
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
+        self.assertRegex(out, r"running|not completed|not finished|in progress|pending", "a blame from a run still running is not refused as one: %s" % out)
+        self.assertEqual(rc, 1, "a blame from a run still running exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_blame_with_no_run_is_refused_and_names_the_run_flag(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102")
+        self.assertIn("--run", out, "a blame with no --run is not refused as one that needs --run: %s" % out)
+        self.assertNotEqual(rc, 0, "a blame with no --run exited 0: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_blame_of_a_lane_outside_the_batch_is_refused_and_stores_nothing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])  # #103 is open, and not in the batch
+        self.assertEqual(self.frozen_lanes(pr), [101, 102], "setup: batch-nightly's frozen set is not #101 and #102")
+        url = self.scripted_run(7005, "failure", self.head("batch-nightly"))
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "103", "--run", url)
+        self.assertRegex(out, r"not in batch|frozen lane set", "a blame of #103, which batch nightly does not hold, is not refused as one: %s" % out)
+        self.assertEqual(rc, 1, "a blame of #103 exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_the_unblamed_drop_refusal_names_the_blame_route(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103], draft=True)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertIn("--batch-build nightly --blame 102", out, "the refused drop of #102, which no run blamed, does not name the --blame route: %s" % out)
+        self.assertEqual(rc, 1, "the refused drop of #102 exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_ready_check_fail_that_names_a_lane_stores_its_blame_so_the_drop_goes_through(self):
+        self.ready_checks_on_main()
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.assertEqual(self.stored_blamed(pr), [], "setup: the batch already holds a Blamed line")
+        with self.no_lint_or_ready_check(ready_state="pass", checks_state=self.lint_fail_naming("lanes/102.txt")):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(rc, 1, "a ready check that fails on lanes/102.txt exited %s, not 1: %s" % (rc, out))
+        self.assertEqual(self.stored_blamed(pr), [102], "a ready check that fails on lanes/102.txt did not store Blamed: #102: %s" % out)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 0, "the drop of #102, which the ready check blamed, exited %s: %s" % (rc, out))
+        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the drop did not take lane #102 off batch-nightly: %s" % out)
 
     # Drop: one lane off the branch, the block rewritten, nothing else touched.
 
