@@ -149,6 +149,23 @@ merge --reviewed        one line per open PR that has a review record comment: i
 merge --reviewed --root DIR [--root DIR ...]
                         the same list for each repo checkout DIR, one block each, then one batch line per repo:
                         `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
+merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
+                        one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
+                        failing lines of that run's failed jobs for the cases (and the files of a pytest or unittest line; a run by path logs
+                        `__main__.Class.name`, so its file is best-effort). No lock, no merge, no post. No match prints the clear line only
+                        when every read succeeded and nothing is unknown. Unknown, exit 1, never clear. A failed read prints only `unknown`; the other causes list the matches too:
+                        - a failed read;
+                        - a --run whose failing lines give no case and no file at all;
+                        - a --run with a failed job whose own log gives no case and no file, an empty log too (the all-jobs-passed rollup is skipped);
+                        - a --run with a failed job that has a failing line naming no case or file (a unittest summary line apart);
+                        - a --run with a job that is not success, skipped, neutral or failure, such as timed out, cancelled or still running;
+                        - a PR with a patch-less changed file, only while a case is queried and that PR has no match.
+                        --file alone is fine beside a patch-less file. An empty value is a usage error.
+                        Limits. A case matches only when its text sits whole in one `+` line; a case a --run names also matches a context line. A name built from pieces or with escapes never matches.
+                        A --case matches a context line only when a --run names the same case. --file finds a fix elsewhere, in guard or product code or far from the case line. --run finds it only when a failing line names its file, or the case name is on an added line or in the patch's context lines. --file is an exact path after normpath.
+                        It finds no rename's previous name, no directory and no backslash path. A reason that spans lines may leave `  (note` in the case.
+                        Cost: API reads only. The pull list, one call per page of 100. One files read (its pages) per open PR.
+                        For --run, the jobs read, one call per page of 100, and one log read per failed job but the rollup.
 merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
                         one line per PR before it goes to a batch: `#N PASS`, or `#N FAIL: reasons`. Checks: open, review record done at the
                         live head and unedited, lint verdict given for the live head (SHA a full lowercase 40-hex; a PASS on UNKNOWN-AT-CAP

@@ -35,6 +35,28 @@
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
                           the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
                           new process, file or timer.
+  merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
+                          one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
+                          patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
+                          (and, for a pytest `FAILED path::name` or unittest `FAIL: name (module.Class.name)` line, the file; a run by path logs
+                          `__main__.Class.name`, which names no file): a line that starts, after any timestamp, with FAIL, FAILED or ERROR;
+                          the case text is what follows the `]` of a hooks/test_guard.py line, without its trailing `  (note)`. Paths are compared
+                          normalised (`./a` is `a`). No match prints `no open pull request touches them.` only when every read succeeded and
+                          nothing is unknown. Unknown (exit 1, `merge: unknown ...` on stderr, the matches still on stdout), with or without
+                          --case or --file: a --run whose failing lines give no case and no file at all; a --run with a failed job (but the
+                          all-jobs-passed rollup) whose own log gives no case and no file, an empty log included; a --run with a job whose
+                          conclusion is not success, skipped, neutral or failure (timed out, cancelled, startup failure, action required,
+                          still running). A changed file with no patch makes a PR unknown only while a case is queried and that PR has no
+                          match: it prints `#N ...: unknown: file PATH has no patch to read` and exits 1; --file alone is fine beside it.
+                          A failed read, or a program that cannot start, prints only `unknown` (exit 1). An empty --run, --case or --file is
+                          a usage error (exit 2). Limits: a case matches only when its text sits whole in one `+` line, so a name built from
+                          pieces or with escapes never matches, and a fix in guard code that leaves the case line alone never matches. --file
+                          is an exact path after normpath: no rename's previous name, no directory, no backslash path. A failing line whose
+                          reason spans lines may keep a partial `  (note` in the case. Stands alone; takes no lock, merges and posts nothing;
+                          any session may run it.
+                          Cost per call: API reads only: the open pull list pages (one call per 100 PRs), one pulls/N/files read (its pages)
+                          per open PR, and for --run the jobs read pages (one call per 100 jobs) and one log read per failed job but the
+                          rollup. No file, process or timer.
   merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
                           the checks before a batch runner gets a PR, one line per N in the order given: `#N PASS`, or `#N FAIL: ` and the
                           reasons joined by `; `. A check that cannot run is a reason (`unknown (...)`), so no PR is ever left without a line,
@@ -121,6 +143,16 @@ class Stop(Exception):
 
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
+
+FINE_CONCLUSIONS = ("success", "skipped", "neutral")  # a job conclusion merge --touches needs no log for; failure is read, any other is unread
+ROLLUP_JOB = REQUIRED_CHECK  # the all-jobs-passed rollup job (actions/all-jobs-passed): it fails in every red run and logs only its own verdict
+
+class UnreadJobs(Stop):
+    """A run has a job that merge --touches could not account for: a failed job whose log gave no case and no file, or a job whose conclusion is
+    neither fine nor failure (Host.failed_lines). Its message is the unknown line; `lines` are the failing lines read from the logs of the run's failed jobs, this one's own included."""
+    def __init__(self, message, lines):
+        super().__init__(message)
+        self.lines = lines
 
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
@@ -907,6 +939,39 @@ class Host:
         else:
             why = f": more than {PAGE_CEILING} pages of 100"
         raise Stop(f"reading {rel} from GitHub failed{why}")
+
+    def pull_files(self, n):
+        """-> the changed files of pull request n, every page of pulls/N/files: dicts with `filename` and, for a text file, `patch`."""
+        return self.pages(f"pulls/{n}/files")
+
+    def failed_lines(self, run_id):
+        """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID: the jobs read (its pages), then one log read per
+        failed job. Each job is accounted for on its own. The rollup job (ROLLUP_JOB) is skipped, with no log read. A job with a fine conclusion
+        (FINE_CONCLUSIONS) needs no log. A failed job must give at least one case or file from its own log lines; an empty log gives none. Any other
+        conclusion, a job still running included, is unread. A failed read is a Stop. A job not accounted for raises UnreadJobs once every job is
+        read, carrying the lines read, so the caller can still use them and say the rest is unknown."""
+        lines, unread = [], []
+        for job in self.pages(f"actions/runs/{run_id}/jobs", "jobs"):
+            name, conclusion = job.get("name") or job.get("id"), job.get("conclusion")
+            if job.get("name") == ROLLUP_JOB or conclusion in FINE_CONCLUSIONS:
+                continue
+            if conclusion != "failure":
+                unread.append(f"{name} {conclusion or 'still running'}")
+                continue
+            c, out = self.api(f"actions/jobs/{job['id']}/logs")
+            if c:
+                raise Stop(f"reading the log of job {job['id']} of run {run_id} failed: {out} " + UNKNOWN_CITE)
+            found = [(t, failing_line(t)) for t in out.splitlines()]
+            found = [(t, p) for t, p in found if p is not None]
+            if not any(file or case for _t, (file, case) in found):
+                unread.append(f"{name} failure, its log gave no case or file")
+            elif any(not (file or case) and not UNITTEST_SUMMARY.fullmatch(LOG_PREFIX.sub("", t, count=1).rstrip()) for t, (file, case) in found):
+                unread.append(f"{name} failure, a failing line in its log names no case or file")  # its own case may be the one the parsed lines hide
+            lines += [t for t, _p in found]
+        if unread:
+            raise UnreadJobs(f"unknown: run {run_id} has a job whose log was not read or gave no case or file ({'; '.join(unread)}) "
+                             + UNKNOWN_CITE, lines)
+        return lines
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
@@ -3835,6 +3900,85 @@ def reviewed_block(h):
         out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in nums))
     return out, True
 
+LOG_PREFIX = re.compile(r"^﻿?(?:\d{4}-\d\d-\d\dT[\d:.]+Z\s+)?(?:\x1b\[[0-9;]*m)*")  # a log line's timestamp and colour codes, before its text
+FAILING_LINE = re.compile(r"(?:FAILED|FAIL|ERROR)\b[:\s]*(.*)")
+UNITTEST_CASE = re.compile(r"(\w+) \((\w+(?:\.\w+){2,})\)(?:\s.*)?")  # unittest: `name (dotted.module.Class.name)`, then maybe a subtest note
+PATCH_FILE_HEADER = re.compile(r"\+\+\+ ")  # a patch's `+++ <path>` file header: three pluses and a space. An added line that starts with `++` and no space is not one
+UNITTEST_SUMMARY = re.compile(r"FAILED \((?:\w+=\d+(?:, )?)+\)")  # unittest's last line, `FAILED (failures=2, errors=1)`: a count, not a failing case
+GUARD_NOTE = re.compile(r"\s{2,}\(.*\)$")  # hooks/test_guard.py's suffix on a line that has a reason: `  (the reason ...)`
+TOUCH_NONE = "no open pull request touches them."
+TOUCH_UNKNOWN = "unknown: no failing case read from run {run}; pass --case or --file and run the query without --run (with --run kept, it still exits 1) "  # a --run alone: the cite follows
+TOUCH_UNKNOWN_BESIDE = ("unknown: run {run} gave no failing line that names a case or a file, so any matches printed came from the explicit "
+                        "--case and --file only ")  # a --run beside --case or --file: the cite follows
+
+def failing_line(text):
+    """-> None when the log line `text` is not a failing line (one that starts, after any timestamp, with FAIL, FAILED or ERROR); else (file, case),
+    each None when the line names none. A hooks/test_guard.py line `FAIL  allow (want deny  )  [Bash       ] <case>  (note)` gives the text after the
+    first `]`, without its trailing `  (note)`, as the case. A pytest line `FAILED path::Class::name - why` gives the path as the file and the name,
+    without its `[param]`, as the case. A unittest line `FAIL: name (dotted.module.Class.name)` gives the name as the case and the module as a file
+    (merge.test_merge gives merge/test_merge.py): best-effort, since a run by path logs `__main__.Class.name`, which names no file."""
+    m = FAILING_LINE.fullmatch(LOG_PREFIX.sub("", text, count=1).rstrip())
+    if not m:
+        return None
+    rest = m.group(1)
+    head = rest.split(None, 1)[0] if rest.split() else ""
+    if "::" in head or head.endswith(".py"):
+        path, *names = head.split("::")
+        return path, (re.sub(r"\[.*\]$", "", names[-1]) or None) if names else None
+    u = UNITTEST_CASE.fullmatch(rest)
+    if u:
+        module = u.group(2).rsplit(".", 2)[0]
+        return (None if module == "__main__" else module.replace(".", "/") + ".py"), u.group(1)
+    if "]" in rest:
+        return None, GUARD_NOTE.sub("", rest.split("]", 1)[1].strip()).strip() or None
+    return None, None
+
+def touches_lines(h, run, cases, files):
+    """-> (lines, unknown): the lines of `merge --touches` and why it is unknown, or None. A line per open pull request that touches a named file or
+    holds a named case in a `+` line of its patch (a case a run's failing lines name also matches a context line), ascending by number; the one no-match line when there is none and nothing is unknown. Paths are
+    posixpath.normpath'd on both sides. The failing lines of the run (Host.failed_lines) add their cases and files to the named ones. Unknown, with
+    the matches still listed: a run with a job that Host.failed_lines cannot account for (UnreadJobs); a run that gave no case and no file at all,
+    even beside --case or --file (on a real host, a run with no failed job but the rollup; a summary line such as `FAILED (failures=2)` parses to
+    none); and, for a pull request that has no match while a case is queried, a changed file with no patch (a binary or large file), on that pull
+    request's own line. Reads: one Host.failed_lines for a run, the open pull list pages, one Host.pull_files per open pull request. A Stop in a
+    read raises before any line is made."""
+    cases, files = list(cases), [posixpath.normpath(f) for f in files]
+    asked = bool(cases or files)
+    unknown, from_run = None, []  # from_run: the cases the run's failing lines named; they also match a context line (a fix keeps the case line)
+    if run:
+        try:
+            lines = h.failed_lines(run)
+        except UnreadJobs as e:
+            lines, unknown = e.lines, str(e)
+        parsed = False  # the run as a whole gave a case or a file; each failed job's own share is held in Host.failed_lines
+        for line in lines:
+            file, case = failing_line(line) or (None, None)
+            parsed = parsed or bool(file or case)
+            if file and posixpath.normpath(file) not in files:
+                files.append(posixpath.normpath(file))
+            if case:
+                from_run.append(case)
+                if case not in cases:
+                    cases.append(case)
+        if not parsed and unknown is None:
+            unknown = (TOUCH_UNKNOWN_BESIDE if asked else TOUCH_UNKNOWN).format(run=run) + UNKNOWN_CITE
+    out = []
+    for d in sorted(h.pages("pulls", fields={"state": "open"}), key=lambda d: d["number"]):
+        changed = h.pull_files(d["number"])
+        added = [t[1:] for f in changed for t in (f.get("patch") or "").splitlines() if t.startswith("+") and not PATCH_FILE_HEADER.match(t)]
+        names = {posixpath.normpath(f.get("filename") or ""): f for f in changed}
+        hits = [f"file {p}" for p in files if p in names]
+        context = [t[1:] for f in changed for t in (f.get("patch") or "").splitlines() if t.startswith(" ")]
+        hits += [f"case {c}" for c in cases if any(c in t for t in added) or (c in from_run and any(c in t for t in context))]
+        if not hits and cases:
+            blind = [n for n, f in names.items() if not f.get("patch")]
+            if blind:  # a case may hide in a patch GitHub did not send
+                hits = [f"unknown: file {blind[0]} has no patch to read" + (f" (and {len(blind) - 1} more)" if len(blind) > 1 else "")]
+                unknown = unknown or "unknown: a pull request has a changed file with no patch to read, so a case in it is unread " + UNKNOWN_CITE
+        if hits:
+            out.append(f"#{d['number']} {d['head']['ref']} {d['head']['sha'][:9]} {'draft' if d.get('draft') else 'ready'}: " + "; ".join(hits))
+    return (out or ([] if unknown else [TOUCH_NONE])), unknown
+
 def default_branch(root):
     """The default branch of the checkout `root`: origin/HEAD first, else the repo's default branch as gh reads it (host_default_branch).
     A folder that is missing or unreadable stops here, naming the root, so --root prints it unknown beside the other roots."""
@@ -4174,6 +4318,10 @@ def build_parser():
     p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
+    p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
+    p.add_argument("--run", default=None, metavar="RUN_ID", help="with --touches: a workflow run whose failing log lines name the cases")
+    p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
+    p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
     return p
 
 def main(argv, host=None, lock=None, hosts=None):
@@ -4183,6 +4331,15 @@ def main(argv, host=None, lock=None, hosts=None):
     if ((a.head and not a.confirm) or a.kind or a.guard or a.round or a.fix_check or a.grant or a.net_value != "not owed") and not a.review_record:
         p.error("--head, --kind, --guard, --round, --fix-check, --net-value and --grant go with --review-record (--head also goes with --confirm)" if a.grant
                 else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
+    if any(not v.strip() for v in [*a.case, *a.file, *([a.run] if a.run is not None else [])]):
+        p.error("--run, --case and --file take a value that is not empty")
+    if (a.run or a.case or a.file) and not a.touches:
+        p.error("--run, --case and --file go with --touches")
+    if a.touches:
+        if any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("touches", "run", "case", "file")):
+            p.error("--touches stands alone")  # any other option set, a mode flag or not
+        if not (a.run or a.case or a.file):
+            p.error("--touches needs --run, --case or --file")
     if a.lint and not a.release_check:
         p.error("--lint goes with --release-check")
     if a.release_check:
@@ -4206,7 +4363,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--base, --lint-unknown-ok and --with go with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
-    if a.idle_lanes or a.release_check:
+    if a.idle_lanes or a.touches or a.release_check:
         pass  # stands alone: checked above
     elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
@@ -4248,6 +4405,19 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.repo_dir is not None and not os.path.isdir(a.repo_dir):  # subprocess raises on a missing cwd; stop with a line instead
             raise Stop(f"-C names no folder: {a.repo_dir} " + REPO_CITE)
         refuse_closing_reason(a.undo_check_unknown_ok, a.base_red_ok)  # first: before the role check, any lock, host read or write
+        if a.touches:  # before the role check and any lock: it reads, merges and posts nothing
+            try:
+                lines, unknown = touches_lines(host or Host(), a.run, a.case, a.file)
+            except (Stop, OSError) as e:  # an OSError is a read whose program cannot start (no gh): unknown, never a traceback
+                why = " ".join(str(e).split())
+                print("merge: " + (why if why.startswith("unknown") else f"unknown ({why}) {UNKNOWN_CITE}"), file=sys.stderr)
+                return 1
+            if lines:
+                say(*lines)
+            if unknown:
+                print("merge: " + " ".join(unknown.split()), file=sys.stderr)
+                return 1
+            return 0
         if a.idle_lanes:
             return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
