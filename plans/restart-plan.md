@@ -586,10 +586,20 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
 Owner 13:10 CST Nov 11: "we need to figure out how to avoid container restarts for long running
 sessions (keep them warm)". Read 13:11 CST (chatter audit; decision idle-resume-compacts): the cost is
 not the restart, which adds about 4,000 tokens. It is the prompt cache, which expires after an hour
-idle. The next wake then rewrites the whole context, about 200K tokens for a lane. Proposed, waits for
-the owner's yes: no keep-warm pings, since they are timers (rule outcomes-mechanize-rules) and cost a
-cache read each. A lane whose PR merged is archived at once. A message to an idle session that asks
-for no act waits for its next wake.
+idle. The next wake then rewrites the whole context, about 200K tokens for a lane. Owner 13:20 CST:
+"i banned stuff that seemed buggy from anthropic and that it was never supposed to be a llarger
+permanent hard ban". Read 13:22 CST: the words "never on a timer" came in commit b25883784 (Oct 22),
+whose stated reason is "watching must cost less than what it watches (owner, 2026-10-21)". A
+keep-warm ping is not watching, and by that reason it passes. Prices (claude-api skill): a 1-hour
+cache write costs 2x input; a cache read costs $0.20 per million on Opus 5.5 and $0.10 on Sonnet 5.5,
+which is 1/40 of the write. So a ping every 55 minutes costs less than one rewrite for any idle gap
+under about 40 hours. Unmeasured: what our Stop hooks and judges add to each ping. Proposed, waits for
+the owner's yes:
+  1. Rule outcomes-mechanize-rules keeps its reason and drops the blanket "never on a timer": a timer
+     is allowed when its record shows it costs less than it saves.
+  2. A standing session sets a one-time check-in 55 minutes after its last turn, while it expects
+     another wake within 40 hours. A lane whose PR merged is archived at once instead.
+  3. One night on one standing session measures the ping cost, hooks included, before it spreads.
 
 - **R32. A token audit, then cuts.** Owner 10:57 CST Nov 11: "i also wonder when the coordinator spawns
   lanes if there's ways to be more token efficient (here, and elsewhere tbh -- worried i overuse tokens
