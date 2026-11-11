@@ -1,0 +1,8 @@
+{
+ "id": "lint-base-check-shallow",
+ "title": "Lane lint's base check unshallows before it reads unknown",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Debt from #2582 round 3 (reviewer sonnet, 2026-11-11 04:11 CST): the new base check in merge --lane-lint (merge/merge.py about 2874-2876, merge_reason about 3889-3894) runs before ci-job and head_holds, which unshallow. In a depth-1 clone git merge-tree exits 128 (unrelated histories), so the lint stops as unknown and a re-run never clears it; main passed there. Proved in a scratch depth-1 clone. No test covers it. Fix: unshallow once on exit 128 in a shallow clone, as head_holds does. Notes from the same round: the sibling is judged against the lint's base while ci-hygiene step 8 says 'their base'; 'integration head' survives in R6/R7 names with no glossary row; the `not head_clean` report line at about 2799-2800 is dead code.",
+ "source": "triage 2026-11-11 04:13 CST, from #2582 review record; after #2582 merges (freeze: no lane now)"
+}
