@@ -14415,7 +14415,7 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assertNotIn("Traceback", err)
 
     def test_e_a_fix_check_after_a_merge_of_main_is_refused_when_the_newest_fix_check_failed(self):
-        # A FAIL newest fix check refuses this fix check whatever the merge. The merge is the made-up one of (b) to (d), so the verdict alone
+        # A FAIL newest fix check refuses the new fix check whatever the merge. The merge is the made-up one of (b) to (d), so the verdict alone
         # refuses it, before any git read.
         host = self.fixed_host([REVIEW_OLD_HEAD, self.MAIN_TIP], self.ON_MAIN, verdict="FAIL")
         self.assertEqual(parse_text(self, host.comments[0]["body"])["fix"][3], "FAIL", "the fixture's newest fix check is not FAIL")
