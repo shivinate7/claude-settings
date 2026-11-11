@@ -199,11 +199,6 @@ sync_main() {
   have=$(git rev-parse --verify -q refs/heads/main) || fail "$no_main"
   want=$(git rev-parse --verify -q refs/remotes/origin/main) || return 0
   [ "$have" != "$want" ] || return 0
-  # An origin that shares no commit with local main is not this clone's upstream, so there is nothing to compare.
-  if ! git merge-base "$have" "$want" >/dev/null 2>&1; then
-    echo "install_from_main.sh: WARN: origin main shares no history with local main; installing local main as it is" >&2
-    return 0
-  fi
   if ! git merge-base --is-ancestor "$have" "$want" 2>/dev/null; then
     n=$(git rev-list --count "$want..$have" 2>/dev/null)
     fail "local main has ${n:-some} commit(s) origin/main lacks, so nothing was installed; push them or move main back to origin/main (git log origin/main..main), then run merge/install_from_main.sh"

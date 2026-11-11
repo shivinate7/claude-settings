@@ -364,10 +364,11 @@ cloud_git() {
 # main only when main holds a commit the fetched ref lacks, because moving main would drop that commit. A main that only
 # fast-forwarded (the SessionStart hook's `merge --ff-only`) holds none, though it differs from mirrorSha, the sha this
 # script last set main to. The first fetch is depth 1, so FETCH_HEAD holds no history under the tip, and an ancestor check
-# against it would read a fast-forwarded main as ahead of the ref. When that check fails, a second fetch deepens FETCH_HEAD
-# to a day before the commit of mirrorSha (main's own, when mirrorSha is unset): main descends from it, so main lies in the
-# window; the day covers clock skew. A refresh then fetches depth 1 again, so the clone keeps the new tip only. An unreadable date, a failed deepen or an erroring check cannot tell, and keeps the clone
-# with a WARN. A failed first fetch keeps the clone as it was. The live pin skips it.
+# against it would read a fast-forwarded main as ahead of the ref. When that check fails, a second fetch takes the ref's
+# full history and the check runs again on that tip. No commit date decides it: a clock-skewed commit would hide main from a
+# date window. A third fetch, depth 1, then shortens the clone; its tip is ignored, because origin may have moved since the
+# check, and main moves only to the tip the check ran on. A failed full fetch or an erroring check cannot tell, and keeps the
+# clone with a WARN. A failed first fetch keeps the clone as it was. The live pin skips it.
 # mirror_refresh DIR does the refresh; use_main_mirror below also calls it. A failed refresh keeps the clone at
 # its older main, with a WARN: older reviewed files are safer than a checkout's branch.
 mirror_refresh() {
@@ -383,11 +384,7 @@ mirror_refresh() {
     return
   fi
   if [ -n "$mr_main" ] && [ "$mr_main" != "$mr_tip" ] && ! git -C "$mr_dir" merge-base --is-ancestor "$mr_main" "$mr_tip" 2>/dev/null; then
-    mr_base=$(git -C "$mr_dir" config --get claude-settings.mirrorSha 2>/dev/null)
-    git -C "$mr_dir" cat-file -e "$mr_base^{commit}" 2>/dev/null || mr_base="$mr_main"
-    mr_t=$(git -C "$mr_dir" log -1 --format=%ct "$mr_base" 2>/dev/null)
-    case "$mr_t" in ''|*[!0-9]*) mr_t= ;; esac
-    if [ -z "$mr_t" ] || ! cloud_git -C "$mr_dir" fetch -q --shallow-since="@$((mr_t - 86400))" origin "$REF"; then
+    if ! cloud_git -C "$mr_dir" fetch -q --depth=2147483647 origin "$REF"; then
       log "WARN: could not tell whether the clone $mr_dir holds local commits on main that $REF lacks; keeping it as it is"
       return
     fi
@@ -395,11 +392,8 @@ mirror_refresh() {
     git -C "$mr_dir" merge-base --is-ancestor "$mr_main" "$mr_tip" 2>/dev/null
     case $? in
       0)
-        # Back to depth 1, so the clone holds the new tip only; a failed re-shorten leaves the deeper history, which is harmless.
-        if cloud_git -C "$mr_dir" fetch -q --depth 1 origin "$REF"; then
-          mr_new=$(git -C "$mr_dir" rev-parse -q --verify FETCH_HEAD 2>/dev/null)
-          [ -z "$mr_new" ] || mr_tip="$mr_new"
-        fi ;;
+        # Shorten the history again; a failed fetch leaves the deeper history, which is harmless.
+        cloud_git -C "$mr_dir" fetch -q --depth 1 origin "$REF" || : ;;
       1)
         mr_n=$(git -C "$mr_dir" rev-list --count "$mr_tip..$mr_main" 2>/dev/null)
         log "WARN: the clone $mr_dir has ${mr_n:-some} local commits on main that $REF lacks; keeping it as it is"
@@ -409,11 +403,12 @@ mirror_refresh() {
         return ;;
     esac
   fi
-  if git -C "$mr_dir" checkout -q -B main "$mr_tip" \
-     && git -C "$mr_dir" config claude-settings.mirrorSha "$(git -C "$mr_dir" rev-parse main)"; then
+  if ! git -C "$mr_dir" checkout -q -B main "$mr_tip"; then
+    log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
+  elif git -C "$mr_dir" config claude-settings.mirrorSha "$(git -C "$mr_dir" rev-parse main)"; then
     log "refreshed the clone $mr_dir to $REF"
   else
-    log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
+    log "WARN: moved main in the clone $mr_dir to $REF, but could not record it in claude-settings.mirrorSha"
   fi
 }
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
