@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 12:56 CST. The owner's list closed at 18:43 CST; R21 to R36 came after.
+the history. Last rewrite: 2026-11-11 12:57 CST. The owner's list closed at 18:43 CST; R21 to R37 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -626,6 +626,20 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   never cut. The brief audit (started 12:48 CST) measures brief length and the narration share of lane
   output first; the line ships if narration is a real share. Home: agents/*.md; decision
   agent-model-cap.
+
+- **R37. No fixed word cap, and no "STE" name.** Owner 12:54 CST Nov 11: "i thought i eliminated all
+  STE requirements from everywhere in the repo weeks ago (along with hard limits like 30 vs 31 words
+  etc ...) given my disdain for hard arbitrary static numeric limits". Read 12:55 CST: decision
+  plain-prose-lint keeps STE001, a CI error on a sentence over 30 words (max_words 30). The name
+  survives in lint/ste_lint.py, actions/ste-lint, the STE0nn codes and rule anchor output-write-in-ste,
+  against his 2026-11-02 13:22 CST ruling "drop Simplified Technical English (STE) as a named
+  standard, everywhere". 73 of 3561 commits on main since Nov 4 fix the lint. Owner 12:56 CST: "A --
+  and im sure this 30 word thing is only one of many stale digit level hooks".
+  1. STE001 stops failing; wordiness and repetition go to reviewers and judges, which never count.
+  2. The lint, its action, its codes and the rule anchor drop "STE" from their names.
+  3. A read-only census (started 12:57 CST) lists every fixed number that refuses or fails. Each one
+     the owner did not rule is retired, or derived from measured runs as in 3.2.
+  Home: decision plain-prose-lint, rewritten in place.
 
 - **R35. The global CLAUDE.md loads only what each session needs.** Owner 12:38 CST Nov 11: "im
   wondering whether i properly keep claude.md's just at the repo level and claude-settings level as its
