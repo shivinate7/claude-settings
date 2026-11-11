@@ -15221,21 +15221,25 @@ class ReviewCleanMainWalk(ReviewEnv):
 
 
 class ReviewEmptyCommits(ReviewEnv):
-    """A commit with one parent and that parent's tree, after the reviewed head or after a clean merge of main, keeps the record done (decision
-    pr-review-record). Any other single-parent commit changes the lane's diff, so it keeps the record stale."""
+    """An empty commit makes the record stale, after the reviewed head or after a clean merge of main. Only clean merges of main keep a record:
+    owner, Nov 10 14:07 CST ("a review log survives a clean main merge"), and waiting-page item 514, option b, Nov 11 14:38 CST, which drops the
+    reading that an empty commit keeps it too."""
 
-    def test_an_empty_commit_on_the_reviewed_head_reads_done(self):
+    def test_an_empty_commit_on_the_reviewed_head_reads_stale(self):
         fx = self.real_commits()
         self.reviewed_line(self.reviewed_host(fx, fx.fixed), fx.fixed, "done",
                            "control: the record does not read done at its own head, so the case below tests nothing")
-        self.reviewed_line(self.reviewed_host(fx, fx.empty), fx.empty, "done", "an empty commit on the reviewed head must read done: it changes no tree")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.empty), fx.empty, "stale",
+                                 "an empty commit on the reviewed head must read stale: only clean merges of main keep a record")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: a failed read stands in for the empty commit's rule")
 
-    def test_an_empty_commit_after_a_clean_merge_of_main_reads_done(self):
+    def test_an_empty_commit_after_a_clean_merge_of_main_reads_stale(self):
         fx = self.real_commits()
         self.reviewed_line(self.reviewed_host(fx, fx.clean), fx.clean, "done",
                            "control: a clean merge of main after the reviewed head must read done, before the case below is read")
-        self.reviewed_line(self.reviewed_host(fx, fx.clean_empty), fx.clean_empty, "done",
-                           "an empty commit after a clean merge of main must read done: it changes no tree")
+        out = self.reviewed_line(self.reviewed_host(fx, fx.clean_empty), fx.clean_empty, "stale",
+                                 "an empty commit after a clean merge of main must read stale: only clean merges of main keep a record")
+        self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: a failed read stands in for the empty commit's rule")
 
 
 class ReviewFixAfterPriorRecord(ReviewEnv):
