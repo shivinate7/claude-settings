@@ -1730,7 +1730,7 @@ WALK_SUITES = {
     "hooks/guard_stream.py": [],
     "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
     "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
-    "hooks/guard_merge.py": ["lint/test_hook_catalog.py"],
+    "hooks/guard_merge.py": ["lint/test_hook_catalog.py", "lint/test_settings_matcher.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
 }
@@ -1874,7 +1874,7 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertTrue(in_def, "the fixture: %s imports guard_merge inside a def" % suite)
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), sorted(["hooks/test_guard.py::merge", suite]),
+        self.assertEqual(out.splitlines(), sorted(["hooks/test_guard.py::merge", suite, "lint/test_settings_matcher.py"]),
                          "%s loads guard_merge only inside a def, so the import walk finds it through a function-bound "
                          "load, and the union keeps it beside the merge family line" % suite)
 
