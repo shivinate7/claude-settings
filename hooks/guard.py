@@ -5828,13 +5828,13 @@ SCRATCHPAD_OWNER_REASON = (
     "Rule (scratchpad-owner): this script was written by another agent of this session, and running it "
     "runs code you have not read. "
     "Remedy: read the file, write your own copy of the script under a fresh file name, and run that copy. "
-    "(decision scratchpad-owner, an agent never runs or overwrites another agent's scratchpad file)"
+    "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_OVERWRITE_REASON = (
     "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
     "destroys work that agent may still need. "
     "Remedy: write your own file under a fresh file name of your own. "
-    "(decision scratchpad-owner, an agent never runs or overwrites another agent's scratchpad file)"
+    "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 # Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
 SCRATCHPAD_REMOVERS = ("rm", "mv")
@@ -6288,7 +6288,7 @@ def judge(payload) -> None:
             owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
             if owned:
                 refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
-            scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: deny an overwrite, else record the writer
+            scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
@@ -6356,7 +6356,7 @@ def judge(payload) -> None:
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
-    scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: deny an overwrite, else record the writer
+    scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
 
 
 def write_targets(tool_input: dict) -> list:
