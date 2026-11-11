@@ -1,0 +1,8 @@
+{
+ "id": "lane-lint-windows-guard-slice",
+ "title": "A guard lane proves its Windows guard tests before hand-off",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Lane lint runs no Windows guard tests, so a guard change can pass every lane check and go red only in batch CI. Incident: #2379 in batch 78 (PR 2583, 2026-11-11 06:37 CST), job checks-windows-guard, the linked-nm `cd \"$R\"` case: allow where deny was wanted. Harm: one dropped lane and one wasted batch run per miss.",
+ "source": "coordinator 2026-11-11 06:43 CST (stage 3; file only, no build under the freeze)"
+}
