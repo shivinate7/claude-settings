@@ -1282,14 +1282,14 @@ function pictureProblem(it) {
   return null;
 }
 // What is wrong with an item, as { text, blocks }, or null. One home for every check.
-// The page keys on the database key. A bad id field only warns: the answer still lands at answers/<key>.
-// Anything else the session could not read back safely blocks Send.
+// The page keys on the database key, which is the item's id. An `id` field is optional and ignored.
+// Anything the session could not read back safely blocks Send.
 function problem(it) {
   const okN = typeof it.n === "number" && isFinite(it.n);
   const fix = " Ask the session to fix " + (okN ? "item " + it.n : "this item") + ".";
   if (!okN) return { text: "This item has no number, so it cannot be answered." + fix, blocks: true };
-  // A ruling is closed: it has no picture, stake or option checks to pass. Only its id is read back.
-  if (isRuling(it)) return it.rawId !== it.id ? { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false } : null;
+  // A ruling is closed: it has no picture, stake or option checks to pass.
+  if (isRuling(it)) return null;
   if (it.kind !== "decision" && it.kind !== "task") return { text: "This item is neither a decision nor a task, so it cannot be answered." + fix, blocks: true };
   if (it.kind === "decision") {
     if (it.optionsBad) return { text: "The options of this decision are not a list, so it cannot be answered." + fix, blocks: true };
@@ -1305,8 +1305,6 @@ function problem(it) {
     }
     const pic = pictureProblem(it); if (pic) return { text: pic + fix, blocks: true };
   }
-  // Last on purpose: a hard defect above blocks first, and its warning is the one shown.
-  if (it.rawId !== it.id) return { text: "This item has " + (it.rawId == null ? "no id field" : "an id field that differs from its key") + ", so the session may not read your answer." + fix, blocks: false };
   return null;
 }
 const blocked = (it) => { const p = problem(it); return !!(p && p.blocks); };
@@ -1565,7 +1563,7 @@ function threadEl(it, noLast) {
     long ? h("button", { class: "morebtn", id: "b-morerp-" + it.id, type: "button", "aria-expanded": String(open), "aria-controls": "rp-" + it.id, onclick: () => { state.moreReply[it.id] = !open; repaint(it); } }, open ? "Less" : "More of the reply") : null);
 }
 // The one list of top-level item fields is the itemFields block (the guard reads the same one). A missing, bad or empty block reads as unknown: no warning.
-const PAGE_ADDED = ["rawId", "optionsBad"]; // set by the page when it reads an item, never stored
+const PAGE_ADDED = ["optionsBad"]; // set by the page when it reads an item, never stored
 function itemFields() {
   try { const l = JSON.parse($("itemFields").textContent); return Array.isArray(l) && l.length && l.every((f) => typeof f === "string") ? l : null; } catch (e) { return null; }
 }
@@ -3022,7 +3020,7 @@ render(); renderAsks();
   try { state.comments = (await window.claude?.use?.("comments")) || null; } catch (e) { state.comments = null; }
   const map = (s) => { const m = {}; s.docs.forEach((d) => { m[d.id] = d.data(); }); return m; };
   db.collection("items").onSnapshot((s) => {
-    const all = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, rawId: v.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter(Boolean);
+    const all = s.docs.map((d) => { const v = d.data(); return v && { ...v, id: d.id, ...(v.options != null && !Array.isArray(v.options) ? { options: [], optionsBad: true } : {}) }; }).filter(Boolean);
     // A closed item stays hidden, unless the arbiter's writer filed it as a ruling.
     state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.loaded = true;
     feed.items = true; feed.all = all; freezeSeen(); freezeSunk(); render();
