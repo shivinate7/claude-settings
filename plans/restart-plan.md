@@ -701,8 +701,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   Home: decision question-form; decision reply-judge-samples-never-refuses; rule
   outcomes-stale-decision-protocol.
 
-- **R42 (proposed, waits for the owner's yes). Rulings get acted on, and main moves the way Anthropic
-  moves its own.** Owner 13:39 CST Nov 11: "a report is still just a report yanno that's something for
+- **R42. Rulings get acted on, and main moves the way Anthropic moves its own.** Owner 13:39 CST Nov 11: "a report is still just a report yanno that's something for
   me to read rather than something to act upon". Read 13:41 CST: Anthropic's post "Redesigning source
   control at Anthropic" (Oct 13, updated Oct 15) says "A proper merge queue, for example, doesn't make
   much sense at agent scale". It tests after merge and before deploy, with automated bisect and revert.
@@ -716,6 +715,11 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      its review, sized by risk. Main's CI runs after the merge; a red run bisects and reverts the
      breaking commit. Sessions install from a stable branch that moves only when main is green.
   3. Guard numbers: reverts per merge, and the pace numbers. Main must first finish a CI run (#2591).
+  Owner 13:43 CST: "lanes compete more for the machine isn't a real problem on cloud sessions where each
+  spawns its own machine right? and then it is true for local machines though (which is why we have
+  load brakes for local right" and "r42 part 2: i'm pretty open to this radical approach -- A". Part 1
+  stands on his 13:39 "A seems fine". Shared limits remain: the account's rate limit, CI runners, and
+  agents inside one cloud container. The Plan agent's design for part 2 comes back to him.
 
 - **R41. Mods, skills and the output style: keep all, fix seven defects.** Owner 13:36 CST Nov 11:
   "r41 yes on all". Owner 13:25 CST Nov 11: "tell me how my mods and skills work ... are they even good to keep
