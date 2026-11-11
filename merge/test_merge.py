@@ -19111,6 +19111,23 @@ class BatchFreeze(CloudSession):
                     self.assertEqual(rc, 2, "%s beside --batch-build exited %s, not 2: %s" % (" ".join(argv), rc, out))
                     self.assertEqual(build.call_count, 0, "batch_build ran beside %s" % " ".join(argv))
 
+    def assert_accepted_beside_build(self, *option):
+        """`merge --batch-build NAME PR OPTION` exits 0 and calls batch_build once, as the build alone does. Main accepts these options beside
+        --batch-build, so the stand-alone check must not refuse them."""
+        with unittest.mock.patch.object(merge, "batch_build", return_value=0) as build:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", *option)
+            self.assertEqual(rc, 0, "%s beside --batch-build exited %s, not 0: %s" % (" ".join(option), rc, out))
+            self.assertEqual(build.call_count, 1, "%s beside --batch-build did not reach batch_build once: %s" % (" ".join(option), out))
+
+    def test_a_session_name_is_accepted_beside_batch_build(self):
+        self.assert_accepted_beside_build("--session", "lane-x")
+
+    def test_an_undo_check_reason_is_accepted_beside_batch_build(self):
+        self.assert_accepted_beside_build("--undo-check-unknown-ok", "checked by hand")
+
+    def test_a_base_red_reason_is_accepted_beside_batch_build(self):
+        self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
+
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
 # The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
