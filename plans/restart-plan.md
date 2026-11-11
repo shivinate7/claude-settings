@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:22 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:24 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -548,6 +548,25 @@ then R29.
   Opus median $22.9, mean $51.4; Sonnet median $11.9, mean $16.1. Lane life, start to archive: Opus
   median 64 h, Sonnet 28 h. Standing sessions, both Opus and missed by that listing: coordinator
   $1,839 and triage $1,567 since Nov 3. Not seen: hook judges, local sessions, the other account.
+  The cuts, owner 11:21 and 11:23 CST Nov 11 (waiting page item 506):
+  1. d with a. The coordinator and triage get a measured Sonnet trial inside R33's evaluation. "a: i
+     agree fold into d": earlier compaction applies only to a session that stays on Opus, through the
+     per-model key `modelSettings.<model>.autoCompactWindow` (decision precompact-handoff, rule 1).
+     Owner: "opus could compact tigheter than sonnet no?". Yes; that key sets it per model. Why the
+     coordinator compacts at 441,600 and seeded sessions at 384,000 is still unmeasured; the step finds
+     the setting that causes it.
+  2. b. Owner: "it seems like what we have planned fixes this already? ... it saves time and money no?".
+     Mostly: R24 (each refusal names a working way out), R27 (feedback items close themselves) and the
+     guard cull (3.6) cover most repeats. Two parts are new: all end-of-turn checks speak in one merged
+     message, so one fix turn answers them all. And the hook drafts the "Recovered" and "Handoff gave"
+     lines after a compaction, so they are not retyped after a refusal.
+  3. c. A check-in that waits on CI waits at most 55 minutes, so a wake stays inside the prompt cache.
+     It changes rule git-ci-wait-checks-in ("each wider apart") to "each wider apart, never past 55
+     minutes". Owner: "we should keep some sort of tabs on how anthropic determiines warm cash so this
+     doesn't go stale". The cap is read from one constant that names its source: the cache lifetime in
+     Claude Code's docs, which this session's own system text gives as 1 hour, and 5 minutes once usage
+     enters overage. That constant is a dated claim under R28's shared upkeep, so a docs change is
+     caught.
   Compaction, owner 11:09 CST: "i frankly dont mind compacting sooner given we have such good handoff
   hooks". Today the coordinator compacts at 441,600 tokens and lanes at 384,000; why they differ is
   unmeasured (decision idle-resume-compacts). Every standing session and lane compacts sooner. The audit
