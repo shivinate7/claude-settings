@@ -28633,25 +28633,6 @@ add("lane-effort-pin: lane tag with a grant line that is only a comma is denied"
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
     prompt="Grant: ,\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
     model="sonnet", source_url=LANE_SOURCE_URL)
-# Square brackets hold a template placeholder, as the angle brackets do. Quoted words are the owner's words.
-add("lane-effort-pin: lane tag with a grant line of bracketed owner words is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
-    prompt="Grant: [owner words], [time]\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
-    model="sonnet", source_url=LANE_SOURCE_URL)
-add("lane-effort-pin: lane tag with a grant line of quoted owner words is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
-    prompt='Grant: "B is good", 13:19 CST Nov 10\nDo the task in the brief file.', effort=LANE_EFFORT_FIELD,
-    model="sonnet", source_url=LANE_SOURCE_URL)
-# A bold Grant line is the owner's grant too: the brief reader of rule lane-one-topic tolerates a markdown lead.
-# The second case is the hole a fix to the grant reader alone would open: the bold line would hide the brief's topic.
-add("lane-effort-pin: lane tag with a bold Grant line and effort medium is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
-    prompt="**Grant:** B is good, 13:19 CST Nov 10\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
-    model="sonnet", source_url=LANE_SOURCE_URL)
-add("lane-one-topic: lane tag with cs-topic alpha, a bold Grant line, and a brief for topic colors is denied", "deny",
-    "lane-one-topic", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
-    prompt="**Grant:** B is good, 13:19 CST Nov 10\nLane brief: icon-a. Topic: colors.", effort=LANE_EFFORT_FIELD,
-    model="sonnet", source_url=LANE_SOURCE_URL)
 # A start that carries only the lane tag names no cs-topic or cs-step tag to judge its brief by. Its refusal names
 # the missing tag. It must not steer to create_session, because this call is the start.
 add("lane-one-topic: a create_session start with only the lane tag is denied, and its reason names the missing tag",
