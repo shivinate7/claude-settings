@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 19:03 CST. The owner's list closed at 18:43 CST; R21 came after.
+the history. Last rewrite: 2026-11-10 19:21 CST. The owner's list closed at 18:43 CST; R21 and R22 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -424,6 +424,20 @@ After 3.11, because its third part uses the same owner grant route.
   review notes (CLAUDE.md roles-findings-are-debts-or-notes is filing only). Folds in roadmap steps
   c55 (re-weigh as a whole, notes stay short; owner Oct 26) and o8 (every debt and note on the page).
   Home: CLAUDE.md roles-findings-are-debts-or-notes; skill roadmap; docs/debts/README.md.
+- **R22. A respawn rewrites every session id at once.** Owner 19:19 CST Nov 10, on home's move to a new
+  account: "its moreso that a session ended coordinwtor and all and a new coordinator and sessions
+  respawned and somehow no one rewrote the session ids to now be the new ones". Outcome: an answer
+  wakes a dead session, and the owner has to ask who does the work.
+  1. Cause (read on main): skill project-ops keeps the roster in the claude.ai project instructions,
+     "so keep no second copy in the repo". No session can write there, so sessions copy ids into page
+     items and briefs, and nothing rewrites those copies.
+  2. The roster moves to the record branch, where triage writes it. The session that starts a standing
+     session or lane sends triage the new id in the same turn. Triage rewrites that roster line.
+  3. A page item, brief or handoff names a lane slug or role, never a session id (CLAUDE.md
+     git-slug-then-claim-number already says so for lanes). The wake path reads the id from the roster
+     when it sends. A guard refuses a page write that stores a session id.
+  4. Fits R18 point 2: each item names who wakes, by slug or role.
+  Home: skill project-ops; skill waiting-page.
 
 ## Stage 5. Express pass for prose
 
