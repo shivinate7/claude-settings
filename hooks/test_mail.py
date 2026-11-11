@@ -734,6 +734,8 @@ class NotSent(MailCase):
         notices = [line for line in combined(sent).splitlines() if line.startswith("not sent: ")]
         self.assertTrue(notices, "a refused send printed no 'not sent: <reason>' line: %r" % combined(sent))
         self.assertTrue(notices[0][len("not sent: "):].strip(), "the 'not sent:' line gives no reason: %r" % notices[0])
+        self.assertIn("refused by the test store", notices[0],
+                      "the 'not sent:' line does not hold the hook's stderr text: %r" % notices[0])
         self.assertEqual(store.files(), [], "a refused message landed on the store anyway")
 
     def test_non_fast_forward_on_every_try_makes_six_pushes_then_not_sent_exit_1(self):
