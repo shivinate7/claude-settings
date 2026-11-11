@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:03 CST. The owner's list closed at 18:43 CST; R21 to R32 came after.
+the history. Last rewrite: 2026-11-11 11:10 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -315,6 +315,17 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   markers and checks read the table. Each model ruling lands in one lane that changes the table and
   every reader together. Cause: rulings 279 d, 439 and 444 a reached main 12-57 h late and in pieces;
   359 a, 359 b, 289 and 295 a are not on main. Home: decision agent-model-cap.
+- **R33. Every role has a chosen model and effort, with a reason.** Owner 11:09 CST Nov 11: "i do
+  think these roles that have defaults need to have decided models and why -- similarly maybe an
+  evaluation of what else can be a first try haiku vs what needs to go higher and at what effort
+  levels". Rows in the model table that no ruling chose today: main session, coordinator, triage,
+  batch runner (through "separate sessions"), general-purpose agents, and every skill. Each gets a
+  model, an effort and a one-line reason. An evaluation then tests each role on the cheapest model
+  that passes its checks. It reads measured outcomes per role and model: review pass rates, fix
+  rounds, builder third tries, and cost from R32's audit. Known data: Haiku round 1 fails 79% of
+  reviews, Sonnet 38% (R9; the share that is noise is unknown). A row moves only on a measured pass
+  rate. A move above Sonnet needs the owner's grant (rule roles-sonnet-is-the-ceiling). Runs after
+  R32's audit. Home: decision agent-model-cap.
 
 ### 3.8 One rounds record; no round 3 after a pass
 
@@ -518,6 +529,11 @@ then R29.
   htan it being preloaded"), against decision agent-model-cap, which sets effort by the start call and
   sends the brief as the first message. The cuts are ruled on its report. Home: decision
   agent-model-cap.
+  Compaction, owner 11:09 CST: "i frankly dont mind compacting sooner given we have such good handoff
+  hooks". Today the coordinator compacts at 441,600 tokens and lanes at 384,000; why they differ is
+  unmeasured (decision idle-resume-compacts). Every standing session and lane compacts sooner. The audit
+  proposes the size from its per-turn cost data. The lever is `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the
+  cloud environment, or `/autocompact` per session. Home: decision precompact-handoff, rule 1.
 
 ## Stage 4. Make the roadmap and triage mechanical
 
