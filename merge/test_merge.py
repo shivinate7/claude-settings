@@ -14334,18 +14334,18 @@ class ReviewFixRules(unittest.TestCase):
     def test_a_fix_fail_after_round_three_is_open_and_says_new_lane(self):
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="no")
         self.assertEqual(state, "open", "a failed fix check must not read done")
-        self.assertIn("fix check failed", why)
+        self.assertIn("fix verifier failed", why)
         self.assertIn("new lane", why)
 
     def test_a_fix_fail_after_round_three_with_a_positive_net_value_is_open(self):
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="yes", net="positive")
         self.assertEqual(state, "open", "a failed fix check must not read done, even when round 3's net value is positive")
-        self.assertIn("fix check failed", why)
+        self.assertIn("fix verifier failed", why)
 
     def test_a_fix_fail_after_a_delete_only_round_one_is_open(self):
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_PASS, kind="delete-only", guard="no")
         self.assertEqual(state, "open", "a failed fix check must not read done, even after a delete-only round 1")
-        self.assertIn("fix check failed", why)
+        self.assertIn("fix verifier failed", why)
 
     def test_a_fix_pass_after_round_one_is_done_whatever_round_one_said(self):
         # A fix PASS after the first round counts as that round passing, for a normal change with guard no
