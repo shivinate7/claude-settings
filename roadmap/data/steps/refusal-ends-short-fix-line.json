@@ -5,8 +5,8 @@
   "order": 1029,
   "owner": "triage",
   "why": "Owner 15:44 CST Nov 10 (R10, relayed by the retrospective session): \"i never want my hook to have one spew out the whole thing again after -- as i fixed long ago in how the done deviations inputneeded hook works, that should be viewed as a best practice for other hooks that make you regurgitate output again\".",
-  "note": "Decision guard-remedy-not-to-owner already says to post only the corrected lines, but no refusal text says it, so sessions re-send whole replies. Covers the review-record, departs-from, past-ruling, cite-gloss, recovered, inbox and model-name guards. Home: decision guard-remedy-not-to-owner. Also on the guard-false-alarm-cull list.",
-  "updatedAt": "2026-11-10T15:45:00-06:00",
+  "note": "Decision guard-remedy-not-to-owner already says to post only the corrected lines, but no refusal text says it, so sessions re-send whole replies. Covers the review-record, departs-from, past-ruling, cite-gloss, recovered, inbox and model-name guards. Home: decision guard-remedy-not-to-owner. Also on the guard-false-alarm-cull list. Recurrence, 2026-11-11 (retrospective 12:43 CST): Stop-hook report-shape refusals led triage to repost its whole report at least three times today (12:23, 12:29 and 12:41 CST). Owner 12:42 CST: \"i really dislike when the hook makes my sesison repeat everyhting and add an edit in to the output, i really want that each of these hooks/guards only adds the necessary additional text\". Owner 12:44 CST: \"b is okay\": R10 waits for stage 3, not ahead of the drain (plan 225aa74, 1b33f36).",
+  "updatedAt": "2026-11-11T12:48:00-06:00",
   "lane": "",
   "blockedBy": []
 }
