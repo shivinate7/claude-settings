@@ -2,7 +2,7 @@
   "added": "2026-11-11T22:43:00Z",
   "context": "Goal: main in every repo needs exactly one passing check, and saving that setting never fails.\nProblem (rule): your Oct 30 standing grant covers classic branch protection in the shared form, not rulesets, so a move to rulesets needs your word.\nBased on (measured): claude-settings main has 1 required check, all-jobs-passed (read 16:40 CST).\nBased on (read): you saw \"Saving this branch protection rule failed ... a large number of status checks ... consider migrating to a ruleset\" on another repo. The retrospective asked you which one.\nDeparts from: main, with classic branch protection per repo \u2014 changes to one ruleset per repo that requires all-jobs-passed and blocks deleting or force-pushing main.\nMeanwhile: the retrospective keeps working; nothing waits on this.",
   "holds": "How each repo's main is protected: classic branch protection or one ruleset.",
-  "home": "record same-check-kinds; step ruleset-pr-bypass",
+  "home": ".claude/CLAUDE.md Standing grants (owed; triage's write was refused as self-modification, so the coordinator routes it); step child-repo-gap; plan restart-plan 4ddeed4",
   "id": "one-check-ruleset",
   "kind": "decision",
   "n": 517,
@@ -23,11 +23,13 @@
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "r",
   "rank": 2,
   "ref": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "reply": "Answered in the retrospective's chat at 16:43 CST: \"r\". Grant: in the child-repo sweep, a session on your computer may move each repo's main to a ruleset that requires only all-jobs-passed and blocks deleting or force-pushing main. It covers no other ruleset content. It is noted on step child-repo-gap. Its line in .claude/CLAUDE.md is owed: Claude Code's auto mode refused triage's edit of that file, so the coordinator routes it.",
   "repo": "shivinate7/claude-settings",
   "short": "rulesets for main",
-  "status": "open",
+  "status": "closed",
   "title": "Move every repo's main to a GitHub ruleset, or reset the drifted repo now?",
   "why": "You saw GitHub fail to save a branch protection rule with \"a large number of status checks\", so one repo has drifted from your one-check form."
 }
