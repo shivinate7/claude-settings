@@ -281,7 +281,7 @@ Other tools, in `judge` order:
                        leading `cd`, and python, `perl -i` and `dd of=` writes. A `git commit` is judged
                        on its pathspecs, else its staged files plus the paths of an earlier `git add` of
                        the call (`-a`: the modified tracked files too). A git read that fails judges nothing.
-                       The reason says to brief a lane session. An override lifts it.
+                       The reason says to brief a lane. An override lifts it.
                        COORDINATOR_SCOPE_MODE "ask" turns the deny into an ask.
                        (session-tiers, roles-orchestrator-never-builds)
   scratchpad-owner     ask. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
