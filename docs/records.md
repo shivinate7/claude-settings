@@ -224,7 +224,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `page-item-design` | An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. | [`docs/decisions/page-item-design.md`](../docs/decisions/page-item-design.md) |
 | `page-stale-publish` | Every republish of a waiting page is main's `skills/waiting-page/page.html` with the live `designData` and roadmap blocks kept, never the live page's own code (decision `questions-go-to-owner`, skill `waiting-page`, "Keep the page on main's code"). | [`docs/decisions/page-stale-publish.md`](../docs/decisions/page-stale-publish.md) |
 | `plain-prose-lint` | The STE lint is a plain-prose lint. | [`docs/decisions/plain-prose-lint.md`](../docs/decisions/plain-prose-lint.md) |
-| `plain-push-asks` | Three kinds of push that are not forced ask. | [`docs/decisions/plain-push-asks.md`](../docs/decisions/plain-push-asks.md) |
+| `plain-push-asks` | Two kinds of push that are not forced ask. | [`docs/decisions/plain-push-asks.md`](../docs/decisions/plain-push-asks.md) |
 | `plan-refuter` | Owner, 2026-11-06 12:43 CST, waiting-page item 279, pick d. | [`docs/decisions/plan-refuter.md`](../docs/decisions/plan-refuter.md) |
 | `playwright-browsers-path` | No command sets PLAYWRIGHT_BROWSERS_PATH to work around a missing browser build. | [`docs/decisions/playwright-browsers-path.md`](../docs/decisions/playwright-browsers-path.md) |
 | `playwright-install-once` | Rule `playwright-install` in `hooks/guard.py`: | [`docs/decisions/playwright-install-once.md`](../docs/decisions/playwright-install-once.md) |
