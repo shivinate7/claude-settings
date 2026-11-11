@@ -48,7 +48,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   the handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
   `repo` (feedback about another repo): home `repo:<owner>/<name>`. The session sends the owner's
   message, with its items, to that repo's triage session (tags `cs-build:triage` and
-  `cs-repo:<owner>/<name>`). Triage always exists. In a run with one lane, the lane wears
+  `cs-repo:<owner>/<name>`). Triage always writes the page. In a run with one lane, the lane wears
   triage's hat (owner, 2026-11-10 14:32 CST, G9, triage always writes the page; 14:33 CST, G10, roles are hats). Feedback about the
   session's own repo keeps the ruling and task homes.
   The page writer rewrites each waiting-page comment wake in claude-settings into the shared template, and never answers it in a thread (owner, 2026-11-10 09:13 CST: every page feedback goes into the shared template mechanically; ruling c164: rewrite the item, never a thread reply). The wake's inbox block needs a `task` item with home `step:<slug>` (a step whose file on the record branch names the template) or a `note` item with home `not-page-form`; the Stop guard's page-form rule (`page-form-to-template`) checks it.
