@@ -313,6 +313,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `install-sh-stays-off-windows` | `install.sh` does nothing on Windows. | [`docs/decisions/install-sh-stays-off-windows.md`](../docs/decisions/install-sh-stays-off-windows.md) |
 | `lanes-start-in-tool-worktrees` | Owner, 2026-10-21: refuse the hand-made worktree fully, and record which layer refused isolation. | [`docs/decisions/lanes-start-in-tool-worktrees.md`](../docs/decisions/lanes-start-in-tool-worktrees.md) |
 | `machine-load-brake` | Owner, 2026-10-21 (spec), 2026-10-22 (foreground), 2026-10-23 (disk) and 2026-10-25 (CPU dropped: a 200 ms sample is noise; memory and disk are what stall a machine). | [`docs/decisions/machine-load-brake.md`](../docs/decisions/machine-load-brake.md) |
+| `merge-confirm-repo` | Orchestrator call (lane merge-repo-dir-flag); the owner may rule otherwise. | [`docs/decisions/merge-confirm-repo.md`](../docs/decisions/merge-confirm-repo.md) |
 | `merge-reinstalls-from-main` | The links in `~/.claude` point at one pinned checkout. | [`docs/decisions/merge-reinstalls-from-main.md`](../docs/decisions/merge-reinstalls-from-main.md) |
 | `one-browser-setup-no-apt` | Roadmap step c78 (one shared browser-test setup), 2026-10-26: one composite action installs the browser-test setup for every repo, so a CI fix lands once. | [`docs/decisions/one-browser-setup-no-apt.md`](../docs/decisions/one-browser-setup-no-apt.md) |
 | `owner-override` | The owner starts a prompt with the word `override`. | [`docs/decisions/owner-override.md`](../docs/decisions/owner-override.md) |
@@ -391,9 +392,11 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `map-py-base-name-match` | `py-facts.py` resolves an import by the module's last name. | [`docs/debts/map-py-base-name-match.md`](../docs/debts/map-py-base-name-match.md) |
 | `map-tested-by-no-shell` | MAP11 has no reader for a shell test. | [`docs/debts/map-tested-by-no-shell.md`](../docs/debts/map-tested-by-no-shell.md) |
 | `map-tested-by-path-pieces` | MAP11 counts only a whole path string. | [`docs/debts/map-tested-by-path-pieces.md`](../docs/debts/map-tested-by-path-pieces.md) |
+| `mcp-merge-no-repo-tag` | `mcp__github__merge_pull_request` is judged by green checks only. | [`docs/debts/mcp-merge-no-repo-tag.md`](../docs/debts/mcp-merge-no-repo-tag.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`docs/debts/measured-time-table.md`](../docs/debts/measured-time-table.md) |
 | `merge-commit-skips-review` | While it resolved a merge of main into a lane branch, a builder pushed a logic change to `lint/report_guard.py`. | [`docs/debts/merge-commit-skips-review.md`](../docs/debts/merge-commit-skips-review.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`docs/debts/merge-head-race-remains.md`](../docs/debts/merge-head-race-remains.md) |
+| `merge-reason-paren-cuts-args` | The merge-confirm-repo clause stops reading a merge's arguments at the first token that ends in `)` or `&`. | [`docs/debts/merge-reason-paren-cuts-args.md`](../docs/debts/merge-reason-paren-cuts-args.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`docs/debts/merge-records-stale-base.md`](../docs/debts/merge-records-stale-base.md) |
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`docs/debts/merge-silent-exit.md`](../docs/debts/merge-silent-exit.md) |
 | `mutate-guard-split` | `checks-mutate-guard` runs every guard mutant in one job, 4 at a time. | [`docs/debts/mutate-guard-split.md`](../docs/debts/mutate-guard-split.md) |
