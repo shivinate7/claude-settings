@@ -578,9 +578,9 @@ class UpkeepFixture(Fixture):
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
     def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None):
-        """Write the --live file. The sessions, items and landedPulls keys appear only when given, and landed is written
-        as given (a case may send a value that is not a list). threads=_ABSENT leaves the threads key out. readAt is
-        five minutes old by default."""
+        """Write the --live file. threads=_ABSENT leaves the threads key out. The sessions, items and landedPulls keys
+        appear only when given, and landed is written
+        as given (a case may send a value that is not a list). readAt is five minutes old by default."""
         value = {"readAt": read_at or iso_ago(5)}
         if threads is not _ABSENT:
             value["threads"] = list(threads)
