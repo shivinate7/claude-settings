@@ -5287,28 +5287,26 @@ caseM10() {
   if msg=$(m10_run stalekeep); then ok "$name"; else bad "$name" "$msg"; fi
 }
 
-# ---- caseM11-M14: the mirror refresh (install.sh mirror_refresh). The mirror's main can move on its own: a fast-forward to a
-# commit origin holds, as the SessionStart hook's `merge --ff-only origin/main` does, while mirrorSha stays at the commit the
-# install last set. That holds no local commit, so the refresh must go ahead. A mirror with real local commits on main is kept,
-# and its WARN counts them. The mirror is a depth-1 clone, as install.sh makes it, so a depth-1 FETCH_HEAD holds no history
-# under it: m11_trap_check shows that a naive ancestor check against FETCH_HEAD reads the fast-forwarded main as not behind origin.
+# ---- caseM11-M14: the mirror refresh (install.sh mirror_refresh). A mirror whose main moved off mirrorSha without a local commit
+# holds nothing to keep, so the refresh must go ahead. A mirror with real local commits on main is kept, and its WARN counts
+# them. The mirror is a depth-1 clone, as install.sh makes it, so a depth-1 FETCH_HEAD holds no history under it:
+# m11_trap_check shows that a naive ancestor check against FETCH_HEAD reads the fast-forwarded main as not behind origin.
 # A setup returns 1 with fix_why set on a fixture fault. It runs without a subshell, so it sets the globals the cases read.
 
 # advance_dated FX NAME DATE: advance_github_fixture, with the new commit's committer date set to DATE (git's ISO 8601 form). The
-# variable is set for that one call, so every later commit keeps its own date. The mirror's window reads committer dates.
+# variable is set for that one call, so every later commit keeps its own date. The refresh never reads these dates; a case sets
+# one to a skewed value to show that.
 advance_dated() {
   GIT_COMMITTER_DATE="$3"; export GIT_COMMITTER_DATE
   advance_github_fixture "$1" "$2" claudemd
   unset GIT_COMMITTER_DATE
 }
 
-# mirror_first_install NAME [DATE]: move_fixture NAME, a session checkout on branch lane (so the first install makes the mirror, as
-# caseM8 does), and that first cloud install. Sets mirror, co_branch and co_head. The mirror must be a shallow clone at
-# origin's main, with mirrorSha set to it. With DATE, origin's main first moves to one commit committed at DATE, and that
-# commit is the main the mirror is cloned at (want is set to it).
+# mirror_first_install NAME: move_fixture NAME, a session checkout on branch lane (so the first install makes the mirror, as
+# caseM8 does), and that first cloud install. Sets mirror, want, co_branch and co_head. The mirror must be a shallow clone at
+# origin's main, with mirrorSha set to it.
 mirror_first_install() {
   move_fixture "$1"
-  if [ -n "${2:-}" ]; then advance_dated "$fx" "$1-first" "$2"; want=$(fixture_sha "$fx"); fi
   git -C "$co" checkout -q -b lane
   co_branch=$(git -C "$co" symbolic-ref -q HEAD); co_head=$(git -C "$co" rev-parse HEAD)
   move_install
@@ -5326,20 +5324,28 @@ mirror_first_install() {
   return 0
 }
 
-# mirror_ff_setup NAME: mirror_first_install, then origin's main moves to a1, and the mirror's main fast-forwards to it with no
-# local commit, as the SessionStart hook moves it (a full fetch of origin's main, then --ff-only). Then origin moves three more
-# commits, one a merge, to want. The mirror's main is a1 and mirrorSha stays at the first install's commit.
-mirror_ff_setup() {
-  mirror_first_install "$1" || return 1
-  first_sha=$(git -C "$mirror" config --get claude-settings.mirrorSha)
-  advance_github_fixture "$fx" a1 claudemd
-  a1=$(fixture_sha "$fx")
+# mirror_ff_to_origin NEW: fetch origin's main into the mirror, then fast-forward the mirror's main to NEW with no local commit. That
+# moves main off mirrorSha without a local commit, and mirrorSha must stay where it was. Reads mirror and h. Returns 1 with
+# fix_why set on a fixture fault.
+mirror_ff_to_origin() {
+  ff_before=$(git -C "$mirror" config --get claude-settings.mirrorSha)
   if ! HOME="$h" git -C "$mirror" fetch -q origin main; then fix_why="the full fetch of origin's main into the mirror failed"; return 1; fi
   if ! HOME="$h" git -C "$mirror" merge -q --ff-only origin/main; then fix_why="the --ff-only merge into the mirror's main failed"; return 1; fi
-  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$a1" ]; then
-    fix_why="the mirror main is [$(git -C "$mirror" rev-parse HEAD)], not a1 [$a1]"; return 1
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$1" ]; then
+    fix_why="the mirror main is [$(git -C "$mirror" rev-parse HEAD)], not [$1]"; return 1
   fi
-  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$first_sha" ]; then fix_why="the fast-forward moved mirrorSha"; return 1; fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$ff_before" ]; then fix_why="the fast-forward moved mirrorSha"; return 1; fi
+  return 0
+}
+
+# mirror_ff_setup NAME: mirror_first_install, then origin's main moves to a1, and the mirror's main moves to a1 with no local
+# commit. Then origin moves three more commits, one a merge, to want. The mirror's main is a1 and mirrorSha stays at the first
+# install's commit.
+mirror_ff_setup() {
+  mirror_first_install "$1" || return 1
+  advance_github_fixture "$fx" a1 claudemd
+  a1=$(fixture_sha "$fx")
+  mirror_ff_to_origin "$a1" || return 1
   advance_github_fixture "$fx" a2 claudemd
   advance_github_fixture "$fx" a3 merge
   advance_github_fixture "$fx" a4 claudemd
@@ -5450,40 +5456,36 @@ caseM14() {
   ok "$name"
 }
 
-# caseM15 and caseM16: the refresh's window starts a day before the mirror's main F, by F's committer date. Origin's history is
-# F, L, C, T in parent order, so F is a true ancestor of the tip T. F is dated 20 Oct and L 1 Nov, later than F. The walk
-# from T stops at a commit dated before the window's start. caseM15 has C, clock-skewed, dated 1 Oct, before that start, so
-# the window fetch never reaches F: the refresh reads F as local commits and keeps the mirror. caseM16 is the control: C is dated
-# 25 Oct, inside the window, and the same refresh goes ahead.
+# caseM15 and caseM16: the full-history check never reads commit dates. Origin's history is F, L, C, T in parent order. The mirror's
+# main is F, moved off mirrorSha without a local commit, so the refresh must run the full-history check. F is dated 20 Oct and
+# L 1 Nov. caseM15 has C, clock-skewed, dated 1 Oct, before F: the check must still find F on origin's history. caseM16 is the
+# control: C is dated 25 Oct, after F.
 
-# mirror_window_setup NAME C_DATE: mirror_first_install NAME with F dated 20 Oct, then origin's main gains L (dated 1 Nov), C
-# (dated C_DATE) and the tip T (dated 2 Nov). Sets mirror, want (T), mw_f, mw_c and mw_l (the shas of F, C and L), and the
-# committer dates mw_fd, mw_cd and mw_ld. Returns 1 with fix_why set on a fixture fault.
-mirror_window_setup() {
-  mirror_first_install "$1" 2026-10-20T12:00:00Z || return 1
-  mw_f=$(git -C "$mirror" rev-parse HEAD)
+# mirror_skew_setup NAME C_DATE: mirror_first_install NAME, then origin's main gains F (dated 20 Oct), and the mirror's main moves
+# to F with no local commit. Origin's main then gains L (dated 1 Nov), C (dated C_DATE) and the tip T (dated 2 Nov). Sets mirror,
+# want (T), mw_f and mw_c (the shas of F and C), and the committer dates mw_fd and mw_cd. Returns 1 with fix_why set on a fixture
+# fault.
+mirror_skew_setup() {
+  mirror_first_install "$1" || return 1
+  advance_dated "$fx" "$1-f" 2026-10-20T12:00:00Z
+  mw_f=$(fixture_sha "$fx")
+  mirror_ff_to_origin "$mw_f" || return 1
   advance_dated "$fx" "$1-late" 2026-11-01T12:00:00Z
   advance_dated "$fx" "$1-skew" "$2"
   advance_dated "$fx" "$1-tip" 2026-11-02T12:00:00Z
   want=$(fixture_sha "$fx")
   mw_c=$(git -C "$fx/bare.git" rev-parse "$want~1")
-  mw_l=$(git -C "$fx/bare.git" rev-parse "$want~2")
   if [ "$(git -C "$fx/bare.git" rev-parse "$want~3")" != "$mw_f" ]; then
     fix_why="origin's history is not F, L, C, T in parent order"; return 1
   fi
-  if ! git -C "$fx/bare.git" merge-base --is-ancestor "$mw_f" "$want"; then
-    fix_why="F [$mw_f] is not an ancestor of origin's tip [$want]"; return 1
-  fi
   mw_fd=$(git -C "$fx/bare.git" log -1 --format=%ct "$mw_f")
   mw_cd=$(git -C "$fx/bare.git" log -1 --format=%ct "$mw_c")
-  mw_ld=$(git -C "$fx/bare.git" log -1 --format=%ct "$mw_l")
-  if [ "$mw_ld" -le "$mw_fd" ]; then fix_why="L [$mw_l] is not later-dated than F [$mw_f]"; return 1; fi
   return 0
 }
 
-# window_refresh_problem: prints why the last install did not refresh the mirror to want, or nothing when it did. Reads rc, out,
+# refresh_problem: prints why the last install did not refresh the mirror to want, or nothing when it did. Reads rc, out,
 # mirror and want. The first failing check is the one printed.
-window_refresh_problem() {
+refresh_problem() {
   if [ "$rc" -ne 0 ]; then printf 'install.sh exited %s: %s' "$rc" "$(install_problems)"; return; fi
   wl=$(printf '%s\n' "$out" | grep -F "$mirror" | grep 'local commits')
   if [ -n "$wl" ]; then printf 'a WARN says the mirror holds local commits, though it holds none that origin lacks: %s' "$wl"; return; fi
@@ -5497,31 +5499,37 @@ window_refresh_problem() {
   if [ -n "$mm" ]; then printf '%s' "$mm"; fi
 }
 
-# caseM15: the commit between F and the tip is clock-skewed, dated before the window's start, so the refresh must not read F as
-# local commits: the mirror is refreshed to the tip with no such WARN.
+# caseM15: the commit between main and the tip is clock-skewed, dated before main. The full-history check finds main on origin's
+# history, so the mirror is refreshed to the tip with no WARN.
 caseM15() {
-  name="caseM15: a mirror whose main is an ancestor of origin's tip, with a clock-skewed commit between them dated before the refresh window, is refreshed to the tip with no WARN"
+  name="caseM15: a mirror whose main is behind origin's tip by a clock-skewed commit dated before main is refreshed to the tip by the full-history check, with no WARN"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
-  if ! mirror_window_setup m15 2026-10-01T12:00:00Z; then bad "$name" "FIXTURE $fix_why"; return; fi
-  if [ "$mw_cd" -ge $((mw_fd - 86400)) ]; then
-    bad "$name" "FIXTURE the skewed commit [$mw_c] is not dated before the window's start (F's date minus a day)"; return
+  if ! mirror_skew_setup m15 2026-10-01T12:00:00Z; then bad "$name" "FIXTURE $fix_why"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" = "$(git -C "$mirror" config --get claude-settings.mirrorSha)" ]; then
+    bad "$name" "FIXTURE the mirror's main is at mirrorSha, so the full-history check is not reached"; return
+  fi
+  if [ "$mw_cd" -ge "$mw_fd" ]; then
+    bad "$name" "FIXTURE the skewed commit [$mw_c] is not dated before main [$mw_f]"; return
   fi
   move_install
-  why=$(window_refresh_problem)
+  why=$(refresh_problem)
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
 }
 
-# caseM16 (control): the same mirror with the commit between F and the tip dated inside the window. The refresh goes ahead, so
-# caseM15 fails on the date and not on the fixture's shape.
+# caseM16 (control): the same mirror with the commit between main and the tip dated after main. The refresh goes ahead, so
+# caseM15 fails on the skewed date and not on the fixture's shape.
 caseM16() {
-  name="caseM16 (control): the same mirror with the commit between F and the tip dated inside the refresh window is refreshed to the tip with no WARN"
+  name="caseM16 (control): the same mirror with the commit between main and the tip dated after main is refreshed to the tip by the full-history check, with no WARN"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
-  if ! mirror_window_setup m16 2026-10-25T12:00:00Z; then bad "$name" "FIXTURE $fix_why"; return; fi
-  if [ "$mw_cd" -lt $((mw_fd - 86400)) ]; then
-    bad "$name" "FIXTURE the commit between F and the tip [$mw_c] is dated before the window's start, so this control is the trap"; return
+  if ! mirror_skew_setup m16 2026-10-25T12:00:00Z; then bad "$name" "FIXTURE $fix_why"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" = "$(git -C "$mirror" config --get claude-settings.mirrorSha)" ]; then
+    bad "$name" "FIXTURE the mirror's main is at mirrorSha, so the full-history check is not reached"; return
+  fi
+  if [ "$mw_cd" -le "$mw_fd" ]; then
+    bad "$name" "FIXTURE the commit between main and the tip [$mw_c] is not dated after main, so this control is the trap"; return
   fi
   move_install
-  why=$(window_refresh_problem)
+  why=$(refresh_problem)
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
 }
 
