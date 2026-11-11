@@ -425,6 +425,12 @@ MUTATIONS = [
      '(unreadable or reach) and main()',
      '(unreadable or reach) and True', "guard",
      'glob refspec refs/heads/*:refs/heads/* to a local-path origin with local main ahead'),
+    # Against the fixed text: git's `*` matches an empty name, so the reach test takes `>=`. The anchor is the whole
+    # comparison, since a bare `>=` occurs on other lines. Its killer is the lane row that names main with `main*`.
+    ("push-all-main: a glob whose star matches an empty name is not read as reaching main",
+     'len(full) >= len(target_pre) + len(target_suf)',
+     'len(full) > len(target_pre) + len(target_suf)', "guard",
+     'glob refspec refs/heads/main*:refs/heads/main* from a lane checkout'),
     ("push-all-main: a matching tracking ref is refused",
      'shas.get("refs/remotes/" + remote + "/" + name) != shas[source]',
      'shas.get("refs/remotes/" + remote + "/" + name) == shas[source]', "guard",
