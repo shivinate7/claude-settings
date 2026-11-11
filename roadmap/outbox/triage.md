@@ -628,3 +628,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - 2026-11-10 17:31 CST: lane lint on #2563 (f744895fd) blamed a clash with #2573's head in lint/report_guard.py and merge/test_merge.py. #2573 touches neither: #2563 lacks main (base a8a9fcdd5) and conflicts with main there. The cross-PR merge-tree names a PR when the clash is with main. Ties to the 17:11 note: the main merge-tree read is missing or comes after the cross-PR one.
 
 - 2026-11-10 18:11 CST (#2563 fix check, notes): lint/report_guard.py:2582 comment and lint/test_report_guard_review.py:15 docstring still say review_state; the function is live_review_state.
+
+- note (2026-11-10 18:45 CST, #2559 ask-phase-out round 3 reviewer sonnet): docs/design/ask-phase-out-notes.md:22 reads "Gain: the owner's grant". The Gain is the owner's own Mark read, not a grant (GLOSSARY.md:51, grant = leave to do an act). Reword at the next edit of that file. Low, doc only.
