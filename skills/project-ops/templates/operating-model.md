@@ -58,7 +58,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
   fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  batches each PR whose review record is done, as `merge --reviewed` finds it at its wake. It merges
+  batches each PR whose review log is done, as `merge --reviewed` finds it at its wake. It merges
   the integration PR on green. It asks the owner for no merge. It prints the merge output on the
   terminal, never to a log only. It dispatches no deferred step.
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.

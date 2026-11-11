@@ -13,7 +13,7 @@ Source: `waiting/items/builder-probe-round-4.json` on the roadmap branch. That g
 
 Owner, 2026-11-10 14:07 CST, typed in the retrospective session. The coordinator relayed it at 14:08 CST. Words: "i agree on letting it survive a clean merge where batch ci sees the problem rather than asecond review i agree it shd be mechanical tooo"
 
-- A clean merge of main keeps a review record valid. The merge tool proves the merge mechanically.
+- A clean merge of main keeps a review log valid. The merge tool proves the merge mechanically.
 - Batch CI catches what the merge breaks.
 - A conflicted merge after a PASS fix check takes one more fix check (a fix after a merge of main).
 - Any other difference keeps today's rules.
