@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 10:05 CST. The owner's list closed at 18:43 CST; R21 to R26 came after.
+the history. Last rewrite: 2026-11-11 10:18 CST. The owner's list closed at 18:43 CST; R21 to R27 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -277,6 +277,19 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   Cause that led here: the feedback-log hook writes a message heading without telling the session, so
   it wrote a second one twice (step inbox-dup-heading-merge). Home: CLAUDE.md
   building-mistake-names-its-guard; decision guard-remedy-not-to-owner.
+- **R27. The feedback log tends itself.** Owner 10:16 CST Nov 11: "this should've been a trigger for
+  something that should've been mechanizable remember, we can't have sesisons fualting themselves for
+  something that could bve cvorrected?" and "it seems like basically this was a good idea but it's
+  execution was a little half baked in that it's never cleaned up after or tended to?". Case: the Stop
+  check asked this session to keep 17 settled items in its handoff. Its remedy named only "put them in
+  the handoff", never "mark [closed]". So the session copied ids to pass the check. Measured 10:17 CST in
+  this session's log: 126 items, 57 rulings and 9 standing items still open, none closed by a tool.
+  1. A ruling or task item closes itself when its home holds it on main. The Stop check already proves
+     the home; it marks the line [closed] in the same rewrite that marks repeats.
+  2. Each refusal of the check names [closed] as a way out, beside the handoff (R24).
+  3. The compaction reminder lists only items that still need work.
+  4. Owner words that reach a session by the question box or by relay are saved like a typed message.
+  Home: decision owner-feedback-inbox. Runs with R16, which files a told mistake as a missing guard.
 - **R20. A pass claim needs a verdict line.** Owner 17:17 CST Nov 10, quoting a session: "I told you
   several earlier lane lint runs "passed". They did not. Every run exited 1, and I misread my own echo
   exit code as the lint's"; 18:36 CST: "yes". Rule tokens-run-through-verdict is enforced by nothing on
