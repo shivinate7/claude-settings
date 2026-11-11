@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 09:13 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
+the history. Last rewrite: 2026-11-11 09:16 CST. The owner's list closed at 18:43 CST; R21 to R24 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -240,6 +240,9 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   Owner 09:12 CST Nov 11, in the coordinator's chat: "q2 B" (take #1805 out of the drain; both go to
   stage 3). Alone, #1805 wrongly refuses 136 of 204 ordinary coordinator messages; with #1849, 13 of 204
   (#1849's round 3).
+- **R24. Every refusal names a way out that works.** Owner 09:16 CST Nov 11, in the coordinator's chat:
+  "yes file it for stage 3". Every guard refusal and ask names an allowed way out, and a test proves each
+  named way out passes the guard. Step refusal-names-way-out. Runs beside the cull.
 - **R16. A mistake is filed as a missing guard, by a hook.** Owner 16:22 CST Nov 10: "i thought i've
   already set something really high up in claude.md or elsewhere that sessions/agents should never
   assume an error is their own and instead should strongly be raised awareness that any error they make
