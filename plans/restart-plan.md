@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:18 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:19 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -355,7 +355,9 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   2. A test case's body differs from both parents' versions.
   3. A skip or expected-fail mark, or a changed assertion, that neither parent had.
   4. New test content that neither parent had. That stays a test-author's work.
-  5. A change to test config or a mutation test beyond one parent's version.
+  5. A change to test config beyond one parent's version, or any change to a mutation test. Page
+     item 447 a (owner 2026-11-08 17:19 CST) stands: a merge that conflicts in a mutation test
+     still goes to a test-author.
   Each case is shown red on a dropped or weakened test before the route opens. Until then the old route
   stays. It changes a guard, so the rounds and the net-value rule apply. Home: decision
   builders-cannot-edit-tests, rewritten in place.
@@ -404,7 +406,9 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   "may an override travel by relay?": "q1 -- yes". A relay counts only in R18 point 5's form: his exact
   words, their time, and the one session and act they cover, checked against the sender's feedback log.
   The receiving session prints the same receipt line. Until R18 point 5's check is built (stage 4), only
-  his typed words and a page save grant an override.
+  his typed words and a page save grant an override. This changes decision owner-override's sentence
+  "An override covers only the session where the owner typed it": a relay in that form reaches the
+  one session it names.
 
 ### 3.12 A lane never stalls on a popup
 
