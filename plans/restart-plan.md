@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 12:37 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
+the history. Last rewrite: 2026-11-11 12:40 CST. The owner's list closed at 18:43 CST; R21 to R35 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -611,6 +611,18 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, never `/autocompact` (decision precompact-handoff, rule 1,
   coordinator pick 2026-11-01 17:45). Decision idle-resume-compacts, which lists `/autocompact` as a
   cloud lever, is rewritten to match. Home: decision precompact-handoff, rule 1.
+
+- **R35. The global CLAUDE.md loads only what each session needs.** Owner 12:38 CST Nov 11: "im
+  wondering whether i properly keep claude.md's just at the repo level and claude-settings level as its
+  parent and no where further". Read 12:39 CST: the levels are right (global, repo, path-scoped rules
+  in .claude/rules). The global file holds 3,890 words on every turn of every repo, and its size check
+  counts lines (108 of 200), not words. Owner 12:40 CST: "yes that's fine it would need my sign off (the
+  actual results of the review) but just marking it as an item for review is good to dos onow".
+  1. A read-only audit maps each global section to the repos and session roles where it matters.
+  2. The owner signs off the results before any section moves.
+  3. A lane moves the signed-off sections to path-scoped rules or skills, and the size check counts
+     words too.
+  Home: lint/check_claude_md_size.py; rule tokens-folder-rules-load-by-path.
 
 ## Stage 4. Make the roadmap and triage mechanical
 
