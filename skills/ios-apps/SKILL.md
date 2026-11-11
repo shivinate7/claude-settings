@@ -38,7 +38,7 @@ this repo (the `compliance-check` skill runs it). A row checked by hand is read 
 | `ui-test` | the UI tests on the shared simulator, through `sim-test` (roadmap step c89, one shared simulator tool; it fails until c89 lands on main) | Mac |
 | `native-check` | all four checks above, once per batch | Mac |
 | `phone` | `ios-ship install`: a Release build on the phone | Mac |
-| `testflight` | `ios-ship testflight`: archive and upload | Mac |
+| `testflight` | `ios-ship testflight`: archive and upload; `--export-only [--method debugging\|release-testing]` exports an .ipa | Mac |
 
 ## Folding the iPhone Duo simulator
 

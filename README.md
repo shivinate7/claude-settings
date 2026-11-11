@@ -148,6 +148,28 @@ merge --reviewed        one line per open PR that has a review record comment: i
 merge --reviewed --root DIR [--root DIR ...]
                         the same list for each repo checkout DIR, one block each, then one batch line per repo:
                         `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
+merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
+                        one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
+                        failing lines of that run's failed jobs for the cases (and the files of a pytest or unittest line; a run by path logs
+                        `__main__.Class.name`, so its file is best-effort). No lock, no merge, no post. No match prints the clear line only
+                        when every read succeeded and nothing is unknown. Unknown, exit 1, never clear. A failed read prints only `unknown`; the other causes list the matches too:
+                        - a failed read;
+                        - a --run whose failing lines give no case and no file at all;
+                        - a --run with a failed job whose own log gives no case and no file, an empty log too (the all-jobs-passed rollup is skipped);
+                        - a --run with a failed job that has a failing line naming no case or file (a unittest summary line apart);
+                        - a --run with a job that is not success, skipped, neutral or failure, such as timed out, cancelled or still running;
+                        - a PR with a patch-less changed file, only while a case is queried and that PR has no match.
+                        --file alone is fine beside a patch-less file. An empty value is a usage error.
+                        Limits. A case matches only when its text sits whole in one `+` line; a case a --run names also matches a context line. A name built from pieces or with escapes never matches.
+                        A --case matches a context line only when a --run names the same case. --file finds a fix elsewhere, in guard or product code or far from the case line. --run finds it only when a failing line names its file, or the case name is on an added line or in the patch's context lines. --file is an exact path after normpath.
+                        It finds no rename's previous name, no directory and no backslash path. A reason that spans lines may leave `  (note` in the case.
+                        Cost: API reads only. The pull list, one call per page of 100. One files read (its pages) per open PR.
+                        For --run, the jobs read, one call per page of 100, and one log read per failed job but the rollup.
+merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
+                        one line per PR before it goes to a batch: `#N PASS`, or `#N FAIL: reasons`. Checks: open, review record done at the
+                        live head and unedited, lint verdict given for the live head (SHA a full lowercase 40-hex; a PASS on UNKNOWN-AT-CAP
+                        reads `#N PASS (lint unknown at cap)`) and not FAIL, clean merge with the base, and a stacked base's PR in the call
+                        and passing. A check that cannot run is a FAIL, so a missing line is never a pass. Exit 0 only when all PASS.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
@@ -265,10 +287,12 @@ in all three is refused, and the refusal names both files and the variable. The 
 The app repos need no wrapper script. `install` refuses `PHONE_APPS_JSON` (exit 2): use `--app` and
 `tools/ios-ship.json`.
 
-* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only]` archives each app as Release and uploads it to TestFlight.
+* `ios-ship testflight [CONFIG] [--app NAME]... [--export-only [--method debugging|release-testing]]` archives each app as Release and uploads it to TestFlight.
   It refuses unless the tree is clean and HEAD is `origin/main`, just fetched. All apps share one build number. It
   stops at the first app that fails, and prints one verdict line. `--export-only` skips the main check, exports the
   `.ipa` files to a folder it prints, and deletes the `.ipa` of each app that has `copy_in`.
+  `--method` sets the export method: `debugging` for a development `.ipa`, `release-testing` for a release `.ipa` for registered devices. The default is
+  `app-store-connect`. It is refused without `--export-only`.
 * `ios-ship install [CONFIG] [--app NAME]... [--no-install] [--debug] [--force]` builds each app in its own clone under
   `~/Library/Application Support/ios-adblock-reinstall` and installs it on the phone. One app's failure does not stop
   the others. Exit 75 means that the phone was not reachable. `--no-install` stops after a build for generic iOS.
@@ -294,8 +318,8 @@ On its own boot it first takes the role's lease from `bin/sim-lease`, the Mac-wi
 ## Session tiers and a roadmap record for a repo
 
 The `project-ops` skill packages how the claude-settings project on claude.ai runs. It holds the
-session tiers (a coordinator that starts triage and the batch runner, then lane sessions), one roster,
-rotation of the standing sessions, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
+session roles (a coordinator that starts triage and the batch runner, then lanes), one roster,
+rotation of a standing session that goes stale or breaks, and autopilot deferral. It also holds a record branch for the roadmap data, briefs and role handoff notes. Its
 `scripts/scaffold.py` writes the record-branch skeleton. Its `templates/` hold the operating model,
 the roster, a brief and a role handoff note. A repo adopts it only on the owner's grant. See
 `skills/project-ops/SKILL.md`.

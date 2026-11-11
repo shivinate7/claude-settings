@@ -5,12 +5,14 @@ Other files reach these names through `guard`.
 """
 import fnmatch
 import re
+import shlex
 import warnings
 
 from guard_core import (
-    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, FIND_EXEC_ACTIONS, INTERPRETER_HEREDOC, POWERSHELL_CALL,
-    REDIRECT, SHELL_HEREDOC, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs,
-    _without_message_values, is_powershell, norm, segment_tokens, split_segments,
+    ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, FIND_EXEC_ACTIONS, INTERPRETER_HEREDOC, NODE_WORDS,
+    POWERSHELL_CALL, PYTHON_WORDS, REDIRECT, SHELL_HEREDOC, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE,
+    _interpreter_command, _split_heredocs, _walk_heredocs, _without_message_values, is_powershell, norm,
+    script_language, segment_tokens, split_segments,
 )
 
 
@@ -481,6 +483,195 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
     return done, False
 
 
+# ------------------------------------------------------------------ a script's shell spots
+#
+# A python, node, perl or ruby script is text to the shell that starts it. It reaches a shell only where it
+# hands a string to one: a call such as os.system or subprocess.run, and in perl and ruby a backtick span,
+# `qx(...)` or `%x(...)`. `script_spots` gives the shell text of those spots. Every other string of the
+# script is data, so a `$(...)` or a backtick in it runs nothing.
+_SPOT_CALLS = {
+    "py": r"(?<![\w.])(?:os\s*\.\s*(?:system|popen|exec\w*|spawn\w*|posix_spawn\w*)|subprocess\s*\.\s*\w+"
+          r"|Popen|check_output|check_call|getoutput|getstatusoutput)",
+    "js": r"(?:(?<![\w$.])|(?<=\)\.)|(?<=\w\.))(?:execSync|execFileSync|spawnSync|execFile|spawn)"
+          r"|(?:(?<![\w$.])|(?<=child_process\.)|(?<=cp\.)|(?<=\)\.))exec",
+    "ruby": r"(?<![\w.$@:])(?:system|exec|spawn)(?!\w)"
+            r"|(?<![\w.])(?:IO\s*\.\s*popen|Open3\s*\.\s*\w+|Kernel\s*\.\s*(?:system|exec|spawn))",
+    "perl": r"(?<![\w.$@:>])(?:system|exec)(?!\w)",
+}
+# A call's name, then its open paren; perl and ruby also take a quote after a space (`system "cmd"`).
+_SPOT_PAREN = r"\s*\("
+_SPOT_BARE = r"|[ \t]+(?=['\"])"
+_KEYWORD_ARG = re.compile(r"\s*(?:\*\*)?[A-Za-z_]\w*\s*(?:=(?!=)|:(?!:))")
+_BRACKETS = {"(": ")", "{": "}", "[": "]", "<": ">"}
+_COMMAND_OPEN = re.compile(r"(?:\bqx|%x)[ \t]*([^\w\s])")
+# An argument whose shell text can be told: one string, or a bracket list of strings, with no interpolation.
+_STRING = r"""'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`"""
+_STRINGS = re.compile(r"\[\s*(?:(?:" + _STRING + r")\s*(?:,\s*(?:" + _STRING + r")\s*)*,?\s*)?\]|" + _STRING)
+_INTERPOLATION = {"js": r"\$\{", "perl": r"[$@]", "ruby": r"#\{"}
+# Node reaches a shell through child_process. A name bound to it is read only as `name.call(`.
+_JS_CALLS = r"(?:execSync|execFileSync|spawnSync|execFile|spawn|exec)"
+_JS_MODULE = r"""require\s*\(\s*(?P<quote>['"`])(?:node:)?child_process(?P=quote)\s*\)"""
+_JS_BIND = re.compile(r"(?<![\w$.])(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*" + _JS_MODULE + r"\s*(?=[;\n]|$)")
+_JS_DIRECT = re.compile(_JS_MODULE + r"\." + _JS_CALLS + r"\s*\(")
+
+
+def _call_args(script: str, at: int, parens: bool):
+    """The arguments of the call that starts at `at`, split at the commas outside quotes and brackets. A call
+    with parens ends at its own close paren, one without at the end of its statement."""
+    args, depth, quote, start, i = [], 0, "", at, at
+    while i < len(script):
+        char = script[i]
+        if quote:
+            if char == "\\":
+                i += 2
+                continue
+            quote = "" if char == quote else quote
+        elif char in "'\"`":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                break
+            depth -= 1
+        elif char == "," and depth == 0:
+            args.append(script[start:i])
+            start = i + 1
+        elif not parens and depth == 0 and char in ";\n":
+            break
+        i += 1
+    return args + [script[start:i]]
+
+
+def _command_spans(script: str):
+    """The commands inside the backtick pairs, `qx(...)` and `%x(...)` of a perl or ruby script. The span
+    of `qx` and `%x` ends at the bracket that closes the opener (nested pairs count), or at the same
+    character again for a delimiter that is no bracket."""
+    out = [found.group(1) for found in re.finditer(r"`([^`]*)`", script)]
+    at = 0
+    for opener in _COMMAND_OPEN.finditer(script):
+        if opener.start() < at:
+            continue   # inside the span of an earlier one
+        open_char = opener.group(1)
+        close_char = _BRACKETS.get(open_char, open_char)
+        depth, end = 1, opener.end()
+        while end < len(script) and depth:
+            depth += (script[end] == open_char != close_char) - (script[end] == close_char)
+            end += 1
+        if depth == 0:
+            out.append(script[opener.end():end - 1])
+        at = end
+    return out
+
+
+def _literal_arg(arg: str, lang: str) -> bool:
+    """True when the argument is one string or a bracket list of strings whose text the language does not fill
+    in: a js template with `${`, a perl string in double quotes or backticks with `$` or `@`, or a ruby one
+    with `#{`. A variable, a concatenation or a call is no literal."""
+    if not _STRINGS.fullmatch(arg):
+        return False
+    return not any(each[0] != "'" and (lang != "js" or each[0] == "`") and re.search(_INTERPOLATION[lang], each)
+                   for each in re.findall(_STRING, arg))
+
+
+def _js_module_names(script: str):
+    """The names a node script binds to child_process (`const cp = require('child_process')`), or None when it
+    names the module any other way: a destructured or imported name, a call held in a variable or handed on,
+    or a name used other than as `name.call(`. Those calls cannot be told."""
+    names, told = [], [found.span() for found in _JS_DIRECT.finditer(script)]
+    for bind in _JS_BIND.finditer(script):
+        names.append(bind.group(1))
+        told.append(bind.span())
+    for name in names:
+        for use in re.finditer(r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])", script):
+            if any(start <= use.start() < end for start, end in told):
+                continue
+            call = re.compile(re.escape(name) + r"\." + _JS_CALLS + r"\s*\(").match(script, use.start())
+            if not call:
+                return None
+            told.append(call.span())
+    for mention in re.finditer("child_process", script):
+        if not any(start <= mention.start() < end for start, end in told):
+            return None
+    return names
+
+
+def script_spots(script: str, lang: str = ""):
+    """The shell text of each spot of a script where it hands a string to a shell: the call text of each shell
+    call, and the command of each perl or ruby backtick span, `qx` and `%x`. `lang` is "py", "js", "perl" or
+    "ruby", or '' for a script of unknown language (every language is tried). Python is read with `ast`
+    (`guard_frozen.py_spots`): an alias resolves, a comment and a plain string are text, and a script it cannot
+    tell reads whole. In the other languages, a call whose arguments hold no quote, a variable handed to a
+    shell, reads the whole script: the string it holds cannot be told. So does a node script that names
+    child_process other than as `name.call(` (`_js_module_names`)."""
+    langs = [lang] if lang else list(_SPOT_CALLS)
+    out = []
+    if lang in ("", "py"):
+        from guard_frozen import py_spots   # the home of the ast reading; it imports this module
+        try:
+            found = py_spots(script)
+        except (SyntaxError, ValueError):
+            pass   # python runs no line of it, so the pattern reader below only tries a literal name
+        else:
+            if found is None:
+                return [script]
+            out += found
+            langs = [each for each in langs if each != "py"]
+    for each in langs:
+        calls = _SPOT_CALLS[each]
+        if each == "js":
+            names = _js_module_names(script)
+            if names is None:
+                return _whole_script(script, each)
+            calls += "".join(r"|(?<=(?<![\w$.])" + re.escape(name) + r"\.)exec" for name in names)
+        tail = _SPOT_PAREN + (_SPOT_BARE if each in ("perl", "ruby") else "")
+        for call in re.finditer("(?:" + calls + ")(?:" + tail + ")", script):
+            parens = call.group(0).rstrip().endswith("(")
+            args = [arg.strip() for arg in _call_args(script, call.end(), parens)
+                    if arg.strip() and not _KEYWORD_ARG.match(arg) and not arg.lstrip().startswith("{")]
+            if not any(mark in arg for arg in args for mark in "'\"`") or (
+                    each != "py" and not all(_literal_arg(arg, each) for arg in args)):
+                return _whole_script(script, each)
+            out.append(re.sub(r"\s*\($", "", call.group(0).rstrip()) + "(" + ", ".join(args) + ")")
+    if lang in ("", "perl", "ruby"):
+        out += _command_spans(script)
+    return out
+
+
+def _whole_script(script: str, lang: str):
+    """The shell texts that stand for a script whose shell spots cannot be told: the script, and for js each
+    of its string literals as the target of a write (`tee`). A node script joins a path into a command with
+    `+`, so the path sits in a literal beside the call, and the script as shell text names it nowhere a write
+    reads. This refuses more, never less."""
+    if lang != "js":
+        return [script]
+    return [script] + ["tee " + shlex.quote(text) for text in (
+        found.group(0)[1:-1] for found in re.finditer(_STRING, script)) if text.strip()]
+
+
+def _elide_substitutions(text: str) -> str:
+    """The text with each closed `$(...)` and backtick pair written as `x`. In the string of a script they are
+    data. An unclosed one stays, so the words after it are still read."""
+    out, i = [], 0
+    while i < len(text):
+        if text.startswith("$(", i):
+            depth, end = 1, i + 2
+            while end < len(text) and depth:
+                depth += (text[end] == "(") - (text[end] == ")")
+                end += 1
+            if depth == 0:
+                out.append("x")
+                i = end
+                continue
+        elif text[i] == "`" and text.find("`", i + 1) >= 0:
+            out.append("x")
+            i = text.find("`", i + 1) + 1
+            continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
 def substitution_commands(raw: str, stripped: str, outer: bool = False):
     """The texts a shell runs INSIDE the command, each a command of its own: every `$(...)`, backtick
     and process substitution in `stripped`, plus those in an unquoted heredoc body of `raw`. A quoted
@@ -566,16 +757,165 @@ def env_reference(word: str) -> str:
 _ESCAPED_QUOTE = re.compile(r"""\\\\|\\['"]""")
 
 
+def _rewrite_interpreter_bodies(cmd: str, rewrite) -> str:
+    """Replace each python, node, perl or ruby heredoc body (no shell reads it) with
+    `rewrite(body, header, quoted)`. `quoted` is true for a quoted delimiter, where the shell expands nothing."""
+    own = []
+    bodies = _walk_heredocs(cmd, own_heads=own)[1]
+    for (quote, body, _), header in zip(bodies, own):   # each body is read by its own command
+        header = _without_message_values(header)
+        if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
+            cmd = cmd.replace(body, rewrite(body, header, bool(quote)), 1)
+    return cmd
+
+
 def _plain_escaped_quotes(cmd: str) -> str:
     """Write a backslash-escaped quote in the body of a python, node, perl or ruby heredoc as a plain
     character. Those languages read the backslash as an escape, but the word reader below does not:
     a `\\'` would flip its quote state, and the prose after it would read as bare shell words."""
     if "<<" not in cmd or "\\" not in cmd:
         return cmd
-    for _, body, header in _split_heredocs(cmd)[1]:
+    return _rewrite_interpreter_bodies(
+        cmd, lambda body, _header, _quoted: _ESCAPED_QUOTE.sub(
+            lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body))
+
+
+_PYTHON_HEADER = _interpreter_command(PYTHON_WORDS)
+_NODE_HEADER = _interpreter_command(NODE_WORDS)
+# A `//` line of a template literal ends at its line end, or sooner at the backtick or `${` that goes back to code.
+_TEMPLATE_PROSE_END = re.compile(r"\n|`|\$\{|\Z")
+
+
+def _is_prose_string(body: str, start: int, end: int) -> bool:
+    """True when the python triple-quoted string body[start:end] is prose and not a value code can use."""
+    text = body[start:end]
+    if " " in text or "\n" in text:
+        return True
+    line_start = body.rfind("\n", 0, start) + 1
+    line_end = body.find("\n", end)
+    line_end = len(body) if line_end < 0 else line_end
+    return not body[line_start:start].strip() and not body[end:line_end].strip()
+
+
+def _template_end(body: str, start: int) -> int:
+    """The index of the backtick that closes the template literal opened at body[start], or len(body)."""
+    j, n = start + 1, len(body)
+    while j < n and body[j] != "`":
+        if body.startswith("${", j):
+            j = _expression_end(body, j + 2)
+        else:
+            j += 2 if body[j] == "\\" else 1
+    return j
+
+
+def _expression_end(body: str, start: int) -> int:
+    """The index just past the `}` that closes the `${` expression whose text starts at `start`, or len(body).
+    A brace nests, a quote opens a string up to its mate on the line, and a backtick opens a nested template."""
+    j, n, depth = start, len(body), 1
+    while j < n:
+        char = body[j]
+        if char == "`":
+            j = _template_end(body, j) + 1
+            continue
+        if char in "'\"":
+            j += 1
+            while j < n and body[j] not in (char, "\n"):
+                j += 2 if body[j] == "\\" else 1
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if not depth:
+                return j + 1
+        j += 1
+    return n
+
+
+def _blank_code_prose(body: str, python: bool) -> str:
+    """Cut the comments, and the prose triple-quoted strings, out of a python or node body.
+
+    The word reader below reads a body as shell words. A comment or a docstring that names an env file
+    in prose then reads as a bare word, and an odd apostrophe in it flips the quote state for the code
+    after it. This reads the body with the language's own rules: a quote opens a string up to its
+    mate (a newline ends a single-line one), and a comment is found only outside a string.
+    A python triple-quoted string is cut only when it is prose: it stands alone on its line, as a
+    docstring does, or it holds a space or a newline. One with neither, such as `p = '''.env'''`, may
+    be a path that code goes on to open, so it stays as written. Every other string stays as
+    written, so a read of an env file there is still judged. A node template literal is left whole
+    except for a line that starts with `//`, which the prose case needs and which the reader can
+    only read as shell words. In node a `//` or `/*` right after a backslash is the end of an
+    escaped slash in a regex literal, not a comment, so it opens nothing.
+    """
+    out, i, n = [], 0, len(body)
+    while i < n:
+        char = body[i]
+        pair = body[i:i + 2]
+        if python and char == "#":
+            end = body.find("\n", i)
+            i = n if end < 0 else end
+        elif not python and pair == "//" and body[i - 1:i] != "\\":
+            end = body.find("\n", i)
+            i = n if end < 0 else end
+        elif not python and pair == "/*" and body[i - 1:i] != "\\":
+            end = body.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            out.append("\n" * body.count("\n", i, end))
+            i = end
+        elif python and body[i:i + 3] in ("'''", '"""'):
+            end = body.find(body[i:i + 3], i + 3)
+            end = n if end < 0 else end + 3
+            if _is_prose_string(body, i, end):
+                out.append("\n" * body.count("\n", i, end))
+                out.append('""')
+            else:
+                out.append(body[i:end])
+            i = end
+        elif char in "'\"" or (char == "`" and not python):
+            j = i + 1
+            while j < n and body[j] != char and (char == "`" or body[j] != "\n"):
+                if char == "`" and body.startswith("//", j) and not body[body.rfind("\n", i, j) + 1:j].strip():
+                    k = _TEMPLATE_PROSE_END.search(body, j).start()
+                    out.append(body[i:j])
+                    i, j = k, k
+                    continue
+                if char == "`" and body.startswith("${", j):
+                    j = _expression_end(body, j + 2)
+                    continue
+                j += 2 if body[j] == "\\" else 1
+            out.append(body[i:j + 1])
+            i = j + 1
+        else:
+            out.append(char)
+            i += 1
+    return "".join(out)
+
+
+def _blank_interpreter_prose(cmd: str) -> str:
+    """`_blank_code_prose` over each QUOTED-delimiter python or node heredoc body. An unquoted body is
+    expanded by the shell first, so a `$(...)` in what looks like a comment still runs: it stays whole."""
+    if "<<" not in cmd:
+        return cmd
+
+    def blank(body, header, quoted):
+        python = bool(_PYTHON_HEADER(header))
+        if not quoted or not (python or _NODE_HEADER(header)):
+            return body
+        return _blank_code_prose(body, python)
+    return _rewrite_interpreter_bodies(cmd, blank)
+
+
+def _script_bodies_as_text(cmd: str) -> str:
+    """Write the body of each QUOTED python, node, perl or ruby heredoc as the script it is: bash expands
+    nothing in it, so a `$(...)` or a backtick in one of its strings is data, and the body stands with those
+    spans written as `x`. Its shell spots (`script_spots`) follow as lines of their own, where a substitution
+    runs. Every other word of the body is still read as a shell word."""
+    if "<<" not in cmd:
+        return cmd
+    for quote, body, header in _split_heredocs(cmd)[1]:
         header = _without_message_values(header)
-        if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
-            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub(lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body), 1)
+        lang = script_language(header)
+        if quote and body and lang and not SHELL_HEREDOC(header):
+            cmd = cmd.replace(body, "\n".join([_elide_substitutions(body)] + script_spots(body, lang)), 1)
     return cmd
 
 
@@ -597,7 +937,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
     """
-    cmd = _plain_escaped_quotes(cmd)
+    cmd = _script_bodies_as_text(_blank_interpreter_prose(_plain_escaped_quotes(cmd)))
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH

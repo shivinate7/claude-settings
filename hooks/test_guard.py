@@ -93,6 +93,7 @@ GUARD_TESTS_MODES = ("", "windows-slice")
 FAMILIES = {
     "shared-tree": "stash, reset, restore, checkout and the subject read",
     "branch-worktree": "branch delete and worktree remove/prune",
+    "two-worktrees-one-branch": "a checkout, switch or worktree add that would take a branch another worktree of the clone holds is refused; the forms that take no such branch, and the holder's own checkout, pass",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "pointer-edit": "the pointer checkout's own files: a Write, Edit, MultiEdit or NotebookEdit into them is refused, naming EnterWorktree; its .git, a linked worktree, a target outside it, a stood-down pointer and the read tools pass",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
@@ -105,14 +106,18 @@ FAMILIES = {
     "push-delete": "push and delete",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
+    "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
     "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a single- or double-quoted value); a time in prose, another field or collection, or a value with no offset passes",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
+    "records-page-ready": "a ready pull request whose head holds a stale records page is refused, on the MCP draft:false call and on gh pr ready in each form; a current, non-default, claim-holding, behind-the-base, empty, undo, draft, title-only or non-merge-tool call is allowed; a read that cannot run, or an ancestry unknown in a shallow clone, is refused unknown, and the unknown reason names no --confirm",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
+    "octopus-push": "a git push whose range adds a merge commit of more than two parents is refused, with a two-parent remedy; a push that writes main keeps its push-main ask",
     "cite": "cite by id",
     "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
     "frozen": "frozen paths",
@@ -146,9 +151,11 @@ FAMILIES = {
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
+    "handoff-checked-stamp": "a write to a session handoff that restamps a premise's Checked value is refused without evidence in the session's transcript after its last compact boundary: the incident, the evidence forms, the boundary, the agent and handoff reads, the fail-open copies, the non-handoff files, and the cost",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
+    "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -234,9 +241,11 @@ TEMP_DIR = None
 
 
 def _family(name):
-    """The family a case or a log check takes: session-log and rm-var by name, else FAMILY."""
+    """The family a case or a log check takes: session-log and argv by prefix, rm-var by name, else FAMILY."""
     if name.startswith("session-log:"):
         return "session-log"
+    if name.startswith("argv:"):
+        return "argv"
     return "rm-var" if "rm-var" in name else FAMILY
 
 
@@ -807,6 +816,11 @@ PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
 PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is an agent-worktree branch name
+# The remedy a push-agent-branch refusal prints: the lane's own branch, by name. It never names the agent's
+# branch (rule git-remedy-never-names-target). A deny has no approval prompt, so its reason never offers one.
+PUSH_AGENT_REMEDY = "git push origin HEAD:<lane-branch>"
+PUSH_AGENT_LACKS = ("Approving the prompt", "push origin claude/agent-", "push origin worktree-agent-",
+                    "HEAD:claude/agent-", "HEAD:worktree-agent-")
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -867,6 +881,15 @@ WTCTRLFILE = os.path.join(ROOT, "wtctrlfile")        # a link, plus an untracked
 WTCTRLTRACKED = os.path.join(ROOT, "wtctrltracked")  # a link, plus a change to a tracked file
 WTCTRLDIR = os.path.join(ROOT, "wtctrldir")          # a real untracked node_modules directory with a file
 WTCTRLNESTED = os.path.join(ROOT, "wtctrlnested")    # a link inside an untracked real directory
+# two-worktrees-one-branch (section 1a below). TWBASE is the checkout on main, TWHOLD a linked
+# worktree on branch x, and TWACT the linked worktree that acts, on its own branch. TWLOGSHIM and
+# TWFAILSHIM are git stand-ins put on PATH: one logs each call it gets, the other fails the worktree
+# list read. Each name is a distinct folder, never a substring of another fixture's path.
+TWBASE = os.path.join(ROOT, "twobr-base")
+TWHOLD = os.path.join(ROOT, "twobr-holder")
+TWACT = os.path.join(ROOT, "twobr-actor")
+TWLOGSHIM = os.path.join(ROOT, "twobr-logshim")
+TWFAILSHIM = os.path.join(ROOT, "twobr-failshim")
 
 
 def slash(path):
@@ -1330,7 +1353,8 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None, repos=None, refs=(), tips=None):
+                 count_file=None, compares=None, repos=None, refs=(), tips=None, head_sha=None, head_ref=None,
+                 draft=False):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
@@ -1409,6 +1433,9 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "refs": list(refs),  # branch names the repo holds: the matching-refs read answers the ones under its prefix
         "tips": dict(tips or {}),  # branch name -> the sha of its tip; a branch not listed is at f * 40
     }
+    if head_sha:  # the pull request's own head, when a case names a real commit (records-page-ready); its draft flag too
+        state["pr"]["head"] = {"ref": head_ref or "feat", "sha": head_sha}
+        state["pr"]["draft"] = draft
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
     fake_py = os.path.join(folder, "ghfake.py")
@@ -3585,8 +3612,8 @@ chained_ask("per-file ask: two -C targets in one checkout, the lane by path then
 
 # FIVE SHAPES THAT RUN A PER-FILE DISCARD IN THE SHARED CHECKOUT. Each one points the discard at
 # the shared checkout while the shell, or a `-C` that names the lane, still reads as the lane. Each
-# verdict is the one each row below pins: deny for 1 to 4 (4 is a Set-Location move, read as a cd),
-# ask for 5 (main reads the lane for 5, so it asks and does not deny; the branch must not allow).
+# verdict is the one each row below pins: deny for all five (4 is a Set-Location move, read as a cd;
+# 5 is an env -C or --chdir, read as the run folder, so other-checkout denies it as it denies git -C).
 # Controls that stay allowed are pinned above: "per-file allow: restore of one modified file"
 # (cwd lane) and "one -C target repeated".
 # 1. --work-tree names the shared checkout, whatever -C says.
@@ -3614,31 +3641,62 @@ for _cd in ("sl", "chdir", "Push-Location"):
     sh("per-file ask: PowerShell %s into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout"
        % _cd, _cd + " " + slash(GITMAIN) + "; " + VCS + " restore f.txt",
        "deny", "other-checkout", tool="PowerShell", cwd=GITWT)
-# 5. env's own chdir flags. main does not read them and asks, so ask is pinned.
-sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree",
-   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
-sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree",
-   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "ask", "shared-tree",
+# 5. env's own chdir flags. The guard reads env -C and env --chdir as the run folder, the folder git
+# then runs in, so other-checkout denies each one as it denies a git -C into the shared checkout.
+sh("per-file ask: env -C into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
+   "env -C " + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
+sh("per-file ask: env --chdir into the shared checkout, then restore f.txt, from a worktree, denies by other-checkout",
+   "env --chdir=" + slash(GITMAIN) + " " + VCS + " restore f.txt", "deny", "other-checkout",
    cwd=GITWT)
+# A `cd` after an `env -C` sets the folder the restore runs in, so the restore is judged in the shared
+# checkout, as the plain `cd` form is. The control is the same chain without the env wrapper, which the
+# reader already reads the way the rule needs, so it stays green.
+sh("per-file deny: env -C into the lane, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
+   "env -C " + slash(GITWT) + " " + VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
+sh("per-file deny: control, a plain status, then cd into the shared checkout and restore f.txt, from a folder in no checkout, denies by shared-tree",
+   VCS + " status && cd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
+   "deny", "shared-tree", cwd=NOGIT, lacks=(CHAIN_ASK,))
+# A bare restore of the whole tree is a discard the lane's own dirty tracked file would lose, so it asks in the
+# lane, and chained with a status it denies. The control is that chain with no env wrapper. The decision row puts
+# an env -C on a clean checkout ahead of the status. The shell's folder stays the lane, so the restore must still
+# deny. The verb is restore ., not restore f.txt: a restore of one modified file in the lane is allowed by design
+# (the per-file allow rows), so that verb cannot tell the two readings apart.
+chained_ask("per-file deny: control, a status and a bare restore of the whole tree in a lane with a dirty file, denies as a chained ask command",
+            VCS + " status && " + VCS + " restore .", cwd=GITWT)
+chained_ask("per-file deny: env -C into a clean checkout, then a bare restore of the whole tree in the lane, denies as a chained ask command",
+            "env -C " + slash(SUBJCLEAN) + " " + VCS + " status && " + VCS + " restore .", cwd=GITWT)
 
 # LATE PROBES (named "late probe", so MUTATE_ONLY="late probe" runs this block alone). Each runs a
-# per-file restore in the shared checkout from the lane by a spelling the guard must still read.
-# The chdir flags only name the shared checkout, so they still ask. The control stays allowed.
+# per-file restore in the shared checkout from the lane. env -vC is read as env -C, so other-checkout
+# denies it. The --ch= abbreviation is not read as --chdir, so it still asks. The control stays allowed.
 _SH = slash(GITMAIN)
-for _label, _cmd in (
-    ("env -vC", "env -vC " + _SH + " " + VCS + " restore f.txt"),
-    ("env --ch= abbreviation", "env --ch=" + _SH + " " + VCS + " restore f.txt"),
-):
-    sh("per-file ask: late probe, %s names the shared checkout, from a worktree" % _label, _cmd,
-       "ask", "shared-tree", cwd=GITWT)
+sh("per-file ask: late probe, env -vC names the shared checkout, from a worktree, denies by other-checkout",
+   "env -vC " + _SH + " " + VCS + " restore f.txt", "deny", "other-checkout", cwd=GITWT)
+sh("per-file ask: late probe, env --ch= abbreviation names the shared checkout, from a worktree",
+   "env --ch=" + _SH + " " + VCS + " restore f.txt", "ask", "shared-tree", cwd=GITWT)
 sh("per-file allow: late probe control, a harmless GIT_TRACE prefix in the lane",
    "GIT_TRACE=1 " + VCS + " restore f.txt", "allow", cwd=GITWT)
 
 # Kill cases for mutate_guard: a quoted refspec and a quoted force in a commit message are verdicts.
 sh("per-file kill: a quoted refspec keeps its quotes, so a force push asks",
-   VCS + " push origin \"+main\" $'it\\'s'", "ask", cwd=GITWT)
+   VCS + " push origin \"+main\" \"x", "ask", cwd=GITWT)
 sh("per-file kill: false alarm: --force quoted in a commit message stays allowed",
-   VCS + " commit -m $'release git push --force notes\\'s'", "allow", cwd=GITWT)
+   VCS + " commit -m \"release git push --force notes\" \"x", "allow", cwd=GITWT)
+
+# NORMAL COMMITS WITH AN ANSI-C MESSAGE ALLOW. The guard decodes a bash `$'...'` word before it reads a
+# command (guard_core.decode_ansi_c), so each of these commits must still read as a plain commit.
+sh("per-file allow: an ANSI-C commit message with an escaped quote allows",
+   VCS + " commit -m $'it\\'s fine'", "allow", cwd=GITWT)
+sh("per-file allow: an ANSI-C commit message over two lines allows",
+   VCS + " commit -m $'line one\\nline two'", "allow", cwd=GITWT)
+sh("per-file allow: an ANSI-C commit message naming git push --force as text allows",
+   VCS + " commit -m $'release git push --force notes'", "allow", cwd=GITWT)
+# THE FORM THAT ALLOWS, PINNED. A commit message whose quote never closes is a bash syntax error, so the
+# shell runs nothing. push_text blanks the open quote's tail (_push_scan), so the quoted `git push --force`
+# is text, not a push, and the call reads as a plain commit.
+sh("per-file allow: a commit message whose quote never closes names git push --force, allows",
+   VCS + " commit -m \"release git push --force notes", "allow", cwd=GITWT)
 
 # THE AGENT-OWNED CARVE-OUT (owner ruling 2026-10-03, decision agent-worktree-discard-is-noted, section "Agent-owned worktree").
 # A linked worktree under <repo>/.claude/worktrees/ is agent-owned: a discard there is ALLOWED,
@@ -4280,6 +4338,283 @@ def git_reads_branch_on_remote_shallow_case():
         decision, len(noted), reason[:200])
 
 
+# ============================================================ 1a. two worktrees, one branch
+FAMILY = "two-worktrees-one-branch"
+#
+# Rule two-worktrees-one-branch (the decision of the same name): the guard refuses a git command that
+# checks out a branch another worktree of the clone already holds. The forms are `checkout -B` and
+# `switch -C`, `checkout` and `switch` with --ignore-other-worktrees, and `worktree add -f` or `--force`.
+# Git 2.43 lets the first two through with no warning. That is the incident: a lane session re-pointed
+# a branch that a builder's worktree held, and a commit there would have undone the builder's fix.
+#
+# BOTH DIRECTIONS ARE PINNED. A checkout that takes a branch no other worktree holds, a switch that
+# creates one, a plain checkout that git refuses itself, and the holder's own checkout all stay
+# allowed. The worktree list is read only for the forms above.
+TWO_RULE = "two-worktrees-one-branch"
+
+
+def _sh_quote(text):
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
+def make_git_stand_in(folder, log=None, fail_on=None):
+    """Put a `git` on PATH that hands each call to the real git.
+
+    With `log`, each call's argv is appended to that file, one line a call, before the hand-off. With
+    `fail_on`, a call whose argv holds that text is answered with an error and the real git never runs
+    for it. The real git is named by its absolute path, so the stand-in never calls itself. This is a
+    POSIX script: Windows does not run it, so each case that uses one is skipped there.
+    """
+    os.makedirs(folder, exist_ok=True)
+    lines = ["#!/bin/sh"]
+    if log:
+        lines.append("printf '%s\\n' \"$*\" >> " + _sh_quote(log))
+    if fail_on:
+        lines.append("case \"$*\" in *" + _sh_quote(fail_on)
+                     + "*) echo 'stand-in: read failed' >&2; exit 128;; esac")
+    lines.append("exec " + _sh_quote(os.path.join(GIT_PATH, VCS)) + " \"$@\"")
+    script = os.path.join(folder, VCS)
+    write(script, "\n".join(lines) + "\n")
+    os.chmod(script, 0o755)
+
+
+def _worktree_branches(where):
+    """{real path: branch ref, or None when detached} for each worktree `where` lists, read with git itself."""
+    listing = run_vcs(where, "worktree", "list", "--porcelain")
+    if listing.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: git worktree list --porcelain failed in %r. "
+                 "stderr: %s" % (where, listing.stderr.strip()))
+    held = {}
+    path = None
+    for line in listing.stdout.splitlines():
+        if line.startswith("worktree "):
+            path = os.path.realpath(line[len("worktree "):].strip())
+            held[path] = None
+        elif line.startswith("branch ") and path:
+            held[path] = line[len("branch "):].strip()
+    return held
+
+
+def _build_two_worktrees():
+    """The two-worktrees-one-branch repos: a base on main, a linked worktree holding x, a linked worktree
+    that acts on its own branch, and the two stand-ins. The scope is read back with git before a case
+    relies on it, so a broken build stops the run instead of passing for the wrong reason."""
+    make_repo(TWBASE, {"f.txt": "one\n"})
+    for where, branch in ((TWHOLD, "x"), (TWACT, "actor-lane")):
+        added = run_vcs(TWBASE, "worktree", "add", "-q", where, "-b", branch)
+        if added.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: worktree add %r failed. stderr: %s"
+                     % (where, added.stderr.strip()))
+    held = _worktree_branches(TWBASE)
+    for where, ref in ((TWBASE, "refs/heads/main"), (TWHOLD, "refs/heads/x"),
+                       (TWACT, "refs/heads/actor-lane")):
+        if held.get(os.path.realpath(where)) != ref:
+            sys.exit("fixture setup failed in build_fixtures: %r should hold %s, worktree list reads %r"
+                     % (where, ref, held))
+    make_git_stand_in(TWLOGSHIM, log=os.path.join(TWLOGSHIM, "calls.log"))
+    make_git_stand_in(TWFAILSHIM, fail_on="worktree list")
+
+
+lazy_fixture([TWBASE, TWHOLD, TWACT, TWLOGSHIM, TWFAILSHIM], _build_two_worktrees)
+
+
+def stand_in_sh(name, command, expected, rule=None, **kw):
+    """sh() with a stand-in git on PATH. Windows does not run a POSIX stand-in, so the case is skipped there."""
+    if os.name == "nt":
+        skip_case(name, NO_STAND_IN)
+    else:
+        sh(name, command, expected, rule, **kw)
+
+
+# THE REFUSED FORMS. Each runs from TWACT, a linked worktree on its own branch, while TWHOLD holds x.
+sh("two-worktrees: checkout -B of a branch another worktree holds is refused",
+   VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch -C of a branch another worktree holds is refused",
+   VCS + " switch -C x", "deny", TWO_RULE, cwd=TWACT)
+# THE INCIDENT SHAPE. The lane session ran `checkout -B <branch> origin/<branch>`: a start point after the name.
+sh("two-worktrees: the incident shape, checkout -B with a start point, is refused",
+   VCS + " checkout -B x origin/x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch -C with a start point is refused",
+   VCS + " switch -C x origin/x", "deny", TWO_RULE, cwd=TWACT)
+# THE LONG SPELLING. `--force-create` is `switch -C` written out: a value after it, or after `=`. Git 2.43
+# takes all three forms, and the guard reads each as the same branch, so each is refused.
+sh("two-worktrees: switch --force-create of a branch another worktree holds is refused",
+   VCS + " switch --force-create x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch --force-create with a start point is refused",
+   VCS + " switch --force-create x origin/x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch --force-create=x, the equals spelling, is refused",
+   VCS + " switch --force-create=x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout --ignore-other-worktrees of a held branch is refused",
+   VCS + " checkout --ignore-other-worktrees x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch --ignore-other-worktrees of a held branch is refused",
+   VCS + " switch --ignore-other-worktrees x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: worktree add -f of a held branch is refused",
+   VCS + " worktree add -f ../w2 x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: worktree add --force of a held branch is refused",
+   VCS + " worktree add --force ../w2 x", "deny", TWO_RULE, cwd=TWACT)
+# A QUOTED NAME is still the held branch once the shell strips the quotes.
+sh("two-worktrees: a quoted branch name is the held branch, and is refused",
+   VCS + ' checkout -B "x"', "deny", TWO_RULE, cwd=TWACT)
+# THE IGNORE FLAG REFUSES ANY BRANCH, even one no worktree holds (the ruling, settled in its record).
+sh("two-worktrees: checkout --ignore-other-worktrees of a branch no worktree holds is refused",
+   VCS + " checkout --ignore-other-worktrees y", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch --ignore-other-worktrees of a branch no worktree holds is refused",
+   VCS + " switch --ignore-other-worktrees y", "deny", TWO_RULE, cwd=TWACT)
+# THE -C TREE. The tree a command runs in is the one `git -C` names, else the cwd. A -C naming another
+# tree that lacks x is refused while the holder holds x.
+sh("two-worktrees: git -C <other> checkout -B x, where the holder holds x, is refused",
+   VCS + " -C " + slash(TWACT) + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
+# A READ THAT FAILS REFUSES. The stand-in fails only the worktree list read, and `-B y` names no held
+# branch, so the refusal can only come from the failed read.
+stand_in_sh("two-worktrees: a failed worktree list read refuses, even for a branch no worktree holds",
+            VCS + " checkout -B y", "deny", TWO_RULE, cwd=TWACT, env_path=TWFAILSHIM + os.pathsep + GIT_PATH)
+
+# THE CONTROLS. Each must pass now, before the rule is built, and after it.
+sh("two-worktrees: checkout -B of a branch no other worktree holds is allowed",
+   VCS + " checkout -B y", "allow", cwd=TWACT)
+sh("two-worktrees: switch -c of a new branch is allowed",
+   VCS + " switch -c z", "allow", cwd=TWACT)
+sh("two-worktrees: a plain checkout of a held branch is git's own refusal, not this rule's",
+   VCS + " checkout x", "allow", cwd=TWACT)
+sh("two-worktrees: checkout -B of x in the worktree that already holds x is allowed",
+   VCS + " checkout -B x", "allow", cwd=TWHOLD)
+sh("two-worktrees: a plain status is allowed", VCS + " status", "allow", cwd=TWACT)
+sh("two-worktrees: the form inside an echo's quotes is text, not a checkout",
+   "echo 'git switch -C x'", "allow", cwd=TWACT)
+sh("two-worktrees: a commit message that quotes the form is text, not a checkout",
+   VCS + " commit -m 'git checkout -B x'", "allow", cwd=TWACT)
+sh("two-worktrees: worktree add of a new branch, with no force, is allowed",
+   VCS + " worktree add -b w3-new ../w3", "allow", cwd=TWACT)
+sh("two-worktrees: worktree add of a held branch, with no force, is git's own refusal, not this rule's",
+   VCS + " worktree add ../w4 x", "allow", cwd=TWACT)
+sh("two-worktrees: git -C <holder> checkout -B x, run in the holder's own tree, is allowed",
+   VCS + " -C " + slash(TWHOLD) + " checkout -B x", "allow", cwd=TWHOLD)
+
+# THE TREE PER SEGMENT. A `git -C` moves only the call it heads, and the next call runs in the cwd again.
+# One command can therefore run calls in several trees, and each call is judged in the tree it runs in.
+# W is the holder (TWHOLD, holds x). The cwd is TWACT (holds no x) for the first two cases, and the primary
+# checkout TWBASE (on main, holds no x) for the third. A `cd` is not used: other-checkout refuses a cd into
+# another checkout of the clone before this rule runs, unless the session has a recorded home there. A write
+# that a `git -C` sends into another checkout is refused by other-checkout too, so the third case writes in its cwd.
+sh("two-worktrees: checkout -B x after a git -C that names the holder is refused, the checkout runs in the cwd",
+   VCS + " -C ../twobr-holder status && " + VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout -B x before a git -C that names the holder is refused, the checkout runs in the cwd",
+   VCS + " checkout -B x && " + VCS + " -C ../twobr-holder status", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout -B x in the primary checkout is refused while the holder holds x, after a git -C to the holder",
+   VCS + " -C ../twobr-holder status && " + VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWBASE)
+# THE OWN TREE, FUNCTION LEVEL. From another cwd the hook never reaches the holder's own tree: a write that a
+# `git -C` sends into the holder is refused by other-checkout first, and that rule runs before this one. So the
+# own-tree exclusion is checked on the function, in two_worktrees_own_tree_case.
+# THE -C WRITE, REFUSED BY OTHER-CHECKOUT. From the primary checkout, the holder's `checkout -B x` is a write into
+# another checkout, so the deny names other-checkout, not this rule.
+sh("two-worktrees: git -C <holder> checkout -B x, from the primary checkout, is refused by other-checkout",
+   VCS + " -C ../twobr-holder checkout -B x", "deny", "other-checkout", cwd=TWBASE)
+# A `cd` inside quotes is text, so the checkout still runs in the cwd.
+sh("two-worktrees: a cd inside an echo's quotes moves no tree, so checkout -B x runs in the cwd and is refused",
+   "echo 'cd ../twobr-holder' && " + VCS + " checkout -B x", "deny", TWO_RULE, cwd=TWACT)
+
+# THE CLUSTERED FLAGS. A short flag can share a cluster with -B or -C (`-fB`, `-qC`), and git reads the
+# letter as its own option. Each clustered form is refused the same as its plain spelling.
+sh("two-worktrees: checkout -fB of a branch another worktree holds is refused",
+   VCS + " checkout -fB x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout -qB of a branch another worktree holds is refused",
+   VCS + " checkout -qB x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch -fC of a branch another worktree holds is refused",
+   VCS + " switch -fC x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch -qC of a branch another worktree holds is refused",
+   VCS + " switch -qC x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: checkout -fB of a branch no worktree holds is allowed",
+   VCS + " checkout -fB y", "allow", cwd=TWACT)
+sh("two-worktrees: switch -fC of a branch no worktree holds is allowed",
+   VCS + " switch -fC y", "allow", cwd=TWACT)
+# THE LONG SPELLING, ALLOWED. A new-branch name that no worktree holds passes, so the refused cases above
+# are the held branch and not the spelling.
+sh("two-worktrees: switch --force-create of a branch no worktree holds is allowed",
+   VCS + " switch --force-create y", "allow", cwd=TWACT)
+
+# THE FALSE ALARM. `-d` is --detach for worktree add (git 2.43 reads it), so a forced add with -d takes
+# no branch, and the guard must not read the held name `x` as one. The long spelling is the control.
+sh("two-worktrees: worktree add -f -d, a forced detached add that takes no branch, is allowed",
+   VCS + " worktree add -f -d ../n x", "allow", cwd=TWACT)
+sh("two-worktrees: worktree add -f --detach, a forced detached add that takes no branch, is allowed",
+   VCS + " worktree add -f --detach ../n2 x", "allow", cwd=TWACT)
+
+
+def _two_worktrees_calls(command, cwd):
+    """Run `command` through the guard with the logging stand-in on PATH. Returns (decision, reason, the
+    argv lines the stand-in logged for this one run)."""
+    log = os.path.join(TWLOGSHIM, "calls.log")
+    if os.path.exists(log):
+        os.remove(log)
+    decision, reason = decide({"raw": None, "tool": "Bash", "cwd": cwd, "session": None,
+                               "env_path": TWLOGSHIM + os.pathsep + GIT_PATH,
+                               "tool_input": {"command": command}})
+    calls = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+    return decision, reason, calls
+
+
+def two_worktrees_reads_list_once_case():
+    """The refused form reads the worktree list exactly once, the one read the rule makes. The check goes red
+    on the old code because it reads no list at all, and the stand-in shows that it can see one."""
+    if os.name == "nt":
+        return SKIP, NO_STAND_IN
+    decision, _reason, calls = _two_worktrees_calls(VCS + " checkout -B x", TWACT)
+    listed = [line for line in calls if "worktree list" in line]
+    if len(listed) == 1:
+        return True, "checkout -B of a held branch reads the worktree list once"
+    return False, "checkout -B x reads the worktree list %d time(s), want exactly 1 (decision %s, calls %r)" % (
+        len(listed), decision, calls[:4])
+
+
+def two_worktrees_observer_case():
+    """The stand-in sees a worktree list read that the guard makes today: `worktree remove` reads the list on the
+    old code. Green there, so the empty log of an unrelated command means no read, not a blind stand-in."""
+    if os.name == "nt":
+        return SKIP, NO_STAND_IN
+    _decision, _reason, calls = _two_worktrees_calls(VCS + " worktree remove " + slash(TWHOLD), TWBASE)
+    if any("worktree list" in line for line in calls):
+        return True, "the stand-in logs the worktree list the guard reads for worktree remove"
+    return False, "worktree remove logged no worktree list, so the stand-in cannot see the guard's reads: %r" % (
+        calls[:4],)
+
+
+def two_worktrees_unrelated_no_list_case():
+    """An unrelated git command reads no worktree list. The observer case above proves the stand-in sees reads."""
+    if os.name == "nt":
+        return SKIP, NO_STAND_IN
+    for command in (VCS + " status", VCS + " switch -c z"):
+        _decision, _reason, calls = _two_worktrees_calls(command, TWACT)
+        listed = [line for line in calls if "worktree list" in line]
+        if listed:
+            return False, "%s read the worktree list: %s" % (command, listed[0])
+    return True, "a plain status and a new-branch switch read no worktree list"
+
+
+def two_worktrees_own_tree_case():
+    """The own-tree exclusion, read on the function. Scope first: the holder's own worktree list holds x on the
+    holder, and from the actor's tree the same `checkout -B x` is a hit. Then the subject: from the holder's own
+    tree the same call is no hit, since x there is the holder's own. The hook cannot reach this from another cwd,
+    because other-checkout refuses the write first. GUARD may be a mutated copy, so the module loads from its folder."""
+    import importlib.util
+    materialize(TWHOLD)
+    spec = importlib.util.spec_from_file_location(
+        "guard_branch_worktree_under_test", os.path.join(os.path.dirname(GUARD), "guard_branch_worktree.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    holder = os.path.realpath(TWHOLD)
+    actor = os.path.realpath(TWACT)
+    segment = VCS + " checkout -B x"
+    held = dict(module.clone_worktrees(holder) or [])
+    if held.get(holder) != "refs/heads/x":
+        return False, "scope: the holder's worktree list reads %r for the holder, want refs/heads/x" % (held.get(holder),)
+    if not module.two_worktrees_hit(segment, actor):
+        return False, "scope: from the actor's tree, %r is no hit on the holder's x" % segment
+    own = module.two_worktrees_hit(segment, holder)
+    if own:
+        return False, "own tree: from the holder's own tree, %r is a hit (%r), want no hit" % (segment, own)
+    return True, "from the holder's own tree, checkout -B x is no hit; from the actor's tree it is a hit"
+
+
 # =========================================================================== 1b. the pointer HEAD
 FAMILY = "pointer"
 #
@@ -4610,6 +4945,14 @@ hm_refuse("a PowerShell call with -C and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, tool="PowerShell", cwd=NOGIT)
 hm_refuse("a Windows drive path is outside", HMADD + "C:\\scratch\\lane-a")
 hm_refuse("a Git Bash drive path is outside", HMADD + "/c/scratch/lane-a")
+# A cd into a variable folder is judged where the shell runs the command, so it takes the verdict of its
+# literal twin. The -C form reads its variable on another branch only, so it has no row here.
+hm_refuse("a variable folder, cd \"$R\", then a tree outside home is refused, as the literal cd is",
+        "R=" + HMIN + "; cd \"$R\" && " + HMADD + HMSCRATCH, cwd=NOGIT)
+hm_refuse("a braced variable folder, cd \"${R}\", then a tree outside home is refused",
+        "R=" + HMIN + "; cd \"${R}\" && " + HMADD + HMSCRATCH, cwd=NOGIT)
+hm_refuse("the literal twin: cd into the primary, then a tree outside home, is refused",
+        "cd " + HMIN + " && " + HMADD + HMSCRATCH, cwd=NOGIT)
 hm_refuse("a for loop that builds the tree path from its variable is the incident",
         "for c in A B; do " + VCS + " worktree add -q --detach " + HMSCRATCH + "/wt-$c $c; done")
 
@@ -4639,6 +4982,12 @@ hm_allow("a heredoc body that holds the words passes",
          "cat <<'EOF'\ngit worktree add ../x\nEOF")
 hm_allow("a folder that is no git tree passes, since unknown is no hit",
          HMADD + "../lane-x", cwd=NOGIT)
+hm_allow("a variable folder holding the primary's home folder, cd \"$R\", then a tree in home passes",
+         "R=" + HMIN + "; cd \"$R\" && " + HMADD + ".claude/worktrees/lane6", cwd=NOGIT)
+hm_allow("a variable folder holding a throwaway repo, cd \"$R\", then a tree beside it passes",
+         "R=" + slash(HMTMPREPO) + "; cd \"$R\" && " + HMADD + "../hmtmp-sibling", cwd=NOGIT)
+hm_allow("the literal twin: cd into a throwaway repo, then a tree beside it passes",
+         "cd " + slash(HMTMPREPO) + " && " + HMADD + "../hmtmp-sibling", cwd=NOGIT)
 
 # AGENT. A call with a valid agent_id that adds a tree inside the primary's folder is refused, unless
 # the tree is the agent's own recorded home or its own red-run folder. Each call runs from that home,
@@ -4762,6 +5111,8 @@ TEMP_DIR = None   # back to the system temp for the sections below
 HM_REFUSED_PATH = "hm-text-lane"
 # The call shape every EnterWorktree remedy names. A `path` makes Claude Code ask the owner to approve the worktree.
 ENTER_WORKTREE_SHAPE = "with a `name` and no `path`"
+# An existing checkout needs `path`, not `name`; the approval prompt a `path` triggers is the accepted cost.
+OTHER_CHECKOUT_ENTER_SHAPE = "call the EnterWorktree tool with `path` set to"
 
 
 def hand_made_refusal_text_case():
@@ -6697,6 +7048,24 @@ sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
 sh("check-tail: a verdict call with no pipe in the foreground is allowed",
    "verdict merge --lane-lint 1476", "allow", cwd=NOGIT)
+# `merge --release-check` prints one verdict line per pull request, so tail or head cuts it like a lint verdict.
+# The lane-lint row is the control: its refusal is the one these rows must match.
+sh("check-tail: merge --lane-lint 5 piped to tail -2 in the foreground is refused (control)",
+   "merge --lane-lint 5 | tail -2", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check piped to tail in the foreground is refused",
+   "merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check piped to head in the foreground is refused",
+   "merge --release-check 5 6 | head -1", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: the bin merge --release-check piped to tail in the foreground is refused",
+   "~/.claude/bin/merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --release-check with no pipe in the foreground is allowed (control)",
+   "merge --release-check 5 6", "allow", cwd=NOGIT)
+add("check-tail: merge --release-check piped to tail, backgrounded, is refused", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --release-check 5 6 2>&1 | tail -3")
+add("check-tail: merge --release-check with no pipe, backgrounded, is allowed (control)", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --release-check 5 6")
 
 # =========================================================================== 2c. waiter loops
 #
@@ -8016,6 +8385,44 @@ sh("silent-write throwaway: -C names the throwaway repo, and it is judged there"
    VCS + " -C " + TSLASH + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: cd into the throwaway repo, and it is judged there",
    "cd " + TSLASH + " && " + VCS + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
+# A variable folder is read where the shell runs the commit, as its literal twin is.
+sh("silent-write throwaway: a variable folder holding the throwaway repo, cd \"$R\" then a discarded commit, is allowed",
+   "R=" + TSLASH + "; cd \"$R\" && " + VCS + " commit -m x >/dev/null", "allow", cwd=GITMAIN)
+sh("silent-write real: a variable folder holding the real checkout, cd \"$R\" then a discarded commit, is refused",
+   "R=" + slash(GITMAIN) + "; cd \"$R\" && " + VCS + " commit -m x >/dev/null", "deny", "silent-write",
+   cwd=THROWAWAY)
+sh("silent-write real: the literal twin, cd into the real checkout then a discarded commit, is refused",
+   "cd " + slash(GITMAIN) + " && " + VCS + " commit -m x >/dev/null", "deny", "silent-write", cwd=THROWAWAY)
+# A variable is read only from a plain assignment that runs in this shell. A walk that reads the throwaway
+# folder in the first and third rows allows the commit; the one-quote row is denied either way. Judged from the
+# real checkout, each row stays denied.
+sh("silent-write [cdvar-unread]: D=<throwaway> mkdir -p, cd \"$D\", then a discarded commit from the real checkout, is refused",
+   "D=" + TSLASH + " mkdir -p \"$D\"; cd \"$D\" && " + VCS + " commit -m x >/dev/null 2>&1", "deny", "silent-write",
+   cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: R=<throwaway>, a quote, R=<real>, cd \"$R\", then a discarded commit, is refused",
+   "R=" + TSLASH + "; echo \"it's\"; R=" + slash(GITMAIN) + "; cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1",
+   "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: as the row before, with a second quote after R=<real>, is refused",
+   "R=" + TSLASH + "; echo \"it's\"; R=" + slash(GITMAIN) + "; echo \"it's\"; cd \"$R\" && " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
+# A `[ -d <missing> ] &&` may fail, so the assignment after it may not run and the cd target is unknown:
+# the discarded commit is refused. A walk that reads the assignment as run allows the commit and fails this row.
+# The row after it is its twin with the assignment first, which runs, so the throwaway repo is judged.
+sh("silent-write [cdvar-unread]: [ -d <missing> ] && R=<throwaway>, cd \"$R\", then a discarded commit, is refused",
+   "[ -d " + slash(os.path.join(ROOT, "no-such-folder")) + " ] && R=" + TSLASH + "; cd \"$R\" && " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
+sh("silent-write [cdvar-unread]: control: R=<throwaway> && cd \"$R\", then a discarded commit, is allowed",
+   "R=" + TSLASH + " && cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1", "allow", cwd=GITMAIN)
+# A `ls <missing> &&` may fail, so the cd after it may not run and the commit's folder is unknown: the
+# discarded commit is refused. A walk that reads the cd as run allows the commit; the product denies it, as
+# the row expects.
+sh("silent-write [cdvar-unread]: R=<throwaway>; ls <missing> && cd \"$R\", then a discarded commit from the real checkout, is refused",
+   "R=" + TSLASH + "; ls " + slash(os.path.join(ROOT, "no-such-folder")) + " && cd \"$R\"; " + VCS
+   + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
+# A value that starts with a quoted ~ is not a tilde the shell expands, so it stays unknown, and an unknown folder is
+# refused for a commit from the real checkout.
+sh("silent-write [cdvar-unread]: control: R=\"~/tilde~dir\" quoted, cd \"$R\", then a discarded commit from the real checkout, is refused",
+   "R=\"~/tilde~dir\"; cd \"$R\" && " + VCS + " commit -m x >/dev/null 2>&1", "deny", "silent-write", cwd=GITMAIN)
 sh("silent-write throwaway: --git-dir names the throwaway repo, and it is judged there",
    VCS + " --git-dir=" + TSLASH + "/.git commit -m x >/dev/null", "allow", cwd=GITMAIN)
 sh("silent-write throwaway: a discarded pipe tail in a throwaway repo",
@@ -8324,10 +8731,11 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=()):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
     """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
-    force-push. `silent` marks an allow that must print nothing."""
-    sh("push: " + name, VCS + " push " + tail, expected,
+    force-push. `silent` marks an allow that must print nothing. `word` is the command word the call
+    names: the plain `git`, or a form of it that the shell reads as git."""
+    sh("push: " + name, word + " push " + tail, expected,
        rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
        carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
 
@@ -8507,6 +8915,23 @@ sh("push: lease with -c push.default=current ignores the repository's upstream",
    VCS + " -c push.default=current push " + LE.strip(), "allow", cwd=PUSHUP)
 sh("push: lease with -c push.default=matching asks",
    VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+
+# THE COMMAND WORD SPLIT OR QUOTED INTO PIECES. The guard reads such a word as `git`, as the shell does.
+# A shlex reader does that for the shell forms below, which already ask: green locks that keep it so.
+# Bash's ANSI-C quoting also expands to `git`, but the reader does not unquote `$'...'`, so the word reads
+# as `$git` and the act is allowed. Those are the red rows. Each form expects the plain word's verdict.
+SPLIT_FORCE = "--force origin main"
+SPLIT_PUSH_MAIN = "origin HEAD:main"
+SPLIT_ANSI_WORDS = ["$'g'it", "g$'i't", "$'\\147it'"]
+SPLIT_SHELL_WORDS = ["g'i't", 'gi""t', '"g"it', "\\git", 'g""it', "gi\\t", "env g'i't", "command g'i't"]
+for _word in SPLIT_ANSI_WORDS + SPLIT_SHELL_WORDS:
+    push_case("split word " + _word + " force-pushes main, asks", SPLIT_FORCE, "ask", word=_word)
+    push_case("split word " + _word + " pushes to main, asks", SPLIT_PUSH_MAIN, "ask",
+              rule=PUSH_MAIN_RULE, word=_word)
+# Controls: a plain word that only contains git is text, so it stays allowed.
+sh("split word control: digit, a word with git inside, allows", "digit", "allow")
+sh("split word control: gitk-free, a word with git inside, allows", "gitk-free", "allow")
+sh("split word control: echo git, git as text, allows", "echo git", "allow")
 
 # FALSE ALARMS: a guard that cries wolf is spent.
 # Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
@@ -9138,38 +9563,68 @@ sh("push: stray branch, a bare push under push.default current asks",
 sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " push origin HEAD", "ask",
    PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
 
-# ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
+# DENY, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name is refused, with or
 # without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
 # names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
-# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream.
-push_case("agent branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, -u HEAD asks", "-u origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, @ asks", "origin @", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-push_case("agent branch, the current name as a colon-less refspec asks", "origin claude/agent-a22bb0ed47825117b",
-          "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
-sh("push: agent branch, a bare push under push.default current asks",
-   VCS + " -c push.default=current push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
-push_case("agent worktree, worktree-agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTWT, rule=PUSH_AGENT_RULE)
-push_case("agent worktree, agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTBARE, rule=PUSH_AGENT_RULE)
+# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream. The case names keep their "asks"
+# wording: hooks/mutate_guard.py matches on them.
+
+
+def agent_refused(name, command, cwd=PUSHFEAT, **kw):
+    """One push the agent-branch rule refuses: a deny under its rule id, whose reason prints the lane's remedy
+    and names no agent branch."""
+    sh(name, command, "deny", PUSH_AGENT_RULE, cwd=cwd, carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS, **kw)
+
+
+agent_refused("push: agent branch, HEAD asks", VCS + " push origin HEAD", cwd=PUSHAGENT)
+agent_refused("push: agent branch, -u HEAD asks", VCS + " push -u origin HEAD", cwd=PUSHAGENT)
+agent_refused("push: agent branch, @ asks", VCS + " push origin @", cwd=PUSHAGENT)
+agent_refused("push: agent branch, the current name as a colon-less refspec asks",
+              VCS + " push origin claude/agent-a22bb0ed47825117b", cwd=PUSHAGENT)
+agent_refused("push: agent branch, a bare push under push.default current asks",
+              VCS + " -c push.default=current push", cwd=PUSHAGENT)
+agent_refused("push: agent worktree, worktree-agent-<hex>, -u HEAD asks", VCS + " push -u origin HEAD",
+              cwd=PUSHAGENTWT)
+agent_refused("push: agent worktree, agent-<hex>, -u HEAD asks", VCS + " push -u origin HEAD", cwd=PUSHAGENTBARE)
 # An explicit agent destination from a branch with no upstream (PUSHFEAT, `feat`).
-push_case("explicit agent destination from a branch with no upstream asks",
-          "origin HEAD:claude/agent-a22bb0ed47825117b", "ask", rule=PUSH_AGENT_RULE)
+agent_refused("push: explicit agent destination from a branch with no upstream asks",
+              VCS + " push origin HEAD:claude/agent-a22bb0ed47825117b")
 # Under push.autoSetupRemote, git pushes the current name and sets its upstream itself, so a bare push, `origin`
 # or `-u origin` writes the agent name. The key rides on the call, where the guard reads it.
-sh("push: agent branch, a bare push under autoSetupRemote asks",
-   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
-sh("push: agent branch, origin under autoSetupRemote asks",
-   VCS + " -c push.autoSetupRemote=true push origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
-sh("push: agent branch, -u origin under autoSetupRemote asks",
-   VCS + " -c push.autoSetupRemote=true push -u origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
-# The config-file form: push.autoSetupRemote is in the repo's own config, not on the call, so a bare push asks.
-sh("push: agent branch, a bare push under a config autoSetupRemote asks",
-   VCS + " push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENTCFG)
-# The exact shape: eight hex characters after the prefix ask.
-push_case("agent-12345678, -u HEAD asks (8 hex is the exact shape)", "-u origin HEAD", "ask",
-          cwd=PUSHAGENTEIGHT, rule=PUSH_AGENT_RULE)
+agent_refused("push: agent branch, a bare push under autoSetupRemote asks",
+              VCS + " -c push.autoSetupRemote=true push", cwd=PUSHAGENT)
+agent_refused("push: agent branch, origin under autoSetupRemote asks",
+              VCS + " -c push.autoSetupRemote=true push origin", cwd=PUSHAGENT)
+agent_refused("push: agent branch, -u origin under autoSetupRemote asks",
+              VCS + " -c push.autoSetupRemote=true push -u origin", cwd=PUSHAGENT)
+# The config-file form: push.autoSetupRemote is in the repo's own config, not on the call, so a bare push is refused.
+agent_refused("push: agent branch, a bare push under a config autoSetupRemote asks", VCS + " push",
+              cwd=PUSHAGENTCFG)
+# The exact shape: eight hex characters after the prefix are refused.
+agent_refused("push: agent-12345678, -u HEAD asks (8 hex is the exact shape)", VCS + " push -u origin HEAD",
+              cwd=PUSHAGENTEIGHT)
+# The refusal names the lane's own branch, and it does not echo the agent's name from the command. The push names
+# the agent branch as its destination from a lane checkout (PUSHFEAT, `feat`), so the name is in the command.
+sh("push: agent branch named in the command, the refusal names the lane-branch remedy, not the agent name",
+   VCS + " push origin claude/agent-a22bb0ed47825117b", "deny", PUSH_AGENT_RULE, cwd=PUSHFEAT,
+   carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS + ("claude/agent-a22bb0ed47825117b",))
+
+
+def agent_refusal_opens_with_rule_case():
+    """The printed reason is "<rule id>: <reason>", and the reason opens "Rule (Git): " as the sibling push refusals
+    do (PUSH_REASON, PUSH_MAIN_REASON). No refusal can open with "Rule (" itself."""
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": PUSHAGENT, "session": None,
+        "env_path": None, "tool_input": {"command": VCS + " push origin HEAD"},
+    })
+    want = PUSH_AGENT_RULE + ": Rule (Git): "
+    if got != "deny":
+        return False, "expected deny, got %s" % got
+    if not reason.startswith(want):
+        return False, "the reason does not open with %r: %r" % (want, reason[:90])
+    return True, "a deny whose reason opens with %r" % want
+
+
 # A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main asks.
 sh("push: main with no upstream, a bare push under autoSetupRemote asks push-main",
    VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
@@ -9200,6 +9655,19 @@ sh("push: lane branch, origin under autoSetupRemote is silent",
    VCS + " -c push.autoSetupRemote=true push origin", "allow", cwd=PUSHFEAT, silent=True)
 sh("push: lane branch, -u origin under autoSetupRemote is silent",
    VCS + " -c push.autoSetupRemote=true push -u origin", "allow", cwd=PUSHFEAT, silent=True)
+# Controls for the refusal, all silent allows. PUSHOWNREF is `lane-x`, tracking origin/batch-1, with origin/lane-x on
+# the remote. The archive row pushes an agent's own branch to archive/, which shared-trees-archive-then-delete
+# requires before a delete, so it must stay silent.
+sh("push: lane branch, lane-x pushed by its own name is silent", VCS + " push origin lane-x", "allow",
+   cwd=PUSHOWNREF, silent=True)
+sh("push: lane branch, -u origin of lane-x is silent", VCS + " push -u origin lane-x", "allow",
+   cwd=PUSHOWNREF, silent=True)
+sh("push: lane branch, --delete of lane-x is silent", VCS + " push --delete origin lane-x", "allow",
+   cwd=PUSHOWNREF, silent=True)
+sh("push: agent checkout, HEAD to lane/x is silent", VCS + " push origin HEAD:lane/x", "allow",
+   cwd=PUSHAGENT, silent=True)
+sh("push: agent checkout, HEAD to archive/ of the agent's own branch is silent",
+   VCS + " push origin HEAD:archive/claude/agent-a22bb0ed47825117b", "allow", cwd=PUSHAGENT, silent=True)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
@@ -9252,21 +9720,32 @@ push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=P
 sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
    VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
 
-# ASK, rules 206 a, 207 a and push-agent-branch, on a local-path origin. A main refspec there is silent, and the
-# refspec after it still decides. The controls ask with no main refspec ahead: HEAD on PUSHLOCALSTRAY (its branch
-# tracks origin/other) is stray, and the agent name on PUSHLOCAL asks the agent rule.
+# ASK, rules push-stray-branch and push-main, and DENY, rule push-agent-branch, on a local-path origin. A main
+# refspec there is silent, and the refspec after it still decides. The controls decide with no main refspec ahead:
+# HEAD on PUSHLOCALSTRAY (its branch tracks origin/other) is stray, and the agent name on PUSHLOCAL is refused.
 push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
-push_case("local origin, main then the agent name asks the agent rule", "origin main claude/agent-deadbeef01",
-          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+agent_refused("push: local origin, main then the agent name asks the agent rule",
+              VCS + " push origin main claude/agent-deadbeef01", cwd=PUSHLOCAL)
 push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
           cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
-push_case("local origin, the agent name alone asks the agent rule (control)", "origin claude/agent-deadbeef01",
-          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
-# The same two commands on a network origin still ask push-main: the main refspec decides there.
+agent_refused("push: local origin, the agent name alone asks the agent rule (control)",
+              VCS + " push origin claude/agent-deadbeef01", cwd=PUSHLOCAL)
+# On a network origin, a main refspec before an agent name is refused by the agent rule, not asked as push-main.
+# One click on the push-main ask would otherwise carry the agent branch to origin as well. The agent name is in the
+# push, so the refusal holds from any checkout. A main refspec before a lane name still asks push-main, and so does
+# `origin main HEAD`.
 push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
-push_case("network origin, main then the agent name asks push-main", "origin main claude/agent-deadbeef01", "ask",
+push_case("network origin, main then a lane name asks push-main", "origin main HEAD:lane-x", "ask",
           rule=PUSH_MAIN_RULE)
+sh("push: network origin, main then the agent name asks the agent rule",
+   VCS + " push origin main claude/agent-deadbeef01", "deny", PUSH_AGENT_RULE,
+   carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS + ("claude/agent-deadbeef01",))
+sh("push: network origin, main then HEAD:agent-<hex> asks the agent rule",
+   VCS + " push origin main HEAD:agent-deadbeef01", "deny", PUSH_AGENT_RULE,
+   carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS + ("agent-deadbeef01",))
+# A combined push from an agent checkout: --all sends main and the agent's own branch, so the agent rule refuses it.
+agent_refused("push: agent checkout, --all with main asks the agent rule", VCS + " push --all origin", cwd=PUSHAGENT)
 # A `git -c remote.origin.url=` override names the remote's URL for the read, so the local origin is a network one.
 sh("main, a local origin made a network remote by git -c remote.origin.url asks push-main",
    VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "ask", PUSH_MAIN_RULE,
@@ -9394,10 +9873,11 @@ chained_ask("push: a lone quote in a commit message does not hide a push to main
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin main", cwd=PUSHFEAT)
 chained_ask("push: a lone quote in a commit message does not hide a stray push that follows it",
             VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHSTRAY)
-chained_ask("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
-            VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
-chained_ask("push: agent branch, a comment opener inside a string does not hide a push to an agent name",
-            'echo "#" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+# The agent push is refused on its own, by its rule, not by the ask-alone chain: no ask is chained with it.
+agent_refused("push: agent branch, a lone quote in a commit message does not hide a push to an agent name",
+              VCS + ' commit -m "don\'t" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
+agent_refused("push: agent branch, a comment opener inside a string does not hide a push to an agent name",
+              'echo "#" && ' + VCS + " push origin HEAD", cwd=PUSHAGENT)
 sh("push: text, an echo that names a push to an agent name, is silent",
    'echo "' + VCS + ' push origin HEAD:claude/agent-a22bb0ed47825117b"', "allow", cwd=PUSHAGENT, silent=True)
 sh("push: text, a multi-line quoted string naming a push to an agent name, is silent",
@@ -9951,6 +10431,7 @@ NMTARGET = os.path.join(ROOT, "nmtarget")    # stands in for main's install, out
 NMLINKED = os.path.join(ROOT, "nmlinked")    # a working folder whose node_modules is a link
 NMREAL = os.path.join(ROOT, "nmreal")        # a working folder whose node_modules is a real folder
 NMABSENT = os.path.join(ROOT, "nmabsent")    # a working folder with no node_modules
+NMTILDE = os.path.join(ROOT, "nmlinked~dir")  # a working folder whose name holds a ~, and whose node_modules is a link
 NMSHIM = os.path.join(ROOT, "nmshim")        # a folder whose sitecustomize drops os.path.isjunction
 NM_PKG = ('{"name": "app", "scripts": {"setup": "node setup.js", "build": "node build.js",'
           ' "test": "node test.js"}}\n')
@@ -9985,17 +10466,18 @@ def _make_dir_link(target, link):
 
 
 def _build_linked_nm():
-    """The four working folders of this section, and the shim folder. One folder is a link to the target,
-    one holds a real folder."""
-    for folder in (NMTARGET, NMLINKED, NMREAL, NMABSENT):
+    """The five working folders of this section, and the shim folder. NMLINKED and NMTILDE hold a link to
+    the target, NMREAL holds a real folder, NMABSENT holds none."""
+    for folder in (NMTARGET, NMLINKED, NMREAL, NMABSENT, NMTILDE):
         write(os.path.join(folder, "package.json"), NM_PKG)
     write(os.path.join(NMTARGET, "pkg.js"), "module.exports = {};\n")
     _make_dir_link(NMTARGET, os.path.join(NMLINKED, "node_modules"))
+    _make_dir_link(NMTARGET, os.path.join(NMTILDE, "node_modules"))
     write(os.path.join(NMREAL, "node_modules", "pkg.js"), "module.exports = {};\n")
     write(os.path.join(NMSHIM, "sitecustomize.py"), NM_SHIM_SOURCE)
 
 
-lazy_fixture([NMTARGET, NMLINKED, NMREAL, NMABSENT, NMSHIM], _build_linked_nm)
+lazy_fixture([NMTARGET, NMLINKED, NMREAL, NMABSENT, NMTILDE, NMSHIM], _build_linked_nm)
 
 
 def nm_case(name, command, expected, cwd, tool="Bash"):
@@ -10041,6 +10523,17 @@ nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the p
         "cd " + slash(NMREAL) + " && npm ci", "allow", NMLINKED)
 nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
+nm_case("linked-nm: a variable folder linked, cd \"$R\" then npm ci, is refused, as the literal cd is",
+        "R=" + slash(NMLINKED) + "; cd \"$R\" && npm ci", "deny", NMABSENT)
+nm_case("linked-nm: the literal twin, a cd to the linked folder then npm ci, is refused",
+        "cd " + slash(NMLINKED) + " && npm ci", "deny", NMABSENT)
+# A ~ inside a folder's name is a plain character, so the variable naming it is read. The literal twin comes
+# first: it must deny on the same folder before the variable form means anything. The Windows temp folder
+# (RUNNER~1) is the real case; this folder's name carries the same ~ on every platform.
+nm_case("linked-nm: the literal twin, a cd to a linked folder whose name holds ~, then npm ci, is refused",
+        "cd " + slash(NMTILDE) + " && npm ci", "deny", NMABSENT)
+nm_case("linked-nm: a variable folder linked, whose name holds ~, cd \"$R\" then npm ci, is refused, as its literal twin is",
+        "R=" + slash(NMTILDE) + "; cd \"$R\" && npm ci", "deny", NMABSENT)
 
 # THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
 # not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
@@ -11551,6 +12044,95 @@ for _label, _open in (("E\\OF", "E\\OF"), ("E'OF'", "E'OF'")):
            % (_label, _form),
            "cat <<" + _open + " > x.sh && sh x.sh\n" + _body + "\nEOF", "deny", "env-file", cwd=PROJ)
 
+# ---- heredoc false alarm (lane env-heredoc-false-alarm). A quoted delimiter makes the body text, so an
+# env read in it runs nothing. An unquoted body runs its substitutions, and only those are judged.
+_BT = "`"
+# Incident 2: a quoted brief body named a python heredoc header and an env read.
+sh("env: heredoc-false-alarm: a quoted cat body names a python heredoc header and an env read, allowed",
+   "cat > scratch/brief.md <<'EOF'\nrun python3 - <<X later\ncat " + ENV + " is refused\nEOF",
+   "allow", cwd=PROJ)
+# A clean python heredoc later in the call does not put an unrelated quoted cat body under scan.
+sh("env: heredoc-false-alarm: a quoted cat body with an env read, then a clean python heredoc, allowed",
+   "cat > b.md <<'A'\ncat " + ENV + "\nA\npython3 - <<'B'\nprint(1)\nB", "allow", cwd=PROJ)
+# Inferred reproduction of incident 1 (the exact command is unknown). Bash never
+# expands a backtick or a `$( )` inside a quoted delimiter, so either one in a python string is text.
+sh("env: heredoc-false-alarm: inferred reproduction, a quoted python body, a backtick env read in a string",
+   "python3 - <<'EOF'\nd = {\"note\": \"refuses " + _BT + "cat " + ENV + _BT + "\"}\nEOF",
+   "allow", cwd=PROJ)
+sh("env: heredoc-false-alarm: a quoted python body, a dollar-paren env read in a string, allowed",
+   "python3 - <<'EOF'\nd = {\"note\": \"refuses $(cat " + ENV + ")\"}\nEOF", "allow", cwd=PROJ)
+# A comment opener inside a string, and a template literal that spans lines, are text in a quoted body.
+sh("env: heredoc-false-alarm: a hash opener in a quoted python string, a backtick env read, allowed",
+   "python3 - <<'EOF'\nd = {\"note\": \"# refuses " + _BT + "cat " + ENV + _BT + "\"}\nEOF",
+   "allow", cwd=PROJ)
+sh("env: heredoc-false-alarm: a quoted node body, a multi-line template literal with an env read, allowed",
+   "node - <<'EOF'\nconst note = `the guard\nruns $(cat " + ENV + ") here`;\nconsole.log(note);\nEOF",
+   "allow", cwd=PROJ)
+# Pins: each shape below runs its env read in bash, so it stays denied.
+sh("env: heredoc-false-alarm pin: a python body with an unquoted delimiter, bash runs its backticks, denies",
+   "python3 - <<EOF\nd = {\"note\": \"refuses " + _BT + "cat " + ENV + _BT + "\"}\nEOF",
+   "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: an unquoted cat body with a backtick env read, bash runs it, denies",
+   "cat > n.md <<EOF\nhi " + _BT + "cat " + ENV + _BT + "\nEOF", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: an unquoted cat body with a dollar-paren env read, bash runs it, denies",
+   "cat > n.md <<EOF\nhi $(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a hash opener in double quotes in an unquoted body, the read still runs",
+   "cat > n.md <<EOF\n\"# quoted\" $(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted cat body piped to sh, the env read runs, denies",
+   "cat <<'A' | sh\ncat " + ENV + "\nA", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted bash body, the env read runs, denies",
+   "bash <<'A'\ncat " + ENV + "\nA", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted bash body, a backtick env read in an echo, bash runs it, denies",
+   "bash <<'A'\necho \"" + _BT + "cat " + ENV + _BT + "\"\nA", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted cat body written to x.sh and run by sh, denies",
+   "cat > x.sh <<'A'\ncat " + ENV + "\nA\nsh x.sh", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted python body with a bare env line, denies",
+   "python3 - <<'EOF'\nx = 1\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a quoted cat body, then a python body with a bare env line, denies",
+   "cat > b.md <<'A'\nnotes\nA\npython3 - <<'B'\nx = 1\ncat " + ENV + "\nB", "deny", "env-file", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: a lone apostrophe comment in a quoted python body, then a bare env line",
+   "python3 - <<'EOF'\n# don't\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=PROJ)
+# Pins: each shape below holds its env name as text, so it stays allowed.
+sh("env: heredoc-false-alarm pin: a quoted cat body with a lone apostrophe and a hash, allowed",
+   "cat > n.md <<'EOF'\nDon't cat " + ENV + " # here\nEOF", "allow", cwd=PROJ)
+sh("env: heredoc-false-alarm pin: an unquoted cat body of plain words naming an env read, allowed",
+   "cat > n.md <<EOF\nthe guard refuses cat " + ENV + "\nEOF", "allow", cwd=PROJ)
+# A stdin shell or script runner reads its heredoc body as commands, so that body stays in view even when a
+# printing interpreter's body sits beside it. `cat` only prints its body, so the same shape allows.
+for _header in ("ssh host", "php", "lua", "at now", "su", "sudo", "doas"):
+    sh("env: heredoc-stdin: a print heredoc, then `%s <<'EOF'` whose body reads the env file, denies "
+       "[red on 8bba95a]" % _header,
+       "python3 - <<'PY'\nprint(1)\nPY\n" + _header + " <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file",
+       cwd=PROJ)
+sh("env: heredoc-stdin: a print heredoc, then `cat <<'EOF'` whose body reads the env file, allowed",
+   "python3 - <<'PY'\nprint(1)\nPY\ncat <<'EOF'\ncat " + ENV + "\nEOF", "allow", cwd=PROJ)
+# These headers read their heredoc body as commands: a make recipe, a parallel job list, an ex or vim
+# script, an sftp batch. The body stays in view after a print heredoc.
+for _shell, _stdin_body in (
+        ("make -f -", "all:\n\tcat " + ENV),
+        ("parallel", "cat " + ENV),
+        ("vim -es", ":!cat " + ENV),
+        ("ex", ":!cat " + ENV),
+        ("sftp host", "!cat " + ENV),
+):
+    sh("env: heredoc-stdin: a print heredoc, then `%s <<'EOF'` whose body reads the env file, denies "
+       "[red on 15f6573]" % _shell,
+       "python3 - <<'PY'\nprint(1)\nPY\n" + _shell + " <<'EOF'\n" + _stdin_body + "\nEOF", "deny", "env-file",
+       cwd=PROJ)
+# A bun script reads its stdin body as JavaScript, and a backtick span in execSync runs a shell that the env
+# rule reads. A single-quoted execSync string is not read as shell, so the backtick form is the one pinned.
+sh("env: heredoc-stdin: a print heredoc, then `bun - <<'EOF'` whose body runs the env read in a backtick span, "
+   "denies [red on 15f6573]",
+   "python3 - <<'PY'\nprint(1)\nPY\nbun - <<'EOF'\nrequire('child_process').execSync(" + _BT + "cat " + ENV
+   + _BT + ")\nEOF", "deny", "env-file", cwd=PROJ)
+# Allow controls: `sudo tee` writes its body to a file and runs nothing, and an echo chained before a
+# cat-write runs no shell.
+sh("env: heredoc-stdin: an echo chained before a cat-write heredoc whose body names the env file, allowed "
+   "[red on 15f6573]",
+   "echo look at it; cat > n.md <<'EOF'\nthe guard refuses cat " + ENV + "\nEOF", "allow", cwd=PROJ)
+sh("env: heredoc-stdin: `sudo tee n.md <<'EOF'` whose body names the env file, allowed [red on 15f6573]",
+   "sudo tee n.md <<'EOF'\nthe guard refuses cat " + ENV + "\nEOF", "allow", cwd=PROJ)
+
 
 # The two incident commands, verbatim. The env word is written as @DOTENV@ and rebuilt from ENV, so
 # no Bash call that writes this file carries it (see ENV at the top of the file).
@@ -11634,6 +12216,223 @@ sh("env: heredoc-refuse: a hash in quotes before a bash heredoc with an env read
    'echo "# notes"; bash <<\'EOF\'\ncat ' + ENV + '\nEOF', "deny", "env-file", cwd=NOGIT)
 sh("env: heredoc-allow: a multi-line backtick span crossing a header line in a cat write body, is allowed",
    "cat > /tmp/b.md <<'EOF'\nconst s = `one\nbash <<EOF cat " + ENV + "\n`;\nEOF", "allow", cwd=NOGIT)
+
+# A prose line that names an env file, held in a comment or a string of a body an interpreter runs, is
+# data: the interpreter reads no prose. Each allow below must pass: a blanker that reads its prose as code refuses it as env-file.
+# The deny cases after them keep a real env read in view, beside or after prose, so a fix cannot widen past them.
+sh("env: heredoc-prose-allow: a python body with a triple-quoted prose line holding an env name and an odd apostrophe, is allowed",
+   "python3 - <<'EOF'\np='hooks/guard_env.py'\ns=open(p).read()\ns=s.replace('A','''# don't read " + ENV + ".py; it's text''')\nopen(p,'w').write(s)\nEOF",
+   "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a node body with a // prose line holding an env name and an odd apostrophe, is allowed",
+   "node - <<'EOF'\n// don't match " + ENV + ".sample\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a node body with a /* */ prose line holding an env name and an odd apostrophe, is allowed",
+   "node - <<'EOF'\n/* don't read " + ENV + ".local */\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a python body with a triple-quoted prose line naming an env file, is allowed",
+   "python3 - <<'EOF'\n'''don't read " + ENV + ".local'''\nprint(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a node body with a // prose line naming an env file, with no apostrophe, is allowed",
+   "node - <<'EOF'\n// read " + ENV + ".local\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a node body with a multi-line template literal holding a // prose line, is allowed",
+   "node - <<'EOF'\nconst s = `one\n// don't read " + ENV + ".local\n`;\nconsole.log(s)\nEOF", "allow", cwd=NOGIT)
+
+# The body is judged on what it runs. These stay denied, so no prose allow above widens into a pass for a read.
+# The bash and subprocess cases repeat existing heredoc-refuse cases, so the prose class's edge sits in one block.
+sh("env: heredoc-prose-refuse: a bash heredoc with a quoted delimiter and an env read in the body, denies",
+   "bash <<'EOF'\ncat " + ENV + "\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a python body that runs cat of an env file through subprocess, denies",
+   "python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a clean python heredoc, then a cat of an env file on the next line, denies",
+   "python3 - <<'EOF'\nprint(1)\nEOF\ncat " + ENV, "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a cat of an env file in a substitution of an unquoted cat heredoc, denies",
+   "cat <<EOF\n$(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node runner given an env file with inline code, denies",
+   "node --env-file=" + ENV + " - <<'EOF'\nconsole.log(1)\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a python comment before a real subprocess cat of an env file, denies",
+   "python3 - <<'EOF'\n# don't read\nimport subprocess\nsubprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node runner given an env file, with a // comment before its inline code, denies",
+   "node --env-file=" + ENV + " - <<'EOF'\n// note\nconsole.log(1)\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a python string holding a # then a real subprocess cat of an env file, denies",
+   "python3 - <<'EOF'\nu = \"http://x#y\"; import subprocess; subprocess.run(['cat', '" + ENV + "'])\nEOF", "deny", "env-file",
+   cwd=NOGIT)
+sh("env: heredoc-prose-refuse: an unquoted node body with a // comment and a cat substitution, denies",
+   "node - <<EOF\n// don't $(cat " + ENV + ")\nEOF", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: an unquoted node body with a // inside a string and a cat substitution, denies",
+   'node - <<EOF\nconst u = "http://x"; const s = "$(cat ' + ENV + ')";\nEOF', "deny", "env-file", cwd=NOGIT)
+
+# A triple-quoted string that IS the path is code, not prose, so the prose blanker must keep it.
+sh("env: heredoc-prose-refuse: a python triple-quoted string that is the env path, then an open read of it, denies",
+   "python3 - <<'EOF'\np = '''" + ENV + "'''\nopen(p).read()\nEOF", "deny", "env-file", cwd=NOGIT)
+
+# Each form below must deny. It pins the tokenizer: a blanker that reads a `//`, `/*` or `#`
+# inside a string as a comment, or that misreads where a template literal ends, lets the read through.
+sh("env: heredoc-prose-refuse: a node body with a // in a string, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst u = \"http://x\"; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with a /* in a string, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst s = \"/*\"; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body whose template literal holds a // line that closes on that line, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst s = `one\n// x`; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a python body with a # in a string, then an open read of an env file, denies",
+   "python3 - <<'EOF'\ns = \"#\"; p = '" + ENV + "'\nopen(p).read()\nEOF", "deny", "env-file", cwd=NOGIT)
+
+# An escaped slash in a regex literal is code, so the blanker must not read the slash after it as a comment
+# opener. Each form below must deny: a blanker that reads that slash as a comment opener blanks the env read after it.
+sh("env: heredoc-prose-refuse: a node body with a regex split on an escaped slash, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst p = s.split(/\\//); require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with a replace regex holding an escaped slash, then a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst a = s.replace(/^https?:\\/\\//, ''); require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with a regex holding an escaped slash and a star, on the line before a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst a = s.replace(/\\/*$/, '');\nrequire('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+# A real // comment after a regex line still blanks: the regex does not change where the comment is.
+sh("env: heredoc-prose-allow: a node body with a regex holding an escaped slash, then a // comment naming an env file on its own line, is allowed",
+   "node - <<'EOF'\nconst r = /a\\/b/;\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+
+# A template literal nested in another's ${...} holds a backtick that the blanker reads as the outer template's close.
+# A `/*` or `//` after that backtick then reads as a comment, and it hides the env read on its line or below.
+# Each nested form below must deny. The non-nested controls hold the same read outside a nested template.
+sh("env: heredoc-prose-refuse: a node body whose template literal nests a /* template on line 1, then a backtick cat of an env file on line 2, denies",
+   "node - <<'EOF'\nconst s = `rm -rf ${dirs.map(d => `${d}/*`)}`;\nrequire('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body whose template literal nests a // URL template, then a backtick cat of an env file on the same line, denies",
+   "node - <<'EOF'\nconst u = `${`${a}://${b}`}`; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body whose template literal nests a /* template, then a backtick cat of an env file on the same line, denies",
+   "node - <<'EOF'\nconst s = `${`${d}/*`}`; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with one template literal, not nested, holding a // URL and a backtick cat of an env file, denies",
+   "node - <<'EOF'\nconst u = `${a}://${b}`; require('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a node body with one template literal, not nested, holding /* and a backtick cat of an env file on line 2, denies",
+   "node - <<'EOF'\nconst s = `rm -rf ${d}/*`;\nrequire('child_process').execSync(`cat " + ENV + "`)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+
+# A heredoc with a node or python word before its `<<` (in the file name or a cd path), then bash runs the
+# file, holds shell text. The blanker reads its body by node or python rules, so a `/*` or a `#` hides the read after it.
+sh("env: heredoc-prose-refuse: a script written to node/go with a /* in its body and an env read on the next line, run by bash, denies",
+   "cat > node/go <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash node/go", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a script written by cd into ~/node as go with a /* in its body and an env read, run by bash, denies",
+   "cd ~/node && cat > go <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash go", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a script written to python3/go with a # in its body and an env read on the same line, run by bash, denies",
+   "cat > python3/go <<'EOF'\necho $# ; source " + ENV + "\nEOF\nbash python3/go", "deny", "env-file", cwd=NOGIT)
+# The same bodies under a file name with no interpreter word are controls: the read refuses.
+sh("env: heredoc-prose-refuse: a script written to run/go with a /* in its body and an env read, run by bash, denies",
+   "cat > run/go <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash run/go", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a script written by cd into ~/run as go with a /* in its body and an env read, run by bash, denies",
+   "cd ~/run && cat > go <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash go", "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a script written to run/go with a # in its body and an env read on the same line, run by bash, denies",
+   "cat > run/go <<'EOF'\necho $# ; source " + ENV + "\nEOF\nbash run/go", "deny", "env-file", cwd=NOGIT)
+
+# A node body run by `node -` is code, and a `//` comment after code is text: an env name in it is allowed.
+sh("env: heredoc-prose-allow: a node - body with a // comment after code that names an env file, is allowed",
+   "node - <<'EOF'\nconst a = 1; // do not read " + ENV + "\nconsole.log(a)\nEOF", "allow", cwd=NOGIT)
+
+# A launcher's word is the interpreter only when the launcher starts it. A container, pod or host named node, a
+# `-w` path ending in node, or a `>&` redirect target named node is an argument, so the body is bash's and its
+# env read denies. Each form below must deny: reading the argument as the interpreter word hands the body to the node
+# reader, which blanks from the /* on and lets the env read through.
+sh("env: heredoc-prose-refuse: a docker exec tee to a file in a container named node, a /* in the body, an env read, then bash runs it, denies",
+   "docker exec -i node tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\ndocker exec node bash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a kubectl exec tee to a file in a pod named node, a /* in the body, an env read, then bash runs it, denies",
+   "kubectl exec -i node -- tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nkubectl exec node -- bash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: an ssh tee to a file on a host named node, a /* in the body, an env read, then bash runs it, denies",
+   "ssh node tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nssh node bash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a docker exec tee to a file with a -w path ending in node, a /* in the body, an env read, then bash runs it, denies",
+   "docker exec -w /app/node c tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\ndocker exec c bash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a docker exec cat with a >& redirect to a file named node, a /* in the body, an env read, then bash runs it, denies",
+   "docker exec -i c cat >& node <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash node",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: two heredoc headers on one line, a cat write to go then a node - body, a /* in the first body, an env read, then bash runs go, denies",
+   "cat > go <<'A' && node - <<'B'\ncp -r a/* b/\nsource " + ENV + "\nA\nconsole.log(1)\nB\nbash go",
+   "deny", "env-file", cwd=NOGIT)
+# The node word here is a file argument of tee, not a redirect target. It must deny like the forms above: read as
+# the interpreter word, it blanks the body from the /* on.
+sh("env: heredoc-prose-refuse: a docker exec tee to a file argument named node, a /* in the body, an env read, then bash runs node, denies",
+   "docker exec -i c tee node <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash node",
+   "deny", "env-file", cwd=NOGIT)
+# The two plain forms below have no launcher, so the body is bash's and the read denies.
+sh("env: heredoc-prose-refuse: a plain cat write to a file named node, a /* in the body, an env read, then bash runs node, denies",
+   "cat > node <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash node",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a plain tee to a file named node, a /* in the body, an env read, then bash runs node, denies",
+   "tee node <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash node",
+   "deny", "env-file", cwd=NOGIT)
+
+# Controls. A launched python or node runs its body, so a comment in it is text: an env name in one is allowed.
+# The python and uv controls must pass. The node controls pin that a // comment in a node body is text, so an env name in it must be allowed.
+sh("env: heredoc-prose-allow: a docker exec python3 - body in a container named c, with a # comment naming an env file, is allowed",
+   "docker exec -i c python3 - <<'EOF'\n# read " + ENV + "\nprint(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a uv run python - body with a # comment naming an env file, is allowed",
+   "uv run python - <<'EOF'\n# read " + ENV + "\nprint(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a timeout 5 node - body with a // comment naming an env file, is allowed",
+   "timeout 5 node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: an env X=1 node - body with a // comment naming an env file, is allowed",
+   "env X=1 node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a cd x && node - body with a // comment naming an env file, is allowed",
+   "cd x && node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+
+# The same launch shapes with `app` as the launched word: no interpreter, so the body is bash's and the read denies.
+sh("env: heredoc-prose-refuse: a docker exec tee to a file in a container named app, a /* in the body, an env read, then bash runs it, denies",
+   "docker exec -i app tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\ndocker exec app bash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a kubectl exec tee to a file in a pod named app, a /* in the body, an env read, then bash runs it, denies",
+   "kubectl exec -i app -- tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nkubectl exec app -- bash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: an ssh tee to a file on a host named app, a /* in the body, an env read, then bash runs it, denies",
+   "ssh app tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nssh app bash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a docker exec tee to a file with a -w path ending in app, a /* in the body, an env read, then bash runs it, denies",
+   "docker exec -w /app/app c tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\ndocker exec c bash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+
+# A launch whose flag takes a value before the container name (`--index 2`, `--cidfile f`, `--preserve-fds 3`)
+# tees a body into a file that bash then runs, so the body is bash's and its env read denies. The odd
+# contraction quote in the last case doubles the segment count, so the header parse falls back to the whole line.
+sh("env: heredoc-prose-refuse: a docker compose exec --index 2 tee to a file in a container named node, a /* in the body, an env read, then bash runs it, denies",
+   "docker compose exec --index 2 node tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a podman exec --cidfile tee to a file in a container named node, a /* in the body, an env read, then bash runs it, denies",
+   "podman exec --cidfile f node tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a podman exec --preserve-fds 3 tee to a file in a container named node, a /* in the body, an env read, then bash runs it, denies",
+   "podman exec --preserve-fds 3 node tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a cat write whose line holds an odd contraction quote and a node - heredoc, an env read in the first body, then bash runs go, denies",
+   "cat > go <<'A' ; echo it's ; node - <<'B'\ncp -r a/* b/\nsource " + ENV + "\nA\nconsole.log(1)\nB\nbash go",
+   "deny", "env-file", cwd=NOGIT)
+
+# F1-F3 with app in place of node: no interpreter, so bash's body reads the env file and denies.
+sh("env: heredoc-prose-refuse: a docker compose exec --index 2 tee to a file in a container named app, a /* in the body, an env read, then bash runs it, denies",
+   "docker compose exec --index 2 app tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a podman exec --cidfile tee to a file in a container named app, a /* in the body, an env read, then bash runs it, denies",
+   "podman exec --cidfile f app tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+sh("env: heredoc-prose-refuse: a podman exec --preserve-fds 3 tee to a file in a container named app, a /* in the body, an env read, then bash runs it, denies",
+   "podman exec --preserve-fds 3 app tee /tmp/run <<'EOF'\ncp -r a/* b/\nsource " + ENV + "\nEOF\nbash /tmp/run",
+   "deny", "env-file", cwd=NOGIT)
+
+# Launches that run a node or python body, with a comment that names the env file and no read: each is allowed.
+sh("env: heredoc-prose-allow: an ssh node - body with a // comment naming an env file, is allowed",
+   "ssh host node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a kubectl exec node - body with a // comment naming an env file, is allowed",
+   "kubectl exec pod -- node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a podman exec -i python3 - body with a # comment naming an env file, is allowed",
+   "podman exec -i c python3 - <<'EOF'\n# read " + ENV + "\nprint(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: an npx node - body with a // comment naming an env file, is allowed",
+   "npx node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a pnpm exec node - body with a // comment naming an env file, is allowed",
+   "pnpm exec node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
+sh("env: heredoc-prose-allow: a docker exec timeout 5 node - body with a // comment naming an env file, is allowed",
+   "docker exec c timeout 5 node - <<'EOF'\n// read " + ENV + "\nconsole.log(1)\nEOF", "allow", cwd=NOGIT)
 
 # A data body that a later `sh` runs, or a substitution the shell runs, is judged on what it runs: an env
 # read in the body, a force push in the body, or a force push in a substitution of an unquoted body.
@@ -12344,6 +13143,265 @@ sh("hook-bypass allow: -c core.hooksPath on status, which is not commit, merge o
 sh("hook-bypass allow: running hooks/mutate_shared.py, whose own checkout sets core.hooksPath",
    "python3 hooks/mutate_shared.py", "allow", cwd=GITMAIN)
 
+# ============================================================ process arguments (rule process-args)
+#
+# A process's full arguments can hold a secret, an auth key in a flag, and a session that prints
+# them puts the secret in its transcript. The rule refuses a command that prints other processes'
+# FULL arguments. Its remedy names the forms that stay: a pid, a name, a parent id, a start time.
+# Every case here is named `argv:`, so it takes the family `argv` (see _family) and GUARD_FAMILY=argv
+# runs only these. Every case runs in NOGIT.
+#
+# A refuse case reads `allow` on a guard without the rule, so each one is red there. An allow case
+# checks a form the rule must keep passing, so a fix that refuses too much fails it.
+
+# The shell readers that the guard and the sweep spawn. They are read from source, so a reader that
+# changes is tested as it now reads.
+ARGV_READER_FILES = ("hooks/guard_kill.py", "hooks/git_reads.py", "janitor/sweep.py")
+# The readers that print full arguments, by their exact argv. A session that typed one would be
+# refused by the rule, so no case says these pass. They run in Python and never reach the hook.
+ARGV_FULL_ARGS_READERS = (
+    ("ps", "-o", "command=", "-p", "123"),   # janitor/sweep.py, one pid's command line
+    ("ps", "-axo", "pid=,ppid=,uid=,command="),   # janitor/sweep.py, the whole table
+)
+
+
+def _argv_readers():
+    """{argv: file} for each `ps`, `pgrep` or `lsof` list the readers build. A non-literal element
+    reads as a pid, so `str(pid)` is 123. Stops the run when a reader file holds no such list, so the
+    readers case never runs on nothing."""
+    found = {}
+    for rel in ARGV_READER_FILES:
+        with open(os.path.join(HERE, "..", rel), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read(), filename=rel)
+        lists = 0
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.List) or not node.elts:
+                continue
+            head = node.elts[0]
+            if not (isinstance(head, ast.Constant) and head.value in ("ps", "pgrep", "lsof")):
+                continue
+            lists += 1
+            words = tuple(e.value if isinstance(e, ast.Constant) and isinstance(e.value, str) else "123"
+                          for e in node.elts)
+            found.setdefault(words, rel)
+        if not lists:
+            sys.exit("process-args: no ps, pgrep or lsof argv list in %s" % rel)
+    return found
+
+
+def _playwright_remedy_commands():
+    """The commands the Playwright refusal tells a session to run: its backticked `pgrep` or `ps` spans.
+    Read from the constant's literal, so a changed remedy is the one tested."""
+    with open(os.path.join(HERE, "guard_kill.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), filename="guard_kill.py")
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "PLAYWRIGHT_PATH_REASON" for t in node.targets):
+            commands = re.findall(r"`((?:pgrep|ps)\b[^`]*)`", ast.literal_eval(node.value))
+            if not commands:
+                sys.exit("process-args: PLAYWRIGHT_PATH_REASON names no pgrep or ps command")
+            return commands
+    sys.exit("process-args: no PLAYWRIGHT_PATH_REASON literal in hooks/guard_kill.py")
+
+
+ARGV_REFUSED = (
+    "ps aux", "ps -ef", "ps -eo pid,args", "ps -o args", "ps -A -o pid,command", "ps auxww",
+    "ps -fp 123", "ps -ef | grep tailscale", "ps -eo pid,comm,args",
+    "pgrep -a x", "pgrep -fa x", "pgrep -fl x", "pgrep -af x", "pgrep -l -f x",
+    "cat /proc/*/cmdline", "cat /proc/123/cmdline", r"tr '\0' ' ' < /proc/$pid/cmdline",
+    "cat /proc/[0-9]*/cmdline",
+    "/usr/bin/ps aux", "sudo ps aux", "bash -c 'ps -ef'", "x=$(ps aux)", "env FOO=1 ps aux",
+    "ls && ps aux", "true; ps -ef", "pgrep -f node | xargs ps -fp",
+)
+for _cmd in ARGV_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+
+ARGV_ALLOWED = (
+    "ps -o pid,comm", "ps -eo pid,comm", "ps -A -o pid=,ppid=", "ps -o ppid= -p 123",
+    "ps -o comm= -p 123", "ps -o lstart= -p 123", "ps -p 123 -o pid,comm",
+    "pgrep x", "pgrep -f x", "pgrep -l x", "pgrep -x node", "pidof node",
+    "cat /proc/123/status", "cat /proc/123/comm", "ls /proc/123/fd",
+)
+for _cmd in ARGV_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+for _words, _rel in _argv_readers().items():
+    if _words in ARGV_FULL_ARGS_READERS:
+        continue
+    _cmd = " ".join(_words)
+    sh("argv: allow, the reader in %s spawns: %s" % (_rel, _cmd), _cmd, "allow", cwd=NOGIT)
+
+# The Playwright refusal tells a session to run a pgrep. A command the rule refuses would send the
+# session into a refusal, so each command it names must pass. The case fails when the rule refuses one of
+# them, so a remedy that names a refused form fails here.
+for _cmd in _playwright_remedy_commands():
+    sh("argv: allow, the Playwright remedy tells a session to run: " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# The remedy of the refusal names the safe forms and never a refused one, since a remedy that names a
+# refused form sends the session into the same refusal.
+sh("argv: deny, the remedy names the safe forms and no refused one (ps)", "ps aux", "deny", "process-args",
+   cwd=NOGIT, carries=("ps -o pid,comm", "pgrep -l", "pgrep -f x", "pids only"),
+   lacks=("ps aux", "ps -ef", "pgrep -a", "pgrep -fl", "pgrep -l -f"))
+sh("argv: deny, the remedy names the safe forms and no refused one (pgrep)", "pgrep -fa x", "deny",
+   "process-args", cwd=NOGIT, carries=("pgrep -l", "pgrep -f x", "pids only"),
+   lacks=("pgrep -fa", "pgrep -af", "pgrep -a", "pgrep -fl", "pgrep -l -f", "ps aux", "ps -ef"))
+
+# A quoted, commented or heredoc form is text: the rule judges what a shell would run, not the words.
+# Each refused form after such text still refuses. These are the string cases of building-scanner-respects-strings.
+ARGV_TEXT_ALLOWED = (
+    ("quoted name of the form", 'echo "ps aux"'),
+    ("the form in a commit message", 'git commit -m "refuse ps -ef"'),
+    ("a pattern that names the path", "grep -n 'cmdline' file"),
+    ("a file name that holds the word", "cat notes-about-cmdline.txt"),
+    ("a lone apostrophe inside double quotes", 'echo "Don\'t run ps aux here"'),
+    ("a comment opener inside double quotes", 'echo "# ps aux is text"'),
+    ("a comment after a command", "echo hi # ps aux"),
+    ("a comment line", "# ps aux\nls"),
+    ("a quoted heredoc body", "cat > notes.md <<'EOF'\nps aux lists every process\nEOF"),
+    ("a commit message from a quoted heredoc",
+     "git commit -m \"$(cat <<'EOF'\nps aux lists every process\nEOF\n)\""),
+    ("a multi-line double-quoted string", "printf '%s\\n' \"first line\nps aux is named here\""),
+)
+ARGV_TEXT_REFUSED = (
+    ("a comment opener in quotes, then a real command", 'echo "a # b" && ps aux'),
+    ("a lone apostrophe in quotes, then a real command", 'echo "Don\'t" && ps aux'),
+    ("a quoted hash, then a real command", 'echo "#"; ps -ef'),
+    ("a quoted heredoc, then a real command", "cat <<'EOF'\nnotes\nEOF\nps -ef"),
+    ("a substitution inside double quotes", 'echo "$(ps -ef)"'),
+    ("a substitution in double quotes, piped", 'echo "tailscale: $(ps -ef | grep tailscale)"'),
+    ("a substitution in an unquoted heredoc body", "cat <<EOF\n$(ps aux)\nEOF"),
+)
+for _label, _cmd in ARGV_TEXT_ALLOWED:
+    sh("argv: allow, text: " + _label, _cmd, "allow", cwd=NOGIT)
+for _label, _cmd in ARGV_TEXT_REFUSED:
+    sh("argv: deny, text: " + _label, _cmd, "deny", "process-args", cwd=NOGIT)
+
+# Each refuse case below names a form the rule must read. Each pass control beside it names a form the
+# rule must still allow, so a fix that reads too much fails a control.
+
+# BSD `x` lists the processes with no controlling terminal. Under the BSD personality its COMMAND
+# column is the full argument list. The operand form (`ps ax`) is a separate refusal with no case here.
+# The flag forms are pinned, including `-a -x`, split into two words, which lists the same processes as `-ax`.
+ARGV_BSD_X_REFUSED = ("ps -x", "ps -ax", "ps -Ax", "ps -ex", "ps -xw", "ps -a -x")
+for _cmd in ARGV_BSD_X_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# An explicit -o format decides alone, even with the BSD x flag.
+ARGV_BSD_X_ALLOWED = ("ps -xo pid,comm", "ps -x -o comm=")
+for _cmd in ARGV_BSD_X_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# A read of a process's cmdline by any command, not only cat or tac. The pid is a number, a glob, a
+# variable, or a thread under one (`task/N`). A command that takes the path as an argument, or reads it
+# through `xargs -a`, is refused as cat is.
+ARGV_CMDLINE_REFUSED = (
+    "grep -a tailscale /proc/*/cmdline", "head -c 200 /proc/1/cmdline", "tail -c 200 /proc/1/cmdline",
+    "strings /proc/1/cmdline", "od -c /proc/1/cmdline", "sed -n l /proc/1/cmdline",
+    "xargs -0 -a /proc/1/cmdline echo", "cat /proc/1/task/1/cmdline", "cat /proc/$pid/task/1/cmdline",
+    r"tr '\0' ' ' < /proc/1/task/1/cmdline",
+)
+for _cmd in ARGV_CMDLINE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# The shell's own pid and self stay, under every reader. Other proc files stay, and so does a path
+# that only names the cmdline inside text.
+ARGV_CMDLINE_ALLOWED = (
+    "cat /proc/self/cmdline", "cat /proc/$$/cmdline", "head -c 200 /proc/self/cmdline",
+    "strings /proc/$$/cmdline", "cat /proc/1/comm", "cat /proc/1/status", "echo /proc/1/cmdline",
+    'git commit -m "read /proc/1/cmdline"', "grep -n cmdline file.txt",
+)
+for _cmd in ARGV_CMDLINE_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+ARGV_CMDLINE_TEXT_ALLOWED = (
+    ("a heredoc body that names the read", "cat > notes.md <<'EOF'\nhead -c 200 /proc/1/cmdline\nEOF"),
+    ("a comment that names the read", "ls # head -c 200 /proc/1/cmdline"),
+)
+for _label, _cmd in ARGV_CMDLINE_TEXT_ALLOWED:
+    sh("argv: allow, text: " + _label, _cmd, "allow", cwd=NOGIT)
+
+# pstree prints the full command line with -a or -c, and top with -c. The default tree and the
+# default top columns stay.
+ARGV_TREE_REFUSED = ("pstree -a", "pstree -ap", "pstree -ca", "top -c -bn1", "top -bc")
+for _cmd in ARGV_TREE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+ARGV_TREE_ALLOWED = ("pstree -p", "pstree", "top -bn1", "top -b -n 1 -o %CPU")
+for _cmd in ARGV_TREE_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+# The PowerShell tool reads a process's command line through CIM, WMI or wmic, as the CommandLine
+# property. The pid, name and process-table forms stay.
+ARGV_PS_REFUSED = (
+    "Get-CimInstance Win32_Process | Select CommandLine",
+    "(Get-WmiObject Win32_Process).CommandLine",
+    "wmic process get commandline",
+    "Get-Process | Select Name,CommandLine",
+)
+for _cmd in ARGV_PS_REFUSED:
+    sh("argv: deny, PowerShell, " + _cmd, _cmd, "deny", "process-args", tool="PowerShell", cwd=NOGIT)
+ARGV_PS_ALLOWED = (
+    "Get-Process", "Get-Process | Select Id,ProcessName", "Get-CimInstance Win32_Process | Select ProcessId,Name",
+)
+for _cmd in ARGV_PS_ALLOWED:
+    sh("argv: allow, PowerShell, " + _cmd, _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+# PowerShell text is a string, a comment or a here-string, never a command. Each shape the scanner meets
+# gets a control, and a refused command after the text still refuses.
+ARGV_PS_TEXT_ALLOWED = (
+    ("a quoted Win32_Process CommandLine", 'Write-Output "Win32_Process CommandLine"'),
+    ("a comment opener inside double quotes", 'Write-Output "# Get-CimInstance Win32_Process | Select CommandLine"'),
+    ("a comment line that names the read", "# (Get-WmiObject Win32_Process).CommandLine\nGet-Process"),
+    ("a here-string that names the read",
+     "@'\nGet-CimInstance Win32_Process | Select CommandLine\n'@ | Out-File notes.md"),
+    ("a lone apostrophe inside double quotes", 'Write-Output "Don\'t read CommandLine"'),
+)
+ARGV_PS_TEXT_REFUSED = (
+    ("a comment opener in quotes, then a real command",
+     'Write-Output "a # b"; Get-CimInstance Win32_Process | Select CommandLine'),
+    ("a lone apostrophe in quotes, then a real command", 'Write-Output "Don\'t"; wmic process get commandline'),
+)
+for _label, _cmd in ARGV_PS_TEXT_ALLOWED:
+    sh("argv: allow, PowerShell text: " + _label, _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+for _label, _cmd in ARGV_PS_TEXT_REFUSED:
+    sh("argv: deny, PowerShell text: " + _label, _cmd, "deny", "process-args", tool="PowerShell", cwd=NOGIT)
+
+# The remedy names no refused form of these families. Each case's trigger is a refused form of a family
+# above, so the case also pins the remedy text that the refusal prints.
+ARGV_NEW_FORMS_NOT_IN_REMEDY = (
+    "ps -x", "ps -ax", "ps -xw", "pstree -a", "pstree -ca", "top -c", "top -bc", "cmdline", "xargs -a",
+    "CommandLine", "wmic",
+)
+sh("argv: deny, the remedy names no refused BSD, tree or cmdline form (trigger ps -xw)", "ps -xw", "deny",
+   "process-args", cwd=NOGIT, lacks=ARGV_NEW_FORMS_NOT_IN_REMEDY)
+sh("argv: deny, the remedy names no refused PowerShell form (trigger CommandLine)",
+   "Get-Process | Select Name,CommandLine", "deny", "process-args", tool="PowerShell", cwd=NOGIT,
+   lacks=ARGV_NEW_FORMS_NOT_IN_REMEDY)
+
+# A grep-style command takes its pattern as a bare word, or after -e. A cmdline path given as the pattern
+# names no file, so each form here passes. The path is a file only when a later operand follows.
+ARGV_GREP_PATTERN_ALLOWED = (
+    r'grep -rn "/proc/1/cmdline" docs',
+    r'grep -e "/proc/1/cmdline" hooks/test_guard.py',
+    "echo hi | grep /proc/1/cmdline",
+    "egrep -n /proc/1/cmdline notes.md",
+    "fgrep /proc/1/cmdline notes.md",
+    'rg "/proc/1/cmdline" docs',
+    "rg -n -e /proc/1/cmdline docs",
+)
+for _cmd in ARGV_GREP_PATTERN_ALLOWED:
+    sh("argv: allow, " + _cmd, _cmd, "allow", cwd=NOGIT)
+# The file operand of a grep-style command is a read, whether the pattern is bare or given with -e. These
+# are controls: a fix that exempts the whole command, or reads only the first operand, fails them.
+ARGV_GREP_FILE_REFUSED = (
+    "grep tailscale /proc/1/cmdline", "grep -a x /proc/*/cmdline", "rg x /proc/1/cmdline",
+    "grep -e tailscale /proc/1/cmdline",
+)
+for _cmd in ARGV_GREP_FILE_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+# find runs its -exec command on each path it takes, so the command after -exec reads the cmdline file.
+ARGV_FIND_EXEC_REFUSED = (
+    r"find /proc/1/cmdline -exec cat {} \;",
+    r"find /proc/*/cmdline -exec grep -a tailscale {} +",
+)
+for _cmd in ARGV_FIND_EXEC_REFUSED:
+    sh("argv: deny, " + _cmd, _cmd, "deny", "process-args", cwd=NOGIT)
+
 # =========================================================================== 5. merge into main
 FAMILY = "merge"
 #
@@ -12435,10 +13493,12 @@ def gh_verb(command):
     return " ".join(command.split()[:3])
 
 
-def gh_write_refused(name, command, **fixture):
-    """One gh write refused in a cloud session, and the same write allowed outside one."""
+def gh_write_refused(name, command, lacks_verb="", **fixture):
+    """One gh write refused in a cloud session, and the same write allowed outside one. `lacks_verb` is the
+    verb the refusal must not print; it defaults to the command's first three words."""
     sh("gh-write-cloud: %s is refused in a cloud session" % name, command, "deny", GH_WRITE_RULE,
-       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(gh_verb(command),), **fixture)
+       cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(lacks_verb or gh_verb(command),),
+       **fixture)
     sh("gh-write-cloud: %s is allowed outside a cloud session" % name, command, "allow", cwd=NOGIT, **fixture)
 
 
@@ -12469,6 +13529,46 @@ GH_WRITES = (
 for _name, _command in GH_WRITES:
     gh_write_refused(_name, _command)
 gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
+
+# A repo flag after the group word (`gh pr -R o/r comment 5`) is valid gh, and the verb comes after it. Each
+# write above is repeated with the flag in each of gh's four forms, after `pr` or `issue`. The name of each row
+# carries "after the group word", so MUTATE_ONLY="after the group word" selects these rows alone.
+GH_REPO_FLAGS = ("-R o/r", "--repo o/r", "--repo=o/r", "-Ro/r")
+GH_GROUP_WRITES = [(name, command, {}) for name, command in GH_WRITES if command.split()[1] in ("pr", "issue")]
+GH_GROUP_WRITES.append(("pr merge", "gh pr merge 12 --squash", GH_MERGE_FIXTURE))
+for _flag in GH_REPO_FLAGS:
+    for _name, _command, _fixture in GH_GROUP_WRITES:
+        _words = _command.split()
+        _flagged = " ".join(_words[:2] + _flag.split() + _words[2:])
+        gh_write_refused("%s, %s after the group word" % (_name, _flag), _flagged,
+                         lacks_verb=" ".join(_words[:3]), **_fixture)
+# A repo value that reads as a verb is a value. The verb after it is the one judged, in both directions: a read
+# verb never hides a write, and a write-looking value never makes a read a write. The reads are the controls.
+sh("gh-write-cloud: a repo value named like a read verb does not hide a comment after the group word",
+   "gh pr -R list comment 5 --body hi", "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD,
+   carries=GH_WRITE_REMEDY, lacks=("gh pr comment",))
+for _command in ("gh pr -R o/r view 5", "gh pr -R o/r list", "gh issue --repo o/r list", "gh pr -R comment list"):
+    sh("gh-write-cloud: a read after the group word, %s, is allowed in a cloud session" % _command.split(" ", 2)[2],
+       _command, "allow", cwd=NOGIT, env=GH_WRITE_CLOUD)
+# The local verdicts outside a cloud session: a merge with a pending head is judged by merge-checks, and a
+# create without --draft is refused by draft-pr, with the flag after the group word. Each has a green twin.
+sh("merge-checks: pr merge, -R o/r after the group word, is judged, and a pending head denies",
+   "gh pr -R o/r merge 12", "deny", "merge-checks", carries="pending", cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-checks: pr merge, -R o/r after the group word, is allowed on a green head",
+   "gh pr -R o/r merge 12", "allow", cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+# The control for the rows above: the same repo flag after the verb is already read, so this head read must answer
+# for the repo the flag names. A red on the rows above with "could not run" would mean the fake answers no read
+# for that repo.
+sh("merge-checks: pr merge 12 -R o/r, a flag after the verb, denies a pending head: the control for the "
+   "rows after the group word",
+   "gh pr merge 12 -R o/r", "deny", "merge-checks", carries="pending", cwd=NOGIT,
+   env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+sh("draft-pr: pr create, -R o/r after the group word, without --draft is refused",
+   "gh pr -R o/r create --title x --body y", "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY,
+   lacks=DRAFT_LACKS)
+sh("draft-pr: pr create, -R o/r after the group word, with --draft is allowed",
+   "gh pr -R o/r create --draft --title x", "allow", cwd=NOGIT)
 
 # A write that another rule also refuses gets the gh-write-cloud verdict in a cloud session. Its remedy
 # names an MCP tool, never the refused form. Each refusal has a twin outside a cloud session.
@@ -13404,8 +14504,10 @@ def record_push_cost_case():
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
-    `HEAD:<branch>` adds no read. A stray push (rule push-stray-branch: an implied destination off the
-    upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The conflict-markers
+    `HEAD:<branch>` adds no config read. A stray push (rule push-stray-branch: an implied destination off the
+    upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The octopus-push
+    rule (decision octopus-push-refused) adds one `git rev-list` for each pushed ref whose destination is not
+    main or master, with or without a remote-tracking ref. The conflict-markers
     push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
@@ -13444,18 +14546,20 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want, *cwd in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo",
+         {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1, "rev-list": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1, "rev-list": 1}),
         ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
         ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
-        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo",
+         {"rev-parse": 1, "diff": 1, "rev-list": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
-         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
+         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3, "rev-list": 1}),
         # A stray push: HEAD on a branch tracking another name. The destination's ref is read and is absent, so
         # the conflict check rejects that base and reads the upstream: two diff reads.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
-         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
+         {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2, "rev-list": 1}, PUSHSTRAY),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
@@ -13475,7 +14579,7 @@ def record_push_cost_case():
     if problems:
         return False, "; ".join(problems)
     return True, "one rev-parse per push, one more for a stray push, symbolic-ref for HEAD and bare, " \
-                 "push.default for bare only; " \
+                 "push.default for bare only, one rev-list per pushed ref not to main or master; " \
                  "the transcript is read only at the record branch"
 
 
@@ -14091,6 +15195,11 @@ def step_allow(name, transcript, message, target=ROLE_OTHER):
 # alone cannot pass it.
 step_refuse("a brief for topic colors to a lane on topic icons is refused, though it names the lane's own step",
             role_path("step-topic-lane"), "Lane brief: icon-a. Topic: colors.")
+# Refused, and the steer says to start one with create_session: the sender already holds a lane, so a new lane is the
+# right next step here. The create_session start's reason is split from this one, so the steer must stay on this side.
+step_refuse("a brief for topic colors to a lane on topic icons keeps the steer to start one with create_session",
+            role_path("step-topic-lane"), "Lane brief: icon-b. Topic: colors.",
+            carries=("start one with create_session",))
 # Refused: a lane with a topic gets a brief that names none. The steer names the topic, so the sender can fix it.
 step_refuse("a brief that names no topic, to a lane with a topic, is refused, and the steer names the topic",
             role_path("step-topic-lane"), "Lane brief: icon-a.", carries=TOPIC_STEER)
@@ -14170,7 +15279,583 @@ step_refuse("a heading marker, # Lane brief: x. Topic: icons., to a lane on topi
             role_path("step-colors-lane"), "# Lane brief: x. Topic: icons.")
 step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topic colors is refused",
             role_path("step-colors-lane"), "lane brief: x. topic: icons.")
+# A brief opens with the owner's Grant line, then the marker line. The guard skips the Grant line, so the marker line is
+# judged as the marker case above is: topic colors to a lane on topic icons is refused, on the topic's reason.
+step_refuse("a Grant line, then a brief for topic colors to a lane on topic icons, is refused: the Grant line is skipped",
+            role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nLane brief: icon-a. Topic: colors.",
+            carries=("names a topic the lane does not hold",))
+# Passes, the green control beside the refusal above: a Grant line, then plain text with no marker, passes as plain
+# text does with no Grant line. The Grant line alone is not a refusal.
+step_allow("a Grant line, then plain status text with no marker, is allowed",
+           role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nStatus: PR #12 merged for icon-a.")
+# Refused: a placeholder Grant line is no grant, as on create_session. The brief's topic matches the lane, so only the
+# placeholder can refuse it.
+step_refuse("a Grant line that holds a placeholder is refused, though the brief's topic matches the lane",
+            role_path("step-topic-lane"), "Grant: <owner words>, <time>\nLane brief: icon-a. Topic: icons.")
 
+
+# =========================================================================== a header stamp matches the clock
+FAMILY = "message-time-matches-clock"
+#
+# Rule message-time-matches-clock. A send_message whose first non-blank line, after its markdown lead chars, opens
+# with a header stamp is refused when the stamp is wrong for the clock. A header stamp is `<label>` (1 to 4 words),
+# then `,`, `:`, or a dash spaced on both sides (` - `, ` — `), then an optional date `YYYY-MM-DD `, then `H:MM` or
+# `HH:MM`, an optional `:SS`, then the zone `CST` or `CDT` in any letter case. Anything may follow it. The zone must
+# be the clock's own: a CDT stamp in CST season and a CST stamp in CDT season are refused, whatever the minutes.
+# A dated stamp is an instant with its zone's offset, refused when it is more than 1 minute ahead, with no upper
+# limit. An undated stamp is a signed minute-of-day offset mod 1440, refused only when it is 2 to 60 minutes ahead:
+# more than 60 ahead reads as a quote from an earlier day, and passes. A stamp behind the clock passes. The wrap reads
+# the short way: 00:01 at a clock of 23:59 is 2 minutes ahead. The clock is LOCAL_TIME_NOW. The rule reads no
+# transcript and only the first line, so the cases here need no transcript, except the one lane brief, which needs a
+# lane that lane-one-topic allows.
+MTC_RULE = "message-time-matches-clock"
+MTC_TOOL = "mcp__claude-code-remote__send_later"  # a tool with a message field that is not send_message
+MTC_CLOCK = "2026-11-07T13:22:00-06:00"           # 13:22 CST, the clock of most cases below
+MTC_NEXT_DAY = "2026-11-08T00:01:00-06:00"        # 00:01 CST, the clock of the midnight pair
+MTC_BODY = "detail " * 2500                       # a long body after the first line: about 17,500 characters
+MTC_MORNING = "2026-11-08T07:08:00-06:00"        # 07:08 CST, the clock of the header-form, zone and window cases
+MTC_CDT = "2026-10-30T13:22:00-05:00"            # 13:22 CDT, the clock of the CDT-season cases
+# The helper a session reads the time from, later than the stamp. Every message-time refusal names it. The test
+# side holds this one copy: no product constant holds the path alone (local_time's NOW_CENTRAL_POINTER is a sentence).
+NOW_CENTRAL_PATH = "~/.claude/bin/now-central"
+
+
+def mtc_env(clock):
+    """The guard's environment with its clock fixed, so a verdict never depends on the real time."""
+    return dict(ROLE_ENV, LOCAL_TIME_NOW=clock)
+
+
+def mtc_refuse(name, message, clock=MTC_CLOCK, carries=(), lacks=()):
+    """A send_message whose header stamp is off the clock. The guard refuses it, and the reason names the rule and
+    the now-central helper."""
+    add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=SEND_MESSAGE, cwd=NOGIT,
+        env=mtc_env(clock), session_id=ROLE_OTHER, message=message,
+        carries=tuple(carries) + (NOW_CENTRAL_PATH,), lacks=lacks)
+
+
+def mtc_allow(name, message, clock=MTC_CLOCK, transcript=None):
+    """A send_message the guard lets through silently."""
+    add("message-time-matches-clock: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True,
+        env=mtc_env(clock), session_id=ROLE_OTHER, message=message, transcript=transcript)
+
+
+# Refused: an incident stamp 18 minutes ahead. The reason prints the real time, so the sender can fix the stamp.
+mtc_refuse("an incident stamp 18 minutes ahead is refused, and the reason prints the real time 13:22 CST",
+           "Coordinator, 13:40 CST: pick 1 taken", carries=("13:22 CST",))
+# Refused: 24 minutes ahead, on a clock that is not the default.
+mtc_refuse("a stamp 24 minutes ahead, at a clock of 13:26, is refused",
+           "Coordinator, 13:50 CST", clock="2026-11-07T13:26:00-06:00")
+# Passes: 10 minutes behind. A stamp behind the clock passes.
+mtc_allow("a stamp 10 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:12 CST: pick 1 taken")
+# Refused: 4 minutes ahead. The limit is 1 minute, so this sits past it.
+mtc_refuse("a stamp 4 minutes ahead is refused: the limit is 1 minute",
+           "Coordinator, 13:26 CST")
+# Passes: 4 minutes behind. A stamp behind the clock passes.
+mtc_allow("a stamp 4 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:18 CST")
+# Refused: `Now` is a label like any other, so `Now: 13:30 CST` is a header 8 minutes ahead.
+mtc_refuse("a Now: header 8 minutes ahead, Now: 13:30 CST, is refused",
+           "Now: 13:30 CST")
+# Refused: markdown lead chars are read past, so the bold and quote forms carry the header too.
+mtc_refuse("a bold header, **Coordinator, 13:40 CST**, is refused",
+           "**Coordinator, 13:40 CST**")
+mtc_refuse("a quoted header, > Coordinator, 13:40 CST, is refused",
+           "> Coordinator, 13:40 CST: pick 1 taken")
+# Refused: a date in the stamp is read, and the stamp is judged as the instant it names.
+mtc_refuse("a dated header, 2026-11-07 13:40 CST, 18 minutes ahead is refused",
+           "Coordinator, 2026-11-07 13:40 CST")
+# Passes: dated the day before, the stamp is behind the clock. The date counts toward how far behind.
+mtc_allow("a header dated the day before, at the clock's own minute, is allowed: a stamp behind the clock passes",
+          "Coordinator, 2026-11-06 13:22 CST")
+# Refused: dated the day after, the stamp is 1440 minutes ahead. A reader that ignores the date sees 0 and allows it.
+mtc_refuse("a header dated the day after, at the clock's own minute, is refused: a date counts",
+           "Coordinator, 2026-11-08 13:22 CST")
+# Refused: 14:22 CDT is the instant 13:22 CST, but CDT is the wrong zone label in CST season, so it is refused.
+mtc_refuse("a CDT header in CST season at the same instant, 14:22 CDT at 13:22 CST, is refused: the zone is wrong",
+           "Coordinator, 14:22 CDT")
+# Refused: 15:22 CDT is 14:22 CST, 60 minutes ahead. The reason prints the clock in CST, not CDT.
+mtc_refuse("a CDT header in CST season, 60 minutes ahead, is refused, and the reason prints 13:22 CST, not CDT",
+           "Coordinator, 15:22 CDT", carries=("13:22 CST",), lacks=("13:22 CDT",))
+# Refused: only the header stamp is judged. A right stamp later on the line does not save an off header.
+mtc_refuse("a header 18 minutes off is refused though a right stamp follows it on the line",
+           "Coordinator, 13:40 CST: pick 1 taken (13:22 CST)")
+# Refused: the marker is the first non-blank line, so blank lines above it do not hide the header.
+mtc_refuse("a header after two blank lines is the first non-blank line, and is refused",
+           "\n\nCoordinator, 13:40 CST: pick 1 taken")
+# Passes: 23:50 is 11 minutes behind 00:01 across midnight. A stamp behind the clock passes.
+mtc_allow("a header of 23:50 CST at 00:01 CST, 11 minutes behind across midnight, is allowed",
+          "Coordinator, 23:50 CST", clock=MTC_NEXT_DAY)
+# Refused: 00:01 at a clock of 23:59 is 2 minutes ahead across midnight. The mirror of the pair above.
+mtc_refuse("a header of 00:01 CST at 23:59 CST, 2 minutes ahead across midnight, is refused",
+           "Coordinator, 00:01 CST", clock="2026-11-07T23:59:00-06:00")
+# Refused: a long body after an off header changes nothing. The first line is judged at full message size.
+mtc_refuse("a header 18 minutes off with a long body after it is refused, however long the message",
+           "Coordinator, 13:40 CST: pick 1 taken\n" + MTC_BODY)
+
+# Refused: the incident. A header 2 minutes ahead is past the 1-minute limit.
+mtc_refuse("a header 2 minutes ahead is refused: the incident, pick taken at 13:24 CST",
+           "Coordinator, 13:24 CST: pick taken")
+# Refused: 3 minutes ahead is past the limit.
+mtc_refuse("a header 3 minutes ahead is refused: the limit is 1 minute",
+           "Coordinator, 13:25 CST")
+# Passes: exactly 1 minute ahead is inside the limit. The limit is inclusive.
+mtc_allow("a header exactly 1 minute ahead is allowed: the limit is inclusive",
+          "Coordinator, 13:23 CST")
+# Passes: 3 minutes behind is behind the clock, so it passes.
+mtc_allow("a header 3 minutes behind is allowed: a stamp behind the clock passes",
+          "Coordinator, 13:19 CST")
+# Passes: 23:59 at 00:01 is 2 minutes behind across midnight, so it passes.
+mtc_allow("a header of 23:59 CST at 00:01 CST, 2 minutes behind across midnight, is allowed",
+          "Coordinator, 23:59 CST", clock=MTC_NEXT_DAY)
+# Passes: a dated header exactly 1 minute ahead is inside the limit.
+mtc_allow("a dated header exactly 1 minute ahead is allowed",
+          "Coordinator, 2026-11-07 13:23 CST")
+# Passes: a ruling quoted mid-line carries its own stamp. Only the header stamp is read.
+mtc_allow("a quoted ruling mid-line is allowed: the owner's stamp sits inside the line",
+          'Coordinator, 13:22 CST: owner ruled (owner 2026-10-30 16:20 CDT) yes')
+# Passes: a second stamp on the header line is not judged. The header stamp is the one that counts.
+mtc_allow("a second stamp on the header line is allowed: only the header stamp is judged",
+          "Coordinator, 13:22 CST: first offered 13:40 CST, pick 1 taken")
+# Passes: a stamp only on line 2. The first line is a status line with no stamp.
+mtc_allow("a stamp only on line 2 is not read: the first line is a status line",
+          "Status: PR #12 merged.\nCoordinator, 13:40 CST: pick 1 taken")
+# Passes: a stamp mid-line on a status line is not a header.
+mtc_allow("a status line with a stamp mid-line is allowed",
+          "Status: PR #12 merged (owner 16:36 CST).")
+# Passes: a lane brief's first line holds no stamp, so the later stamp is not judged. The lane fixture lets the
+# brief through lane-one-topic, so this case isolates this rule.
+mtc_allow("a lane brief whose first line holds no stamp is allowed, though a stamp follows it",
+          "Lane brief: icon-a. Topic: icons.\nCoordinator, 13:40 CST: go",
+          transcript=role_path("step-topic-lane"))
+# Refused: a label of four words is a header, so this stamp 18 minutes ahead is refused.
+mtc_refuse("a label of four words, Owner of the lane, 13:40 CST, is a header and is refused",
+           "Owner of the lane, 13:40 CST: pick 1 taken")
+# Passes: a label with no comma, colon or dash is not a header, so the line passes.
+mtc_allow("a label with no comma, colon or dash is not a header, so the line passes",
+          "Coordinator 13:40 CST: pick 1 taken")
+# Passes: the empty states. No first line means nothing to judge.
+mtc_allow("an empty message passes: there is no first line to judge",
+          "")
+mtc_allow("a message of blank lines only passes: there is no first line to judge",
+          "\n  \n\n")
+# Passes: the full-size pair of the refusal above. A header 1 minute ahead with a long body is allowed.
+mtc_allow("a header 1 minute ahead with a long body after it is allowed, however long the message",
+          "Coordinator, 13:23 CST: pick 1 taken\n" + MTC_BODY)
+# Passes: the rule judges send_message only. Another tool with a message field and the same stamp is not judged.
+add("message-time-matches-clock: a send_later with a header 18 minutes off is not judged: the rule is send_message's",
+    "allow", tool=MTC_TOOL, cwd=NOGIT, silent=True, env=mtc_env(MTC_CLOCK),
+    message="Coordinator, 13:40 CST: pick 1 taken", delay_minutes=5)
+# Passes: a dated header behind the clock passes, with seconds on the clock. 13:22 against 13:25:30 is 3 minutes behind.
+mtc_allow("a dated header 3 minutes behind, at a clock of 13:25:30, is allowed: a stamp behind the clock passes",
+          "Coordinator, 2026-11-07 13:22 CST", clock="2026-11-07T13:25:30-06:00")
+# Passes: 16:36 is 9 hours 28 minutes ahead at 07:08. More than 60 minutes ahead reads as a quote from an earlier day.
+mtc_allow("a header quoting another label's time, Owner, 16:36 CST, 9 hours 28 minutes ahead, is allowed: past 60 minutes it passes",
+          "Owner, 16:36 CST: go", clock=MTC_MORNING)
+# Refused: a header quoting another label's time, 18 minutes ahead. The reason tells the sender to open with its own label.
+mtc_refuse("a header quoting another label's time, Owner, 13:40 CST, is refused, and the reason names your own label",
+           "Owner, 13:40 CST: go", carries=("your own label",))
+
+# The wider header form. Each form is refused at a stamp 32 minutes ahead of 07:08, and passes at the clock's own minute.
+# Refused: a 1-digit hour.
+mtc_refuse("a 1-digit hour header, Triage, 7:40 CST, 32 minutes ahead at 07:08, is refused",
+           "Triage, 7:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a 1-digit hour header at the clock's own minute, Triage, 7:08 CST, is allowed",
+          "Triage, 7:08 CST: x", clock=MTC_MORNING)
+# Refused: a spaced em dash in place of the comma.
+mtc_refuse("a spaced em-dash header, 07:40 CST after the label, 32 minutes ahead at 07:08, is refused",
+           "Coordinator — 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a spaced em-dash header at the clock's own minute, 07:08 CST after the label, is allowed",
+          "Coordinator — 07:08 CST: x", clock=MTC_MORNING)
+# Refused: a spaced hyphen in place of the comma.
+mtc_refuse("a spaced hyphen header, 07:40 CST after the label, 32 minutes ahead at 07:08, is refused",
+           "Coordinator - 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a spaced hyphen header at the clock's own minute, 07:08 CST after the label, is allowed",
+          "Coordinator - 07:08 CST: x", clock=MTC_MORNING)
+# Refused: a label of four words.
+mtc_refuse("a four-word label header, Coordinator for the lane, 07:40 CST, 32 minutes ahead at 07:08, is refused",
+           "Coordinator for the lane, 07:40 CST: x", clock=MTC_MORNING)
+mtc_allow("a four-word label header at the clock's own minute, Coordinator for the lane, 07:08 CST, is allowed",
+          "Coordinator for the lane, 07:08 CST: x", clock=MTC_MORNING)
+# Refused: seconds after the time.
+mtc_refuse("a header with seconds, Coordinator, 07:40:00 CST, 32 minutes ahead at 07:08, is refused",
+           "Coordinator, 07:40:00 CST: x", clock=MTC_MORNING)
+mtc_allow("a header with seconds at the clock's own minute, Coordinator, 07:08:00 CST, is allowed",
+          "Coordinator, 07:08:00 CST: x", clock=MTC_MORNING)
+# Refused: a lowercase zone.
+mtc_refuse("a lowercase zone header, Coordinator, 07:40 cst, 32 minutes ahead at 07:08, is refused",
+           "Coordinator, 07:40 cst: x", clock=MTC_MORNING)
+mtc_allow("a lowercase zone header at the clock's own minute, Coordinator, 07:08 cst, is allowed",
+          "Coordinator, 07:08 cst: x", clock=MTC_MORNING)
+
+# The zone must be the clock's own. A wrong zone label is refused whatever the minutes.
+# Refused: a CDT stamp at the clock's own minute, in CST season. The instant is an hour behind, so only the label is wrong.
+mtc_refuse("a CDT header at the clock's own minute in CST season, Coordinator, 07:08 CDT, is refused: the zone is wrong",
+           "Coordinator, 07:08 CDT: x", clock=MTC_MORNING)
+# Refused: a CST stamp in CDT season. 12:22 CST is the instant 13:22 CDT, so only the zone label is wrong.
+mtc_refuse("a CST header in CDT season at the same instant, Coordinator, 12:22 CST at 13:22 CDT, is refused: the zone is wrong",
+           "Coordinator, 12:22 CST: x", clock=MTC_CDT)
+# Passes: the CDT-season pair. A CDT stamp at the clock's own minute in CDT season is allowed.
+mtc_allow("a CDT header at the clock's own minute in CDT season, Coordinator, 13:22 CDT, is allowed",
+          "Coordinator, 13:22 CDT: x", clock=MTC_CDT)
+
+# The undated window: 2 to 60 minutes ahead is refused, and past 60 it reads as a quote from an earlier day.
+# Refused: 60 minutes ahead at 07:08 is the window's upper edge, and the edge is inside it.
+mtc_refuse("a header 60 minutes ahead at 07:08 is refused: the window's upper edge is inside it",
+           "Coordinator, 08:08 CST: x", clock=MTC_MORNING)
+# Passes: 61 minutes ahead at 07:08 is past the window, so it reads as a quote from an earlier day.
+mtc_allow("a header 61 minutes ahead at 07:08 is allowed: past 60 minutes it reads as a quote from an earlier day",
+          "Coordinator, 08:09 CST: x", clock=MTC_MORNING)
+# Refused: a dated stamp has no window. 16:36 on the same day is 9 hours 28 minutes ahead at 07:08, and is refused.
+mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated stamp has no window",
+           "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
+
+
+# ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
+# The same rule on more tools. Only these written values are judged, as ISO-8601 instants with an offset (`Z` or
+# +-HH:MM): `added` in an ArtifactData write (set, update, each write of a batch) to collection `items`; `updatedAt`
+# in a Write (the content's JSON) or an Edit (the new_string) to a roadmap step file; and a literal `updatedAt` in a
+# Bash command, read as text, inside shell quotes or not. A value more than 1 minute ahead of the clock is refused.
+# A value behind the clock passes, because a kept old value is always behind. Quoted times in prose and other fields pass.
+# The cases mirror the incident in decision local-time-central: `added` 20:16Z written to items at a clock of 20:14Z,
+# and a roadmap step `updatedAt` ahead of the clock, in the shape 2026-11-07T14:15:00-06:00.
+MTC_WRITE_CLOCK = "2026-11-07T14:14:00-06:00"  # 14:14 CST, which is 20:14Z: the clock of every case below
+MTC_WRITE_CARRIES = ("14:14 CST", "2026-11-07T14:14-06:00", "2026-11-07T20:14Z")  # the real time, with its offset, both ways
+MTC_CDT_CLOCK = "2026-07-08T09:26:00-05:00"  # 09:26 CDT, which is 14:26Z: a clock in the other daylight season
+MTC_CDT_CARRIES = ("09:26 CDT", "2026-07-08T09:26-05:00", "2026-07-08T14:26Z")  # the real time, with its -05:00 offset
+MTC_ITEM_URL = "https://claude.ai/artifact/mtcwrites"  # the page whose items the ArtifactData cases write
+MTC_STEP = os.path.join(NOGIT, "roadmap", "data", "steps", "silent-undo-edit-pass.json")  # a roadmap step file
+MTC_NOT_STEP = os.path.join(NOGIT, "docs", "silent-undo-edit-pass.json")  # a path that is not a step file
+MTC_OFF_STEP = '{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00-06:00"}\n'  # 16 minutes ahead
+
+
+def mtc_write(name, expected, tool, clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, lacks=(), **tool_input):
+    """One case of the written-value rule: `tool_input`, run as `tool`, against `clock` (default MTC_WRITE_CLOCK).
+    A deny must print each of `carries`, the now-central helper's path among them, and none of `lacks`."""
+    if expected == "deny":
+        add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=tool, cwd=NOGIT,
+            env=mtc_env(clock), carries=tuple(carries) + (NOW_CENTRAL_PATH,), lacks=lacks, **tool_input)
+    else:
+        add("message-time-matches-clock: " + name, "allow", tool=tool, cwd=NOGIT, silent=True,
+            env=mtc_env(clock), **tool_input)
+
+
+def mtc_set(name, expected, data, action="set", collection="items", doc_id="silent-undo-edit-pass",
+            clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, lacks=()):
+    """An ArtifactData write of one document: `data` to `collection`, on the page the cases name, at `clock`."""
+    mtc_write(name, expected, "ArtifactData", clock=clock, carries=carries, lacks=lacks, url=MTC_ITEM_URL,
+              action=action, collection=collection, doc_id=doc_id, data=data)
+
+
+def mtc_batch(name, expected, writes):
+    """An ArtifactData batch of `writes`, each one a dict of op, collection, doc_id and data."""
+    mtc_write(name, expected, "ArtifactData", url=MTC_ITEM_URL, action="batch", writes=writes)
+
+
+def mtc_bash(name, expected, command, clock=MTC_WRITE_CLOCK, carries=MTC_WRITE_CARRIES, transcript=None):
+    """A Bash command whose text carries, or does not carry, a literal updatedAt value. A case whose command needs
+    another clock, or a transcript for another rule to allow it, names both; the rest keep the 14:14 CST clock."""
+    mtc_write(name, expected, "Bash", clock=clock, carries=carries, command=command, transcript=transcript)
+
+
+# Refused: an `added` in items 4 minutes ahead. The limit is 1 minute, so this is past it.
+mtc_set("an added 4 minutes ahead in items is refused", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:18:00Z"})
+# Passes: an `added` 5 minutes behind is behind the clock, so it passes.
+mtc_set("an added 5 minutes behind in items is allowed: a value behind the clock passes", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:09:00Z"})
+# Refused: the offset form, 11 minutes ahead (14:25 CST is 20:25Z).
+mtc_set("an added 14:25 at -06:00, 11 minutes ahead, in items is refused", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:25:00-06:00"})
+# Passes: 14:14 at -05:00 is 19:14Z, 60 minutes behind the clock, so it passes.
+mtc_set("an added of 14:14 at -05:00 in items is allowed: 60 minutes behind, a value behind passes", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-05:00"})
+# Refused: 14:14 at -07:00 is 21:14Z, 60 minutes ahead. A reader that drops the offset sees 0 and allows it.
+mtc_set("an added of 14:14 at -07:00 in items is refused: 60 minutes ahead, the offset counts", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-07:00"})
+# Refused: an update is judged as a set is.
+mtc_set("an update that sets an added 4 minutes ahead in items is refused", "deny",
+        {"added": "2026-11-07T20:18:00Z"}, action="update")
+# Passes: an update that sets a value 10 minutes behind passes.
+mtc_set("an update that sets an added 10 minutes behind in items is allowed", "allow",
+        {"added": "2026-11-07T20:04:00Z"}, action="update")
+# Refused: each write of a batch is judged. The first is exact, the second 16 minutes ahead.
+mtc_batch("a batch whose second write sets an added 16 minutes ahead is refused", "deny", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"}},
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-next",
+     "data": {"id": "silent-undo-edit-next", "added": "2026-11-07T20:30:00Z"}}])
+# Refused: a step Write, judged on the content's JSON, 16 minutes ahead.
+mtc_write("a roadmap step Write with updatedAt 14:30 at -06:00 is refused", "deny", "Write",
+          file_path=MTC_STEP, content=MTC_OFF_STEP)
+# Refused: the stamp sits after a full-size note. The whole content is read, however long it is.
+mtc_write("a roadmap step Write whose updatedAt follows a full-size note is refused, however long the content",
+          "deny", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "note": "' + MTC_BODY + '", "updatedAt": "2026-11-07T14:30:00-06:00"}\n')
+# Refused: a step Edit, judged on its new_string. The old_string holds an exact time and is not the one judged.
+mtc_write("a roadmap step Edit whose new_string holds updatedAt 14:30 at -06:00 is refused", "deny", "Edit",
+          file_path=MTC_STEP, old_string='"updatedAt": "2026-11-07T14:14:00-06:00"',
+          new_string='"updatedAt": "2026-11-07T14:30:00-06:00"')
+# Refused: the literal form in a Bash heredoc, the shape the incident's writes took.
+mtc_bash("a Bash heredoc with updatedAt=\"2026-11-07T14:30:00-06:00\" is refused", "deny",
+         'cat > "$D/silent-undo-edit-pass.txt" <<\'EOF\'\nupdatedAt="2026-11-07T14:30:00-06:00"\nEOF')
+# Refused: the JSON form in a Bash heredoc.
+mtc_bash("a Bash heredoc of JSON with \"updatedAt\": 14:30 at -06:00 is refused", "deny",
+         'cat > "$D/silent-undo-edit-pass.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00-06:00"}\nEOF')
+# Refused: a comment opener, `#`, inside a double-quoted string does not hide the literal after it on the line.
+mtc_bash("a Bash literal after a # inside a double-quoted string is refused", "deny",
+         r"""echo "step #2 of 4"; printf '%s\n' 'updatedAt="2026-11-07T14:30:00-06:00"'""")
+# Refused: a lone apostrophe in unquoted text does not hide the literal, though a quote-aware reader would skip it.
+mtc_bash("a Bash literal after a lone apostrophe in unquoted text is refused", "deny",
+         r"""echo Owner's step; printf '%s\n' 'updatedAt="2026-11-07T14:30:00-06:00"'""")
+# Refused: an escaped JSON form in a double-quoted string is the same literal once the shell reads it.
+mtc_bash("an escaped JSON updatedAt 14:30 at -06:00 in a double-quoted string is refused", "deny",
+         r'''printf "%s\n" "{\"id\": \"silent-undo-edit-pass\", \"updatedAt\": \"2026-11-07T14:30:00-06:00\"}" > "$D/silent-undo-edit-pass.json"''')
+# Refused: a literal on the second line of a multi-line single-quoted string is still a literal in the command.
+mtc_bash("a Bash literal on line 2 of a multi-line single-quoted string is refused", "deny",
+         r"""printf '%s\n' 'step one
+updatedAt="2026-11-07T14:30:00-06:00"'""")
+
+# Refused: 20:16Z is 2 minutes ahead, past the 1-minute limit. This is the incident's own value.
+mtc_set("an added 20:16Z, 2 minutes ahead, in items is refused: the incident value is past the limit", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:16:00Z"})
+# Passes: 20:15Z is 1 minute ahead, inside the limit. The limit is inclusive.
+mtc_set("an added 20:15Z, 1 minute ahead, in items is allowed: the limit is inclusive", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:15:00Z"})
+# Refused: the clock is 20:14:59Z, whose minute is 20:14, so 20:16Z is 2 minutes ahead. Kept to the second, the gap
+# is 61 seconds, one whole minute, so the value would pass. The clock's seconds are cut to the minute first.
+mtc_set("an added 20:16Z in items is refused at a clock of 20:14:59: the clock's seconds are cut to the minute",
+        "deny", {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:16:00Z"},
+        clock="2026-11-07T14:14:59-06:00")
+# Passes: 14:14 CST exact, in each form. The Z form first.
+mtc_set("an added exactly 20:14Z in items is allowed", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"})
+mtc_set("an added exactly 14:14 at -06:00 in items is allowed", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-06:00"})
+# Passes: `added` is judged in collection items only. Answers and receipts are not judged, though 36 minutes off.
+mtc_set("an added 36 minutes ahead in answers is allowed: only collection items is judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="answers")
+mtc_set("an added 36 minutes ahead in receipts is allowed: only collection items is judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="receipts")
+# Passes: other fields are not judged. `replied` in answers and `ruled` in items are 3 hours off, and pass.
+mtc_set("a replied 3 hours off in answers is allowed: replied is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "replied": "2026-11-07T23:14:00Z"}, collection="answers")
+mtc_set("a ruled 3 hours off in items is allowed: ruled is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "ruled": "2026-11-07T17:14:00Z"})
+# Passes: a time in prose, HH:MM CST inside note or why, is not a written value.
+mtc_set("an HH:MM CST time inside note and why in items is allowed: quoted times in prose pass", "allow",
+        {"id": "silent-undo-edit-pass", "note": "Owner ruled at 13:40 CST: pick b.", "why": "Asked at 13:40 CST."})
+# Passes: a value with no offset is not judged.
+mtc_set("an added with no offset in items is allowed: a value with no offset is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:30:00"})
+# Passes: an update that carries no added is not judged, the empty case of the field.
+mtc_set("an update that carries no added is allowed", "allow", {"status": "closed"}, action="update")
+# Passes: a batch of right writes, one of them in answers, is allowed.
+mtc_batch("a batch of right writes, one in answers 36 minutes off, is allowed", "allow", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"}},
+    {"op": "set", "collection": "answers", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}}])
+# Passes: a step Write at 14:14 exact, in each form, and a step with no updatedAt at all.
+mtc_write("a roadmap step Write at 20:14Z exact is allowed", "allow", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T20:14:00Z"}\n')
+mtc_write("a roadmap step Write at 14:14 at -06:00 exact is allowed", "allow", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:14:00-06:00"}\n')
+mtc_write("a roadmap step Write with no updatedAt is allowed: the empty case", "allow", "Write",
+          file_path=MTC_STEP, content='{"id": "silent-undo-edit-pass"}\n')
+mtc_write("a roadmap step Write with an updatedAt that has no offset is allowed", "allow", "Write",
+          file_path=MTC_STEP, content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00"}\n')
+# Passes: a Write to a path that is not a step file is not judged, though its updatedAt is 16 minutes ahead.
+mtc_write("a Write to a non-step path holding updatedAt 14:30 at -06:00 is allowed", "allow", "Write",
+          file_path=MTC_NOT_STEP, content=MTC_OFF_STEP)
+# Passes: a step Edit at exact time, in each form.
+mtc_write("a roadmap step Edit whose new_string holds 20:14Z exact is allowed", "allow", "Edit", file_path=MTC_STEP,
+          old_string='"updatedAt": "2026-11-07T14:14:00-06:00"', new_string='"updatedAt": "2026-11-07T20:14:00Z"')
+mtc_write("a roadmap step Edit whose new_string holds 14:14 at -06:00 exact is allowed", "allow", "Edit",
+          file_path=MTC_STEP, old_string='"updatedAt": "2026-11-07T20:14:00Z"',
+          new_string='"updatedAt": "2026-11-07T14:14:00-06:00"')
+# Passes: the literal forms at exact time, in each form.
+mtc_bash("a Bash heredoc with updatedAt=\"2026-11-07T20:14:00Z\" exact is allowed", "allow",
+         'cat > "$D/silent-undo-edit-pass.txt" <<\'EOF\'\nupdatedAt="2026-11-07T20:14:00Z"\nEOF')
+mtc_bash("a Bash heredoc of JSON with updatedAt 14:14 at -06:00 exact is allowed", "allow",
+         'cat > "$D/silent-undo-edit-pass.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:14:00-06:00"}\nEOF')
+# Passes: `updatedAt=$T` is a shell variable, not a literal, so the value the variable takes is not read.
+mtc_bash("a Bash updatedAt=$T from a shell variable is allowed: a variable is not a literal", "allow",
+         'T=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo updatedAt=$T')
+
+
+# Passes: an old updatedAt or added that a write keeps, resends or quotes is behind the clock, so it passes.
+mtc_write("a roadmap step Write that changes note and keeps an old updatedAt 2026-11-06T18:00Z is allowed", "allow",
+          "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "note": "Changed the note.", "updatedAt": "2026-11-06T18:00:00Z"}\n')
+mtc_write("a roadmap step Edit whose new_string carries the old updatedAt 2026-11-06T18:00Z is allowed", "allow",
+          "Edit", file_path=MTC_STEP, old_string='"note": "Old note."',
+          new_string='"note": "New note.",\n  "updatedAt": "2026-11-06T18:00:00Z"')
+mtc_set("an ArtifactData set that resends an old added 2026-11-01T10:00Z in items is allowed", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-01T10:00:00Z", "note": "Resent."})
+mtc_bash("a Bash git log -S for the old updatedAt literal is allowed", "allow",
+         """git log -S '"updatedAt": "2026-11-06T18:00:00Z"' --oneline -- roadmap/data/steps""")
+mtc_bash("a Bash grep for the old updatedAt literal is allowed", "allow",
+         """grep -rn '"updatedAt": "2026-11-06T18:00:00Z"' roadmap/data/steps""")
+mtc_bash("a Bash heredoc fixture holding the old updatedAt literal is allowed", "allow",
+         'cat > "$D/fixture.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-06T18:00:00Z"}\nEOF')
+
+
+# Passes: a repair that rewrites an ahead value to the clock. The command holds the ahead value first and the right
+# time last. Only the last literal is the value the command leaves, so only that one is judged.
+mtc_bash("a Bash sed repair of updatedAt from 14:30 to 14:14 at -06:00 is allowed: the last literal is the clock", "allow",
+         r"""sed -i 's/"updatedAt": "2026-11-07T14:30:00-06:00"/"updatedAt": "2026-11-07T14:14:00-06:00"/' roadmap/data/steps/x.json""")
+mtc_bash("a Bash Python string replace of updatedAt from 14:30 to 14:14 at -06:00 is allowed: the last literal is the clock",
+         "allow",
+         r'''python3 -c "import json; p='roadmap/data/steps/x.json'; s=open(p).read(); open(p,'w').write(s.replace('\"updatedAt\": \"2026-11-07T14:30:00-06:00\"', '\"updatedAt\": \"2026-11-07T14:14:00-06:00\"'))"''')
+# Passes: `==` is a comparison, not a write, so the regex skips it. Only the assignment's value, 14:10 CST, is judged.
+mtc_bash("a Bash Python == check of updatedAt 14:30 at -06:00, then an = write of 14:10, is allowed: a comparison is not judged",
+         "allow",
+         r"""python3 -c 'import json; d=json.load(open("roadmap/data/steps/x.json")); assert d["updatedAt"] == "2026-11-07T14:30:00-06:00"; d["updatedAt"] = "2026-11-07T14:10:00-06:00"; json.dump(d, open("roadmap/data/steps/x.json","w"))'""")
+# Refused: the last literal is 14:30 at -06:00, 16 minutes ahead. The earlier 14:00 is behind, and does not hide it.
+mtc_bash("a Bash sed that sets updatedAt 14:00 to 14:30 at -06:00, the last literal ahead, is refused", "deny",
+         r"""sed -i 's/"updatedAt": "2026-11-07T14:00:00-06:00"/"updatedAt": "2026-11-07T14:30:00-06:00"/' roadmap/data/steps/x.json""")
+
+
+# ---- the document through file_path, and the str_replace action: `added` written two more ways
+# A set, an update or a batch entry may pass the document through `file_path`, a local JSON file, instead of `data`.
+# A str_replace edits one top-level string field in place. Both can carry `added` into collection items, so both
+# are judged. The refuse cases hold a value 10 minutes ahead (20:24Z); each pair holds the exact value (20:14Z).
+MTC_FILE_DIR = os.path.join(ROOT, "mtc")  # a folder of the run folder, for the document files below
+os.makedirs(MTC_FILE_DIR, exist_ok=True)
+
+
+def mtc_doc_file(name, added):
+    """A local JSON file holding one item document with `added`, under the run folder."""
+    path = os.path.join(MTC_FILE_DIR, name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"id": "silent-undo-edit-pass", "added": added}, f)
+    return path
+
+
+MTC_FILE_AHEAD = mtc_doc_file("ahead.json", "2026-11-07T20:24:00Z")  # 10 minutes ahead of the clock
+MTC_FILE_EXACT = mtc_doc_file("exact.json", "2026-11-07T20:14:00Z")  # the clock itself
+
+# Refused: a set whose document comes through file_path, 10 minutes ahead. The guard reads the file, not only data.
+mtc_write("a set that passes an item through file_path with added 10 minutes ahead is refused", "deny",
+          "ArtifactData", url=MTC_ITEM_URL, action="set", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_AHEAD)
+mtc_write("an update that passes an item through file_path with added 10 minutes ahead is refused", "deny",
+          "ArtifactData", url=MTC_ITEM_URL, action="update", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_AHEAD)
+mtc_batch("a batch entry that passes an item through file_path with added 10 minutes ahead is refused", "deny", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass", "file_path": MTC_FILE_AHEAD}])
+# Passes: the same three with added at the clock itself, 20:14Z.
+mtc_write("a set that passes an item through file_path with added exactly 20:14Z is allowed", "allow",
+          "ArtifactData", url=MTC_ITEM_URL, action="set", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_EXACT)
+mtc_write("an update that passes an item through file_path with added exactly 20:14Z is allowed", "allow",
+          "ArtifactData", url=MTC_ITEM_URL, action="update", collection="items",
+          doc_id="silent-undo-edit-pass", file_path=MTC_FILE_EXACT)
+mtc_batch("a batch entry that passes an item through file_path with added exactly 20:14Z is allowed", "allow", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass", "file_path": MTC_FILE_EXACT}])
+
+# Refused: a str_replace of the added field in items, which moves its value to 10 minutes ahead (20:24Z).
+mtc_write("a str_replace that moves added in items to 10 minutes ahead is refused", "deny", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:04:00Z", new_str="2026-11-07T20:24:00Z")
+# Passes: the same str_replace to the clock itself, 20:14Z.
+mtc_write("a str_replace that moves added in items to exactly 20:14Z is allowed", "allow", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:04:00Z", new_str="2026-11-07T20:14:00Z")
+
+# ---- written forms the check judges: a value with no updatedAt key in a roadmap step Edit, a date-less fragment in a
+# str_replace, and a shell assignment with a single-quoted pair. The check judges the value a write lands, not the key
+# beside it. A shell command is judged only through a literal updatedAt key with a quoted value. An unquoted value, or a
+# value with no key, is still missed.
+# Refused: an Edit of a step file that writes 14:30 at -06:00 over an older instant. Its new_string has no key.
+mtc_write("a roadmap step Edit that writes 14:30 at -06:00 over an older instant, with no updatedAt key, is refused",
+          "deny", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T14:30:00-06:00")
+# Refused: the same write as one entry of a MultiEdit. The entry's new_string has no updatedAt key.
+mtc_write("a roadmap step MultiEdit entry that writes 14:30 at -06:00 over an older instant, with no key, is refused",
+          "deny", "MultiEdit", file_path=MTC_STEP,
+          edits=[{"old_string": "2026-11-07T13:00:00-06:00", "new_string": "2026-11-07T14:30:00-06:00"}])
+# Refused: the same entry with its updatedAt key, the form the check already reads. A control for the case above.
+mtc_write("a roadmap step MultiEdit entry whose new_string holds updatedAt 14:30 at -06:00 is refused", "deny",
+          "MultiEdit", file_path=MTC_STEP,
+          edits=[{"old_string": '"updatedAt": "2026-11-07T13:00:00-06:00"',
+                  "new_string": '"updatedAt": "2026-11-07T14:30:00-06:00"'}])
+# Passes: the keyless Edit at a value 10 minutes behind the clock, and at the clock itself.
+mtc_write("a roadmap step Edit that writes 14:04 at -06:00 over an older instant, with no updatedAt key, is allowed",
+          "allow", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T14:04:00-06:00")
+mtc_write("a roadmap step Edit that writes exactly 20:14Z over an older instant, with no updatedAt key, is allowed",
+          "allow", "Edit", file_path=MTC_STEP, old_string="2026-11-07T13:00:00-06:00",
+          new_string="2026-11-07T20:14:00Z")
+# Refused: a str_replace that sets added to the fragment T20:24:00Z. A fragment has no full instant to read.
+mtc_write("a str_replace that sets added in items to the fragment T20:24:00Z is refused", "deny", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="T20:04:00Z", new_str="T20:24:00Z")
+# Passes: a str_replace that sets added to a full instant 10 minutes behind the clock.
+mtc_write("a str_replace that moves added in items to 10 minutes behind is allowed", "allow", "ArtifactData",
+          url=MTC_ITEM_URL, action="str_replace", collection="items", doc_id="silent-undo-edit-pass",
+          field="added", old_str="2026-11-07T20:02:00Z", new_str="2026-11-07T20:04:00Z")
+# Refused: a python3 -c dict assignment with a double-quoted key. A `]` sits between the key and the `=`.
+mtc_bash("a Bash python3 -c dict assignment of updatedAt 14:30 at -06:00 is refused", "deny",
+         r"""python3 -c 'd["updatedAt"] = "2026-11-07T14:30:00-06:00"'""")
+# Refused: the same with a single-quoted key, d['updatedAt']=, and the value double-quoted.
+mtc_bash("a Bash python3 -c assignment with a single-quoted updatedAt key, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "d['updatedAt']=\"2026-11-07T14:30:00-06:00\""''')
+# Refused: a jq |= assignment of updatedAt 14:30 at -06:00. The `|` sits between the key and the value.
+mtc_bash("a Bash jq |= assignment of updatedAt 14:30 at -06:00 is refused", "deny",
+         r"""jq '.updatedAt |= "2026-11-07T14:30:00-06:00"' roadmap/data/steps/silent-undo-edit-pass.json""")
+# Refused: a single-quoted key and value, 16 minutes ahead. The scan reads the command as text, not as shell tokens,
+# so the quote style does not hide the literal from the clock.
+mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:30:00-06:00'"''')
+# Passes: the same assignment 4 minutes behind the clock. A value behind the clock passes.
+mtc_bash("a Bash python3 -c assignment with a single-quoted key and value, 14:10 at -06:00, is allowed", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:10:00-06:00'"''')
+# Passes: the value opens on a single quote and closes on a double one, 16 minutes ahead. The `\1` backreference holds
+# the close to the open quote, so this mismatched pair is not a literal the scan reads.
+mtc_bash("a Bash value opened on a single quote and closed on a double, 14:30 at -06:00, is allowed: the pair must match",
+         "allow", r'''d['updatedAt']='2026-11-07T14:30:00-06:00"''')
+# Refused: a dict literal with a single-quoted key and value, 16 minutes ahead.
+mtc_bash("a Bash python3 -c dict literal with a single-quoted updatedAt, 14:30 at -06:00, is refused", "deny",
+         r'''python3 -c "d={'updatedAt': '2026-11-07T14:30:00-06:00'}"''')
+# Passes: the same dict literal 4 minutes behind the clock.
+mtc_bash("a Bash python3 -c dict literal with a single-quoted updatedAt, 14:10 at -06:00, is allowed", "allow",
+         r'''python3 -c "d={'updatedAt': '2026-11-07T14:10:00-06:00'}"''')
+# Refused: the incident's Python write as written. Its value, 05:40Z on Nov 2, is 23:40 CST, which is 10 minutes ahead
+# of a 23:30 CST clock. At the 14:14 CST clock that value is days behind, so that clock cannot refuse this command.
+mtc_bash("the incident Python write, a single-quoted updatedAt 10 minutes ahead at 23:30 CST, is refused", "deny",
+         INCIDENT_PYTHON_WRITE, clock="2026-11-01T23:30:00-06:00",
+         carries=("23:30 CST", "2026-11-01T23:30-06:00", "2026-11-02T05:30Z"), transcript=TRIAGE_TRANSCRIPT)
+# Passes: the same write at 23:41 CST, a minute after its value. A value behind the clock passes.
+mtc_bash("the incident Python write at 23:41 CST, a minute after its value, is allowed", "allow",
+         INCIDENT_PYTHON_WRITE, clock="2026-11-01T23:41:00-06:00", transcript=TRIAGE_TRANSCRIPT)
+# Passes: a single-quoted repair from 14:30 to 14:10 at -06:00, the behind value last. Only the last keyed literal is
+# judged, and it is behind the clock.
+mtc_bash("a Bash single-quoted repair from 14:30 to 14:10 at -06:00, the behind value last, is allowed", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); d['updatedAt']='2026-11-07T14:30:00-06:00'.replace(\"'updatedAt': '2026-11-07T14:30:00-06:00'\", \"'updatedAt': '2026-11-07T14:10:00-06:00'\")"''')
+# Passes: a grep for a single-quoted key holds no instant, so no written value is judged.
+mtc_bash("a Bash grep for a single-quoted updatedAt key with no instant is allowed", "allow",
+         r'''grep "'updatedAt'" roadmap/data/steps/x.json''')
+# Passes: // and /* inside quoted strings, beside an updatedAt 20 minutes behind. The scan must not crash or refuse.
+mtc_bash("a Bash command with // and /* inside quoted strings, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "see http://claude.ai/x /* note */" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: a JSX-like text, <p>Don't</p>, beside a behind updatedAt. A lone apostrophe must not stop the scan.
+mtc_bash("a Bash command with <p>Don't</p> text, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "<p>Don't</p>" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: an instant 16 minutes ahead in prose, beside a behind updatedAt. Only a literal updatedAt value is judged.
+mtc_bash("a Bash command with an instant 16 minutes ahead in prose, beside a behind updatedAt, is allowed", "allow",
+         r'''echo "due 2026-11-07T14:30:00-06:00 for the step" && python3 -c "import json; print(json.dumps({\"updatedAt\": \"2026-11-07T13:54:00-06:00\"}))"''')
+# Passes: `!=` is a compare, not a write, so the value after it is not judged, even 16 minutes ahead at 14:14 CST.
+mtc_bash("a Bash != compare of updatedAt to 14:30 at -06:00 is allowed: a compare writes no value", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); print(d['updatedAt'] != '2026-11-07T14:30:00-06:00')"''')
+# Passes: `>` is a compare too, so the value after it is not judged, even 16 minutes ahead at 14:14 CST.
+mtc_bash("a Bash > compare of updatedAt to 14:30 at -06:00 is allowed: a compare writes no value", "allow",
+         r'''python3 -c "import json; d=json.load(open('roadmap/data/steps/x.json')); print(d['updatedAt'] > '2026-11-07T14:30:00-06:00')"''')
+# Refused at a CDT clock: the reason prints the clock with its -05:00 offset, and no CST offset.
+mtc_set("an added 14 minutes ahead in items, at a CDT clock of 09:26, is refused: the reason prints -05:00", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-07-08T14:40:00Z"},
+        clock=MTC_CDT_CLOCK, carries=MTC_CDT_CARRIES, lacks=("-06:00",))
 
 # =========================================================================== 5i. SendMessage to a cloud session
 FAMILY = "sendmessage-session-id"
@@ -14754,6 +16439,246 @@ scratch_allow("scratchpad-message: an agent's commit -F of a relative file after
 add("scratchpad-message: an orchestrator payload with agent_id and agent_type null is allowed", "allow",
     raw=json.dumps({"tool_name": "Bash", "tool_input": {"command": SCRATCH_CMD}, "cwd": NOGIT,
                     "session_id": FAKE_SESSION, "agent_id": None, "agent_type": None}))
+
+# =========================================================================== 5b2. the records page on a ready pull request
+FAMILY = "records-page-ready"
+#
+# `records-page-ready`. Marking a pull request ready is refused while its head holds a stale records page: the merge
+# tool rebuilds the page only on a draft, before the branch goes ready (decision records-index-at-merge). The rule
+# asks ready_page_state (merge/merge.py) about the head. A read that cannot run is refused unknown.
+#
+# THE FIXTURE. One bare origin with real branches, a checkout on main (the folder a case runs in), a checkout on
+# feat-stale (the no-selector form reads the folder's branch), and a repo with no stamp file (not a merge-tool repo).
+# Each case's fake gh answers for its own pull request with the head's real sha. The fixture assumes the base's
+# .github/stamp.json names the default branch, read from origin/<base>, and that the page is what lint/hook_catalog.py writes.
+RPR = os.path.join(ROOT, "readypage")
+RPR_ORIGIN = os.path.join(RPR, "origin.git")
+RPR_SEED = os.path.join(RPR, "seed")
+RPR_REPO = os.path.join(RPR, "clone")          # the folder most cases run in: on main
+RPR_NOSEL = os.path.join(RPR, "clone-feat")    # the same origin, on feat-stale: the no-selector form
+RPR_PLAIN = os.path.join(RPR, "plain")         # a repo with no .github/stamp.json: it does not use the merge tool
+RPR_GEN = os.path.join(REPO, "lint", "hook_catalog.py")
+RPR_COUNT = os.path.join(RPR, "gh-calls.log")  # the count fake's log: one line per gh call
+RPR_RULE = "records-page-ready"
+RPR_CARRY = ("Return #12 to draft",)           # the stale remedy's first step (merge.stale_page_remedy)
+RPR_DEBT = "# Gap one\n\n- **What.** The check misses one case.\n- **Where.** x\n- **Decision.** none\n- **Retire.** y\n"
+RPR_STAMP = json.dumps({"defaultBranch": "main", "kinds": [],
+                        "merge": {"method": "merge", "deadlineMinutes": 5, "afterMerge": [], "deleteBranch": True}})
+GHREADY_STALE = os.path.join(RPR, "gh-stale")      # feat-stale, base main: a debt with no page
+GHREADY_NAMED = os.path.join(RPR, "gh-named")      # the same, and every call must name repos/y/x
+GHREADY_CURRENT = os.path.join(RPR, "gh-current")  # feat-current: a debt and the page the generator writes
+GHREADY_CLAIM = os.path.join(RPR, "gh-claim")      # feat-claim: its head commit holds a Record-claim
+GHREADY_BEHIND = os.path.join(RPR, "gh-behind")    # feat-behind: cut before main moved on
+GHREADY_DEV = os.path.join(RPR, "gh-dev")          # feat-dev: base dev, not the default branch
+GHREADY_EMPTY = os.path.join(RPR, "gh-empty")      # feat-empty: no record in the tree
+GHREADY_BAD = os.path.join(RPR, "gh-bad")          # feat-bad: a record the generator refuses
+GHREADY_HANG = os.path.join(RPR, "gh-hang")        # feat-stale, every answer delayed past any read deadline
+GHREADY_COUNT = os.path.join(RPR, "gh-count")      # feat-stale, one log line per gh call
+GHREADY_PLAIN = os.path.join(RPR, "gh-plain")      # feat-stale, for the repo that does not use the merge tool
+RPR_SHALLOW = os.path.join(RPR, "shallow")         # a shallow clone of origin: it holds main's tip and cuts feat-behind's path to it
+RPR_SHALLOW_WT = os.path.join(RPR, "shallow-wt")   # a worktree of that clone at feat-behind, for the scope read in the fixture
+GHREADY_SHALLOW = os.path.join(RPR, "gh-shallow")  # feat-behind in RPR_SHALLOW: the ancestry is unknown, so the ready mark is refused
+GHREADY_SHALLOW_NAMED = os.path.join(RPR, "gh-shallow-named")  # the same, and every call must name repos/y/x
+RPR_UNKNOWN_LACKS = ("--confirm", "merge <pr>", "merge 12")  # the unknown reason names no merge command: it says to retry, or to draft first
+
+
+def _rpr_git(where, *args):
+    done = run_vcs(where, *IDENT, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the records-page-ready fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _rpr_need(ok, what):
+    if not ok:
+        sys.exit("fixture setup failed in the records-page-ready fixtures: " + what)
+
+
+def _build_ready_page():
+    os.makedirs(RPR, exist_ok=True)
+    _rpr_git(RPR, "init", "-q", "--bare", "-b", "main", RPR_ORIGIN)
+    os.makedirs(RPR_SEED, exist_ok=True)
+    _rpr_git(RPR_SEED, "init", "-q", "-b", "main", ".")
+    _rpr_git(RPR_SEED, "remote", "add", "origin", RPR_ORIGIN)
+
+    def commit(message, files=None, page=False):
+        for rel, text in (files or {}).items():
+            write(os.path.join(RPR_SEED, *rel.split("/")), text)
+        if page:  # the generator writes the page for this tree, as the merge tool does before the branch goes ready
+            done = subprocess.run([sys.executable, RPR_GEN, "--root", RPR_SEED, "--records-only"], capture_output=True, text=True)
+            _rpr_need(done.returncode == 0, "the generator refused the seed tree: " + done.stderr.strip())
+        _rpr_git(RPR_SEED, "add", "-A")
+        _rpr_git(RPR_SEED, "commit", "-q", "-m", message)
+
+    def branch(name, base):
+        _rpr_git(RPR_SEED, "checkout", "-q", "-B", name, base)
+
+    commit("base", {".github/stamp.json": RPR_STAMP, "README.md": "base\n"})
+    branch("feat-behind", "main")                         # cut here, before main moves on
+    commit("a debt, cut before main moved", {"debts/gap-one.md": RPR_DEBT})
+    _rpr_git(RPR_SEED, "checkout", "-q", "main")
+    commit("main moves on", {"README.md": "main moved\n"})
+    branch("feat-stale", "main")
+    commit("a debt and no page", {"debts/gap-one.md": RPR_DEBT})
+    branch("feat-current", "main")
+    commit("a debt and the page the generator writes", {"debts/gap-one.md": RPR_DEBT}, page=True)
+    branch("feat-claim", "main")
+    commit("Claim record numbers\n\nRecord-claim: D-002", {"debts/gap-one.md": RPR_DEBT})
+    branch("feat-empty", "main")
+    commit("a note and no record", {"notes.txt": "a note\n"})
+    branch("feat-bad", "main")
+    commit("a record the generator refuses", {"debts/bad.md": "# Bad\n\n- **Where.** x\n"})
+    branch("dev", "main")
+    commit("dev moves on", {"dev.txt": "dev side\n"})
+    branch("feat-dev", "dev")
+    commit("a debt aimed at dev", {"debts/gap-one.md": RPR_DEBT})
+    _rpr_git(RPR_SEED, "push", "-q", "origin", "main", "dev", "feat-behind", "feat-stale", "feat-current",
+             "feat-claim", "feat-empty", "feat-bad", "feat-dev")
+
+    # Scope before subject: each head is the state its case names.
+    _rpr_need(run_vcs(RPR_SEED, "merge-base", "--is-ancestor", "main", "feat-behind").returncode == 1,
+              "feat-behind holds the base tip, so it has no lack to skip for")
+    _rpr_need("gap-one" in _rpr_git(RPR_SEED, "show", "feat-current:docs/records.md"), "feat-current carries no page")
+    _rpr_need(_rpr_git(RPR_SEED, "ls-tree", "--name-only", "feat-stale", "--", "docs/records.md") == "", "feat-stale carries a page")
+    _rpr_need("**What.**" not in _rpr_git(RPR_SEED, "show", "feat-bad:debts/bad.md"), "feat-bad holds a What line")
+
+    _rpr_git(RPR, "clone", "-q", RPR_ORIGIN, RPR_REPO)
+    _rpr_git(RPR, "clone", "-q", RPR_ORIGIN, RPR_NOSEL)
+    _rpr_git(RPR_NOSEL, "checkout", "-q", "feat-stale")
+    make_repo(RPR_PLAIN, {"README.md": "plain\n", "debts/gap-one.md": RPR_DEBT})
+
+    def head(name):
+        return _rpr_git(RPR_SEED, "rev-parse", "--verify", name)
+    stale = dict(head_sha=head("feat-stale"), head_ref="feat-stale", draft=True)
+    make_fake_gh(GHREADY_STALE, "main", **stale)
+    make_fake_gh(GHREADY_NAMED, "main", need=["y/x"], **stale)
+    make_fake_gh(GHREADY_HANG, "main", delay_s=75, **stale)  # past any read deadline under the 60 s hook timeout, under decide's 120 s
+    make_fake_gh(GHREADY_COUNT, "main", count_file=RPR_COUNT, **stale)
+    make_fake_gh(GHREADY_PLAIN, "main", **stale)
+    make_fake_gh(GHREADY_CURRENT, "main", head_sha=head("feat-current"), head_ref="feat-current", draft=True)
+    make_fake_gh(GHREADY_CLAIM, "main", head_sha=head("feat-claim"), head_ref="feat-claim", draft=True)
+    make_fake_gh(GHREADY_BEHIND, "main", head_sha=head("feat-behind"), head_ref="feat-behind", draft=True)
+    make_fake_gh(GHREADY_DEV, "dev", head_sha=head("feat-dev"), head_ref="feat-dev", draft=True)
+    make_fake_gh(GHREADY_EMPTY, "main", head_sha=head("feat-empty"), head_ref="feat-empty", draft=True)
+    make_fake_gh(GHREADY_BAD, "main", head_sha=head("feat-bad"), head_ref="feat-bad", draft=True)
+
+    # The unknown ancestry: a shallow clone holds main's tip and cuts the path from feat-behind to it, so the read
+    # answers None, never False (testing/shallow_clone.py, the one shallow fixture). Scope first, in the clone and in a worktree.
+    error = shallow_clone.make(RPR_ORIGIN, RPR_SHALLOW, head("main"))
+    _rpr_need(not error, "the shallow fixture could not be built: " + error)
+    _rpr_git(RPR_SHALLOW, "fetch", "origin", "+refs/heads/feat-behind:refs/remotes/origin/feat-behind")
+    behind = head("feat-behind")
+    facts = shallow_clone.facts(RPR_SHALLOW, head("main"), behind)
+    _rpr_need(facts["shallow"] and facts["pin_present"] and facts["ancestor_rc"] == 1,
+              "the shallow clone does not reach the unknown shape: %r" % (facts,))
+    _rpr_git(RPR_SHALLOW, "worktree", "add", "--detach", RPR_SHALLOW_WT, behind)
+    _rpr_need(_load_git_reads().branch_is_ancestor(RPR_SHALLOW_WT, behind, "refs/remotes/origin/main") is None,
+              "the worktree's ancestry read is not unknown")
+    _rpr_git(RPR_SHALLOW, "worktree", "remove", "--force", RPR_SHALLOW_WT)
+    behind_pr = dict(head_sha=behind, head_ref="feat-behind", draft=True)
+    make_fake_gh(GHREADY_SHALLOW, "main", **behind_pr)
+    make_fake_gh(GHREADY_SHALLOW_NAMED, "main", need=["y/x"], **behind_pr)
+
+
+lazy_fixture([RPR], _build_ready_page)
+
+
+def _rpr_env(fake):
+    """The guard's PATH: the fake gh's folder, git, and the interpreter's folder. Nothing else, so no real gh is reached."""
+    return fake + os.pathsep + GIT_PATH + os.pathsep + PY_PATH
+
+
+def rpr_bash(name, command, expected, fake, cwd=RPR_REPO, tool="Bash", carries=(), lacks=()):
+    sh(name, command, expected, rule=RPR_RULE if expected == "deny" else None, tool=tool, cwd=cwd,
+       env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks)
+
+
+def rpr_mcp(name, expected, fake, carries=(), lacks=(), cwd=RPR_REPO, **tool_input):
+    add(name, expected, rule=RPR_RULE if expected == "deny" else None, tool="mcp__github__update_pull_request",
+        cwd=cwd, env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks, **tool_input)
+
+
+RPR_STALE_LACKS = ("unknown",)  # a stale refusal names the page, never an unread
+# Refused: the page is stale on the head, and the refusal names the remedy. Each form of the call is its own case.
+rpr_mcp("records-page-ready: MCP draft false on a stale page is refused", "deny", GHREADY_NAMED,
+        carries=RPR_CARRY, lacks=RPR_STALE_LACKS, owner="y", repo="x", pullNumber=12, draft=False)
+rpr_bash("records-page-ready: gh pr ready 12 on a stale page is refused", "gh pr ready 12", "deny", GHREADY_STALE,
+         carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+rpr_bash("records-page-ready: gh pr ready with no selector on a stale branch is refused", "gh pr ready", "deny",
+         GHREADY_STALE, cwd=RPR_NOSEL, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+rpr_bash("records-page-ready: gh pr ready by URL on a stale page is refused",
+         "gh pr ready https://github.com/y/x/pull/12", "deny", GHREADY_NAMED, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+rpr_bash("records-page-ready: gh pr ready \"#12\" on a stale page is refused", 'gh pr ready "#12"', "deny",
+         GHREADY_STALE, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+rpr_bash("records-page-ready: GH_REPO=y/x gh pr ready 12 on a stale page is refused", "GH_REPO=y/x gh pr ready 12", "deny",
+         GHREADY_NAMED, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+rpr_bash("records-page-ready: gh pr ready 12 -R y/x on a stale page is refused", "gh pr ready 12 -R y/x", "deny",
+         GHREADY_NAMED, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+rpr_bash("records-page-ready: a PowerShell gh pr ready 12 on a stale page is refused", "gh pr ready 12", "deny",
+         GHREADY_STALE, tool="PowerShell", carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+# Refused unknown: the read cannot run, so the rule cannot clear the head. The unknown reason names no merge command
+# (RPR_UNKNOWN_LACKS): a ready mark that is already set would be merged by the --confirm it names.
+rpr_bash("records-page-ready: a page the generator refuses is refused unknown", "gh pr ready 12", "deny", GHREADY_BAD,
+         carries=("unknown",), lacks=RPR_UNKNOWN_LACKS)
+rpr_bash("records-page-ready: a read that never answers is refused unknown", "gh pr ready 12", "deny", GHREADY_HANG,
+         carries=("unknown",), lacks=RPR_UNKNOWN_LACKS)
+# An unknown ancestry (merge-base reads None in a shallow clone) is unknown, not off main: the ready mark is refused, on both forms.
+rpr_bash("records-page-ready: gh pr ready 12 with an unknown ancestry in a shallow clone is refused unknown", "gh pr ready 12",
+         "deny", GHREADY_SHALLOW, cwd=RPR_SHALLOW, carries=("unknown",), lacks=RPR_UNKNOWN_LACKS)
+rpr_mcp("records-page-ready: MCP draft false with an unknown ancestry in a shallow clone is refused unknown", "deny",
+        GHREADY_SHALLOW_NAMED, cwd=RPR_SHALLOW, carries=("unknown",), lacks=RPR_UNKNOWN_LACKS,
+        owner="y", repo="x", pullNumber=12, draft=False)
+# A scanner must read the call as the parser does: text in quotes, heredocs and comments is no call.
+rpr_bash("records-page-ready: a quoted # before the call does not hide it", 'echo "#" && gh pr ready 12', "deny",
+         GHREADY_STALE, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+rpr_bash("records-page-ready: an apostrophe in a word does not hide the call", "echo Don't && gh pr ready 12", "deny",
+         GHREADY_STALE, carries=RPR_CARRY, lacks=RPR_STALE_LACKS)
+rpr_bash("records-page-ready: the call on a line of a multi-line quoted string is no call",
+         'echo "start\ngh pr ready 12\nend"', "allow", GHREADY_STALE)
+rpr_bash("records-page-ready: the call in a heredoc body is no call", "cat <<'EOF'\ngh pr ready 12\nEOF", "allow", GHREADY_STALE)
+rpr_bash("records-page-ready: the call in a comment is no call", "echo ok # gh pr ready 12", "allow", GHREADY_STALE)
+# Allowed: each control changes one thing from the refused case.
+rpr_mcp("records-page-ready: MCP draft false on a current page is allowed", "allow", GHREADY_CURRENT,
+        owner="y", repo="x", pullNumber=12, draft=False)
+rpr_bash("records-page-ready: gh pr ready 12 on a current page is allowed", "gh pr ready 12", "allow", GHREADY_CURRENT)
+rpr_bash("records-page-ready: a stale page into a base that is not the default is allowed", "gh pr ready 12", "allow",
+         GHREADY_DEV)
+rpr_bash("records-page-ready: a head holding a Record-claim is allowed", "gh pr ready 12", "allow", GHREADY_CLAIM)
+rpr_bash("records-page-ready: a head that lacks the base tip is allowed", "gh pr ready 12", "allow", GHREADY_BEHIND)
+rpr_bash("records-page-ready: a head with no record folders is allowed", "gh pr ready 12", "allow", GHREADY_EMPTY)
+rpr_bash("records-page-ready: gh pr ready --undo on a stale page is allowed", "gh pr ready 12 --undo", "allow", GHREADY_STALE)
+rpr_mcp("records-page-ready: MCP draft true on a stale page is allowed", "allow", GHREADY_NAMED,
+        owner="y", repo="x", pullNumber=12, draft=True)
+rpr_bash("records-page-ready: gh pr ready 12 in a repo that does not use the merge tool is allowed", "gh pr ready 12",
+         "allow", GHREADY_PLAIN, cwd=RPR_PLAIN)
+rpr_bash("records-page-ready: gh pr view 12 on a stale page is allowed", "gh pr view 12", "allow", GHREADY_STALE)
+
+
+def _rpr_no_read(tool_input):
+    """An MCP update that marks nothing ready (a title edit, or a close) is allowed, and starts no gh call."""
+    if os.path.exists(RPR_COUNT):
+        os.remove(RPR_COUNT)
+    case = {"raw": None, "tool": "mcp__github__update_pull_request", "cwd": RPR_REPO, "session": None,
+            "env_path": _rpr_env(GHREADY_COUNT), "config": MERGECFG, "tool_input": tool_input,
+            "transcript": None, "agent_id": None, "agent_type": None, "event": None, "stop_active": False,
+            "no_root": False, "max_seconds": None, "env": None, "temp": None, "guard": None, "silent": False}
+    got, reason = decide(case)
+    calls = open(RPR_COUNT, encoding="utf-8").read().splitlines() if os.path.exists(RPR_COUNT) else []
+    if got != "allow":
+        return False, "want allow, got %s: %s" % (got, reason[:110])
+    if calls:
+        return False, "%d gh call(s) for a call that marks nothing ready" % len(calls)
+    return True, "allowed, no gh call"
+
+
+def rpr_title_only_case():
+    return _rpr_no_read({"owner": "y", "repo": "x", "pullNumber": 12, "title": "A new title"})
+
+
+def rpr_closed_case():
+    return _rpr_no_read({"owner": "y", "repo": "x", "pullNumber": 12, "state": "closed"})
+
 
 # =========================================================================== 5c. the records page
 FAMILY = "records-page"
@@ -15671,6 +17596,15 @@ cmk_refuse("a real merge conflict left in a file, then add -A and commit",
          VCS + " add -A && " + VCS + " commit -m x", CMK_MERGE)
 cmk_refuse("a triplet staged in a source file, then commit", VCS + " commit -m x", CMK_STAGED)
 cmk_refuse("a triplet staged, behind a false command in the chain", "false && " + VCS + " commit -m x", CMK_STAGED)
+# A plain VAR=value runs nothing, so `_chain_safe` keeps the chain readable and the commit is judged. Before
+# that change, the assignment made the chain unreadable and the commit was allowed.
+cmk_refuse("[cdvar-unread] a triplet staged, behind a plain assignment in the chain", "CDVAR=1 && " + VCS + " commit -m x",
+           CMK_STAGED)
+# A variable folder is read where the shell runs the commit, as its literal twin is (failed_cd_stays).
+cmk_refuse("a variable folder holding a triplet staged in a source file, cd \"$R\" then commit",
+           "R=" + slash(CMK_STAGED) + "; cd \"$R\" && " + VCS + " commit -m x", NOGIT)
+cmk_refuse("the literal twin, cd to a folder holding a staged triplet then commit, from no repository",
+           "cd " + slash(CMK_STAGED) + " && " + VCS + " commit -m x", NOGIT)
 
 # 2. The working tree: an add in the chain, or a commit that names its file, holds that file's content.
 cmk_refuse("commit -am with the triplet in a tracked, modified file", VCS + " commit -am x", CMK_AM)
@@ -16018,6 +17952,254 @@ cmk_refuse("a merge that conflicts on a clean tree, then add -A, commit and push
 # 8. A push judges the net change it sends: a triplet added and removed again is no hit.
 cmk_allow("two commits, the first adding a triplet and the second removing it, then a push",
           VCS + " push", R2_NET)
+
+
+# =========================================================================== 5e. octopus-push
+#
+# `octopus-push`. A `git push` is refused when a commit it would send is a merge with more than two parents
+# (an octopus merge). The range is the one the conflict-markers push check reads: the destination's
+# remote-tracking tip to the pushed ref, else HEAD. An octopus merge already in that tip's history is outside
+# the range and passes. A push that writes main or master is out of scope: it keeps its push-main ask. The
+# remedy names the two-parent form, so the push can be redone as chained two-parent merges.
+#
+# Each push case runs in a checkout whose remote is a bare repository beside it: nothing leaves the machine.
+# The fixtures reuse the conflict-markers push helpers (`_cmk_pushed`, `_cmk_run`, `_cmk_commit`), and their
+# folders carry an `oct-` prefix, so no bare remote name collides with another fixture's.
+FAMILY = "octopus-push"
+OCT_RULE = "octopus-push"
+OCT_TARGET_WORD = "octopus"                       # the forbidden target, as a remedy would name it
+OCT_THREE = os.path.join(ROOT, "oct-three")       # topic: a commit, a merge of x and y (three parents), a commit
+OCT_FOUR = os.path.join(ROOT, "oct-four")         # topic: a commit, a merge of x, y and z (four parents)
+OCT_TWO = os.path.join(ROOT, "oct-two")           # topic: a commit, then a merge of x and a merge of y (two parents each)
+OCT_PLAIN = os.path.join(ROOT, "oct-plain")       # topic: two commits, no merge
+OCT_REMOTE = os.path.join(ROOT, "oct-remote")     # topic: a three-parent merge already pushed, then a clean commit
+OCT_EMPTY = os.path.join(ROOT, "oct-empty")       # topic: a three-parent merge already pushed, nothing unpushed
+OCT_MAIN = os.path.join(ROOT, "oct-main")         # main: a commit, then an unpushed three-parent merge
+
+
+def _oct_branch(where, name, rel, text):
+    """Cut `name` from main and commit one file on it. The caller picks the branch to merge into."""
+    _cmk_run(where, "checkout", "-q", "-b", name, "main")
+    _cmk_commit(where, rel, text, "change on " + name)
+
+
+def _oct_merge(where, into, names):
+    """Merge `names` into branch `into` as one merge commit. --no-ff keeps a fast-forward from hiding it."""
+    _cmk_run(where, "checkout", "-q", into)
+    _cmk_run(where, "merge", "-q", "--no-ff", "--no-edit", *names)
+
+
+def _oct_parents(where, rng):
+    """The parent count of each merge in `rng`, sorted, as git reads them. `rng` may hold several words, such
+    as `HEAD --not --remotes=origin`, which names the commits a push would send to the remote."""
+    out = _cmk_run(where, "rev-list", "--merges", "--parents", *rng.split())
+    return sorted(len(line.split()) - 1 for line in out.splitlines())
+
+
+def _oct_must(where, rng, want, what):
+    """Stop the suite unless the merges in `rng` have the parent counts `want`. Each fixture's scope is read
+    this way before a case judges it, so a fixture that built nothing fails here, not as a wrong case."""
+    got = _oct_parents(where, rng)
+    if got != want:
+        sys.exit("fixture setup failed in the octopus-push fixtures: %s: merges in %r have parents %r, want %r"
+                 % (what, rng, got, want))
+
+
+def _oct_remote(where):
+    """Topic with a three-parent merge pushed to its remote, and no commit after it."""
+    _cmk_pushed(where, {"a.txt": "base\n"})
+    _cmk_commit(where, "t1.txt", "t1\n", "topic one")
+    _oct_branch(where, "x", "x.txt", "x\n")
+    _oct_branch(where, "y", "y.txt", "y\n")
+    _oct_merge(where, "topic", ["x", "y"])
+    _cmk_run(where, "push", "-q", "origin", "topic")
+    _oct_must(where, "origin/topic", [3], "the merge on the remote")
+
+
+def _build_octopus_push():
+    _cmk_pushed(OCT_THREE, {"a.txt": "base\n"})
+    _cmk_commit(OCT_THREE, "t1.txt", "t1\n", "topic one")
+    _oct_branch(OCT_THREE, "x", "x.txt", "x\n")
+    _oct_branch(OCT_THREE, "y", "y.txt", "y\n")
+    _oct_merge(OCT_THREE, "topic", ["x", "y"])
+    _cmk_commit(OCT_THREE, "t2.txt", "t2\n", "topic two, after the merge")
+    _oct_must(OCT_THREE, "origin/topic..HEAD", [3], "the unpushed three-parent merge")
+
+    _cmk_pushed(OCT_FOUR, {"a.txt": "base\n"})
+    _cmk_commit(OCT_FOUR, "t1.txt", "t1\n", "topic one")
+    for name in ("x", "y", "z"):
+        _oct_branch(OCT_FOUR, name, name + ".txt", name + "\n")
+    _oct_merge(OCT_FOUR, "topic", ["x", "y", "z"])
+    _oct_must(OCT_FOUR, "origin/topic..HEAD", [4], "the unpushed four-parent merge")
+
+    _cmk_pushed(OCT_TWO, {"a.txt": "base\n"})
+    _cmk_commit(OCT_TWO, "t1.txt", "t1\n", "topic one")
+    _oct_branch(OCT_TWO, "x", "x.txt", "x\n")
+    _oct_merge(OCT_TWO, "topic", ["x"])
+    _oct_branch(OCT_TWO, "y", "y.txt", "y\n")
+    _oct_merge(OCT_TWO, "topic", ["y"])
+    _oct_must(OCT_TWO, "origin/topic..HEAD", [2, 2], "two unpushed two-parent merges")
+
+    _cmk_pushed(OCT_PLAIN, {"a.txt": "base\n"})
+    _cmk_commit(OCT_PLAIN, "t1.txt", "t1\n", "topic one")
+    _cmk_commit(OCT_PLAIN, "t2.txt", "t2\n", "topic two")
+    _oct_must(OCT_PLAIN, "origin/topic..HEAD", [], "no merge, unpushed")
+
+    _oct_remote(OCT_REMOTE)
+    _cmk_commit(OCT_REMOTE, "b.txt", "clean\n", "clean change, unpushed")
+    _oct_must(OCT_REMOTE, "origin/topic..HEAD", [], "only the clean commit, unpushed")
+
+    _oct_remote(OCT_EMPTY)
+    _oct_must(OCT_EMPTY, "origin/topic..HEAD", [], "nothing unpushed")
+
+    _cmk_pushed(OCT_MAIN, {"a.txt": "base\n"})
+    _oct_branch(OCT_MAIN, "x", "x.txt", "x\n")
+    _oct_branch(OCT_MAIN, "y", "y.txt", "y\n")
+    _cmk_run(OCT_MAIN, "checkout", "-q", "main")
+    _cmk_commit(OCT_MAIN, "m.txt", "m\n", "main one, unpushed")
+    _oct_merge(OCT_MAIN, "main", ["x", "y"])
+    _oct_must(OCT_MAIN, "origin/main..HEAD", [3], "the unpushed three-parent merge on main")
+    # push-main reads the remote's URL, and a local bare path is no network remote, so the ask would go silent.
+    # Give origin the network URL that the push-main fixtures use (PUSHREMOTE). The guard never contacts it, and
+    # the tracking refs above stay as they are.
+    _cmk_run(OCT_MAIN, "config", "remote.origin.url", PUSHREMOTE)
+
+
+lazy_fixture([OCT_THREE, OCT_FOUR, OCT_TWO, OCT_PLAIN, OCT_REMOTE, OCT_EMPTY, OCT_MAIN], _build_octopus_push)
+
+# The false-alarm fixtures. origin/main gains a three-parent merge O, and local main stays at the base, so O is
+# on the remote only. A push of a topic that merges origin/main sends no new octopus, and neither does a push of
+# a new branch cut from origin/main.
+OCT_ALARM = os.path.join(ROOT, "oct-alarm")          # topic, at the base and pushed, merges origin/main
+OCT_ALARM_NEW = os.path.join(ROOT, "oct-alarm-new")  # as oct-alarm, plus a new three-parent merge on topic
+OCT_ALARM_REMOTE = os.path.join(CMKREMOTE, os.path.basename(OCT_ALARM) + ".git")   # the bare remote of oct-alarm
+OCT_FRESH = os.path.join(ROOT, "oct-fresh")          # branch fresh, cut from origin/main, with no tracking ref
+OCT_FRESH_TRUNK = os.path.join(ROOT, "oct-fresh-trunk")  # as oct-fresh, but origin's default branch is trunk, at the base
+
+
+def _oct_on_origin_main(where, trunk=False):
+    """origin/main gains a three-parent merge O of x and y. Local main stays at the base, so O is on the
+    remote only. With `trunk`, origin's default branch (origin/HEAD) is trunk, still at the base, so the
+    remote's default base lacks O. The scope is read before any case judges it."""
+    _cmk_pushed(where, {"a.txt": "base\n"})
+    if trunk:
+        _cmk_run(where, "push", "-q", "origin", "main:refs/heads/trunk")
+        _cmk_run(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    _oct_branch(where, "x", "x.txt", "x\n")
+    _oct_branch(where, "y", "y.txt", "y\n")
+    _cmk_run(where, "checkout", "-q", "-b", "src", "main")
+    _cmk_commit(where, "m.txt", "m\n", "src one")
+    _oct_merge(where, "src", ["x", "y"])
+    _cmk_run(where, "push", "-q", "origin", "src:refs/heads/main")
+    _oct_must(where, "origin/main", [3], "the octopus on origin/main")
+    _oct_must(where, "main", [], "local main holds no merge")
+
+
+def _oct_merged_origin(where):
+    """Topic, at the base and pushed, merges origin/main: a two-parent merge that brings O in."""
+    _oct_on_origin_main(where)
+    _cmk_run(where, "checkout", "-q", "topic")
+    _cmk_run(where, "merge", "-q", "--no-ff", "--no-edit", "origin/main")
+    _oct_must(where, "origin/topic..HEAD", [2, 3], "the merge and O both sit past the tracking tip")
+    _oct_must(where, "HEAD --not --remotes=origin", [2], "only the merge is new to the remote")
+
+
+def _build_octopus_origin():
+    _oct_merged_origin(OCT_ALARM)
+    _oct_must(OCT_ALARM_REMOTE, "main", [3], "the bare remote of oct-alarm holds the octopus on main")
+    _oct_merged_origin(OCT_ALARM_NEW)
+    _oct_branch(OCT_ALARM_NEW, "x2", "x2.txt", "x2\n")
+    _oct_branch(OCT_ALARM_NEW, "y2", "y2.txt", "y2\n")
+    _oct_merge(OCT_ALARM_NEW, "topic", ["x2", "y2"])
+    _oct_must(OCT_ALARM_NEW, "HEAD --not --remotes=origin", [2, 3], "the new three-parent merge and the merge")
+
+    _oct_on_origin_main(OCT_FRESH)
+    _cmk_run(OCT_FRESH, "checkout", "-q", "-b", "fresh", "--no-track", "origin/main")
+    if run_vcs(OCT_FRESH, "rev-parse", "--verify", "-q", "refs/remotes/origin/fresh").returncode == 0:
+        sys.exit("fixture setup failed in the octopus-push fixtures: fresh has a remote-tracking ref")
+    if run_vcs(OCT_FRESH, "rev-parse", "--verify", "-q", "fresh@{upstream}").returncode == 0:
+        sys.exit("fixture setup failed in the octopus-push fixtures: fresh has an upstream")
+    _oct_must(OCT_FRESH, "HEAD", [3], "the new branch is cut from origin/main, which holds O")
+
+    _oct_on_origin_main(OCT_FRESH_TRUNK, trunk=True)
+    _cmk_run(OCT_FRESH_TRUNK, "checkout", "-q", "-b", "fresh", "--no-track", "origin/main")
+    _oct_must(OCT_FRESH_TRUNK, "origin/trunk", [], "the remote's default branch holds no merge")
+    _oct_must(OCT_FRESH_TRUNK, "HEAD", [3], "the new branch is cut from origin/main, which holds O")
+
+
+lazy_fixture([OCT_ALARM, OCT_ALARM_NEW, OCT_FRESH, OCT_FRESH_TRUNK], _build_octopus_origin)
+
+
+def oct_refuse(name, command, cwd):
+    sh("octopus-push: %s is refused" % name, command, "deny", OCT_RULE, cwd=cwd)
+
+
+def oct_allow(name, command, cwd):
+    sh("octopus-push: %s is allowed" % name, command, "allow", cwd=cwd)
+
+
+# A push is refused when a commit it would send is a merge of more than two parents, whatever the refspec.
+oct_refuse("a push of a three-parent merge in the range", VCS + " push", OCT_THREE)
+oct_refuse("a push by an explicit refspec of a three-parent merge in the range",
+           VCS + " push origin HEAD:refs/heads/topic", OCT_THREE)
+oct_refuse("a push of a four-parent merge in the range", VCS + " push", OCT_FOUR)
+
+# Only what the push sends is judged: two-parent merges pass, and so does a range with no merge at all.
+oct_allow("a push of a range holding only two-parent merges", VCS + " push", OCT_TWO)
+oct_allow("a push of a range with no merge", VCS + " push", OCT_PLAIN)
+
+# A merge already in the remote-tracking tip's history is outside the range, so the push passes. The empty
+# range is the state where nothing is unpushed at all.
+oct_allow("a push of a clean commit, with a three-parent merge already on the remote", VCS + " push", OCT_REMOTE)
+oct_allow("a push with nothing unpushed, its three-parent merge already on the remote", VCS + " push", OCT_EMPTY)
+
+# Main is out of scope. The push-main ask is queued, not raised, so a deny from this rule would win over it:
+# this case fails if a builder's rule forgets the main exemption.
+sh("octopus-push: a push of main with a three-parent merge keeps its push-main ask",
+   VCS + " push origin main", "ask", PUSH_MAIN_RULE, cwd=OCT_MAIN)
+
+# A false alarm: the range is what the push adds to the remote. An octopus already on a remote ref is not sent,
+# so a merge that brings it in, or a new branch cut from it, passes. A new octopus above those is still refused.
+oct_allow("a push of a topic that merges origin/main, whose octopus is already on origin/main",
+          VCS + " push origin topic", OCT_ALARM)
+oct_allow("a push of a new branch cut from origin/main, whose octopus is already on origin/main",
+          VCS + " push origin fresh", OCT_FRESH)
+oct_allow("a push of a new branch cut from origin/main, when origin's default branch lacks that octopus",
+          VCS + " push origin fresh", OCT_FRESH_TRUNK)
+
+# A push to a URL names no configured remote, so no remote-tracking ref is read for it. The bare repository holds
+# the octopus on main, so the push sends only the merge, and it passes.
+oct_allow("a push to the remote's path, whose octopus is already on its main",
+          VCS + " push " + slash(OCT_ALARM_REMOTE) + " topic", OCT_ALARM)
+oct_refuse("a push of a topic with a new three-parent merge above a merge of origin/main",
+           VCS + " push origin topic", OCT_ALARM_NEW)
+
+# A dry run sends nothing, so it passes whatever the range holds.
+oct_allow("a dry run, --dry-run, of a push with a three-parent merge in the range",
+          VCS + " push --dry-run origin topic", OCT_THREE)
+oct_allow("a dry run, -n, of a push with a three-parent merge in the range",
+          VCS + " push -n origin topic", OCT_THREE)
+
+
+def octopus_remedy_case():
+    """The octopus-push refusal names the two-parent form in its remedy, and never the forbidden target
+    (git-remedy-never-names-target). The rule's name sits in the reason's header, so the target word is read
+    only after the `Remedy:` label, in lower case."""
+    got, reason = decide({
+        "raw": None, "tool": "Bash", "cwd": OCT_THREE, "session": None,
+        "env_path": None, "tool_input": {"command": VCS + " push"},
+    })
+    if got != "deny":
+        return False, "expected deny, got %s" % got
+    remedy = reason.lower().partition("remedy:")[2]
+    if "two-parent" not in remedy:
+        return False, "the remedy does not name the two-parent form: %s" % reason[:90]
+    if OCT_TARGET_WORD in remedy:
+        return False, "the remedy names the forbidden target %r: %s" % (OCT_TARGET_WORD, remedy[:90])
+    leak = names_the_target(reason, OCT_RULE)
+    if leak:
+        return False, "the reason names the forbidden target %r" % leak
+    return True, "refused, and the remedy names the two-parent form and not the octopus merge"
 
 
 # =========================================================================== 6. frozen paths
@@ -16713,8 +18895,9 @@ sh("frozen: a leftover token is not a key to the push rule",
 # THE SHELL RUNNERS KEEP QUOTED TEXT IN VIEW. Quoted text with a space or an operator is data, unless a
 # shell reads it: text piped into `sh`, or an `iex`. The first two pins deny those shapes, and they guard
 # a future regression of the data reading.
-# The commit message is the allow shape that reading made data. A heredoc body fed to an interpreter
-# is code, not data: it stays in view, so a shell write it names denies.
+# The commit message is the allow shape that reading made data. A quoted heredoc body fed to a non-shell
+# interpreter is read only at its shell spots, the calls that hand text to a shell (`os.system`, `shell=True`).
+# A body with no shell spot is data, not a write; a shell write named at a spot denies.
 sh("frozen shell: an echo of a quoted cat-write onto the config settings, piped to sh, denies "
    "[regression pin: passes on main and d7fb2f1]",
    'echo "cat > ' + CFG_SETTINGS + '" | sh', "deny", "frozen-path", cwd=NOGIT)
@@ -16725,9 +18908,30 @@ sh("frozen shell: an iex of a Set-Content onto the config settings denies "
 sh("frozen data: a quoted commit message naming a cat-write onto the config settings allows "
    "[new allow: red on main, passes on d7fb2f1]",
    VCS + ' commit -m "note: cat > ' + CFG_SETTINGS + ' is refused"', "allow", cwd=NOGIT)
-sh("frozen shell: a heredoc body naming a cat-write onto the config settings, fed to python, denies "
-   "[review round 1, the orchestrator's F5 call: flipped from allow, an interpreter body stays in view]",
-   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen data: a heredoc body naming a cat-write onto the config settings, fed to python, allows "
+   "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
+   "is not the act; incident 2026-11-02 01:16 CST]",
+   "python hooks/guard.py <<'DOC'\ncat > " + CFG_SETTINGS + "\nDOC", "allow", cwd=NOGIT)
+sh("frozen shell: a python heredoc that os.system-runs a cat-write onto the config settings denies "
+   "[regression pin: passes on main]",
+   "python3 - <<'DOC'\nimport os; os.system('cat > " + CFG_SETTINGS + "')\nDOC", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a heredoc body fed to bash, naming a cat-write onto the config settings, denies "
+   "[regression pin: passes on main, a shell-run body stays in view]",
+   "bash <<'SH'\ncat > " + CFG_SETTINGS + "\nSH", "deny", "frozen-path", cwd=NOGIT)
+
+# Alias bypass: a shell spot reached through an import alias denies or asks, as the spelled-out call does.
+sh("frozen shell: a python heredoc importing run from subprocess, a cp onto the config settings with shell=True, "
+   "denies [alias bypass, main denies]",
+   "python3 - <<'PY'\nfrom subprocess import run\nrun('cp x " + CFG_SETTINGS + "', shell=True)\nPY",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: a python heredoc importing run from subprocess, a cp onto the hook path with shell=True, "
+   "denies [alias bypass, main denies]",
+   "python3 - <<'PY'\nfrom subprocess import run\nrun('cp x " + CFG_HOOK + "', shell=True)\nPY",
+   "deny", "frozen-path", cwd=NOGIT)
+# A python comment is text, not a shell spot: a body whose only spot is a comment is data.
+sh("frozen data: a python heredoc whose only spot is a comment naming a write onto the config settings, allows "
+   "[comment false alarm, main allows]",
+   "python3 - <<'PY'\n# subprocess.run('echo x > " + CFG_SETTINGS + "', shell=True)\nPY", "allow", cwd=NOGIT)
 
 # The narrowing reads a quoted word as data, a plain word as code. Each shape below is a real write, so each DENIES.
 for _n, _c in (
@@ -17053,6 +19257,67 @@ sh("frozen pin: echo naming a settings copy allows [cap-ask-fix r2 pin]",
 sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask-fix r2 pin]",
    "gh pr create --draft --title \"Update " + CFG_CLAUDEMD + "\" --body \"notes\"", "allow", cwd=NOGIT)
 
+# A FROZEN PATH HELD IN A SHELL VARIABLE, written by a script that a `python -c` or `node -e` runs. The guard
+# expands `$F` in the command text, so the script's own text names the frozen hook, and the write denies. The
+# same text printed by python writes nothing, so it allows.
+sh("frozen var: a frozen hook path in a shell variable, written by os.system in python -c, denies",
+   "F=" + slash(CFG) + "; python3 -c \"import os; os.system('echo x >> $F/hooks/guard.py')\"",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen var: a frozen hook path in a shell variable, written by execSync in node -e, denies",
+   "F=" + slash(CFG) + "; node -e \"require('child_process').execSync('echo x >> $F/hooks/guard.py')\"",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen var: a frozen hook path in a shell variable, printed by python -c, writes nothing and allows",
+   "F=" + slash(CFG) + "; python3 -c \"print('echo x >> $F/hooks/guard.py')\"",
+   "allow", cwd=NOGIT)
+
+# A FROZEN PATH JOINED BY `+` INSIDE A `node -e` STRING. The whole-script reading cannot read a string join, so
+# the script's text is refused whole. Each command writes the frozen hook through the joined path, so each denies.
+sh("frozen join: a frozen hook path joined by + into a node -e execSync cp, denies",
+   "node -e \"const p='" + CFG_HOOK + "'; require('child_process').execSync('cp /tmp/x ' + p)\"",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen join: a frozen hook path joined by + into a node -e execSync tee, denies",
+   "node -e \"const p='" + CFG_HOOK + "'; require('child_process').execSync('tee ' + p)\"",
+   "deny", "frozen-path", cwd=NOGIT)
+
+
+# A FROZEN HOOK OR CAP PATH HELD IN A SHELL VARIABLE, WRITTEN BY A HEREDOC BODY THAT PYTHON OR NODE RUNS. The body
+# is a script, so the guard reads it at its shell spots, and `$F` in it stands for the variable's value. An
+# unquoted heredoc expands `$F` in the shell before the interpreter runs, so a plain `F=` is enough there. A quoted
+# heredoc keeps `$F` literal, so its case exports F: the child shell that os.system or execSync starts reads `$F`
+# from the environment. A plain `F=` with a quoted heredoc writes nothing, so no case uses that pair. The cap key
+# is CLAUDE_CODE_SUBAGENT_MODEL, the same name CAP_KEY holds further down.
+sh("frozen heredoc var: a frozen hook path in F, set by F= before an unquoted python heredoc whose os.system writes $F, denies",
+   "F=" + CFG_HOOK + "; python3 - <<EOF\nimport os\nos.system(\"echo x >> $F\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: a frozen hook path in F, exported before a quoted python heredoc whose os.system writes $F, denies",
+   "export F=" + CFG_HOOK + "; python3 - <<'EOF'\nimport os\nos.system(\"echo x >> $F\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: an apostrophe in a python comment ahead of the os.system write of $F, denies",
+   "export F=" + CFG_HOOK + "; python3 - <<'EOF'\n# don't write here\nimport os\nos.system(\"echo x >> $F\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: a # inside a python string ahead of the os.system write of $F, denies",
+   "export F=" + CFG_HOOK + "; python3 - <<'EOF'\nmsg = '# note'\nimport os\nos.system(\"echo x >> $F\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+chained_ask("cap heredoc var: a cap write to $F, set by F= before an unquoted python heredoc whose os.system writes it, denies as a chained ask command",
+   "F=" + PROJ_SETTINGS + "; python3 - <<EOF\nimport os\nos.system(\"echo CLAUDE_CODE_SUBAGENT_MODEL=opus > $F\")\nEOF",
+   cwd=NOGIT, carries=("agent-model-cap",))
+chained_ask("cap heredoc var: a cap write to $F, exported with a semicolon before a quoted python heredoc, denies as a chained ask command",
+   "export F=" + PROJ_SETTINGS + "; python3 - <<'EOF'\nimport os\nos.system(\"echo CLAUDE_CODE_SUBAGENT_MODEL=opus > $F\")\nEOF",
+   cwd=NOGIT, carries=("agent-model-cap",))
+sh("cap heredoc var: a cap write to $F, exported with && before a quoted python heredoc, asks as a lone command",
+   "export F=" + PROJ_SETTINGS + " && python3 - <<'EOF'\nimport os\nos.system(\"echo CLAUDE_CODE_SUBAGENT_MODEL=opus > $F\")\nEOF",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=("agent-model-cap",))
+# CONTROLS. The same bodies with the path written out keep their verdict, and a $F that python only prints allows.
+sh("frozen heredoc var control: a literal frozen hook path in a quoted python heredoc, denies",
+   "python3 - <<'EOF'\nimport os\nos.system(\"echo x >> " + CFG_HOOK + "\")\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var control: a literal frozen hook path in a quoted node heredoc, denies",
+   "node - <<'EOF'\nrequire('child_process').execSync('echo x >> " + CFG_HOOK + "')\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("cap heredoc var control: a literal settings path in an unquoted python heredoc, asks as the cap",
+   "python3 - <<EOF\nimport os\nos.system(\"echo CLAUDE_CODE_SUBAGENT_MODEL=opus > " + PROJ_SETTINGS + "\")\nEOF",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=("agent-model-cap",))
+sh("frozen heredoc var control: $F only printed by python in a quoted heredoc, the shell writes nothing, allows",
+   "export F=" + CFG_HOOK + "; python3 - <<'EOF'\nprint(\"echo x >> $F\")\nEOF", "allow", cwd=NOGIT)
+
 
 # =========================================================================== 6b. the model cap
 FAMILY = "model-cap"
@@ -17307,8 +19572,9 @@ sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
 
 # THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
-# a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view. So is text
-# piped into an interpreter: the interpreter may run it, so a pipe into one fails closed. Incident
+# a pure printer. A quoted heredoc body fed to an interpreter is read only at its shell spots (see the
+# shell-spot rule above), so a body with none allows. Text piped into an interpreter is not a heredoc: the
+# interpreter may run it, so a pipe into one fails closed. Incident
 # 2026-10-14: a reviewer's probe piped a JSON tool-call sample holding a cap write into
 # `python hooks/guard.py`, and the owner was asked to approve a call that wrote nothing. Whether that
 # friction is acceptable is the owner's call, not the test's. Each case names the write the way a
@@ -17331,11 +19597,21 @@ chained_ask("cap data: a multi-line quoted string naming a cat-write, piped to p
    "command [cap-ask-fix r1: a pipe into an interpreter fails closed]",
    "printf '%s' 'a note\ncat > " + PROJ_LOCAL + " " + CAP_KEY + "' | python hooks/guard.py", cwd=NOGIT,
    carries=("agent-model-cap",))
-sh("cap data: a heredoc body fed to python stdin naming a cat-write asks [r1 red, F5 call]",
+sh("cap data: a heredoc body fed to python stdin naming a cat-write allows "
+   "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
+   "is not the act; incident 2026-11-02 01:16 CST]",
    "python hooks/guard.py <<'PAYLOAD'\n{\"tool_input\": {\"command\": \"cat > " + PROJ_LOCAL + " "
-   + CAP_KEY + "\"}}\nPAYLOAD", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
-sh("cap data: a python heredoc that only prints a cat-write asks [r1 red, F5 call]",
-   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
+   + CAP_KEY + "\"}}\nPAYLOAD", "allow", cwd=NOGIT)
+sh("cap data: a python heredoc that subprocess-runs a cat-write with shell=True asks "
+   "[regression pin: passes on main]",
+   "python3 - <<'PY'\nimport subprocess; subprocess.run('cat > " + PROJ_LOCAL + " " + CAP_KEY
+   + "', shell=True)\nPY", "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
+sh("cap data: a python heredoc that only prints a cat-write allows "
+   "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
+   "is not the act; incident 2026-11-02 01:16 CST]",
+   "python3 - <<'PY'\nprint('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY", "allow", cwd=NOGIT)
+sh("cap data: a python heredoc that os.system-runs a cat-write asks [regression pin: passes on main]",
+   "python3 - <<'PY'\nimport os; os.system('cat > " + PROJ_LOCAL + " " + CAP_KEY + "')\nPY",
    "ask", "agent-model-cap", cwd=NOGIT, carries=(CAP_KEY,))
 chained_ask("cap data: a JSON tool-call sample holding the cap write, piped to python, denies as a chained ask command "
    "[cap-ask-fix r1: a pipe into an interpreter fails closed]",
@@ -17468,6 +19744,86 @@ for _n in ("bash -c", "sh -c", "eval"):
                 "denies as a chained ask command [cap-ask safety hole r3 red]",
                 _n + " \"echo 'ok'; echo " + R3_CAP_LINE + "\"", cwd=NOGIT,
                 carries=("agent-model-cap",))
+
+# THE CAP STRING FALSE ALARM. Text handed to an interpreter as DATA (a -c argument, a quoted heredoc body
+# fed to a non-shell interpreter, a data heredoc written to a file) that writes no settings file is not a
+# settings write, so it ALLOWS. The pins after the false alarms hold the other side: the same text run as
+# CODE (a shell body, os.system, a redirect outside the string) still asks, or denies when it chains with a
+# second command. On main, 1a and 1b ask and 1c denies under ask-alone, so all three are red there. 1c and 1d
+# are INFERRED reproductions: the exact incident commands were not kept, so each keeps the shape the incident named.
+CAP_STRING_CMD = "echo {\"" + CAP_KEY + "\": \"opus\"} > .claude/settings.json"
+CAP_STRING_PAYLOAD = json.dumps({"tool_name": "Bash", "tool_input": {"command": CAP_STRING_CMD}})
+CAP_STRING_WRITE = CAP_KEY + "=" + OPUS
+CAP_STRING_COMPACT = cap_settings(compact=True)
+
+# 1a. A python -c whose script builds a Bash payload naming the cap write, then runs the guard on it.
+sh("cap data: 1a, a python -c building a Bash payload that names a cap write as text allows [cap-string-false-alarm]",
+   "python3 -c 'import json,subprocess; p=" + CAP_STRING_PAYLOAD
+   + "; subprocess.run([\"python3\",\"hooks/guard.py\"],input=json.dumps(p),text=True)'",
+   "allow", cwd=PROJ)
+
+# 1b. A quoted heredoc fed to python3 hooks/guard.py, whose body is a Bash payload naming the cap write.
+CAP_STRING_BODY = json.dumps({"tool_name": "Bash", "tool_input": {"command":
+                              "echo '{\"env\":{\"" + CAP_KEY + "\":\"opus\"}}' > .claude/settings.json"}})
+sh("cap data: 1b, a quoted heredoc fed to python3 hooks/guard.py, whose body names a cap write, allows [cap-string-false-alarm]",
+   "python3 hooks/guard.py <<'EOF'\n" + CAP_STRING_BODY + "\nEOF", "allow", cwd=PROJ)
+
+# 1c. INFERRED REPRODUCTION of the cap-string-false-alarm incident. The
+# exact body was lost. The shape kept: a data heredoc written to probe.py, a python body holding command
+# strings (one a guard call with its own heredoc, one the cap write as text), then `python3 probe.py`.
+_CAP_PROBE_PY = ("CMDS = [\n    " + json.dumps("python3 hooks/guard.py <<'EOF2'\n" + CAP_STRING_BODY + "\nEOF2")
+                 + ",\n    " + json.dumps("echo '{\"env\":{\"" + CAP_KEY + "\":\"opus\"}}' > .claude/settings.json")
+                 + ",\n]\n")
+sh("cap data: 1c, inferred reproduction of the 2026-11-03 incident, a data heredoc to probe.py holding a cap write as text, allows [cap-string-false-alarm]",
+   "cat > probe.py <<'EOF'\n" + _CAP_PROBE_PY + "EOF\npython3 probe.py", "allow", cwd=PROJ)
+
+# 1d. INFERRED REPRODUCTION of the trial run gd incident: a reviewer's python3 -c
+# feeding JSON test payloads to hooks/guard.py, one of them a settings write raising the model to Opus. The
+# exact command was not kept. THIS FORM ALLOWS ON MAIN, so it is a pin, not a red case: a Write-tool payload
+# carrying the cap as text is data for the guard, and the -c script writes nothing itself. The incident's
+# ask therefore came from another form, most likely a payload whose text holds a shell redirect (1a's shape).
+_CAP_TRIAL_PAYLOADS = [{"tool_name": "Bash", "tool_input": {"command": "ls"}},
+                       {"tool_name": "Write", "tool_input": {"file_path": PROJ_LOCAL, "content": cap_settings()}}]
+sh("cap data: 1d pin, a python3 -c feeding a Write-tool payload with the cap as text to the guard allows [cap-string-false-alarm pin: allows on main]",
+   "python3 -c 'import json,subprocess; P=" + json.dumps(_CAP_TRIAL_PAYLOADS)
+   + "; [subprocess.run([\"python3\",\"hooks/guard.py\"],input=json.dumps(p),text=True) for p in P]'",
+   "allow", cwd=NOGIT)
+
+# THE PINS. Each is the same settings write run as CODE, so it still asks, or denies when it chains with a
+# second command. 1a and the os.system pin hold the same string: the pin is where the interpreter runs it.
+# A HEREDOC BODY IS A SECOND COMMAND to the guard, so the two shell heredoc pins DENY under ask-alone on
+# main, not ask. They are pinned at the verdict main gives (deny, ask-alone), so the guard is not changed.
+chained_ask("cap pin: a bash heredoc whose body writes the cap into .claude/settings.json denies as a chained ask command [cap-string-false-alarm pin]",
+   "bash <<'SH'\necho '" + CAP_STRING_COMPACT + "' > .claude/settings.json\nSH",
+   cwd=PROJ, carries=("agent-model-cap",))
+chained_ask("cap pin: a sh heredoc whose body writes the cap into .claude/settings.json denies as a chained ask command [cap-string-false-alarm pin]",
+   "sh <<'SH'\nprintf '%s' '" + CAP_STRING_COMPACT + "' > .claude/settings.json\nSH",
+   cwd=PROJ, carries=("agent-model-cap",))
+sh("cap pin: sh -c writing the cap into .claude/settings.json asks [cap-string-false-alarm pin]",
+   "sh -c 'echo " + CAP_STRING_WRITE + " > .claude/settings.json'",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap pin: a python -c calling os.system on the cap write to .claude/settings.json asks [cap-string-false-alarm pin]",
+   "python3 -c 'import os; os.system(\"echo " + CAP_STRING_WRITE + " > .claude/settings.json\")'",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap pin: a python heredoc body calling os.system on the cap write to .claude/settings.json asks [cap-string-false-alarm pin]",
+   "python3 - <<'PY'\nimport os\nos.system(\"echo " + CAP_STRING_WRITE + " > .claude/settings.json\")\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap pin: python3 -c printing the cap, redirected into .claude/settings.json outside the string, asks [cap-string-false-alarm pin]",
+   "python3 -c 'print(\"" + CAP_STRING_WRITE + "\")' > .claude/settings.json",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap pin: a cat redirect into .claude/settings.json with the cap in its heredoc body asks [cap-string-false-alarm pin]",
+   "cat > .claude/settings.json <<'EOF'\n" + cap_settings() + "\nEOF",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(OPUS,))
+chained_ask("cap pin: a quoted body written to x.sh, then run by sh x.sh, writing the cap, denies as a chained ask command [cap-string-false-alarm pin]",
+   "cat > x.sh <<'SH'\nprintf '%s' '" + CAP_STRING_COMPACT + "' > .claude/settings.json\nSH\nsh x.sh",
+   cwd=PROJ, carries=("agent-model-cap",))
+
+# THE CAP THROUGH A SHELL VARIABLE. The settings path sits in `$F`, set by an assignment chained ahead of the
+# python -c. Main denies it as a chained ask command (ask-alone), so a cap write does not pass when its path is
+# held in a variable.
+chained_ask("cap var: a cap write to a settings path held in a shell variable, through os.system in python -c, denies as a chained ask command",
+   "F=" + PROJ_SETTINGS + "; python3 -c \"import os; os.system('echo " + CAP_KEY + "=opus >> $F')\"",
+   cwd=NOGIT, carries=("agent-model-cap",))
 
 # =========================================================================== 6c. ask alone
 FAMILY = "ask-alone"
@@ -17766,8 +20122,119 @@ sh("ask-alone: a one-command python heredoc holding a forced push asks, not deni
    "python3 - <<'PY'\n" + FORCE_PUSH + "\nPY", "ask", "force-push", cwd=PUSHFEAT)
 sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree asks, not denies",
    "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
-sh("ask-alone: a one-command python heredoc holding a cap write asks, not denies",
-   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "agent-model-cap", cwd=PROJ)
+sh("cap data: a one-command python heredoc holding a cap write as text allows "
+   "[step agent-model-cap-string-false-alarm: a false-alarm fix, interpreter string data that writes no file "
+   "is not the act; incident 2026-11-02 01:16 CST]",
+   "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "allow", cwd=PROJ)
+sh("cap data: a one-command python heredoc whose os.system runs a cap write asks "
+   "[regression pin: passes on main]",
+   "python3 - <<'PY'\nimport os; os.system('" + CAP_PLAIN + "')\nPY", "ask", "agent-model-cap", cwd=PROJ,
+   carries=(CAP_KEY,))
+
+# Alias bypass: a cap write through an import alias asks, as the spelled-out call does. CAP_ECHO_LOCAL
+# is the cap write every case below names.
+CAP_ECHO_LOCAL = "echo " + CAP_KEY + "=" + OPUS + " > .claude/settings.local.json"
+sh("cap alias: a python heredoc importing run from subprocess, a cap write run with shell=True, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nfrom subprocess import run\nrun('" + CAP_ECHO_LOCAL + "', shell=True)\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap alias: a python heredoc importing subprocess as sp, a cap write run by sp.run with shell=True, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nimport subprocess as sp\nsp.run('" + CAP_ECHO_LOCAL + "', shell=True)\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap alias: a python heredoc importing os as o, a cap write run by o.system, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nimport os as o\no.system('" + CAP_ECHO_LOCAL + "')\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap alias: a python heredoc importing system from os, a cap write run by system, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nfrom os import system\nsystem('" + CAP_ECHO_LOCAL + "')\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap alias: a python heredoc importing call from subprocess, a cap write run by call with shell=True, asks "
+   "[alias bypass, main asks]",
+   "python3 - <<'PY'\nfrom subprocess import call\ncall('" + CAP_ECHO_LOCAL + "', shell=True)\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+# A python comment is text, not a shell spot: a body whose only spot is a comment is data.
+sh("cap comment: a python heredoc whose only spot is a comment naming a cap write, allows "
+   "[comment false alarm, main allows]",
+   "python3 - <<'PY'\n# os.system('" + CAP_ECHO_LOCAL + "')\nPY", "allow", cwd=PROJ)
+
+# Python file operations, node aliases, os.path imports and written-then-run scripts. Each case names a write
+# the way a probe would: CAP_ECHO_LOCAL is the cap write, CFG_HOOK the hook path a frozen write lands on, ENV
+# the env file.
+sh("frozen python: a heredoc copying onto the hook path with shutil.copy denies",
+   "python3 - <<'PY'\nimport shutil; shutil.copy('src','" + CFG_HOOK + "')\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a heredoc moving onto the hook path with shutil.move denies",
+   "python3 - <<'PY'\nimport shutil; shutil.move('src','" + CFG_HOOK + "')\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a heredoc copying onto the hook path through shutil as sh denies",
+   "python3 - <<'PY'\nimport shutil as sh; sh.copy('src','" + CFG_HOOK + "')\nPY", "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen python: a heredoc changing the mode of the hook path with os.chmod denies",
+   "python3 - <<'PY'\nimport os; os.chmod('" + CFG_HOOK + "', 0o755)\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a python -c copying onto the hook path with shutil.copy denies",
+   "python3 -c \"import shutil; shutil.copy('src','" + CFG_HOOK + "')\"", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a body written to x.py, copying onto the hook path with shutil.copy, then run, denies",
+   "cat > x.py <<'PY'\nimport shutil; shutil.copy('src','" + CFG_HOOK + "')\nPY\npython3 x.py",
+   "deny", "frozen-path", cwd=NOGIT)
+
+sh("cap node: a node heredoc calling a cap write through childProcess.exec asks",
+   "node - <<'J'\nconst childProcess=require('child_process'); childProcess.exec('" + CAP_ECHO_LOCAL + "')\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling a cap write through a destructured execSync renamed e asks",
+   "node - <<'J'\nconst {execSync: e}=require('child_process'); e('" + CAP_ECHO_LOCAL + "')\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node import of execSync as e calling a cap write asks",
+   "node - <<'J'\nimport {execSync as e} from 'child_process'; e('" + CAP_ECHO_LOCAL + "')\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling a cap write through cp.execSync held in run asks",
+   "node - <<'J'\nconst cp=require('child_process');\nconst run=cp.execSync;\nrun('" + CAP_ECHO_LOCAL + "')\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling a cap write through promisified exec asks",
+   "node - <<'J'\nconst {exec}=require('child_process');\nconst execAsync=require('util').promisify(exec);\n"
+   "await execAsync('" + CAP_ECHO_LOCAL + "')\nJ", "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node -e calling a cap write through cp.execSync asks",
+   "node -e \"const cp=require('child_process'); cp.execSync('" + CAP_ECHO_LOCAL + "')\"",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("frozen node: a node heredoc copying onto the hook path through childProcess.exec denies",
+   "node - <<'J'\nconst childProcess=require('child_process'); childProcess.exec('cp x " + CFG_HOOK + "')\nJ",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("env node: a node heredoc reading the env file in a template string through cp.execSync denies",
+   "node - <<'J'\nconst cp=require('child_process'); cp.execSync(`cat " + ENV + "`)\nJ",
+   "deny", "env-file", cwd=PROJ)
+
+sh("cap import: a python heredoc importing os.path, then os.system on a cap write, asks",
+   "python3 - <<'PY'\nimport os.path\nos.system('" + CAP_ECHO_LOCAL + "')\nPY",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap import: a python -c importing os.path, then os.system on a cap write, asks",
+   "python3 -c \"import os.path; os.system('" + CAP_ECHO_LOCAL + "')\"",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+
+chained_ask("cap script: a body written to x.py that runs a cap write with subprocess run and shell=True, then run, "
+   "denies as a chained ask command [main's verdict]",
+   "cat > x.py <<'PY'\nfrom subprocess import run\ncmd='" + CAP_ECHO_LOCAL + "'\nrun(cmd, shell=True)\nPY\n"
+   "python3 x.py", cwd=PROJ, carries=("agent-model-cap",))
+chained_ask("cap script: a body written to x.py that runs a cap write with os as o system, then run, "
+   "denies as a chained ask command [main's verdict]",
+   "cat > x.py <<'PY'\nimport os as o\ncmd='" + CAP_ECHO_LOCAL + "'\no.system(cmd)\nPY\npython3 x.py",
+   cwd=PROJ, carries=("agent-model-cap",))
+
+# Pins for the from-import forms, the interpolated shell calls in perl and node, and a data print that allows.
+sh("frozen python: a heredoc importing copy from shutil, copying onto the hook path, denies [pin]",
+   "python3 - <<'PY'\nfrom shutil import copy; copy('src','" + CFG_HOOK + "')\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen python: a heredoc importing chmod from os, changing the mode of the hook path, denies [pin]",
+   "python3 - <<'PY'\nfrom os import chmod; chmod('" + CFG_HOOK + "', 0o755)\nPY", "deny", "frozen-path", cwd=NOGIT)
+sh("cap perl: a perl heredoc whose system runs a cap write held in a variable, asks [pin]",
+   "perl <<'PL'\nmy $c = 'echo " + CAP_KEY + "=" + OPUS + " > .claude/settings.local.json'; system(\"$c\");\nPL",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling execSync on a cap write in a template literal, asks [pin]",
+   "node - <<'J'\nconst c='" + CAP_ECHO_LOCAL + "'; require('child_process').execSync(`${c}`)\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap node: a node heredoc calling execSync on a cap write joined by concatenation, asks [pin]",
+   "node - <<'J'\nconst c='" + CAP_ECHO_LOCAL + "'; require('child_process').execSync('' + c)\nJ",
+   "ask", "agent-model-cap", cwd=PROJ, carries=(CAP_KEY,))
+sh("cap data: a python heredoc printing a path join beside a cap write as text, allows [pin]",
+   "python3 - <<'PY'\nimport os; print(os.path.join('a','b'), '" + CAP_ECHO_LOCAL + "')\nPY",
+   "allow", cwd=PROJ)
 
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
 # multi-line template literal inside the body. None of them hides the prune or adds a command.
@@ -19343,6 +21810,33 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The two MCP updates that mark nothing ready, read by _rpr_no_read (records-page-ready). They sit here because
+# LOG_CHECKS_EXTRA is defined here.
+for _label, _check in (
+    ("records-page-ready: an MCP title edit on a stale page is allowed and starts no gh call", rpr_title_only_case),
+    ("records-page-ready: an MCP close on a stale page is allowed and starts no gh call", rpr_closed_case),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = RPR_RULE
+# The agent-branch refusal's opening words (defined in the push section). Registered here, where LOG_CHECKS_EXTRA is
+# defined, and its family is the push section's, set by hand.
+AGENT_OPENS_LABEL = "push-agent-branch: the refusal's reason opens with Rule (Git), after its rule id"
+LOG_CHECKS_EXTRA.append((AGENT_OPENS_LABEL, agent_refusal_opens_with_rule_case))
+LOG_FAMILY[AGENT_OPENS_LABEL] = "push-delete"
+# The two-worktrees-one-branch log checks read the stand-in's call log. Each builds only its own fixture,
+# through decide's materialize_for, so a family run need not build every lazy fixture.
+TWO_OBSERVER_LABEL = "two-worktrees: the stand-in logs a worktree list read the guard makes today"
+TWO_LIST_ONCE_LABEL = "two-worktrees: the refused form reads the worktree list exactly once"
+TWO_NO_LIST_LABEL = "two-worktrees: an unrelated git command reads no worktree list"
+LOG_CHECKS_EXTRA.append((TWO_OBSERVER_LABEL, two_worktrees_observer_case))
+LOG_CHECKS_EXTRA.append((TWO_LIST_ONCE_LABEL, two_worktrees_reads_list_once_case))
+TWO_OWN_TREE_LABEL = "two-worktrees: the holder's own checkout -B x is no hit in the rule's own logic, from the holder's root"
+LOG_CHECKS_EXTRA.append((TWO_NO_LIST_LABEL, two_worktrees_unrelated_no_list_case))
+LOG_CHECKS_EXTRA.append((TWO_OWN_TREE_LABEL, two_worktrees_own_tree_case))
+for _label in (TWO_OBSERVER_LABEL, TWO_LIST_ONCE_LABEL, TWO_NO_LIST_LABEL, TWO_OWN_TREE_LABEL):
+    LOG_FAMILY[_label] = TWO_RULE
+FIXTURELESS_CHECKS.update((two_worktrees_observer_case, two_worktrees_reads_list_once_case,
+                           two_worktrees_unrelated_no_list_case, two_worktrees_own_tree_case))
 # The two unreadable-lone-operand checks. Their cases and labels sit in the shared-tree block, which runs
 # before LOG_CHECKS_EXTRA exists, so they register here and their family is set by hand, as above.
 LOG_CHECKS_EXTRA.append((UNREAD_NOGIT_LABEL, unread_lone_operand_no_git_case))
@@ -19360,6 +21854,12 @@ for _constant in REMEDY_CONSTANTS:
     _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
     LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
     LOG_FAMILY[_remedy_label] = "stream"
+# The octopus-push remedy check is defined in its section above. It builds only the fixture it reads, through
+# decide, so it is fixtureless and a family run does not build every fixture. Its family is set by hand.
+OCT_REMEDY_LABEL = "octopus-push: the refusal's remedy names the two-parent form and not the forbidden target"
+LOG_CHECKS_EXTRA.append((OCT_REMEDY_LABEL, octopus_remedy_case))
+LOG_FAMILY[OCT_REMEDY_LABEL] = "octopus-push"
+FIXTURELESS_CHECKS.add(octopus_remedy_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -19465,7 +21965,6 @@ def _mirror_names_tie():
 LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
                          _mirror_names_tie))
 
-
 # ---- resolve-vars: `_resolve_vars` of guard_frozen, read as the shell reads each assignment. A check reads
 # the use site (the last `;` segment, double quotes removed), so a fix that rewrites an assignment's own text
 # still passes. The guard under test is loaded as every check loads it (GUARD_UNDER_TEST is honoured).
@@ -19553,21 +22052,22 @@ RESOLVE_CASES = (
 for _label, _command, _want in RESOLVE_CASES:
     LOG_CHECKS_EXTRA.append((_label, resolve_case(_command, _want)))
 
-# ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
-# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
-# verb from each of them. One check per root flag form, called on gh_call_of directly.
+# ---- merge: gh_call_of reads the pr verb past a repo flag. Its callers (merge_call_of, the draft-PR read,
+# ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front of the verb,
+# or after the group word, hides the verb from each of them. One check per flag form, called on gh_call_of directly.
 FAMILY = "merge"
 
 
 def gh_root_flag_verb_check(segment, verb):
-    """True when gh_call_of's first two words are the verb, so the root flag before it is read past."""
+    """True when gh_call_of's first two words are the verb, so a repo flag in front of the verb, or after the
+    group word, is read past."""
     guard = _load_guard_module()
     rest = guard.gh_call_of(segment)
     if rest is None:
         return False, "gh_call_of reads no gh call in %r" % segment
     if rest[:2] != verb:
         return False, "gh_call_of(%r) gives %r, so its first two words are not %r" % (segment, rest, verb)
-    return True, "gh_call_of(%r) reads %r past the root flag" % (segment, verb)
+    return True, "gh_call_of(%r) reads %r past the repo flag" % (segment, verb)
 
 
 def gh_root_dash_r_check():
@@ -19582,12 +22082,104 @@ def gh_root_repo_spaced_check():
     return gh_root_flag_verb_check("gh --repo o/r pr create --fill", ["pr", "create"])
 
 
-FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check))
+# The same flag after the group word (`gh pr -R o/r merge`): gh reads it there too. Each form has a check. A repo
+# value that reads as a verb is the value, never the verb.
+def gh_group_dash_r_check():
+    return gh_root_flag_verb_check("gh pr -R o/r merge 12", ["pr", "merge"])
+
+
+def gh_group_repo_equals_check():
+    return gh_root_flag_verb_check("gh pr --repo=o/r merge 12", ["pr", "merge"])
+
+
+def gh_group_repo_spaced_check():
+    return gh_root_flag_verb_check("gh issue --repo o/r comment 3 --body x", ["issue", "comment"])
+
+
+def gh_group_joined_dash_r_check():
+    return gh_root_flag_verb_check("gh pr -Ro/r merge 12", ["pr", "merge"])
+
+
+def gh_group_value_verb_check():
+    return gh_root_flag_verb_check("gh pr -R list comment 5", ["pr", "comment"])
+
+
+FIXTURELESS_CHECKS.update((gh_root_dash_r_check, gh_root_repo_equals_check, gh_root_repo_spaced_check,
+                           gh_group_dash_r_check, gh_group_repo_equals_check, gh_group_repo_spaced_check,
+                           gh_group_joined_dash_r_check, gh_group_value_verb_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R root flag", gh_root_dash_r_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> root flag",
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a -R flag after the group word",
+                         gh_group_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<repo> flag after the group word",
+                         gh_group_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the issue verb past a spaced --repo <repo> flag after the group word",
+                         gh_group_repo_spaced_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a joined -R<repo> flag after the group word",
+                         gh_group_joined_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a repo value that looks like a verb, "
+                         "after the group word", gh_group_value_verb_check))
+
+
+# ---- merge: merge_call_of reads the repo value, not only the verb. A repo flag joined to its value (-Ro/r) gave
+# repo '', which is the working directory's repo, so the merge check read the wrong repo. The spaced and equals forms
+# are controls: they read the repo already. Each check asserts the selector (scope) before the repo (subject).
+def merge_call_repo_check(segment, want_repo):
+    """True when merge_call_of reads the pull request '12' and the repo `want_repo` from a `gh pr merge` segment."""
+    guard = _load_guard_module()
+    got = guard.merge_call_of(segment)
+    if got is None:
+        return False, "merge_call_of reads no gh pr merge in %r" % segment
+    selector, repo = got
+    if selector != "12":
+        return False, "merge_call_of(%r) gives selector %r, not '12'" % (segment, selector)
+    if repo != want_repo:
+        return False, "merge_call_of(%r) gives repo %r, not %r" % (segment, repo, want_repo)
+    return True, "merge_call_of(%r) reads repo %r" % (segment, want_repo)
+
+
+def merge_repo_joined_before_verb_check():
+    return merge_call_repo_check("gh -Ro/r pr merge 12", "o/r")
+
+
+def merge_repo_joined_after_group_check():
+    return merge_call_repo_check("gh pr -Ro/r merge 12", "o/r")
+
+
+def merge_repo_joined_after_verb_check():
+    return merge_call_repo_check("gh pr merge 12 -Ro/r", "o/r")
+
+
+def merge_repo_spaced_dash_r_check():
+    return merge_call_repo_check("gh pr merge 12 -R o/r", "o/r")
+
+
+def merge_repo_spaced_repo_check():
+    return merge_call_repo_check("gh pr merge 12 --repo o/r", "o/r")
+
+
+def merge_repo_equals_check():
+    return merge_call_repo_check("gh pr merge 12 --repo=o/r", "o/r")
+
+
+FIXTURELESS_CHECKS.update((merge_repo_joined_before_verb_check, merge_repo_joined_after_group_check,
+                           merge_repo_joined_after_verb_check, merge_repo_spaced_dash_r_check,
+                           merge_repo_spaced_repo_check, merge_repo_equals_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag before the verb",
+                         merge_repo_joined_before_verb_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag after the group word",
+                         merge_repo_joined_after_group_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a joined -R<repo> flag after the verb",
+                         merge_repo_joined_after_verb_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a spaced -R <repo> flag after the verb",
+                         merge_repo_spaced_dash_r_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a spaced --repo <repo> flag after the verb",
+                         merge_repo_spaced_repo_check))
+LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a --repo=<repo> flag after the verb",
+                         merge_repo_equals_check))
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
@@ -20099,6 +22691,115 @@ for _label, _check in (
          own_read_case("body-int-then-lane", [ARCH_LANE_TAGS])),
         ("lane-closes-after-records: own_session_read skips a get_session result whose content is an int, reads no record",
          own_read_case("body-int", [None]))):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# The agent's own transcript folder has one home (rule agent-transcript-path-one-home): own_session's agent_transcript_dir,
+# The agent folder beside the transcript: <transcript minus .jsonl>/subagents/agent-<id>.jsonl. The copies in hooks/guard_kill.py and hooks/stall_watch.py must name that folder.
+# The copies in lint/report_guard.py and lint/ruling_census.py are pinned in their own suites.
+AGENT_HOME_ID = "ab12cd34ef56a7890"  # an agent id as the harness sends it: 17 hex characters
+
+
+def load_hook(name, file_name):
+    """A hooks module beside the guard under test (GUARD), loaded by path, so a mutant copy of the guard reads its own copy."""
+    import importlib.util
+    hooks = os.path.dirname(GUARD)
+    if hooks not in sys.path:
+        sys.path.insert(0, hooks)  # guard_kill imports its siblings by name
+    spec = importlib.util.spec_from_file_location(name, os.path.join(hooks, file_name))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def agent_home_shape_check():
+    """agent_transcript_dir names the agent folder beside the transcript, for a transcript path with .jsonl, without it, and dotted."""
+    own = _load_own_session()
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: the one home of the agent folder is not built"
+    base = os.path.join(ROOT, "agenthome")
+    for name in ("sess.jsonl", "sess", "sess.v2"):
+        got = own.agent_transcript_dir(os.path.join(base, name))
+        want = os.path.join(base, name[:-len(".jsonl")] if name.endswith(".jsonl") else name, "subagents")
+        if got != want:
+            return False, "agent_transcript_dir(%s) is %s, want %s" % (name, got, want)
+    return True, "agent_transcript_dir names the agent folder beside the transcript for each shape"
+
+
+def agent_path_check():
+    """agent_transcript_path is the agent's file in the home folder."""
+    own = _load_own_session()
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: agent_transcript_path has no home to build on"
+    transcript = os.path.join(ROOT, "agenthome", "sess.jsonl")
+    got = own.agent_transcript_path(transcript, AGENT_HOME_ID)
+    want = os.path.join(own.agent_transcript_dir(transcript), "agent-" + AGENT_HOME_ID + ".jsonl")
+    if got != want:
+        return False, "agent_transcript_path is %s, want %s" % (got, want)
+    return True, "agent_transcript_path is the agent's file in the home folder"
+
+
+def agent_kill_finds_check():
+    """in_own_agent_worktree finds the agent file beside a .jsonl transcript, for a pid whose parent is init in its worktree."""
+    kill = load_hook("guard_kill_home_check", "guard_kill.py")
+    base = os.path.join(ROOT, "agenthome-kill")
+    transcript = os.path.join(base, "live.jsonl")
+    write(transcript, "{}\n")
+    write(os.path.join(base, "live", "subagents", "agent-" + AGENT_HOME_ID + ".jsonl"), "{}\n")
+    cwd = os.path.join(base, ".claude", "worktrees", "agent-" + AGENT_HOME_ID)
+    kill._ps_ppid = lambda pid: 1  # a pid whose parent is init
+    kill._pid_cwd = lambda pid: cwd  # a cwd inside this agent's worktree
+    if not kill.in_own_agent_worktree(4242, transcript):
+        return False, "in_own_agent_worktree does not find the agent file beside the transcript"
+    return True, "in_own_agent_worktree finds the agent file beside the transcript"
+
+
+def agent_stall_finds_check():
+    """agent_transcripts lists the agent file beside the session first."""
+    stall = load_hook("stall_watch_home_check", "stall_watch.py")
+    base = os.path.join(ROOT, "agenthome-stall")
+    got = stall.agent_transcripts(os.path.join(base, "sess.jsonl"), AGENT_HOME_ID, "")[:1]
+    want = [os.path.join(base, "sess", "subagents", "agent-" + AGENT_HOME_ID + ".jsonl")]
+    if got != want:
+        return False, "agent_transcripts lists %r first, want %r" % (got, want)
+    return True, "agent_transcripts lists the agent file beside the session first"
+
+
+def agent_copies_agree_check():
+    """The stall_watch and guard_kill copies name the agent folder beside the transcript, for each transcript shape."""
+    own = _load_own_session()
+    stall = load_hook("stall_watch_home_agree", "stall_watch.py")
+    kill = load_hook("guard_kill_home_agree", "guard_kill.py")
+    base = os.path.join(ROOT, "agenthome-agree")
+    for name in ("sess.jsonl", "sess", "sess.v2"):
+        transcript = os.path.join(base, name)
+        stem = name[:-len(".jsonl")] if name.endswith(".jsonl") else name
+        agent_file = os.path.join(base, stem, "subagents", "agent-" + AGENT_HOME_ID + ".jsonl")
+        write(agent_file, "{}\n")
+        got = stall.agent_transcripts(transcript, AGENT_HOME_ID, "")[0]
+        if got != agent_file:
+            return False, "agent_transcripts names %s for %s, want %s" % (got, name, agent_file)
+    if not hasattr(own, "agent_transcript_dir"):
+        return False, "own_session has no agent_transcript_dir: the copies have no home to agree with"
+    jsonl = os.path.join(base, "sess.jsonl")  # guard_kill reads a transcript that ends in .jsonl, by its own gate
+    kill._ps_ppid = lambda pid: 1
+    kill._pid_cwd = lambda pid: os.path.join(base, ".claude", "worktrees", "agent-" + AGENT_HOME_ID)
+    if not kill.in_own_agent_worktree(4242, jsonl):
+        return False, "in_own_agent_worktree finds no agent file in the folder beside sess.jsonl"
+    return True, "the stall_watch and guard_kill copies name the home's folder for each shape"
+
+
+for _label, _check in (
+        ("agent-transcript-path-one-home: agent_transcript_dir names the agent folder beside the transcript, with or without .jsonl",
+         agent_home_shape_check),
+        ("agent-transcript-path-one-home: agent_transcript_path is the agent's file in the home folder",
+         agent_path_check),
+        ("agent-transcript-path-one-home: guard_kill finds the agent file beside a .jsonl transcript",
+         agent_kill_finds_check),
+        ("agent-transcript-path-one-home: stall_watch lists the agent file beside the session first",
+         agent_stall_finds_check),
+        ("agent-transcript-path-one-home: the stall_watch and guard_kill copies name the home's folder for each shape",
+         agent_copies_agree_check)):
     LOG_CHECKS_EXTRA.append((_label, _check))
 
 
@@ -21484,19 +24185,20 @@ def _put_commit(where, files, message):
     _must(where, *IDENT, "commit", "-q", "-m", message)
 
 
-def _mixed_mid_merge(w):
-    """Cut at main. The lane changes the test file and src/app.py. Main changes the same lines in both (a conflict
-    in each) and src/clean.py, which the lane never touches (a clean merge). Main is merged in and the merge is
-    left in progress: MERGE_HEAD is set, and the two conflicts are unmerged."""
+def _mixed_mid_merge(w, rel=TEST_A):
+    """Cut at main. The lane changes `rel` (the test file by default) and src/app.py. Main changes the same lines in
+    both (a conflict in each) and src/clean.py, which the lane never touches (a clean merge). Main is merged in and
+    the merge is left in progress: MERGE_HEAD is set, and the two conflicts are unmerged. `rel` may name a mutation
+    test or a near-miss name instead: only the path differs."""
     main = w + "-main"
-    _test_author_lane(w, TEST_A, LANE_TEXT, more=(("src/app.py", "x = 6\n"),))
+    _test_author_lane(w, rel, LANE_TEXT, more=(("src/app.py", "x = 6\n"),))
     _must(w, "reset", "-q", "--hard", "lane")
-    _put_commit(main, [(TEST_A, BASE_FILES[TEST_A] + "# main's newer case\n"), ("src/app.py", "x = 9\n"),
+    _put_commit(main, [(rel, BASE_FILES[TEST_A] + "# main's newer case\n"), ("src/app.py", "x = 9\n"),
                        ("src/clean.py", "z = 1\n")], "main moves")
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
-    _require_conflict(w, TEST_A)
+    _require_conflict(w, rel)
     _require_conflict(w, "src/app.py")
     with open(os.path.join(w, "src/clean.py"), encoding="utf-8") as handle:
         clean = handle.read()
@@ -21680,6 +24382,56 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that reso
 add("test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused", "deny", rule=TA,
     tool="Edit", file_path=os.path.join(CI_MID, CI), old_string=CI_LINT,
     new_string=CI_LINT.replace("ste_lint.py", "other_lint.py"), carries=("builder", "Report"), **AUTH_CI)
+
+# ---- the merge route for a mutation test (decision builders-cannot-edit-tests, "Merge route"). A mutation test is test
+# code only a test-author edits, so a merge that conflicts one of the three (AUTHOR_MUTATION_TESTS) gives its
+# test-author the conflicted product paths, as a conflicted test file does. Each fixture is `_mixed_mid_merge` with the
+# mutation test as its conflicted path: src/app.py conflicts beside it, and src/clean.py merges clean.
+MUT_GUARD, MUT_SHARED, MUT_SWEEP = "hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"
+MUT_FILES = {**MIXED_FILES, MUT_GUARD: BASE_FILES[TEST_A], MUT_SHARED: BASE_FILES[TEST_A], MUT_SWEEP: BASE_FILES[TEST_A]}
+MUT_GUARD_MID = diff_repo("ta-mut-guard-mid", lambda w: _mixed_mid_merge(w, MUT_GUARD), files=MUT_FILES)
+MUT_SHARED_MID = diff_repo("ta-mut-shared-mid", lambda w: _mixed_mid_merge(w, MUT_SHARED), files=MUT_FILES)
+MUT_SWEEP_MID = diff_repo("ta-mut-sweep-mid", lambda w: _mixed_mid_merge(w, MUT_SWEEP), files=MUT_FILES)
+# Near misses: a name that looks like a mutation test but is product code, so the route stays shut for it. A fix that
+# matches the prefix (`mutate_*.py`) or the basename alone (MUTATION_TEST_NAMES) would open it.
+NEAR_A, NEAR_B = "hooks/mutate_x.py", "src/mutate_guard.py"
+NEAR_FILES = {**MIXED_FILES, NEAR_A: BASE_FILES[TEST_A], NEAR_B: BASE_FILES[TEST_A]}
+NEAR_A_MID = diff_repo("ta-near-a-mid", lambda w: _mixed_mid_merge(w, NEAR_A), files=NEAR_FILES)
+NEAR_B_MID = diff_repo("ta-near-b-mid", lambda w: _mixed_mid_merge(w, NEAR_B), files=NEAR_FILES)
+
+AUTH_MUT_GUARD = dict(agent_id="auth1", agent_type="test-author", cwd=MUT_GUARD_MID)
+AUTH_MUT_SHARED = dict(agent_id="auth1", agent_type="test-author", cwd=MUT_SHARED_MID)
+AUTH_MUT_SWEEP = dict(agent_id="auth1", agent_type="test-author", cwd=MUT_SWEEP_MID)
+AUTH_NEAR_A = dict(agent_id="auth1", agent_type="test-author", cwd=NEAR_A_MID)
+AUTH_NEAR_B = dict(agent_id="auth1", agent_type="test-author", cwd=NEAR_B_MID)
+BLD_MUT_GUARD = dict(agent_id="bld1", agent_type="builder", cwd=MUT_GUARD_MID)
+# (i) Case 1's form, in a merge that also conflicts a mutation test. No test path is conflicted here, so the route is
+# shut and the Edit is refused on main (red). Each of the three mutation tests is its own merge.
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted hooks/mutate_guard.py, is allowed",
+    "allow", tool="Edit", file_path=os.path.join(MUT_GUARD_MID, "src/app.py"), new_string="x = 7\n", **AUTH_MUT_GUARD)
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted hooks/mutate_shared.py, is allowed",
+    "allow", tool="Edit", file_path=os.path.join(MUT_SHARED_MID, "src/app.py"), new_string="x = 7\n", **AUTH_MUT_SHARED)
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted janitor/mutate_sweep.py, is allowed",
+    "allow", tool="Edit", file_path=os.path.join(MUT_SWEEP_MID, "src/app.py"), new_string="x = 7\n", **AUTH_MUT_SWEEP)
+# (ii) A merge that conflicts only product files: the near-miss name is product code, so no test path and no mutation
+# test is conflicted. Refused on main, and must stay refused. Case 9 pins the plain product-only merge.
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted hooks/mutate_x.py, is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(NEAR_A_MID, "src/app.py"), new_string="x = 7\n",
+    carries=("builder", "Report"), **AUTH_NEAR_A)
+add("test-author: Edit of a product file its merge conflicts, beside a conflicted src/mutate_guard.py, is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(NEAR_B_MID, "src/app.py"), new_string="x = 7\n",
+    carries=("builder", "Report"), **AUTH_NEAR_B)
+# (iii) In the mutate_guard merge: a builder's Edit of the conflicted mutation test is refused (builder-test-edit), and
+# its Edit of the conflicted product file is allowed, as main allows it today.
+add("builder-test: Edit of hooks/mutate_guard.py in a merge that conflicts it is refused", "deny", rule=BT, tool="Edit",
+    file_path=os.path.join(MUT_GUARD_MID, MUT_GUARD), new_string="x = 2\n", carries=("test-author", "Report"),
+    **BLD_MUT_GUARD)
+add("builder-test: Edit of the conflicted src/app.py in a merge that conflicts hooks/mutate_guard.py is allowed", "allow",
+    tool="Edit", file_path=os.path.join(MUT_GUARD_MID, "src/app.py"), new_string="x = 2\n", **BLD_MUT_GUARD)
+# (iv) In the same merge, a product path that merged clean stays refused for the test-author.
+add("test-author: Edit of a product file the merge merged clean, beside a conflicted hooks/mutate_guard.py, is refused",
+    "deny", rule=TA, tool="Edit", file_path=os.path.join(MUT_GUARD_MID, "src/clean.py"), new_string="z = 2\n",
+    carries=("builder", "Report"), **AUTH_MUT_GUARD)
 
 
 def refused_push_and_stop_case(label):
@@ -22382,6 +25134,44 @@ sh("impeccable bash: bash -c detect is allowed", "bash -c 'npx impeccable detect
    cwd=NOGIT)
 sh("impeccable bash: the pinned script path, detect, is allowed",
    "skills/impeccable/scripts/impeccable detect src", "allow", cwd=NOGIT)
+
+# impeccable, detect after leading flags or a `--` separator. The subcommand is the first word after the
+# flags and the `--` that ends them, so a `detect` there is the same read-only call; `npm run <script> --
+# <args>` hands the `--` on to the script. The flags and the separator never let a build or a settings
+# writer through: the word after them must still be `detect`, and a `detect` later in the call is no subcommand.
+sh("impeccable bash: detect after a leading json flag is allowed",
+   "impeccable --json detect", "allow", cwd=NOGIT)
+sh("impeccable bash: detect after a leading json flag through npx is allowed",
+   "npx impeccable --json detect", "allow", cwd=NOGIT)
+sh("impeccable bash: detect after two leading flags is allowed",
+   "impeccable --json --verbose detect", "allow", cwd=NOGIT)
+sh("impeccable bash: detect after a -- separator is allowed",
+   "impeccable -- detect", "allow", cwd=NOGIT)
+sh("impeccable bash: detect after a -- separator under npm run is allowed",
+   "npm run impeccable -- detect", "allow", cwd=NOGIT)
+
+sh("impeccable bash: live-server behind a leading json flag is denied",
+   "impeccable --json live-server", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: live-server after a -- separator under npm run is denied",
+   "npm run impeccable -- live-server", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: context behind a leading json flag is denied",
+   "impeccable --json context", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: polish after a -- separator is denied",
+   "impeccable -- polish", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: a settings writer behind a leading flag is denied",
+   "npx impeccable --json hooks on", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: flags with no subcommand are denied",
+   "impeccable --json", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: a detect after a live-server subcommand is denied",
+   "impeccable live-server detect", "deny", "impeccable-review-only", cwd=NOGIT)
+# Both chains stay refused. The plain one is denied by its second segment alone, so a fix that reads
+# only the first segment fails it. The flag-led one is denied today by its first segment; it holds once
+# the flag fix lands.
+sh("impeccable bash: a detect chained before a live-server is denied",
+   "impeccable detect; impeccable live-server", "deny", "impeccable-review-only", cwd=NOGIT)
+sh("impeccable bash: a flag-led detect chained before a live-server is denied",
+   "impeccable --json detect; impeccable live-server", "deny", "impeccable-review-only", cwd=NOGIT)
+
 
 # impeccable, heredoc bodies. A heredoc body is text, not a run, so the shell reader must not read a
 # body line as a command. A body is KEPT (judged as shell) when an interpreter word sits on the header
@@ -23272,6 +26062,31 @@ def pd_seam_case():
 LOG_CHECKS_EXTRA.append(("page-item-design: the checker runs only for a write with designs", pd_seam_case))
 
 
+def pd_key_case():
+    """The checker is handed the item under its doc key. A data `id` field that names another item is ignored, so a
+    picture that misses under the key is denied. The seam stands in for the checker: it misses only under the key."""
+    seen = []
+
+    def seam(page_file, item):
+        seen.append(item.get("id"))
+        if item.get("id") == PD_DOC:
+            return 1, "The picture of option A shows nothing the focus names."
+        return 0, ""
+    repo = pd_repo("dockey", PD_PAGE)
+    calls, out, _ = pd_judged(pd_body(repo, pd_item(id="other-id")), "dockey", seam=seam)
+    if calls != 1:
+        return False, "the checker was called %d times for a write with a picture, want 1" % calls
+    if seen != [PD_DOC]:
+        return False, "checker got item id %r, want the doc key %r: the data id field must not name the item" % (seen[0], PD_DOC)
+    decision, _reason = read_decision(out)
+    if decision != "deny":
+        return False, "a miss under the doc key was %s, want deny" % decision
+    return True, "the checker gets the doc key, and a miss under it is denied"
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: the item's id is its doc key, not its data id field", pd_key_case))
+
+
 def pd_partial_options():
     """Two options with gain and lose, one with a picture. A partial update's options must pass the form rule too."""
     return with_stake({"options": [{"key": "a", "label": "Full card", "how": "The card shows the full stock.", "design": "m1"},
@@ -23343,6 +26158,47 @@ def pd_budget_case():
 
 
 LOG_CHECKS_EXTRA.append(("page-item-design: pictured items in one batch share one deadline", pd_budget_case))
+
+
+def pd_batch_miss_case():
+    """A batch of three pictured items: the first is unknown, the second misses, the third would pass. The deny names
+    the second, the checker is not run on the third (the loop ends at the first miss), and the first's unknown is one
+    noted line. The checker is a stand-in that answers by item, so nothing renders and the case stays fast."""
+    seen = []
+    ids = ["miss-1", "miss-2", "miss-3"]
+
+    def stand_in(page_file, item):
+        seen.append(item["id"])
+        if item["id"] == "miss-1":
+            return 3, "checker cannot run for item one"
+        if item["id"] == "miss-2":
+            return 1, "item two's mockup draws no focus"
+        return 0, ""
+    repo = pd_repo("batch-miss", PD_PAGE)
+    writes = [{"op": "set", "collection": "items", "doc_id": doc, "data": pd_item(id=doc)} for doc in ids]
+    payload = {"tool_name": "ArtifactData", "cwd": repo,
+               "tool_input": {"url": PQ_URL, "action": "batch", "writes": writes}}
+    _calls, out, rows = pd_judged(payload, "batch-miss", seam=stand_in)
+    decision, reason = read_decision(out)
+    noted = pd_noted(rows)
+    problems = []
+    if seen != ids[:2]:
+        problems.append("the checker ran on %s, want %s: one call per item up to the first miss, none for item three"
+                        % (seen, ids[:2]))
+    if decision != "deny":
+        problems.append("want deny, got %s: %s" % (decision, reason[:160]))
+    elif "item two's mockup draws no focus" not in reason:
+        problems.append("the deny does not name item two: %s" % reason[:160])
+    if len(noted) != 1:
+        problems.append("want one noted/page-item-design line for item one's unknown, found %d" % len(noted))
+    elif "checker cannot run for item one" not in "\t".join(noted[0]):
+        problems.append("the noted line does not carry item one's unknown: %r" % noted[0])
+    return (not problems), ("; ".join(problems)
+                            or "the deny names item two, the checker stops there, one noted line for item one")
+
+
+LOG_CHECKS_EXTRA.append(("page-item-design: a batch whose second item misses is denied there, with no run of the third",
+                         pd_batch_miss_case))
 
 
 # --------------------------------------------------------------------------- a design names its file, in a mockup home
@@ -25212,9 +28068,10 @@ def subject_unread_log_case(command=None, expect_note=True, cwd=SUBJDIRTY, searc
 
 
 def per_file_quoted_force_noted_case():
-    """KILL CASE for a mutate_guard entry removed in 78e8446: a quoted force on a worktree remove.
-    The base reads the quoted `--force`, so the unread subject is noted, not silent."""
-    return subject_unread_log_case(VCS + " worktree remove \"--force\" $'x\\'y' /x")
+    """KILL CASE for the mutate_guard entry `subject: a quoted force flag reads as unforced`
+    (hooks/mutate_guard.py). A quoted `--force` on a worktree remove reads as forced, so the unread
+    subject is noted, not silent. The abbreviated entry is killed by the `log:` check, not this one."""
+    return subject_unread_log_case(VCS + " worktree remove \"--force\" \"x'y /x")
 
 
 LOG_CHECKS_EXTRA.append(("per-file kill: log: a quoted or abbreviated force on a worktree remove "
@@ -26614,6 +29471,48 @@ for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
         tool=CREATE_SESSION_CALL, prompt="x", model=_model)
 add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
 
+# ---- A Workflow call whose args hold a placeholder. A placeholder is an all-caps word with an underscore, or a
+# __X__ word, and the whole value must be one (a sentence that holds one passes). The guard reads args and each
+# array item or object value one level down. Each refusal names the placeholder and the fix. The args are
+# structured values, not source text, so no comment-opener or quote case applies.
+FAMILY = "workflow-args"
+WORKFLOW_ARGS_RULE = "workflow-args-shape-check"
+WORKFLOW_ARGS_FIX = ("replace", "real value", "fill in")
+WORKFLOW_ARGS_SCRIPT = _step_flow("'Check the named files.'", "agentType: 'reviewer', model: 'sonnet'")
+add("workflow-args: a placeholder string in args is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="FACT_CLOSE_PLACEHOLDER",
+    carries=("FACT_CLOSE_PLACEHOLDER", WORKFLOW_ARGS_FIX))
+add("workflow-args: a __X__ placeholder string in args is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="__FILL__",
+    carries=("__FILL__", WORKFLOW_ARGS_FIX))
+add("workflow-args: a __X__ placeholder last in an args array is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=["a.ts", "__FILL__"],
+    carries=("__FILL__", WORKFLOW_ARGS_FIX))
+add("workflow-args: a __X__ placeholder first in an args array is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=["__FILL__", "a.ts"],
+    carries=("__FILL__", WORKFLOW_ARGS_FIX))
+add("workflow-args: a caps placeholder as an args object value is refused", "deny", WORKFLOW_ARGS_RULE,
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args={"pr": "PR_NUMBER"},
+    carries=("PR_NUMBER", WORKFLOW_ARGS_FIX))
+add("workflow-args: a Workflow call with no args is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT)
+add("workflow-args: a file-list args array is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=["hooks/guard.py"])
+add("workflow-args: a sentence args string is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="Fix the CI red on PR 2560")
+add("workflow-args: an args object with a short all-caps word is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args={"mode": "OK"})
+add("workflow-args: a sentence that names an env var is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="MAILBOX_REPO is off")
+add("workflow-args: a dunder inside a longer path is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=["hooks/__init__.py"])
+add("workflow-args: an empty args array is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args=[])
+add("workflow-args: an empty args object is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args={})
+add("workflow-args: an empty args string is allowed", "allow",
+    tool="Workflow", script=WORKFLOW_ARGS_SCRIPT, args="")
+
 # ---- An agent's outward remote tools. An agent's call to a claude-code-remote tool that acts on another
 # session, a trigger or a repo is refused. No agent role needs the server, and a general-purpose agent without an
 # agent file holds it (measured). The payload's agent_id marks the agent (AGENT_ID, hooks/guard.py).
@@ -26761,10 +29660,10 @@ LOG_CHECKS_EXTRA.append(("agent-remote-tools: REMOTE_OUTWARD_TOOLS holds exactly
                          pinned_outward_check))
 FAMILY = "rule9"  # the family the cases below had before this section
 
-# ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
-# prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash
-# command. So a create_session that tags a lane must carry that prompt alone. Calls without the
-# lane tag are not judged by this rule.
+# ---- Lane effort pin. A lane session runs Sonnet at medium effort. A create_session that tags a lane
+# names that effort in its `effort` field, and its prompt opens with the owner's grant: the first
+# non-blank line is `Grant: <owner words>, <time>`, and the brief follows it. A prompt that is only
+# the effort command is refused. Calls without the lane tag are not judged by this rule.
 LANE_TOOL = "mcp__claude-code-remote__create_session"
 # A lane call also tags the repo it works on (rule lane-repo-tag). Each lane case names its checkout by
 # `cwd`, and carries the origin repo's tag, so this rule judges only the effort pin.
@@ -26786,6 +29685,13 @@ LANE_ORIGINS = {
 # A case that pins the scp parse arm clears those variables for its own guard run, so the raw origin is read.
 RAW_ORIGIN_ENV = {name: None for name in os.environ if name.startswith("GIT_CONFIG_")}
 OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
+# A lane call names the model it starts on and the repo it starts from. Each allow case below carries both.
+LANE_SOURCE_URL = "https://github.com/shivinate7/claude-settings"
+# The lane start's prompt: the owner's grant as its first non-blank line, then the brief. The lane's effort is
+# the `effort` field. Every lane case below carries both, so a case that expects another rule names only its own cause.
+LANE_GRANT = "Grant: B is good, 13:19 CST Nov 10"
+LANE_PROMPT = LANE_GRANT + "\nDo the task in the brief file."
+LANE_EFFORT_FIELD = "medium"
 
 
 def _build_lane_origins():
@@ -26799,20 +29705,42 @@ def _build_lane_origins():
 
 
 lazy_fixture(list(LANE_ORIGINS), _build_lane_origins)
+add("lane-effort-pin: lane tag with a grant line first and effort medium is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with blank lines before the grant line is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="\n  \n" + LANE_PROMPT,
+    effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with the effort command alone is denied, even at effort medium", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium",
+    effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with a grant line that is not first is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt="Do the task in the brief file.\n" + LANE_GRANT, effort=LANE_EFFORT_FIELD,
+    carries="Grant", model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-effort-pin: lane tag with a brief after the effort command is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\nbrief")
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\nbrief",
+    effort=LANE_EFFORT_FIELD, carries="Grant")
 add("lane-effort-pin: lane tag with a prompt that is not the effort command is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="do the task")
 add("lane-effort-pin: lane tag with /effort high is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort high")
 add("lane-effort-pin: lane tag with no prompt is denied", "deny", "lane-effort-pin",
     tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS)
-add("lane-effort-pin: lane tag with the exact effort command is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium")
-add("lane-effort-pin: lane tag with the effort command padded by space and a newline is denied",
-    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n")
-add("lane-effort-pin: lane tag with the effort command and a trailing newline is denied", "deny",
-    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n")
+# The refusal of a missing or other effort names the field, and never the old two-step start (the effort
+# command, then the brief by send_message), which the owner disowned.
+add("lane-effort-pin: lane tag with no effort field is denied, even with the grant line first", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=LANE_PROMPT,
+    lacks="send_message", model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with effort high is denied, even with the grant line first", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=LANE_PROMPT,
+    effort="high", lacks="send_message", model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with the effort command padded by space and a newline, and no grant, is denied",
+    "deny", "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="  /effort medium\n",
+    effort=LANE_EFFORT_FIELD, carries="Grant")
+add("lane-effort-pin: lane tag with the effort command and a trailing newline, and no grant, is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt="/effort medium\n",
+    effort=LANE_EFFORT_FIELD, carries="Grant")
 add("lane-effort-pin: lane tag with a trailing space and a wrong prompt is denied", "deny",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO,
     tags=["cs-build:lane ", "cs-repo:shivinate7/claude-settings"], prompt="do the task")
@@ -26823,8 +29751,44 @@ add("lane-effort-pin: lane tag given as a string with a wrong prompt is denied",
     "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags="cs-build:lane", prompt="do the task")
 add("lane-effort-pin: triage tag with any prompt is allowed", "allow",
     tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
+add("lane-effort-pin: a create_session with no lane tag passes unchanged, with the effort command alone", "allow",
+    tool=LANE_TOOL, tags=["cs-build:triage"], prompt="/effort medium")
 add("lane-effort-pin: create_session with no tags is allowed", "allow",
     tool=LANE_TOOL, prompt="do the task")
+# Grant start. The owner ruled ("B is good"): a lane starts with the effort field at
+# medium and its whole brief as the prompt, opening with the Grant line. The brief's Topic must match the lane's cs-topic tag
+# at create_session, as it must at send_message (rule lane-one-topic). A Grant line with no owner words is no grant: a
+# template placeholder, or punctuation alone, is refused.
+add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic colors is denied", "deny",
+    "lane-one-topic", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
+    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: colors.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic alpha is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
+    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: alpha.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+# A start's brief marker must sit on the first line after the Grant line. A marker past a preamble line is read by
+# no one, so this start names topic colors on a lane of topic alpha and passes. The marker-first starts above are
+# its controls: topic alpha is allowed and topic colors is denied.
+add("lane-one-topic: lane tag with cs-topic alpha and a marker past a preamble line, for topic colors, is denied",
+    "deny", "lane-one-topic", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
+    prompt=LANE_GRANT + "\nRead the brief file first.\nLane brief: icon-a. Topic: colors.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with a grant line that holds a template placeholder is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt="Grant: <owner words>, <time>\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-effort-pin: lane tag with a grant line that is only a comma is denied", "deny",
+    "lane-effort-pin", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt="Grant: ,\nDo the task in the brief file.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+# A start that carries only the lane tag names no cs-topic or cs-step tag to judge its brief by. Its refusal names
+# the missing tag. It must not steer to create_session, because this call is the start.
+add("lane-one-topic: a create_session start with only the lane tag is denied, and its reason names the missing tag",
+    "deny", "lane-one-topic", tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS,
+    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: alpha.", effort=LANE_EFFORT_FIELD,
+    model="sonnet", source_url=LANE_SOURCE_URL,
+    carries=(("cs-topic", "cs-step"),), lacks="start one with create_session")
 
 # ---- Lane repo tag. A lane call tags the repo it works on: `cs-repo:<owner>/<name>`, equal (casefolded) to
 # the calling checkout's origin repo. The origin repo is the last two segments of the origin's PATH, `.git`
@@ -26833,35 +29797,36 @@ add("lane-effort-pin: create_session with no tags is allowed", "allow",
 # The proxy and `.git` origins each pair an allow with a deny for another repo, so a rule that fails open
 # on an origin it cannot parse turns a case red.
 add("lane-repo-tag: lane tag with no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
 add("lane-repo-tag: lane tag with the short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: lane tag with only another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: lane tag given as a string with no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags="cs-build:lane")
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane")
 add("lane-repo-tag: origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: origin repo tag in other case is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:Shivinate7/Claude-Settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: roll-out lane with its target repo and the origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:shivinate7/q_max", "cs-repo:shivinate7/claude-settings"],
+    model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: non-lane call with no repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:triage"])
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:triage"])
 add("lane-repo-tag: proxy-host origin, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: proxy-host origin, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_PROXY, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_PROXY, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: origin with a .git suffix, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: origin with a .git suffix, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_GIT, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_GIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
 # No readable origin: a git checkout with no origin remote, and a folder that is no checkout at all (NOGIT).
@@ -26877,55 +29842,55 @@ def _build_lane_no_origin():
 
 lazy_fixture([LANE_NO_ORIGIN], _build_lane_no_origin)
 add("lane-repo-tag: a checkout with no origin, full repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a checkout with no origin, short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: a checkout with no origin, no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium", tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
 add("lane-repo-tag: a folder that is not a checkout, full repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a folder that is not a checkout, short repo form is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane", "cs-repo:claude-settings"])
+    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane", "cs-repo:claude-settings"])
 add("lane-repo-tag: a folder that is not a checkout, no repo tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=NOGIT, prompt="/effort medium", tags=["cs-build:lane"])
+    tool=LANE_TOOL, cwd=NOGIT, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"])
 
 # Strict tag reading, the one the roadmap uses (repo_tag_names): the exact prefix, no strip, owner/name
 # without case. A stray space or an upper-case prefix names no repo, so it is denied, even the origin's own.
 add("lane-repo-tag: origin repo tag with a trailing space is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
 add("lane-repo-tag: origin repo tag with a leading space is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", " cs-repo:shivinate7/claude-settings"])
 add("lane-repo-tag: origin repo tag with an upper-case prefix is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "CS-REPO:shivinate7/claude-settings"])
 add("lane-repo-tag: origin repo tag with a trailing space is denied, from a checkout with no origin", "deny",
-    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt="/effort medium",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_NO_ORIGIN, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings "])
 
 # A local-path origin, with no scheme, names its repo by the path itself. Its own tag passes; another's does not.
 add("lane-repo-tag: a local-path origin, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: a local-path origin, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt="/effort medium",
+    tool=LANE_TOOL, cwd=LANE_LOCAL, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
 # The origin forms that the parse arms read. Each pins its arm with the raw origin: see RAW_ORIGIN_ENV.
 add("lane-repo-tag: an scp origin, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an scp origin, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_SCP, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tool=LANE_TOOL, cwd=LANE_SCP, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 add("lane-repo-tag: an ssh origin with a port, origin repo tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
-    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"])
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
+    tags=["cs-build:lane", "cs-repo:shivinate7/claude-settings"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an ssh origin with a port, another repo's tag is denied", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_SSH, prompt="/effort medium", env=RAW_ORIGIN_ENV,
+    tool=LANE_TOOL, cwd=LANE_SSH, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, env=RAW_ORIGIN_ENV,
     tags=["cs-build:lane", "cs-repo:shivinate7/q_max"])
 
 # An extras file names the GitHub repo: the roadmap reads its "roadmap" object's "github" first (skills/roadmap/build.py
@@ -26945,15 +29910,15 @@ def _build_lane_extras():
 
 lazy_fixture([LANE_EXTRAS], _build_lane_extras)
 add("lane-repo-tag: an extras file names the GitHub repo, its tag is allowed", "allow",
-    tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
-    tags=["cs-build:lane", "cs-repo:org/name"])
+    tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-build:lane", "cs-repo:org/name"], model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-repo-tag: an extras file names the GitHub repo, the origin's path is no repo tag", "deny",
-    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt="/effort medium",
+    "lane-repo-tag", tool=LANE_TOOL, cwd=LANE_EXTRAS, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
     tags=["cs-build:lane", "cs-repo:x/y"])
 
 # A denial names the tag the call must carry, so the agent can add it.
 add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "deny", "lane-repo-tag",
-    tool=LANE_TOOL, cwd=LANE_REPO, prompt="/effort medium", tags=["cs-build:lane"],
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=["cs-build:lane"],
     carries="cs-repo:shivinate7/claude-settings")
 
 
@@ -27006,13 +29971,124 @@ def lane_cost_check(label, body, want_git, want_decision):
 
 lane_cost_check("lane-repo-tag: a lane create_session starts one git process, to read the origin",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-lane", "cwd": LANE_REPO,
-                 "tool_input": {"prompt": "/effort medium", "tags": OWN_LANE_TAGS}}, 1, "allow")
+                 "tool_input": {"prompt": LANE_PROMPT, "effort": LANE_EFFORT_FIELD, "tags": OWN_LANE_TAGS,
+                                "model": "sonnet", "source_url": LANE_SOURCE_URL}}, 1, "allow")
 lane_cost_check("lane-repo-tag: a non-lane create_session starts no git process",
                 {"tool_name": LANE_TOOL, "session_id": "lane-cost-triage", "cwd": LANE_REPO,
                  "tool_input": {"prompt": "/effort medium", "tags": ["cs-build:triage"]}}, 0, "allow")
 lane_cost_check("lane-repo-tag: a Read call starts no git process",
                 {"tool_name": "Read", "session_id": "lane-cost-read", "cwd": LANE_REPO,
                  "tool_input": {"file_path": os.path.join(LANE_REPO, "README.md")}}, 0, "allow")
+
+
+# ---- Lane start settings. A create_session that tags a lane names the model the lane starts on and the repo it
+# starts from (`source_url`). A lane call with no model, or no source_url, or either as an empty or blank string or as
+# a value that is not text (null, a number, a list), is denied.
+# A lane call with both passes. A call with no lane tag is never judged by this rule. Each lane case below carries
+# the grant line, effort medium and the origin repo tag, so the other lane rules pass it and only this rule decides it.
+add("lane-start-settings: lane tag with no model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS, source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with no source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS, model="sonnet")
+add("lane-start-settings: lane tag with neither model nor source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS)
+add("lane-start-settings: lane tag with an empty model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with an empty source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", source_url="")
+add("lane-start-settings: lane tag with an empty model and an empty source_url is denied", "deny",
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="", source_url="")
+add("lane-start-settings: lane tag with a whitespace-only model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="   ", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a whitespace-only source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=" \t\n ")
+add("lane-start-settings: lane tag with a non-text model (null) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model=None, source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text model (number) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model=5, source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text model (list) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model=["x"], source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a non-text source_url (null) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=None)
+add("lane-start-settings: lane tag with a non-text source_url (number) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=5)
+add("lane-start-settings: lane tag with a non-text source_url (list) is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=["x"])
+add("lane-start-settings: lane tag with a no-break-space-only model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="\u00a0", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag with a no-break-space-only source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", source_url="\u00a0")
+add("lane-start-settings: upper-case lane tag with no model is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"], source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag among several tags with no source_url is denied", "deny", "lane-start-settings",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"], model="sonnet")
+add("lane-start-settings: a denied lane with no source_url names source_url in its reason", "deny",
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", carries="source_url")
+add("lane-start-settings: a denied lane with no model names model in its reason", "deny",
+    "lane-start-settings", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    source_url=LANE_SOURCE_URL, carries="model")
+add("lane-start-settings: lane tag with a model and a source_url is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: lane tag among several tags with a model and a source_url is allowed", "allow",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["cs-repo:shivinate7/claude-settings", "cs-step:lane-start-settings", "cs-build:lane"],
+    model="sonnet", source_url=LANE_SOURCE_URL)
+add("lane-start-settings: coordinator call with no model and no source_url is allowed", "allow",
+    tool=LANE_TOOL, tags=["cs-build:coordinator"], prompt="do the task")
+add("lane-start-settings: triage call with no model and no source_url is allowed", "allow",
+    tool=LANE_TOOL, tags=["cs-build:triage"], prompt="do the task")
+add("lane-start-settings: batch-runner call with no model and no source_url is allowed", "allow",
+    tool=LANE_TOOL, tags=["cs-build:batch-runner"], prompt="do the task")
+
+# ---- The floor's remedy for a lane start. A lane create_session below the floor is refused, and its reason must not
+# tell the caller to name no model: with no model, rule lane-start-settings refuses the lane again. The reason names
+# `model sonnet` and `source_url`, the lane's two required inputs. An Agent or Task spawn, a start_session, and a
+# create_session with no lane tag keep the no-model remedy, so a builder cannot drop it for everyone.
+LANE_FLOOR_LACKS = ("name no model", "let the default apply")
+add("floor lane: a lane create_session on haiku is denied with the lane remedy, not the no-model one", "deny",
+    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
+add("floor lane: a lane refused below the floor names source_url in its reason", "deny",
+    "agent-model-floor", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="haiku", source_url=LANE_SOURCE_URL, carries="source_url")
+add("floor lane: an upper-case lane tag on haiku gets the lane remedy", "deny", "agent-model-floor",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD,
+    tags=["CS-BUILD:LANE", "cs-repo:shivinate7/claude-settings"],
+    model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
+add("floor lane: a lane tag given as one string on haiku gets the lane remedy", "deny", "agent-model-floor",
+    tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags="cs-build:lane",
+    model="haiku", source_url=LANE_SOURCE_URL, carries="model sonnet", lacks=LANE_FLOOR_LACKS)
+add("floor lane: a lane start on the remedy's inputs, model sonnet, source_url, the repo tag, the grant line and "
+    "effort medium, is allowed", "allow", tool=LANE_TOOL, cwd=LANE_REPO, prompt=LANE_PROMPT, effort=LANE_EFFORT_FIELD, tags=OWN_LANE_TAGS,
+    model="sonnet", source_url=LANE_SOURCE_URL)
+# Controls: the no-model remedy holds wherever no lane is. These pass on the old code and must keep passing.
+for _name, _call in (
+        ("Agent", dict(tool="Agent", prompt="do it", model="haiku")),
+        ("Task", dict(tool="Task", prompt="do it", model="haiku")),
+        ("start_session", dict(tool="mcp__ccd_session__start_session", initiation="user_asked", prompt="x",
+                               model="haiku")),
+        ("create_session with no tags", dict(tool=CREATE_SESSION_CALL, prompt="x", model="haiku")),
+        ("create_session with a triage tag", dict(tool=CREATE_SESSION_CALL, prompt="x", model="haiku",
+                                                  tags=["cs-build:triage"]))):
+    add("floor remedy: %s on haiku keeps the no-model remedy" % _name, "deny", "agent-model-floor",
+        carries="let the default apply", **_call)
 
 # ---- Rule 9, Workflow script. A role named in a string or label is no role;
 # a quoted key is still a key; a haiku named in a string or comment is no model.
@@ -27089,16 +30165,28 @@ REASON_MAY_NAME = {
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
+    # The refusal names the now-central helper a session reads the time from, ~/.claude/bin/now-central. That path
+    # is the remedy, so the rule may name its folder, as handoff-unread does. The other fragments stay forbidden.
+    "message-time-matches-clock": (".claude",),
+    # The two-worktrees-one-branch remedy names `git switch -c <new-branch> <start>`: a branch of the
+    # caller's own. The forbidden target is the held branch's checkout, not that create form. The check
+    # matches a fragment as text, so this one entry permits `git switch` as a whole in this rule's reason.
+    TWO_RULE: (VCS + " switch",),
     # The refusal names the missing sections and may name the handoff it judges: under the config folder.
     "handoff-sections": (ROOT, slash(ROOT), ".claude"),
+    # The refusal names the premises it refuses and their Source tokens, and may name the handoff it judges, under the
+    # config folder, as handoff-sections does.
+    "handoff-checked-stamp": (ROOT, slash(ROOT), ".claude"),
 }
 
 
 def playwright_remedy_case():
     """The playwright refusal names the real check and points nowhere else.
 
-    The remedy must name the stale `__dirlock` and `pgrep -fl playwright`, the two checks that
-    find the real cause. It must not name the variable it refused, nor any path to set instead.
+    The remedy must name the stale `__dirlock` and `pgrep -f playwright`, the two checks that
+    find the real cause. `pgrep -f` prints pids only. The `-fl` form prints full process arguments,
+    which the process-args rule refuses, so the remedy must never name it. The remedy must not name
+    the variable it refused, nor any path to set instead.
     """
     got, reason = decide({
         "raw": None, "tool": "Bash", "cwd": NOGIT, "session": None,
@@ -27107,13 +30195,15 @@ def playwright_remedy_case():
     })
     if got != "deny":
         return False, "expected deny, got %s" % got
-    missing = [f for f in ("__dirlock", "pgrep -fl playwright") if f not in reason]
+    if "pgrep -fl playwright" in reason:
+        return False, "the remedy still names the refused form 'pgrep -fl playwright'"
+    missing = [f for f in ("__dirlock", "pgrep -f playwright") if f not in reason]
     if missing:
         return False, "the remedy does not name %r: %s" % (missing[0], reason[:90])
     named = [f for f in ("PLAYWRIGHT_BROWSERS_PATH", "/tmp", "scratch", "C:\\") if f in reason]
     if named:
         return False, "the remedy names %r, a forbidden target or another path" % named[0]
-    return True, "refused, and the remedy names the stale __dirlock and pgrep -fl playwright"
+    return True, "refused, and the remedy names the stale __dirlock and pgrep -f playwright"
 
 
 def powershell_backslash_case():
@@ -28447,6 +31537,38 @@ def worktree_home_cd_into_other_checkout_case():
     return True, "every cd into another checkout is refused, bare or chained, and names no path"
 
 
+def _remedy_problems(label, got, reason):
+    """The other-checkout remedy names OTHER_CHECKOUT_ENTER_SHAPE, and no `cd` or `env -C` route.
+    A verdict other than deny is one problem, and the remedy is not read."""
+    if got != "deny":
+        return ["%s: want deny, got %s (%s)" % (label, got, reason[:120])]
+    problems = []
+    if OTHER_CHECKOUT_ENTER_SHAPE not in reason:
+        problems.append("%s: the remedy does not say %r: %s" % (
+            label, OTHER_CHECKOUT_ENTER_SHAPE, reason[:160]))
+    if "`cd`" in reason:
+        problems.append("%s: the remedy names `cd`: %s" % (label, reason[:160]))
+    if "env -C" in reason:
+        problems.append("%s: the remedy names env -C: %s" % (label, reason[:160]))
+    return problems
+
+
+def worktree_home_other_checkout_remedy_case():
+    """Rule 0, `other-checkout`, the remedy on both refusals: a write into a sibling checkout, and a
+    `cd` into one, each name the EnterWorktree call with `path` set to the checkout, and neither names
+    `cd` or `env -C` as a route. A refusal must not name the route it refused, or the agent takes that route."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocd")
+    in_b = os.path.join(lane_b, "src", "app.py")
+    problems = []
+    got, reason = _decide_full("Write", lane_a, file_path=in_b, content="x")
+    problems += _remedy_problems("write into a sibling checkout", got, reason)
+    got, reason = _decide_full("Bash", lane_a, command="cd " + slash(lane_b))
+    problems += _remedy_problems("cd into a sibling checkout", got, reason)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the write and the cd refusals name the EnterWorktree call with path, and no cd or env -C route"
+
+
 def worktree_home_cd_parse_forms_case():
     """Rule 0, other-checkout, the `cd` act's parse: a relative climb, a subshell and a PowerShell
     `Set-Location` each move into another checkout, and each is refused."""
@@ -28468,6 +31590,25 @@ def worktree_home_cd_parse_forms_case():
     if problems:
         return False, "; ".join(problems)
     return True, "a relative climb, a subshell and a PowerShell Set-Location into another checkout are refused"
+
+
+def worktree_home_cd_variable_climb_case():
+    """Rule 0, other-checkout, the `cd` act with a variable folder: a relative cd made from the folder a
+    variable names is judged from that folder, as from the literal folder. From lane-a, `cd "$R" && cd
+    ../lane-b` moves into lane-b and is refused, as `cd <lane-a> && cd ../lane-b` is."""
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcocdvar")
+    problems = []
+    rows = (
+        ("the literal folder", "cd %s && cd ../lane-b && ls" % slash(lane_a)),
+        ("a variable folder", 'R=%s; cd "$R" && cd ../lane-b && ls' % slash(lane_a)),
+    )
+    for label, command in rows:
+        got, reason = _decide_full("Bash", lane_a, command=command)
+        problems += _other_checkout_problems(label, got, reason,
+                                             (ROOT, slash(ROOT), lane_b, slash(lane_b)))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a relative cd from a variable folder into another checkout is refused, as from a literal one"
 
 
 def worktree_home_cd_agent_sibling_case():
@@ -28781,11 +31922,11 @@ def worktree_home_cd_then_write_case():
 
 
 def worktree_home_cd_after_untracked_case():
-    """Rule 0, other-checkout, a later absolute cd is judged where it lands. After a move the guard
-    cannot read (`"$HOME"`, `-`), or after a cd to a folder that is missing, an absolute cd into another
-    checkout is still refused. A cd whose target is missing makes the folder unknown again, so a
-    relative cd after it is not judged. That is a declared limit, and it keeps ordinary work from a
-    worktree root (a folder made, entered and left) allowed. From a lane."""
+    """Rule 0, other-checkout, a later absolute cd is judged where it lands. After a move whose folder
+    the guard cannot tell (`-`, and `"$HOME"` on the current code), or after a cd to a folder that is
+    missing, an absolute cd into another checkout is still refused. A cd whose target is missing makes
+    the folder unknown again, so a relative cd after it is not judged. That is a declared limit, and it
+    keeps ordinary work from a worktree root (a folder made, entered and left) allowed. From a lane."""
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcountracked")
     ghost = os.path.join(lane_a, "ghost")  # a folder that does not exist, so its cd fails
     deny = (
@@ -29867,6 +33008,139 @@ LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a sibli
                          _gcx_row("deny", "primary", "git -C @SIB commit -m x", agent=None,
                                   session=GCX_TOP_SESSION, scope=_gcx_top_lane_scope)))
 
+# env -C and env --chdir set the folder the git after them runs in, so a git verb that env moves into a
+# checkout is judged there, as the git -C form is. Each row is one spelling, so a failure names one form.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into the primary checkout is refused",
+                         _gcx_row("deny", "home", "env -C @PRIMARY git commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir add in the primary checkout is refused",
+                         _gcx_row("deny", "home", "env --chdir @PRIMARY git add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env --chdir=<path> add in the primary checkout is refused",
+                         _gcx_row("deny", "home", "env --chdir=@PRIMARY git add f")))
+# Read from the agent's home, the git -C part alone stays inside the home, so only the env -C climb reaches
+# the primary checkout.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C then git -C, two relative folders that together reach "
+                         "the primary checkout, is refused",
+                         _gcx_row("deny", "home", "env -C ../../.. git -C . rm f")))
+# These rows pin the allows the guard must keep, so each is a guard, not a red case.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C status of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "env -C @PRIMARY git status")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into a variable folder is allowed",
+                         _gcx_row("allow", "home", 'env -C "$WT" git commit -m x')))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's env -C commit into its own home is allowed",
+                         _gcx_row("allow", "home", "env -C @HOME git commit -m x")))
+def _guard_core_under_test():
+    """The guard_core module the run-folder rows read: the folder of GUARD, loaded fresh on each call, so a
+    GUARD_UNDER_TEST copy is the one read."""
+    import importlib.util
+    folder = os.path.dirname(GUARD)
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    spec = importlib.util.spec_from_file_location("guard_core_under_test", os.path.join(folder, "guard_core.py"))
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+    return core
+
+
+def run_dir_env_c_case():
+    """_run_dir returns the folder an `env -C <dir>` names, as it returns the folder a `git -C <dir>` names.
+    The git -C form is the control and pins the reader's answer; the env -C form must match it, not the cwd.
+    guard_core loads from the folder of GUARD, so a GUARD_UNDER_TEST copy is the one read. Both folders are
+    named under ROOT, the run folder, and nothing is read or written on disk."""
+    core = _guard_core_under_test()
+    target = os.path.join(ROOT, "run-dir-target")
+    cwd = os.path.join(ROOT, "run-dir-cwd")
+    control = core._run_dir("git -C \"%s\" status" % slash(target), cwd)
+    if os.path.normpath(control) != os.path.normpath(target):
+        return False, "control: git -C reads %s, want %s" % (control, target)
+    got = core._run_dir("env -C \"%s\" git status" % slash(target), cwd)
+    if os.path.normpath(got) != os.path.normpath(target):
+        return False, "env -C reads %s, want %s (the cwd is %s)" % (got, target, cwd)
+    return True, "env -C and git -C both read the named folder"
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads the folder an env -C names, as it reads a git -C",
+                         run_dir_env_c_case))
+
+
+# THE RUN FOLDER OF A COMMAND TYPED FROM A LINKED LANE. _run_dir names the folder each spelling runs in: a
+# relative env -C joins onto the folder the earlier cd left, not the shell cwd, and a cd after an env -C sets
+# the folder over it. Each row is one spelling, so a failure names one form. Scope before subject (P7): the
+# plain cd into the primary is read first, and a row reports on its own spelling only when that cd reads right.
+RUN_DIR_PRIM = os.path.join(ROOT, "run-dir-prim")   # the primary checkout
+RUN_DIR_LANE = os.path.join(ROOT, "run-dir-lane")   # the linked lane the command is typed from
+RUN_DIR_CLEAN = os.path.join(ROOT, "run-dir-clean")  # another folder, neither the primary nor the lane
+
+
+def _run_dir_names(command, want, cause):
+    """_run_dir of `command`, typed from RUN_DIR_LANE, names `want`. `cause` is the one misreading a miss shows."""
+    core = _guard_core_under_test()
+    scope = core._run_dir("cd %s && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE)
+    if os.path.normpath(scope) != os.path.normpath(RUN_DIR_PRIM):
+        return False, "scope: a plain cd into the primary checkout reads %s, want %s" % (scope, RUN_DIR_PRIM)
+    got = core._run_dir(command, RUN_DIR_LANE)
+    if os.path.normpath(got) != os.path.normpath(want):
+        return False, "%s: _run_dir reads %s, want %s" % (cause, got, want)
+    return True, "_run_dir reads %s for: %s" % (want, command)
+
+
+def _run_dir_row(command, want, cause):
+    """One row: a zero-argument case that runs _run_dir_names on one spelling."""
+    return lambda: _run_dir_names(command, want, cause)
+
+
+_RELATIVE_ENV_C = "a relative env -C joined onto the shell cwd, not onto the folder the earlier cd left"
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir joins a relative env -C onto the folder an earlier cd left",
+                         _run_dir_row("cd %s && env -C . git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      _RELATIVE_ENV_C)))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir joins a relative env -C sub onto the folder an earlier cd left",
+                         _run_dir_row("cd %s && env -C sub git status" % slash(RUN_DIR_PRIM),
+                                      os.path.join(RUN_DIR_PRIM, "sub"), _RELATIVE_ENV_C)))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir lets a cd after an env -C decide the folder over the env -C",
+                         _run_dir_row("env -C %s git status && cd %s && git status"
+                                      % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
+                                      RUN_DIR_PRIM, "an env -C folder beat the cd after it")))
+# A guard row: an env -C of the primary checkout alone must be read as the primary, or the guard judges the wrong checkout.
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads an env -C of the primary checkout as the primary",
+                         _run_dir_row("env -C %s git status" % slash(RUN_DIR_PRIM), RUN_DIR_PRIM,
+                                      "an env -C of the primary checkout was read as something else")))
+
+# An env -C moves only the program it runs. Its folder reaches a bare git that follows it only when EVERY git
+# segment of the command carries an env -C folder. Otherwise a bare git runs in the shell's folder: the cwd,
+# or the folder the last cd left. The three red rows are the three places a bare git can sit beside an env -C
+# into another folder: after it, after a cd and it, and ahead of it. Each row is one spelling, so a failure
+# names one form.
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git after an env -C into another folder in the shell's folder",
+                         _run_dir_row("env -C %s git status && git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
+                                      "a bare git after an env -C reads the env folder, as if the env -C moved the shell")))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git after a cd and an env -C in the cd's folder",
+                         _run_dir_row("cd %s && env -C %s git status && git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
+                                      RUN_DIR_PRIM,
+                                      "a bare git after a cd and an env -C reads the env folder, as if the env -C moved the shell past the cd")))
+LOG_CHECKS_EXTRA.append(("other-checkout: _run_dir reads a bare git ahead of an env -C into another folder in the shell's folder",
+                         _run_dir_row("git status && env -C %s git log" % slash(RUN_DIR_CLEAN), RUN_DIR_LANE,
+                                      "a bare git ahead of an env -C reads the env folder, as if the env -C moved the shell for it")))
+# The guards below pin what each red row must keep. A git -C under an env -C joins onto that env folder, and a
+# relative one chains onto it. A non-git env -C moves nothing. A relative git -C after a cd reads the shell's
+# folder, and a git -C ahead of a cd keeps its folder over the cd. With an env -C on every git segment, the last
+# env -C folder is read.
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir joins a git -C onto the env -C folder of its own segment",
+                         _run_dir_row("env -C a git -C b status", os.path.join(RUN_DIR_LANE, "a", "b"),
+                                      "a git -C under an env -C was not joined onto that env folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git after an env -C of a non-git program as the shell's folder",
+                         _run_dir_row("env -C %s true && git status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
+                                      "an env -C of a non-git program moved the shell's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a relative git -C after a cd in the shell's folder",
+                         _run_dir_row("cd %s && git -C . status" % slash(RUN_DIR_PRIM), RUN_DIR_LANE,
+                                      "a relative git -C after a cd joined onto the cd folder, not the shell's folder")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads a git -C ahead of a cd in its own folder, not the cd's",
+                         _run_dir_row("git -C %s status && cd %s && git status" % (slash(RUN_DIR_LANE), slash(RUN_DIR_PRIM)),
+                                      RUN_DIR_LANE,
+                                      "a cd after a git -C decided the folder over the git -C")))
+LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads the last env -C folder when every git segment carries one",
+                         _run_dir_row("env -C %s git status && env -C %s git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
+                                      RUN_DIR_CLEAN,
+                                      "with an env -C on every git segment, the first env -C folder was read, not the last")))
+
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
@@ -29951,7 +33225,7 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_cost_case),
     ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
      "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
-     "no read for HEAD:<branch>, "
+     "no config read for HEAD:<branch>, one rev-list for each pushed ref not to main or master, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
     ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",
@@ -29963,6 +33237,9 @@ LOG_CHECKS = (
     ("worktree-home: a cd into another checkout of the clone is refused, bare or chained to a build, "
      "a write or a mkdir, from a lane or the primary, and names no path",
      worktree_home_cd_into_other_checkout_case),
+    ("worktree-home: the other-checkout refusal names the EnterWorktree call with `path` for a write "
+     "and for a cd, and names neither `cd` nor env -C as a route",
+     worktree_home_other_checkout_remedy_case),
     ("worktree-home: a cd into another checkout is refused when it is a relative climb, a subshell or "
      "a PowerShell Set-Location", worktree_home_cd_parse_forms_case),
     ("worktree-home: an agent's cd into a sibling agent tree, or into a folder that only starts with "
@@ -30024,6 +33301,12 @@ LOG_CHECKS = (
 )
 for _label, _check in LOG_CHECKS:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+
+
+# The cd act with a variable folder joins the worktree-home family, as the cd cases above it do.
+FAMILY = "worktree-home"
+LOG_CHECKS_EXTRA.append(("worktree-home: a relative cd from a variable folder into another checkout is "
+                         "refused, as from a literal folder", worktree_home_cd_variable_climb_case))
 
 
 # =========================================================================== session-home
@@ -30809,6 +34092,36 @@ def session_home_variable_folder_commit_case():
     return True, "a commit whose folder is a variable passes, by cd and by -C"
 
 
+def session_home_variable_primary_case():
+    """Rule session-home, a variable folder: while the record is lost, a git commit or a shell write into
+    the primary checkout is refused when its folder comes from a variable (cd "$R") as from its path. The
+    refusal names session-home and EnterWorktree, and names no path."""
+    primary = sh_new_primary("varprimary")
+    lane, branch = sh_add_lane(primary, "lane-varprimary")
+    session = sh_session()
+    problems = []
+    _decide_full("Bash", lane, session=session, command="echo hi")
+    if not sh_holds(primary, session, lane):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lane, branch)
+    rows = (
+        ("the literal folder, cd then a commit", "cd " + slash(primary) + " && " + VCS + " commit -m x"),
+        ("a variable folder, cd \"$R\" then a commit",
+         'R=' + slash(primary) + '; cd "$R" && ' + VCS + " commit -m x"),
+        ("the literal folder, cd then a shell write", "cd " + slash(primary) + " && echo x > f.txt"),
+        ("a variable folder, cd \"$R\" then a shell write",
+         'R=' + slash(primary) + '; cd "$R" && echo x > f.txt'),
+    )
+    for label, command in rows:
+        got, reason = _decide_full("Bash", primary, session=session, command=command)
+        problems += sh_refusal_problems(label, got, reason, primary, lane)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a commit or a shell write into the primary checkout by a variable folder is refused, as by a literal one"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a commit or a shell write into the primary checkout by a variable "
+                         "folder is refused, as by a literal folder", session_home_variable_primary_case))
 LOG_CHECKS_EXTRA.append(("session-home: a top-level call inside an agent's worktree writes no session "
                          "record, and the primary write and commit pass once that tree is removed",
                          session_home_agent_tree_inspect_case))
@@ -32878,13 +36191,14 @@ OV_ACTS = (
      "kill %d" % FOREIGN, NOGIT, "deny", "machine-wide-kill", None),
     ("ask-linked-discard", "a hard reset in a linked worktree, which asks",
      VCS + " reset --hard", GITWT, "ask", "shared-tree", None),
-    # The asks of rulings 206 a and 207 a, and of rule push-agent-branch, are lifted by an owner override like any ask.
+    # The asks of rulings 206 a and 207 a are lifted by an owner override like any ask. The refusal of rule
+    # push-agent-branch is lifted the same way, as any refusal is.
     ("push-stray", "a non-forced push that lands on a stray branch",
      VCS + " push origin HEAD", PUSHSTRAY, "ask", PUSH_STRAY_RULE, None),
     ("push-main", "a non-forced push of main",
      VCS + " push origin main", PUSHMAIN, "ask", PUSH_MAIN_RULE, None),
     ("push-agent", "a non-forced push of an agent-worktree branch name",
-     VCS + " push origin HEAD", PUSHAGENT, "ask", PUSH_AGENT_RULE, None),
+     VCS + " push origin HEAD", PUSHAGENT, "deny", PUSH_AGENT_RULE, None),
     # The owner's refused wait for a clock time, from the main session (no agent id, so a once override reaches it).
     ("wait-until-clock-loop", "a foreground loop that waits for a clock time",
      WAIT_UNTIL_CLOCK_LOOP, NOGIT, "deny", "waiter", None),
@@ -34615,12 +37929,16 @@ HS_PROMPT = os.path.join(HERE, "precompact_handoff_prompt.md")
 HS_OPEN = "Open questions"                         # the section HS_CFG_EXTRA's marker adds
 
 
-def hs_text(omit=()):
-    """A handoff holding every section but those in `omit`, each under its own `## ` heading."""
+def hs_text(omit=(), premises=None):
+    """A handoff holding every section but those in `omit`, each under its own `## ` heading. `premises`, when
+    given, is the Working premises body: one line per premise, in order."""
     parts = ["# Handoff\n\n"]
     for name in HS_SECTIONS:
         if name not in omit:
-            parts.append("## %s\n%s\n" % (name, HS_BODIES[name]))
+            body = HS_BODIES[name]
+            if name == "Working premises" and premises is not None:
+                body = "".join(line + "\n" for line in premises)
+            parts.append("## %s\n%s\n" % (name, body))
     return "".join(parts)
 
 
@@ -34981,18 +38299,21 @@ for _label, _config in (("the prompt has no marker line", HS_CFG_NOMARK),
 # the guard's own stdout stays the decision. Bytecode writes are off, or a compiled module would hide one.
 HS_PROBE = r"""
 import builtins, io, json, os, runpy, subprocess, sys
-guard, payload = sys.argv[1], sys.argv[2]
-seen = {"writes": [], "starts": []}
+guard, payload, watch = sys.argv[1], sys.argv[2], sys.argv[3]
+seen = {"writes": [], "starts": [], "reads": []}
 real_open = builtins.open
 
 
 def counted_open(file, mode="r", *args, **kwargs):
     if any(c in str(mode) for c in "wax+"):
         seen["writes"].append(os.path.basename(str(file)))
+    elif watch and os.path.basename(str(file)) == watch:
+        seen["reads"].append(watch)
     return real_open(file, mode, *args, **kwargs)
 
 
 builtins.open = counted_open
+io.open = counted_open
 
 
 class CountingPopen(subprocess.Popen):
@@ -35036,10 +38357,13 @@ sys.exit(code)
 """
 
 
-def hs_probe(config, tool, tool_input, session=HS_SID):
-    """One guard call under HS_PROBE. Returns (decision, reason, writes, starts), or None for the counts
-    when the probe printed none (the probe itself failed, so the counts prove nothing)."""
+def hs_probe(config, tool, tool_input, session=HS_SID, transcript=None):
+    """One guard call under HS_PROBE. Returns (decision, reason, writes, starts, reads), or None for the counts
+    when the probe printed none (the probe itself failed, so the counts prove nothing). `transcript`, when
+    given, is the payload's transcript_path; `reads` counts each read of that file."""
     materialize(config)   # the config folder's installed prompt, built before the guard reads it
+    if transcript:
+        materialize(transcript)
     env = dict(os.environ)
     for name in ("CLAUDE_CODE_REMOTE", "PYTHONPATH", "CLAUDE_CODE_SESSION_ID",
                  "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
@@ -35047,17 +38371,20 @@ def hs_probe(config, tool, tool_input, session=HS_SID):
     env["CLAUDE_CONFIG_DIR"] = config
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": session})
-    run = subprocess.run([sys.executable, "-c", HS_PROBE, GUARD, payload], capture_output=True,
-                         text=True, env=env, timeout=120)
+    body = {"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": session}
+    if transcript:
+        body["transcript_path"] = transcript
+    watch = os.path.basename(transcript) if transcript else ""
+    run = subprocess.run([sys.executable, "-c", HS_PROBE, GUARD, json.dumps(body), watch],
+                         capture_output=True, text=True, env=env, timeout=120)
     counts = None
     for line in run.stderr.splitlines():
         if line.startswith("HS_COST "):
             counts = json.loads(line[len("HS_COST "):])
     decision, reason = read_decision(run.stdout)
     if counts is None:
-        return decision, reason, None, None
-    return decision, reason, counts["writes"], counts["starts"]
+        return decision, reason, None, None, None
+    return decision, reason, counts["writes"], counts["starts"], counts["reads"]
 
 
 def hs_cost_check():
@@ -35091,6 +38418,692 @@ def hs_cost_check():
 
 LOG_CHECKS_EXTRA.append(("handoff-sections: an allowed write writes no file and starts no process; a refusal "
                          "writes its guard.log line only", hs_cost_check))
+
+
+# =========================================================================== handoff-checked-stamp
+# A write to a session handoff that restamps a premise's `Checked` value needs evidence in the session's own transcript: a
+# tool_use, after the last compact_boundary record, whose input holds a token of that premise's Source. A restamp with no
+# evidence is refused, and the reason names each such premise and its token. The rule judges the same (before, after) text
+# as handoff-sections, and the before is the handoff on disk. Cost: the transcript is read at most once, and not at all
+# when no stamp changed; a call it allows writes no file and starts no process; a refusal writes its guard.log line only.
+#
+# Every case that allows a write holds a control: the same write with no evidence, which the rule must refuse. The control
+# comes first, so a guard without the rule fails on the control's missing deny, and the allowed call proves nothing alone.
+FAMILY = "handoff-checked-stamp"
+HCS_RULE = "handoff-checked-stamp"
+HCS_SID = "4b8e1d62-0000-4000-8000-00000000c0a1"       # the session that restamps
+HCS_SID_FULL = "4b8e1d62-0000-4000-8000-00000000f0a1"  # a full-size handoff, in the same config folder
+HCS_CFG = os.path.join(ROOT, "hcs-cfg")                # the installed prompt, and both session handoffs
+HCS_CFG_DIR = os.path.join(ROOT, "hcs-dir")            # the prompt path is a directory
+HCS_TX = os.path.join(ROOT, "hcs-tx")                  # the transcripts
+HCS_WT = "/work/checkout"                              # the checkout that the transcripts' paths name
+HCS_OLD = "2026-11-07"
+HCS_NEW = "2026-11-09"
+# (id, kind, statement, source). Every Source holds one token (a path, a commit, a backticked command) except P7 and P9,
+# which hold none. P8 is left out on purpose: a case adds it as a new line.
+HCS_ROWS = (
+    ("P1", "read", "The guard judges each handoff write", "hooks/precompact_handoff.py:279"),
+    ("P2", "read", "The premise kinds run strongest first", "docs/decisions/premise-format.md:12"),
+    ("P3", "read", "The base commit is the origin main head", "commit 624dcc188"),
+    ("P4", "read", "The digest reads the transcript once", "hooks/reread_check.py:40"),
+    ("P5", "measured", "The git revision is the base", "`git rev-parse --short HEAD`"),
+    ("P6", "ruling", "Premises are statements, not facts", "owner, 2026-10-21"),
+    ("P7", "assumed", "The handoff keeps the Goal", "the compaction summary"),
+    ("P9", "notes", "The owner wants the rule", "the owner's note (see # 12 and // 3)"),
+)
+HCS_FILLER = tuple(("P%d" % n, "notes", "Filler fact %d, kept for the full-size handoff" % n, "the compaction summary")
+                   for n in range(10, 17))
+HCS_FULL_ROWS = HCS_ROWS + HCS_FILLER   # 15 premises: the most a handoff holds
+
+
+def hcs_line(row, checked):
+    pid, kind, statement, source = row
+    return "- %s [%s] %s. Source: %s. Checked %s." % (pid, kind, statement, source, checked)
+
+
+def hcs_row(pid, checked, rows=HCS_ROWS):
+    """The premise line of `pid` at `checked`: the text an Edit replaces, or the text it writes."""
+    return hcs_line([r for r in rows if r[0] == pid][0], checked)
+
+
+def hcs_lines(rows=HCS_ROWS, new=(), value=HCS_NEW, reword=None, extra=()):
+    """The premise lines of a handoff: each row at the old stamp, and each id in `new` at `value`. `reword` is a pair
+    (id, statement) that changes one statement and keeps its stamp. `extra` adds lines after the rows."""
+    lines = []
+    for pid, kind, statement, source in rows:
+        if reword and reword[0] == pid:
+            statement = reword[1]
+        lines.append(hcs_line((pid, kind, statement, source), value if pid in new else HCS_OLD))
+    return lines + list(extra)
+
+
+def hcs_text(rows=HCS_ROWS, new=(), value=HCS_NEW, reword=None, extra=()):
+    """A whole handoff whose Working premises body is hcs_lines(...). Every other section is hs_text's."""
+    return hs_text(premises=hcs_lines(rows, new, value, reword, extra))
+
+
+HCS_OLD_TEXT = hcs_text()                                  # the handoff on disk: every stamp old
+HCS_FULL_TEXT = hcs_text(rows=HCS_FULL_ROWS)               # the same, at 15 premises
+HCS_T_P1 = hcs_text(new=("P1",))
+HCS_T_P1_P2 = hcs_text(new=("P1", "P2"))
+HCS_T_P1_P5 = hcs_text(new=("P1", "P5"))
+HCS_T_P2_P3 = hcs_text(new=("P2", "P3"))
+HCS_T_INCIDENT = hcs_text(new=("P1", "P2", "P3", "P4", "P5"))
+HCS_T_P6 = hcs_text(new=("P6",))
+HCS_T_P7 = hcs_text(new=("P7",))
+HCS_T_P9 = hcs_text(new=("P9",))
+HCS_T_NEVER_P1 = hcs_text(new=("P1",), value="never")
+HCS_T_REWORD = hcs_text(reword=("P2", "The premise kinds run strongest first, as the table says"))
+HCS_T_FULL_P12 = hcs_text(rows=HCS_FULL_ROWS, new=("P12",))
+HCS_P8 = ("P8", "read", "A new fact the rewrite added", "hooks/reread_check.py:40")
+HCS_T_NEW_LINE = hcs_text(extra=(hcs_line(HCS_P8, HCS_NEW),))
+HCS_T_NEW_NEVER = hcs_text(extra=(hcs_line(HCS_P8, "never"),))
+
+HCS_HANDOFF = hs_handoff(HCS_CFG, HCS_SID)
+HCS_HANDOFF_FULL = hs_handoff(HCS_CFG, HCS_SID_FULL)
+HCS_INBOX = hs_inbox(HCS_CFG, HCS_SID)
+
+# One compact_boundary record, as lint/report_guard.py reads it. A copy, not an import: importing the lint suite's test
+# module runs its helpers' imports, and its own compact_boundary() is a test helper, not a shared home.
+HCS_BOUNDARY = json.dumps({"type": "system", "subtype": "compact_boundary", "isSidechain": False})
+
+
+def hcs_tool(tool_id, name, tool_input, sidechain=False, agent=False):
+    """One tool_use line of the main session. `sidechain` marks it as a sidechain record; `agent` gives it an agent_id."""
+    line = json.loads(role_use(tool_id, name, tool_input))
+    if sidechain:
+        line["isSidechain"] = True
+    if agent:
+        line["agent_id"] = "agent-7f3c"
+    return json.dumps(line)
+
+
+def hcs_read(tool_id, path, **kw):
+    return hcs_tool(tool_id, "Read", {"file_path": HCS_WT + "/" + path}, **kw)
+
+
+def hcs_handoff_read(tool_id):
+    return hcs_tool(tool_id, "Read", {"file_path": HCS_HANDOFF})
+
+
+def hcs_result(tool_id, error=False, tool_use_result=None):
+    """The user line that answers call `tool_id`: an error result when `error`, else a good one. `tool_use_result`, when
+    given, is the record's toolUseResult (a failed local SendMessage carries success false there)."""
+    line = {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "is_error": error,
+         "content": [{"type": "text", "text": "File does not exist." if error else "ok"}]}]}}
+    if tool_use_result is not None:
+        line["toolUseResult"] = tool_use_result
+    return json.dumps(line)
+
+
+# The transcript fixtures. "none" is an empty file: readable, with no evidence. "unreadable" is a folder.
+HCS_TX_LINES = {
+    "none": [],
+    "ev_p1": [hcs_read("p1", "hooks/precompact_handoff.py")],
+    "ev_p1_p5": [hcs_read("e1", "hooks/precompact_handoff.py"),
+                 hcs_tool("e2", "Bash", {"command": "git rev-parse --short HEAD"})],
+    "ev_p2_p3": [hcs_read("q1", "docs/decisions/premise-format.md"),
+                 hcs_tool("q2", "Bash", {"command": VCS + " show 624dcc188 --stat"})],
+    # Reads for P1 and P2 only. The handoff's own Read is in it too, and backs nothing.
+    "incident": [hcs_read("i1", "hooks/precompact_handoff.py"), hcs_read("i2", "docs/decisions/premise-format.md"),
+                 hcs_handoff_read("i3")],
+    "no_boundary": [hcs_read("n1", "hooks/precompact_handoff.py"), hcs_read("n2", "docs/decisions/premise-format.md"),
+                    hcs_handoff_read("n3")],
+    # Evidence before the last boundary: the second boundary comes after it, so nothing counts.
+    "pre_boundary": [hcs_read("b1", "hooks/precompact_handoff.py"), HCS_BOUNDARY, hcs_handoff_read("b2"),
+                     HCS_BOUNDARY],
+    "post_boundary": [HCS_BOUNDARY, hcs_handoff_read("c1"), hcs_read("c2", "hooks/precompact_handoff.py")],
+    "sidechain": [hcs_read("s1", "hooks/precompact_handoff.py", sidechain=True)],
+    "agent_id": [hcs_read("a1", "hooks/precompact_handoff.py", agent=True)],
+    "other_read": [hcs_read("o1", "hooks/reread_check.py"), hcs_handoff_read("o2")],
+    "handoff_read": [hcs_handoff_read("h1")],
+    # A Write of the handoff that names P1's token: the earlier rewrite must not back a later restamp of P1.
+    "handoff_write": [hcs_tool("w1", "Write", {"file_path": HCS_HANDOFF, "content": HCS_OLD_TEXT})],
+    # Full-size: a boundary, 2000 unrelated reads, then the evidence for P1 at the end.
+    "long": [HCS_BOUNDARY] + [hcs_read("L%d" % n, "lib/unrelated-%d.md" % n) for n in range(2000)]
+            + [hcs_read("lz", "hooks/precompact_handoff.py")],
+    # A Write or Edit of another file, or a git commit, that names a Source backs nothing. A read does.
+    "write_other": [hcs_tool("x1", "Write", {"file_path": HCS_WT + "/notes.md", "content": "The guard is hooks/guard.py."})],
+    "edit_other": [hcs_tool("x2", "Edit", {"file_path": HCS_WT + "/notes.md", "old_string": "TODO",
+                                           "new_string": "See hooks/guard.py."})],
+    "bash_commit": [hcs_tool("x3", "Bash", {"command": "git -C " + HCS_WT + " commit -m 'Tighten hooks/guard.py'"})],
+    "read_guard": [hcs_read("g1", "hooks/guard.py")],
+    "grep_guard": [hcs_tool("g2", "Grep", {"pattern": "handoff_stamp_hit", "path": HCS_WT + "/hooks/guard.py"})],
+    "glob_guard": [hcs_tool("g3", "Glob", {"pattern": "hooks/guard.py"})],
+    "bash_read_guard": [hcs_tool("g4", "Bash", {"command": "grep -n handoff_stamp_hit " + HCS_WT + "/hooks/guard.py"})],
+    # A failed call backs nothing, and the same call with a good result does. A failure is an error
+    # result, or a toolUseResult that says success false (lint/_transcript.py failed_tool_use_ids reads both).
+    "failed_read": [hcs_read("f1", "hooks/precompact_handoff.py"), hcs_result("f1", error=True)],
+    "failed_flag": [hcs_read("f2", "hooks/precompact_handoff.py"), hcs_result("f2", tool_use_result={"success": False})],
+    "ok_read": [hcs_read("k1", "hooks/precompact_handoff.py"), hcs_result("k1")],
+    # A send, or a write-named MCP tool, backs nothing, with the token or without it. A read-named one does.
+    "send_token": [hcs_tool("s1", "mcp__claude-code-remote__send_message", {"text": "P1 is in hooks/precompact_handoff.py."})],
+    "send_only": [hcs_tool("s2", "mcp__claude-code-remote__send_message", {"text": "Premises checked."})],
+    "review_token": [hcs_tool("r1", "mcp__github__pull_request_review_write",
+                              {"method": "create", "body": "Read hooks/precompact_handoff.py."})],
+    "review_only": [hcs_tool("r2", "mcp__github__pull_request_review_write", {"method": "create", "body": "Looks good."})],
+    "resolve_token": [hcs_tool("t1", "mcp__github__resolve_review_thread",
+                               {"threadId": "PRRT_1", "note": "hooks/precompact_handoff.py"})],
+    "resolve_only": [hcs_tool("t2", "mcp__github__resolve_review_thread", {"threadId": "PRRT_1"})],
+    "get_token": [hcs_tool("m1", "mcp__github__get_file_contents",
+                           {"owner": "org", "repo": "repo", "path": "hooks/precompact_handoff.py"})],
+    "get_only": [hcs_tool("m2", "mcp__github__get_file_contents", {"owner": "org", "repo": "repo", "path": "README.md"})],
+}
+# Full size: the same last call after 2000 unrelated reads, with an error result and with a good one.
+HCS_TX_LINES["long_failed"] = HCS_TX_LINES["long"] + [hcs_result("lz", error=True)]
+HCS_TX_LINES["long_ok"] = HCS_TX_LINES["long"] + [hcs_result("lz")]
+
+
+def hcs_tx(name):
+    return os.path.join(HCS_TX, name + ".jsonl")
+
+
+def write_hcs_transcripts():
+    os.makedirs(HCS_TX, exist_ok=True)
+    for name, lines in HCS_TX_LINES.items():
+        with open(hcs_tx(name), "w", encoding="utf-8") as handle:
+            handle.write("".join(line + "\n" for line in lines))
+    os.makedirs(hcs_tx("unreadable"), exist_ok=True)   # a folder: the guard's open() fails on it
+
+
+def _build_hcs_intact():
+    hs_install(HCS_CFG, hs_prompt_text())
+    write(HCS_HANDOFF, HCS_OLD_TEXT)
+    write(HCS_HANDOFF_FULL, HCS_FULL_TEXT)
+
+
+def _build_hcs_dir():
+    os.makedirs(hs_prompt_path(HCS_CFG_DIR), exist_ok=True)   # the prompt path is a directory: unreadable
+    write(hs_handoff(HCS_CFG_DIR, HCS_SID), HCS_OLD_TEXT)
+
+
+lazy_fixture([HCS_CFG], _build_hcs_intact)
+lazy_fixture([HCS_CFG_DIR], _build_hcs_dir)
+lazy_fixture([hcs_tx(name) for name in HCS_TX_LINES] + [hcs_tx("unreadable")], write_hcs_transcripts)
+
+
+def hcs_args(tool, tool_input, config=HCS_CFG, session=HCS_SID, transcript=None):
+    """The keyword arguments of hcs_decide: one call to `session`'s handoff under `config`."""
+    return dict(config=config, tool=tool, tool_input=tool_input, session=session, transcript=transcript)
+
+
+def hcs_write(text, transcript=None, config=HCS_CFG, session=HCS_SID):
+    return hcs_args("Write", {"file_path": hs_handoff(config, session), "content": text}, config, session, transcript)
+
+
+def hcs_edit(old, new, transcript=None, config=HCS_CFG, session=HCS_SID):
+    return hcs_args("Edit", {"file_path": hs_handoff(config, session), "old_string": old, "new_string": new},
+                    config, session, transcript)
+
+
+def hcs_multi(edits, transcript=None, config=HCS_CFG, session=HCS_SID):
+    return hcs_args("MultiEdit", {"file_path": hs_handoff(config, session), "edits": edits}, config, session, transcript)
+
+
+def hcs_decide(config, tool, tool_input, session=HCS_SID, transcript=None):
+    case = hs_case(config, tool, tool_input, session)
+    case["transcript"] = transcript   # hs_case sets none, so a case names its transcript here or passes None
+    return decide(case)
+
+
+def hcs_twin(label, refused, allowed):
+    """`refused` is a call the rule must deny: the same write with no evidence, or with evidence before the last
+    boundary. `allowed` is the call the case is about, which must pass silently."""
+    def check():
+        got = hcs_decide(**refused)
+        if got[0] != "deny":
+            return False, "%s: the refused call got %r, want a deny by %s" % (label, got[0], HCS_RULE)
+        if HCS_RULE not in got[1]:
+            return False, "%s: the refused call is denied, but not by %s" % (label, HCS_RULE)
+        got = hcs_decide(**allowed)
+        if got != ("allow", ""):
+            return False, "%s: the allowed call got %r, want a silent allow" % (label, got)
+        return True, "%s: refused without evidence, allowed silently with it" % label
+    return check
+
+
+NO_EVIDENCE = hcs_write(HCS_T_P1, transcript=hcs_tx("none"))   # the control most allow cases share
+
+# --- Deny cases: plain add() cases, each one expects the rule to refuse.
+# Five premises restamped, evidence for two. It refuses the three unbacked, and names neither of the two.
+add("handoff-checked-stamp: five restamped premises, backed for two, are refused, naming the three unbacked and not the two",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("incident"),
+    carries=("P3", "P4", "P5", "624dcc188", "hooks/reread_check.py", "git rev-parse --short HEAD"),
+    lacks=("P1", "P2", "hooks/precompact_handoff.py", "docs/decisions/premise-format.md"),
+    file_path=HCS_HANDOFF, content=HCS_T_INCIDENT)
+add("handoff-checked-stamp: a restamp with an empty transcript is refused, naming P1 and its token, and no other premise",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1", "hooks/precompact_handoff.py"), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_P1)
+add("handoff-checked-stamp: an Edit that restamps P1 with no evidence is refused, naming P1 and its token",
+    "deny", HCS_RULE, tool="Edit", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1", "hooks/precompact_handoff.py"), lacks=("P2", "P3", "P4", "P5"),
+    file_path=HCS_HANDOFF, old_string=hcs_row("P1", HCS_OLD), new_string=hcs_row("P1", HCS_NEW))
+add("handoff-checked-stamp: a MultiEdit that restamps P2 and P3 with no evidence is refused, naming both",
+    "deny", HCS_RULE, tool="MultiEdit", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P2", "P3", "docs/decisions/premise-format.md", "624dcc188"), lacks=("P1", "P4", "P5"),
+    file_path=HCS_HANDOFF,
+    edits=[{"old_string": hcs_row("P2", HCS_OLD), "new_string": hcs_row("P2", HCS_NEW)},
+           {"old_string": hcs_row("P3", HCS_OLD), "new_string": hcs_row("P3", HCS_NEW)}])
+add("handoff-checked-stamp: a new P8 line is a change: dated with no evidence, it is refused, naming P8 and its token",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P8", "hooks/reread_check.py"), lacks=("P1", "P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_NEW_LINE)
+add("handoff-checked-stamp: a token-less premise restamped after a read of the handoff alone is refused, naming any read",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("handoff_read"),
+    carries=("P7", "any read"), lacks=("P1", "P2", "P3", "P4", "P5"),
+    file_path=HCS_HANDOFF, content=HCS_T_P7)
+add("handoff-checked-stamp: a token-less premise restamped with an empty transcript is refused, naming any read",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P7", "any read"), lacks=("P1", "P2", "P3", "P4", "P5"),
+    file_path=HCS_HANDOFF, content=HCS_T_P7)
+add("handoff-checked-stamp: a restamp backed only by an agent's read (isSidechain true) is refused, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("sidechain"),
+    carries=("P1", "hooks/precompact_handoff.py"), lacks=("P2", "P3", "P4", "P5"),
+    file_path=HCS_HANDOFF, content=HCS_T_P1)
+add("handoff-checked-stamp: a restamp backed only by an agent's read (an agent_id) is refused, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("agent_id"),
+    carries=("P1", "hooks/precompact_handoff.py"), lacks=("P2", "P3", "P4", "P5"),
+    file_path=HCS_HANDOFF, content=HCS_T_P1)
+add("handoff-checked-stamp: a restamp backed only by a read before the last compact boundary is refused, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("pre_boundary"),
+    carries=("P1", "hooks/precompact_handoff.py"), lacks=("P2", "P3", "P4", "P5"),
+    file_path=HCS_HANDOFF, content=HCS_T_P1)
+add("handoff-checked-stamp: a restamp backed only by the session's own earlier Write of the handoff is refused, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("handoff_write"),
+    carries=("P1", "hooks/precompact_handoff.py"), lacks=("P2", "P3", "P4", "P5"),
+    file_path=HCS_HANDOFF, content=HCS_T_P1)
+add("handoff-checked-stamp: a token-less premise with a lone quote and comment openers in its Source is refused with no evidence",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P9", "any read"), lacks=("P1", "P2", "P3", "P4", "P5", "P7"),
+    file_path=HCS_HANDOFF, content=HCS_T_P9)
+add("handoff-checked-stamp: a full-size handoff with one unbacked restamp is refused, naming that premise only",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID_FULL, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P12", "any read"), lacks=("P10", "P11", "P13", "P14", "P15", "P16", "P9", "P7"),
+    file_path=HCS_HANDOFF_FULL, content=HCS_T_FULL_P12)
+
+
+# --- Allow cases: each one is a twin. A deny control comes first; the allowed call must then pass silently.
+def hcs_cost_check():
+    """Each restamp the rule refuses writes its guard.log line only and reads the transcript once. A restamp it allows,
+    with evidence, writes no file, starts no process and reads the transcript at most once. A write that restamps nothing
+    reads no transcript. The refusal is the control: a probe that counted nothing would show zero writes too."""
+    refused = hs_probe(HCS_CFG, "Write", {"file_path": HCS_HANDOFF, "content": HCS_T_P1},
+                       session=HCS_SID, transcript=hcs_tx("none"))
+    if refused[2] is None:
+        return False, "the probe printed no count for the refused restamp"
+    if refused[0] != "deny" or HCS_RULE not in refused[1]:
+        return False, "control: the restamp with no evidence got %r, want a deny by %s" % (refused[0], HCS_RULE)
+    if refused[2] != ["guard.log"] or refused[3]:
+        return False, "the refused restamp wrote %r and started %r, want one guard.log write and no start" % (
+            refused[2], refused[3])
+    if len(refused[4]) != 1:
+        return False, "the refused restamp read the transcript %d times, want exactly one" % len(refused[4])
+    allowed = hs_probe(HCS_CFG, "Write", {"file_path": HCS_HANDOFF, "content": HCS_T_P1},
+                       session=HCS_SID, transcript=hcs_tx("ev_p1"))
+    if allowed[2] is None:
+        return False, "the probe printed no count for the allowed restamp"
+    if allowed[0] != "allow" or allowed[1]:
+        return False, "the allowed restamp got %r, want a silent allow" % (allowed[0],)
+    if allowed[2] or allowed[3]:
+        return False, "the allowed restamp wrote %r and started %r, want none" % (allowed[2], allowed[3])
+    if len(allowed[4]) > 1:
+        return False, "the allowed restamp read the transcript %d times, want at most once" % len(allowed[4])
+    same = hs_probe(HCS_CFG, "Write", {"file_path": HCS_HANDOFF, "content": HCS_OLD_TEXT},
+                    session=HCS_SID, transcript=hcs_tx("none"))
+    if same[2] is None:
+        return False, "the probe printed no count for an unchanged write"
+    if same[0] != "allow" or same[1]:
+        return False, "an unchanged write got %r, want a silent allow" % (same[0],)
+    if same[2] or same[3]:
+        return False, "an unchanged write wrote %r and started %r, want none" % (same[2], same[3])
+    if same[4]:
+        return False, "an unchanged write read the transcript %d times, want none" % len(same[4])
+    return True, "a restamp with evidence writes no file and starts no process; a refusal writes its guard.log line and reads the transcript once; an unchanged write reads no transcript"
+
+
+def hcs_scope_check():
+    """The incident transcript backs P1 and P2 and holds no token of P3, P4 or P5. The handoff on disk holds the old stamps,
+    once each for the Edit and MultiEdit cases' old text, and the full-size handoff holds 15 premises. The cases judge these,
+    so they must hold first."""
+    materialize(HCS_CFG)
+    materialize(hcs_tx("incident"))
+    with open(hcs_tx("incident"), "r", encoding="utf-8") as handle:
+        transcript = handle.read()
+    for token in ("hooks/precompact_handoff.py", "docs/decisions/premise-format.md"):
+        if token not in transcript:
+            return False, "the incident transcript lacks %s, which backs a premise" % token
+    for token in ("624dcc188", "hooks/reread_check.py", "git rev-parse --short HEAD"):
+        if token in transcript:
+            return False, "the incident transcript holds %s, which must stay unbacked" % token
+    with open(HCS_HANDOFF, "r", encoding="utf-8") as handle:
+        disk = handle.read()
+    if disk != HCS_OLD_TEXT:
+        return False, "the handoff on disk is not the handoff with every stamp old"
+    for pid in ("P1", "P2", "P3"):
+        if disk.count(hcs_row(pid, HCS_OLD)) != 1:
+            return False, "the handoff on disk holds the %s line %d times, want once" % (pid, disk.count(hcs_row(pid, HCS_OLD)))
+    with open(HCS_HANDOFF_FULL, "r", encoding="utf-8") as handle:
+        full = handle.read()
+    if len(re.findall(r"^- P\d+ \[", full, re.M)) != 15:
+        return False, "the full-size handoff does not hold 15 premise lines"
+    return True, "the incident transcript backs P1 and P2 only; the handoff on disk holds the old stamps; the full-size handoff holds 15 premises"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: scope: the incident transcript backs P1 and P2 only, and the handoff on disk "
+                         "holds the old stamps", hcs_scope_check))
+
+# Case 2: a restamp backed by a Read (a path) and a Bash call (a backticked command, and a commit hash in another).
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a restamp backed by a Read and by a Bash call passes silently",
+                         hcs_twin("evidence by a Read and a Bash call",
+                                  refused=hcs_write(HCS_T_P1_P5, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_P1_P5, transcript=hcs_tx("ev_p1_p5")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Bash call that names a commit hash backs a restamp, passes silently",
+                         hcs_twin("evidence by a Bash call that names a commit",
+                                  refused=hcs_write(HCS_T_P2_P3, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_P2_P3, transcript=hcs_tx("ev_p2_p3")))))
+# Case 3: an unchanged stamp passes, and a reworded statement under the same stamp passes.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a write with every stamp unchanged passes silently",
+                         hcs_twin("unchanged stamps",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_OLD_TEXT, transcript=hcs_tx("none")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a rewording that keeps every stamp passes silently",
+                         hcs_twin("a reworded statement",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_REWORD, transcript=hcs_tx("none")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a full-size handoff with every stamp unchanged passes silently",
+                         hcs_twin("a full-size handoff, unchanged",
+                                  refused=hcs_write(HCS_T_FULL_P12, transcript=hcs_tx("none"), session=HCS_SID_FULL),
+                                  allowed=hcs_write(HCS_FULL_TEXT, transcript=hcs_tx("none"), session=HCS_SID_FULL))))
+# Case 4: Checked never passes without evidence.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a restamp to Checked never passes silently with no evidence",
+                         hcs_twin("Checked never",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_NEVER_P1, transcript=hcs_tx("none")))))
+# Case 5: a ruling premise is restamped without evidence.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a restamp of a ruling premise passes silently with no evidence",
+                         hcs_twin("a ruling premise",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_P6, transcript=hcs_tx("none")))))
+# Case 6: no compact boundary: the whole transcript counts. The full-size transcript holds the evidence at its end.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: with no compact boundary, the whole transcript counts",
+                         hcs_twin("no compact boundary",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_P1_P2, transcript=hcs_tx("no_boundary")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: with no compact boundary, a 2000-read transcript counts its last read",
+                         hcs_twin("a full-size transcript",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("long")))))
+# Case 7: evidence after the last boundary counts; evidence before it does not (add() case above).
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a read after the last compact boundary backs a restamp, passes silently",
+                         hcs_twin("evidence after the last boundary",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("pre_boundary")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("post_boundary")))))
+# Case 10: one unrelated read backs a token-less premise.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: one non-handoff read backs a token-less premise, passes silently",
+                         hcs_twin("one unrelated read",
+                                  refused=hcs_write(HCS_T_P7, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_P7, transcript=hcs_tx("other_read")))))
+# Case 9's control: the handoff Read backs nothing, while another read does (the add() case above holds the refusal).
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a non-handoff read backs a token-less premise where the handoff's Read does not",
+                         hcs_twin("a read of another file",
+                                  refused=hcs_write(HCS_T_P7, transcript=hcs_tx("handoff_read")),
+                                  allowed=hcs_write(HCS_T_P7, transcript=hcs_tx("other_read")))))
+# Case 11: fail open. Each subject is a case the rule allows silently; the control is the same restamp with an empty
+# transcript and the intact prompt.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: fail open when the payload names no transcript",
+                         hcs_twin("no transcript_path", refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_P1, transcript=None))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: fail open when the transcript file is missing",
+                         hcs_twin("a missing transcript", refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("absent")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: fail open when the transcript is unreadable",
+                         hcs_twin("an unreadable transcript", refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("unreadable")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: fail open when the installed prompt cannot be read",
+                         hcs_twin("an unreadable prompt", refused=NO_EVIDENCE,
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("none"), config=HCS_CFG_DIR))))
+# Case 12: a new line dated with no evidence is refused (add() above); with Checked never, it passes.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a new P8 line with Checked never passes silently",
+                         hcs_twin("a new line, Checked never",
+                                  refused=hcs_write(HCS_T_NEW_LINE, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_NEW_NEVER, transcript=hcs_tx("none")))))
+# Case 13: Edit and MultiEdit with evidence pass; the same edits with no evidence are refused (add() cases above).
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: an Edit backed by a Read passes silently",
+                         hcs_twin("an Edit with evidence",
+                                  refused=hcs_edit(hcs_row("P1", HCS_OLD), hcs_row("P1", HCS_NEW), transcript=hcs_tx("none")),
+                                  allowed=hcs_edit(hcs_row("P1", HCS_OLD), hcs_row("P1", HCS_NEW), transcript=hcs_tx("ev_p1")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a MultiEdit backed by a Read and a Bash call passes silently",
+                         hcs_twin("a MultiEdit with evidence",
+                                  refused=hcs_multi([{"old_string": hcs_row("P2", HCS_OLD), "new_string": hcs_row("P2", HCS_NEW)},
+                                                     {"old_string": hcs_row("P3", HCS_OLD), "new_string": hcs_row("P3", HCS_NEW)}],
+                                                    transcript=hcs_tx("none")),
+                                  allowed=hcs_multi([{"old_string": hcs_row("P2", HCS_OLD), "new_string": hcs_row("P2", HCS_NEW)},
+                                                     {"old_string": hcs_row("P3", HCS_OLD), "new_string": hcs_row("P3", HCS_NEW)}],
+                                                    transcript=hcs_tx("ev_p2_p3")))))
+# Case 14: a repo's HANDOFF.md and an inbox beside the handoff are not session handoffs, and pass.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a repo's own HANDOFF.md, restamped with no evidence, passes silently",
+                         hcs_twin("a repo HANDOFF.md",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_args("Write", {"file_path": os.path.join(NOGIT, "HANDOFF.md"),
+                                                             "content": HCS_T_P1}, transcript=hcs_tx("none")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: the owner-feedback inbox, restamped with no evidence, passes silently",
+                         hcs_twin("the owner-feedback inbox",
+                                  refused=NO_EVIDENCE,
+                                  allowed=hcs_args("Write", {"file_path": HCS_INBOX,
+                                                             "content": hcs_line(("P1", "read",
+                                                                                  "The guard judges each handoff write",
+                                                                                  "hooks/precompact_handoff.py:279"),
+                                                                                 HCS_NEW) + "\n"},
+                                                   transcript=hcs_tx("none")))))
+# Scanner text: a lone quote and comment openers in a Source. The rule reads markdown lines, and this case holds one.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a token-less Source with a quote and comment openers is judged, and one read backs it",
+                         hcs_twin("a Source with a quote and comment openers",
+                                  refused=hcs_write(HCS_T_P9, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_P9, transcript=hcs_tx("other_read")))))
+# The cost check, last: its refusal and its allow each read the transcript once.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: an allowed restamp writes no file and starts no process; a refusal writes its "
+                         "guard.log line and reads the transcript once; an unchanged write reads no transcript", hcs_cost_check))
+
+
+# --- Cases for stamps spelled `Checked:` or `Re-checked`, a stamp that is absent or empty, a new premise line,
+# and a premise whose kind changes in the write. A control keeps the rule from refusing a restamp it allows.
+HCS_SID_COLON = "4b8e1d62-0000-4000-8000-00000000c0a2"    # a handoff whose stamps are spelled `Checked: <value>`
+HCS_COLON = hs_handoff(HCS_CFG, HCS_SID_COLON)
+HCS_GUARD = ("P8", "read", "The guard refuses a restamp with no evidence", "hooks/guard.py:1176")
+HCS_T_GUARD = hcs_text(extra=(hcs_line(HCS_GUARD, HCS_NEW),))   # a new dated line whose Source names hooks/guard.py
+HCS_RELABEL_ROWS = tuple((pid, "ruling" if pid == "P1" else kind, statement, source)
+                         for pid, kind, statement, source in HCS_ROWS)
+HCS_DEMOTE_ROWS = tuple((pid, "read" if pid == "P6" else kind, statement, source)
+                        for pid, kind, statement, source in HCS_ROWS)
+HCS_T_RELABEL = hcs_text(rows=HCS_RELABEL_ROWS, new=("P1",))   # P1 was [read]; the write makes it [ruling] and restamps it
+HCS_T_DEMOTE = hcs_text(rows=HCS_DEMOTE_ROWS, new=("P6",))     # P6 was [ruling]; the write makes it [read] and restamps it
+
+
+def hcs_stamped(row, stamp):
+    """The premise line of `row` with `stamp` after its Source (the stamp's own period included), or none when `stamp`
+    is ""."""
+    pid, kind, statement, source = row
+    head = "- %s [%s] %s. Source: %s." % (pid, kind, statement, source)
+    return head + " " + stamp if stamp else head
+
+
+def hcs_p1_text(p1_stamp):
+    """A handoff whose P1 line ends in `p1_stamp`, with every other premise at the old stamp."""
+    return hs_text(premises=[hcs_stamped(row, p1_stamp) if row[0] == "P1" else hcs_line(row, HCS_OLD)
+                             for row in HCS_ROWS])
+
+
+HCS_T_SPELL_COLON = hcs_p1_text("Checked: %s." % HCS_NEW)
+HCS_T_SPELL_RE = hcs_p1_text("Re-checked %s." % HCS_NEW)
+HCS_T_ABSENT = hcs_p1_text("")                  # P1 loses its stamp
+HCS_T_EMPTY = hcs_p1_text("Checked .")          # P1's stamp has no value
+
+
+def hcs_colon_text(p1_value):
+    """A handoff whose every stamp is spelled `Checked: <value>`: P1 at `p1_value`, the rest at the old value."""
+    return hs_text(premises=[hcs_stamped(row, "Checked: %s." % (p1_value if row[0] == "P1" else HCS_OLD))
+                             for row in HCS_ROWS])
+
+
+HCS_COLON_OLD = hcs_colon_text(HCS_OLD)     # the handoff on disk for the colon session
+HCS_T_COLON_NEW = hcs_colon_text(HCS_NEW)   # the same, with P1 restamped in the same spelling
+
+
+def _build_hcs_colon():
+    write(HCS_COLON, HCS_COLON_OLD)
+
+
+lazy_fixture([HCS_COLON], _build_hcs_colon)
+
+
+def hcs_colon_scope():
+    """The colon handoff on disk is the handoff with every stamp spelled Checked: at the old value, so the twin's
+    refused write changes P1 alone. The twin branches on that spelling, so it asserts the fixture first (P7)."""
+    materialize(HCS_COLON)
+    with open(HCS_COLON, "r", encoding="utf-8") as handle:
+        disk = handle.read()
+    if disk != HCS_COLON_OLD:
+        return False, "the colon handoff on disk is not the handoff with every stamp spelled Checked: at the old value"
+    return True, "the colon handoff on disk holds every stamp spelled Checked: at the old value"
+
+
+def hcs_scoped(scope, twin):
+    """`twin`, run only once `scope` holds: a scope failure is the case's failure, named as the scope."""
+    def check():
+        ok, note = scope()
+        if not ok:
+            return False, note
+        return twin()
+    return check
+
+
+# Case 1: a stamp spelled other than `Checked <value>` counts. A new value under another spelling, or a stamp that is
+# absent or has no value after the write, is a change, and it is refused with no evidence.
+add("handoff-checked-stamp: a stamp spelled Checked: with a new value is refused with no evidence, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_SPELL_COLON)
+add("handoff-checked-stamp: a stamp spelled Re-checked with a new value is refused with no evidence, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_SPELL_RE)
+add("handoff-checked-stamp: a stamp present before and absent after is refused with no evidence, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_ABSENT)
+add("handoff-checked-stamp: a stamp present before with no value after is refused with no evidence, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_EMPTY)
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a stamp spelled Checked: with its value unchanged passes silently; with a new "
+                         "value it is refused with no evidence",
+                         hcs_scoped(hcs_colon_scope,
+                                    hcs_twin("a stamp spelled Checked:",
+                                             refused=hcs_write(HCS_T_COLON_NEW, transcript=hcs_tx("none"),
+                                                               session=HCS_SID_COLON),
+                                             allowed=hcs_write(HCS_COLON_OLD, transcript=hcs_tx("none"),
+                                                               session=HCS_SID_COLON)))))
+
+# Case 2: a Source's token backed only by a Write or Edit of another file, or by a non-read Bash call, backs nothing. The
+# controls: a Read, a Grep, a Glob and a Bash read of the token each back it.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Write of another file that names a token-bearing Source backs no restamp; "
+                         "a Read of that Source does",
+                         hcs_twin("a Write of another file",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("write_other")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("read_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: an Edit of another file that names a token-bearing Source backs no restamp; "
+                         "a Read of that Source does",
+                         hcs_twin("an Edit of another file",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("edit_other")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("read_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a git commit that names a token-bearing Source backs no restamp; "
+                         "a Read of that Source does",
+                         hcs_twin("a git commit",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("bash_commit")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("read_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Grep of a token-bearing Source backs a restamp, passes silently",
+                         hcs_twin("a Grep",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("grep_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Glob of a token-bearing Source backs a restamp, passes silently",
+                         hcs_twin("a Glob",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("glob_guard")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Bash read of a token-bearing Source backs a restamp, passes silently",
+                         hcs_twin("a Bash read",
+                                  refused=hcs_write(HCS_T_GUARD, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_GUARD, transcript=hcs_tx("bash_read_guard")))))
+
+# Case 3: a failed call backs nothing; the same call with a good result backs the premise. The full-size pair ends with
+# that call after 2000 unrelated reads.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a failed Read backs no restamp; the same Read with a good result does, "
+                         "passes silently",
+                         hcs_twin("a failed Read",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("failed_read")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a Read whose toolUseResult says success false backs no restamp; the same "
+                         "Read with a good result does, passes silently",
+                         hcs_twin("a Read with success false",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("failed_flag")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a failed Read after 2000 unrelated reads backs no restamp; the same Read "
+                         "with a good result does, passes silently",
+                         hcs_twin("a failed Read at full size",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("long_failed")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("long_ok")))))
+
+# Case 4: a send, and a write-named MCP tool, back nothing, with the token in their text or with a token-less Source. A
+# read-named MCP tool backs the token it holds, and a token-less Source.
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a send_message whose text holds the Source backs no restamp; a Read of the "
+                         "Source does",
+                         hcs_twin("a send_message with the token",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("send_token")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a send_message that is the only call for a token-less Source backs nothing; a "
+                         "read-named MCP tool does",
+                         hcs_twin("a send_message alone",
+                                  refused=hcs_write(HCS_T_P7, transcript=hcs_tx("send_only")),
+                                  allowed=hcs_write(HCS_T_P7, transcript=hcs_tx("get_only")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a pull_request_review_write whose input holds the Source backs no restamp; a "
+                         "Read of the Source does",
+                         hcs_twin("a review write with the token",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("review_token")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a pull_request_review_write that is the only call for a token-less Source backs "
+                         "nothing; a read-named MCP tool does",
+                         hcs_twin("a review write alone",
+                                  refused=hcs_write(HCS_T_P7, transcript=hcs_tx("review_only")),
+                                  allowed=hcs_write(HCS_T_P7, transcript=hcs_tx("get_only")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a resolve_review_thread whose input holds the Source backs no restamp; a Read of "
+                         "the Source does",
+                         hcs_twin("a thread resolve with the token",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("resolve_token")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("ok_read")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a resolve_review_thread that is the only call for a token-less Source backs "
+                         "nothing; a read-named MCP tool does",
+                         hcs_twin("a thread resolve alone",
+                                  refused=hcs_write(HCS_T_P7, transcript=hcs_tx("resolve_only")),
+                                  allowed=hcs_write(HCS_T_P7, transcript=hcs_tx("get_only")))))
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a read-named MCP tool whose input holds the Source backs a restamp, passes "
+                         "silently",
+                         hcs_twin("a read-named MCP tool with the token",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_P1, transcript=hcs_tx("get_token")))))
+
+# Note 6: the kind that judges a premise is its BEFORE kind. A premise relabelled to [ruling] with no evidence is refused;
+# a premise that was [ruling] before passes, even when the write relabels it.
+add("handoff-checked-stamp: a premise relabelled [ruling] in the same write, restamped with no evidence, is refused by its "
+    "before kind, naming P1",
+    "deny", HCS_RULE, tool="Write", cwd=NOGIT, session=HCS_SID, config=HCS_CFG, transcript=hcs_tx("none"),
+    carries=("P1",), lacks=("P2", "P3", "P4", "P5", "P7", "P9"),
+    file_path=HCS_HANDOFF, content=HCS_T_RELABEL)
+LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a premise that was [ruling] before and is relabelled [read] in the same write, "
+                         "restamped with no evidence, passes silently",
+                         hcs_twin("a ruling premise relabelled to read",
+                                  refused=hcs_write(HCS_T_P1, transcript=hcs_tx("none")),
+                                  allowed=hcs_write(HCS_T_DEMOTE, transcript=hcs_tx("none")))))
 
 
 # =========================================================================== the machine-load brake
@@ -38540,6 +42553,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an owner override lifts the cross-checkout", "worktree-home"),
     ("worktree-home: the cross-checkout read costs", "worktree-home"),
     ("worktree-home: a cd into another checkout of the clone is refused", "worktree-home"),
+    ("worktree-home: the other-checkout refusal names the EnterWorktree call", "worktree-home"),
     ("worktree-home: a cd into another checkout is refused when it is a relative climb", "worktree-home"),
     ("worktree-home: an agent's cd into a sibling agent tree", "worktree-home"),
     ("worktree-home: a cd to a checkout's own root", "worktree-home"),

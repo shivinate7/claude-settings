@@ -4,12 +4,11 @@ description: Use when a session has a question, a decision or a task for the own
 ---
 
 The waiting page is the one private page per repo or project. Its Questions tab holds every item
-that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only a session that
-reads its own answers at a wake writes an item.
+that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only triage writes an item (owner, 2026-11-10 14:30-14:32 CST). A lane that wears triage's hat in a run with one lane writes as triage (owner, 2026-11-10 14:33 CST).
 
-A lane never writes an item. A lane session ends, and so does an agent. It puts its
-question in its report. The orchestrator writes the item with itself as `owner`. It routes the
-answer back to the lane or its next try.
+A lane never writes an item, unless it wears triage's hat in a run with one lane. A lane puts its
+question in its report, and sends it to its parent in the same turn. Triage writes the item with the asking session as `owner`, and routes the
+answer back to the lane or its next try. Not built: the route from a lane to triage.
 
 Every repo's page is the same template. The page is fixed. All content lives in its database,
 through the ArtifactData tool. Two exceptions are stored in the page itself: a design mockup (see
@@ -29,9 +28,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
 
-- `items/<id>`: one per waiting item. The database key and the `id` field must be the same
-  string. The page keys on the database key, and warns on an item whose `id` field is missing or
-  different. Fields: `id`, `n` (a stable number the owner answers by),
+- `items/<id>`: one per waiting item. The database key is the item's id. The `id` field is optional
+  and ignored: the page, the guard and the tools read the key. Fields: `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
   record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
@@ -43,7 +41,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - `arbiter: true` marks a ruling: an item the arbiter decided (decision `session-tiers`, Arbiter, "On the page").
     The arbiter hands each ruling to the writer. The writer writes it closed, with the item's `status` `closed`,
     `home` the ruling's record id, `pick` the ruled option's key, `why`, and `ruled` (an ISO time). It cites the ruling.
-    The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item stays hidden.
+    The page shows it in "Arbiter rulings", newest first, with one Overturn button. Every other closed item with a `closed` time stays as one line in "Answered" until the owner marks it read. A closed item with no `closed` time counts as read and stays hidden.
     A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
     the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
@@ -91,6 +89,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - A decision adds `options` (a list of `{key, label, how, gain, lose}`, plus `design` on a look question, plus an optional `differs` and `widens`), `pick` (the key you
     recommend) and `why`. Each key is the letter the page shows for its position, in lowercase: `a`, `b`, `c` in order (guard rule `option-letter-keys`).
     One letter per option: an option's `label` and its mockup carry no letter of their own (no "B:", no "Option B"), since the page's key is the only letter (guard rule `option-letter-keys` refuses a label that opens with another letter's tag).
+    When an option asks for a settings change, its label names `settings.json` and the entry by its exact title or key, one entry per option. Otherwise no relayed grant covers it (decision relayed-grant-read-from-page).
     Never use the key `none`. The page adds its own "None of these" option
     with that key. Name an option in every item text by its letter ("option A", "pick b"), never by another key. The page shows each option by its letter by position and names a pick by its `label`, never by its `key`. The page never preselects an option: it stars `pick`, and a tap on the starred option picks it.
     - `multi: true` marks a decision whose options can all be done together. The owner ticks any number of them, so the card shows checkboxes in a group, not radios.
@@ -129,6 +128,14 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set when an answer
     takes the busy-lane path. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
     reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
+  - `closed` (an ISO UTC time with a trailing `Z`) is when the item closed. The session that closes the item writes it in the same `update` as `status: "closed"`
+    (step 2 of "Route and close"; the writer does the same for a chat answer). The page shows a closed item that has a `closed` time as one line in "Answered" until the owner marks it read.
+    A closed item with no `closed` time counts as read, so the page never shows it.
+  - `dismissed` (an ISO time, or `null`) is the owner's read mark. Only the page writes it, at the owner's press, with `update`: Mark read writes the time, and Mark unread writes `null`
+    (the runtime has no field delete). No session writes `dismissed`. A session changes a closed item, or any item the owner may have marked, only with `update`, never `set`:
+    `set` drops `closed` and `dismissed`, and the item then counts as read and leaves the page. A `replied` time later than `dismissed` brings the line back.
+    A re-ask (an open item that is owed again) shows as a card, whatever `dismissed` says. A Mark read on an open item changes its version, so a close pinned to the version you read
+    can conflict. Read the item again and retry the close. Never drop it.
   - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. Setting or dropping it also sets `replied` to now. `run` and
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
     with `waits` and `lastAnswer` reads as answered on the page.
@@ -171,7 +178,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
   `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. A reply
   also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. The page writes one more
-  field later, at the owner's press: `dismissed` (ISO time), on a thread's root ask only, with `update` (Dismiss). Restore writes
+  field later, at the owner's press: `dismissed` (ISO time), on a thread's root ask only, with `update` (Mark read). Mark unread writes
   `dismissed: null` (the runtime has no field delete). It never deletes or replaces the owner's `text` or a `reply`. No session writes
   `dismissed`. A session answering a dismissed record uses `update`, which keeps it (see "Route an ask"). A reply goes through the same
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
@@ -183,9 +190,11 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   went, in plain words, and when). Never write `text` or `at`: ArtifactData writes as the owner, so this sentence is the only
   guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
   An ask with `reply` is answered. The page lists threads newest first by the `at` of their root ask, and a reply sits in its root's thread.
-  It shows each waiting ask, each new answer (whatever its age) and the newest 3 answers already seen.
-  A thread with a waiting reply always shows. The page hides a dismissed thread (root `dismissed` is an ISO time) unless a
-  record in it waits or has an `answered` later than `dismissed`, and opens it again under "Show N dismissed asks". No session deletes or replaces an ask.
+  It shows each waiting ask, each new answer (whatever its age) and the newest 3 answers already seen. An answered ask whose `home` a session wrote,
+  with no record in its thread waiting, is routed: the page shows it as one line, its `home` and the first sentence of its `reply`, until the owner marks it read.
+  A routed ask answered before the page's `READ_FROM` time counts as read.
+  A thread with a waiting reply always shows. The page hides a read thread (root `dismissed` is an ISO time) unless a
+  record in it waits or has an `answered` later than `dismissed`, and opens it again under "Show N read asks". No session deletes or replaces an ask.
   An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
@@ -209,13 +218,14 @@ carries the badge "Answered, filing pending" or "Answered, filed in <home>". It 
 
 ## The writer
 
-Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
-project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
+Each page has one writer: triage (owner, 2026-11-10 14:30-14:32 CST). In a run with one lane, the lane
+wears triage's hat and writes it (owner, 2026-11-10 14:33 CST). The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
-into `meta/page`. The writer watches the page ("Read the answers").
+into `meta/page`. The writer watches the page ("Read the answers"). A repo may name the writer's session id in its
+extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. The key send counts only on a delivered result. A rotation updates it.
 
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
-  to its parent in the same turn, and the orchestrator writes the item ("Add an item", step 0).
+  to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
@@ -241,13 +251,13 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   Jot `- <id> [page] -> page:<n>` under the owner's message in the inbox; the feedback guard
   (`hooks/feedback_guard.py`) blocks until the transcript shows that send. The writer puts the item's
   `n` in every items write, set or update, so the guard can match it.
-  - Not written yet: the writer writes the item closed (`status: "closed"`), with the answer and its
+  - Not written yet: the writer writes the item closed (`status: "closed"` and `closed` set to now), with the answer and its
     time in `context`. The asking session (`owner`) then files the answer to `home` ("Route and
     close" step 1) and writes `receipts/<id>`. The writer never writes receipts.
-  - Written: the writer closes the item, with the answer and its time in `context`. The owning
+  - Written: the writer closes the item (`status: "closed"` and `closed` set to now), with the answer and its time in `context`. The owning
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
-- A lane has no chat with the owner. Its question goes in its report, and a lane session also sends it
+- A lane has no chat with the owner. Its question goes in its report, and a lane also sends it
   to its parent with `send_message` in the same turn. The Stop report guard blocks a lane reply whose
   Input Needed asks a pick or a yes/no unless the same turn sent it to its parent or the writer. A box,
   a page link or a promise does not pass.
@@ -273,7 +283,13 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    (never an open item, an arbiter ruling or a park answer). A closed item with `waits` gets a line that says it is closed with waits. The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
-4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
+4. Before any republish, check the pictures of the open items, against the file about to be published (`<out>`, the `--write` output of
+   step 2), never the live page: `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <folder> --page <out>`
+   (`<folder>` is the fetch of "Keep a copy in the repo", step 2). It writes nothing. Hold the republish on any exit but 0.
+   `held item <n>: ...` (exit 4): fix that item, check again. `checks unknown: ...` (exit 3), or no page file (exit 2):
+   a check that cannot read its input fails, never passes (owner ruling, item 276 a): say the line in the reply,
+   and republish nothing until a check passes. `checks pass` (exit 0): go on.
+   `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
    (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
    When you also add a design, do it in
@@ -318,6 +334,8 @@ never runs it. There is one path: the record branch's own worktree. Never write 
    - `same`: stop. Commit nothing.
    - `changed <n>`: in the same worktree, run `git add` on the copy folder, then
      commit and push the record branch. The commit message names the count.
+   - `held item <n>: <sentence>` after the verdict line (exit 4): after `changed`, the copy was written; commit it as for `changed`. After `same`, commit nothing. The page would
+     draw that item's picture wrong. Fix the item, export again, and do not republish while one is held.
    - `refused`: nothing was written. Make no commit. The reply names each find: the file, the JSON path and
      the kind, never the value. Fix the item on the page first, then run the steps again.
    - `unknown`: nothing was written. Say the line in the reply. A missing collection folder or marker, an
@@ -376,7 +394,7 @@ the waiting page. A page that moves loses its read access, and the repo then hol
    one, prints one `unknown` line, writes nothing and exits 2. The page and each
    text file are scanned like the docs; a find refuses that artifact only.
 4. Run `git add` on the export folder of each artifact whose line says `changed`. Then commit and push the record
-   branch. A `refused` or `unknown` artifact wrote nothing, so its folder is as it was. Say each such line in
+   branch. A `refused` artifact wrote nothing, so its folder is as it was. An `unknown` one wrote nothing too. A `checks unknown: collections lack <name>` line is not a verdict: its artifact wrote the copy, says `same` or `changed <n>`, and exits 2. Say each such line in
    the reply, and fix the cause first.
 
 Cost: one list call per page of each collection of each entry, one python process, and one commit when something
@@ -439,10 +457,9 @@ is never changed.
    answer, and two writers clash on the design republish (see "Add a design").
 1. Only the writer does this step. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
    while its item is open.
-2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
-   or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
-   and make it equal to the key. After the `set`, read the item back (`ArtifactData get
-   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each keyed
+2. Write it with `ArtifactData set items/<id>`. Make the key a slug of the question, 32 characters
+   or fewer. Never reuse a key. If a slug is taken, add a suffix. After the `set`, read the item back (`ArtifactData get
+   items/<id>`). Check `n`, `kind` and, on a decision, `options`: at least one, each keyed
    `a`, `b`, `c` in order, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
@@ -473,7 +490,7 @@ is never changed.
      next Send unless the owner chooses another. The owner cannot hold a stood pick
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
-   (the page hides a closed item, except an arbiter ruling). Open no question box (`questions-go-to-owner`).
+   (a closed item is one line on the page, with no card to open). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.
 
 ## Read the answers
@@ -516,7 +533,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 
 - An answer saved on the page counts as the owner's grant for the item it names (ruling 2a). The same answer in the terminal box counts the same. If the two disagree,
   the later one wins: compare the answer's `at` with the time of the terminal answer.
-- A session that acts on an answer it did not route checks it first. Make the fetch folder with `python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch <scratch dir>`; it prints `fetch <dir>`. Fetch `answers/<id>` and `items/<id>` with `ArtifactData get` and `out_dir` set to that `<dir>`. Then run `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key>`. `--root` is a checkout of the page's repo, the one whose extras register the page (in a cloud session, `/home/user/claude-settings`). `--pick` is required and must equal the page's choice. The checker counts only a folder `--new-fetch` made, checked once, holding only those two files, none older than its stamp: an absent doc saves no file, so a reused folder could hold a withdrawn answer. A check uses the folder up as its first step, so every verdict uses it up: a retry fetches again into a new folder. Act only on `counted`, and only on the act the picked option's label names. Quote its page, item id, n, choice and `at`. Decision relayed-grant-read-from-page holds the relay rules.
+- A session that acts on an answer it did not route checks it first. Make the fetch folder with `python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch <scratch dir>`; it prints `fetch <dir>`. Fetch `answers/<id>` and `items/<id>` with `ArtifactData get` and `out_dir` set to that `<dir>`. Then run `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key>`. `--root` is a checkout of the page's repo, the one whose extras register the page (in a cloud session, `/home/user/claude-settings`). `--pick` is required and must equal the page's choice. The checker counts only a folder `--new-fetch` made, checked once, holding only those two files, none older than its stamp: an absent doc saves no file, so a reused folder could hold a withdrawn answer. A check uses the folder up as its first step, so every verdict uses it up: a retry fetches again into a new folder. The `counted` line is `counted item=<id> n=<n> choice=<key> at=<time> label=<label> [note=<json>]`. `label=` is the picked option's label as one JSON string, a JSON list for a multi item, or `null` for an overturn. Act only on `counted`, and only on the act that label names. A settings change counts only when the label names `settings.json` and the entry by its exact title or key, one entry per grant. Quote its page, item id, n, choice, `at` and label. Decision relayed-grant-read-from-page holds the relay rules.
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner withdrew it: the item is still open, and nothing is ruled. That re-read also saves the
   answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
@@ -602,10 +619,10 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    `git rev-parse --verify --quiet origin/<branch>^{commit}` succeeds, with `<branch>` from `record_branch()` in `~/.claude/lint/layout.py`, default `roadmap`). Otherwise it becomes a todo record
    (layout `todo` or `debts`). When the home is a roadmap step, the filed note cites `page item <n>`, which the
    roadmap upkeep row "page rulings not on their step" checks.
-2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
-   you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
-   in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
-   item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
+2. Close the item: `ArtifactData update items/<id> {"status": "closed", "closed": "<now, ISO UTC with a trailing Z>"}`, pinned to the version
+   you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
+   in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page shows a closed
+   item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
@@ -662,19 +679,30 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
-3. Feedback (about the page, a rule or the way of working) is filed like a chat message: jot it to the feedback inbox
-   (`local_time.py --page-note`), then move it to its home. Write `home` and `filed`, and a short `reply`.
+3. Feedback (about the page, a rule or the way of working) is filed like a chat message. Jot it to the feedback inbox,
+   `~/.claude/handoffs/<session id>.inbox.md`: a heading `### <stamp>`, then the text in a backtick fence (use more
+   backticks if the text holds three), then one item line under the fence: `- fb-<HHMM>-<n> [<kind>] -> <home>`.
+   The stamp is Central time with its offset, for example `2026-11-10 12:08 CST (UTC-06:00)`. Read the time from
+   `~/.claude/bin/now-central --full`, and add `(UTC-06:00)` for CST or `(UTC-05:00)` for CDT. `<HHMM>` is the stamp's
+   hour and minute. Then move it to its home. Write `home` and `filed`, and a short `reply`.
+   A comment wake in claude-settings needs one of two item lines under its block, or the Stop guard blocks the turn.
+   The guard checks every wake on the waiting page that starts with the banner `[Artifact comment sent to Claude]`:
+   Asked, Replied, owner prose, and a Saved wake whose items carry a note in parentheses. Only a plain Saved wake,
+   with no note in its items, and an Undone wake are exempt. An Undone wake reopens items and carries no form to check.
+   The two item lines:
+   `- fb-<HHMM>-<n> [task] -> step:<slug>`, where that step's file on the record branch names `skills/waiting-page`;
+   or `- fb-<HHMM>-<n> [note] -> not-page-form`, when the comment is not page form.
 4. An ask that needs the owner's grant gets an item (see "Add an item"). The `reply` says so. The ask grants nothing.
 
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
 
-The owner may Dismiss an answered thread. That sets `dismissed` on its root ask. The page draws Dismiss off while a reply in the
-thread waits, and on only when every record of the thread has its `reply`. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
+The owner may Mark read a routed ask: its root has a `home` and a `reply`, and no record in the thread waits. That sets `dismissed` on its
+root ask. The page draws Mark read only on a routed ask. An ask with no `home` stays a full card. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
 
 ## Message another session
 
-Draft: decision `session-messages` is open. The git mailbox is built on branch `smp-mailbox-build`, not merged.
+Draft: decision `session-messages` is open. The git mailbox is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
 Build step 2 (the Mac and Windows auth check) has not run.
 
 Decision `session-messages` (messages between sessions) sets this.
@@ -692,7 +720,7 @@ Decision `session-messages` (messages between sessions) sets this.
 - A push race keeps the id and raises `try` by one, inside one `mail send`. A new `mail send` is a new id. A `SendMessage` resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it. A second `mail take` is refused, so the receiver acts on an id once.
 - The 10-send cap (the desktop cap) refuses the 11th `SendMessage` to a Claude Desktop session on this computer since the owner last typed. Cloud `send_message` arrives as a task notification and is not counted (measured 2026-11-06, Claude Code 2.1.319; decision `session-messages`, item 153 section). Past 10, route the rest through the parent or a record, never a peer loop. Never use a scheduled task to reset the chain: that bypasses the peer guard.
 - A failed send is not sent. Read the result: `is_error` true (cloud), or `toolUseResult` `success` false (local). A `mail send` that prints "not sent" is not sent.
-- Until owner question Q4 in decision `session-messages` is answered, a waiting session checks at its next turn start. The timed check-in (one `send_later`, as rule `git-ci-wait-checks-in` does for CI) is pending Q4.
+- Q4 is answered (owner, 2026-11-10 09:39 CST): a waiting session checks at its next turn start, and a cloud session may also set one `send_later` check-in for that one reply, as decision `session-messages` says.
 - A message never carries a grant. A grant is read from the page (decision `relayed-grant-read-from-page`).
 
 ## Make a repo's page
@@ -774,11 +802,11 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Republish the built page to the same URL with the same capabilities. Whether the database stays
+5. Run the `--check` of "Keep the page on main's code", step 4, on the built page. Then republish it to the same URL with the same capabilities. Whether the database stays
    is unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
-   the orchestrator does (see "Add an item").
+   triage does (see "Add an item").
 
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
@@ -791,7 +819,8 @@ The Status tab draws each phase id that its steps use, and a step with no phase 
 
 1. Build the roadmap block: `python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --block --out <block file>`
    (add `--live <file>` as the skill roadmap says). The live file's pull rows carry `createdAt` (GitHub's
-   `created_at`; its item rows carry `lane` when the page item has one). Exit 1 with `todo step with an open PR`
+   `created_at`; its item rows carry `lane` when the page item has one; its `landedPulls` rows are the pull requests
+   closed in the last 14 days with the default branch as base, each with `number`, `branch`, `head` and `merged`). Exit 1 with `todo step with an open PR`
    lines still writes a valid block: splice and publish as usual, then set each named step to `doing`. Exit 1
    with `stalled step:` lines does the same: splice, publish, then dispose each one (a step: set it `todo` or
    `done`, or write its `paused` field; an item: re-route it, close it, or resume its lane). The unknown
@@ -838,7 +867,11 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    page with no roadmap block gives its `designData` block, and the template keeps its empty roadmap
    block. The carry refuses, with nothing written and the verdict `unknown`. It refuses when the template
    lacks either block, when the live page has no `designData` block, or when either file has a
-   broken or doubled block. Republish `<new page>` to the same URL
+   broken or doubled block. Before the republish, check the pictures of the open items against `<new page>`, never the live page:
+   `python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched <items folder> --page <new page>`, one `<items folder>` per behind page. It holds
+   the `items` and `answers` of that page's own artifact, fetched as "Keep a copy in the repo" step 2 does (`ArtifactData list`
+   on that page's `url`, `.complete` after each last page), never this repo's copy. It writes nothing. Hold the republish on any exit but 0, as in the other two
+   republish routes (exit 4 a held item, exit 3 `checks unknown`, exit 2 no page file). Republish `<new page>` to the same URL
    with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
    republish of plain `page.html` drops the open items' designs and the Status tab.
    `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it
