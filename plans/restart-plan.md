@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 12:42 CST. The owner's list closed at 18:43 CST; R21 to R35 came after.
+the history. Last rewrite: 2026-11-11 12:45 CST. The owner's list closed at 18:43 CST; R21 to R35 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -747,3 +747,10 @@ Measured 2026-11-10; re-measure after stage 3.
 - Handoffs (478 sessions): 215 end waiting on the batch runner's merge; 139 name a rebase or main move;
   132 name a re-review after a head move.
 - Batch CI (checks.yml, Nov 10): green n=4, 34-211 min, median 51.
+- Batch flow, last 15 batch merges to 08:26 CST Nov 11 (256 lanes): 74 batch builds per 15 merges
+  (R26 target: one CI run per batch); 22% of CI minutes on heads that merged; 147 lane drops; lane wait,
+  last commit to merge, median 536 min.
+- Each batch merge's report gives the four pace numbers (CLAUDE.md reports-batch-pace-numbers):
+  wall-clock, lanes run and most at once, minutes with no lane running, brake refusals. Owner
+  12:44 CST Nov 11: "how will we judge how well the parallelism is landing?" These numbers, against
+  this baseline, are the answer.
