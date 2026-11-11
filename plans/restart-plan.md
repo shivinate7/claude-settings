@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:10 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:13 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -529,6 +529,13 @@ then R29.
   htan it being preloaded"), against decision agent-model-cap, which sets effort by the start call and
   sends the brief as the first message. The cuts are ruled on its report. Home: decision
   agent-model-cap.
+  First report, 11:10 CST: partial, because agents have no session tools. Owner box answer 11:12 CST:
+  "given my spend says i spent like thousands of dollars on like nov 8 -- i feel like u didn't properly
+  catch where all my spend has gone. also remember, dollar savings shouldn't come at the cost of speed
+  -- speed is more important (but it's all relative and not absolute)", and "Finish measuring first".
+  So: a read-only measuring session (Sonnet, started 11:13 CST) sums spend by day, role, repo and
+  model over every session. No cut is ruled before it reports. A cut that slows work is weighed
+  against the speed it costs, and speed wins a close call.
   Compaction, owner 11:09 CST: "i frankly dont mind compacting sooner given we have such good handoff
   hooks". Today the coordinator compacts at 441,600 tokens and lanes at 384,000; why they differ is
   unmeasured (decision idle-resume-compacts). Every standing session and lane compacts sooner. The audit
