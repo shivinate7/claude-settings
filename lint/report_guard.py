@@ -154,7 +154,7 @@ checkout the global rules file names (the copied cloud layout); a tool it cannot
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
 process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
-commit, local git starts, and at most one `git fetch origin`, all inside one REVIEW_READ_TIMEOUT budget. A stop_hook_active rewrite is not checked.
+commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
 """
 import bisect
 import datetime
@@ -2570,7 +2570,7 @@ REVIEW_HISTORY_RE = re.compile(
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
-REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply: under the Stop hook's 80 s timeout (settings.json), so the hook is never killed before it prints
+REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply, under the Stop hook's 80 s timeout (settings.json); the question and relay checks run outside this budget
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
     "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
