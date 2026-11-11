@@ -203,6 +203,7 @@ GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
 GUARD_FILES = ("settings.json",)
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
+REPO_CITE = "(decision merge-confirm-repo, -C names the checkout a merge acts in, so a -C that names no folder stops the merge)"
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
@@ -746,8 +747,9 @@ class GitLock(Lock):
 
 class GhLock(Lock):
     """Real use: the GitHub API. The API refuses a ref that exists, so one run wins."""
-    def __init__(self, now=time.time, pause=time.sleep):
+    def __init__(self, now=time.time, pause=time.sleep, cwd=None):
         self.now, self.pause = now, pause
+        self.cwd = cwd  # where `gh` runs: {owner}/{repo} in a route names the repo of this directory
 
     def api(self, *a, once=False):
         """The one home of every lock `gh api` call. A network error or rate limit is retried NET_RETRIES times with `self.pause`
@@ -757,7 +759,7 @@ class GhLock(Lock):
         ponytail: no retry inside `shared_deadline`, as in Host.gh. Before the lock is held, a rate wait follows the ladder: 60 + 300 + 900 s = 21 minutes per call at most, and the lock is not yet ours to extend."""
         path = next((x for x in a if x.startswith("repos/")), " ".join(a))
         retries = NET_RETRIES if _READ_DEADLINE is None and not once else 0
-        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a]), self.pause, retries, f"the lock call {path}", self.now, self.extend_for)
+        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a], cwd=self.cwd), self.pause, retries, f"the lock call {path}", self.now, self.extend_for)
         return c, out
 
     def read(self, b):
@@ -2014,9 +2016,12 @@ def hit_suites(root, paths, skip):
     home of which suites run, so no list is kept here. A step's `if:` is not read: the batch may have turned it on. Stop
     when the workflow, one of those jobs or a suite source cannot be read, or a hit line is not a plain suite line."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
-    from workflow_steps import CHECKS_SUITE_JOBS, job_block, run_body, step_blocks, step_key  # the one home of the step parser
+    from workflow_steps import CHECKS_SUITE_JOBS, job_block, job_workflow, run_body, step_blocks, step_key  # the one home of the step parser
+    flow, why = job_workflow(root, "checks")  # the repo names its workflow file; the `checks` job finds it
+    if why:
+        raise Stop(f"the workflow cannot be read: {why} {BASE_CITE}")
     try:
-        with open(os.path.join(root, ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+        with open(flow, encoding="utf-8") as f:
             text = f.read()
     except (OSError, UnicodeError) as e:
         raise Unread(f"the workflow cannot be read ({type(e).__name__}) {BASE_CITE}")
@@ -2918,8 +2923,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing."""
-    host = host or Host()
     if target.isdigit():
+        host = host or Host(cwd=root)
         n = int(target)
         info = host.pr(n)
         base = info["base"]
@@ -3639,7 +3644,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
 def default_lock(root):
     """A Claude Code cloud session (CLAUDE_CODE_REMOTE=true) gets GitLock: its proxy refuses the REST writes GhLock makes (HTTP 403 on
     POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
-    return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock()
+    return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock(cwd=root)
 
 # The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
@@ -4250,9 +4255,10 @@ def kind_misfits(kind, files):
 
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
-def idle_lanes(live):
+def idle_lanes(live, repo_dir=None):
     """merge --idle-lanes: print one line per lane to archive, then the summary line. Exit 1 with no summary when the
-    live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one."""
+    live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
+    `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
         return 1
@@ -4264,7 +4270,7 @@ def idle_lanes(live):
     except (Exception, SystemExit) as e:  # a build that exits at import is unloadable too
         print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
         return 1
-    c, root = sh(["git", "rev-parse", "--show-toplevel"])
+    c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=repo_dir)
     if c:
         print("merge: not in a git checkout. No list was made.", file=sys.stderr)
         return 1
@@ -4281,9 +4287,12 @@ def idle_lanes(live):
     say(*entries)
     return 1 if unread else 0
 
-def main(argv, host=None, lock=None, hosts=None):
-    p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
+def build_parser():
+    """The one home of merge's command line. The guard (hooks/guard_merge.py) parses a command with this, so its reading of -C and --repo-dir is the tool's own.
+    allow_abbrev is off: a prefix such as `--repo` or `--confir` is an error, never the flag it starts."""
+    p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0], allow_abbrev=False)
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
+    p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
@@ -4313,6 +4322,10 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--run", default=None, metavar="RUN_ID", help="with --touches: a workflow run whose failing log lines name the cases")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
+    return p
+
+def main(argv, host=None, lock=None, hosts=None):
+    p = build_parser()
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
     if ((a.head and not a.confirm) or a.kind or a.guard or a.round or a.fix_check or a.grant or a.net_value != "not owed") and not a.review_record:
@@ -4340,6 +4353,8 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--live goes with --idle-lanes")
     if a.root and not a.reviewed:
         p.error("--root goes with --reviewed")
+    if a.root and a.repo_dir is not None:  # each --root names its own checkout, so a -C beside it would be read by nothing
+        p.error("-C does not go with --root: each --root names its own checkout")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
@@ -4387,6 +4402,8 @@ def main(argv, host=None, lock=None, hosts=None):
     elif (a.unlock is None) == (a.pr is None) or (a.unlock is not None and a.confirm):
         p.error("give a pull request number, --unlock, --reviewed, or --role TIER")
     try:
+        if a.repo_dir is not None and not os.path.isdir(a.repo_dir):  # subprocess raises on a missing cwd; stop with a line instead
+            raise Stop(f"-C names no folder: {a.repo_dir} " + REPO_CITE)
         refuse_closing_reason(a.undo_check_unknown_ok, a.base_red_ok)  # first: before the role check, any lock, host read or write
         if a.touches:  # before the role check and any lock: it reads, merges and posts nothing
             try:
@@ -4402,9 +4419,9 @@ def main(argv, host=None, lock=None, hosts=None):
                 return 1
             return 0
         if a.idle_lanes:
-            return idle_lanes(a.live)  # before the role check and any lock: it reads, merges and posts nothing
+            return idle_lanes(a.live, a.repo_dir)  # before the role check and any lock: it reads, merges and posts nothing
         if a.lane_lint:
-            c, root = sh(["git", "rev-parse", "--show-toplevel"])
+            c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
             if c:
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
@@ -4412,11 +4429,11 @@ def main(argv, host=None, lock=None, hosts=None):
                 return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs)  # before the role check and any lock: it merges and pushes nothing
         if a.release_check:
             try:
-                c, root = sh(["git", "rev-parse", "--show-toplevel"])
+                c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)  # -C names the checkout; None is the process directory's
                 root_why = "not in a git checkout" if c else None
             except (OSError, subprocess.TimeoutExpired) as e:  # OSError: git is missing
                 root, root_why = None, e
-            lines, ok = release_check(root, host or Host(), a.release_check, {n: (sha, v) for n, sha, v in a.lint}, root_why)  # before the role check and any lock: it reads, merges and pushes nothing
+            lines, ok = release_check(root, host or Host(cwd=a.repo_dir if root_why else root), a.release_check, {n: (sha, v) for n, sha, v in a.lint}, root_why)  # before the role check and any lock: it reads, merges and pushes nothing
             say(*lines)
             return 0 if ok else 1
         if a.role is not None:
@@ -4431,7 +4448,7 @@ def main(argv, host=None, lock=None, hosts=None):
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
-        c, root = sh(["git", "rev-parse", "--show-toplevel"])
+        c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
         if c:
             raise Stop("not in a git checkout")
         lock = lock or default_lock(root)
@@ -4441,7 +4458,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 b = default_branch(root)
             say(f"merge: lock on {b} removed." if lock.unlock(b) else f"merge: no lock on {b}; nothing to remove.")
             return 0
-        h = host or Host()
+        h = host or Host(cwd=root)
         if not a.reviewed:
             a.pr = int(a.pr)
             info = h.pr(a.pr)  # the PR's base decides which config; confirm and preview reuse this read
