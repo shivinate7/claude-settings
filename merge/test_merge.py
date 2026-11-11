@@ -16520,22 +16520,28 @@ class BatchFreeze(CloudSession):
         return rc, out.getvalue() + err.getvalue()
 
     @contextlib.contextmanager
-    def no_lint_or_ready_check(self, ready_state=None):
+    def no_lint_or_ready_check(self, ready_state=None, checks_state=None):
         """The ready checks, patched to fail the run if called: draft_step and run_ready_checks always. With no `ready_state`, the lane lint
         too: a build or a drop runs none. With `ready_state` ("pass", "fail" or "unknown", or a ci_job_run answer as a tuple), the run is a
         --batch-build --ready: lane_lint runs for real under a spy that counts its calls, ci-job's answer is scripted to that state, and the
-        temp tree lives in this run's folder. Yields {name: mock}: read after the run."""
+        temp tree lives in this run's folder. With `checks_state` too (the same answer forms), run_ready_checks runs for real, and its ci-job
+        run ("--pinned") answers `checks_state` while the lint keeps `ready_state`. Yields {name: mock}: read after the run."""
+        if checks_state is not None and ready_state is None:
+            raise ValueError("checks_state goes with ready_state: the ready checks run in a --ready run, which lints first")
         with contextlib.ExitStack() as stack:
+            patched = ("draft_step",) if checks_state is not None else ("draft_step", "run_ready_checks")
             mocks = {name: stack.enter_context(unittest.mock.patch.object(
                          merge, name, side_effect=AssertionError(f"merge.{name} ran: a batch run runs no ready check")))
-                     for name in ("draft_step", "run_ready_checks")}
+                     for name in patched}
             if ready_state is None:
                 mocks["lane_lint"] = stack.enter_context(unittest.mock.patch.object(
                     merge, "lane_lint", side_effect=AssertionError("merge.lane_lint ran: a batch build or drop runs no lane lint")))
             else:
                 answer = LINT_STATES[ready_state] if isinstance(ready_state, str) else ready_state
+                checks = LINT_STATES[checks_state] if isinstance(checks_state, str) else checks_state
                 mocks["lane_lint"] = stack.enter_context(unittest.mock.patch.object(merge, "lane_lint", wraps=merge.lane_lint))
-                stack.enter_context(unittest.mock.patch.object(merge, "ci_job_run", return_value=answer))
+                mocks["ci_job_run"] = stack.enter_context(unittest.mock.patch.object(
+                    merge, "ci_job_run", side_effect=lambda wt, *args, **kw: checks if checks is not None and "--pinned" in args else answer))
                 stack.enter_context(unittest.mock.patch.object(tempfile, "tempdir", self.run_dir))
             yield mocks
 
@@ -16586,6 +16592,18 @@ class BatchFreeze(CloudSession):
     def drop_pr_numbers(self, out, name):
         """The PR numbers of each `merge --batch-drop NAME <pr>` command the run printed, in order."""
         return re.findall(rf"merge --batch-drop {re.escape(name)} (\d+)", out)
+
+    def blame_lane(self, name, n):
+        """A red run blames lane #n on the draft batch NAME: its one batch-head lint FAILs on lanes/<n>.txt, and the run prints the drop
+        command for #n. The setup of a drop the blame allows. -> (rc, output)."""
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming(f"lanes/{n}.txt")):
+            rc, out = self.run_batch("--batch-build", name, "--ready")
+        self.assertEqual(self.drop_pr_numbers(out, name), [str(n)], "setup: the red run did not blame lane #%d: %s" % (n, out))
+        return rc, out
+
+    def ready_checks_on_main(self):
+        """origin's main names one ready check, so a --ready run must run it (merge.readyChecks)."""
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], readyChecks=["check invariants"]))))
 
     # Build: the branch, the pull request, the lock and the lint.
 
@@ -16785,15 +16803,47 @@ class BatchFreeze(CloudSession):
         self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready: %s" % out)
         self.assertEqual(rc, 0, "--ready with --lint-unknown-ok exited %s: %s" % (rc, out))
 
-    def test_ready_on_a_ready_batch_says_already_ready_and_lints_and_calls_nothing(self):
+    # The ready checks: a draft goes ready only when merge.readyChecks pass (decision lanes-run-no-full-ci-job). Here the lint of the head passes,
+    # so only the checks decide the ready mark.
+
+    def test_ready_refuses_the_ready_mark_when_a_ready_check_fails(self):
+        self.ready_checks_on_main()
         for n in (101, 102):
             self.lane(n)
-        self.frozen_batch("nightly", [101, 102])  # ready
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state="pass", checks_state="fail") as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        ran = [c for c in mocks["ci_job_run"].call_args_list if "--pinned" in c.args]
+        self.assertTrue(ran, "--ready ran no ready check, though merge.readyChecks names one: %s" % out)
+        self.assertEqual(self.host.readies, [], "a failing ready check did not refuse the ready mark: %s" % out)
+        self.assertTrue(self.host.batch_pulls[pr]["draft"], "a failing ready check marked the batch PR ready: %s" % out)
+        self.assertEqual(rc, 1, "a failing ready check exited %s, not 1: %s" % (rc, out))
+
+    def test_ready_marks_the_batch_ready_when_every_ready_check_passes(self):  # the control of the case above
+        self.ready_checks_on_main()
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state="pass", checks_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(self.host.readies, [pr], "passing ready checks did not let --ready mark the batch PR ready once: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready with its checks passing: %s" % out)
+        self.assertEqual(rc, 0, "--ready with its checks passing exited %s: %s" % (rc, out))
+
+    def test_ready_on_a_batch_whose_head_a_lint_already_read_says_already_ready_and_lints_nothing(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")  # the one lint of the head, then ready
+        self.assertEqual(rc, 0, "setup: the first --ready exited %s: %s" % (rc, out))
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the first --ready did not mark the batch PR ready: %s" % out)
+        readies = list(self.host.readies)
         with self.no_lint_or_ready_check(ready_state="pass") as mocks:
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
         self.assertIn("already ready", out, "--ready on a ready batch does not say already ready: %s" % out)
-        self.assertEqual(self.lint_calls(mocks), [], "--ready on a ready batch linted the batch head again: %s" % out)
-        self.assertEqual(self.host.readies, [], "--ready on a ready batch called Host.ready: %s" % out)
+        self.assertEqual(self.lint_calls(mocks), [], "--ready on a batch whose head a lint already read linted it again: %s" % out)
+        self.assertEqual(self.host.readies, readies, "--ready on a ready batch called Host.ready: %s" % out)
         self.assertEqual(rc, 0, "--ready on a ready batch exited %s: %s" % (rc, out))
 
     def test_ready_with_a_pr_list_other_than_the_frozen_set_is_refused_as_a_build_is(self):
@@ -16998,6 +17048,7 @@ class BatchFreeze(CloudSession):
         answer = self.lint_fail_naming("docs/unrelated.md", passing=("lanes/102.txt",), passing_cmd=self.FAILED_STEP_CMD)  # two steps, one command
         with self.no_lint_or_ready_check(ready_state=answer), self.blame_spy() as seen:
             rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertTrue(seen, "the blame never ran, so the loop below checked no result: %s" % out)
         for got in seen:  # the scope first: a lane is named only by a path the failing step printed, docs/unrelated.md. None or {} passes too
             for n, paths in (got or {}).items():
                 self.assertEqual([p for p in paths if p != "docs/unrelated.md"], [],
@@ -17053,6 +17104,32 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [], "the drop marked a pull request ready")
         for name, mock in mocks.items():
             self.assertFalse(mock.called, "the drop called merge.%s: a drop runs no lane lint and no ready check" % name)
+
+    # After the build, a drop takes off only a lane that a red run blamed (decision batch-freeze-lane-set). The control is
+    # test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once, which drops a blamed lane.
+
+    def test_a_drop_of_an_unblamed_lane_from_a_draft_batch_is_refused_and_moves_nothing(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103], draft=True)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 1, "a drop of lane #102, which no red run blamed, was not refused with exit 1: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_a_drop_of_an_unblamed_lane_from_a_ready_batch_is_refused_and_returns_nothing_to_draft(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102, 103])  # ready
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 1, "a drop of lane #102, which no red run blamed, was not refused with exit 1: %s" % out)
+        self.assertEqual(self.host.to_drafts, [], "a refused drop of an unblamed lane called to_draft: %s" % out)
+        self.assert_untouched(pr, snap, out)
 
     def test_drop_leaves_another_batchs_branch_and_pr_alone(self):
         for n in (101, 102, 103, 104):
@@ -17179,6 +17256,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102, 103):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102, 103], draft=True)
+        self.blame_lane("nightly", 102)  # a red run blames #102, so the drop below is allowed
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
         self.assertIn("--batch-build nightly --ready", out, "the drop of a draft does not say the batch needs --ready again: %s" % out)
@@ -17226,6 +17304,24 @@ class BatchFreeze(CloudSession):
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
 
     # --on: the batch stacks on a running batch's head.
+
+    def test_a_drop_that_restacks_a_ready_batch_with_no_return_to_draft_then_ready_lints_its_head(self):
+        # batch-x is a draft holding 101 and 102. Ready batch-nightly stacks on it. A red run blames #102, the drop takes it off x, and the
+        # host refuses the return to draft that the restack asks for. Nothing then lints batch-nightly's new head.
+        for n in (101, 102, 104):
+            self.lane(n)
+        self.frozen_batch("x", [101, 102], draft=True)
+        nightly = self.frozen_batch("nightly", [104], on="batch-x")
+        self.blame_lane("x", 102)
+        self.host.to_draft_refuse = merge.Host.to_draft(None, 1)[1]
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "x", "102")
+        self.assertIn(nightly, self.host.to_drafts, "setup: the restack did not try to return ready batch-nightly to draft: %s" % out)
+        self.assertFalse(self.host.batch_pulls[nightly]["draft"], "setup: the refused return left batch-nightly ready, which the case needs: %s" % out)
+        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")],
+                         "--ready on batch-nightly, whose head a drop restacked and no return to draft covered, did not lint that head once: %s" % out)
 
     def test_on_builds_from_the_running_head_and_records_it_with_the_lane(self):
         for n in (101, 102):
