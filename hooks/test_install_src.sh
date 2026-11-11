@@ -4097,7 +4097,7 @@ merge_run_check() {
 }
 
 # mergepin1: a cloud merge from a plain clone, with local main behind origin/main. The helper fast-forwards main to
-# origin's, and the live pin moves to it by the rename. Per owner ruling 2026-11-11 14:19 CST: the installer fetches and
+# origin's, and the live pin moves to it by the rename. Per the ruling of 11 Nov, 14:19 CST: the installer fetches and
 # uses origin's main.
 mergepin1() {
   name="mergepin1: cloud merge, plain clone, local main behind origin: main fast-forwards to origin's and the live pin moves to it"
@@ -4107,7 +4107,7 @@ mergepin1() {
 }
 
 # mergepin2: the same with the clone marked cloudMirror. The mirror resume is the other cloud block that can move the pin.
-# Per owner ruling 2026-11-11 14:19 CST: the installer fetches and uses origin's main.
+# Per the ruling of 11 Nov, 14:19 CST: the installer fetches and uses origin's main.
 mergepin2() {
   name="mergepin2: cloud merge, clone marked cloudMirror, local main behind origin: main fast-forwards to origin's and the live pin moves to it"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
@@ -4117,7 +4117,7 @@ mergepin2() {
 
 # mergepin3: local main is one commit past origin/main, a commit origin/main lacks. The helper refuses: it exits 1
 # with one 'install not run' line, runs no install, and moves neither the clone's main nor the pin.
-# Per owner ruling 2026-11-11 14:19 CST: the installer fetches and uses origin's main.
+# Per the ruling of 11 Nov, 14:19 CST: the installer fetches and uses origin's main.
 mergepin3() {
   name="mergepin3: cloud merge, local main one commit past origin: refused with exit 1 and one 'install not run' line; main and the pin do not move"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
@@ -5451,13 +5451,13 @@ caseM14() {
 }
 
 # caseM15 and caseM16: the refresh's window starts a day before the mirror's main F, by F's committer date. Origin's history is
-# F, L, C, T in parent order, so F is a true ancestor of the tip T. F is dated 2026-10-20 and L 2026-11-01, later than F. The walk
-# from T stops at a commit dated before the window's start. caseM15 has C, clock-skewed, dated 2026-10-01, before that start, so
+# F, L, C, T in parent order, so F is a true ancestor of the tip T. F is dated 20 Oct and L 1 Nov, later than F. The walk
+# from T stops at a commit dated before the window's start. caseM15 has C, clock-skewed, dated 1 Oct, before that start, so
 # the window fetch never reaches F: the refresh reads F as local commits and keeps the mirror. caseM16 is the control: C is dated
-# 2026-10-25, inside the window, and the same refresh goes ahead.
+# 25 Oct, inside the window, and the same refresh goes ahead.
 
-# mirror_window_setup NAME C_DATE: mirror_first_install NAME 2026-10-20T12:00:00Z, then origin's main gains L (dated 2026-11-01), C
-# (dated C_DATE) and the tip T (dated 2026-11-02). Sets mirror, want (T), mw_f, mw_c and mw_l (the shas of F, C and L), and the
+# mirror_window_setup NAME C_DATE: mirror_first_install NAME with F dated 20 Oct, then origin's main gains L (dated 1 Nov), C
+# (dated C_DATE) and the tip T (dated 2 Nov). Sets mirror, want (T), mw_f, mw_c and mw_l (the shas of F, C and L), and the
 # committer dates mw_fd, mw_cd and mw_ld. Returns 1 with fix_why set on a fixture fault.
 mirror_window_setup() {
   mirror_first_install "$1" 2026-10-20T12:00:00Z || return 1

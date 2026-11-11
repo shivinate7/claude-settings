@@ -1210,7 +1210,7 @@ case30() {
 }
 
 # ---- Case 31: local main diverged from origin, clean tree on main -> the tree stays; one log line with git's reason ----
-# Per owner ruling 2026-11-11 14:19 CST: the installer fetches and uses origin's main.
+# Per the ruling of 11 Nov, 14:19 CST: the installer fetches and uses origin's main.
 case31() {
   name="case31: SessionStart hook with local main diverged from origin leaves the clean tree on main unchanged; the log gets git's reason, then the pin install's refusal"
   d="$work/case31"; hook_fixture "$d" main
