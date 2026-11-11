@@ -15137,10 +15137,27 @@ class ReleaseCheck(ReviewEnv):
         }
         for state, (comment, want) in bad.items():
             with self.subTest(state=state):
-                _, lines, err, _ = self.release([7], comments=[comment])
+                reads = self.one_commit_reads() if state == "stale" else {}  # a stale record's clean-merge walk reads the live head
+                _, lines, err, host = self.release([7], comments=[comment], **reads)
+                if state == "stale":
+                    self.assertIn(self.head("feat"), host.commit_reads, "the stale record's walk did not read the live head, so the case tests nothing")
                 self.assertEqual(lines, [want], err)
         _, lines, err, _ = self.release([7], comments=[self.review(7)])
         self.assertEqual(lines, ["#7 PASS"], err)
+
+    def one_commit_reads(self):
+        """-> the commit reads of `release` for a live head that is one commit on a parent with another tree. The clean-merge walk of a stale
+        record reads that head, finds no merge and stops there, so its line keeps the state alone, with no unknown suffix."""
+        live, parent = self.head("feat"), "ab" * 20
+        return {"commits": {live: [parent], parent: []}, "trees": {live: "cd" * 20, parent: "ef" * 20}}
+
+    def test_check_2_b_a_stale_record_whose_walk_cannot_read_the_head_names_the_unknown_walk(self):
+        # Control: the walk's commit read fails, so the stale line keeps its state and adds the unknown why, the one the walk gives.
+        rc, lines, err, _ = self.release([7], comments=[self.review(7, head=REVIEW_OLD_HEAD)])
+        line = self.line_of(lines, 7)
+        self.assertTrue(line.startswith("#7 FAIL: the record is for head 0f0f0f0f0; "), line)
+        self.assertIn(f"; {merge.REVIEW_SURVIVAL_UNKNOWN} (", line, "the stale line lacks the unknown walk's why: " + line)
+        self.assertEqual(rc, 1, err)
 
     def test_check_2_a_record_that_names_another_pr_does_not_count_for_this_one(self):
         stray = review_comment(9, 7, record_text(n=8, head=self.head()))  # on #7's thread, but it names #8
