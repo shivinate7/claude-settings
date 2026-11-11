@@ -1,0 +1,14 @@
+{
+  "id": "readme-mcp-merge-cites",
+  "title": "Back README.md lines 193-196 and debt mcp-merge-no-repo-tag lines 3, 7 and 9 with cites",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "The batch 80 prose judge found these lines unbacked on main.",
+  "note": "Runner 8, 12:56 CST Nov 11, batch 80 (PR 2592) prose judge: README.md 193-196 unbacked (no cite for the merge --repo checkout read, the cs-repo tag gate, rule/decision merge-confirm-repo, or the non-checkout stop); docs/debts/mcp-merge-no-repo-tag.md lines 3, 7 and 9 unbacked. 62 lines UNKNOWN past the call cap. A fix of items on main, so the freeze allows a lane (coordinator 13:00 CST, triage's call on when).",
+  "source": "runner 8 via the coordinator, 2026-11-11 13:00 CST",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:01:00-06:00",
+  "blockedBy": []
+}

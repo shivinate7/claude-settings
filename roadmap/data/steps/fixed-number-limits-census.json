@@ -1,0 +1,14 @@
+{
+  "id": "fixed-number-limits-census",
+  "title": "Drop the 30-word sentence cap, and retire every fixed number that refuses or fails without an owner ruling",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "Arbitrary static numbers fail work that is fine; the owner ruled them out.",
+  "note": "R37 (owner 12:54 and 12:56 CST Nov 11, relayed by the retrospective; plan 7066904). Owner 12:54: \"i thought i eliminated all STE requirements from everywhere in the repo weeks ago (along with hard limits like 30 vs 31 words etc, and instead just say keep things tight or oh ythere's too much verbiage / reptition -- given my disdain for hard arbitrary static numeric limits)\"; 12:56: \"A -- and im sure this 30 word thing is only one of many stale digit level hooks\". Ruling: STE001 (max_words 30) stops failing; wordiness and repetition go to reviewers and judges; the lint, its action, codes and rule anchor output-write-in-ste drop \"STE\" (step ste-lint-rename). A read-only census (Explore Sonnet, started 12:57 CST by the retrospective) lists every fixed number that refuses or fails; each one the owner did not rule is retired or derived from measured runs. Home: decision plain-prose-lint, rewritten in place. Measured: 73 of 3561 commits on main since Nov 4 (2%) name an STE fix or a sentence split.",
+  "source": "owner 2026-11-11 12:54-12:56 CST, relayed by the retrospective session",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:01:00-06:00",
+  "blockedBy": []
+}

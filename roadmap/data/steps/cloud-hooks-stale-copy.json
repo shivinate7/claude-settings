@@ -1,0 +1,14 @@
+{
+  "id": "cloud-hooks-stale-copy",
+  "title": "A long cloud session picks up hook changes from main, not only the copy it installed at start",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "A stale guard copy lets mistakes through that main's guard refuses.",
+  "note": "Coordinator 13:00 CST Nov 11: a long cloud session runs the hooks it installed at start. The coordinator ran a guard copy older than 10e38b0ae (lane start: effort field and brief as prompt) until 12:50 CST today, so 7 lane starts sent a bare \"/effort medium\" prompt and the lane-effort-pin guard never saw them (retrospective brief audit, 12:56 CST). The guard that would have stopped it is lane-effort-pin, which was not loaded.",
+  "source": "coordinator 2026-11-11 13:00 CST",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:01:00-06:00",
+  "blockedBy": []
+}

@@ -1,0 +1,14 @@
+{
+  "id": "subagent-handback-skipped",
+  "title": "Find why background agents end without calling SubagentHandback, and fix the cause",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "A report that never arrives costs a resume and can stall a lane.",
+  "note": "Owner feedback 12:57 CST Nov 11 (via the coordinator 13:00 CST), from a tile-windows coordinator session (10:45-12:55 CST): a test-author (77 tool uses, about 22 min) and a design-reviewer (79 tool uses, about 39 min) ended without calling SubagentHandback; the harness said \"ended without delivering a report\". Each sent a full report when asked by SendMessage. Ask: read those two transcripts' last turns (the tile-windows session transcript holds both task notifications; search \"ended without delivering a report\"), find why the call was skipped (long run, a final message with no call, or a context limit), and fix the cause in the agent definitions or a SubagentStop hook.",
+  "source": "owner feedback 2026-11-11 12:57 CST, via the coordinator 13:00 CST",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:01:00-06:00",
+  "blockedBy": []
+}

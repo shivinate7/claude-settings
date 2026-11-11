@@ -1,12 +1,12 @@
 {
- "title": "The agent-brief check refuses a brief that asks a role to write paths its role may not write",
- "phase": "now",
- "status": "todo",
- "order": 991,
- "owner": "claude-settings",
- "why": "Triage briefed a test-author to resolve a merge whose only conflict was in a product file; the role may not write it, so one agent run was wasted (note brief-role-scope-mismatch, 11:38 CST Nov 10).",
- "note": "Owner-shared incident (owner chat 11:24 CST Nov 11, repo 77-rollover): a test-author briefed to \"write red checks for v4.3 rules\" was refused writing harness/check_rules.py; deliverables 1-5 needed tooling (the checker, excel_run.ps1 -Commit, README, runs/.gitignore). The guard was right; the cost was a wasted spawn and an owner question (A builder / B widen scope) that the role rules already answer. Direction: catch it at spawn, before the agent runs; the refusal tells the orchestrator to brief a builder for the tooling first, whose red run on today's code is its proof, then a test-author for the cases. Never widen test-author scope to tooling. Filed by triage 11:40 CST Nov 10, from its own mistake on #2268. Check: hooks/agent_brief.py compares the spawn's role with the paths the brief names to write or resolve, and refuses a test-author brief that resolves a product path, or a builder brief that edits a test path. Red case first. Freeze: triage may build it with agents (owner 11:26 CST). Folded in: step brief-role-scope (Nov 8, lane timing-tests, same check as a warning; one home: the role guard's write-path constants).",
- "updatedAt": "2026-11-11T11:25:00-06:00",
- "lane": "",
- "blockedBy": []
+  "title": "The agent-brief check refuses a brief that asks a role to write paths its role may not write",
+  "phase": "now",
+  "status": "todo",
+  "order": 991,
+  "owner": "claude-settings",
+  "why": "Triage briefed a test-author to resolve a merge whose only conflict was in a product file; the role may not write it, so one agent run was wasted (note brief-role-scope-mismatch, 11:38 CST Nov 10).",
+  "note": "Owner-shared incident (owner chat 11:24 CST Nov 11, repo 77-rollover): a test-author briefed to \"write red checks for v4.3 rules\" was refused writing harness/check_rules.py; deliverables 1-5 needed tooling (the checker, excel_run.ps1 -Commit, README, runs/.gitignore). The guard was right; the cost was a wasted spawn and an owner question (A builder / B widen scope) that the role rules already answer. Direction: catch it at spawn, before the agent runs; the refusal tells the orchestrator to brief a builder for the tooling first, whose red run on today's code is its proof, then a test-author for the cases. Never widen test-author scope to tooling. Filed by triage 11:40 CST Nov 10, from its own mistake on #2268. Check: hooks/agent_brief.py compares the spawn's role with the paths the brief names to write or resolve, and refuses a test-author brief that resolves a product path, or a builder brief that edits a test path. Red case first. Freeze: triage may build it with agents (owner 11:26 CST). Folded in: step brief-role-scope (Nov 8, lane timing-tests, same check as a warning; one home: the role guard's write-path constants). Widened (owner feedback 12:57 CST via the coordinator 13:00 CST, from a tile-windows coordinator session): four incidents. (a) A builder brief said \"add a check under test/\"; builder-test-edit refused its Write to test/move.ps1. (b) A design-reviewer brief said write, commit and push a review; the role has no Write tool. (c) A designer brief named design/mockups/; designer-scope allows only docs/design. (d) A finished designer was resumed by SendMessage; its worktree was gone, so worktree-home refused it. Ask: a PreToolUse check on Agent spawns and on SendMessage resumes that refuses before the spawn and names the right role (test files to a test-author, Markdown records to a record-writer, a design-reviewer gets no write, a designer writes only in its design folder), and refuses a resume whose worktree is gone. Show it red on each of the four brief shapes first.",
+  "updatedAt": "2026-11-11T13:01:00-06:00",
+  "lane": "",
+  "blockedBy": []
 }
