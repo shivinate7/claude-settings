@@ -706,8 +706,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   Home: decision question-form; decision reply-judge-samples-never-refuses; rule
   outcomes-stale-decision-protocol.
 
-- **R44 (proposed, waits for the owner's yes). Child repos follow claude-settings, with cited
-  exceptions only.** Owner 13:57 CST Nov 11: "i don't want it to be that the repoos like Q_max have
+- **R44. Child repos follow claude-settings, with cited exceptions only.** Owner 14:05 CST Nov 11: "on
+  r44 yea agreed A build all 3". Owner 13:57 CST Nov 11: "i don't want it to be that the repoos like Q_max have
   adopted a ton of old rules and they just stick in them and claude-settings comes and is unable to
   bring that lift immediately". Read 13:58 CST: the mandate exists (decision session-tiers, Child
   repos, owner 2026-11-02 14:02 CST: a child contradicts a parent line only where it cites it as a
