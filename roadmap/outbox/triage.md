@@ -653,3 +653,9 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Note: MESSAGE_COPULAS lacks remains, stays, appears, it's, that's.
 - Note: lint/test_settings_matcher.py:113-119 repeats test_guard_matcher_covers_sendmessage.
 - Note: mutate_guard.py ignores a top-level MUTATE_ONLY, so a brief's one-mutant command runs the whole table (test-author, 20:05 CST).
+
+## 2026-11-10 20:17 CST: from lane guard-matcher-github-mcp (#2571), via coordinator; sort after the drain
+- Debt, live once #2571 lands: the DRAFT_PR_REASON remedy (hooks/guard_merge.py:287) says "Add --draft to gh pr create". It also fires on mcp__github__create_pull_request, where the fix is `draft: true`.
+- Note: enable_pr_auto_merge (lint/report_guard.py:1939) is a merge route that no rule routes. It is allowed.
+- Note: update_pull_request is routed but unjudged, so `draft: false` marks a PR ready with no rule.
+- Note: hooks/test_mutate_ci.py:1718-1719 repeats WALK_SUITES in place of reading it (rule building-allow-list-is-the-constant).
