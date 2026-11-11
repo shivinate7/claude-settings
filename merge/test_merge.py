@@ -13148,6 +13148,18 @@ CLOUD_ALLOW_RULES = tuple(f"Bash({shim} * --confirm{tail})" for shim in CLOUD_AL
 # A role rule allows one exact `merge --role <tier>` per tier in merge.MERGE_ROLES. No `*` and no word after the tier, so it cannot
 # pass --confirm or a PR number. The tiers come from decision session-tiers (the session tier design).
 CLOUD_ROLE_RULES = tuple(f"Bash({shim} --role {tier})" for shim in CLOUD_ALLOW_SHIMS for tier in sorted(merge.MERGE_ROLES))
+# The cloud batch runner closes pull requests and comments on them, and auto mode refuses those `gh api` calls with no allow rule (decision
+# auto-mode-owner-acts). These two rules allow one close of a pull request and one comment from a body file, and no other `gh api` call.
+GH_CLOSE_RULE = "Bash(gh api -X PATCH repos/shivinate7/*/pulls/* -f state=closed)"
+GH_COMMENT_RULE = "Bash(gh api -X POST repos/shivinate7/*/issues/*/comments -F body=@*)"
+GH_CLOUD_RULES = (GH_CLOSE_RULE, GH_COMMENT_RULE)
+
+def claude_rule_matches(rule, command):
+    """True when the Bash allow `rule` allows `command`, on Claude Code's documented wildcard semantics (the permissions docs, the wildcard
+    patterns section): `*` matches any text, spaces included; the rule must match the whole command; a newline ends a
+    command, so `*` never matches one."""
+    assert rule.startswith("Bash(") and rule.endswith(")"), rule
+    return re.fullmatch(r"[^\n]*".join(re.escape(part) for part in rule[len("Bash("):-1].split("*")), command) is not None
 # One left-to-right pass over a shell script: a quoted string, an escaped character, or a comment, whichever starts first. A `#` opens a
 # comment at a line start or after a space, `;`, `&`, `|` or `(`, never inside a string or in `$#` and `${#x}`.
 SH_TOKEN = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|\\.|(?:^|(?<=[\s;&|(]))#[^\n]*""", re.M | re.S)
@@ -13219,25 +13231,48 @@ class ShellScan(unittest.TestCase):
 
 class CloudAllow(unittest.TestCase):
     """merge/cloud_allow.json holds the `merge --confirm` and `merge --role` allow rules that only a cloud session's settings.json gets
-    (install.sh's cloud branch). A local settings.json is a link to the repo's settings.json and gets none."""
+    (install.sh's cloud branch), and the two `gh api` rules of ruling 163 a. A local settings.json is a link to the repo's settings.json and
+    gets none. A rule is a merge-shim rule (its command word is a home shim) or a gh rule (its command word is `gh`). Each part is checked
+    exactly, and the file holds five rules in all, so a rule in neither part fails."""
 
     def allow(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             return json.load(f)["permissions"]["allow"]
 
-    # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays
-    def test_the_rules_file_holds_three_rules_and_no_coordinator_role_rule(self):
-        allow = self.allow()
-        self.assertEqual(len(allow), 3, allow)
-        self.assertNotIn("Bash(~/.claude/bin/merge --role coordinator)", allow)
-        self.assertIn("Bash(~/.claude/bin/merge --role batch-runner)", allow)
+    @staticmethod
+    def command_word(rule):
+        if not (rule.startswith("Bash(") and rule.endswith(")")):
+            return ""
+        return rule[len("Bash("):-1].split(" ", 1)[0]
 
-    def test_the_rules_file_is_exactly_the_confirm_and_role_rules_of_the_home_shim(self):
+    def merge_allow(self):
+        return [rule for rule in self.allow() if self.command_word(rule) in CLOUD_ALLOW_SHIMS]
+
+    def gh_allow(self):
+        return [rule for rule in self.allow() if self.command_word(rule) == "gh"]
+
+    # decision session-tiers: the coordinator never merges, so its role rule goes; the batch-runner rule stays
+    def test_the_merge_rules_hold_three_rules_and_no_coordinator_role_rule(self):
+        allow = self.merge_allow()
+        self.assertEqual(len(allow), 3, allow)
+        self.assertNotIn("Bash(~/.claude/bin/merge --role coordinator)", self.allow())
+        self.assertIn("Bash(~/.claude/bin/merge --role batch-runner)", self.allow())
+
+    # the two gh rules join the three merge rules (decision auto-mode-owner-acts)
+    def test_the_rules_file_holds_five_rules_in_all(self):
+        self.assertEqual(len(self.allow()), 5, self.allow())
+
+    def test_the_rules_file_has_only_permissions_allow(self):
         with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
             data = json.load(f)
         self.assertEqual(set(data), {"permissions"})
         self.assertEqual(set(data["permissions"]), {"allow"})
-        self.assertEqual(sorted(data["permissions"]["allow"]), sorted(CLOUD_ALLOW_RULES + CLOUD_ROLE_RULES))  # no more, no fewer, no repeat
+
+    def test_the_merge_rules_are_exactly_the_confirm_and_role_rules_of_the_home_shim(self):
+        self.assertEqual(sorted(self.merge_allow()), sorted(CLOUD_ALLOW_RULES + CLOUD_ROLE_RULES))  # no more, no fewer, no repeat
+
+    def test_the_gh_rules_are_exactly_the_close_and_comment_rules_of_ruling_163_a(self):
+        self.assertEqual(sorted(self.gh_allow()), sorted(GH_CLOUD_RULES))  # no more, no fewer, no repeat
 
     def test_no_rule_names_the_script_or_python(self):
         for rule in self.allow():
@@ -13245,8 +13280,8 @@ class CloudAllow(unittest.TestCase):
                 self.assertNotIn("merge.py", rule)
                 self.assertNotIn("python", rule)
 
-    def test_each_rules_command_word_is_the_home_shim(self):
-        for rule in self.allow():
+    def test_each_merge_rules_command_word_is_the_home_shim(self):
+        for rule in self.merge_allow():
             with self.subTest(rule=rule):
                 self.assertTrue(rule.startswith("Bash(") and rule.endswith(")"), rule)
                 self.assertIn(rule[len("Bash("):-1].split(" ", 1)[0], CLOUD_ALLOW_SHIMS)
@@ -13257,12 +13292,12 @@ class CloudAllow(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertNotIn(rule[len("Bash("):].split(" ", 1)[0], ("merge", "bin/merge"))
 
-    def test_every_rule_is_a_confirm_shape_or_an_exact_role_command_and_none_is_broad(self):
+    def test_every_merge_rule_is_a_confirm_shape_or_an_exact_role_command_and_none_is_broad(self):
         narrow = re.compile(r"Bash\(~/\.claude/bin/merge \* --confirm( \*)?\)")
         role = re.compile(r"Bash\(~/\.claude/bin/merge --role (\S+)\)")
-        for rule in self.allow():
+        self.assertNotIn("Bash(*)", self.allow())
+        for rule in self.merge_allow():
             with self.subTest(rule=rule):
-                self.assertNotEqual(rule, "Bash(*)")
                 m = role.fullmatch(rule)
                 if m:
                     self.assertIn(m.group(1), merge.MERGE_ROLES, f"{rule} names a tier the code does not know")
@@ -13300,6 +13335,73 @@ class CloudAllow(unittest.TestCase):
                 for needle in ("merge.py", "bin/merge", "--confirm"):
                     self.assertNotIn(needle, rule)
                 self.assertFalse(rule.startswith("Bash(merge"), rule)
+
+class RuleWildcardMatch(unittest.TestCase):
+    """claude_rule_matches on literal rules, independent of the rules file."""
+
+    def test_star_matches_text_with_spaces(self):
+        self.assertTrue(claude_rule_matches("Bash(echo *)", "echo a b c"))
+
+    def test_the_rule_must_match_the_whole_command(self):
+        self.assertFalse(claude_rule_matches("Bash(gh api -X PATCH)", "gh api -X PATCH repos/x"))
+
+    def test_star_does_not_cross_a_newline(self):
+        self.assertFalse(claude_rule_matches("Bash(echo *)", "echo a\nrm -rf x"))
+
+    def test_a_literal_rule_matches_only_its_own_command(self):
+        self.assertTrue(claude_rule_matches("Bash(echo a)", "echo a"))
+        self.assertFalse(claude_rule_matches("Bash(echo a)", "echo ab"))
+
+# Ruling 163 a: the commands the two gh rules must allow, and the commands no rule in the file may allow.
+GH_CLOSE_COMMAND = "gh api -X PATCH repos/shivinate7/Degen/pulls/530 -f state=closed"
+GH_COMMENT_COMMAND = "gh api -X POST repos/shivinate7/Degen/issues/538/comments -F body=@/tmp/c.md"
+GH_REFUSED_COMMANDS = (
+    "gh api -X DELETE repos/shivinate7/Degen/pulls/530 -f state=closed",  # a method other than PATCH on pulls
+    "gh api -X PUT repos/shivinate7/Degen/pulls/5/merge",  # a merge, not a close
+    "gh api -X PATCH repos/other/x/pulls/1 -f state=closed",  # another owner's repository
+    "gh api -X PATCH repos/shivinate7/Degen/pulls/530 -f state=open",  # a reopen, not a close
+    "gh api -X POST repos/shivinate7/Degen/pulls/5/reviews -f event=COMMENT",  # a review, not a comment
+    "gh api -X DELETE repos/shivinate7/Degen/issues/comments/9",  # a delete of a comment
+    "gh api -X POST repos/shivinate7/Degen/issues/538/comments -f body=hello",  # an inline body, not a body file
+    "gh api -X PATCH repos/shivinate7/Degen/pulls/530 -f state=closed; rm -rf x",  # a second command after `;`
+    "gh api -X PATCH repos/shivinate7/Degen/pulls/530 -f state=closed\nrm -rf x",  # a second command on a new line
+    "gh api -X POST repos/shivinate7/Degen/issues/538/comments -F body=@/tmp/c.md\nrm -rf x",  # the same, past the comment rule's `*`
+)
+
+class CloudGhRules(unittest.TestCase):
+    """The two gh rules of merge/cloud_allow.json (ruling 163 a), probed with claude_rule_matches. Each case asserts first that the rule
+    it probes is in the file, so a missing rule fails by name."""
+
+    def allow(self):
+        with open(CLOUD_ALLOW_FILE, encoding="utf-8") as f:
+            return json.load(f)["permissions"]["allow"]
+
+    def allowing(self, command):
+        """The rules in the file that allow `command`."""
+        return [rule for rule in self.allow() if claude_rule_matches(rule, command)]
+
+    def test_a_close_of_a_degen_pull_request_is_allowed(self):
+        self.assertIn(GH_CLOSE_RULE, self.allow(), "merge/cloud_allow.json has no rule that closes a pull request")
+        self.assertIn(GH_CLOSE_RULE, self.allowing(GH_CLOSE_COMMAND),
+                      f"no rule in merge/cloud_allow.json allows {GH_CLOSE_COMMAND!r}")
+
+    def test_a_comment_from_a_body_file_on_a_degen_issue_is_allowed(self):
+        self.assertIn(GH_COMMENT_RULE, self.allow(), "merge/cloud_allow.json has no rule that comments from a body file")
+        self.assertIn(GH_COMMENT_RULE, self.allowing(GH_COMMENT_COMMAND),
+                      f"no rule in merge/cloud_allow.json allows {GH_COMMENT_COMMAND!r}")
+
+    def test_no_rule_in_the_file_allows_a_refused_command(self):
+        self.assertIn(GH_CLOSE_RULE, self.allow(), "merge/cloud_allow.json has no rule that closes a pull request")
+        self.assertIn(GH_COMMENT_RULE, self.allow(), "merge/cloud_allow.json has no rule that comments from a body file")
+        for command in GH_REFUSED_COMMANDS:
+            with self.subTest(command=command):
+                self.assertFalse(self.allowing(command), f"a rule in merge/cloud_allow.json allows {command!r}")
+
+    def test_control_a_too_broad_rule_matches_each_one_line_refusal(self):
+        # The refusals above mean something only if the matcher can say yes: `gh api *` must match each one that has no newline.
+        for command in (c for c in GH_REFUSED_COMMANDS if "\n" not in c):
+            with self.subTest(command=command):
+                self.assertTrue(claude_rule_matches("Bash(gh api *)", command), f"the matcher does not match {command!r} with a broad rule")
 
 # ------------------------------------------------------------------ the review record
 # The review record is a comment on the pull request. `merge <pr> --review-record` prints it, a lane posts it, and `merge --reviewed` reads

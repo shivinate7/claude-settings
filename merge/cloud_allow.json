@@ -3,7 +3,9 @@
     "allow": [
       "Bash(~/.claude/bin/merge * --confirm)",
       "Bash(~/.claude/bin/merge * --confirm *)",
-      "Bash(~/.claude/bin/merge --role batch-runner)"
+      "Bash(~/.claude/bin/merge --role batch-runner)",
+      "Bash(gh api -X PATCH repos/shivinate7/*/pulls/* -f state=closed)",
+      "Bash(gh api -X POST repos/shivinate7/*/issues/*/comments -F body=@*)"
     ]
   }
 }
