@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:10 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:19 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -325,7 +325,8 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   rounds, builder third tries, and cost from R32's audit. Known data: Haiku round 1 fails 79% of
   reviews, Sonnet 38% (R9; the share that is noise is unknown). A row moves only on a measured pass
   rate. A move above Sonnet needs the owner's grant (rule roles-sonnet-is-the-ceiling). Runs after
-  R32's audit. Home: decision agent-model-cap.
+  R32's audit, and folds in docs/todo.md line 9 (roadmap step c201: one lane per role on the
+  next model down). Home: decision agent-model-cap.
 
 ### 3.8 One rounds record; no round 3 after a pass
 
@@ -354,7 +355,9 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   2. A test case's body differs from both parents' versions.
   3. A skip or expected-fail mark, or a changed assertion, that neither parent had.
   4. New test content that neither parent had. That stays a test-author's work.
-  5. A change to test config or a mutation test beyond one parent's version.
+  5. A change to test config beyond one parent's version, or any change to a mutation test. Page
+     item 447 a (owner 2026-11-08 17:19 CST) stands: a merge that conflicts in a mutation test
+     still goes to a test-author.
   Each case is shown red on a dropped or weakened test before the route opens. Until then the old route
   stays. It changes a guard, so the rounds and the net-value rule apply. Home: decision
   builders-cannot-edit-tests, rewritten in place.
@@ -403,7 +406,9 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   "may an override travel by relay?": "q1 -- yes". A relay counts only in R18 point 5's form: his exact
   words, their time, and the one session and act they cover, checked against the sender's feedback log.
   The receiving session prints the same receipt line. Until R18 point 5's check is built (stage 4), only
-  his typed words and a page save grant an override.
+  his typed words and a page save grant an override. This changes decision owner-override's sentence
+  "An override covers only the session where the owner typed it": a relay in that form reaches the
+  one session it names.
 
 ### 3.12 A lane never stalls on a popup
 
@@ -529,6 +534,19 @@ then R29.
   htan it being preloaded"), against decision agent-model-cap, which sets effort by the start call and
   sends the brief as the first message. The cuts are ruled on its report. Home: decision
   agent-model-cap.
+  First report, 11:10 CST: partial, because agents have no session tools. Owner box answer 11:12 CST:
+  "given my spend says i spent like thousands of dollars on like nov 8 -- i feel like u didn't properly
+  catch where all my spend has gone. also remember, dollar savings shouldn't come at the cost of speed
+  -- speed is more important (but it's all relative and not absolute)", and "Finish measuring first".
+  So: a read-only measuring session (Sonnet, started 11:13 CST) sums spend by day, role, repo and
+  model over every session. No cut is ruled before it reports. A cut that slows work is weighed
+  against the speed it costs, and speed wins a close call.
+  Measured 11:17 CST (800 sessions back to Nov 3; costs are each session's whole life): sessions
+  active Nov 7-9 cost at least $22,075. Opus lanes, all started before the Sonnet lane ruling (owner
+  2026-11-08 12:21 CST), are $19,889 of it, 387 lanes; no Opus lane started after it. Cost per lane:
+  Opus median $22.9, mean $51.4; Sonnet median $11.9, mean $16.1. Lane life, start to archive: Opus
+  median 64 h, Sonnet 28 h. Standing sessions, both Opus and missed by that listing: coordinator
+  $1,839 and triage $1,567 since Nov 3. Not seen: hook judges, local sessions, the other account.
   Compaction, owner 11:09 CST: "i frankly dont mind compacting sooner given we have such good handoff
   hooks". Today the coordinator compacts at 441,600 tokens and lanes at 384,000; why they differ is
   unmeasured (decision idle-resume-compacts). Every standing session and lane compacts sooner. The audit
