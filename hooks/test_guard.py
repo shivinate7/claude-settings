@@ -822,6 +822,12 @@ PUSHBEHIND = os.path.join(ROOT, "pushbehind")            # main checkout, origin
 PUSHMASTERAHEAD = os.path.join(ROOT, "pushmasterahead")  # master checkout, local master ahead; no local main
 PUSHNOMAIN = os.path.join(ROOT, "pushnomain")            # lane checkout; local trunk and feat, no main or master
 PUSHLOCALAHEAD = os.path.join(ROOT, "pushlocalahead")    # PUSHAHEAD's state, with a local-path origin
+# Every-branch fixtures (rule push-all-main): main equal to its tracking ref on a network origin. PUSHALLNOAGENT holds
+# no agent-named local branch; each of the other three adds one, and differs from PUSHALLNOAGENT only in that branch.
+PUSHALLNOAGENT = os.path.join(ROOT, "pushallnoagent")          # main only
+PUSHALLAGENT = os.path.join(ROOT, "pushallagent")              # plus agent-0123456789abcdef
+PUSHALLAGENTWT = os.path.join(ROOT, "pushallagentwt")          # plus worktree-agent-0123456789abcdef
+PUSHALLAGENTCLAUDE = os.path.join(ROOT, "pushallagentclaude")  # plus claude/agent-0123456789abcdef
 # The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -835,6 +841,9 @@ PUSH_AGENT_LACKS = ("Approving the prompt", "push origin claude/agent-", "push o
 # allowed when it would not. A refusal's remedy never names main or master as a target.
 PUSH_ALL_RULE = "push-all-main"
 PUSH_ALL_LACKS = ("Approving the prompt", "push origin main", "push origin master", "HEAD:main", "HEAD:master")
+# A refusal for an agent-named branch names no agent branch in its remedy (rule git-remedy-never-names-target).
+PUSH_ALL_AGENT_LACKS = ("push origin agent-", "HEAD:agent-", "push origin claude/agent-", "HEAD:claude/agent-",
+                        "push origin worktree-agent-", "HEAD:worktree-agent-")
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -2525,6 +2534,26 @@ def _build_push():
         sys.exit("fixture setup failed in build_fixtures: PUSHLOCALAHEAD needs a local-path origin, "
                  "and local main ahead")
 
+    # The every-branch fixtures (rule push-all-main). Scope before subject: each reads back that the checkout is main,
+    # that main equals its tracking ref, and that its local branches are exactly main and the one agent-named branch
+    # the fixture names (or main alone), so no case judges a fixture that holds a branch it does not name.
+    for where, branch in ((PUSHALLNOAGENT, None), (PUSHALLAGENT, "agent-0123456789abcdef"),
+                          (PUSHALLAGENTWT, "worktree-agent-0123456789abcdef"),
+                          (PUSHALLAGENTCLAUDE, "claude/agent-0123456789abcdef")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        if branch:
+            run_vcs(where, "branch", branch)
+        heads = sorted(run_vcs(where, "for-each-ref", "--format=%(refname)", "refs/heads/").stdout.split())
+        want = sorted(["refs/heads/main"] + (["refs/heads/" + branch] if branch else []))
+        main_ok = bool(_ref(where, "refs/heads/main")) and (
+            _ref(where, "refs/heads/main") == _ref(where, "refs/remotes/origin/main"))
+        if _head(where) != "refs/heads/main" or not main_ok or heads != want:
+            sys.exit("fixture setup failed in build_fixtures: %r needs main equal to origin/main and local branches "
+                     "%s, got %s" % (where, want, heads))
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2832,7 +2861,8 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
               PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG,
               PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET, PUSHAHEADAGENT, PUSHNOTRACK, PUSHBEHIND,
-              PUSHMASTERAHEAD, PUSHNOMAIN, PUSHLOCALAHEAD],
+              PUSHMASTERAHEAD, PUSHNOMAIN, PUSHLOCALAHEAD,
+              PUSHALLNOAGENT, PUSHALLAGENT, PUSHALLAGENTWT, PUSHALLAGENTCLAUDE],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -9638,6 +9668,16 @@ def all_allowed(name, tail, cwd=PUSHFEAT, **kw):
     sh("push: " + name, VCS + " push " + tail, "allow", cwd=cwd, silent=True, **kw)
 
 
+def all_agent_refused(name, tail, cwd):
+    """One plain push the all-branches rule refuses for a local agent-named branch that --all or --branches would send
+    to origin, while main equals its tracking ref. A deny under its rule id, whose reason names an agent, prints the
+    lane's remedy, and names neither a main target nor an agent branch as its target. The reason may not say that main
+    would update, since in these fixtures it would not."""
+    sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
+       carries=("Rule (Git): ", "agent", PUSH_AGENT_REMEDY),
+       lacks=PUSH_ALL_LACKS + PUSH_ALL_AGENT_LACKS + ("may update the default branch",))
+
+
 # A failed ref read refuses, since unknown is never safe. PUSHFAILSHIM is a git stand-in that fails every for-each-ref
 # and runs the real git for the rest, so PUSHFEAT's tracking-ref read comes back unknown although local main equals it.
 PUSHFAILSHIM = os.path.join(ROOT, "pushfailshim")
@@ -9977,6 +10017,28 @@ all_refused("--all to origin, which has no main ref, from a branch tracking a se
 # A failed ref read refuses: the tracking ref cannot be read, so the push may write main.
 all_refused("--all from a lane checkout, a failed ref read, refuses", "--all origin", cwd=PUSHFEAT,
             env_path=PUSHFAILSHIM + os.pathsep + GIT_PATH)
+
+# REFUSED, rule push-all-main, for a local agent-named branch. --all and --branches send every local branch to origin,
+# so a branch named like an agent worktree reaches origin although main equals its tracking ref. The refusal's remedy is
+# a push of named branches. The glob refspec that sends every branch to main is refused the same way.
+for form in ("--all", "--branches"):
+    all_agent_refused(form + " with a local agent-named branch, main matching its tracking ref, refuses",
+                      form + " origin", cwd=PUSHALLAGENT)
+    all_agent_refused(form + " with a local worktree-agent-named branch, main matching its tracking ref, refuses",
+                      form + " origin", cwd=PUSHALLAGENTWT)
+    all_agent_refused(form + " with a local claude/agent-named branch, main matching its tracking ref, refuses",
+                      form + " origin", cwd=PUSHALLAGENTCLAUDE)
+all_agent_refused("glob refspec refs/heads/*:refs/heads/* with a local agent-named branch, main matching its tracking "
+                  "ref, refuses", "origin refs/heads/*:refs/heads/*", cwd=PUSHALLAGENT)
+# Green controls beside them. The same fixture with no agent-named branch is silent, and a push of a named branch is
+# unchanged by an agent-named branch that sits in the same repo.
+for form in ("--all", "--branches"):
+    all_allowed(form + " with no agent-named local branch, main matching its tracking ref, is silent", form + " origin",
+                cwd=PUSHALLNOAGENT)
+all_allowed("glob refspec refs/heads/*:refs/heads/* with no agent-named local branch, main matching its tracking ref, "
+            "is silent", "origin refs/heads/*:refs/heads/*", cwd=PUSHALLNOAGENT)
+push_case("origin feature with a local agent-named branch present, is silent", "origin feature", "allow",
+          cwd=PUSHALLAGENT, silent=True)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
