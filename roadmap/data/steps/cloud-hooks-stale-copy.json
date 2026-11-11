@@ -6,9 +6,9 @@
   "phase": "next",
   "lane": "",
   "why": "A stale guard copy lets mistakes through that main's guard refuses.",
-  "note": "Coordinator 13:00 CST Nov 11: a long cloud session runs the hooks it installed at start. The coordinator ran a guard copy older than 10e38b0ae (lane start: effort field and brief as prompt) until 12:50 CST today, so 7 lane starts sent a bare \"/effort medium\" prompt and the lane-effort-pin guard never saw them (retrospective brief audit, 12:56 CST). The guard that would have stopped it is lane-effort-pin, which was not loaded.",
+  "note": "Coordinator 13:00 CST Nov 11: a long cloud session runs the hooks it installed at start. The coordinator ran a guard copy older than 10e38b0ae (lane start: effort field and brief as prompt) until 12:50 CST today, so 7 lane starts sent a bare \"/effort medium\" prompt and the lane-effort-pin guard never saw them (retrospective brief audit, 12:56 CST). The guard that would have stopped it is lane-effort-pin, which was not loaded. Owner 12:59 CST (relayed by the retrospective): \"its weird a lane can be spawned without its brief first preprovided like somesthings going wrong if the lane/session just autospawns and then gets filled in after the fact, feels weird\". Plan 691a84e places this as stage 3 item 3.10.",
   "source": "coordinator 2026-11-11 13:00 CST",
   "owner": "triage",
-  "updatedAt": "2026-11-11T13:01:00-06:00",
+  "updatedAt": "2026-11-11T13:05:00-06:00",
   "blockedBy": []
 }
