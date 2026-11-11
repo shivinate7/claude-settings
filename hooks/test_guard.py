@@ -9932,6 +9932,17 @@ all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a lane checkout, l
             "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEADLANE)
 all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a detached checkout, local main ahead, is silent",
             "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEADDET)
+# A colon-less glob names the same ref on both sides: `refs/tags/v*` is `refs/tags/v*:refs/tags/v*`. Its source
+# cannot name main, so it sends no main and is silent, even with local main ahead of its tracking ref.
+all_allowed("glob refspec refs/tags/v* (colon-less) from a lane checkout, local main ahead, is silent",
+            "origin 'refs/tags/v*'", cwd=PUSHAHEADLANE)
+all_allowed("glob refspec refs/heads/lane/* (colon-less) from a lane checkout, local main ahead, is silent",
+            "origin 'refs/heads/lane/*'", cwd=PUSHAHEADLANE)
+# A colon-less glob whose source reaches main maps onto itself and reaches main, so it refuses as the colon form does.
+all_refused("glob refspec refs/heads/* (colon-less) from a lane checkout, local main ahead, refuses",
+            "origin 'refs/heads/*'", cwd=PUSHAHEADLANE)
+all_refused("glob refspec refs/heads/main* (colon-less) from a lane checkout, local main ahead, refuses",
+            "origin 'refs/heads/main*'", cwd=PUSHAHEADLANE)
 # A tracking ref that is missing, or that differs from local main, refuses. The push may write main.
 all_refused("--all from a lane checkout, no origin/main tracking ref, refuses", "--all origin", cwd=PUSHNOTRACK)
 all_refused("--branches from a lane checkout, no origin/main tracking ref, refuses", "--branches origin",
