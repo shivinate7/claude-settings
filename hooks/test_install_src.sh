@@ -4019,11 +4019,12 @@ pinmove5() {
   else ok "$name"; fi
 }
 
-# ---- mergepin cases: a cloud merge run from the clone never moves the live pin off local main ----------
+# ---- mergepin cases: a cloud merge run from the clone moves the live pin only to main, after main is origin's ----------
 # Decision merge-reinstalls-from-main, ruling 4: only merge/install_from_main.sh moves the pin. That run takes
 # the install lock and runs install.sh from the pin. In a cloud run install.sh takes the pin as its source (its
-# SCRIPT_DIR branch), so its cloud blocks see the pin, and they must leave it at local main. The one move is the
-# rename in merge/install_from_main.sh, and that runs only when local main is past the pin.
+# SCRIPT_DIR branch), so its cloud blocks see the pin, and they must leave it where it is. The one move is the
+# rename in merge/install_from_main.sh. That runs after local main fast-forwards to origin's main, and not at all
+# when local main holds a commit origin lacks.
 # Each case runs the clone's own merge/install_from_main.sh from the clone, as the coordinator's merge does.
 
 s12() { printf '%.12s' "$1"; }
@@ -4031,9 +4032,10 @@ s12() { printf '%.12s' "$1"; }
 # merge_run TAG SETUP: one cloud run of the clone's merge/install_from_main.sh, from live_pin_fixture TAG built
 # with its install files tracked. SETUP is plain; mirror (the clone carries claude-settings.cloudMirror, as a
 # clone install.sh made does); or local (main gets one commit that origin/main lacks). Sets mr_co, mr_pin, mr_link,
-# mr_origin, mr_want (the clone's local main after SETUP, before the run), mr_path_before (the link's resolved
-# path before the run), mr_out, mr_rc, mr_head_after (the pin's HEAD after) and mr_path_after (the link's resolved
-# path after). Returns 1 with mr_msg when the fixture or SETUP failed.
+# mr_origin, mr_want (the clone's local main after SETUP, before the run), mr_head_before and mr_path_before (the
+# pin's HEAD and the link's resolved path before the run), mr_out (stdout and stderr together), mr_rc, mr_head_after
+# (the pin's HEAD after) and mr_path_after (the link's resolved path after). Returns 1 with mr_msg when the fixture
+# or SETUP failed.
 merge_run() {
   mr_msg=""
   if ! live_pin_fixture "$1" install; then mr_msg="$lp_msg"; return 1; fi
@@ -4055,6 +4057,7 @@ merge_run() {
     *) mr_msg="unknown setup $2"; return 1 ;;
   esac
   mr_want=$(git -C "$mr_co" rev-parse --verify -q refs/heads/main)
+  mr_head_before=$(git -C "$mr_link" rev-parse HEAD 2>/dev/null)
   mr_path_before=$(realpwd "$mr_link")
   h=$(new_home); write_redirect "$h" "$lp_bare"
   cfg="$work/$1-cfg"; mr_cfg="$cfg"; stub_bin="$work/$1-bin"; make_curl_stub "$stub_bin"
@@ -4068,20 +4071,19 @@ merge_run() {
   return 0
 }
 
-# merge_pin_check NAME: after mr's run the pin keeps local main, the clone's main did not move, and the pin keeps
-# its path. A HEAD at origin/main is the defect's own mark, so it is named first. Returns 1 after a bad line.
+# merge_pin_check NAME: after mr's run the clone's main is origin's main, the pin's HEAD is origin's main, and the link
+# points at the tree that move made for it (<clone>-live-<12 hex of origin's main>). Returns 1 after a bad line.
 merge_pin_check() {
-  if [ "$mr_head_after" = "$mr_origin" ] && [ "$mr_origin" != "$mr_want" ]; then
-    bad "$1" "the cloud merge moved the live pin to origin/main ($(s12 "$mr_origin")), not local main ($(s12 "$mr_want"))"; return 1
+  mr_main_after=$(git -C "$mr_co" rev-parse --verify -q refs/heads/main 2>/dev/null)
+  if [ "$mr_main_after" != "$mr_origin" ]; then
+    bad "$1" "the run left the clone's local main at ${mr_main_after:-nothing}, want origin's main $(s12 "$mr_origin")"; return 1
   fi
-  if [ "$mr_head_after" != "$mr_want" ]; then
-    bad "$1" "the live pin HEAD is ${mr_head_after:-unreadable} after the run, want local main $(s12 "$mr_want")"; return 1
+  if [ "$mr_head_after" != "$mr_origin" ]; then
+    bad "$1" "the live pin HEAD is ${mr_head_after:-unreadable} after the run, want origin's main $(s12 "$mr_origin")"; return 1
   fi
-  if [ "$(git -C "$mr_co" rev-parse --verify -q refs/heads/main)" != "$mr_want" ]; then
-    bad "$1" "the run moved the clone's local main off $(s12 "$mr_want")"; return 1
-  fi
-  if [ "$mr_path_after" != "$mr_path_before" ]; then
-    bad "$1" "the live pin path moved from $mr_path_before to ${mr_path_after:-nothing}"; return 1
+  mr_want_path=$(realpwd "$mr_co-live-$(git -C "$mr_co" rev-parse --short=12 "$mr_origin")")
+  if [ -z "$mr_want_path" ] || [ "$mr_path_after" != "$mr_want_path" ]; then
+    bad "$1" "the live pin path is ${mr_path_after:-nothing}, want the rename target ${mr_want_path:-not made}"; return 1
   fi
   return 0
 }
@@ -4094,36 +4096,43 @@ merge_run_check() {
   bad "$1" "install.sh did not run (no 'Installing from' line): $mr_out"; return 1
 }
 
-# mergepin1: a cloud merge from a plain clone leaves the live pin at local main, at its own path.
+# mergepin1: a cloud merge from a plain clone, with local main behind origin/main. The helper fast-forwards main to
+# origin's, and the live pin moves to it by the rename.
 mergepin1() {
-  name="mergepin1: cloud merge, plain clone: the live pin keeps local main and its own path"
+  name="mergepin1: cloud merge, plain clone, local main behind origin: main fast-forwards to origin's and the live pin moves to it"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   if ! merge_run mergepin1 plain; then bad "$name" "fixture: $mr_msg"; return; fi
-  if merge_pin_check "$name" && merge_run_check "$name"; then ok "$name"; fi
+  if merge_run_check "$name" && merge_pin_check "$name"; then ok "$name"; fi
 }
 
 # mergepin2: the same with the clone marked cloudMirror. The mirror resume is the other cloud block that can move the pin.
 mergepin2() {
-  name="mergepin2: cloud merge, clone marked cloudMirror: the live pin keeps local main and its own path"
+  name="mergepin2: cloud merge, clone marked cloudMirror, local main behind origin: main fast-forwards to origin's and the live pin moves to it"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   if ! merge_run mergepin2 mirror; then bad "$name" "fixture: $mr_msg"; return; fi
-  if merge_pin_check "$name" && merge_run_check "$name"; then ok "$name"; fi
+  if merge_run_check "$name" && merge_pin_check "$name"; then ok "$name"; fi
 }
 
-# mergepin3: control. Local main is one commit past origin/main, a commit origin/main lacks, so the cloud blocks
-# cannot move the pin to origin/main. The rename in merge/install_from_main.sh is the only move: the pin path
-# becomes <clone>-live-<new 12 hex> and its HEAD is the new local main.
+# mergepin3: local main is one commit past origin/main, a commit origin/main lacks. The helper refuses: it exits 1
+# with one 'install not run' line, runs no install, and moves neither the clone's main nor the pin.
 mergepin3() {
-  name="mergepin3: control: local main one commit past origin: the cloud merge moves the pin to it by the rename"
+  name="mergepin3: cloud merge, local main one commit past origin: refused with exit 1 and one 'install not run' line; main and the pin do not move"
   if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
   if ! merge_run mergepin3 local; then bad "$name" "fixture: $mr_msg"; return; fi
-  want_path=$(realpwd "$mr_co-live-$(git -C "$mr_co" rev-parse --short=12 "$mr_want")")
-  if ! merge_run_check "$name"; then return; fi
-  if [ -z "$want_path" ] || [ "$mr_path_after" != "$want_path" ]; then
-    bad "$name" "the pin path is ${mr_path_after:-nothing}, want the rename target ${want_path:-not made}"
-  elif [ "$mr_head_after" != "$mr_want" ]; then
-    bad "$name" "the pin HEAD is ${mr_head_after:-unreadable}, want the new local main $(s12 "$mr_want")"
-  else ok "$name"; fi
+  if [ "$mr_rc" -ne 1 ]; then bad "$name" "merge/install_from_main.sh exited $mr_rc, want 1 for the refusal: $mr_out"; return; fi
+  if [ "$(printf '%s\n' "$mr_out" | grep -c .)" -ne 1 ] || ! printf '%s\n' "$mr_out" | grep -q '^install not run: '; then
+    bad "$name" "want one output line, 'install not run: ...': $mr_out"; return
+  fi
+  if [ "$(git -C "$mr_co" rev-parse --verify -q refs/heads/main)" != "$mr_want" ]; then
+    bad "$name" "the refusal moved the clone's local main off $(s12 "$mr_want")"; return
+  fi
+  if [ "$mr_head_after" != "$mr_head_before" ]; then
+    bad "$name" "the refusal moved the live pin HEAD from $(s12 "$mr_head_before") to ${mr_head_after:-unreadable}"; return
+  fi
+  if [ "$mr_path_after" != "$mr_path_before" ]; then
+    bad "$name" "the refusal moved the live pin path from $mr_path_before to ${mr_path_after:-nothing}"; return
+  fi
+  ok "$name"
 }
 
 # mergepin4: a cloud merge takes its files from main, never from the clone's lane branch. The clone keeps its branch,
@@ -5410,7 +5419,7 @@ caseM13() {
 }
 
 # caseM14 (control, d for install.sh): a cloud install that refreshes the mirror prints the short sha of the commit it installed.
-# Green on main: the settings line names "from <source> at <sha>" when jq is present. It guards that line against a fix that drops it.
+# The settings line names "from <source> at <sha>" when jq is present. It guards that line against a fix that drops it.
 caseM14() {
   name="caseM14 (control): a cloud install that refreshes the mirror prints the short sha of the commit it installed"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
