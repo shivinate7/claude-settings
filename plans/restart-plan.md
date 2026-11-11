@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 12:57 CST. The owner's list closed at 18:43 CST; R21 to R37 came after.
+the history. Last rewrite: 2026-11-11 13:01 CST. The owner's list closed at 18:43 CST; R21 to R37 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -376,6 +376,8 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   repo): a test-author briefed to write red checks needed new tooling, was refused, and had to ask
   the owner. Step brief-role-scope-check catches a brief whose paths do not fit its role at spawn,
   and sends tooling to a builder first, whose red run is its proof.
+  Owner feedback 12:57 CST Nov 11 (a tile-windows coordinator, relayed by the coordinator 13:00 CST)
+  widens that step: four more incidents, and a refusal for a resume whose worktree is gone.
 
 ### 3.9 A hook refusal gets a short correction
 
@@ -406,6 +408,12 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   shim on Windows; H6 decision watch desktop-only. Page questions: ArtifactData writes run the same
   question form (guard.py) and judge (call_judge.py, past rulings included) as the chat box. Home:
   decision hook-catalog-page.
+
+Coordinator 13:00 CST Nov 11: a long cloud session keeps the hooks installed at its start. Its copy
+lacked lane-effort-pin (10e38b0ae, 13:40 CST Nov 10) until a reinstall at 12:50 CST Nov 11, so 7 of 7
+lanes read started with a bare "/effort medium" and the brief came later. Owner 12:59 CST: "its weird
+a lane can be spawned without its brief first preprovided". A session whose installed hooks are older
+than main says so at its next turn and reinstalls; the fresh start clears it once.
 
 ### 3.11 One override route, with a receipt
 
@@ -486,6 +494,9 @@ After 3.11, because its third part uses the same owner grant route.
   anyway, pretty true -- but they do still type a whole fuckton of a lot, and that is tbd on whether we
   should have some sorta rules on how much a lane "chirps" in a snese". Open: measure lane output per
   turn first; a lane's only readers are its parent (the report) and its handoff.
+
+Owner feedback 12:57 CST Nov 11 (relayed by the coordinator 13:00 CST): two background agents ended
+with no hand-back, so their caller waited on nothing. An agent's end always reaches its caller.
 
 ### 3.13 Express pass for prose
 
