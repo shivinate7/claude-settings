@@ -14651,8 +14651,9 @@ def record_push_cost_case():
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
     `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
-    branch (`symbolic-ref`, the agent test) and one `git for-each-ref` of the tracking refs. A glob refspec reads the
-    URL and the for-each-ref, and no branch. A local-path origin stops after the URL read. No push spawns
+    branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
+    update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and
+    the same two for-each-ref reads, and no branch. A local-path origin stops after the URL read. No push spawns
     `ls-remote`, `fetch` or `push`. A stray push (rule push-stray-branch: an implied destination off the
     upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The conflict-markers
     push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
@@ -14706,15 +14707,16 @@ def record_push_cost_case():
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
          {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
         # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
-        # current branch (the agent test) and one for-each-ref of the tracking refs. A glob reads the config and the
-        # for-each-ref. A local-path origin stops after the config read. The guard's other checks add to those counts
+        # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
+        # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.
+        # A local-path origin stops after the config read. The guard's other checks add to those counts
         # on the same call: record_writer_hit reads the bare destination of a push with no refspec (a --all push is one:
         # symbolic-ref and push.default), and the conflict-markers check reads its bases, three for a glob, which names
         # no tracking ref, with the default base's symbolic-ref and rev-parse.
         ("a --all push to a network remote", "push --all origin",
-         {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 1}),
+         {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 2}),
         ("a glob push to a network remote", "push origin refs/heads/*:refs/heads/*",
-         {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 1, "diff": 3}),
+         {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 2, "diff": 3}),
         ("a --all push to a local-path origin", "push --all origin",
          {"rev-parse": 1, "symbolic-ref": 1, "config": 2}, PUSHLOCALAHEAD),
     ):
