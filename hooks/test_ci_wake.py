@@ -13,7 +13,8 @@ cases import the module and swap its `gh`, `time`, `subprocess` and `shutil` for
 and no wait is real.
 
 Decision ci-wait-reads-run-status, section "The CI wake-up":
-- Only `gh pr ready <N>` starts a watch. A `git push` in any form starts none, and makes no gh call.
+- Only a ready call starts a watch: the shell `gh pr ready <N>`, or a GitHub MCP
+  update_pull_request call with draft false. A `git push` in any form starts none, and makes no gh call.
 - Each `gh pr ready` in one command gets its own watch, in one process. The hook prints one
   verdict line per PR, then exits 2 once.
 - Text inside quotes, inside a heredoc body, or after an unquoted `#` is no command. A lone quote
@@ -1891,7 +1892,7 @@ def mcp_update(pull, owner, repo, draft=None):
 
 
 def case_mcp_ready_call_starts_the_watch():
-    """The MCP update with draft false marks PR 214 ready. Its watch reads the PR's own repo (owner and
+    """The MCP update with draft false marks its PR ready. Its watch reads the PR's own repo (owner and
     repo of tool_input), not the folder's (cwd_repo), and each gh call names that repo. The shell
     `gh pr ready` on the same fixture is the green control: only the payload differs."""
     owner, name = REPO_APP.split("/")
