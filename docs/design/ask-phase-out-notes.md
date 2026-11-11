@@ -19,7 +19,7 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
   in it waits or gets a later answer. It lists the thread under "Show N dismissed asks" with Restore. Mark read is that mechanism, extended to items.
 - Pick: one name for the act on asks and items: "Mark read", with "Mark unread" in place of Restore, "Marked read." in place of
   "Dismissed.", and "Show N read asks" in place of "Show N dismissed asks". The stored field keeps its name, `dismissed`.
-  Gain: the owner's word, and one act with one name on the page (ux-one-plain-name). Loss: an act he learned on Nov 6 changes its words.
+  Gain: the owner's grant, and one act with one name on the page (ux-one-plain-name). Loss: an act he learned on Nov 6 changes its words.
 - Option "Words: Dismiss and Restore" (`#s=keep-dismiss`, focus `#line-212`): today's words on both. Gain: nothing to relearn.
   Loss: "Dismiss" reads as "throw away", but nothing is thrown away.
 - Not used: the `read` field. On `receipts/<id>` and on `asks/<id>` it means "a session read this". The owner's mark in the same name
@@ -115,7 +115,7 @@ line, its home and the short reply; Mark read removes it; nothing is deleted.
 - A check the design needs: a close with no `closed` time breaks it. The writer's read of closed items (the `kept-answer:` lines of
   "Keep the page on main's code" step 2) can flag a closed item with no `closed` time that changed after the ship time.
 
-## 8. Critique pass (impeccable, single context; no sub-agent tool, no snapshot)
+## 8. Critique pass (impeccable, single context; no agent tool, no snapshot)
 
 - Fixed: item lines said "Show" and ask lines "Show answer". Both now say "Show answer" (one act, one name).
 - Fixed: in the read lists, Mark unread was the loud `.btn.alt` on every row, louder than Mark read. It is quiet there. The one

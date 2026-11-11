@@ -1361,12 +1361,6 @@ PAGE_ONLY_REASON = ("Only the page's Mark read writes dismissed. The owner's pre
                     "(decision item-field-rendered, a waiting item names only fields the page draws)")
 
 
-def item_field_reason(matched) -> str:
-    """The printed reason for an item-field-rendered refusal: the page-only reason when the write named a field only
-    the page writes, else the table's generic item-field reason."""
-    return PAGE_ONLY_REASON if str(matched).endswith(PAGE_ONLY_MARK) else PAGE_REASONS["item-field-rendered"]
-
-
 def item_field_hit(op, entry, data) -> str:
     """The matched text when this write of a waiting item names a top-level field outside the page's
     itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
@@ -1507,6 +1501,7 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
+                "item-field-page-only": PAGE_ONLY_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
