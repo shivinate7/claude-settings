@@ -2,29 +2,29 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 19:27 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
+the history. Last rewrite: 2026-11-10 20:02 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
-Read it top to bottom: six stages in the order they run. Each stage holds the rulings that govern it,
+Read it top to bottom: five stages in the order they run. Each stage holds the rulings that govern it,
 in the owner's words with the time. Ids (R1, G1, D1) are stable names, not an order.
 
 ## Why this order
 
-The words come first, because every later brief uses them (3.0, G1-G15). Then what loses whole CI runs:
-checks that refuse a green batch at merge, fixed time limits, a repo with no CI (3.1-3.2). Then the
-loop that sends lanes back: stale review logs, repeated lint, extra rounds, one model table (3.3-3.8).
-Then trust in guards: wrong refusals, mistakes filed as missing guards, pass claims with proof, short
-corrections, one catalog, one override route, no lane popups (3.6-3.12). Stage 4 then makes the
-owner's side mechanical: one home and one wake per answer, easy relays, debts and notes kept in place.
-Each is fixed once, before lanes resume, so the resumed lanes run under it.
+The words come first, because every later brief uses them (3.0, G1-G15). The rest of stage 3 then
+runs in parallel; only two items wait on another (3.2 runs with 3.1; 3.12 after 3.11). It covers what
+loses whole CI runs (3.1, 3.2, 3.4, 3.5), the loop that sends lanes back (3.3, 3.7, 3.8), and trust in
+guards (3.6, 3.9-3.12), and the express pass for prose (3.13). Stage 4 makes the owner's side mechanical: one home and one wake per answer, easy
+relays, debts and notes kept in place, session ids that survive a restart. Each is fixed once, before
+lanes resume, so the resumed lanes run under it. An item still open (D1, D3) holds no stage.
 
 ## What happens next
 
 1. The drain finishes (stage 1); the H1 lane lands as the one exception.
 2. The coordinator opens one PR that lands this file on main (stage 2). The retrospective session
    opens no PRs. Each ruling's home is rewritten later by the lane that builds it.
-3. Stage 3 lanes start in order, 3.0 first; triage has every ruling filed as a step.
+3. Stage 3 starts with 3.0; once it lands, every other item starts at once, except the two that wait
+   (see Why this order). Triage has every ruling filed as a step.
 
 ## Stage 1. Drain
 
@@ -45,13 +45,13 @@ tool the guard judges is reached by the matcher.
 
 ## Stage 2. Land this plan on main
 
-One prose PR holds every settled ruling below in the owner's words with its time. It is the first PR
-after the drain. The express pass (R7, stage 5) would make this PR fast; until it lands, the PR takes
-the normal docs-only route.
+One prose PR holds every settled ruling below in the owner's words with its time (#2575). It takes the
+normal docs-only route; later rulings land in one follow-up PR (coordinator 19:15 CST).
 
 ## Stage 3. Change how every lane flows
 
-Before any other lane starts. Each item is one lane, in this order.
+Before any other lane starts. An item may hold several rulings; triage splits it into one lane per
+step.
 
 ### 3.0 One glossary of roles, the same on local and cloud
 
@@ -141,8 +141,9 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
 
 ### 3.1 Checks that can refuse a merge run in CI
 
-- **R2.** Owner 14:07 CST Nov 10: "i agree speed maximization is a good idea". The merge tool only reads
-  CI's verdict and checks the batch is current with main. The Retire check moves into CI. Cause: batch
+- **R2.** Owner 14:07 CST Nov 10: "i agree speed maximization is a good idea". The merge tool runs no
+  check of its own that can refuse a green batch. It reads CI's verdict, the PR-body lines (R15), and
+  whether the batch is current with main. The Retire check moves into CI. Cause: batch
   #2551 green in CI at 11:15 CST, refused at merge 11:50 CST by the Retire check's 600 s local limit;
   one full CI run lost. Home: decision debt-close-runs-retire; step retire-check-whole-suite;
   merge.readyChecks in decision lanes-run-no-full-ci-job.
@@ -272,7 +273,7 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   change, the role's model otherwise). Fixes are verified per G5. Correction, owner 16:07 CST Nov 10
   (relayed; step rounds-rules-one-record): round 3 follows owner pick 471 a
   (2026-11-09 23:39 CST, step review-state-guard-needs-round-3) as it stands. A guard or check change
-  that passes round 1 is done; only one fixed under a fix check waits for round 3. The net-value test is
+  that passes round 1 is done; only one fixed under a fix verifier waits for round 3. The net-value test is
   only for an unclear case that cannot finish by the end of the rounds (the 2026-10-15 "still
   unfinished" valve in hold-unsafe-after-round-3). Evidence: round 3 found a failure 0 of 14+ times
   after a clean round 2; the net-value hold caught 6 real holes. Deferred: Sonnet round 1 for every
@@ -378,6 +379,14 @@ After 3.11, because its third part uses the same owner grant route.
   should have some sorta rules on how much a lane "chirps" in a snese". Open: measure lane output per
   turn first; a lane's only readers are its parent (the report) and its handoff.
 
+### 3.13 Express pass for prose
+
+- **R7.** Owner 14:12 CST Nov 10: "if we develop some sorta express pass for the entirety of prose to be
+  fast to review i'd be open to considering that"; 15:22 CST: "this is very key yes". A PR whose owner
+  quotes match the feedback log word for word skips the review round that decision
+  docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling. First user:
+  the follow-up plan PR. Home: decision docs-only-prs-skip-review, rewritten in place.
+
 ## Stage 4. Make the roadmap and triage mechanical
 
 - **D1. The roadmap is mechanical (open).** Owner 14:14 CST Nov 10: "realistically we have the actual
@@ -457,19 +466,11 @@ After 3.11, because its third part uses the same owner grant route.
   4. Fits R18 point 2: each item names who wakes, by slug or role.
   Home: skill project-ops; skill waiting-page.
 
-## Stage 5. Express pass for prose
+## Stage 5. Resume lanes
 
-Can move before stage 2 so this plan's PR uses it.
-
-- **R7.** Owner 14:12 CST Nov 10: "if we develop some sorta express pass for the entirety of prose to be
-  fast to review i'd be open to considering that"; 15:22 CST: "this is very key yes". A PR whose owner
-  quotes match the feedback log word for word skips the review round that decision
-  docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling. First user:
-  this plan's own PR (stage 2). Home: decision docs-only-prs-skip-review, rewritten in place.
-
-## Stage 6. Resume lanes
-
-Under the new flow. Then the rest of the queue. Re-measure the baseline below.
+Under the new flow, once stage 3 and the settled parts of stage 4 land. An open part holds nothing: D1,
+R6's open outbox question, and R19 point 1 (waits on PR #1619) land when they land. Then the rest of the
+queue. Re-measure the baseline below.
 
 ## Dropped
 
