@@ -46,7 +46,7 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // failSetText: a write to asks whose text holds it is refused with code denied, so one ask of a batch fails and the rest save.
 // hold: { set: n } or { delete: n }. An asks write or delete after the first n waits at the hold until window.__release() runs; window.__held counts the calls waiting.
 // A case disarms it with window.__hold = null, since the init script arms it again on every load (a reload).
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failUpdate = false, comments, meta, groups, receipts, holdReceipts, holdAsks = false, dbExtra = {}, noStore = false, hold = {} }) {
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failUpdate = false, comments, meta, groups, receipts, holdReceipts, holdAsks = false, dbExtra = {}, noStore = false, hold = {}, keepItems = false }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
@@ -57,6 +57,9 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
   // The asks are kept in the page's localStorage, so a reload finds them as the store held them.
   try { const kept = JSON.parse(localStorage.getItem("__stub.asks")); if (kept) data.asks = kept; } catch (e) {}
   const keepAsks = () => { try { localStorage.setItem("__stub.asks", JSON.stringify(data.asks || {})); } catch (e) {} };
+  // keepItems (opt-in): the items' update writes, such as Mark read, are kept too, so a reload finds them as the store held them.
+  if (keepItems) { try { const kept = JSON.parse(localStorage.getItem("__stub.items")); if (kept) data.items = kept; } catch (e) {} }
+  const keepItemsStore = () => { if (!keepItems) return; try { localStorage.setItem("__stub.items", JSON.stringify(data.items || {})); } catch (e) {} };
   const subs = {}, docSubs = {};
   window.__log = [];
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
@@ -83,7 +86,7 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
         set: async (body) => { if (name === "asks") await holdFor("set"); if (failSet || (name === "asks" && failSetText && String(body.text).includes(failSetText))) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
         // A merge write, as the runtime's update: the fields given are set, the rest of the record stays. It is refused when the record is gone.
         // failUpdate refuses every asks update with permission-denied, as a store that cannot write does.
-        update: async (body) => { if (failUpdate && name === "asks") throw { code: "permission-denied" }; if (!(data[name] || {})[id]) throw { code: "not-found" }; window.__log.push(["update", name, id, body]); data[name][id] = { ...data[name][id], ...body }; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
+        update: async (body) => { if (failUpdate && name === "asks") throw { code: "permission-denied" }; if (!(data[name] || {})[id]) throw { code: "not-found" }; window.__log.push(["update", name, id, body]); data[name][id] = { ...data[name][id], ...body }; if (name === "asks") keepAsks(); if (name === "items") keepItemsStore(); setTimeout(() => fire(name, id), 0); },
         delete: async () => { if (name === "asks") await holdFor("delete"); if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
         onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
       }),
@@ -121,7 +124,7 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -136,7 +139,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, holdAsks, dbExtra, noStore, hold });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, holdAsks, dbExtra, noStore, hold, keepItems });
   await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
@@ -3966,6 +3969,45 @@ test("ask-phase-out: Mark read on a closed item's line writes dismissed with upd
   assert.match(ups[0].body.dismissed, DIS_ISO, `dismissed is not an ISO time: ${ups[0].body.dismissed}`);
   assert.deepEqual(await apBad(page, "items"), [], "Mark read made a set or a delete on items");
   assert.equal(await page.locator("#tier-answered").getByRole("button", { name: new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`) }).count(), 0, `the line of No. ${AP_CLOSED.n} still has Mark read after the press`);
+});
+
+test("ask-phase-out: a closed line marked read leaves the Answered list on reload, and sits behind Show read items", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], keepItems: true }); if (!page) return;
+  // Setup: before Mark read, the line of No. 70 is in the Answered list.
+  await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `the line of No. ${AP_CLOSED.n} in the Answered section before Mark read`);
+  const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
+  await press.click();
+  await apWaitUpdates(page, "items", 1);
+  const ups = await apWrites(page, "items");
+  assert.equal(ups.length, 1, `Mark read made ${ups.length} update writes on items, not one, so the reload below would not hold the mark`);
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await mustHave(page, `#item-${TASK.id}`, `the open task ${TASK.id} after the reload`);
+  // Scope first: the Answered section is drawn, with the read item behind its fold, so the absence below is real.
+  await mustHave(page, "#tier-answered", "the Answered section after the reload");
+  await mustHave(page, "#readItems", "the Show read items fold in the Answered section after the reload");
+  assert.equal(await page.locator(`#tier-answered #line-${AP_CLOSED.n}`).count(), 0, `the line of No. ${AP_CLOSED.n}, marked read, is in the Answered list after a reload`);
+  // Control: the line sits behind the fold, so it is moved, not lost.
+  await page.click("#readItems");
+  await mustHave(page, `#readItemList #line-${AP_CLOSED.n}`, `the line of No. ${AP_CLOSED.n} in the read items list after the reload`);
+});
+
+test("ask-phase-out: Mark read on a closed item's line leaves a Marked read. line in its place this visit, with Mark unread", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
+  await press.click();
+  await apWaitUpdates(page, "items", 1);
+  await mustHave(page, `#tier-answered article#line-${AP_CLOSED.n}.askc.dropped`, `the Marked read line of No. ${AP_CLOSED.n} in its place in the Answered section`);
+  // One step reads the line, so a re-render between two reads cannot split them.
+  const line = await page.evaluate(({ n, id }) => {
+    const r = document.getElementById("line-" + n), sl = r ? r.querySelector(":scope > p.sline") : null;
+    return { text: r ? r.textContent.replace(/\s+/g, " ").trim() : "", tabindex: r ? r.getAttribute("tabindex") : null, lineRole: sl ? sl.getAttribute("role") : null,
+      restore: !!r && !!r.querySelector("#ires-" + id) };
+  }, { n: AP_CLOSED.n, id: AP_CLOSED.id });
+  assert.ok(line.text.startsWith(`Marked read. No. ${AP_CLOSED.n}, ${AP_CLOSED.title}`), `the Marked read line reads ${JSON.stringify(line.text)}`);
+  assert.equal(line.restore, true, `the Marked read line of No. ${AP_CLOSED.n} has no Mark unread`);
+  assert.equal(line.tabindex, "-1", `the Marked read line of No. ${AP_CLOSED.n} has tabindex ${line.tabindex}, not -1`);
+  assert.equal(line.lineRole, "status", `the Marked read line's p.sline has role ${line.lineRole}, not status`);
 });
 
 test("ask-phase-out: a read item sits under Show read items, and Mark unread on it writes dismissed null with update", async (t) => {
