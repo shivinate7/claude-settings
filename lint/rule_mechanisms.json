@@ -366,7 +366,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "check-tail",
-        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint` or `merge --review-record` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes), and it reads the check through `uv run`, a versioned python such as `python3.11`, and an `env` or python wrapper. A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
+        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint`, `merge --review-record` or `merge --release-check` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes), and it reads the check through `uv run`, a versioned python such as `python3.11`, and an `env` or python wrapper. A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
       },
       "test": "hooks/test_guard.py::check-tail: the incident line, backgrounded, is refused"
     },
@@ -491,10 +491,16 @@
     },
     "output-tracking-turn-one-line": {
       "mechanism": {
+        "kind": "judgment",
+        "reason": "One line on a turn that lands nothing is a content judgment. No check can tell a tracking turn from a turn with something to report."
+      }
+    },
+    "output-landing-turn-ends-with-report": {
+      "mechanism": {
         "kind": "check",
         "ref": "lint/report_guard.py",
         "test": "lint/test_report_guard.py::ReportGuardTests.test_67_every_github_landing_tool_with_no_report_blocks",
-        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The test cited proves the push_files tool; Bash pushes are proved by test_61_sudo_git_push_blocks and test_64_git_dash_c_push_blocks in lint/test_report_guard.py. The tracking-only case, one line on a turn that lands nothing, stays a content judgment."
+        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The test cited proves the push_files tool; Bash pushes are proved by test_61_sudo_git_push_blocks and test_64_git_dash_c_push_blocks in lint/test_report_guard.py."
       }
     },
     "output-never-echo-agent-report": {

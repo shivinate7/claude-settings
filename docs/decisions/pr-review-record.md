@@ -7,6 +7,9 @@ Owner, 2026-11-01 04:26 CST, waiting-page item 113 a. Source: the brief. The wai
 - Each PR carries a review record.
 - The batch runner finds reviewed, green PRs itself.
 - No merge message.
+- Owner, 2026-11-08 06:08 CST, item 396 a: a fourth review round for the builder-probe fix (step `builder-probe-false-alarm`).
+
+Source: `waiting/items/builder-probe-round-4.json` on the roadmap branch. That grant covers only that change (rule `outcomes-grant-covers-named-act`). The coordinator's brief for step `record-granted-round` lets the record hold a granted round.
 
 ## The incident
 
@@ -24,6 +27,7 @@ PR: #<n>
 Head: <40-hex sha>
 Kind: normal|delete-only|docs-only
 Guard or check: yes|no
+Grant: #<n>, item <n> <letter>, owner, <YYYY-MM-DD HH:MM CST|CDT>
 Round <n>: <reviewer|design-reviewer>, <model>, <PASS|FAIL|PARTIAL>
 Fix check: <40-hex reviewed head>, reviewer, <model>, <PASS|FAIL>
 Net value: not owed|zero|positive|negative
@@ -32,10 +36,11 @@ CI: read live by merge --reviewed
 
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
-- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. On every record, a Fix check whose model is not exactly `sonnet` (any letter case; `claude-sonnet-5-5` is not) is open, and `--fix-check` refuses it, whatever Guard or check says (owner item 444 a, 2026-11-08 15:04 CST; it widens item 351 a, 2026-11-07 14:44 CST). A fix check PASS counts as its round passing in any round when Guard or check is `no`. When Guard or check is `yes`, a fix check PASS before round 3 does not end review (item 402 a, owner, 2026-11-08 06:08 CST). After round 3, a PASS keeps the net value round 3 gave; with no round recorded it reads open.
+- The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. On every record, a Fix check whose model is not exactly `sonnet` (any letter case; `claude-sonnet-5-5` is not) is open, and `--fix-check` refuses it, whatever Guard or check says (owner item 444 a, 2026-11-08 15:04 CST; it widens item 351 a, 2026-11-07 14:44 CST). A fix check PASS counts as its round passing in any round when Guard or check is `no`. When Guard or check is `yes`, a fix check PASS below the final round does not end review: the record stays open until the final round is recorded with a net value of zero or positive (item 402 a, owner, page item 471 a, 2026-11-09 23:39 CST). After the final round (round 3, or 4 with a `Grant` line), a PASS keeps the net value that round gave; with no round recorded it reads open.
+- The `Grant` line is optional and comes once, directly after `Guard or check`. It is the owner's grant of round 4, the one round past round 3 (rule `roles-review-cap-three`). `--grant TEXT` writes it, only with `--review-record`. Its text is `#<pr>, ` and a cite. The `#<pr>` must be the record's own PR, so a copied grant binds to no other PR. The cite is an item number, one lowercase letter for the pick, `owner`, and a CST or CDT time. `--grant` with another PR than the positional one is a usage error. With the line the rounds must reach round 4. Without it they stop at round 3. Never round 5.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
   PR as `CI draft, no run`, because a draft has no CI run.
-- A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
+- A body is not a record when the marker is missing, a field is malformed or out of place, or round numbers skip. Nor is it one when a round is above 3 with no `Grant` line, above 4 with one, or short of 4 with one.
 - The newest record for a head counts. A record for an old head is stale.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
@@ -52,6 +57,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - Kind is `docs-only`, with zero rounds, unless the change is a record that files an owner ruling. That change posts `Kind: normal` with one round (decision `docs-only-prs-skip-review`).
 
 - A last `design-reviewer` line of FAIL or PARTIAL keeps a record open on the PASS rule. The round 3 and `delete-only` done rules stay done, and their reason names the design failure.
+- With a `Grant` line, round 4 is the final round. The round 3 rules above run on it unchanged, and their reason names round 4.
 - A round 3 verdict does not decide done. When Guard or check is `yes`, Net value does, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open until round 3 is done, even after a fix check PASSes (item 402 a, owner, 2026-11-08 06:08 CST). The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
@@ -94,7 +100,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
   - It refuses Guard or check `no` when a path starts with an entry of `GUARD_PATHS` or equals one of `GUARD_FILES`. `GUARD_PATHS` is `stale_cites.RULE_DIRS` plus `merge/` and `githooks/`. `GUARD_FILES` is `settings.json`. A test path (`hooks/guard.py` `is_test_rel`) never counts, because test files alone never count (record `hold-unsafe-after-round-3`).
   - It refuses a files list shorter than the PR's changed-file count, and a PR read that gives no count. GitHub lists at most 3000 files.
   - `agents/*.md` is not on the list. Only its `tools` lines are a guard, and a path cannot tell those apart from prompt text.
-  - It refuses Kind `docs-only` when a path does not end in `.md`. It refuses Kind `delete-only` when a path adds lines, or is added, renamed or copied. A file that only loses lines passes, because delete-only "only deletes and adds nothing" (record `hold-unsafe-after-round-3`).
+  - It refuses Kind `docs-only` when any path, an old path included, is not a doc. A doc is a `.md` file under `docs/`, or the root `README.md`. Case is ignored. The path is not stripped, so a stray space makes it a non-doc. Any other file may steer behaviour, such as a skill, an agent file, a hook prompt, a `.claude/rules` file or a nested README. The check treats it as a rule under decision `docs-only-prs-skip-review` (a docs-only change touches no rule, guard, check or product code), and fails closed. Such a PR takes Kind `normal` with one round 1 review. It refuses Kind `delete-only` when a path adds lines, or is added, renamed or copied. A file that only loses lines passes, because delete-only "only deletes and adds nothing" (record `hold-unsafe-after-round-3`).
   - Guard or check `yes` stays allowed with no hit, because a guard can live outside those paths.
 - The path check runs only when `--review-record` writes a record. `merge --reviewed` still trusts a record posted by hand. A read there would add one call per PR.
 - In another repo, a change under `hooks/`, `lint/`, `bin/`, `actions/`, `.github/`, `merge/` or `githooks/`, or to a root `settings.json`, must say Guard or check `yes`. It then owes the net-value test after round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.

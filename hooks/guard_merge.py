@@ -7,14 +7,15 @@ import fnmatch
 import json
 import os
 import re
+from datetime import datetime, timedelta, timezone
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
+    SHELL_TOOLS, WRITE_TOOLS, _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -70,9 +71,10 @@ def gh_call_of(segment: str):
     """Return the tokens after `gh` when the segment's COMMAND WORD is gh, else None.
 
     A repo flag before the verb (`gh -R o/r pr merge`) is valid gh and hid the verb from every
-    caller, which read the first two words. The flag moves to the end: gh reads `-R` after the
-    verb the same, and the callers that look for the repo (merge_call_of, ci_wake) already read
-    it there.
+    caller, which read the first two words. The same flag right after the group word
+    (`gh pr -R o/r comment`) hid the subcommand the same way. The flag moves to the end: gh
+    reads `-R` after the verb the same, and the callers that look for the repo (merge_call_of,
+    ci_wake) already read it there.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -86,12 +88,16 @@ def gh_call_of(segment: str):
     index = resolve_command(tokens)
     if index is None or basename(tokens[index]) not in ("gh", "gh.exe"):
         return None
-    rest, root = tokens[index + 1:], []
-    while rest and _gh_root_repo_flag(rest, 0):
-        taken = _gh_root_repo_flag(rest, 0)
-        root += rest[:taken]
-        rest = rest[taken:]
-    return rest + root
+    rest, root, group = tokens[index + 1:], [], []
+    for _ in (0, 1):   # before the group word, then right after it
+        while rest and _gh_root_repo_flag(rest, 0):
+            taken = _gh_root_repo_flag(rest, 0)
+            root += rest[:taken]
+            rest = rest[taken:]
+        if group or not rest:
+            break
+        group, rest = rest[:1], rest[1:]
+    return group + rest + root
 
 
 # ---- a merge made outside the merge tool
@@ -127,11 +133,12 @@ def merge_call_of(segment: str):
     while index < len(args):
         arg = args[index]
         index += 1
-        if arg in ("-R", "--repo"):
+        taken = _gh_root_repo_flag(args, index - 1)
+        if taken == 2:
             repo = args[index] if index < len(args) else ""
             index += 1
-        elif arg.startswith("--repo="):
-            repo = arg[len("--repo="):]
+        elif taken:   # `--repo=o/r`, `-Ro/r`; pflag drops the '=' of a shorthand (`-R=o/r`)
+            repo = arg[len("--repo="):] if arg.startswith("--repo=") else arg[2:].removeprefix("=")
         elif arg in MERGE_VALUE_FLAGS:
             index += 1
         elif arg.startswith("-"):
@@ -390,11 +397,19 @@ def gh_write_of(segment: str) -> str:
 # The page is rebuilt only at merge. The commit is refused when the page it would hold differs from
 # HEAD's page, the base tip's page AND origin/<base>'s page: a merge of the base into the lane brings
 # the base's page, so it passes. The base is `resolve_default_base`, read at its TIP. A merge that brought
-# a page the base has since moved past also passes: the page equals MERGE_HEAD's page by exact blob id,
-# and MERGE_HEAD is on origin/<base>'s first-parent line (`rev-list --first-parent`), so a branch merged
-# into the base is no pass. Those reads run only on the path that would refuse, and a failed read is refused.
-# A rebuilt page, a page of a merge of any commit off that line, and a page taken after the merge state
-# is gone are refused.
+# a page the base has since moved past also passes: the page equals MERGE_HEAD's page by exact blob id, and
+# one of two holds. MERGE_HEAD is on origin/<base>'s first-parent line (`rev-list --first-parent`), so a
+# branch merged into the base is no pass. Or some best merge base of HEAD and MERGE_HEAD (`merge-base --all`,
+# more than one after a criss-cross merge) is no ancestor of origin/<base> (`merge-base --is-ancestor` exits
+# 1): the lane is stacked on a branch main has not merged, and MERGE_HEAD is that branch moved on. A lane cut
+# from main has every best base on main, so it gets no pass from the second. Those reads run only on the path
+# that would refuse. A failed merge-base read, or an is-ancestor exit other than 0 or 1, gives no stacked
+# pass for that base and falls through to the first-parent test, which refuses unless MERGE_HEAD is on the
+# base's first-parent line. A failed rev-parse or rev-list read refuses. The stacked clause cannot tell the
+# lane's base from a sibling lane that shares its unmerged history: a sibling's page passes the same way,
+# and the merge tool rebuilds the page before ready.
+# A rebuilt page, a page of a merge of any other commit, and a page taken after the merge state is gone
+# are refused.
 # The hook runs BEFORE the shell chain, so `commit -a` (a tracked page), `commit <page>` and a `git add`
 # that reaches the page earlier in the same command read the working tree, and any other commit reads
 # the index. A commit that names paths (`--`, --only) holds only those paths. A non-git segment whose
@@ -521,14 +536,23 @@ def _runs_generator(segment):
 
 
 def _merge_head_page(top, base):
-    """The blob id of the page at MERGE_HEAD when a merge is in progress and MERGE_HEAD is a commit on
-    origin/<base>'s first-parent line (a past base tip), else ''. A failed or short read gives ''."""
+    """The blob id of the page at MERGE_HEAD when a merge is in progress and one of two holds, else ''.
+    (1) Some best merge base of HEAD and MERGE_HEAD is no ancestor of origin/<base>: the lane is stacked on
+    a branch that main has not merged, and MERGE_HEAD is that branch moved on. (2) MERGE_HEAD is a commit on
+    origin/<base>'s first-parent line (a past base tip). A merge-base read with no answer, or an
+    is-ancestor exit other than 0 or 1, gives no stacked pass for that base and falls through to (2). A
+    failed rev-parse or rev-list read gives ''."""
     # One read gives MERGE_HEAD's commit and its page: it fails when no merge is in progress.
     done = _git(top, "rev-parse", "MERGE_HEAD", "MERGE_HEAD:" + RECORDS_PAGE)
     ids = done.stdout.split() if done is not None and done.returncode == 0 else []
     if len(ids) != 2:
         return ""
     origin = base if base.startswith("origin/") else "origin/" + base
+    meet = _git(top, "merge-base", "--all", "HEAD", "MERGE_HEAD")
+    for best in meet.stdout.split() if meet is not None and meet.returncode == 0 else []:
+        seen = _git(top, "merge-base", "--is-ancestor", best, origin)
+        if seen is not None and seen.returncode == 1:   # 1 is "not an ancestor"; 0 is one, other is a failure
+            return ids[1]
     line = _git(top, "rev-list", "--first-parent", origin)   # one id per base tip, newest first
     return ids[1] if line is not None and line.returncode == 0 and ids[0] in line.stdout.split() else ""
 
@@ -551,7 +575,7 @@ def _commit_page_id(top, working):
 
 def records_page_hit(stripped: str, cwd: str) -> str:
     """Return the commit when it would hold a records page that is none of HEAD's, the base tip's,
-    origin/<base>'s and MERGE_HEAD's (MERGE_HEAD on origin/<base>'s first-parent line), else ''. Each segment is judged from its own command word."""
+    origin/<base>'s and MERGE_HEAD's (`_merge_head_page` says when MERGE_HEAD's page counts), else ''. Each segment is judged from its own command word."""
     staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
@@ -1495,6 +1519,230 @@ def brief_hit(tool: str, tool_input, transcript: str):
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
     return None
 
+
+# ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
+STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
+STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes
+# A header is a label of 1 to 4 words, then `,` or `:` or a dash spaced on both sides, an optional date, then
+# `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case. Anything may follow.
+_STAMP_HEADER = re.compile(
+    _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,3}(?:[,:]|\s[-\u2014\u2013])\s*"
+    r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
+    r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
+_STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
+STAMP_REASON = (
+    "this message's header stamp is wrong for the clock: {why}. "
+    "The time is {now}: re-stamp your own header with that time, then send it again. If the first line quotes "
+    "someone else's time in header form, open the message with your own label first. "
+    "If the first line names a future time, such as a deadline or an ETA, move it off the first line. "
+    "(decision local-time-central, sessions speak times in US Central)"
+)
+STAMP_AHEAD_WHY = "it is {off} minutes ahead, and the limit is " + str(STAMP_LIMIT_MINUTES)
+STAMP_ZONE_WHY = "it says {zone}, and the clock's zone now is {name}"
+
+
+def _minutes_ahead(then, now) -> int:
+    """Whole minutes an instant is ahead of the clock: negative when it is behind. Both are cut to the minute
+    first, so the header stamp and an ISO instant compare one way (rule message-time-matches-clock)."""
+    return int((then.replace(second=0, microsecond=0) - now.replace(second=0, microsecond=0)).total_seconds() // 60)
+
+
+def stamp_hit(tool: str, tool_input):
+    """Return (matched, reason) when this send_message opens with a header stamp that is wrong for the clock, else
+    None. Only the first non-blank line is read, and only its header stamp. Wrong means one of three things. The
+    zone name is not the clock's own (local_time's DST rule names the current zone), whatever the minutes. A dated
+    stamp is more than STAMP_LIMIT_MINUTES ahead, compared as an instant with its zone's offset, with no upper limit.
+    An undated stamp is between STAMP_LIMIT_MINUTES (exclusive) and STAMP_QUOTE_MINUTES (inclusive) ahead, as a
+    signed minute-of-day offset modulo 1440 in [-720, 720). An undated stamp further ahead is read as a quote from
+    an earlier day and passes, as does any stamp behind the clock.
+    The clock is local_time.clock(), and the reason's time comes from local_time.central_hhmm: one home of the
+    clock and its DST rule. Cost: one clock read, no transcript, no file, no process. Fails open: the stamp is
+    advice about a time, so a missing clock module or an impossible date lets the message through."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message = tool_input.get("message")
+    first = next((ln.strip() for ln in message.splitlines() if ln.strip()), "") if isinstance(message, str) else ""
+    found = _STAMP_HEADER.match(first)
+    if not found:
+        return None
+    try:
+        import local_time
+        now = local_time.clock().replace(second=0, microsecond=0)  # whole minutes: both forms compare one way
+        clock_zone = local_time.central_hhmm(now).split()[1]
+        stamp_zone = found.group("zone").upper()
+        hour, minute = int(found.group("hour")), int(found.group("minute"))
+        if hour > 23 or minute > 59:
+            return None
+        if stamp_zone != clock_zone:
+            why = STAMP_ZONE_WHY.format(zone=stamp_zone, name=clock_zone)
+        else:
+            zone = timezone(timedelta(hours=_STAMP_OFFSET_HOURS[stamp_zone]))
+            if found.group("date"):
+                stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
+                off = _minutes_ahead(stamped, now)
+                late = off > STAMP_LIMIT_MINUTES
+            else:
+                there = now.astimezone(zone)
+                off = (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
+                late = STAMP_LIMIT_MINUTES < off <= STAMP_QUOTE_MINUTES
+            if not late:
+                return None
+            why = STAMP_AHEAD_WHY.format(off=off)
+        return "header stamp " + found.group(0).strip(), STAMP_REASON.format(why=why, now=local_time.central_hhmm(now))
+    except (ImportError, ValueError, OverflowError):
+        return None
+
+
+# Written values: an ISO instant with an offset, in three places (rule message-time-matches-clock). The Bash scan
+# reads the command as text, not as tokens: a quote-aware reader skips a literal inside a quoted string or after
+# a lone apostrophe, which is where an incident's literal sat. It reads the key `updatedAt`, bare or quoted, with
+# an optional `]` after it. Then `:`, `=` or jq's `|=`, then a single- or double-quoted value, closed by the
+# same quote. It skips `==`, `!=` and `>`.
+_ISO_INSTANT = r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})"
+_ISO_FULL = re.compile(_ISO_INSTANT)
+_UPDATED_AT = re.compile(r"""updatedAt\\?["']?\]?\s*(?:\|=|:|=(?!=))\s*\\?(["'])""" + _ISO_INSTANT + r"\\?\1")
+# A str_replace of `added` may carry only the time part of the value, such as `T20:24:00Z`.
+_TIME_FRAGMENT = re.compile(r"T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})")
+_STEP_FILE = re.compile(r"(?:^|/)roadmap/data/steps/[^/]+\.json$")
+WRITTEN_ITEMS = "items"  # the ArtifactData collection whose `added` is judged
+WRITTEN_REASON = (
+    "this written time ({what}) is {off} minutes ahead of the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
+    "The time is {now}, which is {central} and {utc}: write that time, then run the call again. "
+    "(decision local-time-central, sessions speak times in US Central)"
+)
+
+
+def _offset(zone):
+    """The timezone of an ISO offset, `Z` or `[+-]HH[:]MM`. Raises ValueError for an impossible offset."""
+    if zone == "Z":
+        return timezone.utc
+    digits = zone[1:].replace(":", "")
+    return timezone(timedelta(hours=int(digits[:2]), minutes=int(digits[2:])) * (-1 if zone[0] == "-" else 1))
+
+
+def _instant(found):
+    """The aware datetime of an _ISO_INSTANT match, or None for an impossible date or offset."""
+    year, month, day, hour, minute, zone = found.groups()
+    try:
+        return datetime(int(year), int(month), int(day), int(hour), int(minute), tzinfo=_offset(zone))
+    except ValueError:
+        return None
+
+
+def _fragment_ahead(found, now):
+    """Minutes a _TIME_FRAGMENT match is ahead of `now`, or None for an impossible time or offset. The guard reads
+    no page, so the date the fragment lands on is unknown. It takes the day that puts the time nearest the clock,
+    a signed offset in [-720, 720) as an undated header stamp has. So a behind fragment passes, and yesterday's
+    late time does not read as almost a day ahead after UTC midnight. It is not refused outright, because a value
+    behind the clock passes."""
+    hour, minute, zone = int(found.group(1)), int(found.group(2)), found.group(3)
+    if hour > 23 or minute > 59:
+        return None
+    try:
+        there = now.astimezone(_offset(zone))
+    except ValueError:
+        return None
+    return (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
+
+
+def _document_added(entry, cwd):
+    """The `added` string of one ArtifactData write's document, or None. The document is the inline `data` (a dict,
+    or a JSON string), else the local JSON file named by `file_path`, read against `cwd` when the path is relative:
+    the one file read this rule costs, made only for a write to collection items with no inline data. A file that
+    does not read or parse holds nothing to judge."""
+    data = entry.get("data")
+    path = entry.get("file_path")
+    try:
+        if data is None and isinstance(path, str) and path:
+            with open(os.path.join(cwd, path) if cwd else path, encoding="utf-8") as handle:
+                data = json.load(handle)
+        elif isinstance(data, str):
+            data = json.loads(data)
+    except (OSError, ValueError):
+        return None
+    added = data.get("added") if isinstance(data, dict) else None
+    return added.strip() if isinstance(added, str) else None
+
+
+def _written_texts(tool: str, tool_input: dict, cwd: str = ""):
+    """The text of each written value this call carries that holds an ISO instant or time fragment to judge: an
+    `added` alone, each offset instant in a step edit's new text, or each literal `updatedAt` in a step's content
+    or a command."""
+    if tool == DATA_TOOL:
+        action = tool_input.get("action")
+        writes = [(w.get("op") or w.get("action"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)] \
+            if action == "batch" else [(action, tool_input)]
+        for op, entry in writes:
+            if entry.get("collection") != WRITTEN_ITEMS:
+                continue
+            if op == "str_replace":  # the new text of the `added` field is the value the document ends with
+                new = entry.get("new_str")
+                added = new.strip() if entry.get("field") == "added" and isinstance(new, str) else None
+            else:
+                added = _document_added(entry, cwd) if op in ("set", "update") else None
+            if added:
+                yield "added " + added, added
+        return
+    if tool in WRITE_TOOLS:
+        paths = [v.replace("\\", "/") for k in ("file_path", "path") if isinstance(v := tool_input.get(k), str)]
+        if any(_STEP_FILE.search(p) for p in paths):
+            content = tool_input.get("content")
+            if isinstance(content, str) and "updatedAt" in content:
+                for found in _UPDATED_AT.finditer(content):
+                    yield found.group(0), found.group(0)
+            # An edit can replace the value alone, with no key in its new text. Every time a step holds is past
+            # by nature (createdAt, updatedAt), so each offset instant an edit writes is judged.
+            news = [tool_input.get("new_string")]
+            news += [e.get("new_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
+            for new in news:
+                if isinstance(new, str):
+                    for found in _ISO_FULL.finditer(new):
+                        yield found.group(0), found.group(0)
+        return
+    command = tool_input.get("command")
+    if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:
+        # Only the last literal is judged: the new value comes last in `s/old/new/`, `.replace(old, new)` and an
+        # assignment, so a repair that rewrites an ahead value to the right time passes.
+        last = None
+        for last in _UPDATED_AT.finditer(command):
+            pass
+        if last:
+            yield last.group(0), last.group(0)
+
+
+def written_time_hit(tool: str, tool_input, cwd: str = ""):
+    """Return (matched, reason) when a written ISO instant is more than STAMP_LIMIT_MINUTES ahead of the clock,
+    else None. A value behind the clock passes: a kept old value is always behind. Judged: `added` in an
+    ArtifactData set, update or batch write to collection items (the document inline or through `file_path`), and
+    the new text of a str_replace on `added`, a whole instant or a time fragment such as `T20:24:00Z`. In a
+    roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
+    text. In a shell command: the last literal `updatedAt` key with a single- or double-quoted value. Only a value
+    with an offset is read. Cost: one clock read, and only when a judged value is present; one local file read,
+    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit."""
+    if not isinstance(tool_input, dict):
+        return None
+    judged = []
+    for what, text in _written_texts(tool, tool_input, cwd):
+        found = _ISO_FULL.search(text)
+        if found:
+            then = _instant(found)
+            if then:
+                judged.append((what, then))
+        elif fragment := _TIME_FRAGMENT.fullmatch(text):
+            judged.append((what, fragment))
+    if not judged:
+        return None
+    try:
+        import local_time
+        now = local_time.clock().replace(second=0, microsecond=0)
+        for what, then in judged:
+            off = _minutes_ahead(then, now) if isinstance(then, datetime) else _fragment_ahead(then, now)
+            if off is not None and off > STAMP_LIMIT_MINUTES:
+                return what, WRITTEN_REASON.format(
+                    what=what, off=off, now=local_time.central_hhmm(now), central=local_time.central_iso(now, seconds=False),
+                    utc=now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"))
+    except (ImportError, ValueError, OverflowError):
+        return None
 
 # ------------------------------------------------------------------ hook-bypass
 #
