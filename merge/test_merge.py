@@ -17129,13 +17129,15 @@ class TouchesRead(Env):
     named case in a `+` line of its patch (never a `-` line, a context line or the `+++` header). With --run, the run's failed lines name the cases.
     The read lists the open pulls, each one's files and, for --run, the run's failed lines. It takes no lock and merges and posts nothing."""
 
-    def assert_touches_usage(self, *argv):
-        """A usage error (rc 2) from a parser that knows --touches: stderr holds none of OLD_PARSER_ERRORS, which is what a parser without the flag prints."""
+    def assert_touches_usage(self, *argv, why=None):
+        """A usage error (rc 2) from a parser that knows --touches: stderr holds none of OLD_PARSER_ERRORS, which is what a parser without the flag prints.
+        `why` leads the failure message with the cause. -> stderr, for a caller that reads the refusal's text."""
         rc, out, err = self.run_args(*argv, host=incident_host())
-        self.assertEqual(rc, 2, out + err)
+        self.assertEqual(rc, 2, (why + "\n" if why else "") + out + err)
         for old in OLD_PARSER_ERRORS:
             self.assertNotIn(old, err, f"the parser does not know --touches (it says {old!r}) for argv {argv}")
         self.assertNotIn("Traceback", err, out + err)
+        return err
 
     def test_the_incident_fix_is_named_by_file_case_and_run_and_the_unrelated_pull_is_not(self):
         head = touch_head(2390, TOUCH_FIX, "ready")
@@ -17256,6 +17258,16 @@ class TouchesRead(Env):
                 self.assert_touches_usage(*argv)
         rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())  # the control: the flag alone is valid
         self.assertEqual(rc, 0, out + err)
+
+    def test_touches_with_release_check_is_refused_like_the_other_flags(self):
+        # Setup first: the flag alone reads the one pull that touches the file, so the refusal below cannot come from a fixture that reads nothing.
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())
+        self.assertEqual(rc, 0, "setup: the --touches read with --file alone did not run:\n" + out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"],
+                         "setup: the --touches read named the wrong pull:\n" + out)
+        err = self.assert_touches_usage("--touches", "--file", TOUCH_GUARD, "--release-check", "5",
+                                        why="--touches beside --release-check exited 0, so the release check never ran and no refusal was printed")
+        self.assertRegex(err, r"error: [^\n]*stands alone", "the refusal does not say --touches stands alone:\n" + err)
 
     def test_a_run_query_reads_one_list_page_each_pulls_files_and_the_run_once(self):
         host = cost_host()
