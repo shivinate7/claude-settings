@@ -1,0 +1,8 @@
+{
+ "id": "handover-reads-reviewed",
+ "title": "A triage hand-over quotes the merge --reviewed line for its head",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Triage handed #2379 over at 042143e5c (2026-11-11 07:47 CST) after a fix check, but main's `merge --reviewed` read 'a guard or check change owes the final round and its net value after a fix check'. Same gate as the 04:46 CST withdrawal. Harm: one wasted coordinator check and a late release per miss. Fix: the hand-over message carries the `merge --reviewed` line for the PR, and a send to the coordinator that names a PR with an open line is refused.",
+ "source": "coordinator 2026-11-11 07:49 CST message; triage mistake"
+}
