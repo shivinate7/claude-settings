@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 09:11 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
+the history. Last rewrite: 2026-11-11 09:13 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -36,6 +36,7 @@ holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on ma
   with 682 open and 95 merged since 00:00 CST (GitHub search, coordinator, 2026-11-10 19:23 CST), draining all of them would hold the plan for about a week.
   1. The drain ends when the named queue lands: batch 74b (#2574), batch 75, and the coordinator's
      next-to-release list at 19:23 CST (#2563, #2566, the ten former #2563 waiters, #2575, #2542).
+     #1805 left the queue for item 3.6 (owner 09:12 CST Nov 11).
   2. Triage sorts the other open PRs (662 at 23:51 CST, coordinator) against this plan. It closes a PR whose purpose a ruling here
      replaces, with its branch kept so it can reopen. The rest wait as stage 3 input.
   3. Stage 2 starts as soon as #2575 is on main, without waiting for the sort.
@@ -235,6 +236,10 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   list. After it, wrong refusals are notes only. If they turn out to be a problem again, revisit a
   threshold (a guard with 3 recorded wrong refusals gets its own lane). Home: new decision
   cull-guard-wrong-refusals, beside cull-rules (PR #2568, branch cull-false-alarms-once).
+  The cull also judges the message guard between sessions, #1805, with its fix #1849, as one pair.
+  Owner 09:12 CST Nov 11, in the coordinator's chat: "q2 B" (take #1805 out of the drain; both go to
+  stage 3). Alone, #1805 wrongly refuses 136 of 204 ordinary coordinator messages; with #1849, 13 of 204
+  (#1849's round 3).
 - **R16. A mistake is filed as a missing guard, by a hook.** Owner 16:22 CST Nov 10: "i thought i've
   already set something really high up in claude.md or elsewhere that sessions/agents should never
   assume an error is their own and instead should strongly be raised awareness that any error they make
