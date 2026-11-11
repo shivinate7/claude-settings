@@ -14211,9 +14211,10 @@ class ReviewEnv(Env):
 
     def reviewed_host(self, fx, head, base="main", comments=None):
         """Pull request 7 at `head` on base `base`, with the repo's commits, trees and compares as `fx` gives them. The record is a PASS on fx.fixed
-        with no fix line, unless `comments` is given."""
+        with no fix line, and a lane-lint PASS names `head`: a done record reads done only with that lint at the live head (decision
+        lanes-run-no-full-ci-job). Both are the defaults, unless `comments` is given."""
         if comments is None:
-            comments = [review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS))]
+            comments = [review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS)), lint_of(7, head)]
         return PullsHost([batch_pull(7, head, base=base)], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
 
     def reviewed_line(self, host, head, state, msg):
