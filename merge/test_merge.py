@@ -14396,8 +14396,8 @@ class ReviewFixAfterMainMerge(ReviewEnv):
 
     def assert_listed_done(self, earlier, body, why="", live=REVIEW_HEAD):
         """`merge --reviewed` lists pull request 7 at `live` as done, with a why that starts with `why`, once the posted record `body`
-        follows the `earlier` record."""
-        listed = PullsHost([batch_pull(7, live)], {}, comments=[earlier, review_comment(2, 7, body)])
+        follows the `earlier` record. A done record also needs a lane-lint PASS at `live`, so the comments hold one (lint_of)."""
+        listed = PullsHost([batch_pull(7, live)], {}, comments=[earlier, lint_of(7, live), review_comment(2, 7, body)])
         rc, out, err = self.run_args("--reviewed", host=listed)
         self.assertEqual(rc, 0, "merge --reviewed refused the listing:\n" + out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {live[:9]} done: {re.escape(why)}",
