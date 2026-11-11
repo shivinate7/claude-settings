@@ -11,7 +11,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   triage and the batch runner together, as a trio, before any lane. It holds lane state
   and writes each lane brief. It starts each lane in roadmap order, with `model` (the lane row's),
   `source_url` (the repo) and effort `medium`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
-  and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. On a local session, the load
+  and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
+  `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
@@ -57,8 +58,8 @@ A spawner is a session that starts its own agents. Each session role is a set of
   N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
   fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
-  integration PR on green. It asks the owner for no merge. It prints the merge output on the
+  batches each PR whose review record is done, as `merge --reviewed` finds it at its wake. It merges
+  the integration PR on green. It asks the owner for no merge. It prints the merge output on the
   terminal, never to a log only. It dispatches no deferred step.
 - **Lane.** Runs one line of work, with its own builder and reviewer agents.
   It reports up to the coordinator. Work that needs a local machine is a lane whose brief
