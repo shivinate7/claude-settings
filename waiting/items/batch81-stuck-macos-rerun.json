@@ -25,9 +25,10 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 1,
   "ref": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "reply": "Overtaken, no answer needed (coordinator 15:27 CST). Both macOS jobs of run 43088666860 had already finished and passed, at 14:18 and 14:23 CST. The \"in progress\" GitHub showed was stale. What waits now is the run's final roll-up jobs (all-jobs-passed and ci-done), queued since 14:23 CST. The coordinator is checking with the batch runner, and a new question comes only if that roll-up stays stuck.",
   "repo": "shivinate7/claude-settings",
   "short": "stuck macOS jobs",
-  "status": "open",
+  "status": "closed",
   "title": "Re-run the two stuck macOS CI jobs of batch 81 once at 15:19 CST?",
   "why": "Batch 81 holds the Windows time-limit fix you want in before the archive, and its CI run looks stuck on GitHub's side."
 }
