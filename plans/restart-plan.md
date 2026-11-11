@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:51 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
+the history. Last rewrite: 2026-11-11 11:54 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -189,6 +189,14 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
 ### 3.2 Time limits end hangs only
 
 With 3.1, this stops a green batch from being refused at merge.
+
+The stopgap does not wait for the drain. Owner 12:11 CST Nov 10, decision ci-job-caps: "generously raise
+time limits in the interim so that tests dont fail off time". Case: it was not done. Main had no
+finished push run from 11:56 CST Nov 9 to at least 11:50 CST Nov 11; 11 runs were cut at the Windows
+guard shard cap (debt windows-shards-outgrow-caps). The coordinator queued the raise as a fix lane at
+11:56 CST Nov 11. Owner 11:53 CST Nov 11: "i'd already told triage/coordinator to just raise the test
+limits and i had shared so mayn gripes arleady about artificially timed tests ... pretty frusdtrating".
+Under R16, the missing guard: a main job that ends at its cap raises an alarm at once.
 
 - **R3.** Owner 14:09 CST Nov 10: "time limits as a rule make little to no sense when they feel
   arbitrary and are not outcomes related ... I understand keeping time limits at some point for letting
