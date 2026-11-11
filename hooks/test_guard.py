@@ -809,7 +809,7 @@ PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex beh
 PUSHAGENTSHORT = os.path.join(ROOT, "pushagentshort")  # agent-<7 hex>: a hex tail one character short of the shape
 PUSHAGENTEIGHT = os.path.join(ROOT, "pushagenteight")  # agent-<8 hex>: the exact shape, at its lower bound
 PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with push.autoSetupRemote in its own config
-# --all and --branches fixtures (page item 502). PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET and PUSHAHEADAGENT hold a local
+# --all and --branches fixtures. PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET and PUSHAHEADAGENT hold a local
 # main one commit ahead of origin/main, from a main, lane, detached and agent checkout. PUSHNOTRACK has no origin/main
 # ref. PUSHBEHIND has origin/main one commit ahead of local main. PUSHMASTERAHEAD has master, not main, one commit ahead
 # of origin/master. PUSHNOMAIN has neither main nor master. PUSHLOCALAHEAD is PUSHAHEAD with a local-path origin.
@@ -831,8 +831,8 @@ PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is
 PUSH_AGENT_REMEDY = "git push origin HEAD:<lane-branch>"
 PUSH_AGENT_LACKS = ("Approving the prompt", "push origin claude/agent-", "push origin worktree-agent-",
                     "HEAD:claude/agent-", "HEAD:worktree-agent-")
-# The owner's ruling on --all and --branches (page item 502, 2026-11-10 16:08 CST): refused when the push would update
-# main or master on the remote, allowed when it would not. A refusal's remedy never names main or master as a target.
+# --all and --branches never ask. They are refused when the push would update main or master on the remote, and
+# allowed when it would not. A refusal's remedy never names main or master as a target.
 PUSH_ALL_RULE = "push-all-main"
 PUSH_ALL_LACKS = ("Approving the prompt", "push origin main", "push origin master", "HEAD:main", "HEAD:master")
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
@@ -2445,7 +2445,7 @@ def _build_push():
     if run_vcs(PUSHAGENTCFG, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % PUSHAGENTCFG)
 
-    # --all and --branches (page item 502). Each fixture is read back before a case judges it: the local branch,
+    # --all and --branches. Each fixture is read back before a case judges it: the local branch,
     # the remote-tracking ref it is compared with, and the checkout the case names.
     def _ref(where, ref):
         return run_vcs(where, "rev-parse", "-q", "--verify", ref).stdout.strip()
@@ -9755,8 +9755,8 @@ push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main"
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
           rule=PUSH_MAIN_RULE)
-# Re-pointed by the owner's ruling on --all and --branches (page item 502): on a lane checkout, local main equal to
-# origin/main, neither push writes main, so both are silent. The refusal and allow rows are in the section below.
+# On a lane checkout with local main equal to origin/main, --all and --branches are silent: neither push writes main.
+# The refusal and allow rows are in the section below.
 all_allowed("lane checkout, --all with local main equal to origin/main is silent", "--all origin", cwd=PUSHFEAT)
 all_allowed("lane checkout, --branches with local main equal to origin/main is silent", "--branches origin",
             cwd=PUSHFEAT)
@@ -9873,11 +9873,12 @@ sh("main, cd into a folder that does not exist, then origin main, asks push-main
    "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=PUSHLOCALMAIN)
 
-# --all and --branches (owner's ruling, page item 502, 2026-11-10 16:08 CST). A plain push of every branch never asks.
-# It is refused when it would update main or master on the remote, and allowed when it would not. The remote's main
-# is read from its remote-tracking ref. A ref that differs from local main, or is missing, counts as an update, since
-# the push may write main. A ref that matches local main is trusted: the guard never contacts the remote.
-# The four checkouts give the same verdict, except the agent rows, which keep PR 2465's push-agent-branch refusal.
+# --all and --branches never ask. A plain push of every branch is refused when it would update main or master on the
+# remote, and allowed when it would not. The remote's main is read from its remote-tracking ref. A ref that differs from
+# local main, or is missing, counts as an update, since the push may write main. A ref that matches local main is trusted:
+# the guard never contacts the remote.
+# The four checkouts give the same verdict, except the agent rows. The agent-branch rule refuses an agent checkout's
+# --all and --branches, since the agent branch in that push would still reach origin.
 for form in ("--all", "--branches"):
     all_refused(form + " from a main checkout, local main ahead of origin/main, refuses", form + " origin",
                 cwd=PUSHAHEAD)
@@ -9889,7 +9890,7 @@ for form in ("--all", "--branches"):
                   VCS + " push " + form + " origin", cwd=PUSHAHEADAGENT)
 all_refused("--all with no remote named, from a main checkout, local main ahead, refuses", "--all", cwd=PUSHAHEAD)
 # A glob refspec from every branch to every branch reaches main as --all does. Its agent row is pinned to this rule:
-# PR 2465's agent rule covers only --all and --branches.
+# the agent-branch rule covers only --all and --branches.
 all_refused("glob refspec refs/heads/*:refs/heads/* from a main checkout, local main ahead, refuses",
             "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEAD)
 all_refused("glob refspec refs/heads/*:refs/heads/* from a lane checkout, local main ahead, refuses",
