@@ -1,0 +1,8 @@
+{
+ "id": "item-field-rendered-text",
+ "title": "Item-field record says what the dismissed refusal does",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Debt from #2559 round 3 (reviewer sonnet, 2026-11-11 01:23 CST): docs/decisions/item-field-rendered.md lines 14-15 say an unreadable itemFields block lets a write pass and that the reason tells the writer to add the field. Both are false for `dismissed`, and the refusal's printed reason cites that record, so the session it stops reads a record that contradicts it. Notes in the same lane: page.test.mjs:4052's test name says the guard accepts the write; docs/design/ask-phase-out-notes.md:88 and ask-phase-out.html:1262 keep the old sub-line; a session cannot clear a stale `dismissed`, so a re-filed item can sit behind Show read after a reload (no answer lost).",
+ "source": "triage 2026-11-11 01:25 CST, from #2559 review record 6789779392; after #2559 merges (freeze: no lane now)"
+}
