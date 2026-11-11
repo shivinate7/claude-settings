@@ -276,6 +276,15 @@ RULES = [
      ("End each commit message with", "Co-Authored-By: <model> <noreply@anthropic.com>")),
     ("rule: no record path in a commit message, except the Drops-lines trailer",
      ("Name no record path in a commit message", "Drops-lines:")),
+    # The commit-message form. The fragments hold under the current wording and the wording that
+    # replaces it. A line in COMMON is in the writer set on both sides of writer_set_check, so a
+    # dropped or reworded line passes that check. These rows pin the text itself.
+    ("rule: the commit message is passed by a heredoc on git commit -F -",
+     ("git commit -F - <<'EOF'",)),
+    ("rule: the commit message may also be passed with -m",
+     ("or with `-m`",)),
+    ("rule: never -F with a file in the scratchpad",
+     ("Never use `-F <file>`", "scratchpad")),
 ]
 for _label, _parts in RULES:
     add(_label, "context", payload("builder"), rule_check(_parts))
