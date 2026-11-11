@@ -4,5 +4,7 @@
  "status": "queued",
  "repo": "shivinate7/claude-settings",
  "why": "Lane lint runs no Windows guard tests, so a guard change can pass every lane check and go red only in batch CI. Incident: #2379 in batch 78 (PR 2583, 2026-11-11 06:37 CST), job checks-windows-guard, the linked-nm `cd \"$R\"` case: allow where deny was wanted. Harm: one dropped lane and one wasted batch run per miss.",
- "source": "coordinator 2026-11-11 06:43 CST (stage 3; file only, no build under the freeze)"
+ "source": "coordinator 2026-11-11 06:43 CST (stage 3; file only, no build under the freeze)",
+ "note": "Ruling R26 (owner, relayed 10:02 CST Nov 11, plan 258b86a) folds this into plan item 3.5: a lane's own checks run the Windows slice, touched-file mutation tests and signed-commit cases.",
+ "updatedAt": "2026-11-11T10:09:00-06:00"
 }
