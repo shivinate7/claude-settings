@@ -1330,7 +1330,7 @@ class CrossMeasure(LaneFixture):
     # The main-net cases (R1-R10, step cross-measure-main-net). A pair clash counts only when both heads merge clean with main; the
     # lane head itself is checked against its base; a counted FAIL refuses before the ci-job run, so the ci-job never runs beside it.
 
-    def test_a_stale_sibling_that_clashes_only_through_main_passes_with_a_report_line_naming_it(self):  # R1, the 2026-11-10 incident
+    def test_a_stale_sibling_that_clashes_only_through_main_passes_with_a_report_line_naming_it(self):  # R1: a sibling that clashes with main but not with the lane head is stale. The lane passes, and the report names the sibling.
         sib = self.pr_writes(8, {"shared-a.txt": "sibling\n"}, lane_body(OWN))  # cut before main moves
         self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")  # main moves on the same path after the sibling was cut
         head = self.merge_into_feat("origin/main")  # the lane head merges main, so it holds main's change
