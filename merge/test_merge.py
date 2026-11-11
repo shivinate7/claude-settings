@@ -14209,13 +14209,13 @@ class ReviewEnv(Env):
         self.assertEqual(r.returncode, 1, "the fixture's hand-resolved merge does not conflict with main3 in git")
         return types.SimpleNamespace(**names, parents=parents, trees=trees, on_main=on_main)
 
-    def reviewed_host(self, fx, head, base="main", comments=None):
+    def reviewed_host(self, fx, head, base="main", comments=None, more=()):
         """Pull request 7 at `head` on base `base`, with the repo's commits, trees and compares as `fx` gives them. The record is a PASS on fx.fixed
         with no fix line, and a lane-lint PASS names `head`: a done record reads done only with that lint at the live head (decision
-        lanes-run-no-full-ci-job). Both are the defaults, unless `comments` is given."""
+        lanes-run-no-full-ci-job). Both are the defaults, unless `comments` is given. `more` holds the other open pull requests, as batch_pull gives them."""
         if comments is None:
             comments = [review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS)), lint_of(7, head)]
-        return PullsHost([batch_pull(7, head, base=base)], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        return PullsHost([batch_pull(7, head, base=base), *more], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
 
     def reviewed_line(self, host, head, state, msg):
         """-> the output of `merge --reviewed`, after one check: pull request 7's line names `head` and reads `state`."""
@@ -14860,6 +14860,22 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         rc, out, err = self.run_fix_after_prior(fx, self.prior_text(fx), fx.edited)
         self.assertEqual(rc, 2, "a fix check on a merge with an extra edit, after a sonnet PASS fix check, was accepted:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+
+    def test_a_fix_verifier_on_a_conflicted_merge_with_an_edit_outside_its_conflict_is_refused(self):
+        # Control: the conflicted merge, which resolves a.txt by hand and edits nothing else, is accepted. The case also edits p.txt, a file that
+        # git merges without a conflict. The scope check: the conflicted files stay a.txt alone, so only the extra edit can refuse the case.
+        fx = self.real_commits()
+        prior = self.prior_text(fx)
+        rc, out, err = self.run_fix_after_prior(fx, prior, fx.conflicted)
+        self.assertEqual(rc, 0, "control: a fix verifier on a conflicted merge after a sonnet PASS fix verifier was refused:\n" + out + err)
+        edited = self.git_commit(fx.fixed, {"a.txt": "resolved\n", "b.txt": "b\n", "c.txt": "c\n", "p.txt": "edited\n"}, fx.main3)
+        self.facts(fx, [edited])
+        self.assertEqual(merge.conflicting_files(self.co, fx.fixed, fx.main3), ("conflict", ["a.txt"]), "fixture: fixed and main3 do not conflict on a.txt alone")
+        self.assertEqual(fx.parents[edited], [fx.fixed, fx.main3], "fixture: the edited merge is not a merge of the fixed head and main3")
+        rc, out, err = self.run_fix_after_prior(fx, prior, edited)
+        self.assertEqual(rc, 2, "a fix verifier on a conflicted merge with an edit outside its conflict, after a sonnet PASS fix verifier, was accepted:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix verifier still printed a record")
+        self.assertNotIn("Traceback", err)
 
 class ReviewRoundModel(ReviewEnv):
     """The --round values against the reviewer row (agent-model-cap): a review after the first names sonnet, the last review names opus only by
@@ -15572,6 +15588,33 @@ class ReleaseCheck(ReviewEnv):
         rc, lines, err = self.release_at(fx, fx.plain, fx.fixed)
         self.assertEqual(rc, 1, err)
         self.assert_fails_alone(self.line_of(lines, 7), 7, rf"the record is for head {fx.fixed[:9]}")
+
+    def two_bases(self, fx):
+        """Pull request 7 on main, at fx.clean with its record done at fx.fixed, and pull request 8 on feat-base, at fx.stacked. -> the two pull requests.
+        Call base_tip first: main must hold main2, or git's merge of fx.clean into main is not clean."""
+        return [batch_pull(7, fx.clean), batch_pull(8, fx.stacked, base="feat-base", head_ref="feat8")]
+
+    def test_d_a_pr_on_main_is_judged_on_main_whatever_base_the_other_pr_names(self):
+        # Control: read last, #7 is judged on main, its own base, and its clean merge of main reads PASS. The case reads #8 last, so release_check
+        # judges #7 on feat-base, the base #8 names, and the clean merge of main reads stale.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        pulls, comments = self.two_bases(fx), [self.review(7, head=fx.fixed)]
+        reads = dict(commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        _, lines, err, _ = self.release([8, 7], pulls=pulls, comments=comments, **reads)
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", "control: #7 does not pass when it is read last:\n" + err)
+        _, lines, err, _ = self.release([7, 8], pulls=pulls, comments=comments, **reads)
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", "release_check judges #7 on feat-base, the base of #8 read last, so the clean merge of main reads stale:\n" + err)
+
+    def test_e_reviewed_and_release_check_read_the_same_pr_the_same_way(self):
+        # Control: merge --reviewed reads #7 done at its clean merge of main. The case is release_check on the same two pull requests, with #7 first.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        self.reviewed_line(self.reviewed_host(fx, fx.clean, more=self.two_bases(fx)[1:]), fx.clean, "done",
+                           "control: merge --reviewed does not read #7 at its clean merge of main as done")
+        _, lines, err, _ = self.release([7, 8], pulls=self.two_bases(fx), comments=[self.review(7, head=fx.fixed)],
+                                        commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", "merge --reviewed reads #7 done, and --release-check reads the same pull request as failing:\n" + err)
 
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
