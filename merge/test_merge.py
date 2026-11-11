@@ -17037,7 +17037,7 @@ def failed_case(name):
     """A failing case's line in a run's log, in the form hooks/test_guard.py prints: FAIL, the got and want verdicts, the tool, the case's name."""
     return "%s  %-6s(want %-6s)  [%-11s] %s" % ("FAIL", "allow", "deny", "Bash", name)
 
-# #2390's patch for hooks/test_guard.py, as its fix commit (bb0985937) made it: the two hunks that edit a failing case's body.
+# #2390's patch for hooks/test_guard.py, as the fix made it: the two hunks that edit a failing case's body.
 # Each case's name is on a context line, unchanged, and its body is in `-` and `+` lines. No `+` line names a failing case.
 INCIDENT_PATCH = r"""@@ -21529,7 +21531,10 @@ add("brief-destructive-git: git stash list is a read and is allowed", "allow",
  add("brief-destructive-git: git status is allowed", "allow",
