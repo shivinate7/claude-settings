@@ -1450,10 +1450,11 @@ jobs:
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
-    # Full guard suite off pull_request, in 3 shards. A 2-shard split ran 19:31 and past 20:00 (cancelled) under this
-    # cap (runs 42406480975, 42408558620), so each of 3 shards takes a third of the cases. Per-shard time is unmeasured
-    # until a full run. The cap stays 20 min.
-    timeout-minutes: 20
+    # Full guard suite off pull_request, in 3 shards. A 2-shard split ran 19:31 and past 20:00 (cancelled) under the old
+    # 20 min cap (runs 42406480975, 42408558620), so each of 3 shards takes a third of the cases. Under that cap, 11 main push
+    # runs from 42700538152 to 43038567637 (Nov 9 to Nov 11) cut a shard at 20.05 to 20.08 min with no red test; green shards took
+    # 15.27 to 19.98 min. Stopgap cap 75 min (owner 12:11 CST Nov 10, decision ci-job-caps).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1483,7 +1484,7 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of checks-windows-guard: its figures and cap are there.
-    timeout-minutes: 20
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1505,7 +1506,7 @@ jobs:
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of checks-windows-guard: its figures and cap are there.
-    timeout-minutes: 20
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
