@@ -693,3 +693,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - 2026-11-11 10:09 CST, coordinator 10:07 CST: R26 fully ruled, so the stage 3 hold (R25) is lifted. Stage 3 starts with 3.0 once the drain's named queue lands, stage 4 alongside, test-guard-split-per-rule first.
 - 2026-11-11 10:10 CST, note (triage mistake): guard message-time-matches-clock let through updatedAt times 3-5 min ahead of the clock when set in a shell variable (T=2026-11-11T10:09:00-06:00 at 10:06 CST; commits 2a001b7c3, 5be320cf0); it refused the literal form. Guard owed: read a time assigned to a shell variable.
 - R27 (owner 10:16 CST Nov 11, plan 6e0c790 under 3.6): new step feedback-log-tends-itself. Add 6e0c790 to the owed plan follow-up PR.
+- R28 (owner 10:19-10:22 CST Nov 11, plan a96d4a3 under 3.6): steps prose-tending-contract and prose-tending-move-stores; feedback-log-tends-itself waits on the contract. Add a96d4a3 to the owed plan follow-up PR.

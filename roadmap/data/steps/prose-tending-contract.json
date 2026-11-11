@@ -1,0 +1,14 @@
+{
+ "id": "prose-tending-contract",
+ "title": "One shared tending contract and runner for every prose store",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "why": "Each prose store (feedback log, debts, notes, handoffs, steps, decisions) is tended its own way or not at all, so items go stale and the same fix is built many times. The feedback log incident (R27) is one case.",
+ "note": "Ruling R28 (plan a96d4a3 under item 3.6, after R27). Owner 10:19 CST: \"everything that marks prose should share the same \\\"tending\\\" mechanism ... it should be more uniform, standardized, and shared as much as possible to avoid stale duplication and to ensure shared best practrices\". Order (box answer before 10:22 CST): a read-only skim audit (the retrospective session, running now), then this shared contract, then a deeper audit and moves. Home: a new decision for the shared contract. Shape: lint/layout.json holds per store its item shape, a \"still true?\" test and a close step; one runner, called from the merge check, Stop hooks, compaction and triage status; no new timer or process. Waits on the skim audit. Step feedback-log-tends-itself is its first user and waits on this step.",
+ "source": "owner 2026-11-11 10:19-10:22 CST, relayed by the retrospective session 10:23 CST",
+ "owner": "triage",
+ "updatedAt": "2026-11-11T10:23:00-06:00",
+ "blockedBy": []
+}
