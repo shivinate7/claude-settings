@@ -261,7 +261,8 @@ it's how the limit batches that's the problem". How many lanes start is left to 
 - **R9.** Owner 15:44 CST Nov 10: "yeah i never wanted round 3 if it passed earlier and was so confused
   to see that it was occuring"; "agreed A -- can look into the sonnet noise thing later". Fold the 15+
   rounds rulings into one record. Round 1 runs on item 359 a's model (Sonnet for a guard or check
-  change, the role's model otherwise). Fixes are verified per G5. Round 3 follows owner pick 471 a
+  change, the role's model otherwise). Fixes are verified per G5. Correction, owner 16:07 CST Nov 10
+  (relayed; step rounds-rules-one-record): round 3 follows owner pick 471 a
   (2026-11-09 23:39 CST, step review-state-guard-needs-round-3) as it stands. A guard or check change
   that passes round 1 is done; only one fixed under a fix check waits for round 3. The net-value test is
   only for an unclear case that cannot finish by the end of the rounds (the 2026-10-15 "still
@@ -306,8 +307,9 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   and fail closed; agent or pasted text never grants. Fast path, no model call: `override` (one act) or
   `override` with any length (15, 15m, 90 minutes, 2 hours, 4h). Any other wording is judged. Every
   grant prints one receipt line the owner sees (what it lifts, one act or until when); today a grant
-  prints nothing. A refusal no override can lift says so. Home: decision owner-override, rewritten in
-  place.
+  prints nothing. A refusal no override can lift says so. Departs from: decision owner-override, where
+  a longer phrase such as "override 15m please" grants nothing; under R12 the judge reads it. Home:
+  decision owner-override, rewritten in place.
 
 ### 3.12 A lane never stalls on a popup
 
