@@ -417,7 +417,8 @@ than main says so at its next turn and reinstalls; the fresh start clears it onc
 Owner 13:10 CST: "maybe we enforce cloud sessions to restart often mechanically based on certain
 conditions like certain items landing on main". Read 13:11 CST (decision idle-resume-compacts): the
 cloud reruns the install at each worker restart, which follows an idle gap. A busy session never
-restarts, so only it goes stale. Proposed, waits for the owner's yes: when hooks or settings on main
+restarts, so only it goes stale. Owner 13:21 CST: "yes sorry i meant reinstall not restart i agree".
+When hooks or settings on main
 changed since the install, the session reinstalls at its next turn, in place, with no restart. It
 restarts only for a change a reinstall cannot load. Whether a new hook entry in settings.json loads
 without a restart is unmeasured; a lane measures it first.
@@ -588,7 +589,7 @@ sessions (keep them warm)". Read 13:11 CST (chatter audit; decision idle-resume-
 not the restart, which adds about 4,000 tokens. It is the prompt cache, which expires after an hour
 idle. The next wake then rewrites the whole context, about 200K tokens for a lane. Owner 13:20 CST:
 "i banned stuff that seemed buggy from anthropic and that it was never supposed to be a llarger
-permanent hard ban". Read 13:22 CST: the words "never on a timer" came in commit b25883784 (Oct 22),
+permanent hard ban". Read 13:21 CST: the words "never on a timer" came in commit b25883784 (Oct 22),
 whose stated reason is "watching must cost less than what it watches (owner, 2026-10-21)". A
 keep-warm ping is not watching, and by that reason it passes. Prices (claude-api skill): a 1-hour
 cache write costs 2x input; a cache read costs $0.20 per million on Opus 5.5 and $0.10 on Sonnet 5.5,
