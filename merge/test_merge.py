@@ -17008,11 +17008,12 @@ def controls(text):
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
+# The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
 TOUCH_RUN = "42559512356"
 TOUCH_GUARD = "hooks/test_guard.py"
 TOUCH_FIX = "fix-brief-destructive-git-windows"
-TOUCH_CASE_A = "brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied"
-TOUCH_CASE_B = "brief-destructive-git: builder brief that orders the reset in a fenced block is denied"
+TOUCH_CASE_A = "brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed"
+TOUCH_CASE_B = "brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied"
 TOUCH_NONE = "no open pull request touches them."
 TOUCH_UNKNOWN = f"unknown: no failing case read from run {TOUCH_RUN}; pass --case or --file"
 
@@ -17036,11 +17037,44 @@ def failed_case(name):
     """A failing case's line in a run's log, in the form hooks/test_guard.py prints: FAIL, the got and want verdicts, the tool, the case's name."""
     return "%s  %-6s(want %-6s)  [%-11s] %s" % ("FAIL", "allow", "deny", "Bash", name)
 
-def incident_host(**reads):
-    """The open pulls of the incident, listed out of order: #2390 is the fix, and its `+` lines hold both cases; #2401 is unrelated."""
+# #2390's patch for hooks/test_guard.py, as its fix commit (bb0985937) made it: the two hunks that edit a failing case's body.
+# Each case's name is on a context line, unchanged, and its body is in `-` and `+` lines. No `+` line names a failing case.
+INCIDENT_PATCH = r"""@@ -21529,7 +21531,10 @@ add("brief-destructive-git: git stash list is a read and is allowed", "allow",
+ add("brief-destructive-git: git status is allowed", "allow",
+     tool="Agent", prompt="Run `git status`.", subagent_type="builder", model="sonnet")
+ add("brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed", "allow",
+-    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO + " reset --hard`.",
++    tool="Agent", prompt="Try it first: `git -C '" + SCRATCH_REPO + "' reset --hard`.",
++    subagent_type="builder", model="sonnet")
++add("brief-destructive-git: a reset --hard in a scratch repo named with forward slashes is allowed", "allow",
++    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO.replace(os.sep, "/") + " reset --hard`.",
+     subagent_type="builder", model="sonnet")
+ add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
+     tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
+@@ -21564,7 +21569,7 @@ add("brief-destructive-git: builder brief that orders `git worktree remove x` is
+     tool="Agent", prompt="Then run `git worktree remove x`.", subagent_type="builder", model="sonnet")
+ add("brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied", "deny",
+     BRIEF_DESTRUCTIVE, tool="Agent",
+-    prompt="Compare: `git -C " + SCRATCH_REPO + " status && git reset --hard origin/main`.",
++    prompt="Compare: `git -C '" + SCRATCH_REPO + "' status && git reset --hard origin/main`.",
+     subagent_type="builder", model="sonnet")
+ add("brief-destructive-git: a reset under an inline ``` span line that is not a fence is denied", "deny",
+     BRIEF_DESTRUCTIVE, tool="Agent", prompt="```git status```\nRun `git reset --hard origin/main`.",
+"""
+
+
+def incident_fix_files():
+    """#2390's changed files: hooks/test_guard.py as its fix commit changed it, its failing cases' names on context lines."""
+    return [touch_file(TOUCH_GUARD, *INCIDENT_PATCH.splitlines())]
+
+
+def incident_host(plus_lines=False, **reads):
+    """The open pulls of the incident, listed out of order: #2390 is the fix, and its patch is the one its commit made (incident_fix_files);
+    #2401 is unrelated. `plus_lines` swaps #2390's patch for a synthetic one that adds both cases on `+` lines. Only tests of the `+`-line
+    match and of the job reads use it. None of them claims to be the incident."""
     pulls = [touch_pull(2401, "docs-x"), touch_pull(2390, TOUCH_FIX)]
-    files = {2390: [touch_file(TOUCH_GUARD, "@@ -1,1 +1,2 @@", f"+    {TOUCH_CASE_A}", f"+    {TOUCH_CASE_B}")],
-             2401: [touch_file("docs/x.md", "@@ -1,1 +1,1 @@", "+a docs line")]}
+    fix = ([touch_file(TOUCH_GUARD, "@@ -1,1 +1,2 @@", f"+    {TOUCH_CASE_A}", f"+    {TOUCH_CASE_B}")] if plus_lines else incident_fix_files())
+    files = {2390: fix, 2401: [touch_file("docs/x.md", "@@ -1,1 +1,1 @@", "+a docs line")]}
     return TouchesHost(pulls, files, **reads)
 
 def run_jobs(*rows):
@@ -17139,29 +17173,45 @@ class TouchesRead(Env):
         self.assertNotIn("Traceback", err, out + err)
         return err
 
-    def test_the_incident_fix_is_named_by_file_case_and_run_and_the_unrelated_pull_is_not(self):
+    def test_the_incident_fix_is_named_by_its_file_and_the_unrelated_pull_is_not(self):
+        host = incident_host()
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(2401, host.file_calls, "the read never reached the files of #2401")
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"], out)
+
+    def test_a_case_on_a_plus_line_names_its_pull_and_the_unrelated_pull_is_not(self):
         head = touch_head(2390, TOUCH_FIX, "ready")
         for argv, want in (
-            (("--file", TOUCH_GUARD), [head + f"file {TOUCH_GUARD}"]),
             (("--case", TOUCH_CASE_A), [head + f"case {TOUCH_CASE_A}"]),
             (("--case", TOUCH_CASE_B), [head + f"case {TOUCH_CASE_B}"]),
             (("--file", TOUCH_GUARD, "--case", TOUCH_CASE_A), [head + f"file {TOUCH_GUARD}; case {TOUCH_CASE_A}"]),
         ):
             with self.subTest(argv=argv):
-                host = incident_host()
+                host = incident_host(plus_lines=True)
                 rc, out, err = self.run_args("--touches", *argv, host=host)
                 self.assertEqual(rc, 0, out + err)
                 self.assertIn(2401, host.file_calls, "the read never reached the files of #2401")
                 self.assertEqual(out.splitlines(), want, out)
+
+    def test_a_run_of_the_incident_never_reads_clear_on_its_fix(self):
+        # Setup first (P7): the fixture is the incident's shape. Each failing case's name is on a context line of #2390's patch, and its body changed.
+        patch = [t for f in incident_host().files[2390] for t in f["patch"].splitlines()]
+        for case in (TOUCH_CASE_A, TOUCH_CASE_B):
+            self.assertTrue(any(t.startswith(" ") and case in t for t in patch), "setup: no context line of #2390's patch names " + case)
+            self.assertFalse(any(t.startswith(("+", "-")) and case in t for t in patch), "setup: a + or - line of #2390's patch names " + case)
+        head = touch_head(2390, TOUCH_FIX, "ready")
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())  # the control: the file query finds the fix
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [head + f"file {TOUCH_GUARD}"], "setup: the file query did not name #2390:\n" + out)
         host = incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A), failed_case(TOUCH_CASE_B)]})
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
-        self.assertEqual(rc, 0, out + err)
-        self.assertIn(2401, host.file_calls, "the --run read never reached the files of #2401")
-        lines = out.splitlines()
-        self.assertEqual(len(lines), 1, "the --run query named more than the fix:\n" + out)
-        self.assertTrue(lines[0].startswith(head), "the --run query did not name #2390:\n" + out)
-        for case in (TOUCH_CASE_A, TOUCH_CASE_B):
-            self.assertIn(case, lines[0], "the --run query did not name the failing case " + case)
+        self.assertIn(2390, host.file_calls, "the --run read never reached the files of #2390")
+        if rc == 0:
+            self.assertTrue(any(line.startswith(head) for line in out.splitlines()),
+                            "the --run query read clear: exit 0 and no line names #2390, which holds both failing cases:\n" + out)
+        else:
+            self.assertIn("unknown", out + err, f"the --run query exited {rc} without saying unknown:\n" + out + err)
 
     def test_a_case_on_a_minus_line_context_or_plus_plus_plus_header_does_not_match(self):
         pull = touch_pull(2430, "guard-tests")
@@ -17284,7 +17334,7 @@ class TouchesRead(Env):
 
     def test_it_takes_no_lock_and_moves_no_ref_or_file(self):
         before, status = self.refs(), sh(self.co, "git", "status", "--porcelain")
-        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}))
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=incident_host(plus_lines=True, logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}))
         self.assertEqual(rc, 0, out + err)
         self.assertFalse(self.lock_ref(), "--touches took the merge lock")
         self.assertEqual(self.refs(), before, "--touches moved a ref")
@@ -17308,7 +17358,7 @@ class TouchesRead(Env):
 
     def test_a_run_line_with_a_reason_note_names_its_case_without_the_note(self):
         note = "  (the reason does not name rule 'brief-destructive-git': the Bash call was allowed)"  # test_guard's suffix on a line that has a reason
-        host = incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A) + note]})
+        host = incident_host(plus_lines=True, logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A) + note]})
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"],
@@ -17343,12 +17393,13 @@ class TouchesRead(Env):
                 self.assertIn("merge: unknown", err, f"a {conclusion} red job read clear beside --file:\n" + out + err)
 
     def touches_run(self, rows, *argv, pulls=None, files=None):
-        """`merge --touches --run RUN` beside argv, over the run of `rows` (run_jobs) and the open pulls: the incident's, unless `pulls` and `files`
-        name others. -> (rc, out, err). The scope is read first: the run's jobs were listed, and the log of each failed job was read (the rollup
-        job's log is not asked for), so a verdict below is about the log lines and never about a read that did not run."""
+        """`merge --touches --run RUN` beside argv, over the run of `rows` (run_jobs) and the open pulls: the `+`-line pulls of incident_host(plus_lines=True),
+        unless `pulls` and `files` name others. These tests are about the job reads and the unknown lines, not the incident's shape, which
+        test_a_run_of_the_incident_never_reads_clear_on_its_fix pins. -> (rc, out, err). The scope is read first: the run's jobs were listed, and the
+        log of each failed job was read (the rollup job's log is not asked for), so a verdict below is about the log lines and never about a read that did not run."""
         jobs, logs = run_jobs(*rows)
         if pulls is None:
-            host = incident_host(jobs=jobs, job_logs=logs, count_gh=True)
+            host = incident_host(plus_lines=True, jobs=jobs, job_logs=logs, count_gh=True)
         else:
             host = TouchesHost(pulls, files, jobs=jobs, job_logs=logs, count_gh=True)
         rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, *argv, host=host)
