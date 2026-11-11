@@ -178,6 +178,7 @@ ENDED_BUCKETS = SESSION_BUCKETS[3:5]
 ITEM_DONE_STATUSES = ("closed",)
 # A live file with no items list: the open items are unknown, so the lanes to archive read unknown.
 ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
+THREADS_MISSING_WHY = "unknown (the live file has no threads list)"
 IDLE_LANES_LINE = "lanes to archive"
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
 FUTURE_MINUTES = 5
@@ -646,11 +647,13 @@ def health(repo, extra, where, slug, branch):
 def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
-    Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+    Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
     "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
-    A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
+    A file with no pulls list reads unknown, so a dropped key never shows as "none". A file with no threads list stays
+    valid: `threads` is None and `threadsWhy` says why, so only the thread count reads unknown (never zero) and `strays`
+    holds that reason. An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
     names that is not an open step is listed in `strays`. One list of lane rows (not archived, carrying this repo's
     cs-repo tag) feeds liveness: `sessionSteps` holds their step ids and `laneTags` their topic and build tags, for an
     item's lane; `liveSteps` holds the step ids of those rows not ended (ENDED_BUCKETS), for a step's lane and a
@@ -685,9 +688,9 @@ def live_work(path, steps, slug=None):
         datetime.datetime.fromisoformat(read.replace("Z", "+00:00"))
     except (AttributeError, ValueError):
         read = "unknown (the live file's readAt is not an ISO time: %r)" % (read,)
-    missing = [key for key in ("threads", "pulls") if not isinstance(raw.get(key), list)]
-    if missing:
-        return {"read": "unknown (the live file has no %s list)" % " or ".join(missing)}
+    if not isinstance(raw.get("pulls"), list):
+        return {"read": "unknown (the live file has no pulls list)"}
+    has_threads = isinstance(raw.get("threads"), list)
     skipped, strays = [], []
 
     def keep(kind, rows, ok):
@@ -702,7 +705,7 @@ def live_work(path, steps, slug=None):
         return good
 
     text = lambda row, key: isinstance(row.get(key), str) and row[key].strip()
-    threads = keep("thread", raw.get("threads", []), lambda r: text(r, "title") and r.get("state") in STATES
+    threads = keep("thread", raw["threads"] if has_threads else [], lambda r: text(r, "title") and r.get("state") in STATES
                    and (r.get("step") is None or isinstance(r["step"], str)))
     before_pulls = len(skipped)
     pulls = keep("pull", raw.get("pulls", []),
@@ -710,6 +713,8 @@ def live_work(path, steps, slug=None):
                  and (r.get("branch") is None or isinstance(r["branch"], str)))
     pulls_skipped = len(skipped) - before_pulls
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
+    if not has_threads:
+        strays = [THREADS_MISSING_WHY]  # a count of 0 would read as "no thread names a stray step"
     before_landed = len(skipped)
     # `merged` is the JSON true or false the publisher read from GitHub; text such as "true" is a wrong shape, not a guess.
     landed_pulls = keep("landedPull", raw["landedPulls"], lambda r: type(r.get("number")) is int
@@ -785,7 +790,8 @@ def live_work(path, steps, slug=None):
         # a publisher that does not send `lane` reads unknown in stalled_items, never "no lane".
         page_items = [dict({"n": r["n"], "status": r["status"], "home": r["home"]},
                            **{k: r[k] for k in ("lane", "owner") if k in r}) for r in raw["items"]]
-    return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
+    return {"read": read, "threads": threads if has_threads else None,
+            "threadsWhy": None if has_threads else THREADS_MISSING_WHY, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
             "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions,

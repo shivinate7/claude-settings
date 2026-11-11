@@ -6751,6 +6751,103 @@ test("merged_page.py --live hands its JSON to the build as the live file", () =>
   assert.ok(b.live && Array.isArray(b.live.threads), "the build did not read the live file: " + JSON.stringify(b.live ?? null));
 });
 
+// The Live work cases share one live file and one way to open the Status tab on it. The read time is fixed, so no case depends on the clock.
+// A case passes only the keys it changes; JSON.stringify drops an undefined key, so { pulls: undefined } builds a file with no pulls list.
+const LIVE_READ = "2026-11-10T12:00:00Z";
+const liveFile = (over = {}) => ({ readAt: LIVE_READ, branches: [], sessions: [], ...over });
+async function liveStatus(t, over) {
+  const page = await open(t, { pageHtml: mergedPage("--live", JSON.stringify(liveFile(over))) });
+  if (page) await openStatus(page);
+  return page;
+}
+const PULL_ONLY = { pulls: [{ number: 7, title: "Lane pull seven", branch: "lane-seven" }] };
+
+// A live file with no threads list: the read stays valid, so the Status tab shows its open pull request and the read time.
+// Only the thread count is unknown, so the page never reads "No thread is open" for it (a made-up zero).
+test("the Status tab with a live file that has no threads list shows its pull request and the read as valid", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  // The live work line is the one whose label reads Live work: the stalled band is also a line, and it may be a not-read one.
+  const line = page.locator(".livenone").filter({ hasText: "Live work" });
+  const shown = (await line.count()) ? (await line.first().textContent()).replace(/\s+/g, " ") : "(no live work line)";
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab draws live work as not read, not its pull request: " + shown);
+  const text = (await page.locator("details.live").textContent()).replace(/\s+/g, " ");
+  assert.match(text, /1 open pull request/, "the live work does not count the open pull request: " + text);
+  assert.match(text, /#7/, "the live work does not show open pull request #7: " + text);
+  assert.match(text, /Lane pull seven/, "the live work does not show the title of open pull request #7: " + text);
+  assert.doesNotMatch(text, /not read/, "the live work reads not read with its pulls and read valid: " + text);
+  assert.doesNotMatch(text, /No thread is open/, "the live work reads no threads, a made-up zero: " + text);
+});
+
+// The control for that case: a live file with no pulls list is not read, whatever its threads list holds.
+test("control: the Status tab with a live file that has no pulls list reads live work not read", async (t) => {
+  const page = await liveStatus(t, { pulls: undefined, threads: [] }); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 0, "the Status tab draws live work with no pulls list as a panel, not as not read");
+  const line = page.locator(".livenone").filter({ hasText: "Live work" });
+  assert.equal(await line.count(), 1, "the Status tab draws no live work line for a live file with no pulls list");
+  assert.match((await line.textContent()).replace(/\s+/g, " "), /not read/, "the live work line does not say not read");
+});
+
+// The threads-unknown marker in the Live work summary. A pill reads as a thread state (failed and stopped share its colour), so an
+// unknown thread count gets a dashed ring and the words, the same ring the panel draws for a line not read.
+const summaryText = (page) => page.locator("details.live > summary").textContent().then((s) => s.replace(/\s+/g, " ").trim());
+
+test("the threads-unknown marker is a ring and the words in the summary, with no threads list", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab does not draw live work as a panel");
+  const marker = page.locator("details.live > summary .thr-unk");
+  assert.equal(await marker.count(), 1, "the summary has no .thr-unk marker: " + (await summaryText(page)));
+  assert.equal((await marker.textContent()).trim(), "threads unknown", "the .thr-unk marker does not read threads unknown");
+  assert.equal(await marker.locator(".rg.unk").count(), 1, "the .thr-unk marker has no .rg.unk ring");
+});
+
+test("the threads-unknown marker is not a tag pill in the summary, with no threads list", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab does not draw live work as a panel");
+  assert.equal(await page.locator("details.live > summary .tag", { hasText: "threads unknown" }).count(), 0,
+    "a .tag pill in the summary reads threads unknown, the look of a thread state: " + (await summaryText(page)));
+});
+
+test("the threads-unknown marker lays out as one inline row whose words do not wrap, with no threads list", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab does not draw live work as a panel");
+  const marker = page.locator("details.live > summary .thr-unk");
+  assert.equal(await marker.count(), 1, "the summary has no .thr-unk marker to lay out");
+  // The summary is a flex box, so the marker is a flex item and Chromium blockifies its computed display: inline-flex reads as flex.
+  // The probe sits in the same summary, so it blockifies the same way and the two values compare.
+  const wantDisplay = await probeOf(page.locator("details.live > summary"), "display", "inline-flex");
+  assert.equal(await computedOf(marker, "display"), wantDisplay, `the marker's display is not inline-flex, so its ring and words do not sit on one row (want ${wantDisplay})`);
+  assert.equal(await computedOf(marker, "whiteSpace"), "nowrap", "the marker's white-space is not nowrap, so its words may break over lines");
+});
+
+test("the threads-unknown marker's ring is in the open panel's thread count row, with no threads list", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab does not draw live work as a panel");
+  await page.locator("details.live > summary").click();
+  const row = page.locator("details.live li", { hasText: "Thread count" });
+  assert.equal(await row.count(), 1, "the open panel has no thread count row");
+  assert.equal(await row.isVisible(), true, "the thread count row is not shown when the live work panel is open");
+  assert.equal(await row.locator(".rg.unk").count(), 1, "the thread count row has no .rg.unk ring, so it reads unknown without the mark the summary carries: " + (await row.textContent()).replace(/\s+/g, " ").trim());
+});
+
+// The controls: an empty threads list is a real zero and gets no marker, and a list with threads keeps each thread's pill and no marker.
+test("control: an empty threads list draws no threads-unknown marker and no threads-unknown pill", async (t) => {
+  const page = await liveStatus(t, { ...PULL_ONLY, threads: [] }); if (!page) return;
+  assert.equal(await page.locator("details.live > summary").count(), 1, "the live work summary is missing");
+  assert.match(await summaryText(page), /1 open pull request/, "the summary does not show its open pull request, so the case did not draw the summary");
+  assert.equal(await page.locator("details.live > summary .thr-unk").count(), 0, "an empty threads list draws a threads-unknown marker: zero is a real read, not unknown");
+  assert.equal(await page.locator("details.live > summary .tag", { hasText: "threads unknown" }).count(), 0, "an empty threads list draws a threads-unknown pill");
+});
+
+test("control: a failed and a stopped thread keep their tag pills and draw no threads-unknown marker", async (t) => {
+  const threads = [{ title: "Failing lane", state: "failed" }, { title: "Stopped lane", state: "stopped" }];
+  const page = await liveStatus(t, { ...PULL_ONLY, threads }); if (!page) return;
+  const summary = page.locator("details.live > summary");
+  assert.equal(await summary.count(), 1, "the live work summary is missing");
+  assert.equal(await summary.locator(".tag.st-failed", { hasText: "1 failed" }).count(), 1, "the summary's failed thread is not a .tag pill: " + (await summaryText(page)));
+  assert.equal(await summary.locator(".tag.st-stopped", { hasText: "1 stopped" }).count(), 1, "the summary's stopped thread is not a .tag pill: " + (await summaryText(page)));
+  assert.equal(await summary.locator(".thr-unk").count(), 0, "a list of threads draws a threads-unknown marker");
+});
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
