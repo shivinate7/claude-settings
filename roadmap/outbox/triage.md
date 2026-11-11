@@ -705,3 +705,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 
 - Debt scratchpad-owner-cp-mv-dest: name the sequence "a refused overwrite, then a write the guard cannot see (cp, touch, dd of=, curl -o)", so A's run passes where main asked. Round 3 (reviewer sonnet), comment 6802189443.
 - docs/decisions/scratchpad-owner.md:5 "opens no safety hole" overstates; say "opens no unconditional hole".
+
+## 2026-11-11 11:14 CST: docs/todo.md line 9 (follow-up PR)
+
+- Line 9 (measure one step down per role, step c201) is now one lane with R33's evaluation on step model-table-one-home. Point the line at that step, or delete it when the step's lane opens (retrospective 11:15 CST).
