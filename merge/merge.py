@@ -65,9 +65,8 @@
                           check or the cross-measure stops there too: the ci-job never runs beside it, and one refusal lists every FAIL block, with
                           no PASS line and no comment. Two heads clash when `git merge-tree` of them conflicts. A clash counts only when both
                           heads merge clean with the base. A clash that comes through the base is a report line after the PASS line, and it
-                          names the PR that conflicts with the base. On an integration head (it merged the head of another open PR) no clash
-                          counts, so each is a report line. A counted clash FAILs, naming each PR and file, with its remedy (--lint-unknown-ok
-                          never lifts it). PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
+                          names the PR that conflicts with the base. A counted clash FAILs, naming each PR and file, with its remedy
+                          (--lint-unknown-ok never lifts it). PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
                           head against main (its base), two merge-trees per other PR compared (that PR against the base, and against the head),
                           and exactly one PR-list read; no merge-tree for a stack-skipped PR, and none beyond the head's when there is no other
                           PR. (A PR-list read is one `gh api` call per 100 PRs, and the PR-list read still runs when there is no other PR. When any PR is
@@ -2762,8 +2761,6 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     -> (fails, reports, stop). fails: one text block for the clashes that count. reports: one line per clash that does not count. stop: "" or the text
     of an unknown (a read git cannot answer, a head origin does not hold); the caller raises it, with the fails above it, never as a pass.
     A clash counts only when both heads merge clean with the base: otherwise it comes through the base, and its line names the head that conflicts with it.
-    An integration head (read_lanes finds another open PR's head among its merge tips) counts no clash: the build merged each lane, and the batch-freeze
-    rule puts any PR outside the batch in a later batch, where its own lint and the join's re-lint meet the clash.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with."""
     lane = set(LANE_SESSION.findall(body or ""))
@@ -2778,7 +2775,6 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     if c:
         raise Stop(f"the cross-measure of {head[:9]} is unknown: git fetch origin failed: {out} {LANE_LINT_CITE}")
     conflicts, reports, unknown, unfetched = [], [], [], []
-    integration = []  # one bool, read when the first clash needs it
     for m in picked:
         other = rows[m]["head"]["sha"]
         if git(root, "rev-parse", "--verify", "-q", f"{other}^{{commit}}")[0]:  # a fork's head is not on origin, so no fetch brings it
@@ -2807,17 +2803,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         elif why is not None:
             reports.append(f"{named}. Not counted: #{m}'s own head conflicts with {base}, so the clash comes through {base}. Its own lint names it.")
         else:
-            if not integration:
-                try:
-                    tips, _ = read_lanes(root, f"refs/remotes/origin/{base}", head)
-                    integration.append(bool(set(tips) & {d["head"]["sha"] for d in rows.values()}))
-                except (ValueError, OSError, subprocess.TimeoutExpired) as e:
-                    unknown.append(f"  #{m}: the clash with this head cannot be counted, because the merge tips of the head could not be read ({e})")
-                    continue
-            if integration[0]:
-                reports.append(f"{named}. Not counted: this head is an integration head, so #{m} meets the clash in a later batch, at its own lint and the join's lint.")
-            else:
-                conflicts.append(named)
+            conflicts.append(named)
     fails = []
     if conflicts:
         fails.append("\n".join(["its head conflicts with another PR's head (git merge-tree), file by file:", *conflicts,
