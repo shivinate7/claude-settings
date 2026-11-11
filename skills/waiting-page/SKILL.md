@@ -6,7 +6,7 @@ description: Use when a session has a question, a decision or a task for the own
 The waiting page is the one private page per repo or project. Its Questions tab holds every item
 that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only triage writes an item (owner, 2026-11-10 14:30-14:32 CST). A lane that wears triage's hat in a run with one lane writes as triage (owner, 2026-11-10 14:33 CST).
 
-In a standing build the owner talks in two places: the page for anything waiting on the owner, and the coordinator's chat for anything new, never a lane (decision `session-tiers`, the session roles; owner, 2026-11-10 16:46 CST, G15, the two-places ruling).
+In a larger build the owner talks in two places: the page for anything waiting on the owner, and the coordinator's chat for anything new, never a lane (decision `session-tiers`, the session roles; owner, 2026-11-10 16:46 CST, G15, the two-places ruling).
 
 A lane never writes an item, unless it wears triage's hat in a run with one lane. A lane puts its
 question in its report, and sends it to its parent in the same turn. Triage writes the item with the asking session as `owner`, and routes the
