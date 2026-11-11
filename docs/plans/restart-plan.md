@@ -2,36 +2,42 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 19:03 CST. The owner's list closed at 18:43 CST; R21 came after.
-
-Refuter: refuter opus, 2026-11-10 19:59 CST, holds with notes (sent to the retrospective session for the owner).
+the history. Last rewrite: 2026-11-10 20:02 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
-Read it top to bottom: six stages in the order they run. Each stage holds the rulings that govern it,
+Read it top to bottom: five stages in the order they run. Each stage holds the rulings that govern it,
 in the owner's words with the time. Ids (R1, G1, D1) are stable names, not an order.
 
 ## Why this order
 
-The words come first, because every later brief uses them (3.0, G1-G15). Then what loses whole CI runs:
-checks that refuse a green batch at merge, fixed time limits, a repo with no CI (3.1-3.2). Then the
-loop that sends lanes back: stale review logs, repeated lint, extra rounds, one model table (3.3-3.8).
-Then trust in guards: wrong refusals, mistakes filed as missing guards, pass claims with proof, short
-corrections, one catalog, one override route, no lane popups (3.6-3.12). Stage 4 then makes the
-owner's side mechanical: one home and one wake per answer, easy relays, debts and notes kept in place.
-Each is fixed once, before lanes resume, so the resumed lanes run under it.
+The words come first, because every later brief uses them (3.0, G1-G15). The rest of stage 3 then
+runs in parallel; only two items wait on another (3.2 runs with 3.1; 3.12 after 3.11). It covers what
+loses whole CI runs (3.1, 3.2, 3.4, 3.5), the loop that sends lanes back (3.3, 3.7, 3.8), and trust in
+guards (3.6, 3.9-3.12), and the express pass for prose (3.13). Stage 4 makes the owner's side mechanical: one home and one wake per answer, easy
+relays, debts and notes kept in place, session ids that survive a restart. Each is fixed once, before
+lanes resume, so the resumed lanes run under it. An item still open (D1, D3) holds no stage.
 
 ## What happens next
 
 1. The drain finishes (stage 1); the H1 lane lands as the one exception.
 2. The coordinator opens one PR that lands this file on main (stage 2). The retrospective session
    opens no PRs. Each ruling's home is rewritten later by the lane that builds it.
-3. Stage 3 lanes start in order, 3.0 first; triage has every ruling filed as a step.
+3. Stage 3 starts with 3.0; once it lands, every other item starts at once, except the two that wait
+   (see Why this order). Triage has every ruling filed as a step.
 
 ## Stage 1. Drain
 
 In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we speak"). The freeze
 holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
+
+- **R23. The drain ends at the named queue.** Owner 19:23 CST Nov 10 picked "Named queue". Outcome:
+  with 682 PRs open and 95 merged in a day, draining all of them would hold the plan for about a week.
+  1. The drain ends when the named queue lands: batch 74b (#2574), batch 75, and the coordinator's
+     next-to-release list at 19:23 CST (#2563, #2566, the ten former #2563 waiters, #2575, #2542).
+  2. Triage sorts the other open PRs against this plan. It closes a PR whose purpose a ruling here
+     replaces, with its branch kept so it can reopen. The rest wait as stage 3 input.
+  3. Stage 2 starts as soon as #2575 is on main, without waiting for the sort.
 
 Freeze exception, owner 16:02 CST: "i see yes fix it then". One lane makes the settings.json guard
 matcher route the GitHub MCP write tools to guard.py (hole H1, under R11 below), with a test that every
@@ -39,13 +45,13 @@ tool the guard judges is reached by the matcher.
 
 ## Stage 2. Land this plan on main
 
-One prose PR holds every settled ruling below in the owner's words with its time. It is the first PR
-after the drain. The express pass (R7, stage 5) would make this PR fast; until it lands, the PR takes
-the normal docs-only route.
+One prose PR holds every settled ruling below in the owner's words with its time (#2575). It takes the
+normal docs-only route; later rulings land in one follow-up PR (coordinator 19:15 CST).
 
 ## Stage 3. Change how every lane flows
 
-Before any other lane starts. Each item is one lane, in this order.
+Before any other lane starts. An item may hold several rulings; triage splits it into one lane per
+step.
 
 ### 3.0 One glossary of roles, the same on local and cloud
 
@@ -73,7 +79,7 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
   agents, whoever started it. Merges rules roles-solo-builds-short-edit-list and
   roles-orchestrator-never-builds. Home: CLAUDE.md, decision session-tiers.
 - **G13. The arbiter is a decider only.** Owner 15:08 CST Nov 10: "isn't arbiter just a decider, why
-  would it ever have [agents]"; "yes" to the form. It makes rulings in its repo, one tier below the
+  would it ever have subagents"; "yes" to the form. It makes rulings in its repo, one tier below the
   owner. It may start only read-only agents (Explore, refuter) to gather evidence. It builds nothing,
   starts no lanes, and grants no Opus. The arbiter session itself runs Opus (agent-model-cap:61).
   Rewrite session-tiers:81 ("a standing session and an orchestrator"). Home: decision session-tiers,
@@ -135,8 +141,9 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
 
 ### 3.1 Checks that can refuse a merge run in CI
 
-- **R2.** Owner 14:07 CST Nov 10: "i agree speed maximization is a good idea". The merge tool only reads
-  CI's verdict and checks the batch is current with main. The Retire check moves into CI. Cause: batch
+- **R2.** Owner 14:07 CST Nov 10: "i agree speed maximization is a good idea". The merge tool runs no
+  check of its own that can refuse a green batch. It reads CI's verdict, the PR-body lines (R15), and
+  whether the batch is current with main. The Retire check moves into CI. Cause: batch
   #2551 green in CI at 11:15 CST, refused at merge 11:50 CST by the Retire check's 600 s local limit;
   one full CI run lost. Home: decision debt-close-runs-retire; step retire-check-whole-suite;
   merge.readyChecks in decision lanes-run-no-full-ci-job.
@@ -263,9 +270,10 @@ it's how the limit batches that's the problem". How many lanes start is left to 
 - **R9.** Owner 15:44 CST Nov 10: "yeah i never wanted round 3 if it passed earlier and was so confused
   to see that it was occuring"; "agreed A -- can look into the sonnet noise thing later". Fold the 15+
   rounds rulings into one record. Round 1 runs on item 359 a's model (Sonnet for a guard or check
-  change, the role's model otherwise). Fixes are verified per G5. Round 3 follows owner pick 471 a
+  change, the role's model otherwise). Fixes are verified per G5. Correction, owner 16:07 CST Nov 10
+  (relayed; step rounds-rules-one-record): round 3 follows owner pick 471 a
   (2026-11-09 23:39 CST, step review-state-guard-needs-round-3) as it stands. A guard or check change
-  that passes round 1 is done; only one fixed under a fix check waits for round 3. The net-value test is
+  that passes round 1 is done; only one fixed under a fix verifier waits for round 3. The net-value test is
   only for an unclear case that cannot finish by the end of the rounds (the 2026-10-15 "still
   unfinished" valve in hold-unsafe-after-round-3). Evidence: round 3 found a failure 0 of 14+ times
   after a clean round 2; the net-value hold caught 6 real holes. Deferred: Sonnet round 1 for every
@@ -308,8 +316,9 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   and fail closed; agent or pasted text never grants. Fast path, no model call: `override` (one act) or
   `override` with any length (15, 15m, 90 minutes, 2 hours, 4h). Any other wording is judged. Every
   grant prints one receipt line the owner sees (what it lifts, one act or until when); today a grant
-  prints nothing. A refusal no override can lift says so. Home: decision owner-override, rewritten in
-  place.
+  prints nothing. A refusal no override can lift says so. Departs from: decision owner-override, where
+  a longer phrase such as "override 15m please" grants nothing; under R12 the judge reads it. Home:
+  decision owner-override, rewritten in place.
 
 ### 3.12 A lane never stalls on a popup
 
@@ -342,14 +351,41 @@ After 3.11, because its third part uses the same owner grant route.
   on a card for an act that is always allowed, so the owner's answers wait. The hooks that judge a page
   write (call_judge.py, guard.py) still run, so no check is lost.
   1. Read on main, 19:02 CST: `settings.json` already allows `mcp__claude-artifacts__db_write` and the
-     other page tools. The cloud card shows anyway. Cause unproven. Suspects: the cloud tool is named
-     `ArtifactData` and no allow entry names it, or auto mode asks despite the entry.
-  2. The fix lane first reproduces the card in a cloud session. It then adds the name the card checks,
-     for page reads and writes only. A test proves a page write in a cloud session shows no card.
+     other page tools. The cloud card shows anyway. Owner 19:13 CST, a second card in a Degen session:
+     "even this artifact write needed my permission". That card names the tool as `claude-artifacts:
+     db write`, the allowed name, so a missing name is not the whole cause. Suspects: that session's
+     settings lack the entry, or the card comes from claude.ai and no settings file can lift it.
+     Owner 19:15 CST, a third card (home triage restoring its page, 18 writes): "only allow once for
+     these". The card offers no "always allow", which points at the second suspect.
+     Owner 19:27 CST, on home triage reloading its page: "so the triage session pulled it off subagents
+     which sskrf for permission on every repopulate and instead did it in batches of like hundred each
+     but each batch still need my approvsl". And: "thats still not optimal". The card shows once per
+     call even with `db_write` allowed. That session also showed two tool names the allow list lacks:
+     `mcp__claude-artifacts__db_usage` and `mcp__claude-artifacts__read_artifact`. Auto mode rightly
+     refused its try to write its own allow list.
+  2. Until the fix lands, a page writer sends its writes in the main session, as `batch` calls of up to
+     50 writes each, one card per call. It never writes the page from a subagent.
+  3. The page hooks match `ArtifactData` only, so they skip a write named `mcp__claude-artifacts__db_write`.
+     Open PR #2549 (artifact-guard-matcher-names) adds those names. It lands with this fix.
+  4. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
+     im guessing we need to add too now to the allow list". `ArtifactData` now has nine actions: get,
+     list, query, profiles, set, update, str_replace, delete, batch. The allow list names six tools.
+     A web search found no public list of the new tool names.
+  5. The fix lane first reproduces the card in a cloud session. It reads the real tool names from that
+     session's tool listing, never from a guess. It then allows every page database action under each
+     name the card checks. A test proves a page write in a cloud session shows no card.
 - **D3. How much a lane writes (open).** Owner 16:46 CST Nov 10: "lane's own chat never reaches me
   anyway, pretty true -- but they do still type a whole fuckton of a lot, and that is tbd on whether we
   should have some sorta rules on how much a lane "chirps" in a snese". Open: measure lane output per
   turn first; a lane's only readers are its parent (the report) and its handoff.
+
+### 3.13 Express pass for prose
+
+- **R7.** Owner 14:12 CST Nov 10: "if we develop some sorta express pass for the entirety of prose to be
+  fast to review i'd be open to considering that"; 15:22 CST: "this is very key yes". A PR whose owner
+  quotes match the feedback log word for word skips the review round that decision
+  docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling. First user:
+  the follow-up plan PR. Home: decision docs-only-prs-skip-review, rewritten in place.
 
 ## Stage 4. Make the roadmap and triage mechanical
 
@@ -415,20 +451,26 @@ After 3.11, because its third part uses the same owner grant route.
   review notes (CLAUDE.md roles-findings-are-debts-or-notes is filing only). Folds in roadmap steps
   c55 (re-weigh as a whole, notes stay short; owner Oct 26) and o8 (every debt and note on the page).
   Home: CLAUDE.md roles-findings-are-debts-or-notes; skill roadmap; docs/debts/README.md.
+- **R22. A respawn rewrites every session id at once.** Owner 19:19 CST Nov 10, on home's move to a new
+  account: "its moreso that a session ended coordinwtor and all and a new coordinator and sessions
+  respawned and somehow no one rewrote the session ids to now be the new ones". Outcome: an answer
+  wakes a dead session, and the owner has to ask who does the work.
+  1. Cause (read on main): skill project-ops keeps the roster in the claude.ai project instructions,
+     "so keep no second copy in the repo". No session can write there, so sessions copy ids into page
+     items and briefs, and nothing rewrites those copies.
+  2. The roster moves to the record branch, where triage writes it. The session that starts a standing
+     session or lane sends triage the new id in the same turn. Triage rewrites that roster line.
+  3. A page item, brief or handoff names a lane slug or role, never a session id (CLAUDE.md
+     git-slug-then-claim-number already says so for lanes). The wake path reads the id from the roster
+     when it sends. A guard refuses a page write that stores a session id.
+  4. Fits R18 point 2: each item names who wakes, by slug or role.
+  Home: skill project-ops; skill waiting-page.
 
-## Stage 5. Express pass for prose
+## Stage 5. Resume lanes
 
-Can move before stage 2 so this plan's PR uses it.
-
-- **R7.** Owner 14:12 CST Nov 10: "if we develop some sorta express pass for the entirety of prose to be
-  fast to review i'd be open to considering that"; 15:22 CST: "this is very key yes". A PR whose owner
-  quotes match the feedback log word for word skips the review round that decision
-  docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling. First user:
-  this plan's own PR (stage 2). Home: decision docs-only-prs-skip-review, rewritten in place.
-
-## Stage 6. Resume lanes
-
-Under the new flow. Then the rest of the queue. Re-measure the baseline below.
+Under the new flow, once stage 3 and the settled parts of stage 4 land. An open part holds nothing: D1,
+R6's open outbox question, and R19 point 1 (waits on PR #1619) land when they land. Then the rest of the
+queue. Re-measure the baseline below.
 
 ## Dropped
 
