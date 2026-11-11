@@ -1323,11 +1323,12 @@ retired_case15() {
   rm -rf "$h"
 }
 
-# retired16 helper: a git shim first on PATH. It logs its arguments to $2, then runs the real git.
-retired_git_shim() {
+# git_shim DIR LOG [SNIPPET]: a git shim in DIR, put first on PATH by the run that uses it. It logs its arguments to LOG, runs
+# SNIPPET (shell code that exits 1 to fail the call), then runs the real git. The real git is found here, before PATH changes.
+git_shim() {
   real_git=$(command -v git)
   mkdir -p "$1"
-  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexec "%s" "$@"\n' "$2" "$real_git" > "$1/git"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\n%s\nexec "%s" "$@"\n' "$2" "${3:-:}" "$real_git" > "$1/git"
   chmod +x "$1/git"
 }
 
@@ -1346,7 +1347,7 @@ retired_case16() {
   retired_commit "$co" "ship more files"
   out1=$(retired_run "$co" "$h" "$cfg" local); rc1=$?
   log="$work/retired16-git.log"; : > "$log"
-  retired_git_shim "$work/retired16-bin" "$log"
+  git_shim "$work/retired16-bin" "$log"
   out2=$( PATH="$work/retired16-bin:$PATH"; export PATH; retired_run "$co" "$h" "$cfg" local ); rc2=$?
   calls=$(grep -c 'ls-files' "$log" 2>/dev/null); calls=${calls:-0}
   folders=$(landed_dirs | wc -l | tr -d ' ')
@@ -4909,6 +4910,15 @@ move_install() {
   fi
   rc=$?
 }
+# move_install_shimmed DIR LOG [SNIPPET]: a git shim in DIR (git_shim, with SNIPPET), then one cloud install with DIR first on PATH.
+# Sets out and rc, as move_install does. PATH is put back after the install.
+move_install_shimmed() {
+  git_shim "$1" "$2" "${3:-}"
+  shim_path_was=$PATH
+  PATH="$1:$PATH"; export PATH
+  move_install
+  PATH=$shim_path_was; export PATH
+}
 merge_rule_count() { jq '[.permissions.allow[]? | select(startswith("Bash(~/.claude/bin/merge"))] | length' "$h/.claude-cfg/settings.json" 2>/dev/null; }
 # The count main's merge/cloud_allow.json holds, read from the fixture's main (move_fixture set fx): install must write that many.
 want_merge_count() { git -C "$fx/src" show HEAD:merge/cloud_allow.json | jq '.permissions.allow | length'; }
@@ -5533,6 +5543,82 @@ caseM16() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
 }
 
+# caseM17: a mirror whose main is still at mirrorSha, with origin three commits ahead, is refreshed to the tip by depth-1 fetches
+# alone. Its main holds no local commit, so the refresh asks origin for no history.
+caseM17() {
+  name="caseM17: a mirror at mirrorSha with origin three commits ahead is refreshed to the tip by depth-1 fetches only, with no full-history fetch"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_first_install m17; then bad "$name" "FIXTURE $fix_why"; return; fi
+  advance_github_fixture "$fx" e1 claudemd
+  advance_github_fixture "$fx" e2 claudemd
+  advance_github_fixture "$fx" e3 claudemd
+  want=$(fixture_sha "$fx")
+  log="$work/m17-git.log"; : > "$log"
+  move_install_shimmed "$work/m17-bin" "$log"
+  why=$(refresh_problem)
+  if [ -n "$why" ]; then bad "$name" "$why"; return; fi
+  fetches=$(grep -F claude-settings-main "$log" | grep -F ' fetch ')
+  if [ -z "$fetches" ]; then bad "$name" "FIXTURE the shim logged no fetch of the mirror, so the depth check proves nothing"; return; fi
+  deep=$(printf '%s\n' "$fetches" | grep -v -e '--depth 1 ' -e '--depth=1 ')
+  if [ -n "$deep" ]; then bad "$name" "the refresh made a full-history fetch of the mirror: $deep"; return; fi
+  ok "$name"
+}
+
+# caseM18: a mirror whose main moved off mirrorSha takes the full-history check, and that fetch fails. The refresh keeps the mirror
+# at its main, with one WARN on the mirror that says could not tell. A deleted early return adds a second WARN on the mirror, so
+# the count of WARNs names it.
+caseM18() {
+  name="caseM18: a mirror whose main moved off mirrorSha keeps its main when the full-history fetch fails, with one WARN that says could not tell"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_ff_setup m18; then bad "$name" "FIXTURE $fix_why"; return; fi
+  kept=$(git -C "$mirror" rev-parse HEAD)
+  kept_sha=$(git -C "$mirror" config --get claude-settings.mirrorSha)
+  fail_deep='case "$*" in *claude-settings-main*" fetch "*) case "$*" in *"--depth 1 "*|*"--depth=1 "*) ;; *) exit 1 ;; esac ;; esac'
+  log="$work/m18-git.log"; : > "$log"
+  move_install_shimmed "$work/m18-bin" "$log" "$fail_deep"
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  attempts=$(grep -F claude-settings-main "$log" | grep -F ' fetch ' | grep -v -e '--depth 1 ' -e '--depth=1 ')
+  if [ -z "$attempts" ]; then bad "$name" "FIXTURE no full-history fetch of the mirror was attempted, so the failed fetch proves nothing"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$kept" ]; then
+    bad "$name" "the mirror's main moved to [$(git -C "$mirror" rev-parse HEAD)] though the full-history fetch failed"; return
+  fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$kept_sha" ]; then
+    bad "$name" "mirrorSha moved though the full-history fetch failed"; return
+  fi
+  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror")
+  n_wl=$(printf '%s\n' "$wl" | grep -c .)
+  if [ "$n_wl" -ne 1 ]; then bad "$name" "want one WARN that names the mirror, got $n_wl: $wl"; return; fi
+  case "$wl" in *"could not tell"*) ;; *) bad "$name" "the WARN does not say could not tell: $wl"; return ;; esac
+  ok "$name"
+}
+
+# caseM19: the mirror's main moves to origin's tip, then the mirrorSha write fails. The WARN says main moved and could not be
+# recorded, and no line on the mirror says it is kept, because main did move.
+caseM19() {
+  name="caseM19: a mirror whose main moves to origin's tip, when the mirrorSha write fails, is warned that the move could not be recorded, and is not called kept"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  if ! mirror_first_install m19; then bad "$name" "FIXTURE $fix_why"; return; fi
+  first_sha=$(git -C "$mirror" config --get claude-settings.mirrorSha)
+  advance_github_fixture "$fx" g1 claudemd
+  want=$(fixture_sha "$fx")
+  fail_write='case "$*" in *"config claude-settings.mirrorSha "*) exit 1 ;; esac'
+  log="$work/m19-git.log"; : > "$log"
+  move_install_shimmed "$work/m19-bin" "$log" "$fail_write"
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ -z "$(grep -F 'config claude-settings.mirrorSha ' "$log")" ]; then bad "$name" "FIXTURE the shim logged no mirrorSha write, so the failed write proves nothing"; return; fi
+  if [ "$(git -C "$mirror" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "the mirror is at [$(git -C "$mirror" rev-parse HEAD)], not origin's main [$want]"; return
+  fi
+  if [ "$(git -C "$mirror" config --get claude-settings.mirrorSha)" != "$first_sha" ]; then
+    bad "$name" "mirrorSha moved though its write failed"; return
+  fi
+  wl=$(printf '%s\n' "$out" | grep WARN | grep -F "$mirror")
+  case "$wl" in *"moved main in the clone"*"could not record it in claude-settings.mirrorSha"*) ;; *) bad "$name" "the WARN does not say main moved but could not be recorded: $wl"; return ;; esac
+  kept=$(printf '%s\n' "$out" | grep -F "$mirror" | grep 'keeping it')
+  if [ -n "$kept" ]; then bad "$name" "a line on the mirror says it is kept, though main moved: $kept"; return; fi
+  ok "$name"
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -5694,6 +5780,9 @@ run caseM13
 run caseM14
 run caseM15
 run caseM16
+run caseM17
+run caseM18
+run caseM19
 run pinmove1
 run pinmove2
 run pinmove3
