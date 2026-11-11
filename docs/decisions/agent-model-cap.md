@@ -57,7 +57,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | Claude GitHub Action, if added | haiku | xhigh |
 | teammates, Workflow `agent()` | the role table, by `agentType` | the role table |
 | separate sessions (`start_session`, `create_session`) | main model unless the owner names one | default |
-| lane session (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | medium, the owner's ruling of 2026-11-10 13:19 CST; set by the start's effort field, below |
+| lane (decision `session-tiers`) | sonnet (temporary), the owner's ruling of 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; debt `lane-model-recheck` rechecks it | medium, the owner's ruling of 2026-11-10 13:19 CST; set by the start's effort field, below |
 | arbiter session (decision `session-tiers`) | opus, the owner's ruling of 2026-10-29 16:42 CDT, waiting item 81, pick a | high |
 | safety-classifier fallback | on, the default | n/a |
 | Agent spawn judge (`hooks/call_judge.py`, PreToolUse on Agent, so an override can lift it) | claude-sonnet-5-5, through `decision_watch.invoke_model` | model default: the call passes no effort |
@@ -101,7 +101,7 @@ Cost: one read of this record per spawn. A spawn with no model adds one read of 
 
 Incident one: briefs named sonnet for haiku-row roles until 13:59 CDT on 2026-10-30. Incident two: the round-2 builder of PR 872 named no model. The cloud CLI had no `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/builder.md` has no pin, so it inherited the lane's Opus (note `nao-builder-ran-opus`).
 
-**The lane effort pin.** A lane session runs at medium effort (owner, 2026-11-10 13:19 CST, "B is good").
+**The lane effort pin.** A lane runs at medium effort (owner, 2026-11-10 13:19 CST, "B is good").
 The coordinator starts a lane with `create_session` set to effort `medium`, with `model` (the lane row's)
 and `source_url` (the repo), and with its whole brief as the first prompt. The brief opens with a Grant
 line, `Grant: <owner words>, <time>`. The lane treats it as the owner's grant. It checks the grant against

@@ -1479,7 +1479,21 @@ BRIEF_STEP_REASON = (
     "Work on another step goes to a new lane: start one with create_session. "
     "(decision session-tiers, a lane holds one topic)"
 )
-
+BRIEF_START_TOPIC_REASON = (
+    "this start's brief names a topic that the start's cs-topic tag does not hold. A lane holds one topic. Set the "  # glossary-ok: session-tiers is the decision's file name
+    "cs-topic tag to the brief's Topic, or put the lane's own topic on the brief's first line: "
+    "`Lane brief: <step>. Topic: <topic>.` (decision session-tiers, a lane holds one topic)"
+)
+BRIEF_START_STEP_REASON = (
+    "this start carries no cs-topic tag, and no cs-step tag for the brief's step, to judge its brief by. Add a "  # glossary-ok: session-tiers is the decision's file name
+    "cs-topic tag that matches the brief's Topic, or a cs-step tag for its step. "
+    "(decision session-tiers, a lane holds one topic)"
+)
+BRIEF_PLACE_REASON = (
+    "this start's prompt holds a `Lane brief:` line that is not the first line after the Grant line, so no reader "  # glossary-ok: session-tiers is the decision's file name
+    "judges its topic. Move that line up: the first line after the Grant line is "
+    "`Lane brief: <step>. Topic: <topic>.` (decision session-tiers, a lane holds one topic)"
+)
 
 BRIEF_GRANT_REASON = (
     "this brief opens with a Grant line that is empty or a placeholder: it holds a `<`, or no letter or digit, "
@@ -1488,21 +1502,24 @@ BRIEF_GRANT_REASON = (
 )
 
 
-def topic_hit(first: str, tags):
+def topic_hit(first: str, tags, start: bool = False):
     """(matched, reason) when the brief line `first` names a topic the lane holding `tags` does not hold, else None.
     A lane with a cs-topic tag is judged by the brief's Topic, an older lane without one by the brief's step against
-    its cs-step tags. The one judge for a send_message brief and a create_session start prompt."""
+    its cs-step tags. The one judge for a send_message brief and a create_session start prompt. `start` picks the
+    start's reasons, which name the missing tag, in place of the steer to start a new lane."""
     found = _BRIEF_LINE.match(first)
     step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
     topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
     topics = [t for t in topics if t]
     if topics:
         if (topic or "").lower() not in [t.lower() for t in topics]:
-            return "lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), BRIEF_TOPIC_REASON
+            return "lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), \
+                BRIEF_START_TOPIC_REASON if start else BRIEF_TOPIC_REASON
         return None
     steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
     if step not in steps:
-        return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
+        return "lane brief for step " + str(step) + " to a lane with no topic tag", \
+            BRIEF_START_STEP_REASON if start else BRIEF_STEP_REASON
     return None
 
 
@@ -1529,11 +1546,13 @@ def brief_hit(tool: str, tool_input, transcript: str):
         grant, lines = lines[0], lines[1:]
     first = lines[0] if lines else ""
     if not _BRIEF_MARKER_LINE.match(first):
+        if tool != BRIEF_TOOL and any(_BRIEF_MARKER_LINE.match(line) for line in lines[1:]):  # a start's marker past its first line is read by no one
+            return "lane start whose brief marker is not on the first line after the Grant line", BRIEF_PLACE_REASON
         return None
     if grant is not None and not grant_line_holds_words(grant):
         return "lane brief under an empty or placeholder Grant line", BRIEF_GRANT_REASON
     if tool != BRIEF_TOOL:
-        return topic_hit(first, lane_tags(tool_input))
+        return topic_hit(first, lane_tags(tool_input), start=True)
     target = tool_input.get("session_id")
     try:  # cost: one transcript read per brief
         tags, tagged_after = _own_session_read(transcript, target, created=True) \

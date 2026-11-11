@@ -2846,7 +2846,7 @@ LANE_EFFORT_REASON = (
 # A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
 # when no repo reads.
 LANE_REPO_TAG_REASON = (
-    "A lane carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
+    "A lane carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "  # glossary-ok: session-tiers is the decision's file name, and Tier tags its heading
     "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
 )
 # A lane start names the model and the repo it works in. The reason names both fields and says why.
@@ -6025,7 +6025,7 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9b2. The lane effort pin: a lane session starts with the effort field at medium and the whole brief as its
+    # 9b2. The lane effort pin: a lane starts with the effort field at medium and the whole brief as its
     # prompt, the owner's Grant line first. An override lifts it: it is not in never_lifted, because the owner
     # may mean another start.
     lane_prompt = lane_effort_hit(tool, tool_input)

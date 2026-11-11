@@ -56,7 +56,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session roles and how 
 - **Lane model** (owner, 2026-11-08 12:21 CST, waiting-page item 439 (lane-model-sonnet), pick none; temporary, until debt `lane-model-recheck` closes). A lane runs Sonnet.
   - The helpers it starts, such as a builder or a designer, keep today's model and effort table in `agent-model-cap` (owner, 17:50, waiting item 59, pick a). This holds until step-down cost and quality are measured (see the todo line). The Measured part of that record has their token cost. Their quality against one step down is unmeasured.
 - **Lane start and effort** (owner, 2026-11-10 13:19 CST, "B is good"). A lane runs at medium effort. The coordinator starts it with `create_session` set to effort `medium`, and its whole brief as the first prompt. The brief opens with a Grant line, `Grant: <owner words>, <time>`. The lane treats the Grant line as the owner's grant. It checks the grant against the coordinator's chat only when the act cannot be undone (coordinator, 2026-11-10 13:18 CST). The pin and its guard live in `agent-model-cap`.
-- **Overlapping files.** No coded guard and no file-ownership record covers lanes that touch the same file. A good brief is enough. A session that spawns agents resolves overlapping edits among them. The owner wants better file splitting (owner, 15:01). A false "done" is already covered. The shared merge tool, `merge/merge.py`, reads the head and CI from GitHub.
+- **Overlapping files.** No coded guard and no file-ownership record covers lanes that touch the same file. A good brief is enough. A spawner resolves overlapping edits among them. The owner wants better file splitting (owner, 15:01). A false "done" is already covered. The shared merge tool, `merge/merge.py`, reads the head and CI from GitHub.
 - **Batch runner.** A third standing role (owner, 15:11): "B for sure actually". The batch runner owns:
   - the integration batch,
   - the CI waits,
@@ -89,7 +89,7 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session roles and how 
 - **Who started a session decides its merge path** (owner, 2026-11-02 15:38 CST). A lane the owner started, with no coordinator above it, merges its own PR under the repo's merge grant or the owner's named act. A lane a coordinator started posts its review log on its PR; the batch runner finds it (record-only intake, decision `pr-ledger`, the PR ledger). A lane's message to the runner is a wake only. The lane never merges. No session merges while a batch's CI run is in progress.
 - **A coordinator starts lanes** (owner, 2026-11-02 15:14 CST). Inside a standing build the owner started, a coordinator starts lanes with no further owner grant. Outside one, each start needs the owner's grant.
 - **A lane's handoff** lives on a `handoff/<slug>` branch, never in the lane PR (owner, 2026-11-02 14:26 CST).
-- **Wrong session.** When the owner names the wrong session, or brings work that belongs to another session, the session says so in one line and names whose job it is (owner, 15:12; rule `style-wrong-tier-one-line`).
+- **Wrong session.** When the owner names the wrong session, or brings work that belongs to another session, the session says so in one line and names whose job it is (owner, 15:12; rule `style-wrong-session-one-line`).
   - Owner, 15:12: "i also may improperly use my setup, ie miscall something coordinator/orchestrator ..."
   - "... and want it so that u push back on me somehow being like by the way, im coordinator ..."
   - "... you should really be messaging triage for this part to save context, etc, it's a learning experience for me."
@@ -176,4 +176,4 @@ Open: the context limit for each role. The route works (waiting item 53, pick a,
 Kind: process
 Home: docs/decisions/session-tiers.md
 Home: rule:roles-pick-mode-from-request
-Home: rule:style-wrong-tier-one-line
+Home: rule:style-wrong-session-one-line

@@ -720,10 +720,10 @@
         "reason": "Whether a question was a status question, and whether the reply took the report shape, is a content judgment. No check reads that."
       }
     },
-    "style-wrong-tier-one-line": {
+    "style-wrong-session-one-line": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether the owner named the wrong tier, or brought work that belongs to another tier, is a content judgment. No check reads that."
+        "reason": "Whether the owner named the wrong session, or brought work that belongs to another session, is a content judgment. No check reads that."
       }
     },
     "style-offer-override-line": {
