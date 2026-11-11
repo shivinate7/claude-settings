@@ -30,6 +30,7 @@ Interface (Claude Code hooks reference, SubagentStart): stdin is one JSON object
 
 Override the module under test with the env var AGENT_BRIEF_UNDER_TEST.
 """
+import ast
 import json
 import os
 import importlib.util
@@ -71,19 +72,10 @@ GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits t
                 "a record-writer edits Markdown only.")
 STASH_LINE = "- Never run git stash, git reset, git checkout <path>, or git restore."
 STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-diff line; the wording may change
-# Non-scope lines in hook order, after the scope line. Builder, test-author, record-writer, designer and any
-# unknown type commit and push; reviewer, Explore, Plan, claude-code-guide and design-reviewer do not, so they
-# get the shorter set. The staged-diff line is not in this list: line_set_check(staged=True) leaves it out.
-WRITER_RULES = [
-    "Standing rules for this agent:",
-    STASH_LINE,
-    "- Push only with: git push origin HEAD:<branch>.",
-    "- Make no gh call unless your brief names it.",
-    "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
-    "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>",
-    "- Name no record path in a commit message. The only exception is the Drops-lines: trailer.",
-    "- Before you end, stop each server you started, by the $! from the same call or through the harness.",
-]
+# Non-scope lines in hook order, after the scope line. The writer set is read from agent_brief's COMMON
+# (writer_set_check). Reader types commit and push nothing, so they get the shorter set below. READER_RULES is
+# pinned here, never read from COMMON: it checks the flags that pick the reader rows, so it cannot take them as its
+# expectation. The staged-diff line is left out by line_set_check(staged=True).
 READER_RULES = [
     "Standing rules for this agent:",
     STASH_LINE,
@@ -307,13 +299,46 @@ def line_set_check(expected, staged=False):
     return check
 
 
+def common_rows():
+    """(agent_brief's COMMON rows, None): each row is (flag, text). Read from the module's source with ast and never
+    imported: importing agent_brief exits 0 when guard_core lacks REFUTER_ROLE, which would end this run green.
+    (None, problem) when the assignment is missing, is not a literal, or is not a list of (flag, text) rows."""
+    path = os.path.join(HERE, "agent_brief.py")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), filename=path)
+    except (OSError, SyntaxError, ValueError) as exc:
+        return None, "agent_brief.py does not parse: %s" % exc
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "COMMON" for t in node.targets):
+            try:
+                rows = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                return None, "agent_brief.COMMON is not a literal"
+            if not isinstance(rows, list) or not all(
+                    isinstance(row, tuple) and len(row) == 2 and isinstance(row[1], str) for row in rows):
+                return None, "agent_brief.COMMON is not a list of (flag, text) rows"
+            return rows, None
+    return None, "agent_brief.py has no COMMON assignment"
+
+
+def writer_set_check(text):
+    """The writer set: every COMMON row but the scope template and the staged-diff line, in hook order. The rows come
+    from the module, so a line it adds reaches the writer types with no edit here."""
+    rows, problem = common_rows()
+    if problem:
+        return problem
+    expected = [line for _always, line in rows if "{scope}" not in line and STAGED_KEY not in line]
+    return line_set_check(expected, staged=True)(text)
+
+
 for _t in ["builder", "test-author", "record-writer", "designer"]:
     add("line set: %s gets the writer set" % _t, "context", payload(_t),
-        line_set_check(WRITER_RULES, staged=True))
+        writer_set_check)
 add("line set: a general (unknown) type gets the writer set", "context",
-    payload("some-new-agent"), line_set_check(WRITER_RULES, staged=True))
+    payload("some-new-agent"), writer_set_check)
 add("line set: a missing agent type gets the writer set", "context", payload(),
-    line_set_check(WRITER_RULES, staged=True))
+    writer_set_check)
 for _t in ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"]:
     add("line set: %s gets the five-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
