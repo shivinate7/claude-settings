@@ -16690,6 +16690,17 @@ class TouchesRead(Env):
         self.assertNotIn("merge: unknown", err, "a job whose only failing line names a case printed unknown:\n" + err)
         self.assertEqual(out.splitlines(), [TOUCH_NONE], "the job with only the parsed line did not give its answer:\n" + out)
 
+    def test_a_unittest_summary_line_beside_a_parsed_fail_keeps_the_parsed_answer(self):
+        name = "test_a_brief_orders_the_reset_is_denied"
+        pull = touch_pull(2431, "case-tests")  # names the test in a `+` line, so the parsed FAIL line has an answer to give
+        files = {2431: [touch_file("docs/x.md", f"+    {name}")]}
+        rows = ((201, "tests", "failure", unit_failed_line(name) + "\nFAILED (failures=1)"),)  # the summary line parses to no case
+        rc, out, err = self.touches_run(rows, pulls=[pull], files=files)
+        self.assertEqual(rc, 0, "the unittest summary line beside a parsed FAIL read as unknown:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "the unittest summary line printed unknown beside a parsed FAIL:\n" + err)
+        self.assertEqual(out.splitlines(), [touch_head(2431, "case-tests", "ready") + f"case {name}"],
+                         "the parsed FAIL line did not keep its answer beside the summary line:\n" + out)
+
     def test_success_skipped_and_neutral_jobs_beside_a_parsed_failure_read_clear(self):
         for conclusion in ("success", "skipped", "neutral"):
             with self.subTest(conclusion=conclusion):
