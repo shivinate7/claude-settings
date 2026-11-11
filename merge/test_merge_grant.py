@@ -127,7 +127,7 @@ class ReviewGrantForm(unittest.TestCase):
     def test_a_record_with_no_grant_line_has_a_none_grant_and_round_trips_unchanged(self):
         # the form on main: no Grant line gives grant None, and the body is byte-identical to the record
         cases = (tm.record_text(rounds=tm.REVIEW_PASS), tm.record_text(rounds=tm.REVIEW_FAILED_THREE, guard="yes", net="zero"),
-                 tm.record_text(rounds=(), kind="docs-only"), tm.record_text(rounds=tm.REVIEW_PASS, fix=(tm.fix_check_line(),)))
+                 tm.record_text(rounds=(), kind="docs-only"), tm.record_text(rounds=tm.REVIEW_PASS, fix=(tm.fix_verifier_line(),)))
         for i, text in enumerate(cases):
             with self.subTest(case=i):
                 rec = tm.parse_text(self, text)
@@ -207,7 +207,7 @@ class ReviewGrantRules(unittest.TestCase):
         # the allowed case: a granted record with a valid Fix check line parses, and its PASS is read on the fourth round
         for guard, net in (("no", "not owed"), ("yes", "zero")):
             with self.subTest(guard=guard, net=net):
-                text = tm.record_text(rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",), guard=guard, net=net, fix=(tm.fix_check_line(),))
+                text = tm.record_text(rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",), guard=guard, net=net, fix=(tm.fix_verifier_line(),))
                 rec = tm.parse_text(self, text)
                 self.assertEqual(rec.get("fix"), tm.REVIEW_FIX_PASS, f"the fix line did not parse on a granted record: {rec.get('fix')!r}")
                 state, why = tm.review_fn(self, "review_state")(rec, tm.REVIEW_HEAD)
