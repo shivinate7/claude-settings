@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 20:02 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
+the history. Last rewrite: 2026-11-10 23:59 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -12,7 +12,7 @@ in the owner's words with the time. Ids (R1, G1, D1) are stable names, not an or
 ## Why this order
 
 The words come first, because every later brief uses them (3.0, G1-G15). The rest of stage 3 then
-runs in parallel; only two items wait on another (3.2 runs with 3.1; 3.12 after 3.11). It covers what
+may run in parallel (3.4 sets how many lanes start); only two items wait on another (3.2 runs with 3.1; 3.12 after 3.11). It covers what
 loses whole CI runs (3.1, 3.2, 3.4, 3.5), the loop that sends lanes back (3.3, 3.7, 3.8), and trust in
 guards (3.6, 3.9-3.12), and the express pass for prose (3.13). Stage 4 makes the owner's side mechanical: one home and one wake per answer, easy
 relays, debts and notes kept in place, session ids that survive a restart. Each is fixed once, before
@@ -23,8 +23,9 @@ lanes resume, so the resumed lanes run under it. An item still open (D1, D3) hol
 1. The drain finishes (stage 1); the H1 lane lands as the one exception.
 2. The coordinator opens one PR that lands this file on main (stage 2). The retrospective session
    opens no PRs. Each ruling's home is rewritten later by the lane that builds it.
-3. Stage 3 starts with 3.0; once it lands, every other item starts at once, except the two that wait
-   (see Why this order). Triage has every ruling filed as a step.
+3. Stage 3 starts with 3.0; once it lands, every other item may start, except the two that wait
+   (see Why this order). How many lanes start, and how they batch, is left to 3.4. Triage has every
+   ruling filed as a step.
 
 ## Stage 1. Drain
 
@@ -32,10 +33,10 @@ In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we 
 holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
 
 - **R23. The drain ends at the named queue.** Owner 19:23 CST Nov 10 picked "Named queue". Outcome:
-  with 682 PRs open and 95 merged in a day, draining all of them would hold the plan for about a week.
+  with 682 open and 95 merged since 00:00 CST (GitHub search, coordinator, 2026-11-10 19:23 CST), draining all of them would hold the plan for about a week.
   1. The drain ends when the named queue lands: batch 74b (#2574), batch 75, and the coordinator's
      next-to-release list at 19:23 CST (#2563, #2566, the ten former #2563 waiters, #2575, #2542).
-  2. Triage sorts the other open PRs against this plan. It closes a PR whose purpose a ruling here
+  2. Triage sorts the other open PRs (662 at 23:51 CST, coordinator) against this plan. It closes a PR whose purpose a ruling here
      replaces, with its branch kept so it can reopen. The rest wait as stage 3 input.
   3. Stage 2 starts as soon as #2575 is on main, without waiting for the sort.
 
@@ -46,7 +47,9 @@ tool the guard judges is reached by the matcher.
 ## Stage 2. Land this plan on main
 
 One prose PR holds every settled ruling below in the owner's words with its time (#2575). It takes the
-normal docs-only route; later rulings land in one follow-up PR (coordinator 19:15 CST).
+normal docs-only route; later rulings land in one follow-up PR (coordinator message to the retrospective session, 19:15 CST:
+"Your later commits on restart-plan (74ce03ec1 and after) land in one follow-up PR after #2575 is on
+main").
 
 ## Stage 3. Change how every lane flows
 
@@ -79,7 +82,7 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
   agents, whoever started it. Merges rules roles-solo-builds-short-edit-list and
   roles-orchestrator-never-builds. Home: CLAUDE.md, decision session-tiers.
 - **G13. The arbiter is a decider only.** Owner 15:08 CST Nov 10: "isn't arbiter just a decider, why
-  would it ever have subagents"; "yes" to the form. It makes rulings in its repo, one tier below the
+  would it ever have [agents]"; "yes" to the form. It makes rulings in its repo, one tier below the
   owner. It may start only read-only agents (Explore, refuter) to gather evidence. It builds nothing,
   starts no lanes, and grants no Opus. The arbiter session itself runs Opus (agent-model-cap:61).
   Rewrite session-tiers:81 ("a standing session and an orchestrator"). Home: decision session-tiers,
@@ -357,7 +360,7 @@ After 3.11, because its third part uses the same owner grant route.
      settings lack the entry, or the card comes from claude.ai and no settings file can lift it.
      Owner 19:15 CST, a third card (home triage restoring its page, 18 writes): "only allow once for
      these". The card offers no "always allow", which points at the second suspect.
-     Owner 19:27 CST, on home triage reloading its page: "so the triage session pulled it off subagents
+     Owner chat in the retrospective session, 19:27 CST, on home triage reloading its page: "so the triage session pulled it off [agents]
      which sskrf for permission on every repopulate and instead did it in batches of like hundred each
      but each batch still need my approvsl". And: "thats still not optimal". The card shows once per
      call even with `db_write` allowed. That session also showed two tool names the allow list lacks:
