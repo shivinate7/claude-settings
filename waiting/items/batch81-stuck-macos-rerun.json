@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-11T21:00:00Z",
+  "context": "Goal: batch 81, which holds the Windows time-limit fix you want in before the archive, lands.\nProblem (rule): its CI run looks stuck on GitHub's side, and your R26 says no session re-runs a job on its own.\nBased on (measured): run 43088666860: the two macOS jobs read \"in progress\" since 13:48 CST; every step of one reads completed and passed; GitHub's jobs API answers 502 for the other; the run itself reads \"queued\".\nBased on (ruling): R26, no self-made reruns.\nDeparts from: main, where a stuck run waits until someone acts \u2014 the batch runner re-runs those two jobs once.\nMeanwhile: the batch runner waits; batches 82 and 83 queue behind 81.",
+  "holds": "Whether the batch runner may cancel and re-run the two stuck macOS jobs of run 43088666860, once.",
+  "home": "ruling R26 (no self-made reruns), exception for this run only",
+  "id": "batch81-stuck-macos-rerun",
+  "kind": "decision",
+  "n": 515,
+  "options": [
+    {
+      "gain": "Batch 81 can land today.",
+      "how": "If the two jobs still read in progress at 15:19 CST, the batch runner cancels and re-runs only those two jobs, once.",
+      "key": "a",
+      "label": "Re-run once (Recommended)",
+      "lose": "About one more macOS run of CI minutes."
+    },
+    {
+      "gain": "No re-run.",
+      "how": "Wait for GitHub to finish the two jobs on its own.",
+      "key": "b",
+      "label": "Wait",
+      "lose": "Batch 81, then 82 and 83, wait with no known end."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 1,
+  "ref": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "repo": "shivinate7/claude-settings",
+  "short": "stuck macOS jobs",
+  "status": "open",
+  "title": "Re-run the two stuck macOS CI jobs of batch 81 once at 15:19 CST?",
+  "why": "Batch 81 holds the Windows time-limit fix you want in before the archive, and its CI run looks stuck on GitHub's side."
+}
