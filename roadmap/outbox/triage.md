@@ -645,3 +645,11 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - note (2026-11-10 19:31 CST, runner 8 via coordinator): the merge tool's prose judge flagged docs/decisions/claims-carry-backing.md:83 as stale; it cites merge.py:2617-2624, 2640, 2633, which no longer hold that code. Rewrite the cite as an id or a value cite.
 - note (2026-11-10 19:35 CST, #2566 round 2 reviewer sonnet): docs/debts/lane-model-recheck.md:4 still points at "the `lane session` row", which #2566 renames to `lane`. hooks/guard_merge.py:1549: a start that quotes a `Lane brief:` line later in its body, with no marker first, gets "Move that line up", which is the wrong advice for a quote (rare). The lane-one-topic record in session-tiers.md does not describe the new BRIEF_PLACE refusal. "lane session" text stays at agent-model-cap.md:10 and at guard.py:341, 3955, 3964, 6035, 6041, 6056 (out of the diff).
 - note (2026-11-10 19:36 CST, #1186 test-author haiku): on main and on #1186, a node heredoc that writes `$F` (or a template literal) to a frozen or capped path is allowed (4 probe cases), and python open() of a literal frozen path inside a heredoc is allowed. Main's gaps, not #1186's; kept out of its lane. Candidate debt if Claude writes such a form.
+
+## 2026-11-10 20:15 CST: #1805 round 3 findings (follow-up PR after it lands)
+- Debt (message-role-scope): hooks/guard.py:2486-2490, 2548-2553. The closed adverb set reads `correct` as an edit after "is not yet", "no longer", "indeed", "really". It refuses "tests/x.py is no longer correct, so change guard.py" to a builder. The decision's Accepted limits rank a false alarm above a rare miss.
+- Debt: no allow case and no mutant cover the copula-adverb branch of `_message_copula_before`. A mutant that drops the branch passes the suite.
+- Note: stale comments at hooks/guard.py:2479 and hooks/test_guard.py:20604 ("a copula earlier in the clause").
+- Note: MESSAGE_COPULAS lacks remains, stays, appears, it's, that's.
+- Note: lint/test_settings_matcher.py:113-119 repeats test_guard_matcher_covers_sendmessage.
+- Note: mutate_guard.py ignores a top-level MUTATE_ONLY, so a brief's one-mutant command runs the whole table (test-author, 20:05 CST).
