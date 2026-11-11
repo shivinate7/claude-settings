@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R43 came after.
+the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R44 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -705,6 +705,23 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      or fix. It flags, like its other items, and never refuses.
   Home: decision question-form; decision reply-judge-samples-never-refuses; rule
   outcomes-stale-decision-protocol.
+
+- **R44 (proposed, waits for the owner's yes). Child repos follow claude-settings, with cited
+  exceptions only.** Owner 13:57 CST Nov 11: "i don't want it to be that the repoos like Q_max have
+  adopted a ton of old rules and they just stick in them and claude-settings comes and is unable to
+  bring that lift immediately". Read 13:58 CST: the mandate exists (decision session-tiers, Child
+  repos, owner 2026-11-02 14:02 CST: a child contradicts a parent line only where it cites it as a
+  known exemption, with the owner's grant). What enforces it: probe group restates catches copied
+  record text only; skill compliance-check runs only when asked; claude-settings actions in child CI
+  are pinned and move only when a session notices (decision action-pins-follow-sessions, which names
+  seven pins that drift unseen). That decision's "no bot, no schedule" leaned on the timer ban that
+  3.15 relaxed. Nothing flags a child line that contradicts a parent rule without an exemption.
+  1. First, a read-only audit of the child repos (q_max first): pin age, lines that contradict a parent
+     rule with no exemption, copies, and any outputStyle or hook override.
+  2. Then the split: skill compliance-check is the one-time sweep that brings a repo in line; a check
+     in child CI keeps it there. The check flags a contradicting line with no exemption line, and pins
+     move when claude-settings main changes an action.
+  3. shiv-stylisms content (are its 23 rules still right) joins R35's review, which the owner signs.
 
 - **R43. A usage brake on accounts with a rate limit.** Owner 13:48 CST Nov 11: "it might just be
   somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was
