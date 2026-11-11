@@ -14169,7 +14169,8 @@ class ReviewEnv(Env):
         of main and main2, `edited` is the clean merge plus one file, `conflicted` is a conflict with main3 resolved by hand, `stacked` merges
         `feat`, and `octopus` has three parents. `plain` is a commit on `fixed`, `clean_plain` a commit on `clean`, and `after_plain` a clean merge
         of main on `plain`. `empty` and `clean_empty` add a commit with no change on `fixed` and on `clean`. -> the shas by name, with `parents` and
-        `trees` for each (git's own answers) and `on_main`, the compare answers on main."""
+        `trees` for each (git's own answers), `on_main`, the compare answers on main, and `on_stack`, the compare answers of `feat` (the second parent
+        of `stacked`) on feat-base, which holds `feat`, and on main, which does not."""
         sh(self.co, "git", "fetch", "-q", "origin")
         seed = sh(self.co, "git", "rev-parse", "origin/main")
         pre = self.git_commit(seed, {"p.txt": "p\n"})
@@ -14207,15 +14208,22 @@ class ReviewEnv(Env):
         self.assertNotEqual(r.stdout.split()[:1], [trees[edited]], "the fixture's edited merge has git's clean merge tree")
         r = subprocess.run(["git", "merge-tree", "--write-tree", fixed, main3], cwd=self.co, capture_output=True, text=True)
         self.assertEqual(r.returncode, 1, "the fixture's hand-resolved merge does not conflict with main3 in git")
-        return types.SimpleNamespace(**names, parents=parents, trees=trees, on_main=on_main)
+        # on_stack is scripted as GitHub answers it: feat...feat-base reads identical, and feat...main reads diverged. The cases then never rely on
+        # the host's default answer for either compare.
+        self.assertEqual(sh(self.co, "git", "rev-parse", "origin/feat-base"), feat, "fixture: origin's feat-base is not feat, so on_stack is not true")
+        self.assertFalse(self.is_ancestor(feat, "origin/main"), "fixture: feat is on origin's main, so on_stack's main answer is not true")
+        on_stack = {(feat, "feat-base"): "identical", (feat, "main"): "diverged"}
+        return types.SimpleNamespace(**names, parents=parents, trees=trees, on_main=on_main, on_stack=on_stack)
 
-    def reviewed_host(self, fx, head, base="main", comments=None, more=()):
+    def reviewed_host(self, fx, head, base="main", comments=None, more=(), compares=None):
         """Pull request 7 at `head` on base `base`, with the repo's commits, trees and compares as `fx` gives them. The record is a PASS on fx.fixed
         with no fix line, and a lane-lint PASS names `head`: a done record reads done only with that lint at the live head (decision
-        lanes-run-no-full-ci-job). Both are the defaults, unless `comments` is given. `more` holds the other open pull requests, as batch_pull gives them."""
+        lanes-run-no-full-ci-job). Both are the defaults, unless `comments` is given. `more` holds the other open pull requests, as batch_pull gives them.
+        `compares` replaces fx.on_main, for a case that reads a compare of another base."""
         if comments is None:
             comments = [review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS)), lint_of(7, head)]
-        return PullsHost([batch_pull(7, head, base=base), *more], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        compares = fx.on_main if compares is None else compares
+        return PullsHost([batch_pull(7, head, base=base), *more], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=compares)
 
     def reviewed_line(self, host, head, state, msg):
         """-> the output of `merge --reviewed`, after one check: pull request 7's line names `head` and reads `state`."""
@@ -14702,8 +14710,10 @@ class ReviewCleanMainMerge(ReviewEnv):
     def test_d_a_merge_of_a_branch_on_the_base_but_not_on_main_reads_stale(self):
         fx = self.real_commits()
         self.assert_clean_merge_done(fx)
-        self.reviewed_line(self.reviewed_host(fx, fx.stacked, base="feat-base"), fx.stacked, "stale",
+        host = self.reviewed_host(fx, fx.stacked, base="feat-base", compares={**fx.on_main, **fx.on_stack})
+        self.reviewed_line(host, fx.stacked, "stale",
                            "a merge whose second parent is on the pull request's base but not on origin's main must not read done")
+        self.assertTrue(any(first == fx.feat for first, _ in host.compare_reads), "the walk did not compare the second parent with any base, so the case tests nothing")
 
     def test_e_a_three_parent_merge_reads_stale(self):
         fx = self.real_commits()
@@ -15376,6 +15386,25 @@ class ReleaseCheck(ReviewEnv):
         rc, lines, err, _ = self.release([7, 8], comments=[stray, self.review(8)])
         self.assert_fails_alone(self.line_of(lines, 7), 7, r"record")
         self.assertEqual(self.line_of(lines, 8), "#8 PASS", err)
+        self.assertEqual(rc, 1, err)
+
+    def test_check_2_a_stacked_pr_whose_head_merges_its_own_base_after_review_fails_stale(self):
+        # The review is done at fx.fixed. The head merges feat, the base of #8, which is no clean merge of main, so the record reads stale and #8 fails
+        # alone. Control: at its reviewed head #8 passes, with its base pull request #7 (head feat-base) in the call and passing.
+        fx = self.real_commits()
+        reads = dict(commits=fx.parents, trees=fx.trees, compares={**fx.on_main, **fx.on_stack})
+
+        def pulls(head8):
+            return [batch_pull(7, fx.feat, head_ref="feat-base"), batch_pull(8, head8, base="feat-base", head_ref="feat8")]
+
+        comments = [self.review(7, head=fx.feat), self.review(8, head=fx.fixed)]
+        rc, lines, err, _ = self.release([8, 7], pulls=pulls(fx.fixed), comments=comments, **reads)
+        self.assertEqual((rc, lines), (0, ["#8 PASS", "#7 PASS"]), "control: the stacked pull request at its reviewed head does not pass:\n" + err)
+        rc, lines, err, _ = self.release([8, 7], pulls=pulls(fx.stacked), comments=comments, **reads)
+        self.assertFalse(self.line_of(lines, 8).startswith("#8 PASS"),
+                         "a stacked pull request whose head merges its own base after review passed the release check:\n" + err)
+        self.assert_fails_alone(self.line_of(lines, 8), 8, rf"the record is for head {fx.fixed[:9]}")
+        self.assertEqual(self.line_of(lines, 7), "#7 PASS", err)
         self.assertEqual(rc, 1, err)
 
     # Check 3: the newest record is unedited
