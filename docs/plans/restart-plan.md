@@ -96,9 +96,9 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
   topic 1"; 14:37 CST: "yes it can be closed". Every split a rule chose is removed, so both places
   behave the same. A split the platform forces lives only inside the tool, never in a role's
   definition. Splits to remove in this lane: two tests for "cloud" in the code; guards that judge only
-  one of start_session and create_session; the merge role file on the cloud only; the load brake on the
-  owner's computer only; a lane the owner starts cannot merge on the cloud yet (docs/todo.md, "Let a
-  solo session merge", owner 2026-11-02 14:02 CST). Deferred to a later build phase (owner 14:37 CST,
+  one of start_session and create_session; the merge role file on the cloud only. Also the load brake on
+  the owner's computer only, and a lane the owner starts that cannot merge on the cloud yet
+  (docs/todo.md, "Let a solo session merge", owner 2026-11-02 14:02 CST). Deferred to a later build phase (owner 14:37 CST,
   "can be targeted after/later"): the details of forced splits, mainly a team that mixes local and
   cloud sessions while the mailbox bridge (MAILBOX_REPO) is off.
 - **G9. Triage always writes the waiting page.** Owner 14:32 CST Nov 10: "yea triage always writes the
@@ -190,9 +190,9 @@ With 3.1, this stops a green batch from being refused at merge.
 ### 3.3 A review log survives a clean main merge
 
 - **R1.** Owner 14:07 CST Nov 10: "i agree on letting it survive a clean merge where batch ci sees the
-  problem rather than asecond review i agree it shd be mechanical tooo". A log stays valid when the new
-  head differs from the reviewed head only by a clean merge of main, with the lane's own diff unchanged,
-  proved by the merge tool (for example git range-diff). Any difference keeps today's rule. Batch CI
+  problem rather than asecond review". And: "i agree it shd be mechanical tooo". A log stays valid when the new
+  head differs from the reviewed head only by a clean merge of main, with the lane's own diff unchanged.
+  The merge tool proves it (for example with git range-diff). Any difference keeps today's rule. Batch CI
   catches clashes with main. Home: decision pr-review-record, rewritten in place. Folds in steps
   fix-check-after-main-merge and fix-check-chain.
 
@@ -240,7 +240,7 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   several earlier lane lint runs "passed". They did not. Every run exited 1, and I misread my own echo
   exit code as the lint's"; 18:36 CST: "yes". Rule tokens-run-through-verdict is enforced by nothing on
   main (only quoted in a guard_stream.py remedy). (1) A "passed", "green" or "clean" claim in a report or
-  a message to a parent cites a verdict line from this session's verdict log; the report guard refuses
+  a message to a parent cites a verdict line from this session's verdict log. The report guard refuses
   an uncited claim, remedy "run it through verdict". (2) Lint, ci-job, tests and the merge tool's
   release check run only through `verdict`; a bare run is refused with that form. Both run inside
   existing guards; no new process. Home: CLAUDE.md tokens-run-through-verdict; decision
@@ -262,8 +262,8 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   to see that it was occuring"; "agreed A -- can look into the sonnet noise thing later". Fold the 15+
   rounds rulings into one record. Round 1 runs on item 359 a's model (Sonnet for a guard or check
   change, the role's model otherwise). Fixes are verified per G5. Round 3 follows owner pick 471 a
-  (2026-11-09 23:39 CST, step review-state-guard-needs-round-3) as it stands: a guard or check change
-  that passes round 1 is done; only one fixed under a fix check waits for round 3; the net-value test is
+  (2026-11-09 23:39 CST, step review-state-guard-needs-round-3) as it stands. A guard or check change
+  that passes round 1 is done; only one fixed under a fix check waits for round 3. The net-value test is
   only for an unclear case that cannot finish by the end of the rounds (the 2026-10-15 "still
   unfinished" valve in hold-unsafe-after-round-3). Evidence: round 3 found a failure 0 of 14+ times
   after a clean round 2; the net-value hold caught 6 real holes. Deferred: Sonnet round 1 for every
@@ -291,15 +291,15 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   chats?". docs/catalog.md (lint/hook_catalog.py) lists all 36 hooks but no permissions, autoMode rules,
   env, cloud-only allow rules, githooks or mod events. It grows to every hook and setting with a "runs
   on" column (Mac, Windows, cloud), and the page's Status tab links it. Audit holes to close: H1 GitHub
-  MCP writes never reach the guard (settings.json matcher; fixed in stage 1); H2 unarmed clones commit
-  env files; H3 hooks fail open on a partial install; H4 a repo's disableAllHooks is unwatched; H5 no rm
+  MCP writes never reach the guard (settings.json matcher; fixed in stage 1). H2 unarmed clones commit
+  env files; H3 hooks fail open on a partial install. H4 a repo's disableAllHooks is unwatched; H5 no rm
   shim on Windows; H6 decision watch desktop-only. Page questions: ArtifactData writes run the same
   question form (guard.py) and judge (call_judge.py, past rulings included) as the chat box. Home:
   decision hook-catalog-page.
 
 ### 3.11 One override route, with a receipt
 
-- **R12.** Owner 16:10 CST Nov 10: "yes this statement of opus 4h etc also feels super arbitrary i dont
+- **R12.** Owner 16:10 CST Nov 10: "yes this statement of opus 4h etc also feels super arbitrary". And: "i dont
   want to do such rigid word grants moreso like if i say send a swarm of opus agents that just works too
   yanno? A is good though but it should be override <anytime> or override not just override and
   override 4h". One route reads the owner's own typed words for overrides and Opus asks alike, judged
@@ -378,14 +378,14 @@ After 3.11, because its third part uses the same owner grant route.
      that form as the remedy. The page route stays. Per guard-guards-mistakes-only, no check assumes an
      attacker.
   Evidence (coordinator, 16:49 CST): 9 page comments today each carried two clashing relay
-  instructions; a chat answer reached the page 4-9 min late and the notes hook refused 8 turns meanwhile;
-  every owner question was sent twice and the copies drift; the H1 grant reached the coordinator only by
+  instructions. A chat answer reached the page 4-9 min late and the notes hook refused 8 turns meanwhile.
+  Every owner question was sent twice and the copies drift; the H1 grant reached the coordinator only by
   a chat relay. Cost: one hop through triage before the asker wakes (unmeasured). Home: skill
   waiting-page; decision relayed-grant-read-from-page, rewritten in place.
 - **R19. Debts and notes are kept in place, like the roadmap.** Owner 17:00 CST Nov 10: "need to know
   if triage is properly reviewing and adjusting the debts and notes lists just like i have it adjust
   the roadmap/questions posted or i have all my sessions rewrite their handoff entirely in place rather
-  than just append -- does this make sense? in general something like notes/debts probably should be
+  than just append". And: "does this make sense? in general something like notes/debts probably should be
   visible from the artifact itself too"; 17:03 CST: "why it's so hard for AI to track the time"; 17:11
   CST: "approved".
   1. Owner item 358 lands first (sightings and expiry, one debt-fix lane per batch; step
@@ -399,7 +399,7 @@ After 3.11, because its third part uses the same owner grant route.
      refuses a blank or unreadable time (step page-time-field-valid). Cause: about 190 blank times
      written Nov 10 from a misread clock tool, repaired by hand.
   Evidence (audit 17:06 CST, main 2d6f67f7c): notes.md 1,918 lines (504 KB), up 27% since Nov 7; 120
-  debts; 24% of notes over 14 days old; about 2% cite gone code, 2-3% repeat; no rule makes anyone
+  debts. 24% of notes are over 14 days old; about 2% cite gone code, 2-3% repeat; no rule makes anyone
   review notes (CLAUDE.md roles-findings-are-debts-or-notes is filing only). Folds in roadmap steps
   c55 (re-weigh as a whole, notes stay short; owner Oct 26) and o8 (every debt and note on the page).
   Home: CLAUDE.md roles-findings-are-debts-or-notes; skill roadmap; docs/debts/README.md.
