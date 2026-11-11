@@ -717,3 +717,9 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - docs/todo.md line 9: point at step model-table-one-home.
 - Decision waiting-data-in-repo: fix two stale claims in place (retrospective audit 11:42 CST): it says this repo has only the old `waiting-page` key (main has 20 `artifacts` entries), and that export saves no page HTML (page.html is in all five copies).
 - Decision session-messages: rewrite its status lines (8-10, 23, 207-208) to the measured truth: Windows read auth OK (ls-remote exit 0, 1.1 s, 11-10 11:00 CST), Windows push unproven (empty commit 587de9e), Mac round trip 08c14103ba2b (11-10 18:41 CST) (retrospective 11:55 CST).
+
+## 2026-11-11 12:53 CST: notes from #2591 and #2593 reviews (for docs/debts/notes.md)
+
+- buckets-read-merging-checkout-caps (#2591 round 3, sonnet, comment 6804487229): merge/merge.py Host.buckets (1260-1268) reads job caps from the merging checkout. After a cap raise, main's older cap-cut push runs bucket as a plain cancel, which is UNKNOWN at 1499-1503, so `red_base` (3185) refuses the next merge until a newer push run passes. The way out is `--base-red-ok` or a checkout on main. A false alarm, likely one-time per cap change.
+- round-two-skip-misread (triage, 12:45 CST): a round 1 reviewer wrote "Round 2 skips" on a guard change. The merge tool needs rounds 1-3 in order for a guard or check change, so the record read "open". Briefs should say that a guard change always runs 3 rounds.
+- guard-yes-by-path (triage, 12:49 CST): three reviewers judged #2593 "guard no" (a PostToolUse notify hook). The merge tool counts any hooks/ or settings.json edit as a guard change and refused `--guard no`. Briefs should name the tool's path rule, so reviewers judge net value from round 1.
