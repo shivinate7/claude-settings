@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 17:13 CST.
+the history. Last rewrite: 2026-11-10 18:37 CST.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -227,6 +227,15 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   Cause that led here: the feedback-log hook writes a message heading without telling the session, so
   it wrote a second one twice (step inbox-dup-heading-merge). Home: CLAUDE.md
   building-mistake-names-its-guard; decision guard-remedy-not-to-owner.
+- **R20. A pass claim needs a verdict line.** Owner 17:17 CST Nov 10, quoting a session: "I told you
+  several earlier lane lint runs "passed". They did not. Every run exited 1, and I misread my own echo
+  exit code as the lint's"; 18:36 CST: "yes". Rule tokens-run-through-verdict is enforced by nothing on
+  main (only quoted in a guard_stream.py remedy). (1) A "passed", "green" or "clean" claim in a report or
+  a message to a parent cites a verdict line from this session's verdict log; the report guard refuses
+  an uncited claim, remedy "run it through verdict". (2) Lint, ci-job, tests and the merge tool's
+  release check run only through `verdict`; a bare run is refused with that form. Both run inside
+  existing guards; no new process. Home: CLAUDE.md tokens-run-through-verdict; decision
+  guard-remedy-not-to-owner.
 
 ### 3.7 One model table
 
