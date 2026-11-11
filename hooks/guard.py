@@ -567,7 +567,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool,
-            _add_shape, _commit_shape, _is_python, own_tier_tagged,
+            _add_shape, _commit_shape, _is_python, own_role_tagged,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -5820,7 +5820,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # repo (`candidates`: the repo's legacy-repos path, then the layout path), or a record-branch folder of a
 # checkout that stands on the record branch (record_branch_of, with RECORD_DATA in it).
 # The rule acts only on a call with no agent, in a cloud session (CLAUDE_CODE_REMOTE true), whose own tags
-# carry cs-build:coordinator: guard_merge.own_tier_tagged reads the tags of the newest get_session record of the
+# carry cs-build:coordinator: guard_merge.own_role_tagged reads the tags of the newest get_session record of the
 # session's own id (override.remote_session_id, the environment's, never the payload's) in its transcript, plus each
 # own set_session_tags add and minus each own remove on that id since then. No role file is read. No transcript, no
 # record and no own add, or a read error, is no coordinator. An owner override lifts the rule: it is not in never_lifted.
@@ -5843,8 +5843,8 @@ COORDINATOR_SCOPE_MODE = "deny"
 COORDINATOR_SCOPE_REASON = (
     "Rule (Roles): a coordinator briefs lanes and writes records. It does not change a repository's code, "
     "settings or instructions itself "
-    "(decision session-tiers, a coordinator stays in its tier and a guard enforces it). "
-    "Remedy: brief a lane session to make this change, with the files and the check that proves it. "
+    "(decision session-tiers, a coordinator stays in its session role and a guard enforces it). "
+    "Remedy: brief a lane to make this change, with the files and the check that proves it. "
     "Write records and your scratchpad yourself."
 )
 # The record branch of skill project-ops (SKILL.md, "The record branch"): an orphan branch, `roadmap` by default
@@ -6214,7 +6214,7 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
         return ""
     from override import remote_session_id   # the own id: the environment's, in the session_ form
     transcript = payload.get("transcript_path")
-    return hit if own_tier_tagged(transcript if isinstance(transcript, str) else "", remote_session_id() or "",
+    return hit if own_role_tagged(transcript if isinstance(transcript, str) else "", remote_session_id() or "",
                                   "coordinator") else ""
 # ------------------------------------------------------------------ another agent's scratchpad script
 #

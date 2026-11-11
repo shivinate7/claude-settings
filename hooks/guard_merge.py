@@ -1047,15 +1047,15 @@ def _own_get_session_tags(transcript: str, session_id: str):
     return _own_session_read(transcript, session_id)[0]
 
 
-def own_tier_tagged(transcript: str, own_id: str, tier: str) -> bool:
-    """True when this session's own tags carry cs-build:<tier>: the tags of its newest get_session record of
+def own_role_tagged(transcript: str, own_id: str, role: str) -> bool:
+    """True when this session's own tags carry cs-build:<role>: the tags of its newest get_session record of
     own_id, plus own set_session_tags adds and minus own removes since that record (with no record, the own adds
     minus the own removes). False with no transcript or no own id, and on any read error (fails open: the
     coordinator-scope rule judges only a proved coordinator)."""
     try:
         if not transcript or not own_id:
             return False
-        return ROLE_TAG_PREFIX + tier in own_session.own_session_tags(transcript, own_id)
+        return ROLE_TAG_PREFIX + role in own_session.own_session_tags(transcript, own_id)
     except Exception:
         return False
 
