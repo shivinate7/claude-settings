@@ -844,7 +844,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   that point we should just integrate github's pr tracker thing there's like a whole connector it has
   doesn't it it's kinda like a table that shows stuff in progress" (GitHub Projects, the table view).
   Open: a probe (triage step github-projects-probe) confirms which connector or API can read and write
-  it from local and cloud.
+  it from local and cloud. The probe starts now, beside the drain, outside the freeze. Owner 14:20 CST
+  Nov 11: "a is cool given it's just a probe".
 - **R6. Triage's outbox is read against main.** Owner 15:22 CST Nov 10: "yes but it's tbd if an outbox
   is the right spot right? but for rn it only make senses that it is read". A check, run when triage
   reports status, lists each owner ruling in the outbox and whether its home on main holds its words.
