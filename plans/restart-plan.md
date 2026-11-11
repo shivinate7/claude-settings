@@ -594,8 +594,8 @@ whose stated reason is "watching must cost less than what it watches (owner, 202
 keep-warm ping is not watching, and by that reason it passes. Prices (claude-api skill): a 1-hour
 cache write costs 2x input; a cache read costs $0.20 per million on Opus 5.5 and $0.10 on Sonnet 5.5,
 which is 1/40 of the write. So a ping every 55 minutes costs less than one rewrite for any idle gap
-under about 40 hours. Unmeasured: what our Stop hooks and judges add to each ping. Proposed, waits for
-the owner's yes:
+under about 40 hours. Unmeasured: what our Stop hooks and judges add to each ping. Owner 13:22 CST:
+"A on keeping sessions warm too".
   1. Rule outcomes-mechanize-rules keeps its reason and drops the blanket "never on a timer": a timer
      is allowed when its record shows it costs less than it saves.
   2. A standing session sets a one-time check-in 55 minutes after its last turn, while it expects
