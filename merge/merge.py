@@ -3861,7 +3861,7 @@ def failing_line(text):
 
 def touches_lines(h, run, cases, files):
     """-> (lines, unknown): the lines of `merge --touches` and why it is unknown, or None. A line per open pull request that touches a named file or
-    holds a named case in a `+` line of its patch, ascending by number; the one no-match line when there is none and nothing is unknown. Paths are
+    holds a named case in a `+` line of its patch (a case a run's failing lines name also matches a context line), ascending by number; the one no-match line when there is none and nothing is unknown. Paths are
     posixpath.normpath'd on both sides. The failing lines of the run (Host.failed_lines) add their cases and files to the named ones. Unknown, with
     the matches still listed: a run with a job that Host.failed_lines cannot account for (UnreadJobs); a run that gave no case and no file at all,
     even beside --case or --file (on a real host, a run with no failed job but the rollup; a summary line such as `FAILED (failures=2)` parses to
@@ -3870,7 +3870,7 @@ def touches_lines(h, run, cases, files):
     read raises before any line is made."""
     cases, files = list(cases), [posixpath.normpath(f) for f in files]
     asked = bool(cases or files)
-    unknown = None
+    unknown, from_run = None, []  # from_run: the cases the run's failing lines named; they also match a context line (a fix keeps the case line)
     if run:
         try:
             lines = h.failed_lines(run)
@@ -3882,8 +3882,10 @@ def touches_lines(h, run, cases, files):
             parsed = parsed or bool(file or case)
             if file and posixpath.normpath(file) not in files:
                 files.append(posixpath.normpath(file))
-            if case and case not in cases:
-                cases.append(case)
+            if case:
+                from_run.append(case)
+                if case not in cases:
+                    cases.append(case)
         if not parsed and unknown is None:
             unknown = (TOUCH_UNKNOWN_BESIDE if asked else TOUCH_UNKNOWN).format(run=run) + UNKNOWN_CITE
     out = []
@@ -3892,7 +3894,8 @@ def touches_lines(h, run, cases, files):
         added = [t[1:] for f in changed for t in (f.get("patch") or "").splitlines() if t.startswith("+") and not PATCH_FILE_HEADER.match(t)]
         names = {posixpath.normpath(f.get("filename") or ""): f for f in changed}
         hits = [f"file {p}" for p in files if p in names]
-        hits += [f"case {c}" for c in cases if any(c in t for t in added)]
+        context = [t[1:] for f in changed for t in (f.get("patch") or "").splitlines() if t.startswith(" ")]
+        hits += [f"case {c}" for c in cases if any(c in t for t in added) or (c in from_run and any(c in t for t in context))]
         if not hits and cases:
             blind = [n for n, f in names.items() if not f.get("patch")]
             if blind:  # a case may hide in a patch GitHub did not send
@@ -4251,9 +4254,8 @@ def main(argv, host=None, lock=None, hosts=None):
     if (a.run or a.case or a.file) and not a.touches:
         p.error("--run, --case and --file go with --touches")
     if a.touches:
-        if (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.idle_lanes
-                or a.release_check):
-            p.error("--touches stands alone")
+        if any(v != p.get_default(k) for k, v in vars(a).items() if k not in ("touches", "run", "case", "file")):
+            p.error("--touches stands alone")  # any other option set, a mode flag or not
         if not (a.run or a.case or a.file):
             p.error("--touches needs --run, --case or --file")
     if a.lint and not a.release_check:

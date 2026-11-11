@@ -152,15 +152,16 @@ merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         one line per open PR that changes a named file or adds a named case in a `+` line of its patch. --run reads the
                         failing lines of that run's failed jobs for the cases (and the files of a pytest or unittest line; a run by path logs
                         `__main__.Class.name`, so its file is best-effort). No lock, no merge, no post. No match prints the clear line only
-                        when every read succeeded and nothing is unknown. Unknown, exit 1, never clear, the matches still printed:
+                        when every read succeeded and nothing is unknown. Unknown, exit 1, never clear. A failed read prints only `unknown`; the other causes list the matches too:
                         - a failed read;
                         - a --run whose failing lines give no case and no file at all;
                         - a --run with a failed job whose own log gives no case and no file, an empty log too (the all-jobs-passed rollup is skipped);
+                        - a --run with a failed job that has a failing line naming no case or file (a unittest summary line apart);
                         - a --run with a job that is not success, skipped, neutral or failure, such as timed out, cancelled or still running;
                         - a PR with a patch-less changed file, only while a case is queried and that PR has no match.
                         --file alone is fine beside a patch-less file. An empty value is a usage error.
-                        Limits. A case matches only when its text sits whole in one `+` line. A name built from pieces or with escapes never matches.
-                        A fix in guard code that leaves the case line alone never matches. --file is an exact path after normpath.
+                        Limits. A case matches only when its text sits whole in one `+` line; a case a --run names also matches a context line. A name built from pieces or with escapes never matches.
+                        A --case never matches a context line, so a fix that leaves its case line alone is found by --run or --file only. --file is an exact path after normpath.
                         It finds no rename's previous name, no directory and no backslash path. A reason that spans lines may leave `  (note` in the case.
                         Cost: API reads only. The pull list, one call per page of 100. One files read (its pages) per open PR.
                         For --run, the jobs read, one call per page of 100, and one log read per failed job but the rollup.
