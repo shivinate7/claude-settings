@@ -1723,7 +1723,7 @@ class TestsForTests(unittest.TestCase):
 WALK_SUITES = {
     "hooks/guard_kill.py": ["hooks/test_checks_never_raise.py"],
     "hooks/guard_env.py": ["janitor/test_session_end_sweep.py"],
-    "hooks/guard_frozen.py": ["hooks/test_shared_names.py"],
+    "hooks/guard_frozen.py": ["hooks/test_dir_before_segment.py", "hooks/test_shared_names.py"],
     "hooks/guard_pointer.py": [],
     "hooks/guard_rm_var.py": [],
     "hooks/guard_shared_tree.py": ["hooks/test_checks_never_raise.py"],
