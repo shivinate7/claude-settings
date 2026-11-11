@@ -143,6 +143,9 @@ Design:
   `bin/mail`, with `bin/mail.cmd` beside it. The cache is a bare clone: `MAILBOX_CACHE`, else
   `~/.claude/mail.git`. It uses plumbing only: read-tree into a temporary index, hash-object,
   update-index, write-tree, commit-tree, then push to refs/heads/mail. It never uses a working tree.
+  Each git call encodes its stdin as UTF-8 bytes, so Windows adds no CR to an index path. Before the push, it reads the new tree
+  back: each added path must hold the blob of its text. A git call that prints "Ignoring path" on stderr
+  is an error, because git then exits 0 and skips the path. Either failure prints "not sent".
   Push race: file names are unique. On a non-fast-forward push, it syncs and rebuilds on the new tip. It
   makes six tries in all: the first push and at most five retries. Any other refusal, such as a hook or
   ACL refusal, is not retried. On failure it prints "not sent: <reason>" and exits 1. On success it
@@ -163,7 +166,7 @@ Design:
 - Take and reply. `mail take [--addr <addr>] <id>` makes one commit that moves the file to
   `done/<addr>/<id>.md` and appends `Taken-by: <addr> <time> <token>`. It exits 0 and prints `taken <id>`
   after the push succeeds, and a session acts only then. In a take race, the loser finds the open path
-  gone and exits 1 with "taken by another". It does not act. A second take is refused the same way. A
+  gone and exits 1 with "taken by another". It does not act. A second take is refused the same way. A take whose read-back fails (the open file stays in the new tree, or the done file is missing) prints "mail unknown: message file missing from the commit" and exits 1. A
   request gets a reply file: `mail send --kind reply --re <id>`, sent to its Reply-to. An inform closes by
   the take alone.
 - Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
