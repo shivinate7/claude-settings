@@ -16,7 +16,7 @@ Sources:
 | A destination (implied, a colon-less refspec, or after the colon) named like an agent-worktree branch (`agent-<hex>`, `claude/agent-<hex>`, `worktree-agent-<hex>`), with or without an upstream | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | A push that names `main` and an agent-worktree branch together (`git push origin main HEAD:agent-<hex>`, `git push origin main agent-<hex>`) | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
 | `--all` or `--branches` from a checkout on an agent-worktree branch, to a network remote, whether or not it would update main | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-agent-branch` |
-| Every branch (`--all`, `--branches`, or a glob refspec such as `refs/heads/*:refs/heads/*`), to a network remote, when it would update main or master there. The agent-checkout `--all` and `--branches` row above takes precedence | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-all-main` |
+| Every branch (`--all`, `--branches`, or a glob refspec such as `refs/heads/*:refs/heads/*`), to a network remote, when it would update main or master there, or when a glob cannot be read. The agent-checkout `--all` and `--branches` row above takes precedence | refuse, remedy `git push origin HEAD:<lane-branch>` | `push-all-main` |
 | Any other plain push | allow | |
 
 - Item 207 a, `push-main`: main moves only by pull request (`git-main-only-by-pr`). The names are
@@ -51,16 +51,21 @@ Sources:
   `push-main`; a lane branch, `HEAD:<lane-branch>`, `archive/*` and deletes are allowed.
 - Every-branch push, `push-all-main`: owner ruling, page item 502, 2026-11-10 16:08 CST. A plain push
   of every branch never asks. It is refused when it would update main or master on a network remote,
-  and allowed otherwise.
+  or when a glob cannot be read there. It is allowed otherwise.
   - It would update when local main or master exists and its remote-tracking ref
     (`refs/remotes/<remote>/<name>`) is missing or differs from it. A matching ref is trusted. The
     guard never contacts the remote.
   - A failed ref read refuses. No local main or master allows.
   - A glob refspec reaches main or master only when its target names one. `refs/heads/*:refs/heads/*`
-    does; `refs/heads/*:refs/heads/lane/*` does not. A glob that is not one `*` on each side refuses.
+    does; `refs/heads/*:refs/heads/lane/*` does not. A glob with no colon is read as `<src>:<src>`, so
+    it is judged by its source side, like any glob: `refs/tags/v*` reaches no main, and `refs/heads/*`
+    does. A glob that is not one `*` on each side refuses on a network remote, whether or not local
+    main exists.
   - The verdict is the same from a main, lane or detached checkout. From an agent checkout, `--all`
-    and `--branches` are refused by `push-agent-branch` whether or not they would update main. A glob
-    from an agent checkout is refused by `push-all-main`.
+    and `--branches` are refused by `push-agent-branch`, not `push-all-main`, to a network remote,
+    whether or not they would update main. The push still sends the agent branch to origin. A glob is
+    judged the same from an agent checkout: refused only when it reaches main or master, so
+    `refs/heads/*:refs/heads/lane/*` is allowed.
   - Silent: a dry run, a local-path remote, and a deletion. A forced form, such as `--all --force` or
     `--force origin refs/heads/*:refs/heads/*`, asks under `force-push`.
 - Silent:
