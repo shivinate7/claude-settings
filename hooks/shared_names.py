@@ -6,7 +6,7 @@ guard or any sibling hook.
 
 import os
 import re
-from typing import Optional
+from typing import Any, Optional
 
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -92,6 +92,33 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+# A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
+# lane-effort-pin and lane-one-topic).
+LANE_GRANT_MARKER = "Grant:"
+CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
+
+
+def lane_tags(tool_input: dict[str, Any]) -> list[Any]:
+    """The `tags` of a call as a list: one string is a list of one; anything else that is not a list is empty."""
+    tags = tool_input.get("tags")
+    if isinstance(tags, str):
+        return [tags]
+    return tags if isinstance(tags, list) else []
+
+
+def is_lane_create_session(tool: str, tool_input: dict[str, Any]) -> bool:
+    """True for a create_session call that tags a lane: any tag that, stripped and casefolded, is LANE_TAG. The one
+    reading of the lane tag; the lane checks and the floor's remedy choice share it."""
+    return tool == CREATE_SESSION_TOOL and any(
+        isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))
+
+
+def grant_line_holds_words(line: str) -> bool:
+    """True when a `Grant:` line carries the owner's words: some letter or digit after the marker, and no `<`, which
+    marks a template placeholder such as `<owner words>`. The one reading, shared by rules lane-effort-pin and
+    lane-one-topic."""
+    words = line[len(LANE_GRANT_MARKER):].strip() if line.startswith(LANE_GRANT_MARKER) else ""
+    return "<" not in words and any(c.isalnum() for c in words)
 
 
 def lane_head_refs(slug: str) -> tuple[str, str]:

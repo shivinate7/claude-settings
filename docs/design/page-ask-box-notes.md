@@ -32,7 +32,7 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
 
 ## 3. The record, `asks/<id>`
 
-- Key: `ask-` plus `Date.now()` in base 36 plus two random characters. The `id` field equals the key, as for `items/`.
+- Key: `ask-` plus `Date.now()` in base 36 plus two random characters. The `id` field equals the key.
 - The page writes `id`, `text` (the owner's words, line breaks kept, 4000 characters or fewer) and `at` (ISO).
   It writes them once, at Send. A text over 4000 characters is never cut: the box has no `maxlength`, so a paste keeps
   every character. Send ask is off and writes nothing, the words stay in the box, and the hint says the length and the
