@@ -1,0 +1,14 @@
+{
+ "id": "ci-wake-mcp-ready",
+ "title": "The CI-done wake fires in the cloud, where a PR is marked ready through the GitHub MCP tool",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "why": "Owner 11:55 CST Nov 11: \"the wake-up that tells a session CI is done never fires in the cloud -- how the fuck is that possible and how have we not figured out how to address it\".",
+ "note": "Cause (debt ci-wake-misses-mcp-ready): hooks/ci_wake.py's PostToolUse matcher in settings.json listens only to the Bash and PowerShell gh ready command; cloud sessions mark ready with the MCP update_pull_request call. Fix: also match the MCP ready call (draft false); red case first, from a recorded MCP ready payload. Close the debt when it lands. Plan 0d3a757. Owner wants it raised now, not left as a debt.",
+ "source": "owner 2026-11-11 11:55 CST, relayed by the retrospective session",
+ "owner": "triage",
+ "updatedAt": "2026-11-11T11:58:00-06:00",
+ "blockedBy": []
+}
