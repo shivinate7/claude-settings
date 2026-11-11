@@ -6,7 +6,9 @@
 GLOSSARY.md holds one table under `## Terms`: term, meaning, home, not. The check fails when a
 row's home is not an existing file or a rule marker, when a file the change adds has a path
 segment that a row lists under "not", and when a line the change adds holds a "not" name in an
-identifier, a rule anchor, a record slug or a hook message. It never reads prose.
+identifier, a rule anchor, a record slug or a hook message. It never reads prose. A name that a row
+keeps passes: the row's meaning holds the backticked name, then ` stays`, as the review log row does
+for its slug.
 
 Each case builds a temp tree: a copy of the module, the rule-audit module it reads rule markers
 from, and the files it checks. The diff cases also make a temp git repo and set
@@ -74,6 +76,16 @@ class Fixture(unittest.TestCase):
     def commit(self):
         self.git("-c", "user.email=t@t", "-c", "user.name=t", "add", "-A")
         self.git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "change")
+
+    def change(self, rel, text):
+        """Commit the fixture as the base once, then add one file as the change. Each call reads only that file's diff."""
+        if not os.path.isdir(os.path.join(self.tree, ".git")):
+            self.base_repo()
+        else:
+            self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.put(rel, text)
+        self.commit()
+        return self.run_check()
 
 
 class GlossaryTests(Fixture):
@@ -230,16 +242,6 @@ class CodeNameTests(Fixture):
     def setUp(self):
         super().setUp()
         self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA)
-
-    def change(self, rel, text):
-        """Commit the fixture as the base once, then add one file as the change. Each call reads only that file's diff."""
-        if not os.path.isdir(os.path.join(self.tree, ".git")):
-            self.base_repo()
-        else:
-            self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        self.put(rel, text)
-        self.commit()
-        return self.run_check()
 
     def red(self, rel, text, *shown):
         code, out = self.change(rel, text)
@@ -588,6 +590,77 @@ class CodeNameTests(Fixture):
 
     def test_the_transcript_folder_name_passes(self):
         self.green("hooks/x.py", 'D = "subagents"\n')
+
+
+class KeptNameTests(Fixture):
+    """A kept name passes, and only the names a row keeps. A row keeps a name in its meaning, as the review
+    log row keeps its slug: the backticked name, then ` stays`. A kept name is a whole name, so a longer name
+    that holds it is still a "not" name. The fixture keeps names the same way a real row does."""
+    KEPT = ("| review log | A reviewer's PR comment with the rounds. Its slug `pr-review-record` stays. "
+            "Its function `review_record` stays. Its function `review_record_problem` stays. "
+            "| `rule:one-rule` | `review record` |\n"
+            "| fix verifier | The reviewer that verifies one fix. Its flag `--fix-check` stays. "
+            "| `rule:one-rule` | `fix check` |\n")
+    BARE = ("| review log | A reviewer's PR comment with the rounds. | `rule:one-rule` | `review record` |\n"
+            "| fix verifier | The reviewer that verifies one fix. | `rule:one-rule` | `fix check` |\n")
+
+    def setUp(self):
+        super().setUp()
+        self.put("GLOSSARY.md", HEAD + ROWS + self.KEPT)
+
+    # Kept names pass
+
+    def test_backticked_kept_slug_on_a_markdown_line_passes(self):
+        code, out = self.change("docs/notes.md", "Each PR keeps its `pr-review-record`.\n")
+        self.assertEqual(code, 0, out)
+
+    def test_kept_flag_and_attribute_in_code_pass(self):
+        code, out = self.change(
+            "merge/merge_probe.py",
+            'import argparse\n\nP = argparse.ArgumentParser()\nP.add_argument("--fix-check", action="store_true")\n'
+            "args = P.parse_args()\nif args.fix_check:\n    pass\n")
+        self.assertEqual(code, 0, out)
+
+    def test_kept_function_names_in_code_pass(self):
+        code, out = self.change(
+            "merge/merge_probe.py",
+            "def review_record(run):\n    return review_record_problem(run)\n\n\n"
+            "def review_record_problem(run):\n    return None\n")
+        self.assertEqual(code, 0, out)
+
+    # Controls: names the rows do not keep stay flagged, and a kept name unflags nothing beside it
+
+    def test_a_longer_name_holding_a_kept_name_is_still_flagged(self):
+        code, out = self.change("merge/merge_probe.py", "fix_check_helper = 1\nreview_record_helper = 2\n")
+        self.assertEqual(code, 1, out)
+        self.assertIn("merge/merge_probe.py:1", out)
+        self.assertIn("merge/merge_probe.py:2", out)
+
+    def test_an_unkept_slug_beside_a_kept_one_is_still_flagged(self):
+        """The Markdown slug reader still runs on this line: the unkept slug is named."""
+        code, out = self.change("docs/notes.md", "Keep `pr-review-record`, not `review-record-helper`.\n")
+        self.assertEqual(code, 1, out)
+        self.assertIn("docs/notes.md:1", out)
+        self.assertIn("review-record-helper", out)
+
+    def test_a_kept_name_on_a_line_does_not_unflag_another_rows_not_name(self):
+        code, out = self.change("merge/merge_probe.py", 'label = "pr-review-record"; fix_check = 1\n')
+        self.assertEqual(code, 1, out)
+        self.assertIn("merge/merge_probe.py:1", out)
+        self.assertIn("fix check", out)
+
+    # The kept list comes from the glossary file
+
+    def test_the_kept_list_comes_from_the_glossary_file(self):
+        """The same two lines pass under the kept glossary and fail under one with no kept marker."""
+        self.put("merge/merge_probe.py", 'P.add_argument("--fix-check")\nargs.fix_check\n')
+        code, out = self.run_check("merge/merge_probe.py")
+        self.assertEqual(code, 0, out)
+        self.put("GLOSSARY.md", HEAD + ROWS + self.BARE)
+        code, out = self.run_check("merge/merge_probe.py")
+        self.assertEqual(code, 1, out)
+        self.assertIn("merge/merge_probe.py:1", out)
+        self.assertIn("merge/merge_probe.py:2", out)
 
 
 class UncommittedTests(Fixture):
