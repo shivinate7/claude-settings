@@ -1327,7 +1327,7 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(rc, 1, "a conflicting same-lane PR under a release-base PR did not refuse: " + text)
         self.assert_remedy_names_a_merge_or_a_rebase(text)
 
-    # The main-net cases (R1-R9, step cross-measure-main-net). A pair clash counts only when both heads merge clean with main; the
+    # The main-net cases (R1-R10, step cross-measure-main-net). A pair clash counts only when both heads merge clean with main; the
     # lane head itself is checked against its base; a counted FAIL refuses before the ci-job run, so the ci-job never runs beside it.
 
     def test_a_stale_sibling_that_clashes_only_through_main_passes_with_a_report_line_naming_it(self):  # R1, the 2026-11-10 incident
@@ -1406,7 +1406,7 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line beside a counted clash: " + text)
         self.assertEqual(self.host.posted, [], "a counted clash beside an unknown ci-job posted a lane-lint comment: " + text)
 
-    def test_an_integration_head_with_an_outside_pr_that_clashes_passes_with_a_report_line_naming_it(self):  # R6
+    def test_an_integration_head_with_an_outside_pr_that_clashes_fails_names_it_and_runs_no_ci_job(self):  # R6
         self.own_writes({"shared-a.txt": "lane 7\n"})
         tip = self.pr_writes(8, {"lane-eight.txt": "lane 8\n"}, lane_body(OTHER))  # a lane tip: another session's open PR
         head = self.merge_into_feat("origin/" + branch_of(8))  # the integration head: PR 8's head is a merge's second parent
@@ -1417,12 +1417,13 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the integration head does not merge clean with main")
         self.assertEqual(self.clash(head, outside), "conflict", "precondition: the integration head and PR 9 do not clash, so the case probes nothing")
         self.use_ci_job(PASSING, 0)
-        rc, text, _, _, _ = self.measured("--lane-lint", "7", "--with", "9")
-        self.assertEqual(rc, 0, "an outside PR that clashes with an integration head refused it: " + text)
-        self.assertEqual(len(pass_lines(text)), 1, "the lane did not print one PASS line: " + text)
-        report = [line for line in text.splitlines() if names_pr(line, 9)]
-        self.assertTrue(report, "the PASS names no report line for the clash with PR #9: " + text)
-        self.assertNotIn("FAIL", "\n".join(report), "the report line for PR #9 reads as a FAIL: " + text)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--with", "9")
+        self.assertEqual(rc, 1, "an outside PR that clashes with an integration head passed the lane: " + text)
+        self.assertTrue(names_pr(text, 9), "the refusal does not name the clashing PR #9: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the clashing file: " + text)
+        self.assertEqual(pass_lines(text), [], "the refusal printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash: " + text)
+        self.assertEqual(self.host.posted, [], "the refusal posted a lane-lint comment: " + text)
 
     def test_an_integration_head_that_conflicts_with_main_fails_and_names_main(self):  # R7, an integration head
         self.pr_writes(8, {"lane-eight.txt": "lane 8\n"}, lane_body(OTHER))  # cut before main moves, so it holds no shared-a.txt
@@ -1483,6 +1484,26 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(pass_lines(text), [], "PR #8's unreadable base read printed a PASS line: " + text)
         self.assertEqual(lints, 0, "the ci-job lint ran past PR #8's unreadable base read: " + text)
         self.assertEqual(self.host.posted, [], "PR #8's unreadable base read posted a lane-lint comment: " + text)
+
+    def test_a_lane_head_that_merged_a_same_lane_sibling_fails_on_a_clash_with_a_third_same_lane_pr(self):  # R10, a head that merged a same-lane sibling
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"lane-eight.txt": "lane 8\n"}, lane_body(OWN))  # PR 8: a same-lane sibling, cut from main, disjoint from the head
+        head = self.merge_into_feat("origin/" + branch_of(8))  # the lane head merges PR 8, so PR 8's head is its second parent
+        third = self.pr_writes(9, {"shared-a.txt": "lane 9\n"}, lane_body(OWN))  # PR 9: same lane, edits the lines the head edits
+        self.assertEqual(self.second_parent(head), sib, "scope: PR 8's head is not a parent of the head, so the head merged no sibling")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[9]["body"]), "precondition: PR 9 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(third, "origin/main"), "clean", "precondition: PR 9 does not merge clean with main, so the clash is not the pair the case names")
+        self.assertEqual(self.clash(head, third), "conflict", "precondition: the lane head and PR 9 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)  # the stub would pass, so only the counted clash can refuse
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a counted clash between the lane head and PR #9 passed the lane beside a merged sibling: " + text)
+        self.assertTrue(names_pr(text, 9), "the refusal does not name the clashing PR #9: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the clashing file: " + text)
+        self.assertEqual(pass_lines(text), [], "the refusal printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash: " + text)
+        self.assertEqual(self.host.posted, [], "the refusal posted a lane-lint comment: " + text)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
