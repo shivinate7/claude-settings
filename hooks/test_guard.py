@@ -17986,6 +17986,57 @@ sh("frozen join: a frozen hook path joined by + into a node -e execSync tee, den
    "deny", "frozen-path", cwd=NOGIT)
 
 
+# A FROZEN HOOK OR CAP PATH HELD IN A SHELL VARIABLE, WRITTEN BY A HEREDOC BODY THAT PYTHON OR NODE RUNS. The body
+# is a script, so the guard reads it at its shell spots, and `$F` in it stands for the variable's value. An
+# unquoted heredoc expands `$F` in the shell before the interpreter runs, so a plain `F=` is enough there. A quoted
+# heredoc keeps `$F` literal, so its case exports F: the child shell that os.system or execSync starts reads `$F`
+# from the environment. A plain `F=` with a quoted heredoc writes nothing, so no case uses that pair. The cap key
+# is CLAUDE_CODE_SUBAGENT_MODEL, the same name CAP_KEY holds further down.
+sh("frozen heredoc var: a frozen hook path in F, set by F= before an unquoted python heredoc whose os.system writes $F, denies",
+   "F=" + CFG_HOOK + "; python3 - <<EOF\nimport os\nos.system(\"echo x >> $F\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: a frozen hook path in F, exported before a quoted python heredoc whose os.system writes $F, denies",
+   "export F=" + CFG_HOOK + "; python3 - <<'EOF'\nimport os\nos.system(\"echo x >> $F\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: an apostrophe in a python comment ahead of the os.system write of $F, denies",
+   "export F=" + CFG_HOOK + "; python3 - <<'EOF'\n# don't write here\nimport os\nos.system(\"echo x >> $F\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: a # inside a python string ahead of the os.system write of $F, denies",
+   "export F=" + CFG_HOOK + "; python3 - <<'EOF'\nmsg = '# note'\nimport os\nos.system(\"echo x >> $F\")\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: a frozen hook path in F, set by F= before an unquoted node heredoc whose execSync writes $F, denies",
+   "F=" + CFG_HOOK + "; node - <<EOF\nrequire('child_process').execSync('echo x >> $F')\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: a frozen hook path in F, exported before a quoted node heredoc whose execSync writes $F, denies",
+   "export F=" + CFG_HOOK + "; node - <<'EOF'\nrequire('child_process').execSync('echo x >> $F')\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var: a multi-line template literal ahead of the execSync write of $F, denies",
+   "export F=" + CFG_HOOK + "; node - <<'EOF'\nconst s = `line one\nline two`;\nrequire('child_process').execSync('echo x >> $F')\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+chained_ask("cap heredoc var: a cap write to $F, set by F= before an unquoted python heredoc whose os.system writes it, denies as a chained ask command",
+   "F=" + PROJ_SETTINGS + "; python3 - <<EOF\nimport os\nos.system(\"echo CLAUDE_CODE_SUBAGENT_MODEL=opus > $F\")\nEOF",
+   cwd=NOGIT, carries=("agent-model-cap",))
+chained_ask("cap heredoc var: a cap write to $F, exported with a semicolon before a quoted python heredoc, denies as a chained ask command",
+   "export F=" + PROJ_SETTINGS + "; python3 - <<'EOF'\nimport os\nos.system(\"echo CLAUDE_CODE_SUBAGENT_MODEL=opus > $F\")\nEOF",
+   cwd=NOGIT, carries=("agent-model-cap",))
+sh("cap heredoc var: a cap write to $F, exported with && before a quoted python heredoc, asks as a lone command",
+   "export F=" + PROJ_SETTINGS + " && python3 - <<'EOF'\nimport os\nos.system(\"echo CLAUDE_CODE_SUBAGENT_MODEL=opus > $F\")\nEOF",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=("agent-model-cap",))
+chained_ask("cap heredoc var: a cap write to $F, exported with a semicolon before a quoted node heredoc whose execSync writes it, denies as a chained ask command",
+   "export F=" + PROJ_SETTINGS + "; node - <<'EOF'\nrequire('child_process').execSync('echo CLAUDE_CODE_SUBAGENT_MODEL=opus > $F')\nEOF",
+   cwd=NOGIT, carries=("agent-model-cap",))
+# CONTROLS. The same bodies with the path written out keep their verdict, and a $F that python only prints allows.
+sh("frozen heredoc var control: a literal frozen hook path in a quoted python heredoc, denies",
+   "python3 - <<'EOF'\nimport os\nos.system(\"echo x >> " + CFG_HOOK + "\")\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen heredoc var control: a literal frozen hook path in a quoted node heredoc, denies",
+   "node - <<'EOF'\nrequire('child_process').execSync('echo x >> " + CFG_HOOK + "')\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("cap heredoc var control: a literal settings path in an unquoted python heredoc, asks as the cap",
+   "python3 - <<EOF\nimport os\nos.system(\"echo CLAUDE_CODE_SUBAGENT_MODEL=opus > " + PROJ_SETTINGS + "\")\nEOF",
+   "ask", "agent-model-cap", cwd=NOGIT, carries=("agent-model-cap",))
+sh("frozen heredoc var control: $F only printed by python in a quoted heredoc, the shell writes nothing, allows",
+   "export F=" + CFG_HOOK + "; python3 - <<'EOF'\nprint(\"echo x >> $F\")\nEOF", "allow", cwd=NOGIT)
+
+
 # =========================================================================== 6b. the model cap
 FAMILY = "model-cap"
 #
