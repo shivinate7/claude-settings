@@ -161,7 +161,7 @@ merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         - a PR with a patch-less changed file, only while a case is queried and that PR has no match.
                         --file alone is fine beside a patch-less file. An empty value is a usage error.
                         Limits. A case matches only when its text sits whole in one `+` line; a case a --run names also matches a context line. A name built from pieces or with escapes never matches.
-                        A --case never matches a context line. --file finds a fix elsewhere, in guard or product code or far from the case line. --run finds it only when a failing line names its file, or the case name is on an added line or in a hunk's context lines (up to 3 lines around each change). --file is an exact path after normpath.
+                        A --case matches a context line only when a --run names the same case. --file finds a fix elsewhere, in guard or product code or far from the case line. --run finds it only when a failing line names its file, or the case name is on an added line or in the patch's context lines. --file is an exact path after normpath.
                         It finds no rename's previous name, no directory and no backslash path. A reason that spans lines may leave `  (note` in the case.
                         Cost: API reads only. The pull list, one call per page of 100. One files read (its pages) per open PR.
                         For --run, the jobs read, one call per page of 100, and one log read per failed job but the rollup.
