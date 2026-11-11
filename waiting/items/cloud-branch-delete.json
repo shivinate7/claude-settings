@@ -2,7 +2,7 @@
   "added": "2026-11-11T20:24:00Z",
   "context": "Goal: keep GitHub's branch list small, so sessions find work fast.\nProblem (rule): cloud sessions cannot delete branches, and each way to fix that adds a new writer, which needs your word.\nBased on (measured): at 14:21 CST the cloud link dropped a branch-delete push (\"unexpected disconnect\"). A new-branch push worked.\nBased on (measured): origin has 2,338 branches: 1,715 plain, 331 archive/, 160 lane/.\nBased on (read): your Oct 30 grant allows a delete only when the branch's last commit is on main or on an archive branch.\nDeparts from: main, where cloud deletes go to a session on your computer \u2014 adds a GitHub Actions workflow that deletes on GitHub's side.\nMeanwhile: deletes wait; no other work waits on this.",
   "holds": "Which way a cloud session deletes a branch that your Oct 30 grant already allows it to delete.",
-  "home": "step cloud-branch-delete (filed after your answer)",
+  "home": "plan restart-plan e276625, ruling R45",
   "id": "cloud-branch-delete",
   "kind": "decision",
   "n": 513,
@@ -32,9 +32,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "rank": 2,
   "ref": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "reply": "Closed by your 14:25 CST chat answer (relayed by the retrospective): \"im good with either an actions workflow or a github token -- github token seems better? im very ambivalent to tokens being in all my cloud sessions its just a github token\". Home: R45 in restart-plan. You make one GitHub token and add it to the cloud environment as SHIV_GITHUB_TOKEN; a session then tests one delete and one Projects read with it.",
   "repo": "shivinate7/claude-settings",
   "short": "cloud branch deletes",
-  "status": "open",
+  "status": "closed",
   "title": "How should cloud sessions delete old branches?",
   "why": "Cloud sessions cannot delete a branch today, so 2,338 branches pile up on GitHub."
 }
