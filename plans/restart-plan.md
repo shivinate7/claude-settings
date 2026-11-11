@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:33 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:40 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -503,7 +503,11 @@ then R29.
 - **R28. Every prose store is tended one shared way.** Owner 10:19 CST Nov 11: "everything that marks
   prose should share the same "tending" mechanism ... it should be more uniform, standardized, and
   shared as much as possible to avoid stale duplication and to ensure shared best practrices". Stores:
-  decisions, rules, docs and README, debts, handoffs, the feedback log, the roadmap and queue. Box
+  decisions, rules, docs and README, debts, handoffs, the feedback log, the roadmap and queue. Owner 11:39 CST
+  Nov 11 adds the git copies of each repo's page and the mailbox: "i agree the fix is in r28". Case:
+  claude-settings' copy fell about 11 h behind its live page (read 11:30 CST); the copy step and the
+  Stop check both missed (triage, 11:39 CST). A copy's "still true?" test compares it with its live
+  source. Step waiting-export-miss-cloud fixes the check; a read-only audit measures the other repos. Box
   answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
   pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
   1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
@@ -661,6 +665,19 @@ then R29.
      when it sends. A guard refuses a page write that stores a session id.
   4. Fits R18 point 2: each item names who wakes, by slug or role.
   Home: skill project-ops; skill waiting-page.
+
+- **R34. The page shows how the system works and how healthy each part is.** Owner 11:35 CST Nov 11:
+  "i more or less don't understand what i've built and how well built it is as i care about how it
+  acts in the front end but there's a fuckton of backend". 11:39 CST: "yes i think build it -- let me
+  know if that should be part of the standing artifact or no". G14 makes the page one page, so this is
+  a tab on claude-settings' page, not a new artifact. Each row names what the owner sees, what makes it
+  happen (hooks, checks, skills, decisions), and how healthy it is, measured from git, CI, the debt
+  store and guard logs. A part with no measure says "unknown".
+  1. A read-only audit drafts the rows now.
+  2. The owner judges the draft.
+  3. A lane builds the tab. R28's shared upkeep refreshes each number at triage status, with no new
+     timer.
+  Home: skill roadmap (the page's tabs); docs/map/.
 
 ## Stage 5. Resume lanes
 
