@@ -2326,6 +2326,15 @@ def _build_push():
             or run_vcs(PUSHUPSTREAM, "config", "--get", "branch.feat.remote").stdout.strip() != "upstream"):
         sys.exit("fixture setup failed in build_fixtures: PUSHUPSTREAM needs origin/HEAD -> develop, "
                  "upstream/HEAD -> main and feat tracking upstream")
+    # The second remote's main is read back before a case names it: local main equals upstream/main, and origin
+    # has no main at all, so a push that reads the wrong remote's tracking refs changes its verdict.
+    local_main = run_vcs(PUSHUPSTREAM, "rev-parse", "-q", "--verify", "refs/heads/main").stdout.strip()
+    if (not local_main
+            or local_main != run_vcs(PUSHUPSTREAM, "rev-parse", "-q", "--verify",
+                                     "refs/remotes/upstream/main").stdout.strip()
+            or run_vcs(PUSHUPSTREAM, "rev-parse", "-q", "--verify", "refs/remotes/origin/main").returncode == 0):
+        sys.exit("fixture setup failed in build_fixtures: PUSHUPSTREAM needs local main equal to upstream/main "
+                 "and no origin/main")
 
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
@@ -9616,16 +9625,33 @@ def agent_refused(name, command, cwd=PUSHFEAT, **kw):
     sh(name, command, "deny", PUSH_AGENT_RULE, cwd=cwd, carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS, **kw)
 
 
-def all_refused(name, tail, cwd=PUSHFEAT):
-    """One plain push the all-branches rule refuses: a deny under its rule id, whose reason prints the lane's remedy
-    and names no main or master target."""
+def all_refused(name, tail, cwd=PUSHFEAT, **kw):
+    """One plain push the all-branches rule refuses: a deny under its rule id, whose reason prints the lane's remedy,
+    names its own cause ("sends every branch", which the agent rule's reason never says) and names no main or master
+    target."""
     sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
-       carries=(PUSH_AGENT_REMEDY, "Rule (Git): "), lacks=PUSH_ALL_LACKS)
+       carries=(PUSH_AGENT_REMEDY, "Rule (Git): ", "sends every branch"), lacks=PUSH_ALL_LACKS, **kw)
 
 
-def all_allowed(name, tail, cwd=PUSHFEAT):
+def all_allowed(name, tail, cwd=PUSHFEAT, **kw):
     """One plain push the all-branches rule allows: it writes no main or master on the remote, so it prints nothing."""
-    sh("push: " + name, VCS + " push " + tail, "allow", cwd=cwd, silent=True)
+    sh("push: " + name, VCS + " push " + tail, "allow", cwd=cwd, silent=True, **kw)
+
+
+# A failed ref read refuses, since unknown is never safe. PUSHFAILSHIM is a git stand-in that fails every for-each-ref
+# and runs the real git for the rest, so PUSHFEAT's tracking-ref read comes back unknown although local main equals it.
+PUSHFAILSHIM = os.path.join(ROOT, "pushfailshim")
+
+
+def _build_push_failshim():
+    make_git_stand_in(PUSHFAILSHIM, fail_on="for-each-ref")
+    probe = subprocess.run([os.path.join(PUSHFAILSHIM, VCS), "for-each-ref", "refs/heads/main"],
+                           cwd=ROOT, capture_output=True)
+    if probe.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: the for-each-ref stand-in exited 0, so it fails no read")
+
+
+lazy_fixture([PUSHFAILSHIM], _build_push_failshim)
 
 
 agent_refused("push: agent branch, HEAD asks", VCS + " push origin HEAD", cwd=PUSHAGENT)
@@ -9874,6 +9900,9 @@ all_refused("glob refspec refs/heads/*:refs/heads/* from an agent checkout, loca
             "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADAGENT)
 all_allowed("glob refspec refs/heads/*:refs/heads/* with local main equal to origin/main is silent",
             "origin refs/heads/*:refs/heads/*", cwd=PUSHFEAT)
+# A glob to a local-path origin is no network push, however far local main is ahead of its tracking ref.
+all_allowed("glob refspec refs/heads/*:refs/heads/* to a local-path origin with local main ahead, is silent",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHLOCALAHEAD)
 # A glob into another name does not reach main: main lands on lane/main, a new branch.
 all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a main checkout, local main ahead, is silent",
             "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEAD)
@@ -9906,6 +9935,15 @@ all_allowed("--all dry run with local main ahead, is silent", "--all --dry-run o
 all_allowed("--all to a local-path origin with local main ahead, is silent", "--all origin", cwd=PUSHLOCALAHEAD)
 all_allowed("--branches to a local-path origin with local main ahead, is silent", "--branches origin",
             cwd=PUSHLOCALAHEAD)
+# A second remote is read under its own name. On PUSHUPSTREAM, local main equals upstream/main and origin has no main.
+# A bare --all resolves to upstream through branch.feat.remote, so it is silent as well.
+all_allowed("--all to a second remote whose main ref equals local main, is silent", "--all upstream", cwd=PUSHUPSTREAM)
+all_allowed("--all with no remote named, a branch tracking a second remote, is silent", "--all", cwd=PUSHUPSTREAM)
+all_refused("--all to origin, which has no main ref, from a branch tracking a second remote, refuses", "--all origin",
+            cwd=PUSHUPSTREAM)
+# A failed ref read refuses: the tracking ref cannot be read, so the push may write main.
+all_refused("--all from a lane checkout, a failed ref read, refuses", "--all origin", cwd=PUSHFEAT,
+            env_path=PUSHFAILSHIM + os.pathsep + GIT_PATH)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
@@ -14517,7 +14555,10 @@ def record_push_cost_case():
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
-    `HEAD:<branch>` adds no read. A stray push (rule push-stray-branch: an implied destination off the
+    `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
+    branch (`symbolic-ref`, the agent test) and one `git for-each-ref` of the tracking refs. A glob refspec reads the
+    URL and the for-each-ref, and no branch. A local-path origin stops after the URL read. No push spawns
+    `ls-remote`, `fetch` or `push`. A stray push (rule push-stray-branch: an implied destination off the
     upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The conflict-markers
     push check (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
@@ -14569,10 +14610,26 @@ def record_push_cost_case():
         # the conflict check rejects that base and reads the upstream: two diff reads.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
          {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2}, PUSHSTRAY),
+        # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
+        # current branch (the agent test) and one for-each-ref of the tracking refs. A glob reads the config and the
+        # for-each-ref. A local-path origin stops after the config read. The guard's other checks add to those counts
+        # on the same call: record_writer_hit reads the bare destination of a push with no refspec (a --all push is one:
+        # symbolic-ref and push.default), and the conflict-markers check reads its bases, three for a glob, which names
+        # no tracking ref, with the default base's symbolic-ref and rev-parse.
+        ("a --all push to a network remote", "push --all origin",
+         {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 1}),
+        ("a glob push to a network remote", "push origin refs/heads/*:refs/heads/*",
+         {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 1, "diff": 3}),
+        ("a --all push to a local-path origin", "push --all origin",
+         {"rev-parse": 1, "symbolic-ref": 1, "config": 2}, PUSHLOCALAHEAD),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
             problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
+        # Nothing contacts the remote: the push-main and push-all-main reads are local, and a push reads no remote's refs.
+        for reach in ("ls-remote", "fetch", "push", "remote"):
+            if reach in kinds:
+                problems.append("%s: git spawns %r, which contacts or names the remote" % (label, reach))
         if label == "a bare push" and not any("push.default" in line for line in lines):
             problems.append("a bare push: no read of push.default")
         if label == "a HEAD push" and any("push.default" in line for line in lines):
@@ -32272,7 +32329,7 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_cost_case),
     ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
      "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
-     "no read for HEAD:<branch>, "
+     "no read for HEAD:<branch>, a --all or glob push reads the remote's URL and its tracking refs, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
     ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",
