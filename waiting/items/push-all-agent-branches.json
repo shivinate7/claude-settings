@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-11T03:18:00Z",
+  "context": "Goal: a push of every branch never asks you, and agent branches never reach GitHub (your 2026-11-02 ruling).\nProblem (rule): as built, a push of every branch from a lane is allowed when main is up to date, but it also sends other agents' local branches, and you ruled at 16:08 CST that such a push is allowed whenever it would not update main, so a change needs your word.\nBased on (ruling): your 16:08 CST answer: a push of every branch never asks; it is refused when it would update main, and allowed otherwise.\nBased on (read): the reviewer's dry run: `git push --all` sends `refs/heads/worktree-agent-0123456789abcdef`.\nDeparts from: your 16:08 CST \"allowed otherwise\" \u2014 also refuses a push of every branch while a local agent-named branch exists.\nMeanwhile: the lane fixes its other review findings; on a, it folds this change in before its last review.",
+  "home": "decision plain-push-asks (the ruling on which plain pushes ask)",
+  "id": "push-all-agent-branches",
+  "kind": "decision",
+  "n": 505,
+  "options": [
+    {
+      "gain": "No push can carry a stray agent branch to GitHub.",
+      "how": "The lane adds the refusal before its last review round.",
+      "key": "a",
+      "label": "Refuse it while an agent branch exists (Recommended)",
+      "lose": "A push of every branch is refused in a repo with live agent worktrees, so each branch is pushed by name."
+    },
+    {
+      "gain": "No change.",
+      "how": "The lane ships as reviewed.",
+      "key": "b",
+      "label": "Allow it as built",
+      "lose": "Agent branches can land on GitHub when a lane pushes every branch."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 21:18 CST Nov 10; lane push-all-resolve-no-ask",
+  "repo": "shivinate7/claude-settings",
+  "short": "Refuse push --all while agent branches exist?",
+  "status": "open",
+  "title": "Should a push of every branch be refused while a local agent branch exists, so agent branches never reach GitHub?",
+  "why": "As built, such a push from a lane can carry other agents' branches to GitHub."
+}

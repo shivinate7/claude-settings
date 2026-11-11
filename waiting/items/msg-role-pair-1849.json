@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-11T02:23:00Z",
+  "context": "Goal: the drain lands only what is safe, then the plan starts.\nProblem (rule): #1805 refuses 2 of every 3 ordinary messages unless its fix #1849 ships with it, and adding #1849 changes your named drain queue.\nBased on (ruling): R23, your 19:23 CST \"Named queue\" ruling, which lists the only PRs the drain may land.\nBased on (measured): #1805 alone refuses 136 of 204 messages. With #1849 it refuses 13 of 204 (6%). #1849 passed review round 3.\nDeparts from: the named queue on main's restart plan \u2014 adds #1849, and #1805 lands only together with it.\nMeanwhile: #1805 waits. Triage keeps linting the other queued PRs, and the guard that stops a worktree switch while agents run (built on top of #1849) goes to the sort.",
+  "home": "restart plan R23 (docs/plans/restart-plan.md)",
+  "id": "msg-role-pair-1849",
+  "kind": "decision",
+  "n": 504,
+  "options": [
+    {
+      "gain": "The guard ships working.",
+      "how": "#1849 merges #1805's head, gets a fresh round 1, both are linted, and they go to the coordinator as one pair.",
+      "key": "a",
+      "label": "Add #1849 and ship the two as a pair (Recommended)",
+      "lose": "One more PR, and one more review and lint pass first."
+    },
+    {
+      "gain": "A smaller drain.",
+      "how": "#1805 leaves the named queue; triage's sort places both in that stage.",
+      "key": "b",
+      "label": "Send both to the plan's later build stage",
+      "lose": "The guard waits until the restart plan's third stage, when lanes build its listed fixes."
+    },
+    {
+      "gain": "Your ruling stays as is.",
+      "how": "#1805 goes to the next batch as reviewed; #1849 follows later.",
+      "key": "c",
+      "label": "Ship #1805 alone",
+      "lose": "About 2 of every 3 ordinary messages are refused until #1849 lands."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 20:23 CST Nov 10",
+  "repo": "shivinate7/claude-settings",
+  "short": "Add #1849 so #1805 ships working?",
+  "status": "open",
+  "title": "May #1849 join your named drain queue, so #1805 (the message-role guard) ships only together with its false-alarm fix?",
+  "why": "Alone, #1805 would refuse about 2 of every 3 ordinary messages between sessions."
+}

@@ -9,10 +9,10 @@
   "n": 488,
   "owner": "session-messaging topic session (session_013NEJL1YBVqsXRPBac7nRcz)",
   "ref": "decision session-messages, plan step 2",
-  "reply": "Your question at 11:22 CST: why do you still have to run this by hand, when it was meant to be mechanical? The mechanical route is the git session mailbox (#2484, merged in batch 71): a cloud session leaves the test in the mailbox, and a session on your Mac picks it up and runs it with no step from you. Two things stop that today. (1) Nothing on your Mac reads the mailbox yet. This card is the first Mac run that proves it can, which is plan step 2, so it can't be sent through the mailbox. (2) The mailbox loses messages: your PC run said \"sent\" but stored no file. The fix runs in the messaging topic session (step mail-send-no-file). The other route, a Mac folder shared through Remote Control, also finds nothing: list_computer_folders returned no folders at 11:24 CST. After this one Mac run and that fix, later Mac tests go through the mailbox with no card. (Triage, 11:25 CST.)",
+  "reply": "Done, measured on your Mac at 18:42 CST: login worked with no prompt (exit 0 in 0.53 s), the test message was sent, and the cloud topic session read it. So Mac to cloud works end to end. Two follow-ups are filed as notes: step 4b of the card read a stale local copy, so a later card fetches first; the Mac's mailbox address carries \"-local\" in its host name. Not known yet: whether \"macbook-pro-2\" is the name the Claude app shows. (Triage, 18:47 CST.)",
   "repo": "shivinate7/claude-settings",
   "short": "Mailbox test on the Mac",
-  "status": "open",
+  "status": "closed",
   "title": "Run the mailbox test card on your Mac",
   "why": "Plan step 2 of the mailbox needs one measure on each of your computers, and Windows is done."
 }
