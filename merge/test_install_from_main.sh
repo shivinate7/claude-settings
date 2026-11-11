@@ -1452,7 +1452,61 @@ case41() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41"
+# ---- Case 42: a stale local main (origin/main one commit ahead, local main an ancestor) -> the helper fast-forwards local
+# main and installs origin's main. A fetch never moves local main, so the helper must fetch first. hook_fixture: origin ahead.
+case42() {
+  name="case42: a stale local main behind origin/main: the helper fast-forwards local main and installs origin's main"
+  d="$work/case42"; hook_fixture "$d" trunk ahead
+  h="$d/home"; SHIM="$d/shim"
+  run_live "$d/clone"
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone" rev-parse main)" != "$c1" ]; then
+    bad "$name" "local main is $(git -C "$d/clone" rev-parse main), want origin's main $c1"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then
+    bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want $c1"
+  elif [ "$(tail -n 1 "$h/ran-install.txt" 2>/dev/null)" != "$c1" ]; then
+    bad "$name" "the installer did not run from the pin at $c1: [$(tail -n 1 "$h/ran-install.txt" 2>/dev/null)]"
+  else ok "$name"; fi
+}
+
+# ---- Case 43: a local main holding a commit origin lacks is refused: the helper exits non-zero, runs no install, and moves
+# neither local main nor the pin. The clone's checkout is main (hook_fixture main), so the local commit lands on main itself.
+# Refusal is the outcome asserted here.
+case43() {
+  name="case43: a local main holding a commit origin lacks is refused: the helper exits non-zero, runs no install, and moves neither main nor the pin"
+  d="$work/case43"; hook_fixture "$d" main same
+  h="$d/home"; SHIM="$d/shim"
+  git -C "$d/clone" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
+  local_main=$(git -C "$d/clone" rev-parse main)
+  run_live "$d/clone"
+  if [ "$rc" -eq 0 ]; then bad "$name" "helper exited 0 and installed local main $local_main, which origin lacks"
+  elif [ -e "$h/ran-install.txt" ]; then bad "$name" "an install ran from the unpushed local main"
+  elif [ "$(git -C "$d/clone" rev-parse main)" != "$local_main" ]; then bad "$name" "local main moved from its local commit"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then
+    bad "$name" "the pinned checkout moved to $(git -C "$d/clone-live" rev-parse HEAD), want $c0"
+  else ok "$name"; fi
+}
+
+# ---- Case 44: the helper's output or install log names the commit it installed. Local main is moved to origin's main
+# first, so the pin is behind and the helper moves and installs it.
+case44() {
+  name="case44: the helper's output or install log names the commit it installed"
+  d="$work/case44"; hook_fixture "$d" trunk ahead
+  h="$d/home"; SHIM="$d/shim"
+  git -C "$d/clone" fetch -q origin main
+  if ! git -C "$d/clone" cat-file -e "$c1" 2>/dev/null || ! git -C "$d/clone" update-ref refs/heads/main "$c1"; then
+    bad "$name" "FIXTURE the clone cannot move local main to origin's main $c1"; return
+  fi
+  run_live "$d/clone"
+  short=$(printf '%s' "$c1" | cut -c1-7)
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then bad "$name" "FIXTURE the pinned checkout is not at $c1"
+  elif ! { printf '%s\n' "$out"; cat "$h/.claude-cfg/claude-settings-install.log" 2>/dev/null; } | grep -q "$short"; then
+    bad "$name" "neither the output nor the install log names the installed commit $short"
+  else ok "$name"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
