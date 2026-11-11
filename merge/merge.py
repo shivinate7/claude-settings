@@ -4199,16 +4199,20 @@ def stray_heads(root, tip, block, stops, kept):
     seconds = [p[1] for p in (line.split() for line in out.splitlines()) if len(p) == 2 and p[1] not in frozen]
     return [s for s in dict.fromkeys(seconds) if not any(holds(root, s, k) for k in kept)]
 
-def stacked_remedy(name, branch, onto, named, blamed):
-    """The route the stacked-check refusal names for the lanes it lists. A drop is named only for a lane with a stored blame, the only lane a drop takes off;
-    any other lane gets the route that stores a blame, and the word that it can wait for the next batch."""
+def stacked_remedy(name, branch, onto, base, named, blamed):
+    """The route the stacked-check refusal names for the lanes it lists. A drop is named only for a lane with a stored blame, the only lane a drop takes off.
+    Any other lane gets the two routes the tool accepts from this state: the route that stores a blame, which needs a completed, failed run of the batch's
+    current head, and a wait until the open pull request each line names is merged into `base`, after which the check no longer names it. No route here
+    leaves the lane as it is: the next --ready stops at this same refusal."""
     drops = [n for n in named if n in blamed]
     waits = [n for n in named if n not in blamed]
     text = "".join(f"Run `merge --batch-drop {name} {n}`, then run this --batch-build again: it rebuilds {branch} on the head of {onto} now. " for n in drops)
     if waits:
-        text += (f"{lane_list(waits)} {'has' if len(waits) == 1 else 'have'} no stored blame, so a drop is refused. If a failed run of the batch head is caused by it, run "
-                 + " and ".join(f"`merge --batch-build {name} --blame {n} --run <Actions run URL>`" for n in waits)
-                 + "; or leave it in the batch: it ships with the batch as frozen, and a later change to it goes to the next batch.")
+        one = len(waits) == 1
+        text += (f"{lane_list(waits)} {'has' if one else 'have'} no stored blame, so a drop is refused. If a completed, failed run of the batch's current head is caused by "
+                 f"{'it' if one else 'one of them'}, store the blame with "
+                 + " or ".join(f"`merge --batch-build {name} --blame {n} --run <Actions run URL>`" for n in waits)
+                 + f", then run its drop. Otherwise wait until the pull request each line above names is merged into {base}, then run this --batch-build again.")
     return text.strip()
 
 def sync_batch(root, h, pr, info, block, on, base):
@@ -4225,7 +4229,7 @@ def sync_batch(root, h, pr, info, block, on, base):
     if not strays and all(holds(root, heads[n], tip) for n in sorted(heads)) and not (on and not holds(root, now_on, tip)):
         return 0
     # a frozen set takes no new lane, and a drop rebuilds on the recorded On sha, so the route is a drop and then this build, which rebuilds on the new head
-    stacked_without_base(root, h, base, heads, now_on, own=pr, remedy=lambda named: stacked_remedy(name, branch, on or base, named, block["blamed"]))
+    stacked_without_base(root, h, base, heads, now_on, own=pr, remedy=lambda named: stacked_remedy(name, branch, on or base, base, named, block["blamed"]))
     start, recorded = batch_start(root, block, base)
     start = now_on or start
     text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded, block["blamed"]))
@@ -4297,9 +4301,9 @@ def blame_lines(name, blamed, base, stored=True):
         return f"merge: #{n}'s diff against {base} touches {', '.join(blamed[n][:3])}{' and more' if len(blamed[n]) > 3 else ''}, which the failing check names."
     if stored:
         return [line for n in sorted(blamed) for line in (touches(n) + " To take it off the batch, run:", f"  merge --batch-drop {name} {n}")]
-    return [line for n in sorted(blamed) for line in (touches(n) + " Its blame is not stored, so a drop is refused. To store it, run:",
-                                                        f"  merge --batch-build {name} --blame {n} --run <Actions run URL>",
-                                                        f"or leave #{n} in the batch: it ships with the batch as frozen, and a later change to it goes to the next batch.")]
+    return [line for n in sorted(blamed) for line in (touches(n) + " Its blame is not stored, so a drop is refused. "
+                                                        f"If a completed, failed run of batch {name}'s current head is caused by it, store the blame by running:",
+                                                        f"  merge --batch-build {name} --blame {n} --run <Actions run URL>")]
 
 def record_in_block(h, branch, **fields):
     """Write `fields` (blamed, linted) into the block of batch `branch`'s open pull request, read fresh; the rest of the block and of the body is kept.
