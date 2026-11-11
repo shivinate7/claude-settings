@@ -828,6 +828,7 @@ PUSHALLNOAGENT = os.path.join(ROOT, "pushallnoagent")          # main only
 PUSHALLAGENT = os.path.join(ROOT, "pushallagent")              # plus agent-0123456789abcdef
 PUSHALLAGENTWT = os.path.join(ROOT, "pushallagentwt")          # plus worktree-agent-0123456789abcdef
 PUSHALLAGENTCLAUDE = os.path.join(ROOT, "pushallagentclaude")  # plus claude/agent-0123456789abcdef
+PUSHALLAGENTAHEAD = os.path.join(ROOT, "pushallagentahead")    # plus agent-0123456789abcdef; local main one commit ahead
 # The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -2535,21 +2536,25 @@ def _build_push():
                  "and local main ahead")
 
     # The every-branch fixtures (rule push-all-main). Scope before subject: each reads back that the checkout is main,
-    # that main equals its tracking ref, and that its local branches are exactly main and the one agent-named branch
-    # the fixture names (or main alone), so no case judges a fixture that holds a branch it does not name.
-    for where, branch in ((PUSHALLNOAGENT, None), (PUSHALLAGENT, "agent-0123456789abcdef"),
-                          (PUSHALLAGENTWT, "worktree-agent-0123456789abcdef"),
-                          (PUSHALLAGENTCLAUDE, "claude/agent-0123456789abcdef")):
+    # that main equals its tracking ref (one commit ahead of it for PUSHALLAGENTAHEAD), and that its local branches are
+    # exactly main and the one agent-named branch the fixture names (or main alone), so no case judges a fixture that
+    # holds a branch it does not name.
+    for where, branch, ahead in ((PUSHALLNOAGENT, None, False), (PUSHALLAGENT, "agent-0123456789abcdef", False),
+                                 (PUSHALLAGENTWT, "worktree-agent-0123456789abcdef", False),
+                                 (PUSHALLAGENTCLAUDE, "claude/agent-0123456789abcdef", False),
+                                 (PUSHALLAGENTAHEAD, "agent-0123456789abcdef", True)):
         make_repo(where, {"base.txt": "base\n"})
         run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
         run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
         run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        if ahead:
+            _work_commit(where)
         if branch:
             run_vcs(where, "branch", branch)
         heads = sorted(run_vcs(where, "for-each-ref", "--format=%(refname)", "refs/heads/").stdout.split())
         want = sorted(["refs/heads/main"] + (["refs/heads/" + branch] if branch else []))
-        main_ok = bool(_ref(where, "refs/heads/main")) and (
-            _ref(where, "refs/heads/main") == _ref(where, "refs/remotes/origin/main"))
+        main_equal = _ref(where, "refs/heads/main") == _ref(where, "refs/remotes/origin/main")
+        main_ok = bool(_ref(where, "refs/heads/main")) and main_equal == (not ahead)
         if _head(where) != "refs/heads/main" or not main_ok or heads != want:
             sys.exit("fixture setup failed in build_fixtures: %r needs main equal to origin/main and local branches "
                      "%s, got %s" % (where, want, heads))
@@ -2862,7 +2867,7 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG,
               PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET, PUSHAHEADAGENT, PUSHNOTRACK, PUSHBEHIND,
               PUSHMASTERAHEAD, PUSHNOMAIN, PUSHLOCALAHEAD,
-              PUSHALLNOAGENT, PUSHALLAGENT, PUSHALLAGENTWT, PUSHALLAGENTCLAUDE],
+              PUSHALLNOAGENT, PUSHALLAGENT, PUSHALLAGENTWT, PUSHALLAGENTCLAUDE, PUSHALLAGENTAHEAD],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -9674,13 +9679,29 @@ def all_agent_refused(name, tail, cwd):
     lane's remedy, and names neither a main target nor an agent branch as its target. The reason may not say that main
     would update, since in these fixtures it would not."""
     sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
-       carries=("Rule (Git): ", "agent", PUSH_AGENT_REMEDY),
+       carries=(PUSH_ALL_RULE + ": Rule (Git): ", "sends every branch", "named like an agent worktree", "agent",
+                PUSH_AGENT_REMEDY),
        lacks=PUSH_ALL_LACKS + PUSH_ALL_AGENT_LACKS + ("may update the default branch",))
+
+
+def all_update_refused(name, tail, cwd, **kw):
+    """One plain push the all-branches rule refuses because it would update main or master, or cannot tell that it
+    would not, while a local agent-named branch is also present. The reason opens with the rule id, names the update
+    and no agent: the update is judged first."""
+    sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
+       carries=(PUSH_ALL_RULE + ": Rule (Git): ", "may update the default branch", PUSH_AGENT_REMEDY),
+       lacks=("agent",) + PUSH_ALL_LACKS, **kw)
 
 
 # A failed ref read refuses, since unknown is never safe. PUSHFAILSHIM is a git stand-in that fails every for-each-ref
 # and runs the real git for the rest, so PUSHFEAT's tracking-ref read comes back unknown although local main equals it.
 PUSHFAILSHIM = os.path.join(ROOT, "pushfailshim")
+# PUSHLOCALFAILSHIM fails only the listing of the local branches (the all-agent read), so the tracking-ref read answers.
+PUSHLOCALFAILSHIM = os.path.join(ROOT, "pushlocalfailshim")
+LOCAL_BRANCH_LISTING = "--format=%(refname) refs/heads/"
+# PUSHTRACKFAILSHIM fails only the read of the tracking refs (the update test), so the local-branch listing answers.
+PUSHTRACKFAILSHIM = os.path.join(ROOT, "pushtrackfailshim")
+TRACKING_REF_READ = "%(objectname)"
 
 
 def _build_push_failshim():
@@ -9689,9 +9710,19 @@ def _build_push_failshim():
                            cwd=ROOT, capture_output=True)
     if probe.returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: the for-each-ref stand-in exited 0, so it fails no read")
+    make_git_stand_in(PUSHLOCALFAILSHIM, fail_on=LOCAL_BRANCH_LISTING)
+    probe = subprocess.run([os.path.join(PUSHLOCALFAILSHIM, VCS), "for-each-ref", "--format=%(refname)", "refs/heads/"],
+                           cwd=ROOT, capture_output=True)
+    if probe.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: the local-branch stand-in exited 0, so it fails no listing")
+    make_git_stand_in(PUSHTRACKFAILSHIM, fail_on=TRACKING_REF_READ)
+    probe = subprocess.run([os.path.join(PUSHTRACKFAILSHIM, VCS), "for-each-ref", "--format=%(refname) %(objectname)",
+                            "refs/heads/main"], cwd=ROOT, capture_output=True)
+    if probe.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: the tracking-ref stand-in exited 0, so it fails no read")
 
 
-lazy_fixture([PUSHFAILSHIM], _build_push_failshim)
+lazy_fixture([PUSHFAILSHIM, PUSHLOCALFAILSHIM, PUSHTRACKFAILSHIM], _build_push_failshim)
 
 
 agent_refused("push: agent branch, HEAD asks", VCS + " push origin HEAD", cwd=PUSHAGENT)
@@ -10039,6 +10070,39 @@ all_allowed("glob refspec refs/heads/*:refs/heads/* with no agent-named local br
             "is silent", "origin refs/heads/*:refs/heads/*", cwd=PUSHALLNOAGENT)
 push_case("origin feature with a local agent-named branch present, is silent", "origin feature", "allow",
           cwd=PUSHALLAGENT, silent=True)
+
+# REFUSED, rule push-all-main, when the listing of the local branches fails. The tracking refs show no update, so the
+# agent test reads the local branches next. A failed read is unknown, and unknown is never safe.
+all_refused("--all with a failed read of the local branches, main matching its tracking ref, refuses", "--all origin",
+            cwd=PUSHALLAGENT, env_path=PUSHLOCALFAILSHIM + os.pathsep + GIT_PATH)
+all_refused("--branches with a failed read of the local branches, main matching its tracking ref, refuses",
+            "--branches origin", cwd=PUSHALLAGENT, env_path=PUSHLOCALFAILSHIM + os.pathsep + GIT_PATH)
+all_refused("glob refspec refs/heads/*:refs/heads/* with a failed read of the local branches refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHALLAGENT, env_path=PUSHLOCALFAILSHIM + os.pathsep + GIT_PATH)
+# A failed read of the tracking refs refuses for the update even when a local agent-named branch is present: the
+# tracking read is judged first, so the reason is the update's, not the agent's.
+all_update_refused("--all with a failed read of the tracking refs, and a local agent-named branch, refuses for the update",
+                   "--all origin", cwd=PUSHALLAGENT, env_path=PUSHTRACKFAILSHIM + os.pathsep + GIT_PATH)
+# REFUSED for the update, not for the agent branch. Local main is one commit past its tracking ref, and a local
+# agent-named branch is present, so the reason names the update: the update is judged first.
+for form in ("--all", "--branches"):
+    all_update_refused(form + " with main ahead of its tracking ref and a local agent-named branch refuses for the update",
+                       form + " origin", cwd=PUSHALLAGENTAHEAD)
+all_update_refused("glob refspec refs/heads/*:refs/heads/* with main ahead of its tracking ref and a local agent-named "
+                   "branch refuses for the update", "origin refs/heads/*:refs/heads/*", cwd=PUSHALLAGENTAHEAD)
+# REFUSED, a glob whose source side matches a local agent-named branch, though it reaches no main or master.
+all_agent_refused("glob refspec agent-*:agent-* with a local agent-named branch refuses, though it reaches no main",
+                  "origin agent-*:agent-*", cwd=PUSHALLAGENT)
+all_agent_refused("glob refspec refs/heads/agent-*:refs/heads/agent-* with a local agent-named branch refuses, though "
+                  "it reaches no main", "origin refs/heads/agent-*:refs/heads/agent-*", cwd=PUSHALLAGENT)
+# SILENT, a glob is judged by the local branches its source side matches. A glob that sends main and no agent-named
+# branch is silent beside one, and so is a glob whose prefix and suffix overlap inside a name no branch carries.
+all_allowed("glob refspec refs/heads/main* with a local agent-named branch, main matching its tracking ref, is silent",
+            "origin refs/heads/main*:refs/heads/main*", cwd=PUSHALLAGENT)
+all_allowed("glob refspec refs/heads/agent-*x with a local agent-named branch, no branch ends in x, is silent",
+            "origin refs/heads/agent-*x:refs/heads/agent-*x", cwd=PUSHALLAGENT)
+all_allowed("glob refspec whose prefix and suffix overlap, with a local agent-named branch, is silent",
+            "origin refs/heads/agent-*-0123456789abcdef:refs/heads/agent-*-0123456789abcdef", cwd=PUSHALLAGENT)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
