@@ -9881,10 +9881,6 @@ all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a lane checkout, l
             "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEADLANE)
 all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a detached checkout, local main ahead, is silent",
             "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEADDET)
-# A named main or master destination beside --all refuses from any checkout. Git itself refuses --all with a refspec
-# ("--all can't be combined with refspecs", measured on a dry run), so these rows guard a push git does not send.
-all_refused("--all with HEAD:main beside it refuses, from a lane checkout", "--all origin HEAD:main", cwd=PUSHFEAT)
-all_refused("--all with HEAD:master beside it refuses, from a lane checkout", "--all origin HEAD:master", cwd=PUSHFEAT)
 # A tracking ref that is missing, or that differs from local main, refuses. The push may write main.
 all_refused("--all from a lane checkout, no origin/main tracking ref, refuses", "--all origin", cwd=PUSHNOTRACK)
 all_refused("--branches from a lane checkout, no origin/main tracking ref, refuses", "--branches origin",
