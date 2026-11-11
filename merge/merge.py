@@ -3878,9 +3878,21 @@ def merge_state(h, parents, tree):
         return "unknown", f"the commit read names no tree for the merge of {', '.join(p[:9] for p in parents)}"
     return ("clean" if merged == tree else "edited"), ""
 
-def clean_merges_after(h, head, live):
+def edits_outside_conflict(root, parents, tree):
+    """-> the paths where `tree` differs from git's own merge of `parents` (merge_tree) and that git did not report as conflicted: the edits a hand
+    resolution of a conflicted merge makes beyond its conflict. A conflicted path may hold any resolution. A merge git can run clean, or a diff that
+    cannot run, raises Stop: unknown, never an empty list. Cost: one merge_tree and one `git diff-tree` start."""
+    state, merged, files = merge_tree(root, *parents)
+    if state != "conflict":
+        raise Stop(f"git's merge of {', '.join(p[:9] for p in parents)} is not conflicted, so no conflict bounds its edits " + REVIEW_CITE)
+    c, out = sh(["git", "-C", root, "diff-tree", "-r", "--name-only", "-z", merged, tree])
+    if c:
+        raise Stop(f"git diff-tree exited {c}: {' '.join(out.split())[:200]} " + REVIEW_CITE)
+    return sorted(set(f for f in out.split("\0") if f) - set(files))
+
+def clean_merges_after(h, head, live, base=None):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main or an empty commit. A clean merge of main has two
-    parents, a second parent main holds (Host.holds_head, main being the host's base), and git's clean merge of its parents as its tree
+    parents, a second parent main holds (Host.holds_head, main being `base`, the pull request's own base, else the host's), and git's clean merge of its parents as its tree
     (merge_state). An empty commit has one parent and that parent's tree. The walk follows first parents from `live` and must reach `head` within
     REVIEW_MERGE_WALK commits. A commit that changes the tree, a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
@@ -3904,7 +3916,7 @@ def clean_merges_after(h, head, live):
             if tree != before:
                 return False
         else:
-            if len(parents) != 2 or not h.holds_head(parents[1], h.base):
+            if len(parents) != 2 or not h.holds_head(parents[1], base or h.base):
                 return False
             state, why = merge_state(h, parents, tree)
             if state == "unknown":
@@ -3916,16 +3928,17 @@ def clean_merges_after(h, head, live):
 
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main and empty commits follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
-def live_review_state(h, rec, live):
+def live_review_state(h, rec, live, base=None):
     """-> (state, why) of the parsed record `rec` for the live head `live`: the one home of that read, for `merge --reviewed` (reviewed_read) and the
     lane Stop hook (lint/report_guard.py). It is review_state, except that a stale record whose live head is its Head plus clean merges of main or empty commits
     (clean_merges_after) reads as it does at its Head (decision pr-review-record). A clean-merge read that cannot run keeps the state stale, and
-    the why says REVIEW_SURVIVAL_UNKNOWN and why. Cost: clean_merges_after's, only for a stale record."""
+    the why says REVIEW_SURVIVAL_UNKNOWN and why. Cost: clean_merges_after's, only for a stale record. `base` is the pull request's own base, passed to the walk, so a host that read another pull request last judges this one the same.
+    The host's base is the default."""
     state, why = review_state(rec, live)
     if state != "stale":
         return state, why
     try:
-        if not clean_merges_after(h, rec["head"], live):
+        if not clean_merges_after(h, rec["head"], live, base):
             return state, why
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})"
@@ -3975,7 +3988,7 @@ def reviewed_read(h):
             continue
         rec = parse_review(bodies[-1])
         rec = rec if rec and rec["n"] == n else None
-        state, why = live_review_state(h, rec, sha)
+        state, why = live_review_state(h, rec, sha, d["base"]["ref"])
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)
             if lint == "pass":
@@ -4228,7 +4241,7 @@ def release_check(root, h, numbers, lints, root_why=None):
             else:
                 body, created, updated = rows[-1]  # only the newest record counts
                 rec = parse_review(body)
-                state, why = live_review_state(h, rec if rec and rec["n"] == n else None, i["head"])
+                state, why = live_review_state(h, rec if rec and rec["n"] == n else None, i["head"], i["base"])
                 if state != "done":
                     out.append(why)
                 if created is None or updated is None:
@@ -4590,13 +4603,19 @@ def main(argv, host=None, lock=None, hosts=None):
                     ok = len(parents) == 2 and h.holds_head(parents[1], info["base"])
                     if ok and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
                         try:
-                            ok = clean_merges_after(h, a.fix_check[0], parents[0])
+                            ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"])
                         except (Stop, subprocess.TimeoutExpired, OSError) as e:
                             print(f"merge: --fix-check: whether only clean merges of main sit between {a.fix_check[0][:9]} and {a.head[:9]} is unknown ({' '.join(str(e).split())[:300]}), so the fix check is refused. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                     if ok:  # a clean merge with an extra edit does not qualify, and a merge git cannot read proves nothing, so it refuses too
                         merged, unread = merge_state(h, parents, tree)
                         ok = merged in ("clean", "conflicted")
+                        if merged == "conflicted":  # a conflicted merge takes a hand edit at its conflicted paths only
+                            try:
+                                ok = not edits_outside_conflict(h.cwd or ".", parents, tree)
+                            except (Stop, subprocess.TimeoutExpired, OSError) as e:
+                                print(f"merge: --fix-check: whether {a.head[:9]} edits a path outside git's conflict is unknown ({' '.join(str(e).split())[:300]}), so the fix check is refused. " + REVIEW_CITE, file=sys.stderr)
+                                return 2
                         if merged == "unknown":
                             print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix check is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
