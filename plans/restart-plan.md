@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 10:53 CST. The owner's list closed at 18:43 CST; R21 to R29 came after.
+the history. Last rewrite: 2026-11-11 10:55 CST. The owner's list closed at 18:43 CST; R21 to R30 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -151,6 +151,16 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
   the wrong session or role: one line saying whose job it is and why, then route it. The word fits two
   terms: ask before acting. Home: CLAUDE.md speak-one-name-per-thing and the output style's
   style-wrong-tier-one-line, rewritten in place.
+- **R30. A consultant role, started by the owner.** Owner 10:54 CST Nov 11: "im able to spawn a
+  retrospective or a consultant, basically someone like you who's literally a course correction vehicle
+  for me to chat with from a more outsider lens -- or realistically should i be working wiht a
+  coordinator for this". Box answer before 10:58 CST: "Add consultant role". A sixth session role, the
+  consultant. The owner starts it on demand in claude-settings; no coordinator starts it. It talks with
+  the owner, runs read-only audits, keeps one plan file rewritten in place, and sends each ruling to
+  triage. A finding about another repo goes to that repo's triage. It builds, merges and decides
+  nothing; an arbiter decides, a consultant helps the owner decide. It ends when its plan lands. The
+  name "advisor" is not used, since the built-in advisor (`advisorModel`) has it. Home: decision
+  session-tiers and GLOSSARY.md.
 
 ### 3.1 Checks that can refuse a merge run in CI
 
