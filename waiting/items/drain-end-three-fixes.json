@@ -23,9 +23,11 @@
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "coordinator 12:52 CST Nov 11",
+  "replied": "2026-11-11T19:00:00Z",
+  "reply": "You answered in chat at 12:55 CST (relayed by the coordinator): \"yes land #2591 before archive\". #2591 lands before the archive; #2593 (the CI-done wake) and the mailbox fix carry over in the new sessions' handoffs if they have not landed. Home: restart plan 5dba413.",
   "repo": "shivinate7/claude-settings",
   "short": "Which of today's three fixes must land before the restart?",
-  "status": "open",
+  "status": "closed",
   "title": "Three fixes started today are not in the named queue. Must any besides #2591 land before the restart?",
   "why": "Waiting on all three delays the fresh start."
 }
