@@ -719,7 +719,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   Step child-repo-gap ("Check how far each child repo is from claude-settings main") has been todo since
   Oct 29 with no lane; R44 folds into it.
   Owner 14:03 CST: "audits feel more like one-timey than they are mechanical ... i'd allow for example
-  one quick scan of a part of q_max". Scan 14:05 CST (q_max 32d4373, CLAUDE.md and workflow pins): its
+  one quick scan of a part of q_max". Scan 14:04 CST (q_max 32d4373, CLAUDE.md and workflow pins): its
   CLAUDE.md cites the parent by rule id, as it should. All 9 claude-settings action pins sit at
   2ac382cc6 (Nov 8 20:50 CST), 2758 commits behind main, with 50 commits to actions/ since. Its records
   D-499 and D-833 make the pinned STE sentence-length lint its own law ("npm run lint runs the same
