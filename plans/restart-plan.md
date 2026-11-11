@@ -415,7 +415,7 @@ lanes read started with a bare "/effort medium" and the brief came later. Owner 
 a lane can be spawned without its brief first preprovided". A session whose installed hooks are older
 than main says so at its next turn and reinstalls; the fresh start clears it once.
 Owner 13:10 CST: "maybe we enforce cloud sessions to restart often mechanically based on certain
-conditions like certain items landing on main". Read 13:12 CST (decision idle-resume-compacts): the
+conditions like certain items landing on main". Read 13:11 CST (decision idle-resume-compacts): the
 cloud reruns the install at each worker restart, which follows an idle gap. A busy session never
 restarts, so only it goes stale. Proposed, waits for the owner's yes: when hooks or settings on main
 changed since the install, the session reinstalls at its next turn, in place, with no restart. It
@@ -584,7 +584,7 @@ it at each batch merge, a process already running, and writes one line per sessi
 branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer, no new process.
 
 Owner 13:10 CST Nov 11: "we need to figure out how to avoid container restarts for long running
-sessions (keep them warm)". Read 13:12 CST (chatter audit; decision idle-resume-compacts): the cost is
+sessions (keep them warm)". Read 13:11 CST (chatter audit; decision idle-resume-compacts): the cost is
 not the restart, which adds about 4,000 tokens. It is the prompt cache, which expires after an hour
 idle. The next wake then rewrites the whole context, about 200K tokens for a lane. Proposed, waits for
 the owner's yes: no keep-warm pings, since they are timers (rule outcomes-mechanize-rules) and cost a
