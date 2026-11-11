@@ -13,8 +13,8 @@ The modes, as the builder implements them. This file is their interface.
   as `--replay` does. It prints the replay row, then `catch share: K/R (P%)` (K killed over R ran; a crash is not a
   kill), then one `untested: path:line` line per line whose mutant survived or was not run. It exits 1 when mutants are
   made and none ran, and prints one `no mutant ran: ...` line that names the count not run. It also exits 1, with one
-  `no mutant ran: <cause>` line, when the run stopped before any mutant ran: the checkout refused, the install refused, or
-  the replay raised. It exits 0 otherwise, whatever the share. `--budget S` is a wall deadline counted from the start of the run: a mutant not started by then is
+  `no mutant ran: <cause>` line, when no mutant ran because the change did not parse, the diff could not be read, the
+  checkout or the install was refused, or the replay raised. It exits 0 otherwise, whatever the share. `--budget S` is a wall deadline counted from the start of the run: a mutant not started by then is
   not_run, and a suite still running then is killed, its mutant not_run too. `--log PATH` writes one JSON file with the
   keys base, head, profile, made, killed, crashed, survived, not_run and untested, and writes nothing else into REPO.
   With no changed mutant the share reads `0/0` with no percentage, and the run exits 0.
@@ -54,7 +54,9 @@ that module's own run global. The sweep of old run folders is proven once, in ho
 Process checks use os.killpg and so run on POSIX only, as the CI step does (ubuntu-latest).
 """
 import ast
+import contextlib
 import fnmatch
+import io
 import json
 import os
 import re
@@ -62,9 +64,11 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 import uuid
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -294,6 +298,15 @@ def empty_repo():
     put(repo, {"calc.py": CALC_BASE, "test_calc.py": SUITE})
     commit(repo, "Base: add and mul")
     topic(repo, "feat", {"calc.py": CALC_BASE + "# sub is next\n"}, "Note the next change")
+    return repo
+
+
+def unparsable_repo():
+    """feat changes calc.py to a module that does not parse. No mutant can be made of it: its parse error is the only row."""
+    repo = new_repo()
+    put(repo, {"calc.py": CALC_BASE, "test_calc.py": SUITE})
+    commit(repo, "Base: add and mul")
+    topic(repo, "feat", {"calc.py": CALC_BASE + "\n\ndef broken(:\n    pass\n"}, "Add a def that does not parse")
     return repo
 
 
@@ -605,6 +618,24 @@ class ChangedTests(unittest.TestCase):
         self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
         code, out, err = changed_run(repo, dict(CHANGED, classify="no-such-classifier"))
         assert_no_mutant_ran(self, code, out, err, cause="the replay raised KeyError")
+
+    def test_a_change_that_does_not_parse_exits_1_and_names_the_parse_error(self):
+        repo = unparsable_repo()
+        code, out, err = changed_run(repo, CHANGED)
+        assert_no_mutant_ran(self, code, out, err, cause="parse error")
+
+    def test_a_diff_that_cannot_be_read_exits_1_and_names_the_diff_cause(self):
+        repo = partial_repo()
+        facts = partial_facts(repo)
+        self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
+        # A CLI run cannot make `git diff` fail on a valid pair of commits, so the one diff reader is patched in process.
+        # The temp folder of the run is this case's own, so the deps folder changed_main makes stays in the run folder.
+        out = io.StringIO()
+        with mock.patch.object(mutate_shared, "_changed_files", side_effect=ValueError("fixture: git diff failed")), \
+                mock.patch.object(tempfile, "tempdir", fresh()), contextlib.redirect_stdout(out):
+            code = mutate_guard.changed_main(["--changed", repo, "--profile-file", profile_file(CHANGED),
+                                              "--base", "main", "--head", "feat"])
+        assert_no_mutant_ran(self, code, out.getvalue(), "", cause="cannot read the diff")
 
     def test_limit_caps_the_mutants_made_and_jobs_and_timeout_are_accepted(self):
         repo = partial_repo()
