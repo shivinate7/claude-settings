@@ -41,8 +41,8 @@ action actions/mutation-report.
 `--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
 [--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
 lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 1 when mutants were made and none ran,
-or when none ran because the run stopped first (the checkout or the install refused, or the replay raised). A
-`no mutant ran: ...` line says so, with the cause. Exit 0 otherwise, whatever the share.
+or when none ran because the run stopped first (the diff could not be read, a file did not parse, the checkout or the
+install was refused, or the replay raised). A `no mutant ran: ...` line says so, with the cause. Exit 0 otherwise, whatever the share.
 `--known-defects FILE --repo REPO (--profile NAME | --profile-file JSON) [--base REF] [--suite-timeout S] [--log PATH]`
 plants each listed defect in a checkout of HEAD, installs the profile's packages into it as `--changed` does, and runs its
 catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
@@ -3516,8 +3516,8 @@ def load_profile(args) -> dict:
 def changed_main(argv) -> int:
     """The CI report of a change: mutate the product lines it adds past the merge base, run the suites the profile's `select`
     lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 1 when mutants were made
-    and none ran, or when none ran because the run stopped first (`no_run_cause` in `replay_pr`'s row), after a `no mutant ran: ...`
-    line that names the cause. Exit 0 otherwise, whatever the share: a low share is a report, never a
+    and none ran, or when none ran because the run stopped first (`no_run_cause` in `replay_pr`'s row), after a
+    `no mutant ran: ...` line that names the cause. Exit 0 otherwise, whatever the share: a low share is a report, never a
     failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
     import argparse
     import json
