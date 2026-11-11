@@ -109,7 +109,9 @@ parent, or miss a message while busy.
      that reads the answer, so an item left with the old `owner` gets no reader. If it takes over
      the writer role, it also sets `writer` in `meta/page` to its own session title, as the roster
      gives it. It reads `meta/page` first, then updates `writer` pinned with `if_version`
-     (`ArtifactData`). For each ask with no `reply` whose `owner` is the old writer, it reads the
+     (`ArtifactData`). In a repo whose extras file holds the `page-writer` key, it also updates that
+     key to its own session id. The key sits in a committed file, so the update goes in a PR. For each
+     ask with no `reply` whose `owner` is the old writer, it reads the
      ask, then updates `owner` to itself, pinned with `if_version`. Only the incoming writer writes
      `writer`, since the outgoing one is archived at step 4.
 

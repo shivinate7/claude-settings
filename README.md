@@ -164,6 +164,11 @@ merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         It finds no rename's previous name, no directory and no backslash path. A reason that spans lines may leave `  (note` in the case.
                         Cost: API reads only. The pull list, one call per page of 100. One files read (its pages) per open PR.
                         For --run, the jobs read, one call per page of 100, and one log read per failed job but the rollup.
+merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
+                        one line per PR before it goes to a batch: `#N PASS`, or `#N FAIL: reasons`. Checks: open, review record done at the
+                        live head and unedited, lint verdict given for the live head (SHA a full lowercase 40-hex; a PASS on UNKNOWN-AT-CAP
+                        reads `#N PASS (lint unknown at cap)`) and not FAIL, clean merge with the base, and a stacked base's PR in the call
+                        and passing. A check that cannot run is a FAIL, so a missing line is never a pass. Exit 0 only when all PASS.
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
