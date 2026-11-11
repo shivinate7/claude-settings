@@ -74,6 +74,8 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
 13. A body with a byte that is not UTF-8, piped on stdin, reaches the git call as a lone surrogate. The
    base commit's UTF-8 encode raises on it, so LoneSurrogateBody is red there. A fix must cover both
    encodes, the one in git() and the one in blob_sha(), or the send still raises.
+14. A git call that reports "Ignoring path" on stderr and exits 0 is an error. The stub kind warn keeps every
+   index entry and writes the warning to stderr. IgnoredPathStderr pins that the send then says not sent.
 
 Every machine gets a git identity, as a configured Mac does. A machine with no identity is not covered.
 """
@@ -168,6 +170,14 @@ if action and action["kind"] == "drop-removal" and "--index-info" in args:
     mark()
     kept = [line for line in sys.stdin.buffer.read().splitlines(True) if not line.startswith(b"0 ")]
     done = subprocess.run([REAL] + args, input=b"".join(kept))
+    sys.exit(done.returncode)
+if action and action["kind"] == "warn" and "--index-info" in args:
+    # The real git runs on the same stdin, so every entry lands. Its stderr gets the warning, and the exit code stays.
+    mark()
+    data = sys.stdin.buffer.read()
+    done = subprocess.run([REAL] + args, input=data, capture_output=True)
+    sys.stdout.buffer.write(done.stdout)
+    sys.stderr.buffer.write(done.stderr + action["stderr"].encode("utf-8"))
     sys.exit(done.returncode)
 if action and action["kind"] == "before" and not os.path.exists(action["once"]):
     open(action["once"], "w").close()
@@ -338,7 +348,7 @@ class Machine:
     def stub_actions(self, actions, log=None):
         """actions: {git subcommand: {"kind": "fail", "stderr": ...}
         | {"kind": "before", "once", "argv", "env", "record"}
-        | {"kind": "drop" | "crlf" | "drop-removal"} on update-index --index-info}.
+        | {"kind": "drop" | "crlf" | "drop-removal" | "warn"} on update-index --index-info}.
         log: a file that gets one line per git start (its subcommand and the two prompt variables).
         Each intercepting action writes self.stub_marker, which assert_stub_intercepted reads."""
         with open(self.stub_conf, "w", encoding="utf-8") as handle:
@@ -1243,6 +1253,29 @@ class LoneSurrogateBody(MailCase):
         replaced = body[len(self.PREFIX):-len(self.SUFFIX)]
         self.assertIn(replaced, (b"?", b"\xef\xbf\xbd"),
                       "the pushed body holds neither '?' nor U+FFFD where the byte was: %r" % replaced)
+
+
+class IgnoredPathStderr(MailCase):
+    """Git prints "Ignoring path" on stderr and still exits 0. The entries land in this stand-in, so only the stderr
+    shows the skip. A git call that reports an ignored path is an error, and the send must say not sent."""
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_send_whose_git_reports_an_ignored_path_is_not_sent(self):
+        store = self.store()
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        control = self.send(sender, "cloud/sess-b", "request", "control")
+        self.assertEqual(control.returncode, 0, "control: a healthy send exited %d: %s"
+                         % (control.returncode, combined(control)))
+        self.assertEqual(len(store.files("mail/cloud/sess-b/")), 1, "control: a healthy send did not land its message")
+        sender.stub_actions({"update-index": {"kind": "warn",
+                                              "stderr": "Ignoring path mail/cloud/sess-b/ignored.md\n"}})
+        landed_before = len(store.files("mail/cloud/sess-b/"))
+        sent = self.send(sender, "cloud/sess-b", "request", "warned")
+        self.assert_stub_intercepted(sender)
+        self.assertNotEqual(sent.returncode, 0, "git printed 'Ignoring path' and the send exited 0: %r" % combined(sent))
+        self.assertIn("not sent: ", sent.stderr, "a failed send printed no 'not sent:' line: %r" % sent.stderr)
+        self.assertEqual(len(store.files("mail/cloud/sess-b/")), landed_before,
+                         "the send landed a message after git printed 'Ignoring path'")
 
 
 if __name__ == "__main__":
