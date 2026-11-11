@@ -1,0 +1,8 @@
+{
+ "id": "merge-tree-check-tool",
+ "title": "One tool answers whether a head merges clean with main and another head",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Triage (2026-11-11 08:49 CST) checked #2378 and #1166 against main with `T=$(git merge-tree ... | head -1) && echo clean`, which reads head's exit code, so two conflicted merges read clean. Two builders then hit conflicts their briefs called clean. Harm: wasted lanes and wrong briefs. Fix: a `merge --merge-check <pr> [--with <sha>]` read mode (or a bin script) that prints clean or the conflicted files from merge-tree's own exit, and hand-over briefs cite it.",
+ "source": "triage mistake, 2026-11-11 08:51 CST"
+}
