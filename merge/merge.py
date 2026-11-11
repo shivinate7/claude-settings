@@ -22,13 +22,13 @@
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
                           PR's issue comments since the PR opened; or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
-                          parent is HEAD and whose second parent is on the base, with no edit beyond git's own merge (a conflict resolved by hand counts as git's).
+                          parent is HEAD and whose second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
                           MODEL must be sonnet on every record (exit 2 otherwise).
-                          A review record stays done when the live head differs from its Head only by clean merges of main and empty commits: each
+                          A review log stays done when the live head differs from its Head only by clean merges of main and empty commits: each
                           commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them,
                           or a commit with one parent and that parent's tree. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
-                          the record stale and the line says unknown; the fix check then refuses. Any other difference keeps today's rules.
+                          the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --reviewed --root DIR [--root DIR ...]
@@ -3826,7 +3826,7 @@ def review_state(rec, head):
     note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
     fix = rec.get("fix")
     if fix and fix[3] != "PASS":
-        return "open", "the fix check failed, so the fix needs a new lane: one fresh full review at the live head, which a clean merge of main does not replace"
+        return "open", "the fix verifier failed, so the fix needs a new lane: one fresh full review at the live head, which a clean merge of main does not replace"
     if fix and fix[2].lower() != REVIEW_FIX_GUARD_MODEL:
         return "open", f"the fix check must run on {REVIEW_FIX_GUARD_MODEL}, not {fix[2]}"
     if fix and not top:
@@ -3892,7 +3892,7 @@ def edits_outside_conflict(root, parents, tree):
 
 def clean_merges_after(h, head, live, base=None):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main or an empty commit. A clean merge of main has two
-    parents, a second parent main holds (Host.holds_head, main being `base`, the pull request's own base, else the host's), and git's clean merge of its parents as its tree
+    parents, a second parent main holds (Host.holds_head, main being `base`, else the host's base), and git's clean merge of its parents as its tree
     (merge_state). An empty commit has one parent and that parent's tree. The walk follows first parents from `live` and must reach `head` within
     REVIEW_MERGE_WALK commits. A commit that changes the tree, a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
@@ -3928,17 +3928,17 @@ def clean_merges_after(h, head, live, base=None):
 
 REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main and empty commits follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
-def live_review_state(h, rec, live, base=None):
+def live_review_state(h, rec, live, main):
     """-> (state, why) of the parsed record `rec` for the live head `live`: the one home of that read, for `merge --reviewed` (reviewed_read) and the
     lane Stop hook (lint/report_guard.py). It is review_state, except that a stale record whose live head is its Head plus clean merges of main or empty commits
     (clean_merges_after) reads as it does at its Head (decision pr-review-record). A clean-merge read that cannot run keeps the state stale, and
-    the why says REVIEW_SURVIVAL_UNKNOWN and why. Cost: clean_merges_after's, only for a stale record. `base` is the pull request's own base, passed to the walk, so a host that read another pull request last judges this one the same.
-    The host's base is the default."""
+    the why says REVIEW_SURVIVAL_UNKNOWN and why. Cost: clean_merges_after's, only for a stale record. `main` is the repo's default branch, never the pull request's own base
+    (a merge of a stacked pull request's base is no merge of main): the caller names it, because Host.pr rewrites the host's base on every read. The record survives a clean merge of main only (owner, 2026-11-10 14:07 CST; triage, 2026-11-11 09:35 CST)."""
     state, why = review_state(rec, live)
     if state != "stale":
         return state, why
     try:
-        if not clean_merges_after(h, rec["head"], live, base):
+        if not clean_merges_after(h, rec["head"], live, main):
             return state, why
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})"
@@ -3974,7 +3974,9 @@ def reviewed_read(h):
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
-    names `merge --lane-lint <n>`; no extra call."""
+    names `merge --lane-lint <n>`; no extra call. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
+    request's own base."""
+    main = h.base
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."], [], pulls
@@ -3988,7 +3990,7 @@ def reviewed_read(h):
             continue
         rec = parse_review(bodies[-1])
         rec = rec if rec and rec["n"] == n else None
-        state, why = live_review_state(h, rec, sha, d["base"]["ref"])
+        state, why = live_review_state(h, rec, sha, main)
         if state == "done":
             lint = lint_state(lints.get(n, []), sha)
             if lint == "pass":
@@ -4241,7 +4243,8 @@ def release_check(root, h, numbers, lints, root_why=None):
             else:
                 body, created, updated = rows[-1]  # only the newest record counts
                 rec = parse_review(body)
-                state, why = live_review_state(h, rec if rec and rec["n"] == n else None, i["head"], i["base"])
+                rec = rec if rec and rec["n"] == n else None
+                state, why = live_review_state(h, rec, i["head"], default) if default else review_state(rec, i["head"])  # no default branch read: no walk, the why of that read follows below
                 if state != "done":
                     out.append(why)
                 if created is None or updated is None:
@@ -4440,7 +4443,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
-    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the fix check line, after the rounds; HEAD is the reviewed head the fix diff starts from; a fix after a merge of main also qualifies: the newest record reads done with a PASS Fix check, and the head is a merge of the base into that Head with no edit beyond git's own merge")
+    p.add_argument("--fix-check", type=fix_check_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; a fix after a merge of main also qualifies: the newest review log reads done with a PASS Fix check line, and the head is a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
@@ -4598,14 +4601,14 @@ def main(argv, host=None, lock=None, hosts=None):
                     ok = False
                 elif not last["fix"]:
                     ok = True
-                else:  # a fix never follows a fix, but a fix after a merge of main is allowed: the earlier record reads done on its own head (a sonnet PASS fix check, no hold), and the head is a merge of the base into that Head
-                    parents, tree = h.commit_read(a.head) if review_state(last, last["head"])[0] == "done" else ([], None)  # after a FAIL fix check, or any record that is not done, no merge qualifies
+                else:  # a fix never follows a fix, but a fix after a merge of main is allowed: the earlier record reads done on its own head (a sonnet PASS Fix check line, no hold), and the head is a merge of the base into that Head
+                    parents, tree = h.commit_read(a.head) if review_state(last, last["head"])[0] == "done" else ([], None)  # after a FAIL Fix check line, or any record that is not done, no merge qualifies
                     ok = len(parents) == 2 and h.holds_head(parents[1], info["base"])
                     if ok and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
                         try:
                             ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"])
                         except (Stop, subprocess.TimeoutExpired, OSError) as e:
-                            print(f"merge: --fix-check: whether only clean merges of main sit between {a.fix_check[0][:9]} and {a.head[:9]} is unknown ({' '.join(str(e).split())[:300]}), so the fix check is refused. " + REVIEW_CITE, file=sys.stderr)
+                            print(f"merge: --fix-check: whether only clean merges of main sit between {a.fix_check[0][:9]} and {a.head[:9]} is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                     if ok:  # a clean merge with an extra edit does not qualify, and a merge git cannot read proves nothing, so it refuses too
                         merged, unread = merge_state(h, parents, tree)
@@ -4614,13 +4617,13 @@ def main(argv, host=None, lock=None, hosts=None):
                             try:
                                 ok = not edits_outside_conflict(h.cwd or ".", parents, tree)
                             except (Stop, subprocess.TimeoutExpired, OSError) as e:
-                                print(f"merge: --fix-check: whether {a.head[:9]} edits a path outside git's conflict is unknown ({' '.join(str(e).split())[:300]}), so the fix check is refused. " + REVIEW_CITE, file=sys.stderr)
+                                print(f"merge: --fix-check: whether {a.head[:9]} edits a path outside git's conflict is unknown ({' '.join(str(e).split())[:300]}), so the fix verifier is refused. " + REVIEW_CITE, file=sys.stderr)
                                 return 2
                         if merged == "unknown":
-                            print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix check is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
+                            print(f"merge: --fix-check: whether {a.head[:9]} is git's own merge of the base is unknown ({unread}), so the fix verifier is refused. Fetch both parents of that head into this checkout, then run again. " + REVIEW_CITE, file=sys.stderr)
                             return 2
                 if not ok:
-                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. One exception, a fix after a merge of main: the record reads done with a PASS Fix check, and the pull request head is a merge of the base into that Head with no edit beyond git's merge, a conflict resolution included. A clean merge of main needs no fix check. " + REVIEW_CITE, file=sys.stderr)
+                    print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line. One exception, a fix after a merge of main: the log reads done with a PASS Fix check line, and the pull request head is a merge of the base into that Head with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)

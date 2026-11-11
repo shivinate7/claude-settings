@@ -2711,7 +2711,8 @@ def _live_state(merge_mod, rec, live, cwd, end):
     a record this check cannot prove done still blocks, as a stale record did before the clean-merge read."""
     try:
         with merge_mod.shared_deadline(_time_left(end)):
-            return merge_mod.live_review_state(merge_mod.Host(cwd=cwd or None), rec, live)
+            host = merge_mod.Host(cwd=cwd or None)
+            return merge_mod.live_review_state(host, rec, live, host.base)  # a fresh Host: its base is main, as `merge --reviewed` reads it
     except Exception as err:  # never a pass: the record is not proven done
         return "stale", "%s: %s" % (getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", "the clean-merge read is unknown"), type(err).__name__)
 
