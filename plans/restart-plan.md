@@ -730,6 +730,12 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   load brakes for local right" and "r42 part 2: i'm pretty open to this radical approach -- A". Part 1
   stands on his 13:39 "A seems fine". Shared limits remain: the account's rate limit, CI runners, and
   agents inside one cloud container. The Plan agent's design for part 2 comes back to him.
+  Coordinator 13:51 CST: 70 ruled steps have no lane; the freeze (owner 09:18 CST Nov 10) allows fixes
+  of items on main. Owner 13:50 CST: "remember my goal was to just have main in a state where it's
+  stable enough to take on the full load of 70+ asks at once like my priority is max outcome speed".
+  Owner 13:51 CST: "a". The freeze narrows: until the fan-out, only fixes that main's stability needs
+  start (#2591, the mailbox fix, and failures in main's first finished run). Every other ruled step,
+  fixes included, starts after the guard test file split, all at once.
 
 - **R41. Mods, skills and the output style: keep all, fix seven defects.** Owner 13:36 CST Nov 11:
   "r41 yes on all". Owner 13:25 CST Nov 11: "tell me how my mods and skills work ... are they even good to keep
