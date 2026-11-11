@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R39 came after.
+the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R40 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -700,6 +700,12 @@ the owner's yes:
      or fix. It flags, like its other items, and never refuses.
   Home: decision question-form; decision reply-judge-samples-never-refuses; rule
   outcomes-stale-decision-protocol.
+
+- **R40. Compaction trigger tested higher.** Read 13:05 CST Nov 11 (decision precompact-handoff, item 2):
+  the cloud sets CLAUDE_AUTOCOMPACT_PCT_OVERRIDE per session, 80 here, so compaction starts at 384K of a
+  480K window; one session ran at 92. Owner 13:21 CST: "compaction: A". After the fresh start, a lane
+  sets 92 in the settings env and reads one new session's trigger with get_session. If our value wins,
+  it holds everywhere; if not, the record says so. Home: decision precompact-handoff.
 
 - **R37. No fixed word cap, and no "STE" name.** Owner 12:54 CST Nov 11: "i thought i eliminated all
   STE requirements from everywhere in the repo weeks ago (along with hard limits like 30 vs 31 words
