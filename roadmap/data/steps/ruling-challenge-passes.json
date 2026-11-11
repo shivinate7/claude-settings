@@ -1,0 +1,14 @@
+{
+  "id": "ruling-challenge-passes",
+  "title": "The past-ruling check passes a measured challenge, refuses a bare re-ask, and the reply judge flags deference",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "The check that refuses a repeat of a settled question also refused measured challenges, so sessions deferred to rulings they could fix.",
+  "note": "R39 (owner 13:10 CST Nov 11, relayed by the retrospective, page item 511): \"yes on r39\". Items, plan restart-plan a7fb06a50 R39: 1. hooks/call_judge.py item 8 passes a challenge that carries the record and its sentence, a measure, the outcome the ruling protected and what protects it now, and a fix; it refuses a re-ask with no new fact. 2. Its refusal says how to challenge. 3. The Problem line names the act the yes gates. 4. A red case proves both paths. 5. The reply judge gains a flag-only item for a reply that names a flaw in a ruling but defers with no measure or fix. Owner 13:01: \"my rules are to be challenged/questioned and never read as absolutes given im imperfect\". Homes: decision question-form; decision reply-judge-samples-never-refuses; rule outcomes-stale-decision-protocol.",
+  "source": "owner 2026-11-11 13:01-13:10 CST, relayed by the retrospective session",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:15:00-06:00",
+  "blockedBy": []
+}
