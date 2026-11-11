@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-11T19:49:00Z",
+  "context": "Goal: every step you ruled on gets worked, not left as a line in a report (your 13:39 CST ruling).\nProblem (goal): about 70 steps you ruled on have no one working them, but your Nov 10 hold still allows only fixes to things already on main, and the new work waits until the merges in flight finish.\nBased on (read): the roadmap at 1df0030a9 holds about 70 unblocked steps with your rulings and no worker.\nBased on (ruling): your hold of 09:18 CST Nov 10 (no new work except fixes to things on main), and your Nov 10 ruling that new work starts after the merges in flight finish.\nDeparts from: main, where ruled steps wait as report lines until new work opens \u2014 the coordinator starts them itself.\nMeanwhile: triage sorts the 70 into fixes and new work; the coordinator starts the fixes as soon as the list is ready, whichever option you pick.",
+  "home": "roadmap step ruled-step-coordinator-queue (a ruled step with no worker is the coordinator's to start)",
+  "id": "ruled-steps-start-when",
+  "kind": "decision",
+  "n": 512,
+  "options": [
+    {
+      "gain": "Your rulings start being worked today, and the merges in flight are not slowed.",
+      "how": "The coordinator starts each fix to something on main now, one session per step, and starts the rest the moment the merges in flight finish.",
+      "key": "a",
+      "label": "Fixes now, the rest after the merges finish (Recommended)",
+      "lose": "New-feature steps wait until the three batches in flight land."
+    },
+    {
+      "gain": "All the work starts today.",
+      "how": "Your Nov 10 hold is lifted and the coordinator starts all of them.",
+      "key": "b",
+      "label": "Lift the hold, start all 70 now",
+      "lose": "About 70 sessions start while the merges finish, and they report to a coordinator you plan to retire."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 13:50 CST Nov 11",
+  "repo": "shivinate7/claude-settings",
+  "short": "Start ruled fixes now, the rest after the merges?",
+  "status": "open",
+  "title": "Should the coordinator start ruled fixes to things on main now, and the other ruled steps once the merges in flight finish?",
+  "why": "About 70 steps you ruled on have no one working them."
+}
