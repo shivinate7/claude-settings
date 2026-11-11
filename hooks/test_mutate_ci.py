@@ -11,11 +11,13 @@ The modes, as the builder implements them. This file is their interface.
   merge-base(base, head) and head, with the engines and `changed_lines` of `--replay`. A profile with `select`
   runs every suite that `select` lists for a file, changed or not. Without `select`, only the changed suites run,
   as `--replay` does. It prints the replay row, then `catch share: K/R (P%)` (K killed over R ran; a crash is not a
-  kill), then one `untested: path:line` line per line whose mutant survived or was not run. It exits 0 whatever the
-  share. `--budget S` is a wall deadline counted from the start of the run: a mutant not started by then is not_run, and
-  a suite still running then is killed, its mutant not_run too. `--log PATH` writes one JSON file with the keys base,
-  head, profile, made, killed, crashed, survived, not_run and untested, and writes nothing else into REPO. With no
-  changed mutant the share reads `0/0` with no percentage.
+  kill), then one `untested: path:line` line per line whose mutant survived or was not run. It exits 1 when mutants are
+  made and none ran, and prints one `no mutant ran: ...` line that names the count not run. It also exits 1, with one
+  `no mutant ran: <cause>` line, when no mutant ran because the change did not parse, the diff could not be read, the
+  checkout or the install was refused, or the replay raised. It exits 0 otherwise, whatever the share. `--budget S` is a wall deadline counted from the start of the run: a mutant not started by then is
+  not_run, and a suite still running then is killed, its mutant not_run too. `--log PATH` writes one JSON file with the
+  keys base, head, profile, made, killed, crashed, survived, not_run and untested, and writes nothing else into REPO.
+  With no changed mutant the share reads `0/0` with no percentage, and the run exits 0.
 - `--known-defects FILE --repo REPO (--profile NAME | --profile-file JSON) [--base REF] [--suite-timeout S] [--log PATH]`. FILE
   is a JSON list of planted defects. The profile is required, as for `--changed`: its install runs and its folder is linked
   into the checkout. A missing profile exits 2. Each defect prints one line, `CAUGHT|MISS|UNKNOWN id: name [reason]`. It exits 1 when any defect is MISS or UNKNOWN, else 0. A
@@ -52,7 +54,9 @@ that module's own run global. The sweep of old run folders is proven once, in ho
 Process checks use os.killpg and so run on POSIX only, as the CI step does (ubuntu-latest).
 """
 import ast
+import contextlib
 import fnmatch
+import io
 import json
 import os
 import re
@@ -60,8 +64,11 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 import uuid
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -216,10 +223,13 @@ LOCK_TEXT = "kb-oracle==1.0\n"
 # ---------------------------------------------------------------------------------------------------
 # Fixture repositories. Each one is a base commit on main, and a change cut from it on branch feat.
 
-def partial_repo():
-    """feat adds sub and div. Its suite gains a check for sub only, so sub's mutants die and div's survive."""
+def partial_repo(extra=None):
+    """feat adds sub and div. Its suite gains a check for sub only, so sub's mutants die and div's survive. `extra`
+    ({path: text}) joins the base commit, for a case that needs a file beside calc.py."""
     repo = new_repo()
-    put(repo, {"calc.py": CALC_BASE, "test_calc.py": SUITE})
+    files = {"calc.py": CALC_BASE, "test_calc.py": SUITE}
+    files.update(extra or {})
+    put(repo, files)
     commit(repo, "Base: add and mul")
     topic(repo, "feat", {"calc.py": CALC_SUB_DIV, "test_calc.py": SUITE_WITH_SUB}, "Add sub and div")
     return repo
@@ -288,6 +298,15 @@ def empty_repo():
     put(repo, {"calc.py": CALC_BASE, "test_calc.py": SUITE})
     commit(repo, "Base: add and mul")
     topic(repo, "feat", {"calc.py": CALC_BASE + "# sub is next\n"}, "Note the next change")
+    return repo
+
+
+def unparsable_repo():
+    """feat changes calc.py to a module that does not parse. No mutant can be made of it: its parse error is the only row."""
+    repo = new_repo()
+    put(repo, {"calc.py": CALC_BASE, "test_calc.py": SUITE})
+    commit(repo, "Base: add and mul")
+    topic(repo, "feat", {"calc.py": CALC_BASE + "\n\ndef broken(:\n    pass\n"}, "Add a def that does not parse")
     return repo
 
 
@@ -386,6 +405,7 @@ def defect(defect_id, old, new, suite, file="calc.py"):
 SHARE = re.compile(r"^catch share: (\d+)/(\d+)(.*)$", re.M)
 PERCENT = re.compile(r"\(([\d.]+)%\)")
 UNTESTED = re.compile(r"^untested: (\S+):(\d+)\s*$", re.M)
+NO_MUTANT = re.compile(r"^no mutant ran: .*$", re.M)
 VERDICT = re.compile(r"^(CAUGHT|MISS|UNKNOWN) (\S+?): ", re.M)
 SUITE_NAME = re.compile(r"[\w./-]*test_[\w./-]*\.py")
 
@@ -402,6 +422,20 @@ def share_of(out):
 
 def untested_of(out):
     return ["%s:%s" % pair for pair in UNTESTED.findall(out)]
+
+
+def assert_no_mutant_ran(case, code, out, err, not_run=None, cause=None):
+    """A run in which no mutant ran exits 1 and prints one `no mutant ran:` line. With `not_run`, the line names that count
+    (a run every mutant of which is not_run). With `cause`, the line names the cause (a run that stopped before any mutant
+    ran has no count). One shared step for every case of that run, so the rule is stated once."""
+    case.assertEqual(code, 1, "a run in which no mutant ran must exit 1, got exit %d\n%s%s" % (code, out, err))
+    lines = NO_MUTANT.findall(out)
+    case.assertEqual(len(lines), 1, "want one `no mutant ran:` line, got %d in:\n%s" % (len(lines), out))
+    if not_run is not None:
+        case.assertRegex(lines[0], r"(?<!\d)%d(?!\d)" % not_run,
+                         "the `no mutant ran:` line must name the %d mutants not run:\n%s" % (not_run, lines[0]))
+    if cause is not None:
+        case.assertIn(cause, lines[0], "the `no mutant ran:` line must name the cause %r:\n%s" % (cause, lines[0]))
 
 
 def verdicts_of(out):
@@ -522,7 +556,7 @@ class ChangedTests(unittest.TestCase):
         want = mutants_on(text, [line])
         folder, log = fixture_log()
         code, out, err = changed_run(repo, CHANGED, log=log)
-        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        assert_no_mutant_ran(self, code, out, err, want)
         data = read_log(log)
         self.assertEqual(data["not_run"], want, "no changed suite reaches calc.py, so every mutant is not_run")
         self.assertEqual(data["killed"], 0, "the unchanged suite must not kill without select")
@@ -542,6 +576,17 @@ class ChangedTests(unittest.TestCase):
         self.assertEqual(sorted(untested_of(out)), sorted(["calc.py:%d" % facts["sub"], "calc.py:%d" % facts["div"]]),
                          "each line with a surviving mutant is untested")
 
+    def test_one_mutant_that_ran_and_survived_still_exits_0(self):
+        repo = weak_repo()
+        folder, log = fixture_log()
+        code, out, err = changed_run(repo, SELECTED, log=log, limit=1)
+        data = read_log(log)
+        self.assertEqual((data["made"], data["not_run"], data["survived"]), (1, 0, 1),
+                         "the fixture: one mutant is made, it runs, and it survives")
+        self.assertEqual(code, 0, "one mutant ran, so no mutant ran is false, and a low share exits 0\n"
+                                  "exit %d\n%s%s" % (code, out, err))
+        self.assertIsNone(NO_MUTANT.search(out), "a run in which a mutant ran prints no `no mutant ran:` line:\n" + out)
+
     def test_a_change_with_no_mutant_reads_zero_of_zero_and_no_percentage(self):
         repo = empty_repo()
         folder, log = fixture_log()
@@ -552,6 +597,45 @@ class ChangedTests(unittest.TestCase):
         self.assertEqual((killed, ran), (0, 0), "no mutant ran: the share reads 0/0")
         self.assertIsNone(percent, "0/0 must not print a percentage: UNKNOWN never reads as a rate")
         self.assertEqual(untested_of(out), [], "no mutant, no untested line")
+
+    def test_a_refused_install_exits_1_and_names_the_deps_cause(self):
+        repo = partial_repo()
+        facts = partial_facts(repo)
+        self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
+        code, out, err = changed_run(repo, dict(CHANGED, install=[PY, "-c", "pass"]))
+        assert_no_mutant_ran(self, code, out, err, cause="no lockfile")
+
+    def test_a_checkout_refused_by_its_install_link_exits_1_and_names_the_checkout_cause(self):
+        repo = partial_repo(extra={"package-lock.json": LOCK_TEXT})
+        facts = partial_facts(repo)
+        self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
+        code, out, err = changed_run(repo, dict(CHANGED, install=[PY, "-c", "pass"], link="calc.py"))
+        assert_no_mutant_ran(self, code, out, err, cause="checkout failed")
+
+    def test_an_error_in_the_replay_exits_1_and_names_the_error(self):
+        repo = partial_repo()
+        facts = partial_facts(repo)
+        self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
+        code, out, err = changed_run(repo, dict(CHANGED, classify="no-such-classifier"))
+        assert_no_mutant_ran(self, code, out, err, cause="the replay raised KeyError")
+
+    def test_a_change_that_does_not_parse_exits_1_and_names_the_parse_error(self):
+        repo = unparsable_repo()
+        code, out, err = changed_run(repo, CHANGED)
+        assert_no_mutant_ran(self, code, out, err, cause="parse error")
+
+    def test_a_diff_that_cannot_be_read_exits_1_and_names_the_diff_cause(self):
+        repo = partial_repo()
+        facts = partial_facts(repo)
+        self.assertGreater(facts["sub_n"] + facts["div_n"], 0, "the fixture: the change adds lines with mutants")
+        # A CLI run cannot make `git diff` fail on a valid pair of commits, so the one diff reader is patched in process.
+        # The temp folder of the run is this case's own, so the deps folder changed_main makes stays in the run folder.
+        out = io.StringIO()
+        with mock.patch.object(mutate_shared, "_changed_files", side_effect=ValueError("fixture: git diff failed")), \
+                mock.patch.object(tempfile, "tempdir", fresh()), contextlib.redirect_stdout(out):
+            code = mutate_guard.changed_main(["--changed", repo, "--profile-file", profile_file(CHANGED),
+                                              "--base", "main", "--head", "feat"])
+        assert_no_mutant_ran(self, code, out.getvalue(), "", cause="cannot read the diff")
 
     def test_limit_caps_the_mutants_made_and_jobs_and_timeout_are_accepted(self):
         repo = partial_repo()
@@ -565,10 +649,10 @@ class ChangedTests(unittest.TestCase):
         repo = partial_repo()
         facts = partial_facts(repo)
         folder, log = fixture_log()
-        code, out, err = changed_run(repo, CHANGED, extra=["--budget", "0"], log=log)
-        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        data = read_log(log)
         total = facts["sub_n"] + facts["div_n"]
+        code, out, err = changed_run(repo, CHANGED, extra=["--budget", "0"], log=log)
+        assert_no_mutant_ran(self, code, out, err, total)
+        data = read_log(log)
         self.assertEqual((data["killed"], data["crashed"], data["survived"]), (0, 0, 0),
                          "a mutant the budget stopped is never a kill, a crash or a survivor")
         self.assertEqual(data["not_run"], total, "every mutant the budget stopped is not_run")
@@ -583,7 +667,7 @@ class ChangedTests(unittest.TestCase):
         folder, log = fixture_log()
         # The suite timeout is past the budget, so only the deadline kill can end a hung mutant before it; it keeps a red run short.
         code, out, err = changed_run(repo, CHANGED, extra=["--budget", "3", "--suite-timeout", "5"], log=log)
-        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
+        assert_no_mutant_ran(self, code, out, err, want)
         data = read_log(log)
         self.assertEqual(data["not_run"], want,
                          "a suite the budget passes while it runs is killed and counts not_run\n" + out)
@@ -1138,21 +1222,29 @@ class KnownDefectsBaseTests(unittest.TestCase):
         self.assertEqual(code, 1, "exit %d\n%s%s" % (code, out, err))
 
 
+ACTION = os.path.join(REPO, "actions", "mutation-report", "action.yml")
+
+
+def action_step(name):
+    """The text of the step named `name` in actions/mutation-report/action.yml, from its header to the next step: its env
+    and its run block. The one home of reading a step of that action."""
+    with open(ACTION, encoding="utf-8") as handle:
+        text = handle.read()
+    header = "    - name: %s\n" % name
+    start = text.find(header)
+    if start < 0:
+        raise AssertionError("%s has no step named %s" % (ACTION, name))
+    after = start + len(header)
+    ends = re.search(r"^    - name:", text[after:], re.M)
+    return text[start:] if ends is None else text[start:after + ends.start()]
+
+
 class ReplayBaseWiringTests(unittest.TestCase):
     """The replay step of actions/mutation-report/action.yml passes `--base "origin/$BASE_REF"` to --known-defects, and its
     own env sets BASE_REF. Only that step's block is read: the catch-share step sets BASE_REF and passes --base too."""
 
-    ACTION = os.path.join(REPO, "actions", "mutation-report", "action.yml")
-    HEADER = "    - name: Replay the known defects\n"
-
     def replay_step(self):
-        with open(self.ACTION, encoding="utf-8") as handle:
-            text = handle.read()
-        start = text.find(self.HEADER)
-        self.assertGreaterEqual(start, 0, "%s has no step named Replay the known defects" % self.ACTION)
-        after = start + len(self.HEADER)
-        ends = re.search(r"^    - name:", text[after:], re.M)
-        block = text[start:] if ends is None else text[start:after + ends.start()]
+        block = action_step("Replay the known defects")
         self.assertIn("      run: |\n", block, "the replay step has no run block:\n" + block)
         self.assertIn("--known-defects", block, "the replay step runs no --known-defects command:\n" + block)
         return block
@@ -1166,6 +1258,73 @@ class ReplayBaseWiringTests(unittest.TestCase):
                          "the replay command passes no --base origin/$BASE_REF:\n" + commands[0])
         self.assertRegex(env, r"(?m)^        BASE_REF: ",
                          "the replay step's env does not set BASE_REF:\n" + env)
+
+
+CATCH_STEP = "Report the catch share of the changed lines"
+NO_MUTANT_OUTPUT = "catch share: 0/0\nno mutant ran: 4 mutants not run, no changed suite reaches calc.py\n"
+# A tool that crashes on an uncaught error exits 1 too, and its output holds no `no mutant ran:` line.
+TRACEBACK_OUTPUT = ("Traceback (most recent call last):\n"
+                    "  File \"mutate_guard.py\", line 1, in <module>\n"
+                    "KeyError: 'no-such-classifier'\n")
+
+
+class ReportSummaryTests(unittest.TestCase):
+    """The catch-share step of actions/mutation-report/action.yml, run as the runner runs its script (bash with -e and
+    pipefail, from a file), with a fake tool in place of hooks/mutate_guard.py. The fake prints `output` and exits `code`.
+    The tool's exit code and its output are the contract the step reads: a run that exits 1 for no mutant ran prints its
+    `no mutant ran:` line, and the job summary must show that line. The step itself is a report, never a check, so it
+    exits 0 whatever the tool exits."""
+
+    def summary_for(self, code, output):
+        """The job summary the step writes when the tool prints `output` and exits `code`."""
+        folder = fresh()
+        repo = new_repo()
+        git(repo, "commit", "--allow-empty", "-q", "-m", "Base")
+        git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        tool = os.path.join(folder, "tool.py")
+        with open(tool, "w", encoding="utf-8") as handle:
+            handle.write("import sys\nsys.stdout.write(%r)\nsys.exit(%d)\n" % (output, code))
+        _env, marker, run = action_step(CATCH_STEP).partition("      run: |\n")
+        self.assertTrue(marker, "the catch-share step has no run block")
+        script = os.path.join(folder, "step.sh")
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write(textwrap.dedent(run))
+        summary = os.path.join(folder, "summary.md")
+        env = dict(os.environ, TOOL=tool, PROFILE="claude_settings", LIMIT="10", BUDGET="300", SUITE_TIMEOUT="180",
+                   BASE_REF="main", EVENT="pull_request", OUT=os.path.join(folder, "out"), GITHUB_STEP_SUMMARY=summary)
+        proc = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", script], cwd=repo, env=env,
+                              capture_output=True, text=True, encoding="utf-8")
+        text = ""
+        if os.path.isfile(summary):
+            with open(summary, encoding="utf-8") as handle:
+                text = handle.read()
+        self.assertIn("### Mutation catch share", text,
+                      "the step wrote no job summary; its output:\n" + proc.stdout + proc.stderr)
+        self.assertEqual(proc.returncode, 0,
+                         "the step exits 0 whatever the tool exits, got %d; its output:\n%s%s"
+                         % (proc.returncode, proc.stdout, proc.stderr))
+        return text
+
+    def test_a_run_that_exits_1_shows_its_no_mutant_ran_line_in_the_summary(self):
+        summary = self.summary_for(1, NO_MUTANT_OUTPUT)
+        self.assertRegex(summary, r"(?m)^no mutant ran: ",
+                         "the job summary has no `no mutant ran:` line for exit 1:\n" + summary)
+
+    def test_a_run_that_exits_1_does_not_read_as_the_report_did_not_run(self):
+        summary = self.summary_for(1, NO_MUTANT_OUTPUT)
+        self.assertNotIn("UNKNOWN: the report did not run", summary,
+                         "the job summary reads UNKNOWN for exit 1:\n" + summary)
+
+    def test_an_exit_1_with_no_no_mutant_ran_line_reads_unknown_in_the_summary(self):
+        self.assertIsNone(NO_MUTANT.search(TRACEBACK_OUTPUT), "the fixture: the output holds no `no mutant ran:` line")
+        summary = self.summary_for(1, TRACEBACK_OUTPUT)
+        self.assertRegex(summary, r"(?m)^UNKNOWN: .*exit 1",
+                         "an exit 1 with no `no mutant ran:` line must read UNKNOWN in the job summary:\n" + summary)
+
+    def test_a_run_that_exits_2_still_reads_as_the_report_did_not_run(self):
+        summary = self.summary_for(2, "ERROR no such profile\n")
+        self.assertIn("UNKNOWN: the report did not run (exit 2)", summary,
+                      "a bad argument (exit 2) must still read UNKNOWN in the job summary:\n" + summary)
 
 
 class RealListTests(unittest.TestCase):
@@ -1571,7 +1730,7 @@ WALK_SUITES = {
     "hooks/guard_stream.py": [],
     "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
     "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
-    "hooks/guard_merge.py": ["lint/test_hook_catalog.py"],
+    "hooks/guard_merge.py": ["lint/test_hook_catalog.py", "lint/test_settings_matcher.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
 }
@@ -1715,7 +1874,7 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertTrue(in_def, "the fixture: %s imports guard_merge inside a def" % suite)
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), sorted(["hooks/test_guard.py::merge", suite]),
+        self.assertEqual(out.splitlines(), sorted(["hooks/test_guard.py::merge", suite, "lint/test_settings_matcher.py"]),
                          "%s loads guard_merge only inside a def, so the import walk finds it through a function-bound "
                          "load, and the union keeps it beside the merge family line" % suite)
 

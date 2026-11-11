@@ -15,12 +15,12 @@ from guard_core import (
     strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_calls, push_destinations, push_refspecs, push_target,
+    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target,
 )
 
 
@@ -662,6 +662,10 @@ CONFLICT_MARKERS_CHAIN_REASON = (
     "the guard cannot read, so it cannot be checked for conflict markers before this push sends it. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
+OCTOPUS_PUSH_REASON = (
+    "Rule (Git, octopus-push; decision octopus-push-refused): this push would send {sha}, a merge commit of more than two parents. "
+    "Remedy: redo that merge as a chain of two-parent merges, then retry the push."
+)
 _READ_VERBS = ("status", "diff", "log", "show")
 _CONTINUE_VERBS = ("merge", "rebase", "cherry-pick")
 _CONFLICT_VERBS = ("merge", "pull", "rebase", "cherry-pick", "am")
@@ -764,32 +768,87 @@ def _checked_range(where, source, tracking, memo):
     return None, source
 
 
-def _push_hit(segment, stripped, cwd, args):
-    """Return the first file a `git push` would send with all three conflict markers, else ''. For each
-    ref the push names, the range is the merge base with the destination's remote-tracking tip
-    (`refs/remotes/<remote>/<dest>`, the named remote else origin), else the source's upstream, else the
-    default base, up to the local source ref. A source that does not resolve (a `$(...)`, a backtick, a
-    glob, a typo) is read as HEAD. The range comes from the arguments alone: in the usual case one
-    `git diff --check`, with no read of the top folder, the source or a base first."""
+def _push_refs(segment, stripped, cwd, args, skip=()):
+    """(directory, source, destination, remote-tracking ref, remote, memo) for each ref a `git push`
+    names, except a destination in `skip`. The tracking ref is `refs/remotes/<remote>/<dest>`, the named
+    remote else origin. A source that does not resolve (a `$(...)`, a backtick, a glob, a typo) is read as
+    HEAD. Everything comes from the arguments alone, with no git read beyond the destinations."""
     named = push_refspecs(args)
     where, overrides = push_target(segment, stripped, cwd)
     if named is None or not where or not os.path.isdir(where):
-        return ""
+        return
     specs = named[1] or [""]
     dests = push_destinations(args, where, overrides)
     memo = {}
+    remote = named[0] or "origin"
     for spec, dest in zip(specs, dests):
         source, colon, _target = spec.lstrip("+").partition(":")
-        if colon and not source:
+        if (colon and not source) or dest in skip:
             continue
-        source = _plain_source(source)
-        tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
+        tracking = ("refs/remotes/%s/%s" % (remote, dest)) if dest else ""
+        yield where, _plain_source(source), dest, tracking, remote, memo
+
+
+def _push_hit(segment, stripped, cwd, args):
+    """Return the first file a `git push` would send with all three conflict markers, else ''. For each
+    ref the push names, the range is the merge base with the destination's remote-tracking tip, else the
+    source's upstream, else the default base, up to the local source ref: in the usual case one
+    `git diff --check`, with no read of the top folder, the source or a base first."""
+    for where, source, _dest, tracking, _remote, memo in _push_refs(segment, stripped, cwd, args):
         done, source = _checked_range(where, source, tracking, memo)
         if done is None:
             continue
         name = _triplet_file(_kinds_of(done, where, source))
         if name:
             return name
+    return ""
+
+
+_NOT_A_PLAIN_NAME = re.compile(r"[/:\\.~]")
+
+
+def _remote_refs(where, remote):
+    """The `git rev-list` option that selects the remote-tracking refs of `remote`. A push may name a URL
+    or a path, whose refs sit under another name, so a word with a `/`, `:`, `\\`, `.` or `~` in it reads
+    `git config --get remote.<word>.url` once, and an unconfigured one selects every remote's refs. A
+    plain word is taken as a configured name, with no read."""
+    if _NOT_A_PLAIN_NAME.search(remote):
+        done = _git(where, "config", "--get", "remote." + remote + ".url")
+        if done is None or done.returncode != 0:
+            return "--remotes"
+    return "--remotes=" + remote
+
+
+def _octopus_hit(segment, stripped, cwd, args):
+    """Return the short sha of the first merge of more than two parents that a `git push` would send,
+    else ''. The range is what the push adds to the remote: the source ref, less every ref of the pushed
+    remote, so an octopus that a remote ref already holds (a merge of origin/main brings one in) is not
+    sent. A destination named like the default branch is skipped before any read: push-main asks about
+    that push, and a deny from here would win over the ask. One `git rev-list` for each ref, and one
+    `git config` more for a remote named by a URL or a path (`_remote_refs`)."""
+    for where, source, _dest, _tracking, remote, _memo in _push_refs(
+            segment, stripped, cwd, args, DEFAULT_BRANCH_FALLBACK):
+        done = _git(where, "rev-list", "--merges", "--parents", source, "--not", _remote_refs(where, remote), "--")
+        if done is None or done.returncode != 0:
+            continue
+        for line in done.stdout.splitlines():
+            fields = line.split()
+            if len(fields) > 3:
+                return fields[0][:12]
+    return ""
+
+
+def octopus_push_hit(stripped: str, cwd: str, read_verb) -> str:
+    """Return the short sha of the first merge of more than two parents that a `git push` in the command
+    would send, else ''. Each segment is judged from its own command word. A push whose destination is
+    unnamed reads its source's range all the same. `read_verb("push", args)` is true for a dry run, which
+    sends nothing."""
+    for segment in split_segments(stripped):
+        call = git_call_of(segment) if segment.strip() else None
+        if call is not None and call[0] == "push" and not read_verb("push", call[1]):
+            sha = _octopus_hit(segment, stripped, cwd, call[1])
+            if sha:
+                return sha
     return ""
 
 
@@ -1465,7 +1524,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
 
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
-LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief starts `Lane brief: <step>. Topic: <topic>.`
+LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
 TOPIC_TAG_PREFIX = TOPIC_TAG
 _MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
 _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
@@ -1492,21 +1551,80 @@ BRIEF_STEP_REASON = (
     "Work on another step goes to a new lane: start one with create_session. "
     "(decision session-tiers, a lane holds one topic)"
 )
+BRIEF_START_TOPIC_REASON = (
+    "this start's brief names a topic that the start's cs-topic tag does not hold. A lane holds one topic. Set the "  # glossary-ok: session-tiers is the decision's file name
+    "cs-topic tag to the brief's Topic, or put the lane's own topic on the brief's first line: "
+    "`Lane brief: <step>. Topic: <topic>.` (decision session-tiers, a lane holds one topic)"
+)
+BRIEF_START_STEP_REASON = (
+    "this start carries no cs-topic tag, and no cs-step tag for the brief's step, to judge its brief by. Add a "  # glossary-ok: session-tiers is the decision's file name
+    "cs-topic tag that matches the brief's Topic, or a cs-step tag for its step. "
+    "(decision session-tiers, a lane holds one topic)"
+)
+BRIEF_PLACE_REASON = (
+    "this start's prompt holds a `Lane brief:` line that is not the first line after the Grant line, so no reader "  # glossary-ok: session-tiers is the decision's file name
+    "judges its topic. Move that line up: the first line after the Grant line is "
+    "`Lane brief: <step>. Topic: <topic>.` (decision session-tiers, a lane holds one topic)"
+)
+
+BRIEF_GRANT_REASON = (
+    "this brief opens with a Grant line that is empty or a placeholder: it holds a `<`, or no letter or digit, "
+    "after `Grant:`. A template placeholder is no grant. Put the grant and its time after `Grant:`, as the "
+    "owner gave them. (decision agent-model-cap, the lane start)"
+)
+
+
+def topic_hit(first: str, tags, start: bool = False):
+    """(matched, reason) when the brief line `first` names a topic the lane holding `tags` does not hold, else None.
+    A lane with a cs-topic tag is judged by the brief's Topic, an older lane without one by the brief's step against
+    its cs-step tags. The one judge for a send_message brief and a create_session start prompt. `start` picks the
+    start's reasons, which name the missing tag, in place of the steer to start a new lane."""
+    found = _BRIEF_LINE.match(first)
+    step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
+    topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
+    topics = [t for t in topics if t]
+    if topics:
+        if (topic or "").lower() not in [t.lower() for t in topics]:
+            return "lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), \
+                BRIEF_START_TOPIC_REASON if start else BRIEF_TOPIC_REASON
+        return None
+    steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
+    if step not in steps:
+        return "lane brief for step " + str(step) + " to a lane with no topic tag", \
+            BRIEF_START_STEP_REASON if start else BRIEF_STEP_REASON
+    return None
 
 
 def brief_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
-    hold, else None. Only a message whose first non-blank line starts with LANE_BRIEF_MARKER is read; the
-    transcript is read for that message alone. A target whose newest record (get_session, or the
+    hold, else None. Only a message whose first non-blank line (after its Grant line, if any) starts with
+    LANE_BRIEF_MARKER is read; the transcript is read for that message alone. A Grant line before such a brief
+    must hold the owner's words (grant_line_holds_words). A target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
-    brief's Topic, an older lane without one by the brief's step against its cs-step tags. Fails closed: any
-    error in the reads is a refusal, because the guard-wide crash path fails open."""
-    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+    brief's Topic, an older lane without one by the brief's step against its cs-step tags (topic_hit). A
+    create_session call that tags a lane is judged the same way, by its prompt against its own tags, with no
+    transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    if not isinstance(tool_input, dict):
         return None
-    message = tool_input.get("message")
-    first = next((line.strip() for line in message.splitlines() if line.strip()), "") if isinstance(message, str) else ""
+    if tool == BRIEF_TOOL:
+        text = tool_input.get("message")
+    elif is_lane_create_session(tool, tool_input):
+        text = tool_input.get("prompt")
+    else:
+        return None
+    lines = [line.strip() for line in text.splitlines() if line.strip()] if isinstance(text, str) else []
+    grant = None
+    if lines and lines[0].startswith(LANE_GRANT_MARKER):  # a lane brief opens with the owner's Grant line; the marker line follows it
+        grant, lines = lines[0], lines[1:]
+    first = lines[0] if lines else ""
     if not _BRIEF_MARKER_LINE.match(first):
+        if tool != BRIEF_TOOL and any(_BRIEF_MARKER_LINE.match(line) for line in lines[1:]):  # a start's marker past its first line is read by no one
+            return "lane start whose brief marker is not on the first line after the Grant line", BRIEF_PLACE_REASON
         return None
+    if grant is not None and not grant_line_holds_words(grant):
+        return "lane brief under an empty or placeholder Grant line", BRIEF_GRANT_REASON
+    if tool != BRIEF_TOOL:
+        return topic_hit(first, lane_tags(tool_input), start=True)
     target = tool_input.get("session_id")
     try:  # cost: one transcript read per brief
         tags, tagged_after = _own_session_read(transcript, target, created=True) \
@@ -1519,18 +1637,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
         return None
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
-    found = _BRIEF_LINE.match(first)
-    step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
-    topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
-    topics = [t for t in topics if t]
-    if topics:
-        if (topic or "").lower() not in [t.lower() for t in topics]:
-            return "lane brief for topic " + str(topic) + " to a lane on " + ", ".join(topics), BRIEF_TOPIC_REASON
-        return None
-    steps = [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]
-    if step not in steps:
-        return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
-    return None
+    return topic_hit(first, tags)
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)

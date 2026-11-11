@@ -8,11 +8,12 @@ import re
 
 import guard_core
 from guard_core import (
-    HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, PowerShellScript, _expanded,
-    _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment,
-    heredoc_delimiter, is_powershell, nested_script, norm, resolve_command, segment_tokens, split_segments,
+    HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
+    PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
+    dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
+    segment_tokens, split_segments, strip_heredoc_bodies,
 )
-from guard_env import _quoted_words
+from guard_env import _quoted_words, _substitutions, script_spots
 
 
 # ------------------------------------------------------------------ the frozen paths
@@ -1126,7 +1127,7 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False, writes_first=False,
-                     command_position=False, predicate_command=False) -> str:
+                     command_position=False, predicate_command=False, script_data=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
@@ -1134,7 +1135,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     name as a third argument (`''` when none). `writes_first` asks `writes_to` before `predicate`, for a
     `predicate` that reads files: a word that is no write target never reaches it. The default keeps the cheap
     `predicate` first, because `writes_to` scans the whole text for each word and a command of thousands of
-    words scales with the square of its length."""
+    words scales with the square of its length. `script_data` reads the script of a `python -c` or a
+    `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -1149,6 +1151,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
+    inner = []
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
@@ -1159,6 +1162,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if sed:
             data = data | sed[0]   # a sed script is code: it names no path
             files = sed[1] if sed[2] else set()
+        found = None if closed or not script_data else _inline_script_at([_unquoted(word) for word in raw])
+        if found:
+            data.add(found[1])
+            # the shell still runs a substitution in a double-quoted script word
+            inner += [text for text, _ in _substitutions(raw[found[1]])[0][:-1]]
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -1217,6 +1225,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             elif (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(
                     word, text, *(_segment_command(script) if command_position else ()), written=written):
                 return word
+    for text in inner:
+        hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, writes_first=writes_first,
+                               command_position=command_position)
+        if hit:
+            return hit
     return ""
 
 
@@ -1253,6 +1266,32 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
     return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
 
 
+def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
+    """Return the path a whole shell command writes to that `predicate(path, cwd)` accepts, else ''.
+    A shell reads the command with its heredoc bodies dropped, except a body a shell runs
+    (`strip_heredoc_bodies`). The text a python, node, perl or ruby script holds is data: its heredoc body,
+    a file written and then run by one, and the script of a `python -c` or `node -e` are read only at their
+    shell spots (`script_spots`: os.system, subprocess, `%x`, a backtick in ruby). A crash of that reading
+    falls back to reading every body, which refuses more and never less."""
+    try:
+        hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True, per_body=True), cwd, predicate, holds,
+                           script_data=True)
+        texts = []
+        resolved = _resolve_vars(raw)   # each body and `-c` script reads `$F` as the command's own assignment
+        for lang, body, quote in interpreter_bodies(resolved):
+            texts += script_spots(body, lang)
+            if not quote:
+                texts += [text for text, _ in _substitutions(body, heredoc=True)[0][:-1]]   # bash runs these
+        if _has_inline_flag(raw):
+            for kind, script, *_ in _inline_scripts(resolved):
+                texts += script_spots(script, kind)
+        for text in texts:
+            hit = hit or _shell_write_hit(text, cwd, predicate, holds)
+        return hit
+    except Exception:
+        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds)
+
+
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
     """Return the project config path a shell command writes to, else ''."""
     return _shell_write_hit(cmd, cwd, is_project_config)
@@ -1267,13 +1306,18 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
 # A quoted `<<'EOF'` body is read too: the interpreter runs it. Python is read with `ast`, so a path
 # in a printed string or a comment is text and a path held in a variable is still found. A body
 # `ast` cannot parse is read by a literal path beside a write call. Node is read by pattern.
-_PY_HEADER = re.compile(r"(?<![\w.-])python[\d.]*(?:\.exe)?(?![\w.-])")
-_NODE_HEADER = re.compile(r"(?<![\w.-])(?:node|nodejs|bun|deno)(?:\.exe)?(?![\w.-])")
+_PY_HEADER = SCRIPT_HEADERS["py"]
+_NODE_HEADER = SCRIPT_HEADERS["js"]
 _PY_COMMAND = re.compile(r"^python[\d.]*(?:\.exe)?$")
 _NODE_COMMAND = re.compile(r"^(?:node|nodejs|bun|deno)(?:\.exe)?$")
 _PY_C_FLAG = re.compile(r"^-[A-Za-z]*c$")
 _NODE_EVAL_FLAG = re.compile(r"^(?:-[ep]{1,2}|--eval|--print)$")
 _INLINE_FLAG_WORDS = ("-c", "-e", "-p", "--eval", "--print")
+_INLINE_BUNDLE = re.compile(r"(?<![\w-])-[A-Za-z]+[cep](?![\w-])")   # a flag bundle that ends in one: `-Bc`
+
+
+def _has_inline_flag(text: str) -> bool:
+    return any(flag in text for flag in _INLINE_FLAG_WORDS) or bool(_INLINE_BUNDLE.search(text))
 _PATH_CTORS = ("Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath")
 _PATH_PASS = ("resolve", "expanduser", "absolute")
 _COPY_NAMES = ("copy", "copy2", "copyfile", "copytree", "move")
@@ -1519,6 +1563,113 @@ def _py_hit(body: str, cwd: str, predicate, script: str = "", cut: bool = False)
     return ""
 
 
+# A python script acts on files and processes only through the modules in `_PY_ACTING`. `py_spots` reads it with
+# `ast`: each name an import binds to one of them must be the callee of a shell call of os or subprocess with
+# literal arguments (an alias resolves: `import subprocess as sp`, `from os import system`), or a name that acts
+# on nothing (`_py_inert`). Any other use (shutil.copy, os.chmod, a call held in a variable) cannot be told, so
+# the script reads whole, as a shell reads it. A comment or a plain string is text.
+_PY_ACTING = ("os", "subprocess", "shutil", "pty", "asyncio", "posix", "nt", "sys", "importlib", "ctypes",
+              "multiprocessing", "pathlib", "builtins", "runpy", "_posixsubprocess")
+_OS_SPOT = re.compile(r"system|popen|startfile|exec\w*|spawn\w*|posix_spawn\w*")
+_SUBPROCESS_SPOTS = ("run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput")
+_PY_INERT = ("subprocess.PIPE", "subprocess.DEVNULL", "subprocess.STDOUT")
+_PY_DYNAMIC = ("eval", "exec", "compile", "__import__", "__builtins__", "import_module", "globals", "locals",
+               "vars")
+# The keyword arguments of a shell call that set what runs: a variable there cannot be told.
+_PY_SPOT_KEYWORDS = ("args", "executable")
+
+
+def _py_spot_name(name: str) -> str:
+    """The dotted `name` when that call hands its text to a shell (`os.system`, `subprocess.run`), else ''."""
+    module, _, call = name.rpartition(".")
+    if module == "os" and _OS_SPOT.fullmatch(call) or module == "subprocess" and call in _SUBPROCESS_SPOTS:
+        return name
+    return ""
+
+
+def _py_inert(name: str) -> bool:
+    """True for a dotted name of an acting module that names or reads things and acts on nothing: os.path, a
+    subprocess constant, and every name of sys but sys.modules, which can swap a module for another."""
+    return (name in _PY_INERT or name == "os.path" or name.startswith("os.path.")
+            or name.startswith("sys.") and name.split(".")[1] != "modules")
+
+
+def _py_literal(node) -> bool:
+    import ast
+    if isinstance(node, ast.Constant):
+        return True
+    return isinstance(node, (ast.List, ast.Tuple)) and all(_py_literal(each) for each in node.elts)
+
+
+def _py_import_bindings(tree):
+    """{name: dotted name} for each name an import binds to an acting module or a name of one: `import os.path`
+    binds `os` to os, `import os.path as p` binds `p` to os.path, `from shutil import copy as c` binds `c` to
+    shutil.copy. None for a `from` import of every name, which binds names that cannot be told."""
+    import ast
+    bound = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for each in node.names:
+                top = each.name.split(".")[0]
+                if top in _PY_ACTING:
+                    bound[each.asname or top] = each.name if each.asname else top
+        elif (isinstance(node, ast.ImportFrom) and node.module and not node.level
+              and node.module.split(".")[0] in _PY_ACTING):
+            for each in node.names:
+                if each.name == "*":
+                    return None
+                bound[each.asname or each.name] = node.module + "." + each.name
+    return bound
+
+
+def py_spots(script: str):
+    """The shell text of each call of a python script that hands a string to a shell, as `os.system('...')`,
+    or None when the script cannot be told: it uses an acting module another way (`_PY_ACTING`), reaches code by
+    another route (`eval`, `__import__`), or a shell call takes an argument that is no literal. The caller then
+    reads the whole script as shell. A script that does not parse raises SyntaxError or ValueError: python
+    runs none of it."""
+    import ast
+    import textwrap
+    source = textwrap.dedent(script)
+    tree = ast.parse(source)
+    bound = _py_import_bindings(tree)
+    if bound is None:
+        return None
+    calls, callee_names, parents = [], set(), {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[id(child)] = node
+        if isinstance(node, ast.Name) and node.id in _PY_DYNAMIC:
+            return None
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in bound:
+            spot, base = _py_spot_name(bound[func.value.id] + "." + func.attr), func.value
+        elif isinstance(func, ast.Name) and func.id in bound:
+            spot, base = _py_spot_name(bound[func.id]), func
+        else:
+            continue
+        if spot:
+            calls.append((node, spot))
+            callee_names.add(id(base))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name) or node.id not in bound or id(node) in callee_names:
+            continue
+        name, parent = bound[node.id], parents.get(id(node))
+        if not (_py_inert(name) or isinstance(parent, ast.Attribute) and parent.value is node
+                and _py_inert(name + "." + parent.attr)):
+            return None
+    out = []
+    for node, spot in calls:
+        args = list(node.args) + [kw.value for kw in node.keywords if kw.arg in _PY_SPOT_KEYWORDS]
+        if (not args or not all(_py_literal(arg) for arg in args) or any(kw.arg is None for kw in node.keywords)
+                or any(isinstance(arg, ast.Starred) for arg in node.args)):
+            return None
+        out.append(spot + "(" + ", ".join(ast.get_source_segment(source, arg) or "" for arg in args) + ")")
+    return out
+
+
 _JS_STR = (r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)(?![\w$]|\s*[.(])"""
            r"""|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))""")
 _JS_ONE = re.compile(
@@ -1604,24 +1755,31 @@ def _js_hit(body: str, cwd: str, predicate, script: str = "") -> str:
     return ""
 
 
+def _inline_script_at(tokens):
+    """(kind, index of the script word) for a `python -c SCRIPT` or `node -e SCRIPT` command, else None."""
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return None
+    name = basename(tokens[index])
+    kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
+    flag = _PY_C_FLAG if kind == "py" else _NODE_EVAL_FLAG
+    for at in range(index + 1, len(tokens) - 1):
+        if kind and flag.match(tokens[at]):
+            return kind, at + 1
+    return None
+
+
 def _inline_scripts(command: str):
     """Yield (kind, script, segment number, segments, ends) for each `python -c` and `node -e` script."""
     ends = []
     segments = split_segments(_strip_heredoc_bodies_unconditionally(command), ends)
     for number, segment in enumerate(segments):
-        if not any(flag in segment for flag in _INLINE_FLAG_WORDS):
+        if not _has_inline_flag(segment):
             continue
         tokens = segment_tokens(segment)
-        index = resolve_command(tokens) if tokens else None
-        if index is None:
-            continue
-        name = basename(tokens[index])
-        kind = "py" if _PY_COMMAND.match(name) else "js" if _NODE_COMMAND.match(name) else ""
-        flag = _PY_C_FLAG if kind == "py" else _NODE_EVAL_FLAG
-        for at in range(index + 1, len(tokens) - 1):
-            if kind and flag.match(tokens[at]):
-                yield kind, str(tokens[at + 1]), number, segments, ends
-                break
+        found = _inline_script_at(tokens)
+        if found:
+            yield found[0], str(tokens[found[1]]), number, segments, ends
 
 
 _SCRIPT_READ_LIMIT = 256 * 1024

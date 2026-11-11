@@ -103,9 +103,7 @@ CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
 # mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
 # JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
 RULE_FLOOR = 98
-# 59 includes roles-orchestrator-never-builds: its guard is partial and the schema has no partial
-# marker (debt orchestrator-rule-half-guarded).
-UNMECHANIZED_EXPECTED = 59
+UNMECHANIZED_EXPECTED = 58
 JUDGMENT_EXPECTED = 25
 REASON_MIN_WORDS = 8
 
