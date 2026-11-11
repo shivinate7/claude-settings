@@ -14,9 +14,9 @@ Why: one `gh run watch` made 131 API calls in 60 s, about 7,900 an hour. The cor
 
 Owner, 2026-10-13 11:20 CDT: the CI wake-up hook lives in claude-settings. The mods session drops its own CI wake-up step. The hook is a Python hook registered in `settings.json`, with a red test first.
 
-A PostToolUse hook on Bash and PowerShell (`hooks/ci_wake.py`) starts an `asyncRewake` watcher after `gh pr ready <n>`.
+A PostToolUse hook on Bash, PowerShell and the GitHub MCP `update_pull_request` tool (`hooks/ci_wake.py`) starts an `asyncRewake` watcher after `gh pr ready <n>`, or after an MCP `update_pull_request` call with `draft` false. The MCP call is the cloud's ready route, because `gh pr ready` gets a 403 there (owner, 2026-11-11 11:55 CST, relayed by the retrospective session: the cloud CI-done wake must fire; lane `ci-wake-mcp-ready`).
 
-- Each `gh pr ready` in one command gets its own watch. A push alone starts no watch, because a PR goes ready after its last push and a push read can see the old head. A draft PR starts no watch. The hook's `settings.json` row reads `tool_input` only. It starts python only when gh, pr and ready occur in that order, each at most 16 characters after the one before (any case of gh).
+- Each `gh pr ready` in one command gets its own watch. A push alone starts no watch, because a PR goes ready after its last push and a push read can see the old head. A draft PR starts no watch. An MCP call with `draft` absent or true starts none. The MCP call names its PR by `owner`, `repo` and `pullNumber` in `tool_input`. The hook's `settings.json` row reads `tool_input` only. It starts python only for a ready call: when gh, pr and ready occur in that order, each at most 16 characters after the one before (any case of gh), or when `tool_input` holds a JSON `draft` key set to false. A quoted `draft` inside a shell command is escaped, so it never matches.
 - The watcher reads the PR head once and waits on its runs. A head whose only runs are skipped counts as no run yet.
 - It exits 2 with a one-line verdict, which wakes the session even when idle. It stops at its own deadline, under the hook `timeout`, and wakes with "still running".
 - One watcher runs per PR: a second one for the same PR exits at once.
