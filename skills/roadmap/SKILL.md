@@ -73,7 +73,7 @@ GitHub, so the publisher reads them just before the build and passes one file:
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --block --out FILE
 
     {"readAt": "<ISO time of the reads>",
-     "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+     "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
      "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
      "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
@@ -101,8 +101,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
   and the red line reads `lane` for stalled items. A live file with no `items` list still renders Live work.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
-- With no `--live`, no `threads` or `pulls` list, or a `readAt` that is not an ISO time, the
-  line or its stamp says it was not read, and why. A local session's state does not show yet.
+- With no `--live`, no `pulls` list, or a `readAt` that is not an ISO time, the
+  line or its stamp says it was not read, and why. With no `threads` list the read stays valid: pulls still show and only the thread count reads unknown. A local session's state does not show yet.
   That waits on step o8's option (c): each session writing its own line.
 
 ## A merge marks a step
@@ -252,7 +252,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   one `unknown (<why>)` entry, never an empty list, when:
   - `--live` is missing or unreadable;
   - the live file is not a JSON object;
-  - the live file has no `threads` or `pulls` list;
+  - the live file has no `pulls` list (a missing `threads` list makes only the thread count unknown);
   - `readAt` is not an ISO time, has no time zone, is over 60 minutes old or is more than 5 minutes ahead;
   - there is no `items` list;
   - an `items` row has the wrong shape (`n` not an int, `status` or `home` not a string).

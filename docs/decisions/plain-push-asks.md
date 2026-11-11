@@ -74,7 +74,8 @@ destination reads nothing new, except a push to main or master, which reads the 
 with one `config`. `--all` or `--branches` to a network remote adds one `symbolic-ref`, the checkout's branch.
 A remote given as a URL or path reads nothing. A refspec push such as `origin lane/foo` adds one `symbolic-ref`.
 A `HEAD` push or a bare push adds one `symbolic-ref` and one `config`. One whose destination
-differs from its upstream adds one `rev-parse`, a local read of the remote-tracking ref. `record_push_cost_case` in
+differs from its upstream adds one `rev-parse`, a local read of the remote-tracking ref. The octopus-push check
+(decision `octopus-push-refused`) adds one `rev-list` for each pushed ref other than main or master. `record_push_cost_case` in
 `hooks/test_guard.py` proves the counts.
 
 ## The mistakes

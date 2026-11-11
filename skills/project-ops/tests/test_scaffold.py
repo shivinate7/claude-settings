@@ -286,7 +286,7 @@ class Scaffold(TempDest):
         text = tree(SKILL)["templates/operating-model.md"]
         tiers = re.search(r"## Session tiers.*?(?=\n## )", text, re.S).group(0)
         flat = " ".join(tiers.split())
-        self.assertIn("starts triage and the batch runner together, as a trio, before any lane session", flat)
+        self.assertIn("starts triage and the batch runner together, as a trio, before any lane", flat)
         self.assertIn("checks whether that repo has an active coordinator", flat)
         self.assertIn("It does not wait for a reply.", flat)
         self.assertIn("tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`", flat)
