@@ -142,7 +142,7 @@ ROLLUP_JOB = REQUIRED_CHECK  # the all-jobs-passed rollup job (actions/all-jobs-
 
 class UnreadJobs(Stop):
     """A run has a job that merge --touches could not account for: a failed job whose log gave no case and no file, or a job whose conclusion is
-    neither fine nor failure (Host.failed_lines). Its message is the unknown line; `lines` are the failing lines of the run's other failed jobs."""
+    neither fine nor failure (Host.failed_lines). Its message is the unknown line; `lines` are the failing lines read from the logs of the run's failed jobs, this one's own included."""
     def __init__(self, message, lines):
         super().__init__(message)
         self.lines = lines
@@ -3833,7 +3833,7 @@ PATCH_FILE_HEADER = re.compile(r"\+\+\+ ")  # a patch's `+++ <path>` file header
 UNITTEST_SUMMARY = re.compile(r"FAILED \((?:\w+=\d+(?:, )?)+\)")  # unittest's last line, `FAILED (failures=2, errors=1)`: a count, not a failing case
 GUARD_NOTE = re.compile(r"\s{2,}\(.*\)$")  # hooks/test_guard.py's suffix on a line that has a reason: `  (the reason ...)`
 TOUCH_NONE = "no open pull request touches them."
-TOUCH_UNKNOWN = "unknown: no failing case read from run {run}; pass --case or --file "  # a --run alone: the cite follows
+TOUCH_UNKNOWN = "unknown: no failing case read from run {run}; pass --case or --file and run the query without --run (with --run kept, it still exits 1) "  # a --run alone: the cite follows
 TOUCH_UNKNOWN_BESIDE = ("unknown: run {run} gave no failing line that names a case or a file, so any matches printed came from the explicit "
                         "--case and --file only ")  # a --run beside --case or --file: the cite follows
 
@@ -4251,7 +4251,8 @@ def main(argv, host=None, lock=None, hosts=None):
     if (a.run or a.case or a.file) and not a.touches:
         p.error("--run, --case and --file go with --touches")
     if a.touches:
-        if a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.idle_lanes:
+        if (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record or a.lane_lint or a.idle_lanes
+                or a.release_check):
             p.error("--touches stands alone")
         if not (a.run or a.case or a.file):
             p.error("--touches needs --run, --case or --file")
