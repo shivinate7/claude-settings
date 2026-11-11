@@ -4171,19 +4171,22 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     """Refuse (Stop) a request in which a lane holds a commit of another open pull request on `base` that the request leaves out: merging the lane
     would put that pull request's commits into the batch unfrozen, an old commit of it as much as its head. `heads` is {PR: head} of the request;
     `running` is the head of the integration branch it stacks on, or None; a commit that it or the base tip holds is already in. `own` is the batch's
-    own pull request. Each other head is the sha the open list gives. `remedy` is the route the refusal names."""
+    own pull request. Each other head is the sha the open list gives. `remedy` is the route the refusal names: a text, or a function of the lanes the
+    refusal names (sorted) that returns it."""
     kept = [fetch_branch(root, base, FREEZE_CITE), *([running] if running else [])]
     frozen = set(heads.values())
     others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
     unread = fetch_heads(root, [s for _, s in others])
-    found = []
+    found, named = [], set()
     for n, head in others:
         if head in unread:
             say(f"merge: #{n}'s head {head[:9] or '(none)'} cannot be fetched from origin, so this request was not checked against its commits.")
             continue
-        found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in sorted(heads) if holds_commit_of(root, heads[m], head, kept, frozen)]
+        hit = [m for m in sorted(heads) if holds_commit_of(root, heads[m], head, kept, frozen)]
+        found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in hit]
+        named.update(hit)
     if found:
-        raise Stop("\n".join(found) + f"\n{remedy} Nothing was pushed. {FREEZE_CITE}")
+        raise Stop("\n".join(found) + f"\n{remedy(sorted(named)) if callable(remedy) else remedy} Nothing was pushed. {FREEZE_CITE}")
 
 def stray_heads(root, tip, block, stops, kept):
     """-> the heads a no-ff merge put on the integration branch at `tip`, along its first parents down to any commit of `stops`, that its frozen block
@@ -4195,6 +4198,18 @@ def stray_heads(root, tip, block, stops, kept):
     frozen = set(block["lanes"].values())
     seconds = [p[1] for p in (line.split() for line in out.splitlines()) if len(p) == 2 and p[1] not in frozen]
     return [s for s in dict.fromkeys(seconds) if not any(holds(root, s, k) for k in kept)]
+
+def stacked_remedy(name, branch, onto, named, blamed):
+    """The route the stacked-check refusal names for the lanes it lists. A drop is named only for a lane with a stored blame, the only lane a drop takes off;
+    any other lane gets the route that stores a blame, and the word that it can wait for the next batch."""
+    drops = [n for n in named if n in blamed]
+    waits = [n for n in named if n not in blamed]
+    text = "".join(f"Run `merge --batch-drop {name} {n}`, then run this --batch-build again: it rebuilds {branch} on the head of {onto} now. " for n in drops)
+    if waits:
+        text += (f"{lane_list(waits)} has no stored blame, so a drop is refused. If a failed run of the batch head is caused by it, run "
+                 + " and ".join(f"`merge --batch-build {name} --blame {n} --run <Actions run URL>`" for n in waits)
+                 + "; or leave it in the batch: its change waits for the next batch.")
+    return text.strip()
 
 def sync_batch(root, h, pr, info, block, on, base):
     """Make the integration branch batch-NAME match its frozen block. It is rebuilt when it lacks a frozen lane head, when it holds a lane head the block does
@@ -4210,8 +4225,7 @@ def sync_batch(root, h, pr, info, block, on, base):
     if not strays and all(holds(root, heads[n], tip) for n in sorted(heads)) and not (on and not holds(root, now_on, tip)):
         return 0
     # a frozen set takes no new lane, and a drop rebuilds on the recorded On sha, so the route is a drop and then this build, which rebuilds on the new head
-    stacked_without_base(root, h, base, heads, now_on, own=pr, remedy=f"Run `merge --batch-drop {name} <lane>` for each lane named, then run this "
-                         f"--batch-build again with the lanes left: it rebuilds {branch} on the head of {on or base} now.")
+    stacked_without_base(root, h, base, heads, now_on, own=pr, remedy=lambda named: stacked_remedy(name, branch, on or base, named, block["blamed"]))
     start, recorded = batch_start(root, block, base)
     start = now_on or start
     text = freeze_rewrite(info["body"], block, freeze_lines(name, heads, block["dropped"], (on, now_on) if on else None, recorded, block["blamed"]))
@@ -4274,14 +4288,18 @@ def blamed_lanes(root, fail, lanes, base):
             blamed[n] = hit
     return blamed
 
-def blame_lines(name, blamed, base):
-    """The lines a FAILing lint of batch-NAME's head adds: each blamed lane with its drop command. With no lane to name, one line says the blame is unknown and no
-    drop command is printed: a lane is never named by a guess."""
+def blame_lines(name, blamed, base, stored=True):
+    """The lines a FAILing lint of batch-NAME's head adds: each blamed lane with its drop command when its blame is `stored`, else with the --blame route, since a
+    drop of a lane with no stored blame is refused. With no lane to name, one line says the blame is unknown and no drop command is printed: a lane is never named by a guess."""
     if not blamed:
         return [f"merge: the blame is unknown: no path in the failing check's output is one that a frozen lane's diff against {base} touches, or that output could not be read, so no lane is named and no drop command is printed."]
-    return [line for n in sorted(blamed) for line in (
-        f"merge: #{n}'s diff against {base} touches {', '.join(blamed[n][:3])}{' and more' if len(blamed[n]) > 3 else ''}, which the failing check names. To take it off the batch, run:",
-        f"  merge --batch-drop {name} {n}")]
+    def touches(n):
+        return f"merge: #{n}'s diff against {base} touches {', '.join(blamed[n][:3])}{' and more' if len(blamed[n]) > 3 else ''}, which the failing check names."
+    if stored:
+        return [line for n in sorted(blamed) for line in (touches(n) + " To take it off the batch, run:", f"  merge --batch-drop {name} {n}")]
+    return [line for n in sorted(blamed) for line in (touches(n) + " Its blame is not stored, so a drop is refused. To store it, run:",
+                                                        f"  merge --batch-build {name} --blame {n} --run <Actions run URL>",
+                                                        f"or leave #{n} in the batch: its change waits for the next batch.")]
 
 def record_in_block(h, branch, **fields):
     """Write `fields` (blamed, linted) into the block of batch `branch`'s open pull request, read fresh; the rest of the block and of the body is kept.
@@ -4395,11 +4413,13 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
             batch_ready_checks(root, cfg, pr, name, branch, base)  # a FAIL here blames by the same path as a lint FAIL
         except LintFail as e:
             blamed = blamed_lanes(root, e, heads, base)
+            stored = True
             try:  # the drop that blame_lines prints is allowed only for a lane stored here
                 record_in_block(h, branch, blamed=sorted(blamed or ()), linted=None)
             except Stop as why:
+                stored = False
                 say(f"merge: the blame could not be stored ({why}); a drop of a blamed lane will be refused until a blame is stored.")
-            raise Stop("\n".join([str(e), *blame_lines(name, blamed, base), DRAFT_CITE])) from None
+            raise Stop("\n".join([str(e), *blame_lines(name, blamed, base, stored), DRAFT_CITE])) from None
         tip = fetch_branch(root, branch, FREEZE_CITE)
         pr, info = record_in_block(h, branch, blamed=[], linted=tip)  # the head that passed, so a ready batch is linted again only when its head moves
         if info["draft"]:
