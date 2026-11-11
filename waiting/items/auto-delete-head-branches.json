@@ -1,0 +1,21 @@
+{
+  "added": "2026-11-11T21:22:00Z",
+  "context": "Your ruling g, 15:19 CST: \"i think my answer is G right\". Its part 1 is this one checkbox.\n\nWhy yours: the cloud link to GitHub refuses every settings write (403 at 15:04 CST), and the cloud cannot even read this setting (the repo search answer leaves it out). So it may already be on.",
+  "home": "step cloud-branch-delete; plan restart-plan 04423de, ruling g",
+  "id": "auto-delete-head-branches",
+  "kind": "task",
+  "link": "https://github.com/shivinate7/claude-settings/settings",
+  "n": 516,
+  "owner": "triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "rank": 2,
+  "ref": "step cloud-branch-delete",
+  "repo": "shivinate7/claude-settings",
+  "status": "open",
+  "steps": [
+    "Open https://github.com/shivinate7/claude-settings/settings (General).",
+    "Scroll to Pull Requests. Tick \"Automatically delete head branches\" if it is not ticked. GitHub saves it at once.",
+    "Done when the box shows ticked. Save your answer here."
+  ],
+  "title": "Turn on GitHub's \"Automatically delete head branches\" for claude-settings",
+  "why": "Part 1 of your ruling g (15:19 CST): GitHub then deletes each PR's branch when it merges, so branches stop piling up."
+}
