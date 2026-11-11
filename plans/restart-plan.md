@@ -367,7 +367,7 @@ After 3.11, because its third part uses the same owner grant route.
      `mcp__claude-artifacts__db_usage` and `mcp__claude-artifacts__read_artifact`. Auto mode rightly
      refused its try to write its own allow list.
   2. Until the fix lands, a page writer sends its writes in the main session, as `batch` calls of up to
-     50 writes each, one card per call. It never writes the page from a subagent.
+     50 writes each, one card per call. It never writes the page from an agent.
   3. The page hooks match `ArtifactData` only, so they skip a write named `mcp__claude-artifacts__db_write`.
      Open PR #2549 (artifact-guard-matcher-names) adds those names. It lands with this fix.
   4. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
