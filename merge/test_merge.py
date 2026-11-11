@@ -10012,6 +10012,147 @@ class RecordsHeal(RecordsEnv):
         drops = [l[len("Drops-lines:"):].split(" -- ")[0].split() for l in body.splitlines() if l.startswith("Drops-lines:")]
         self.assertEqual(drops, [["docs/records.md"]], body)
 
+class ReadyPageState(RecordsEnv):
+    """ready_page_state(root, n, host): the state of the records page on a pull request's head, read before the pull request
+    is marked ready (decision records-index-at-merge: only the merge tool rebuilds the page, before the branch goes ready).
+    -> "current", "stale" or "skip". A read that cannot run raises Stop. Nothing is pushed, claimed or locked.
+    The real generator runs here, not the fake of RecordsRebuild, so each page is what lint/hook_catalog.py writes.
+    Skip: the base is not the default branch, the head holds a Record-claim, or the head lacks the base tip (a False answer).
+    An unknown answer about the base tip (None) raises Stop, never a skip.
+    """
+    def setUp(self):
+        Env.setUp(self)  # the real generator (merge.RECORDS as merge.py names it), not RecordsEnv's fake
+
+    def ready_state(self, n=7, root=None):
+        fn = getattr(merge, "ready_page_state", None)
+        self.assertIsNotNone(fn, "merge.ready_page_state is not defined")  # a missing name is a FAIL with a reason, not an ERROR
+        return fn(root or self.co, n, self.host)
+
+    def cut(self, branch, base, files, msg="records", drop=(), page=False):
+        """A new branch on origin, cut from origin/<base>: files are written and the paths in drop removed, in one commit pushed from
+        the second clone. page=True runs the real generator on that tree first, so the commit carries the page it writes."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{base}")
+        for rel in drop:
+            sh(o, "git", "rm", "-q", rel)
+        for rel, text in files.items():
+            put_lf(os.path.join(o, rel), text)
+        if page:
+            sh(o, sys.executable, merge.RECORDS, "--root", o, "--records-only")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
+
+    def no_kinds(self):
+        """The base stamps no record kinds, so the generator writes no page for the repo (the claude-settings shape)."""
+        self.on("main", {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))}, "no stamp kinds")
+
+    def origin_text(self, ref, path):
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "show", f"origin/{ref}:{path}")
+
+    def test_a_page_the_generator_writes_for_the_head_is_current(self):
+        self.cut("feat-current", "main", {"debts/gap-one.md": DEBT_TEXT}, page=True)
+        self.host.branch = "feat-current"
+        self.assertIn("gap-one", self.origin_text("feat-current", "docs/records.md"))  # scope: the page is on the head
+        refs_before = self.refs()
+        self.assertEqual(self.ready_state(), "current")
+        self.assertEqual(self.refs(), refs_before, "the read pushed")
+        self.assertEqual(self.worktrees(), 1, "the read left a worktree behind")
+        self.assertFalse(self.lock_ref(), "the read took the merge lock")
+        self.assertEqual(self.host.readies, [], "the read marked the pull request ready")
+
+    def test_a_head_with_a_debt_and_no_page_is_stale_and_the_read_leaves_no_trace(self):
+        self.cut("feat-stale", "main", {"debts/gap-one.md": DEBT_TEXT})
+        self.host.branch = "feat-stale"
+        self.assertNotIn("docs/records.md", self.tree_names("origin/feat-stale"))  # scope: the head has no page to match
+        refs_before = self.refs()
+        self.assertEqual(self.ready_state(), "stale")
+        self.assertEqual(self.refs(), refs_before, "the read pushed a page: a stale read must not write")
+        self.assertEqual(self.worktrees(), 1, "the read left a worktree behind")
+        self.assertFalse(self.lock_ref(), "the read took the merge lock")
+        self.assertEqual(self.host.readies, [], "the read marked the pull request ready")
+
+    def test_a_full_size_page_round_trips_as_current(self):
+        # Full size: thirty debts on the head, each row in the page the generator writes for all of them.
+        files = {f"debts/gap-{i:02d}.md": DEBT_TEXT.replace("Gap one", f"Gap {i:02d}") for i in range(1, 31)}
+        self.cut("feat-full", "main", files, page=True)
+        self.host.branch = "feat-full"
+        self.assertEqual(self.origin_text("feat-full", "docs/records.md").count("| `gap-"), 30)  # scope: all thirty rows are on the page
+        self.assertEqual(self.ready_state(), "current")
+
+    def test_a_repo_with_no_record_kinds_has_no_page_to_match_and_is_current(self):
+        # The empty state: the base stamps no kinds, so the generator writes no page and the head needs none.
+        self.no_kinds()
+        self.cut("feat-empty", "main", {"notes.txt": "a note\n"})
+        self.host.branch = "feat-empty"
+        self.assertNotIn("docs/records.md", self.tree_names("origin/feat-empty"))  # scope: no page on the head
+        self.assertEqual(self.ready_state(), "current")
+
+    def test_a_head_holding_a_record_claim_is_skipped(self):
+        self.cut("feat-claim", "main", {"debts/gap-one.md": DEBT_TEXT}, msg="Claim record numbers\n\nRecord-claim: D-002")
+        self.host.branch = "feat-claim"
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "log", "-1", "--format=%(trailers:key=Record-claim,valueonly)", "origin/feat-claim").strip(), "D-002")  # scope: a claim is held
+        self.assertEqual(self.ready_state(), "skip")
+
+    def test_a_pull_request_into_a_base_that_is_not_the_default_is_skipped(self):
+        self.cut("dev", "main", {"dev.txt": "dev side\n"})
+        self.cut("feat-dev", "dev", {"debts/gap-one.md": DEBT_TEXT})
+        self.host.branch, self.host.base = "feat-dev", "dev"  # scope: the pull request targets dev, not main
+        self.assertEqual(self.host.pr(7)["base"], "dev")
+        self.assertEqual(self.ready_state(), "skip")
+
+    def test_a_head_that_lacks_the_base_tip_is_skipped(self):
+        self.cut("feat-behind", "main", {"debts/gap-one.md": DEBT_TEXT})
+        self.main_moves()  # main moves on after the head was cut, by a change the merge tool does not take as small
+        self.host.branch = "feat-behind"
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", "origin/main", "origin/feat-behind"], cwd=self.co).returncode, 1,
+                         "scope: the head holds the base tip, so there is no lack to skip for")
+        self.assertEqual(self.ready_state(), "skip")
+
+    def test_a_page_that_cannot_be_rebuilt_raises(self):
+        self.cut("feat-bad", "main", {"debts/bad.md": "# Bad\n\n- **Where.** x\n"})
+        self.host.branch = "feat-bad"
+        self.assertNotIn("**What.**", self.origin_text("feat-bad", "debts/bad.md"))  # scope: the record has no What, so the generator refuses it
+        with self.assertRaises(merge.Stop) as cm:
+            self.ready_state()
+        # A bare Stop would pass on any refusal; the rebuild refusal is the one that names "cannot be rebuilt".
+        self.assertIn("cannot be rebuilt", str(cm.exception), "the Stop is not the rebuild refusal: " + str(cm.exception))
+
+    def test_an_ancestry_read_that_cannot_answer_stops_the_read(self):
+        """A shallow clone holds main's tip and cuts its path to the head, so the ancestry read answers unknown, never False.
+        The read stops, and the ready mark is refused as unknown. A skip would let a stale page through (decision guard-hooks-fail-closed)."""
+        self.cut("feat-behind", "main", {"debts/gap-one.md": DEBT_TEXT})
+        self.main_moves()  # main moves on after the head was cut, so the head lacks the base tip
+        self.host.branch = "feat-behind"
+        sh(self.co, "git", "fetch", "-q", "origin")
+        main_tip = sh(self.co, "git", "rev-parse", "refs/remotes/origin/main")
+        head = sh(self.co, "git", "rev-parse", "refs/remotes/origin/feat-behind")
+        shallow = os.path.join(self.t, "shallow")
+        error = shallow_clone.make(self.bare, shallow, main_tip)  # holds main's tip; the head's commits are fetched below
+        if error:
+            raise RuntimeError("shallow fixture could not be built: " + error)
+        sh(shallow, "git", "fetch", "-q", "origin", "+refs/heads/feat-behind:refs/remotes/origin/feat-behind")
+        tmp, wt = merge.add_worktree(shallow, head)
+        try:  # scope before subject: the read in the worktree that ready_page_state makes is the unknown one
+            facts = shallow_clone.facts(shallow, main_tip, head)
+            self.assertTrue(facts["shallow"] and facts["pin_present"] and facts["ancestor_rc"] == 1,
+                            "scope: the clone does not reach the unknown shape: %r" % (facts,))
+            self.assertEqual(sh(wt, "git", "rev-parse", "--is-shallow-repository"), "true", "scope: the worktree is not shallow")
+            self.assertIsNone(merge.ancestor(wt, "refs/remotes/origin/main", head), "scope: the ancestry read in the worktree is not unknown")
+        finally:
+            merge.drop_worktree(shallow, tmp, wt)
+        try:
+            got = self.ready_state(root=shallow)
+        except merge.Stop as stop:
+            text = str(stop)
+            self.assertNotIn("git fetch", text, "the Stop is a failed fetch, not the unknown ancestry: " + text)
+            self.assertNotIn("cannot make the worktree", text, "the Stop is a failed worktree, not the unknown ancestry: " + text)
+            return
+        self.fail("ready_page_state read an unknown ancestry as %r, want Stop" % (got,))
+
+
 class MergeImport(unittest.TestCase):
     """merge.py imports the records generator when it loads. With that import blocked, the tool prints one clear line and
     exits non-zero, with no traceback."""
