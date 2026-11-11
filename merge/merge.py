@@ -4206,9 +4206,9 @@ def stacked_remedy(name, branch, onto, named, blamed):
     waits = [n for n in named if n not in blamed]
     text = "".join(f"Run `merge --batch-drop {name} {n}`, then run this --batch-build again: it rebuilds {branch} on the head of {onto} now. " for n in drops)
     if waits:
-        text += (f"{lane_list(waits)} has no stored blame, so a drop is refused. If a failed run of the batch head is caused by it, run "
+        text += (f"{lane_list(waits)} {'has' if len(waits) == 1 else 'have'} no stored blame, so a drop is refused. If a failed run of the batch head is caused by it, run "
                  + " and ".join(f"`merge --batch-build {name} --blame {n} --run <Actions run URL>`" for n in waits)
-                 + "; or leave it in the batch: its change waits for the next batch.")
+                 + "; or leave it in the batch: it ships with the batch as frozen, and a later change to it goes to the next batch.")
     return text.strip()
 
 def sync_batch(root, h, pr, info, block, on, base):
@@ -4299,7 +4299,7 @@ def blame_lines(name, blamed, base, stored=True):
         return [line for n in sorted(blamed) for line in (touches(n) + " To take it off the batch, run:", f"  merge --batch-drop {name} {n}")]
     return [line for n in sorted(blamed) for line in (touches(n) + " Its blame is not stored, so a drop is refused. To store it, run:",
                                                         f"  merge --batch-build {name} --blame {n} --run <Actions run URL>",
-                                                        f"or leave #{n} in the batch: its change waits for the next batch.")]
+                                                        f"or leave #{n} in the batch: it ships with the batch as frozen, and a later change to it goes to the next batch.")]
 
 def record_in_block(h, branch, **fields):
     """Write `fields` (blamed, linted) into the block of batch `branch`'s open pull request, read fresh; the rest of the block and of the body is kept.
@@ -4325,7 +4325,7 @@ def batch_ready_checks(root, cfg, pr, name, branch, base):
         return
     tmp, wt = add_worktree(root, fetch_branch(root, branch, FREEZE_CITE))
     try:
-        run_ready_checks(wt, pr, base, checks, f"Each lane this FAIL names is stored as blamed, and its drop command is printed below. "
+        run_ready_checks(wt, pr, base, checks, f"Below, each lane this FAIL names gets its drop command when its blame was stored, or the `--blame` route when the blame write was refused. "
                          f"With none named, fix it in a lane and run `merge --batch-build {name} --ready` again; a change to a lane goes to the next batch.")
     finally:
         drop_worktree(root, tmp, wt)
