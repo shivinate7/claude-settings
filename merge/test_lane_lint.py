@@ -251,6 +251,14 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         sh(self.other, "git", "fetch", "-q", "origin")
         sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")
 
+    def merge_into_feat(self, ref):
+        """The lane's head merges `ref` (a ref the second clone sees) in with a merge commit, and is pushed. -> the new head sha."""
+        o = self.other
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        tm.sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge %s into feat" % ref, ref)
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+        return self.head("feat")
+
 
 class LaneLint(LaneFixture):
     """The lane-lint cases: the lint's verdicts, the stack check, the shallow reads and the ref targets."""
@@ -423,11 +431,7 @@ class LaneLint(LaneFixture):
 
     def merge_release_into_feat(self):
         """The stacked head merges its base in and is pushed. -> the new head sha."""
-        o = self.other
-        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        tm.sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge release into feat", "origin/release")
-        tm.sh(o, "git", "push", "-q", "origin", "feat")
-        return self.head("feat")
+        return self.merge_into_feat("origin/release")
 
     def shallow_lane_checkout(self, pin):
         """self.co becomes a shallow clone of origin with `pin` fetched at depth 1 (testing/shallow_clone.py, the one fixture).
@@ -881,8 +885,9 @@ def lane_lint_usage():
 
 class CrossMeasure(LaneFixture):
     """`merge --lane-lint <pr>` checks the PR's head against each other open PR of its lane and against the PRs --with names: one
-    open-PR list read, then one `git merge-tree --write-tree` per checked PR. A conflict FAILs before the ci-job run and names each
-    conflicting PR and file. A stack pair is skipped. The counts come from the fake host (FakeHost.pulls, pull_list_reads) and from
+    open-PR list read, then `git merge-tree --write-tree` against main for the head and for each checked PR, and one more against the
+    head. A pair conflict FAILs before the ci-job run and names each conflicting PR and file; a pair that clashes only through main is
+    a report line. A stack pair is skipped. The counts come from the fake host (FakeHost.pulls, pull_list_reads) and from
     the merge.sh call log (tree_calls)."""
 
     contains = LaneLint.contains  # the ancestor read the stack cases use: one home, LaneLint's
@@ -892,6 +897,7 @@ class CrossMeasure(LaneFixture):
         self.host.body = lane_body(OWN)
         self.host.pulls = {}
         self.tree_reply, self.tree_calls = None, []  # tree_reply: the (rc, text) every merge-tree call returns, when a case sets one
+        self.tree_fault, self.tree_faulted = None, []  # tree_fault: (base ref, head sha, reply), set by fault_merge_tree; tree_faulted: the calls it answered
         real_sh = merge.sh
 
         def log_merge_tree(args, *rest, **kwargs):
@@ -899,11 +905,41 @@ class CrossMeasure(LaneFixture):
                 self.tree_calls.append(list(args))
                 if self.tree_reply is not None:
                     return self.tree_reply
+                if self.tree_fault is not None and list(args[-2:]) == list(self.tree_fault[:2]):
+                    self.tree_faulted.append(list(args))
+                    return self.tree_fault[2]
             return real_sh(args, *rest, **kwargs)
 
         patch = unittest.mock.patch.object(merge, "sh", log_merge_tree)
         patch.start()
         self.addCleanup(patch.stop)
+
+    def clash(self, a, b):
+        """-> "clean" or "conflict": `git merge-tree --write-tree` of commits a and b, run in the second clone with no merge.py code, so a
+        precondition does not depend on what it probes. Any other exit fails the case: the answer is unknown, not clean."""
+        r = subprocess.run(["git", "-C", self.other, "merge-tree", "--write-tree", a, b], capture_output=True, text=True)
+        if r.returncode == 0:
+            return "clean"
+        if r.returncode == 1 and "CONFLICT" in r.stdout:
+            return "conflict"
+        raise AssertionError("precondition: git merge-tree of %s and %s read neither clean nor conflict (exit %d): %s"
+                             % (a, b, r.returncode, r.stdout + r.stderr))
+
+    def second_parent(self, head):
+        """-> the second parent of commit `head`, or None when it has fewer than two parents."""
+        parts = tm.sh(self.other, "git", "rev-list", "--parents", "-n", "1", head).split()
+        return parts[2] if len(parts) == 3 else None
+
+    def fault_merge_tree(self, base_ref, head, reply):
+        """The one `git merge-tree` of commit `head` against `base_ref` returns `reply` (rc, text). Every other merge-tree runs for real,
+        so the case flips only the read it names. The calls it answered are in self.tree_faulted."""
+        self.tree_fault = (base_ref, head, reply)
+
+    def assert_conflict_line_names(self, text, base, what):
+        """The refusal has a line that names a conflict or an unclean merge, and that line names `base`, the base the lint ran against."""
+        lines = [line for line in text.splitlines() if re.search(r"(?i)conflict|not clean", line)]
+        self.assertTrue(any(re.search(r"\b%s\b" % re.escape(base), line) for line in lines),
+                        "%s: no conflict line names %s: %s" % (what, base, text))
 
     def commit_on(self, name, files, start):
         """Commit `files` ({path: text}) on branch `name`, cut from `start` in the second clone, and push it. -> the commit's sha."""
@@ -1012,7 +1048,7 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(rc, 1, "the conflicting PR beside a stack pair did not refuse: " + text)
         self.assertTrue(names_pr(text, 10), "the refusal does not name the conflicting PR #10: " + text)
         self.assertFalse(names_pr(text, 9), "the refusal names the stack pair PR #9, which is skipped: " + text)
-        self.assertEqual(trees, 1, "git merge-tree ran %d times, want one (PR #10 alone): the stack pair was read" % trees)
+        self.assertEqual(trees, 3, "git merge-tree ran %d times, want three (the head against main, then PR #10 against main and against the head): the stack pair was read" % trees)
         self.assertEqual(lints, 0, "the ci-job lint ran past the refusal: " + text)
 
     def test_a_stack_pair_whose_head_lies_behind_this_head_passes_and_reads_the_list_once(self):
@@ -1025,7 +1061,7 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(rc, 0, "a stack pair whose head lies behind this one refused the lane: " + text)
         self.assertEqual(len(pass_lines(text)), 1, text)
         self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
-        self.assertEqual(trees, 0, "git merge-tree ran %d times for a stack pair, want none" % trees)
+        self.assertEqual(trees, 1, "git merge-tree ran %d times for a stack pair, want one: the head against main, and none for the pair" % trees)
 
     def test_with_names_a_pr_of_another_session_and_its_conflict_fails(self):
         self.own_writes({"shared-a.txt": "lane 7\n"})
@@ -1068,7 +1104,7 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(rc, 1, "--with 11,12 did not refuse the conflicts of both named PRs: " + text)
         self.assertTrue(names_pr(text, 11), "the refusal does not name the --with PR #11: " + text)
         self.assertTrue(names_pr(text, 12), "the refusal does not name the --with PR #12: " + text)
-        self.assertEqual(trees, 2, "git merge-tree ran %d times for --with 11,12, want two: one for each named PR" % trees)
+        self.assertEqual(trees, 5, "git merge-tree ran %d times for --with 11,12, want five: the head against main, then PRs #11 and #12 against main and against the head" % trees)
         self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
         self.assertEqual(lints, 0, "the ci-job lint ran past the --with refusal: " + text)
 
@@ -1092,7 +1128,7 @@ class CrossMeasure(LaneFixture):
         rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", "11,11")
         self.assertEqual(rc, 1, "--with 11,11 did not refuse the conflict of PR #11: " + text)
         self.assertTrue(names_pr(text, 11), "the refusal does not name the --with PR #11: " + text)
-        self.assertEqual(trees, 1, "git merge-tree ran %d times for --with 11,11, want one: a repeated number is read once" % trees)
+        self.assertEqual(trees, 3, "git merge-tree ran %d times for --with 11,11, want three: the head against main, then PR #11 against main and against the head, once" % trees)
         self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
         self.assertEqual(lints, 0, "the ci-job lint ran past the --with refusal: " + text)
 
@@ -1141,23 +1177,23 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(pass_lines(text), [], "a conflict FAIL printed a PASS line: " + text)
         self.assertEqual(lints, 0, "the ci-job lint ran past a conflict FAIL: " + text)
 
-    def test_with_no_other_open_pr_the_run_reads_the_list_once_and_merge_tree_never(self):  # the empty state
+    def test_with_no_other_open_pr_the_run_reads_the_list_once_and_merge_tree_only_for_the_head(self):  # the empty state
         self.use_ci_job(PASSING, 0)
         rc, text, _, reads, trees = self.measured("--lane-lint", "7")
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(pass_lines(text)), 1, text)
         self.assertEqual(reads, 1, "the open PRs were read %d times with no other PR, want once" % reads)
-        self.assertEqual(trees, 0, "git merge-tree ran %d times with no other PR, want none" % trees)
+        self.assertEqual(trees, 1, "git merge-tree ran %d times with no other PR, want one: the head against main" % trees)
 
-    def test_the_cost_is_one_list_read_and_one_merge_tree_for_each_checked_pr(self):
+    def test_the_cost_is_one_list_read_and_two_merge_trees_for_each_checked_pr_plus_one_for_the_head(self):
         self.cost_lane()
         self.use_ci_job(PASSING, 0)
         rc, text, _, reads, trees = self.measured("--lane-lint", "7")
         self.assertEqual(rc, 0, "the cost lane refused, so a PR that is not checked was read: " + text)
         self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
-        self.assertEqual(trees, 1, "git merge-tree ran %d times, want one (PR #8 alone): the stack pair or another session's PR was read" % trees)
+        self.assertEqual(trees, 3, "git merge-tree ran %d times, want three (the head against main, then PR #8 against main and against the head): the stack pair or another session's PR was read" % trees)
 
-    def test_with_adds_one_merge_tree_for_each_named_pr(self):
+    def test_with_adds_two_merge_trees_for_each_named_pr(self):
         self.cost_lane()
         self.use_ci_job(PASSING, 0)
         rc, text, lints, reads, trees = self.measured("--lane-lint", "7", "--with", "10")
@@ -1165,16 +1201,17 @@ class CrossMeasure(LaneFixture):
         self.assertTrue(names_pr(text, 10), "the refusal does not name the --with PR #10: " + text)
         self.assertFalse(names_pr(text, 8), "the refusal names PR #8, which does not conflict: " + text)
         self.assertEqual(reads, 1, "the open PRs were read %d times, want once" % reads)
-        self.assertEqual(trees, 2, "git merge-tree ran %d times with --with 10, want two (PR #8 and PR #10)" % trees)
+        self.assertEqual(trees, 5, "git merge-tree ran %d times with --with 10, want five (the head against main, then PR #8 and PR #10 against main and against the head)" % trees)
 
     def test_the_usage_text_names_the_cost_of_the_cross_measure(self):
         block = lane_lint_usage()
         self.assertIsNotNone(block, "the usage text has no merge --lane-lint entry")
         self.assertRegex(block, r"merge-tree", "the lane-lint usage does not name git merge-tree as a cost: " + block)
         self.assertRegex(block, r"(?i)(PR|pull[ -]request)[ -]list", "the lane-lint usage does not name the PR-list read as a cost: " + block)
-        self.assertRegex(block, r"(?i)per other", "the lane-lint usage does not say merge-tree runs per other PR: " + block)
+        self.assertRegex(block, r"(?i)(two|2) [^.]*merge-trees?[^.]*per other", "the lane-lint usage does not say two merge-trees run per other PR: " + block)
+        self.assertRegex(block, r"(?i)merge-tree[^.]*against main", "the lane-lint usage does not say the head's merge-tree runs against main: " + block)
 
-    def test_a_long_open_list_costs_one_list_read_and_merge_tree_only_for_the_lane(self):  # the full-size state
+    def test_a_long_open_list_costs_one_list_read_and_merge_trees_only_for_the_lane(self):  # the full-size state
         self.own_writes({"shared-a.txt": "lane 7\n"})
         head = self.head("feat")
         for n in range(100, 219):  # 119 other sessions' open PRs: none is read
@@ -1186,7 +1223,7 @@ class CrossMeasure(LaneFixture):
         self.assertTrue(names_pr(text, 219), "the refusal does not name PR #219: " + text)
         self.assertFalse(names_pr(text, 150), "the refusal names another session's PR #150: " + text)
         self.assertEqual(reads, 1, "the open PRs were read %d times in a long list, want once" % reads)
-        self.assertEqual(trees, 1, "git merge-tree ran %d times in a long list, want one (PR #219 alone)" % trees)
+        self.assertEqual(trees, 3, "git merge-tree ran %d times in a long list, want three (the head against main, then PR #219 against main and against the head)" % trees)
 
     def test_the_cross_measure_runs_before_the_ci_job_and_a_fail_never_runs_it(self):
         self.own_writes({"shared-a.txt": "lane 7\n"})
@@ -1289,6 +1326,184 @@ class CrossMeasure(LaneFixture):
         rc, text, _, _, _ = self.measured("--lane-lint", "7")
         self.assertEqual(rc, 1, "a conflicting same-lane PR under a release-base PR did not refuse: " + text)
         self.assert_remedy_names_a_merge_or_a_rebase(text)
+
+    # The main-net cases (R1-R10, step cross-measure-main-net). A pair clash counts only when both heads merge clean with main; the
+    # lane head itself is checked against its base; a counted FAIL refuses before the ci-job run, so the ci-job never runs beside it.
+
+    def test_a_stale_sibling_that_clashes_only_through_main_passes_with_a_report_line_naming_it(self):  # R1, the 2026-11-10 incident
+        sib = self.pr_writes(8, {"shared-a.txt": "sibling\n"}, lane_body(OWN))  # cut before main moves
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")  # main moves on the same path after the sibling was cut
+        head = self.merge_into_feat("origin/main")  # the lane head merges main, so it holds main's change
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(sib, "origin/main"), "conflict", "precondition: PR 8 does not clash with main, so it is no stale sibling")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a stale sibling that clashes only through main refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lane did not print one PASS line: " + text)
+        report = [line for line in text.splitlines() if names_pr(line, 8)]
+        self.assertTrue(report, "the PASS names no report line for the stale sibling #8: " + text)
+        self.assertNotIn("FAIL", "\n".join(report), "the report line for the stale sibling #8 reads as a FAIL: " + text)
+
+    def test_two_siblings_that_are_each_clean_with_main_and_edit_the_same_lines_fail(self):  # R2, the green control of R1
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so it is not the pair R2 names")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "two siblings, each clean with main, that edit the same lines did not refuse: " + text)
+        self.assertTrue(names_pr(text, 8), "the refusal does not name PR #8: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the shared file: " + text)
+        self.assertEqual(pass_lines(text), [], "the refusal printed a PASS line: " + text)
+
+    def test_a_head_that_conflicts_with_main_with_no_sibling_fails_names_main_and_posts_nothing(self):  # R3
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.assertEqual(self.clash(head, "origin/main"), "conflict", "precondition: the head merges clean with main, so the case probes nothing")
+        self.assertEqual(self.host.pulls, {}, "precondition: another PR is listed, so the case has a sibling")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a head that conflicts with main passed the lane: " + text)
+        self.assert_conflict_line_names(text, "main", "the refusal")
+        self.assertEqual(pass_lines(text), [], "a head that conflicts with main printed a PASS line: " + text)
+        self.assertEqual(self.host.posted, [], "a head that conflicts with main posted a lane-lint comment: " + text)
+
+    def test_a_counted_clash_exits_fail_and_the_ci_job_never_runs_beside_it(self):  # R4
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not counted")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(FAILING, 1)  # the stub would FAIL, so its line shows in the refusal if it ran
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a counted clash beside a FAILING ci-job did not refuse: " + text)
+        self.assertTrue(names_pr(text, 8), "the refusal does not name the clashing PR #8: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the clashing file: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash: " + text)
+        self.assertNotIn("comment narration", text, "the ci-job FAIL line is in the refusal beside a counted clash: " + text)
+
+    def test_a_counted_clash_beside_a_passing_ci_job_still_refuses_and_no_unknown_reason_lifts_it(self):  # R5
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not counted")
+        self.use_ci_job(PASSING, 0)  # the stub would pass, so only the counted clash can refuse
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a counted clash beside a PASSING ci-job did not refuse: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash: " + text)
+        self.assertEqual(pass_lines(text), [], "a counted clash beside a PASSING ci-job printed a PASS line: " + text)
+        self.assertEqual(self.host.posted, [], "a counted clash posted a lane-lint comment: " + text)
+        with unittest.mock.patch.object(merge, "CI_JOB", self.write_stub(UNKNOWN, 2)):  # an unknown ci-job, which --lint-unknown-ok may lift
+            rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a counted clash beside an unknown ci-job: " + text)
+        self.assertEqual(lints, 0, "the unknown ci-job ran beside a counted clash: " + text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line beside a counted clash: " + text)
+        self.assertEqual(self.host.posted, [], "a counted clash beside an unknown ci-job posted a lane-lint comment: " + text)
+
+    def test_an_integration_head_with_an_outside_pr_that_clashes_fails_names_it_and_runs_no_ci_job(self):  # R6
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        tip = self.pr_writes(8, {"lane-eight.txt": "lane 8\n"}, lane_body(OTHER))  # a lane tip: another session's open PR
+        head = self.merge_into_feat("origin/" + branch_of(8))  # the integration head: PR 8's head is a merge's second parent
+        outside = self.pr_writes(9, {"shared-a.txt": "outside\n"}, lane_body(OTHER))  # clean with main, clashes with the head
+        self.assertEqual(self.second_parent(head), tip, "precondition: PR 8's head is not a parent of the head, so the head is no integration head")
+        self.assertFalse(same_lane(self.host.body, self.host.pulls[9]["body"]), "precondition: PR 9 is in this lane, so it is read without --with")
+        self.assertEqual(self.clash(outside, "origin/main"), "clean", "precondition: PR 9 does not merge clean with main")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the integration head does not merge clean with main")
+        self.assertEqual(self.clash(head, outside), "conflict", "precondition: the integration head and PR 9 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--with", "9")
+        self.assertEqual(rc, 1, "an outside PR that clashes with an integration head passed the lane: " + text)
+        self.assertTrue(names_pr(text, 9), "the refusal does not name the clashing PR #9: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the clashing file: " + text)
+        self.assertEqual(pass_lines(text), [], "the refusal printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash: " + text)
+        self.assertEqual(self.host.posted, [], "the refusal posted a lane-lint comment: " + text)
+
+    def test_an_integration_head_that_conflicts_with_main_fails_and_names_main(self):  # R7, an integration head
+        self.pr_writes(8, {"lane-eight.txt": "lane 8\n"}, lane_body(OTHER))  # cut before main moves, so it holds no shared-a.txt
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        head = self.merge_into_feat("origin/" + branch_of(8))
+        self.assertEqual(self.second_parent(head), self.host.pulls[8]["head"]["sha"], "precondition: PR 8's head is not a parent of the head, so the head is no integration head")
+        self.assertEqual(self.clash(head, "origin/main"), "conflict", "precondition: the integration head merges clean with main, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "an integration head that conflicts with main passed the lane: " + text)
+        self.assert_conflict_line_names(text, "main", "the refusal")
+        self.assertEqual(pass_lines(text), [], "an integration head that conflicts with main printed a PASS line: " + text)
+        self.assertEqual(self.host.posted, [], "an integration head that conflicts with main posted a lane-lint comment: " + text)
+
+    def test_a_ref_target_that_conflicts_with_main_fails_and_names_main(self):  # R7, a ref target
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")
+        sha = self.own_writes({"shared-a.txt": "lane 7\n"})
+        self.assertEqual(self.clash(sha, "origin/main"), "conflict", "precondition: the ref target merges clean with main, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, _, _, _ = self.measured("--lane-lint", sha)
+        self.assertEqual(rc, 1, "a ref target that conflicts with main passed the lane: " + text)
+        self.assert_conflict_line_names(text, "main", "the refusal")
+        self.assertEqual(pass_lines(text), [], "a ref target that conflicts with main printed a PASS line: " + text)
+
+    def test_a_head_whose_base_read_is_unknown_with_no_sibling_stops_unknown_before_the_ci_job(self):  # R8, the lane head's own base read
+        head = self.own_writes({"own-a.txt": "lane 7\n"})
+        self.assertEqual(self.host.pulls, {}, "precondition: another PR is listed, so the case has a sibling")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the head does not merge clean with main, so its read would not come from the fault alone")
+        self.fault_merge_tree("refs/remotes/origin/main", head, (128, "fatal: merge-tree could not read the trees"))  # exit 128: neither clean (0) nor conflict (1)
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertTrue(self.tree_faulted, "scope: the head's merge-tree against origin/main was not read, so the fault probes nothing")
+        self.assertEqual({tuple(c[-2:]) for c in self.tree_faulted}, {("refs/remotes/origin/main", head)},
+                         "scope: the fault answered a merge-tree that is not the head against origin/main")
+        self.assertEqual(rc, 1, "an unreadable base read of the head passed the lane: " + text)
+        self.assertEqual(pass_lines(text), [], "an unreadable base read of the head printed a PASS line: " + text)
+        self.assertRegex(text, r"(?i)unknown", "an unreadable base read of the head does not stop as unknown: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past an unreadable base read of the head: " + text)
+
+    def test_a_sibling_whose_base_read_is_unknown_beside_a_clash_stops_unknown_before_the_ci_job(self):  # R9, the other head's base read
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so its read would not come from the fault alone")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.fault_merge_tree("refs/remotes/origin/main", sib, (128, "fatal: merge-tree could not read the trees"))  # exit 128: neither clean (0) nor conflict (1)
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertTrue(self.tree_faulted, "scope: PR 8's merge-tree against origin/main was not read, so the fault probes nothing")
+        self.assertEqual({tuple(c[-2:]) for c in self.tree_faulted}, {("refs/remotes/origin/main", sib)},
+                         "scope: the fault answered a merge-tree that is not PR #8 against origin/main")
+        self.assertTrue(any(c[-2:] == ["refs/remotes/origin/main", head] for c in self.tree_calls),
+                        "scope: the lane head's merge-tree against origin/main did not run, so the case probes nothing")
+        self.assertEqual(rc, 1, "PR #8's unreadable base read passed the lane beside a clash: " + text)
+        self.assertRegex(text, r"(?i)unknown", "PR #8's unreadable base read does not stop as unknown: " + text)
+        self.assertEqual(pass_lines(text), [], "PR #8's unreadable base read printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past PR #8's unreadable base read: " + text)
+        self.assertEqual(self.host.posted, [], "PR #8's unreadable base read posted a lane-lint comment: " + text)
+
+    def test_a_lane_head_that_merged_a_same_lane_sibling_fails_on_a_clash_with_a_third_same_lane_pr(self):  # R10, a head that merged a same-lane sibling
+        self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"lane-eight.txt": "lane 8\n"}, lane_body(OWN))  # PR 8: a same-lane sibling, cut from main, disjoint from the head
+        head = self.merge_into_feat("origin/" + branch_of(8))  # the lane head merges PR 8, so PR 8's head is its second parent
+        third = self.pr_writes(9, {"shared-a.txt": "lane 9\n"}, lane_body(OWN))  # PR 9: same lane, edits the lines the head edits
+        self.assertEqual(self.second_parent(head), sib, "scope: PR 8's head is not a parent of the head, so the head merged no sibling")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[9]["body"]), "precondition: PR 9 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the lane head does not merge clean with main")
+        self.assertEqual(self.clash(third, "origin/main"), "clean", "precondition: PR 9 does not merge clean with main, so the clash is not the pair the case names")
+        self.assertEqual(self.clash(head, third), "conflict", "precondition: the lane head and PR 9 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)  # the stub would pass, so only the counted clash can refuse
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a counted clash between the lane head and PR #9 passed the lane beside a merged sibling: " + text)
+        self.assertTrue(names_pr(text, 9), "the refusal does not name the clashing PR #9: " + text)
+        self.assertIn("shared-a.txt", text, "the refusal does not name the clashing file: " + text)
+        self.assertEqual(pass_lines(text), [], "the refusal printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash: " + text)
+        self.assertEqual(self.host.posted, [], "the refusal posted a lane-lint comment: " + text)
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
