@@ -4,12 +4,11 @@ description: Use when a session has a question, a decision or a task for the own
 ---
 
 The waiting page is the one private page per repo or project. Its Questions tab holds every item
-that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only a session that
-reads its own answers at a wake writes an item.
+that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only triage writes an item (owner, 2026-11-10 14:30-14:32 CST). A lane that wears triage's hat in a run with one lane writes as triage (owner, 2026-11-10 14:33 CST).
 
-A lane never writes an item. A lane session ends, and so does an agent. It puts its
-question in its report. The orchestrator writes the item with itself as `owner`. It routes the
-answer back to the lane or its next try.
+A lane never writes an item, unless it wears triage's hat in a run with one lane. A lane puts its
+question in its report, and sends it to its parent in the same turn. Triage writes the item with the asking session as `owner`, and routes the
+answer back to the lane or its next try. Not built: the route from a lane to triage.
 
 Every repo's page is the same template. The page is fixed. All content lives in its database,
 through the ArtifactData tool. Two exceptions are stored in the page itself: a design mockup (see
@@ -210,14 +209,14 @@ carries the badge "Answered, filing pending" or "Answered, filed in <home>". It 
 
 ## The writer
 
-Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
-project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
+Each page has one writer: triage (owner, 2026-11-10 14:30-14:32 CST). In a run with one lane, the lane
+wears triage's hat and writes it (owner, 2026-11-10 14:33 CST). The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers"). A repo may name the writer's session id in its
 extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. The key send counts only on a delivered result. A rotation updates it.
 
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
-  to its parent in the same turn, and the orchestrator writes the item ("Add an item", step 0).
+  to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
@@ -249,7 +248,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   - Written: the writer closes the item, with the answer and its time in `context`. The owning
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
-- A lane has no chat with the owner. Its question goes in its report, and a lane session also sends it
+- A lane has no chat with the owner. Its question goes in its report, and a lane also sends it
   to its parent with `send_message` in the same turn. The Stop report guard blocks a lane reply whose
   Input Needed asks a pick or a yes/no unless the same turn sent it to its parent or the writer. A box,
   a page link or a promise does not pass.
@@ -799,7 +798,7 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    is unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
-   the orchestrator does (see "Add an item").
+   triage does (see "Add an item").
 
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.
