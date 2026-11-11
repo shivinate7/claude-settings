@@ -14439,6 +14439,35 @@ class ReviewFixAfterMainMerge(ReviewEnv):
         self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the passed fix check")
         self.assert_listed_done(earlier, body, why="round 1 is FAIL, and the fix check passed", live=fx.conflicted)
 
+    def test_g_a_conflicted_merge_of_main_after_a_clean_merge_takes_a_fix_check_on_the_reviewed_head(self):
+        # The owner's ruling of 14:07 CST, Nov 10: a record survives a clean merge of main, and a conflicted merge of main after the review takes one
+        # more fix check. The chain is the reviewed head F, its clean merge of main M1, and M2: a merge of main on M1 that conflicts and is resolved
+        # by hand. The fix check names F, so the fix diff is F..M2.
+        fx = self.real_commits()
+        m2 = self.git_commit(fx.clean, {"a.txt": "resolved\n", "c.txt": "c\n"}, fx.main3)
+        self.facts(fx, [m2])
+        self.assertEqual(fx.parents[m2], [fx.clean, fx.main3], "the fixture's head is not a merge of the clean merge and main3")
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.clean, fx.main3], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, "fixture: the clean merge and main3 do not conflict in git:\n" + r.stdout + r.stderr)
+        host = self.record_host(self.newest_record(head=fx.fixed, pre=fx.pre), head=m2, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=m2)
+        self.assertEqual(rc, 0, "a fix check on a conflicted merge of main after a clean merge of main was refused:\n" + out + err)
+        body = posted_body(self, out)
+        self.assertEqual(parse_text(self, body)["head"], m2, "the printed record names the wrong head")
+        self.assertEqual(parse_text(self, body)["fix"], (fx.fixed, *REVIEW_FIX_PASS[1:]), "the printed record lacks the fix check")
+
+    def test_h_a_conflicted_merge_of_main_after_a_plain_commit_on_the_reviewed_head_is_refused(self):
+        # Control: a plain commit between the reviewed head and the conflicted merge is no clean merge of main, so that chain stays refused.
+        fx = self.real_commits()
+        m3 = self.git_commit(fx.plain, {"a.txt": "resolved\n", "c.txt": "c\n"}, fx.main3)
+        self.facts(fx, [m3])
+        self.assertEqual(fx.parents[fx.plain], [fx.fixed], "fixture: the plain commit is not on the reviewed head")
+        host = self.record_host(self.newest_record(head=fx.fixed, pre=fx.pre), head=m3, commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        rc, out, err = self.fix_from_fixed_head(host, fixed=fx.fixed, live=m3)
+        self.assertEqual(rc, 2, "a fix check after a plain commit and a conflicted merge of main was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
 class ReviewCleanMainMerge(ReviewEnv):
     """A record stays done when the pull request head is one or more clean merges of main after the record's head (decision pr-review-record).
     A clean merge is a merge commit whose second parent is on origin's main and whose tree is git's clean merge
@@ -15290,6 +15319,46 @@ class ReleaseCheck(ReviewEnv):
         rc, out, err = self.run_args("--release-check", "seven", "--lint", f"7@{self.head('feat')}:PASS")
         self.assertEqual(rc, 2, out + err)
         self.assertNotIn("unrecognized arguments", err, err)
+
+    # A clean merge of main after the reviewed head (decision pr-review-record). --release-check reads the record as --reviewed does.
+
+    def base_tip(self, sha):
+        """Move origin's main to `sha`. real_commits leaves main at main3, and `clean` conflicts with main3 (both add a.txt), so a case that needs
+        a clean merge of main moves main to main2: main moved on after the record's merge, and git's merge of main2 with the clean merge is clean."""
+        sh(self.co, "git", "push", "-q", "-f", "origin", f"{sha}:refs/heads/main")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def release_at(self, fx, head, record_head):
+        """-> (rc, lines, err) of --release-check on pull request 7 at `head`, its one record for `record_head`, and the commits, trees and
+        compares of fx. The lint is PASS on `head`."""
+        rc, lines, err, _ = self.release([7], lint=self.lints([7], heads={7: head}), pulls=[self.live(7, head=head)],
+                                         comments=[self.review(7, head=record_head)], commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        return rc, lines, err
+
+    def test_a_clean_merge_of_main_after_the_reviewed_head_passes_the_release_check(self):
+        # Catches: --release-check reading the record by review_state alone, so the reviewed head plus a clean merge of main FAILs as stale, while
+        # --reviewed reads the same record as done.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        r = subprocess.run(["git", "merge-tree", "--write-tree", fx.main2, fx.clean], cwd=self.co, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, "fixture: git's merge of main2 and the clean merge is not clean:\n" + r.stdout + r.stderr)
+        rc, lines, err = self.release_at(fx, fx.clean, fx.fixed)
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_b_the_reviewed_head_passes_the_release_check_on_the_same_base(self):
+        # Control: the record at its own head passes on the base the case above uses, so that case's FAIL is the clean merge's alone.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        rc, lines, err = self.release_at(fx, fx.fixed, fx.fixed)
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]), err)
+
+    def test_c_a_plain_commit_after_the_reviewed_head_still_fails_the_release_check(self):
+        # Control: a plain commit is no clean merge, so its record stays stale, and the line FAILs for that one reason.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        rc, lines, err = self.release_at(fx, fx.plain, fx.fixed)
+        self.assertEqual(rc, 1, err)
+        self.assert_fails_alone(self.line_of(lines, 7), 7, rf"the record is for head {fx.fixed[:9]}")
 
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
