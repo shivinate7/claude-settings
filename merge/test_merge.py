@@ -12418,9 +12418,10 @@ N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
 P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
-def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z"):
-    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads."""
-    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
+def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", head_ref=None):
+    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads.
+    head_ref names the head branch; the default is feat<number>."""
+    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": head_ref or "feat%d" % number, "sha": sha}}
 
 def pr_file(name, previous=None, status="modified", additions=0):
     """One changed file of a pull request, as `pulls/<n>/files` lists it. `previous` is the old name of a rename: GitHub gives it only then.
@@ -17144,6 +17145,565 @@ C0_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")  # C0 control characters, but n
 def controls(text):
     """The C0 control characters in `text`, in order."""
     return C0_CONTROL.findall(text)
+
+
+# `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
+# The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
+# The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
+TOUCH_RUN = "42559512356"
+TOUCH_GUARD = "hooks/test_guard.py"
+TOUCH_FIX = "fix-brief-destructive-git-windows"
+TOUCH_CASE_A = "brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed"
+TOUCH_CASE_B = "brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied"
+TOUCH_NONE = "no open pull request touches them."
+TOUCH_UNKNOWN = f"unknown: no failing case read from run {TOUCH_RUN}; pass --case or --file"
+
+def touch_sha(n):
+    """The 40-hex head of open pull request n: its number, four digits, ten times over, so its first nine characters name it."""
+    return f"{n:04d}" * 10
+
+def touch_head(n, ref, state):
+    """The start of the line `merge --touches` prints for pull request n: `#N HEADREF SHA9 draft|ready: `."""
+    return f"#{n} {ref} {touch_sha(n)[:9]} {state}: "
+
+def touch_pull(n, ref, draft=False):
+    """An open pull request as `pages("pulls")` lists it, on the head branch `ref`."""
+    return batch_pull(n, touch_sha(n), draft=draft, head_ref=ref)
+
+def touch_file(path, *lines):
+    """A changed file as `pulls/N/files` lists it: its path, and its patch made of `lines`, the diff's own lines."""
+    return {"filename": path, "patch": "\n".join(lines) + "\n"}
+
+def failed_case(name):
+    """A failing case's line in a run's log, in the form hooks/test_guard.py prints: FAIL, the got and want verdicts, the tool, the case's name."""
+    return "%s  %-6s(want %-6s)  [%-11s] %s" % ("FAIL", "allow", "deny", "Bash", name)
+
+# #2390's patch for hooks/test_guard.py, as the fix made it: the two hunks that edit a failing case's body.
+# Each case's name is on a context line, unchanged, and its body is in `-` and `+` lines. No `+` line names a failing case.
+INCIDENT_PATCH = r"""@@ -21529,7 +21531,10 @@ add("brief-destructive-git: git stash list is a read and is allowed", "allow",
+ add("brief-destructive-git: git status is allowed", "allow",
+     tool="Agent", prompt="Run `git status`.", subagent_type="builder", model="sonnet")
+ add("brief-destructive-git: a reset --hard in a scratch repo under a session scratchpad is allowed", "allow",
+-    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO + " reset --hard`.",
++    tool="Agent", prompt="Try it first: `git -C '" + SCRATCH_REPO + "' reset --hard`.",
++    subagent_type="builder", model="sonnet")
++add("brief-destructive-git: a reset --hard in a scratch repo named with forward slashes is allowed", "allow",
++    tool="Agent", prompt="Try it first: `git -C " + SCRATCH_REPO.replace(os.sep, "/") + " reset --hard`.",
+     subagent_type="builder", model="sonnet")
+ add("brief-destructive-git: the brief's own allow paragraphs, as a test-author brief, are allowed", "allow",
+     tool="Agent", prompt=BRIEF_ALLOW_PARAGRAPHS, subagent_type="test-author")
+@@ -21564,7 +21569,7 @@ add("brief-destructive-git: builder brief that orders `git worktree remove x` is
+     tool="Agent", prompt="Then run `git worktree remove x`.", subagent_type="builder", model="sonnet")
+ add("brief-destructive-git: a brief whose scratch `git -C` segment is joined to a reset outside it is denied", "deny",
+     BRIEF_DESTRUCTIVE, tool="Agent",
+-    prompt="Compare: `git -C " + SCRATCH_REPO + " status && git reset --hard origin/main`.",
++    prompt="Compare: `git -C '" + SCRATCH_REPO + "' status && git reset --hard origin/main`.",
+     subagent_type="builder", model="sonnet")
+ add("brief-destructive-git: a reset under an inline ``` span line that is not a fence is denied", "deny",
+     BRIEF_DESTRUCTIVE, tool="Agent", prompt="```git status```\nRun `git reset --hard origin/main`.",
+"""
+
+
+def incident_fix_files():
+    """#2390's changed files: hooks/test_guard.py as its fix commit changed it, its failing cases' names on context lines."""
+    return [touch_file(TOUCH_GUARD, *INCIDENT_PATCH.splitlines())]
+
+
+def incident_host(plus_lines=False, **reads):
+    """The open pulls of the incident, listed out of order: #2390 is the fix, and its patch is the one its commit made (incident_fix_files);
+    #2401 is unrelated. `plus_lines` swaps #2390's patch for a synthetic one that adds both cases on `+` lines. Only tests of the `+`-line
+    match and of the job reads use it. None of them claims to be the incident."""
+    pulls = [touch_pull(2401, "docs-x"), touch_pull(2390, TOUCH_FIX)]
+    fix = ([touch_file(TOUCH_GUARD, "@@ -1,1 +1,2 @@", f"+    {TOUCH_CASE_A}", f"+    {TOUCH_CASE_B}")] if plus_lines else incident_fix_files())
+    files = {2390: fix, 2401: [touch_file("docs/x.md", "@@ -1,1 +1,1 @@", "+a docs line")]}
+    return TouchesHost(pulls, files, **reads)
+
+def run_jobs(*rows):
+    """A run's jobs as its jobs read lists them, and each job's log as its log read returns it. A row is (id, name, conclusion, log text); a job
+    with conclusion None is still running. -> (jobs, job_logs): the `jobs` and `job_logs` of TouchesHost, keyed as its reads key them."""
+    listed = [{"id": i, "name": name, "status": "in_progress" if conclusion is None else "completed", "conclusion": conclusion}
+              for i, name, conclusion, _log in rows]
+    return {TOUCH_RUN: listed}, {str(i): log for i, _name, _conclusion, log in rows}
+
+def cost_host(**reads):
+    """Three open pulls, for the cost pin: #2390 (the fix, ready), #2401 (unrelated) and #2402 (a draft that touches the guard file, with no case)."""
+    pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x"), touch_pull(2402, "wip-guard-tests", draft=True)]
+    files = {2390: [touch_file(TOUCH_GUARD, "@@ -1,1 +1,2 @@", f"+    {TOUCH_CASE_A}")],
+             2401: [touch_file("docs/x.md", "@@ -1,1 +1,1 @@", "+a docs line")],
+             2402: [touch_file(TOUCH_GUARD, "@@ -1,1 +1,1 @@", "+a guard line")]}
+    return TouchesHost(pulls, files, **{"logs": {TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}, **reads})
+
+def unit_failed_line(name):
+    """A failing unittest case's line in a run's log, in the form unittest prints: FAIL, the test's name, then its dotted id in merge/test_merge.py."""
+    return f"FAIL: {name} (merge.test_merge.TouchesRead.{name})"
+
+class TouchesHost(PullsHost):
+    """The reads of `merge --touches`, scripted over PullsHost: the open pulls (`pages("pulls")`, PullsHost's list read, whose Stop is `pulls_error`),
+    each open pull's changed files (`pull_files`; `files_error` maps a pull number to the Stop its read raises) and a run's failed lines
+    (`failed_lines`; `logs_error` is its Stop). `file_calls` and `log_calls` keep each call's argument, in order. A gh route is an error, unless
+    `count_gh` runs the real Host reads (pull_files, failed_lines, pages, api) over scripted gh; then `gh_calls` names each route it asked, `jobs`
+    maps a run id to the jobs `actions/runs/N/jobs` lists, and `job_logs` maps a job id to the text `actions/jobs/N/logs` returns."""
+
+    def __init__(self, pulls=(), files=None, logs=None, pulls_error=None, files_error=None, logs_error=None, count_gh=False, jobs=None, job_logs=None):
+        super().__init__(list(pulls), {}, pulls_error=pulls_error, count_gh=count_gh)
+        self.files, self.logs = files or {}, logs or {}
+        self.files_error, self.logs_error = files_error or {}, logs_error
+        self.jobs, self.job_logs = jobs or {}, job_logs or {}
+        self.file_calls, self.log_calls = [], []
+
+    def gh(self, args, cwd=None):
+        if not self.count_gh:  # the flag makes no gh call of its own: any route here is a read the cost pin does not allow
+            raise AssertionError("unexpected gh call: " + " ".join(args))
+        return super().gh(args, cwd)
+
+    def answer(self, rel, argv):
+        """The routes a touches read asks over gh: the open pulls and each pull's files as list reads, a run's jobs as a list read, a job's log."""
+        _method, _path, params, flags, _jq = REST.parse(argv)
+        m = re.fullmatch(r"pulls/(\d+)/files", rel)
+        if m:
+            return self.list_reply(argv, rel, self.files.get(int(m.group(1)), []), None, params, flags)
+        if rel == "pulls":
+            return self.list_reply(argv, rel, self.pulls, None, params, flags)
+        m = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)
+        if m:
+            return self.list_reply(argv, rel, self.jobs.get(m.group(1), []), "jobs", params, flags)
+        m = re.fullmatch(r"actions/jobs/(\d+)/logs", rel)
+        if m:
+            return self.job_logs.get(m.group(1), "")
+        return super().answer(rel, argv)
+
+    def list_reply(self, argv, rel, items, key, params, flags):
+        """A list read's reply as gh api prints it: the page asked for. Under -i it starts with the header block, whose Link (rel="next")
+        names the next page while pages follow, as GitHub sends it."""
+        body = REST.listing(items, key, params, flags, None, 100)
+        if "-i" not in argv:
+            return body
+        size = max(1, min(int(params.get("per_page", 30)), 100))
+        last, n = max(1, -(-len(items) // size)), int(params.get("page", 1))
+        link = f'Link: <https://api.github.com/repos/o/r/{rel}?page={n + 1}>; rel="next"\n' if n < last else ""
+        return "HTTP/2.0 200 OK\n" + link + "\n" + body
+
+    def pull_files(self, n):
+        if self.count_gh:  # the real read: Host.pull_files, one gh call per page
+            return merge.Host.pull_files(self, n)
+        self.file_calls.append(n)
+        if n in self.files_error:
+            raise merge.Stop(self.files_error[n])
+        return self.files.get(n, [])
+
+    def failed_lines(self, run_id):
+        if self.count_gh:  # the real read: Host.failed_lines, one jobs read and one log read per failed job
+            return merge.Host.failed_lines(self, run_id)
+        self.log_calls.append(str(run_id))
+        if self.logs_error:
+            raise merge.Stop(self.logs_error)
+        return self.logs.get(str(run_id), [])
+
+class TouchesRead(Env):
+    """`merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: one line per open pull request that touches a named file, or holds a
+    named case in a `+` line of its patch (never a `-` line, a context line or the `+++` header). With --run, the run's failed lines name the cases.
+    The read lists the open pulls, each one's files and, for --run, the run's failed lines. It takes no lock and merges and posts nothing."""
+
+    def assert_touches_usage(self, *argv, why=None):
+        """A usage error (rc 2) from a parser that knows --touches: stderr holds none of OLD_PARSER_ERRORS, which is what a parser without the flag prints.
+        `why` leads the failure message with the cause. -> stderr, for a caller that reads the refusal's text."""
+        rc, out, err = self.run_args(*argv, host=incident_host())
+        self.assertEqual(rc, 2, (why + "\n" if why else "") + out + err)
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err, f"the parser does not know --touches (it says {old!r}) for argv {argv}")
+        self.assertNotIn("Traceback", err, out + err)
+        return err
+
+    def test_the_incident_fix_is_named_by_its_file_and_the_unrelated_pull_is_not(self):
+        host = incident_host()
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(2401, host.file_calls, "the read never reached the files of #2401")
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"], out)
+
+    def test_a_case_on_a_plus_line_names_its_pull_and_the_unrelated_pull_is_not(self):
+        head = touch_head(2390, TOUCH_FIX, "ready")
+        for argv, want in (
+            (("--case", TOUCH_CASE_A), [head + f"case {TOUCH_CASE_A}"]),
+            (("--case", TOUCH_CASE_B), [head + f"case {TOUCH_CASE_B}"]),
+            (("--file", TOUCH_GUARD, "--case", TOUCH_CASE_A), [head + f"file {TOUCH_GUARD}; case {TOUCH_CASE_A}"]),
+        ):
+            with self.subTest(argv=argv):
+                host = incident_host(plus_lines=True)
+                rc, out, err = self.run_args("--touches", *argv, host=host)
+                self.assertEqual(rc, 0, out + err)
+                self.assertIn(2401, host.file_calls, "the read never reached the files of #2401")
+                self.assertEqual(out.splitlines(), want, out)
+
+    def test_a_run_of_the_incident_never_reads_clear_on_its_fix(self):
+        # Setup first (P7): the fixture is the incident's shape. Each failing case's name is on a context line of #2390's patch, and its body changed.
+        patch = [t for f in incident_host().files[2390] for t in f["patch"].splitlines()]
+        for case in (TOUCH_CASE_A, TOUCH_CASE_B):
+            self.assertTrue(any(t.startswith(" ") and case in t for t in patch), "setup: no context line of #2390's patch names " + case)
+            self.assertFalse(any(t.startswith(("+", "-")) and case in t for t in patch), "setup: a + or - line of #2390's patch names " + case)
+        head = touch_head(2390, TOUCH_FIX, "ready")
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())  # the control: the file query finds the fix
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [head + f"file {TOUCH_GUARD}"], "setup: the file query did not name #2390:\n" + out)
+        host = incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A), failed_case(TOUCH_CASE_B)]})
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
+        self.assertIn(2390, host.file_calls, "the --run read never reached the files of #2390")
+        if rc == 0:
+            self.assertTrue(any(line.startswith(head) for line in out.splitlines()),
+                            "the --run query read clear: exit 0 and no line names #2390, which holds both failing cases:\n" + out)
+        else:
+            self.assertIn("unknown", out + err, f"the --run query exited {rc} without saying unknown:\n" + out + err)
+
+    def test_a_case_on_a_minus_line_context_or_plus_plus_plus_header_does_not_match(self):
+        pull = touch_pull(2430, "guard-tests")
+        files = {2430: [touch_file(TOUCH_GUARD, f"+++ {TOUCH_CASE_A}", "@@ -1,2 +1,2 @@", f"-{TOUCH_CASE_B}", f" {TOUCH_CASE_A}", "+kept line")]}
+        for case in (TOUCH_CASE_A, TOUCH_CASE_B):
+            with self.subTest(case=case):
+                host = TouchesHost([pull], files)
+                rc, out, err = self.run_args("--touches", "--case", case, host=host)
+                self.assertEqual(rc, 0, out + err)
+                self.assertIn(2430, host.file_calls, "the read never reached the files of #2430")
+                self.assertEqual(out.splitlines(), [TOUCH_NONE], "a case off a `+` line matched:\n" + out)
+        host = TouchesHost([pull], files)  # the control: the same patch names a `+` line, so the match itself works
+        rc, out, err = self.run_args("--touches", "--case", "kept line", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2430, "guard-tests", "ready") + "case kept line"], out)
+
+    def test_an_added_line_that_starts_with_three_pluses_is_matched_by_its_case(self):
+        pull = touch_pull(2440, "count-alpha")
+        files = {2440: [touch_file("src/count_alpha.c", "@@ -1,1 +1,2 @@", "+++count_alpha_case();")]}  # an added line, not a `+++ ` header: no space after the pluses
+        host = TouchesHost([pull], files)
+        rc, out, err = self.run_args("--touches", "--case", "count_alpha_case", host=host)
+        self.assertIn(2440, host.file_calls, "the read never reached the files of #2440")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2440, "count-alpha", "ready") + "case count_alpha_case"],
+                         "an added line that starts with +++ and no space was skipped as a header:\n" + out + err)
+
+    def test_a_real_plus_plus_plus_b_file_header_is_still_skipped(self):
+        pull = touch_pull(2441, "header-only")
+        files = {2441: [touch_file("src/count_alpha_case.c", "+++ b/src/count_alpha_case.c")]}  # the only `+` line is a file header; its path holds the case
+        host = TouchesHost([pull], files)
+        rc, out, err = self.run_args("--touches", "--case", "count_alpha_case", host=host)
+        self.assertIn(2441, host.file_calls, "the read never reached the files of #2441")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [TOUCH_NONE], "a `+++ b/` file header matched a case:\n" + out + err)
+
+    def test_no_match_prints_the_none_line_and_exits_0(self):
+        host = TouchesHost([])  # the empty state: no open pull, so no file is read
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.file_calls, [], "a file was read with no open pull request")
+        self.assertEqual(out.splitlines(), [TOUCH_NONE], out)
+        host = TouchesHost([touch_pull(2401, "docs-x")], {2401: [touch_file("docs/x.md", "+a docs line")]})
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(2401, host.file_calls, "the read never reached the files of #2401")
+        self.assertEqual(out.splitlines(), [TOUCH_NONE], out)
+
+    def test_a_draft_is_named_draft_and_a_ready_pull_ready(self):
+        pulls = [touch_pull(2402, "wip-guard-tests", draft=True), touch_pull(2390, TOUCH_FIX)]  # out of order
+        files = {n: [touch_file(TOUCH_GUARD, f"+    {TOUCH_CASE_A}")] for n in (2390, 2402)}
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=TouchesHost(pulls, files))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}",
+                                            touch_head(2402, "wip-guard-tests", "draft") + f"file {TOUCH_GUARD}"], out)
+
+    def test_a_failed_read_prints_nothing_and_says_unknown(self):
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x")]  # in order: #2390 matches before #2401's read fails
+        files = {2390: [touch_file(TOUCH_GUARD, f"+    {TOUCH_CASE_A}")], 2401: [touch_file("docs/x.md", "+a docs line")]}
+        for read, host, argv in (
+            ("the open pulls", TouchesHost(pulls, files, pulls_error="reading the open pulls failed: HTTP 502"), ("--file", TOUCH_GUARD)),
+            ("the files of #2401", TouchesHost(pulls, files, files_error={2401: "reading the files of #2401 failed: HTTP 502"}), ("--file", TOUCH_GUARD)),
+            ("the run's failed lines", TouchesHost(pulls, files, logs_error="reading the run's failed lines failed: HTTP 502"), ("--run", TOUCH_RUN)),
+        ):
+            with self.subTest(read=read):
+                rc, out, err = self.run_args("--touches", *argv, host=host)
+                self.assertEqual(rc, 1, out + err)
+                self.assertEqual(out, "", "a failed read printed a partial result")
+                self.assertIn("unknown", out + err, "a failed read did not say unknown")
+
+    def test_a_run_with_no_failing_lines_is_unknown_and_never_clear(self):
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=incident_host(logs={TOUCH_RUN: []}))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(TOUCH_UNKNOWN, out + err, "a run with no failing lines printed no unknown line")
+        self.assertNotIn(TOUCH_NONE, out + err, "a run with no failing lines read as clear")
+        # with --file too, the silent run is still unknown beside the file: the file alone is a query of its own, and it runs
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, "--file", TOUCH_GUARD, host=incident_host(logs={TOUCH_RUN: []}))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("merge: unknown", err, "a silent run beside --file read clear:\n" + out + err)
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"], out)
+
+    def test_it_stands_alone_and_needs_a_selector(self):
+        for argv in (("--touches",),
+                     ("7", "--touches", "--file", TOUCH_GUARD),
+                     ("--touches", "--file", TOUCH_GUARD, "--reviewed"),
+                     ("--touches", "--file", TOUCH_GUARD, "--confirm"),
+                     ("--touches", "--file", TOUCH_GUARD, "--unlock"),
+                     ("--touches", "--file", TOUCH_GUARD, "--role", "coordinator"),
+                     ("7", "--touches", "--file", TOUCH_GUARD, "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no"),
+                     ("7", "--touches", "--file", TOUCH_GUARD, "--lane-lint"),
+                     ("--touches", "--file", TOUCH_GUARD, "--idle-lanes")):
+            with self.subTest(argv=argv):
+                self.assert_touches_usage(*argv)
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())  # the control: the flag alone is valid
+        self.assertEqual(rc, 0, out + err)
+
+    def test_touches_with_release_check_is_refused_like_the_other_flags(self):
+        # Setup first: the flag alone reads the one pull that touches the file, so the refusal below cannot come from a fixture that reads nothing.
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())
+        self.assertEqual(rc, 0, "setup: the --touches read with --file alone did not run:\n" + out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"],
+                         "setup: the --touches read named the wrong pull:\n" + out)
+        err = self.assert_touches_usage("--touches", "--file", TOUCH_GUARD, "--release-check", "5",
+                                        why="--touches beside --release-check exited 0, so the release check never ran and no refusal was printed")
+        self.assertRegex(err, r"error: [^\n]*stands alone", "the refusal does not say --touches stands alone:\n" + err)
+
+    def test_a_run_query_reads_one_list_page_each_pulls_files_and_the_run_once(self):
+        host = cost_host()
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.list_calls, [("pulls", {"state": "open"})], "the open pulls were not read as one list page")
+        self.assertEqual(sorted(host.file_calls), [2390, 2401, 2402], "the files were not read once per open pull")
+        self.assertEqual(host.log_calls, [TOUCH_RUN], "the run's failed lines were not read once")
+        host = cost_host()  # no --run: the failed lines are not read at all
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.log_calls, [], "a query with no --run read the run's failed lines")
+        self.assertEqual(sorted(host.file_calls), [2390, 2401, 2402], "the files were not read once per open pull")
+
+    def test_it_takes_no_lock_and_moves_no_ref_or_file(self):
+        before, status = self.refs(), sh(self.co, "git", "status", "--porcelain")
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=incident_host(plus_lines=True, logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}))
+        self.assertEqual(rc, 0, out + err)
+        self.assertFalse(self.lock_ref(), "--touches took the merge lock")
+        self.assertEqual(self.refs(), before, "--touches moved a ref")
+        self.assertEqual(sh(self.co, "git", "status", "--porcelain"), status, "--touches wrote a file in the checkout")
+
+    def test_a_full_page_of_open_pulls_is_read_in_full(self):
+        numbers = range(2301, 2401)  # 100 open pulls, one full page
+        pulls = [touch_pull(n, f"feat-{n}") for n in numbers]
+        files = {n: [touch_file("docs/x.md", "+a docs line")] for n in numbers}
+        files[2301] = [{"filename": "docs/logo.png"}]  # a binary file has no patch
+        files[2350] = [touch_file(TOUCH_GUARD, f"+    {TOUCH_CASE_A}")]
+        host = TouchesHost(pulls, files)
+        rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(sorted(host.file_calls), list(numbers), "the files of an open pull were not read")
+        self.assertEqual(out.splitlines(), [touch_head(2350, "feat-2350", "ready") + f"file {TOUCH_GUARD}"], out)
+        host = TouchesHost(pulls, files)  # the patch-less file still matches by its path
+        rc, out, err = self.run_args("--touches", "--file", "docs/logo.png", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2301, "feat-2301", "ready") + "file docs/logo.png"], out)
+
+    def test_a_run_line_with_a_reason_note_names_its_case_without_the_note(self):
+        note = "  (the reason does not name rule 'brief-destructive-git': the Bash call was allowed)"  # test_guard's suffix on a line that has a reason
+        host = incident_host(plus_lines=True, logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A) + note]})
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"],
+                         "the note after the case was read as part of the case:\n" + out)
+
+    def test_a_unittest_fail_line_names_its_case_and_the_file_of_its_module(self):
+        name = "test_a_brief_orders_the_reset_is_denied"
+        module_pull = touch_pull(2430, "guard-tests")  # touches the module's own file, with no case text
+        case_pull = touch_pull(2431, "case-tests")  # names the test in a `+` line of another file
+        files = {2430: [touch_file("merge/test_merge.py", "+an unrelated line")], 2431: [touch_file("docs/x.md", f"+    {name}")]}
+        host = TouchesHost([module_pull, case_pull], files, logs={TOUCH_RUN: [unit_failed_line(name)]})
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2430, "guard-tests", "ready") + "file merge/test_merge.py",
+                                            touch_head(2431, "case-tests", "ready") + f"case {name}"],
+                         "the unittest line named no case, or no file from its module:\n" + out)
+
+    def test_a_run_whose_failing_lines_name_no_case_is_unknown_beside_a_file_or_case(self):
+        unparsed = ["FAIL: the runner stopped before any case ran"]  # a failing line with no case text: it parses to nothing
+        for argv in (("--file", TOUCH_GUARD), ("--case", TOUCH_CASE_A)):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, *argv, host=incident_host(logs={TOUCH_RUN: unparsed}))
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("merge: unknown", err, "the run's unparsed failing lines read clear beside " + argv[0] + ":\n" + out + err)
+
+    def test_a_red_job_that_timed_out_or_was_cancelled_is_unknown_beside_a_file(self):
+        for conclusion in ("timed_out", "cancelled"):
+            with self.subTest(conclusion=conclusion):
+                jobs = {TOUCH_RUN: [{"id": 301, "name": "tests", "conclusion": conclusion}]}  # the real jobs read, over scripted gh
+                rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, "--file", TOUCH_GUARD, host=incident_host(jobs=jobs, count_gh=True))
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("merge: unknown", err, f"a {conclusion} red job read clear beside --file:\n" + out + err)
+
+    def touches_run(self, rows, *argv, pulls=None, files=None):
+        """`merge --touches --run RUN` beside argv, over the run of `rows` (run_jobs) and the open pulls: the `+`-line pulls of incident_host(plus_lines=True),
+        unless `pulls` and `files` name others. These tests are about the job reads and the unknown lines, not the incident's shape, which
+        test_a_run_of_the_incident_never_reads_clear_on_its_fix pins. -> (rc, out, err). The scope is read first: the run's jobs were listed, and the
+        log of each failed job was read (the rollup job's log is not asked for), so a verdict below is about the log lines and never about a read that did not run."""
+        jobs, logs = run_jobs(*rows)
+        if pulls is None:
+            host = incident_host(plus_lines=True, jobs=jobs, job_logs=logs, count_gh=True)
+        else:
+            host = TouchesHost(pulls, files, jobs=jobs, job_logs=logs, count_gh=True)
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, *argv, host=host)
+        self.assertIn(f"actions/runs/{TOUCH_RUN}/jobs", host.gh_calls, "the run's jobs were not listed")
+        for i, name, conclusion, _log in rows:
+            if conclusion == "failure" and name != REQUIRED_CHECK:
+                self.assertIn(f"actions/jobs/{i}/logs", host.gh_calls, f"the log of failed job {i} was never read")
+        return rc, out, err
+
+    def unparsed_beside_parsed_rows(self):
+        """Job 1 logs a case no open pull touches, so its case alone reads clear on the tip; job 2's log holds only the exit line, which parses to nothing."""
+        other = "brief-destructive-git: a case no open pull request touches"
+        return ((201, "tests", "failure", failed_case(other)), (202, "lint", "failure", "Error: Process completed with exit code 1."))
+
+    def test_a_failed_job_that_logs_no_case_beside_a_parsed_one_is_unknown_never_clear(self):
+        rc, out, err = self.touches_run(self.unparsed_beside_parsed_rows())
+        self.assertEqual(rc, 1, "a failed job that logged no case read clear beside a parsed one:\n" + out + err)
+        self.assertIn("merge: unknown", err, "a failed job that logged no case printed no unknown beside a parsed one:\n" + out + err)
+        self.assertNotIn(TOUCH_NONE, out + err, "the clear line printed beside a failed job that logged no case")
+
+    def test_a_failed_job_that_logs_no_case_beside_a_parsed_one_keeps_its_matches_on_stdout(self):
+        rc, out, err = self.touches_run(self.unparsed_beside_parsed_rows(), "--file", TOUCH_GUARD)
+        self.assertEqual(rc, 1, "a failed job that logged no case read clear beside --file:\n" + out + err)
+        self.assertIn("merge: unknown", err, "a failed job that logged no case printed no unknown beside --file:\n" + out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"],
+                         "the matches on stdout changed beside the unknown:\n" + out)
+
+    def test_a_startup_failure_action_required_or_running_job_beside_a_parsed_failure_is_unknown(self):
+        for conclusion in ("startup_failure", "action_required", None):
+            with self.subTest(conclusion=conclusion):
+                rows = ((201, "tests", "failure", failed_case(TOUCH_CASE_A)), (202, "lint", conclusion, ""))
+                rc, out, err = self.touches_run(rows)
+                self.assertEqual(rc, 1, f"a job with conclusion {conclusion!r} beside a parsed failed job read clear:\n" + out + err)
+                self.assertIn("merge: unknown", err, f"a job with conclusion {conclusion!r} printed no unknown beside a parsed failed job:\n" + out + err)
+                self.assertNotIn(TOUCH_NONE, out + err, f"the clear line printed beside a job with conclusion {conclusion!r}")
+                self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"],
+                                 "the matches on stdout changed beside the unknown:\n" + out)
+
+    def test_a_failed_job_with_an_empty_log_beside_a_parsed_failure_is_unknown(self):
+        rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)), (202, "lint", "failure", "")))  # HTTP 200, no lines
+        self.assertEqual(rc, 1, "a failed job with an empty log read clear beside a parsed failed job:\n" + out + err)
+        self.assertIn("merge: unknown", err, "a failed job with an empty log printed no unknown beside a parsed failed job:\n" + out + err)
+        self.assertNotIn(TOUCH_NONE, out + err, "the clear line printed beside a failed job with an empty log")
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"],
+                         "the matches on stdout changed beside the unknown:\n" + out)
+
+    def test_a_failing_line_that_names_no_case_beside_a_parsed_one_in_one_job_is_unknown(self):
+        pull7 = touch_pull(7, "wrapper-cases")  # open pull 7 adds the unparsed line's case to hooks/test_wrappers.py
+        files = {7: [touch_file("hooks/test_wrappers.py", '+    check("test_wrappers name without bracket")')]}
+        one_job = ((201, "tests", "failure", failed_case("case alpha") + "  (note)\nFAIL  name without bracket  (note)"),)  # one log, two failing lines
+        rc, out, err = self.touches_run(one_job, pulls=[pull7], files=files)
+        self.assertEqual(rc, 1, "a failing line that names no case read clear beside a parsed one in the same job:\n" + out + err)
+        self.assertIn("merge: unknown", err, "a failing line that names no case printed no unknown beside a parsed one in the same job:\n" + out + err)
+        self.assertNotIn(TOUCH_NONE, out + err, "the clear line printed beside a failing line that names no case")
+
+    def test_a_job_with_only_the_parsed_line_still_gives_its_answer(self):
+        pull7 = touch_pull(7, "wrapper-cases")
+        files = {7: [touch_file("hooks/test_wrappers.py", '+    check("test_wrappers name without bracket")')]}
+        rc, out, err = self.touches_run(((201, "tests", "failure", failed_case("case alpha") + "  (note)"),), pulls=[pull7], files=files)
+        self.assertEqual(rc, 0, "a job whose only failing line names a case read as unknown:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "a job whose only failing line names a case printed unknown:\n" + err)
+        self.assertEqual(out.splitlines(), [TOUCH_NONE], "the job with only the parsed line did not give its answer:\n" + out)
+
+    def test_a_unittest_summary_line_beside_a_parsed_fail_keeps_the_parsed_answer(self):
+        name = "test_a_brief_orders_the_reset_is_denied"
+        pull = touch_pull(2431, "case-tests")  # names the test in a `+` line, so the parsed FAIL line has an answer to give
+        files = {2431: [touch_file("docs/x.md", f"+    {name}")]}
+        rows = ((201, "tests", "failure", unit_failed_line(name) + "\nFAILED (failures=1)"),)  # the summary line parses to no case
+        rc, out, err = self.touches_run(rows, pulls=[pull], files=files)
+        self.assertEqual(rc, 0, "the unittest summary line beside a parsed FAIL read as unknown:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "the unittest summary line printed unknown beside a parsed FAIL:\n" + err)
+        self.assertEqual(out.splitlines(), [touch_head(2431, "case-tests", "ready") + f"case {name}"],
+                         "the parsed FAIL line did not keep its answer beside the summary line:\n" + out)
+
+    def test_success_skipped_and_neutral_jobs_beside_a_parsed_failure_read_clear(self):
+        for conclusion in ("success", "skipped", "neutral"):
+            with self.subTest(conclusion=conclusion):
+                rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)), (202, "lint", conclusion, "")))
+                self.assertEqual(rc, 0, f"a job with conclusion {conclusion!r} beside a parsed failed job read as unknown:\n" + out + err)
+                self.assertNotIn("merge: unknown", err, f"a job with conclusion {conclusion!r} printed unknown beside a parsed failed job:\n" + err)
+                self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"], out)
+
+    def test_the_all_jobs_passed_rollup_failing_beside_a_parsed_failure_is_not_read_unknown(self):
+        rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)),
+                                         (202, REQUIRED_CHECK, "failure", f"{REQUIRED_CHECK}: failure")))  # the rollup fails in every red run, with this one line
+        self.assertEqual(rc, 0, "the rollup job's failure read as unknown beside a parsed failed job:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "the rollup job's failure printed unknown beside a parsed failed job:\n" + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"], out)
+
+    def test_two_failed_jobs_that_each_log_a_case_read_clear(self):
+        rc, out, err = self.touches_run(((201, "tests", "failure", failed_case(TOUCH_CASE_A)), (202, "lint", "failure", failed_case(TOUCH_CASE_B))))
+        self.assertEqual(rc, 0, "two failed jobs that each log a case read as unknown:\n" + out + err)
+        self.assertNotIn("merge: unknown", err, "two failed jobs that each log a case printed unknown:\n" + err)
+        self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}; case {TOUCH_CASE_B}"], out)
+
+    def test_a_changed_file_with_no_patch_makes_its_pull_unknown_for_a_case(self):
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x")]
+        files = {2390: [touch_file(TOUCH_GUARD, f"+    {TOUCH_CASE_A}")],  # holds the case in a `+` line: its own match still prints
+                 2401: [{"filename": "docs/logo.png"}]}  # a binary file: GitHub gives it no patch
+        unknown = touch_head(2401, "docs-x", "ready") + "unknown: file docs/logo.png has no patch to read"
+        match = touch_head(2390, TOUCH_FIX, "ready") + f"case {TOUCH_CASE_A}"
+        rc, out, err = self.run_args("--touches", "--case", TOUCH_CASE_A, host=TouchesHost(pulls, files))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(unknown, (out + err).splitlines(), "the patch-less file did not make its pull unknown:\n" + out + err)
+        self.assertIn(match, (out + err).splitlines(), "the pull that holds the case lost its line beside the unknown one:\n" + out + err)
+        self.assertNotIn(TOUCH_NONE, out + err, "a case query read a pull with a patch-less file as clear")
+        rc, out, err = self.run_args("--touches", "--file", "docs/logo.png", host=TouchesHost(pulls, files))  # the control: a file query matches by path
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(out.splitlines(), [touch_head(2401, "docs-x", "ready") + "file docs/logo.png"], out)
+
+    def test_an_empty_run_case_or_file_is_a_usage_error(self):
+        for argv in (("--run", ""), ("--run", "", "--file", TOUCH_GUARD), ("--case", ""), ("--case", "", "--file", TOUCH_GUARD),
+                     ("--file", ""), ("--file", "", "--case", TOUCH_CASE_A)):
+            with self.subTest(argv=argv):
+                self.assert_touches_usage("--touches", *argv)
+
+    def test_a_file_spelled_with_a_leading_dot_slash_matches_its_path(self):
+        rc, out, err = self.run_args("--touches", "--file", "./" + TOUCH_GUARD, host=incident_host())
+        self.assertEqual(rc, 0, out + err)
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 1, "the ./ spelling matched no pull, or more than the fix:\n" + out)
+        self.assertTrue(lines[0].startswith(touch_head(2390, TOUCH_FIX, "ready")), "the ./ spelling did not name #2390:\n" + out)
+        self.assertRegex(lines[0], rf"file (\./)?{re.escape(TOUCH_GUARD)}$", "the file hit does not name the file")
+
+    def test_an_os_error_from_a_read_is_unknown_with_no_traceback(self):
+        no_gh = os.path.join(self.t, "no-gh")  # a PATH with no gh on it: the read's program cannot start
+        os.makedirs(no_gh)
+        with unittest.mock.patch.dict(os.environ, {"PATH": no_gh}):
+            try:
+                rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=merge.Host(pause=lambda s: None))
+            except OSError as e:
+                self.fail(f"an OSError from a read escaped merge.main instead of printing a `merge: unknown` line: {e!r}")
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("merge: unknown", err, out + err)
+        self.assertNotIn("Traceback", err, err)
+
+    def test_a_run_query_makes_each_gh_read_once_over_the_real_host(self):
+        jobs = {TOUCH_RUN: [{"id": 201, "name": "tests", "conclusion": "failure"}, {"id": 202, "name": "lint", "conclusion": "failure"},
+                            {"id": 203, "name": "build", "conclusion": "success"}]}
+        job_logs = {"201": failed_case(TOUCH_CASE_A), "202": failed_case(TOUCH_CASE_B)}  # the log of each failed job, one line each
+        pulls = [touch_pull(2390, TOUCH_FIX), touch_pull(2401, "docs-x"), touch_pull(2402, "wip-many", draft=True)]
+        files = {2390: [touch_file(TOUCH_GUARD, f"+    {TOUCH_CASE_A}")],
+                 2401: [touch_file("docs/x.md", "+a docs line")],
+                 2402: [touch_file(f"docs/gen/{i:03d}.md", "+a generated line") for i in range(101)]}  # 101 files: two pages of 100
+        host = TouchesHost(pulls, files, jobs=jobs, job_logs=job_logs, count_gh=True)
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=host)
+        self.assertEqual(rc, 0, out + err)
+        expected = [f"actions/runs/{TOUCH_RUN}/jobs",  # the run: one jobs read, then one log read per failed job (not the passing one)
+                    "actions/jobs/201/logs", "actions/jobs/202/logs",
+                    "pulls",  # the open pulls: one page
+                    "pulls/2390/files", "pulls/2401/files", "pulls/2402/files", "pulls/2402/files"]  # each pull's files; 2402's two pages
+        self.assertEqual(sorted(host.gh_calls), sorted(expected), "the gh calls of a run query differ from one read each:\n" + "\n".join(host.gh_calls))
+
+    def test_the_module_docstring_names_the_flag_and_each_read_it_makes(self):
+        lines = (merge.__doc__ or "").splitlines()
+        start = next((i for i, line in enumerate(lines) if "merge --touches" in line), None)
+        self.assertIsNotNone(start, "merge.py's module docstring does not name `merge --touches`")
+        end = start + 1
+        while end < len(lines) and lines[end].startswith("  ") and not lines[end].startswith("  merge "):  # the entry's continuation lines, up to the next entry
+            end += 1
+        entry = "\n".join(lines[start:end])
+        for kind in ("pull list", "pulls/N/files", "jobs read", "log read"):
+            self.assertIn(kind, entry, f"the `merge --touches` entry of merge.py's docstring does not name the {kind} read")
 
 
 if __name__ == "__main__":
