@@ -6,9 +6,9 @@
  "phase": "next",
  "lane": "",
  "why": "hooks/test_guard.py is a busy file: lanes that touch it clash in batches, and clashes drove 147 lane drops across the last 15 batch merges (retrospective audit 09:37 CST Nov 11). One file per rule lets lanes on different rules stack without a conflict.",
- "note": "Ruling R26 part 4 (owner box answer 10:05 CST Nov 11, \"Both\"; plan 3581e5a under item 3.4): run it first in stage 3, while few lanes are open. Its twin: the batch runner puts lanes on the same busy file (hooks/guard.py, hooks/test_guard.py, hooks/mutate_guard.py) in back-to-back stacked batches, never one batch (home: decision batch-freeze-lane-set, step batch-freeze-lane-set-enforce). Held with stage 3 until the batch strategy is settled (R25).",
+ "note": "Ruling R26 part 4 (owner box answer 10:05 CST Nov 11, \"Both\"; plan 3581e5a under item 3.4): run it first in stage 3, while few lanes are open. Its twin: the batch runner puts lanes on the same busy file (hooks/guard.py, hooks/test_guard.py, hooks/mutate_guard.py) in back-to-back stacked batches, never one batch (home: decision batch-freeze-lane-set, step batch-freeze-lane-set-enforce). Stage 3 hold lifted (coordinator 10:07 CST, R26 fully ruled): stage 3 starts with 3.0 once the drain's named queue lands, with stage 4 alongside; this step is stage 3's first item.",
  "source": "owner 2026-11-11 10:05 CST, relayed by the retrospective session",
  "owner": "triage",
- "updatedAt": "2026-11-11T10:11:00-06:00",
+ "updatedAt": "2026-11-11T10:09:00-06:00",
  "blockedBy": []
 }
