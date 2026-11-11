@@ -5843,7 +5843,7 @@ COORDINATOR_SCOPE_MODE = "deny"
 COORDINATOR_SCOPE_REASON = (
     "Rule (Roles): a coordinator briefs lanes and writes records. It does not change a repository's code, "
     "settings or instructions itself "
-    "(decision session-tiers, a coordinator stays in its session role and a guard enforces it). "
+    "(decision session-tiers, a coordinator stays in its session role and a guard enforces it). "  # glossary-ok: session-tiers is the decision's file name
     "Remedy: brief a lane to make this change, with the files and the check that proves it. "
     "Write records and your scratchpad yourself."
 )
