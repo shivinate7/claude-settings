@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 18:45 CST. The owner's list is complete for now (owner 18:43 CST).
+the history. Last rewrite: 2026-11-10 19:03 CST. The owner's list closed at 18:43 CST; R21 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -334,6 +334,16 @@ After 3.11, because its third part uses the same owner grant route.
   Replaces CLAUDE.md questions-go-to-owner, "The started session may wait on it." Unmeasured: how often
   lanes have stalled on a popup so far. Home: CLAUDE.md questions-go-to-owner; decision
   questions-go-to-owner.
+- **R21. A page write never asks.** Owner 19:01 CST Nov 10: "ive found repos in cloud sessions of
+  triage of repos requesting for me to permit this when it should just always be allowed this needs to
+  be fixed too". The card was "Allow Claude to use db write (claude-artifacts)?". Outcome: triage stalls
+  on a card for an act that is always allowed, so the owner's answers wait. The hooks that judge a page
+  write (call_judge.py, guard.py) still run, so no check is lost.
+  1. Read on main, 19:02 CST: `settings.json` already allows `mcp__claude-artifacts__db_write` and the
+     other page tools. The cloud card shows anyway. Cause unproven. Suspects: the cloud tool is named
+     `ArtifactData` and no allow entry names it, or auto mode asks despite the entry.
+  2. The fix lane first reproduces the card in a cloud session. It then adds the name the card checks,
+     for page reads and writes only. A test proves a page write in a cloud session shows no card.
 - **D3. How much a lane writes (open).** Owner 16:46 CST Nov 10: "lane's own chat never reaches me
   anyway, pretty true -- but they do still type a whole fuckton of a lot, and that is tbd on whether we
   should have some sorta rules on how much a lane "chirps" in a snese". Open: measure lane output per
