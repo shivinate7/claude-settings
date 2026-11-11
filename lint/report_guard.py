@@ -145,14 +145,16 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
-the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
+the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
+the one read `merge --reviewed` makes: a record survives clean merges of main, and a clean-merge read that cannot run keeps it stale, so it still blocks. A claim with no
 PR on its line is refused and asks for the PR. With no record for the live head, the remedy names the act (`merge <pr> --review-record ...`, then post the
-record) and never the live head; a record review_state reads open or held is refused with that state and its why, and no post act. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
+record) and never the live head; a record live_review_state reads open or held is refused with that state and its why, and no post act. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
 remedy as a missing record, with the post as a new comment), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
-process kept or timer. A stop_hook_active rewrite is not checked.
+process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
+commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
 """
 import bisect
 import datetime
@@ -2568,6 +2570,7 @@ REVIEW_HISTORY_RE = re.compile(
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
+REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply, under the Stop hook's 80 s timeout (settings.json); the question and relay checks run outside this budget
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
     "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
@@ -2615,11 +2618,21 @@ def review_claims(text):
     return claims
 
 
-def _gh_json(args, cwd):
-    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer."""
+def _time_left(end):
+    """Seconds left of the whole-check budget that ends at `end`, or raises: no time left is a read that could not run."""
+    import time
+    left = end - time.monotonic()
+    if left <= 0:
+        raise TimeoutError("the review check's time budget is spent")
+    return left
+
+
+def _gh_json(args, cwd, end):
+    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer. The read ends at REVIEW_READ_TIMEOUT or
+    at `end`, the end of the whole check's budget, whichever is first."""
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
     run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
-                        timeout=REVIEW_READ_TIMEOUT)
+                        timeout=min(REVIEW_READ_TIMEOUT, _time_left(end)))
     if run.returncode:
         raise RuntimeError("gh api exited %d" % run.returncode)
     return json.loads(run.stdout)
@@ -2645,11 +2658,14 @@ def _text_after_ci_line(body, merge_mod):
 def review_record_problem(hook, text):
     """(refusal, note) for a lane reply that claims a review PASS. A reply with no claim, or a session that is not a lane,
     reads nothing. A claim with no PR is refused. Else two REST reads (the PR's live head, its issue comments); the newest
-    review record must name the PR, and merge's review_state must call it done for the live head. A read that could not
-    run, or a merge tool that could not load, is a note with UNKNOWN, never a block."""
+    review log must name the PR, and merge's live_review_state must call it done for the live head (_live_state). A read
+    of the PR or its comments that could not run, or a merge tool that could not load, is a note with UNKNOWN, never a block.
+    A clean-merge read that could not run keeps a stale record stale, so it blocks, with a note that says so."""
     claims = review_claims(text)
     if not claims:
         return "", ""
+    import time
+    end = time.monotonic() + REVIEW_CHECK_BUDGET  # one budget for every claimed PR and every read, so the hook ends under its timeout
     _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
@@ -2665,9 +2681,9 @@ def review_record_problem(hook, text):
             if merge_mod is None:
                 raise ImportError("merge/merge.py not found")
             cwd = hook.get("cwd")
-            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)["head"]["sha"]
+            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd, end)["head"]["sha"]
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
-                              "--paginate", "--slurp"], cwd)
+                              "--paginate", "--slurp"], cwd, end)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
             rec, body = _newest_record(n, comments, merge_mod)
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
@@ -2676,13 +2692,29 @@ def review_record_problem(hook, text):
         if rec is None and body is not None:
             cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
             reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
+        elif not rec or rec["n"] != n:
+            reasons.append(REVIEW_NO_RECORD % (n, n, n))
         else:
-            state, why = merge_mod.review_state(rec, live) if rec and rec["n"] == n else ("bad", "")
+            state, why = _live_state(merge_mod, rec, live, cwd, end)
             if state in ("open", "held"):
                 reasons.append(REVIEW_NOT_DONE % (n, state, why))
             elif state != "done":
                 reasons.append(REVIEW_NO_RECORD % (n, n, n))
+            if getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", None) and merge_mod.REVIEW_SURVIVAL_UNKNOWN in why:
+                notes.append("Review-record guard: PR #%d reads stale: %s." % (n, why))
     return " ".join(reasons), " ".join(notes)
+
+
+def _live_state(merge_mod, rec, live, cwd, end):
+    """(state, why) of `rec` for the live head, from merge/merge.py live_review_state: the one read `merge --reviewed` makes, so the guard and
+    the list agree on a record that survives clean merges of main. Its reads share the time left of the whole check's budget (`end`). Any error reads as stale, so
+    a record this check cannot prove done still blocks, as a stale record did before the clean-merge read."""
+    try:
+        with merge_mod.shared_deadline(_time_left(end)):
+            host = merge_mod.Host(cwd=cwd or None)
+            return merge_mod.live_review_state(host, rec, live, host.base)  # a fresh Host: its base is main, as `merge --reviewed` reads it
+    except Exception as err:  # never a pass: the record is not proven done
+        return "stale", "%s: %s" % (getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", "the clean-merge read is unknown"), type(err).__name__)
 
 
 def refusal_reason(tools, hold=""):
