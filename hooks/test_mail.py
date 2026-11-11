@@ -42,12 +42,13 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
 6. The sweep of old run folders is proven in hooks/test_feedback_inbox.py. Not repeated here.
 7. A stand-in git (a script named git, first on the case's PATH) stands in for the git calls of one machine.
    It logs each call's env, fails a named subcommand, drops a named update-index (its stdin is read and
-   dropped, exit 0), feeds an update-index --index-info CRLF lines (the "crlf" action), drops the removal
-   lines of an update-index --index-info (the "drop-removal" action), or runs an interloper once before its
-   push, then execs the real git. Each intercepting action writes a marker file, and its case asserts the
-   marker, so an unrun stub fails the case. ReadShowFails, PushRefusedRetry, TakeBothFromOneTip, PromptEnv,
-   IndexUpdateDropped, CrlfIndexLines and TakeRemovalDropped use it. The stub is an extensionless POSIX
-   script, and Windows CreateProcess never runs such a file, so those cases skip on Windows with that reason.
+   dropped, exit 0), feeds an update-index --index-info CRLF lines (the "crlf" action), feeds a hash-object
+   --stdin CRLF lines (the "crlf-stdin" action), drops the removal lines of an update-index --index-info (the
+   "drop-removal" action), or runs an interloper once before its push, then execs the real git. Each
+   intercepting action writes a marker file, and its case asserts the marker, so an unrun stub fails the case.
+   ReadShowFails, PushRefusedRetry, TakeBothFromOneTip, PromptEnv, IndexUpdateDropped, CrlfIndexLines,
+   CrlfBlobHashed and TakeRemovalDropped use it. The stub is an extensionless POSIX script, and Windows
+   CreateProcess never runs such a file, so those cases skip on Windows with that reason.
 8. Timeouts. Each git call of a turn start carries its own bound. The bounds of one moved turn sum to
    10 s or less: fixed per-step bounds, the worst case where every step runs its full bound. The case
    pins that shape. A shared-deadline build passes each call the time left, so its recorded bounds
@@ -163,6 +164,10 @@ if action and action["kind"] == "drop":
         sys.stdin.buffer.read()
     sys.exit(0)
 if action and action["kind"] == "crlf" and "--index-info" in args:
+    mark()
+    done = subprocess.run([REAL] + args, input=sys.stdin.buffer.read().replace(b"\\n", b"\\r\\n"))
+    sys.exit(done.returncode)
+if action and action["kind"] == "crlf-stdin" and "--stdin" in args:
     mark()
     done = subprocess.run([REAL] + args, input=sys.stdin.buffer.read().replace(b"\\n", b"\\r\\n"))
     sys.exit(done.returncode)
@@ -348,7 +353,8 @@ class Machine:
     def stub_actions(self, actions, log=None):
         """actions: {git subcommand: {"kind": "fail", "stderr": ...}
         | {"kind": "before", "once", "argv", "env", "record"}
-        | {"kind": "drop" | "crlf" | "drop-removal" | "warn"} on update-index --index-info}.
+        | {"kind": "drop" | "crlf" | "drop-removal" | "warn"} on update-index --index-info
+        | {"kind": "crlf-stdin"} on hash-object --stdin}.
         log: a file that gets one line per git start (its subcommand and the two prompt variables).
         Each intercepting action writes self.stub_marker, which assert_stub_intercepted reads."""
         with open(self.stub_conf, "w", encoding="utf-8") as handle:
@@ -568,12 +574,12 @@ class MailCase(unittest.TestCase):
         path = "mail/%s/%s.md" % (to, sent_lines[0].split()[1])
         self.assertIn(path, store.files(raw=True), "a send that exited 0 has its message in no pushed tree: %s" % path)
 
-    def assert_stub_intercepted(self, machine):
-        """The stand-in git ran the update-index that its action names. Without this, a case whose stub never ran
+    def assert_stub_intercepted(self, machine, call="update-index --index-info",
+                                effect="no update was dropped or CRLF'd"):
+        """The stand-in git ran the git call that its action names. Without this, a case whose stub never ran
         passes on the old code, because the real git builds the healthy tree."""
         self.assertTrue(os.path.exists(machine.stub_marker),
-                        "the stand-in git never intercepted update-index --index-info, "
-                        "so no update was dropped or CRLF'd")
+                        "the stand-in git never intercepted %s, so %s" % (call, effect))
 
 
 class RoundTrip(MailCase):
@@ -1267,7 +1273,43 @@ class IgnoredPathStderr(MailCase):
         self.assert_send_is_honest(sent, store, "cloud/sess-b", None)
 
 
-MARKER ="ascii-ok: flow → kept"  # U+2192 has no cp1252 code point
+class CrlfBlobHashed(MailCase):
+    """hash-object reads its stdin with a CR before each LF, as a text-mode pipe on Windows writes it. The blob
+    it stores is not the blob of the text, so the tree holds other bytes than the body the send was given. The send
+    refuses it, and the mail ref does not move. Stub action: crlf-stdin, on hash-object --stdin."""
+
+    def assert_refused(self, machine, store, before, sent):
+        self.assert_stub_intercepted(machine, "hash-object --stdin", "no blob was made from CRLF stdin")
+        self.assertEqual(sent.returncode, 1, "a send whose blob came from CRLF stdin exited %d, expected 1: %s"
+                         % (sent.returncode, combined(sent)))
+        self.assertIn("not sent: message file missing from the commit", sent.stderr,
+                      "a send whose blob came from CRLF stdin was refused for another cause: %r" % sent.stderr)
+        self.assertEqual(store.tip(), before, "a send whose blob came from CRLF stdin moved the mail ref")
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_blob_from_crlf_stdin_is_not_sent_on_a_seeded_store_and_keeps_the_tip(self):
+        store = self.store()
+        store.seed("cloud/sess-b", "0a1b2c3d4e91", "request", "cloud/sess-x", "Body marker: base\n")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        control = self.send(sender, "cloud/sess-b", "request", "crlf-blob-control")
+        self.assertEqual(control.returncode, 0, "control: a healthy send exited %d: %s"
+                         % (control.returncode, combined(control)))
+        before = store.tip()
+        sender.stub_actions({"hash-object": {"kind": "crlf-stdin"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "crlf-blob-send")
+        self.assert_refused(sender, store, before, sent)
+
+    @unittest.skipIf(os.name == "nt", NT_NO_STUB)
+    def test_blob_from_crlf_stdin_is_not_sent_on_an_empty_store_and_creates_no_ref(self):
+        store = self.store()
+        self.assertIsNone(store.tip(), "control: the store should start with no mail ref")
+        sender = self.machine("a", store, session="sess-a", stub=True)
+        sender.stub_actions({"hash-object": {"kind": "crlf-stdin"}})
+        sent = self.send(sender, "cloud/sess-b", "request", "crlf-blob-empty")
+        self.assert_refused(sender, store, None, sent)
+
+
+MARKER = "ascii-ok: flow → kept"  # U+2192 has no cp1252 code point
 ARROW = "→"
 BODY = "Body marker: %s\n" % MARKER  # the text MailCase.body writes for this marker
 
