@@ -1,0 +1,8 @@
+{
+ "id": "glossary-outside-repo-unknown",
+ "title": "Glossary lint reports unknown, not PASS, for a file it does not read",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "lint/check_glossary.py gives PASS for a file outside the repo, even one that holds a retired word. Measured by the retrospective session, 2026-11-11 00:20 CST: it passed the old restart plan (d45a034, line 370 'subagent') at a scratchpad path. Its pre-push check missed the word in #2579, and lane lint caught it inside the repo. Rule verification-report-unknown-reads: a file the lint never reads must come back unknown, not clean.",
+ "source": "coordinator 2026-11-11 00:21 CST, relaying the retrospective session; stage 3 (freeze: no lane now)"
+}
