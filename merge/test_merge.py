@@ -17061,9 +17061,10 @@ def ci_batch_pattern():
 
 class BatchFreeze(CloudSession):
     """merge --batch-build and --batch-drop: a batch's frozen lane set, kept in its pull request body between the markers. A build opens
-    the pull request as a draft. `--batch-build NAME --ready` lints the batch head once and marks it ready. A drop returns a ready batch to
-    draft. A build and a drop run no lane lint and no ready check. Each case's first assert names the behaviour it claims, so its red
-    names the cause."""
+    the pull request as a draft. `--batch-build NAME --ready` lints the batch head once, runs the ready checks on it, and asks the host to
+    mark it ready. Host.ready sends nothing, so a real run stops there and names the route. A drop asks the host to return a ready batch to
+    draft; Host.to_draft sends nothing either. A build and a drop run no lane lint and no ready check. Each case's first assert names the
+    behaviour it claims, so its red names the cause."""
 
     def setUp(self):
         super().setUp()
