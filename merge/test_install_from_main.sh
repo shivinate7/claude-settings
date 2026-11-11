@@ -330,6 +330,9 @@ case8() {
   if [ "$LINKS_OK" != yes ]; then skip "$name" "no symlink rights here, so the link check cannot run"; return; fi
   d="$work/case8"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
   live_clone "$d/clone" payload
+  # The origin stays GitHub's URL, which install.sh checks, but every fetch goes to a path with no repository.
+  # The fetch fails here at once, with no network, and the helper installs local main with its WARN line.
+  git -C "$d/clone" config "url.$d/no-origin.git.insteadOf" https://github.com/shivinate7/claude-settings.git
   c0=$(git -C "$d/clone" rev-parse main)
   git -C "$d/clone" worktree add -q --detach "$d/clone-live" "$c0"
   git -C "$d/clone" worktree add -q -b feature "$d/linked"
@@ -1206,7 +1209,7 @@ case30() {
 
 # ---- Case 31: local main diverged from origin, clean tree on main -> the tree stays; one log line with git's reason ----
 case31() {
-  name="case31: SessionStart hook with local main diverged from origin leaves the clean tree on main unchanged and logs one line with git's reason"
+  name="case31: SessionStart hook with local main diverged from origin leaves the clean tree on main unchanged; the log gets git's reason, then the pin install's refusal"
   d="$work/case31"; hook_fixture "$d" main
   git -C "$d/clone" commit -q --allow-empty -m local
   cl=$(git -C "$d/clone" rev-parse HEAD)
@@ -1217,10 +1220,14 @@ case31() {
     || why="$why; the clone's checkout moved to $(git -C "$d/clone" rev-parse HEAD), want $cl"
   skip=$(hook_log_lines "$d/home/.claude-cfg/claude-settings-install.log")
   n=$(printf '%s\n' "$skip" | grep -c .)
-  if [ "$n" -ne 1 ]; then
-    why="$why; want one log line for the refused fast-forward, got $n: [$skip]"
-  elif ! printf '%s\n' "$skip" | grep -q "fatal:"; then
-    why="$why; the log line has no git reason: [$skip]"
+  if [ "$n" -ne 2 ]; then
+    why="$why; want two log lines (the fast-forward's git reason, then the pin install's refusal), got $n: [$skip]"
+  else
+    first=$(printf '%s\n' "$skip" | sed -n 1p)
+    second=$(printf '%s\n' "$skip" | sed -n 2p)
+    printf '%s\n' "$first" | grep -q "fatal:" || why="$why; line 1 has no git reason: [$first]"
+    printf '%s\n' "$second" | grep -q "the pin install failed" || why="$why; line 2 does not name the pin install's failure: [$second]"
+    printf '%s\n' "$second" | grep -q "install not run" || why="$why; line 2 has no refusal from the helper: [$second]"
   fi
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
