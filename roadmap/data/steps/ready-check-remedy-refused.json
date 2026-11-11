@@ -1,0 +1,8 @@
+{
+ "id": "ready-check-remedy-refused",
+ "title": "Ready-check FAIL names no route the tool refuses",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Debt from #2378 fix-lane round 3 (reviewer sonnet, 2026-11-11 04:08 CST): merge/merge.py about L4332-4333, a ready-check FAIL that names no lane says \"fix it in a lane, then --batch-build NAME --ready\". The frozen-set check at about L4394 refuses a moved lane head, so the printed route is refused (rule git-remedy-never-names-target). Claude hits it whenever the blame is unknown, which is common; each hit costs two extra calls (L4394 names a drop, the drop refusal names --blame). Fix: name only --blame or closing the batch PR. Same lane, note: the blamed-lane drop branch of stacked_remedy (about 4208-4209) has no test; a mutant survived.",
+ "source": "triage 2026-11-11 04:10 CST, from #2378 review record; after #2378 merges (freeze: no lane now)"
+}
