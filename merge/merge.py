@@ -3226,6 +3226,33 @@ def draft_step(root, cfg, n, host, info):
         say(f"merge: #{n} stays a draft ({' '.join(why.split()) or 'no reason given'}). Mark it ready after its draft run shows, then run --confirm again to merge. Nothing was merged.")
     return 0
 
+READY_PAGE_CLEANUP_SECONDS = 10  # the worktree's removal gets its own budget: a read that spent its deadline must still clean up
+
+def ready_page_state(root, n, host):
+    """The records page on the head of pull request `n`, read before the pull request is marked ready (decision records-index-at-merge).
+    -> "current": the generator changes nothing on the head. "stale": it would. "skip": the rule does not judge this head: the base is not
+    the default branch, the head holds a Record-claim, or the head lacks the base tip (every lack, as draft_step reads one).
+    A read that cannot run raises Stop, an unknown ancestry too. Pushes nothing, claims nothing, takes no lock and prints nothing: a caller inside a hook reads only the return."""
+    info = host.pr(n)
+    base = info["base"]
+    with contextlib.redirect_stdout(io.StringIO()):  # load_config says its defaults; the default branch is all this read takes from it
+        cfg = load_config(root, base, ".github/stamp.json", " " + RECORDS_CITE)
+    if base != cfg["defaultBranch"]:
+        return "skip"
+    tmp, wt = open_worktree(root, info, base)
+    try:
+        if head_claim(wt):  # a claim stays at the ready confirm
+            return "skip"
+        holds = ancestor(wt, f"origin/{base}", info["head"])
+        if holds is None:  # git could not tell (a shallow clone, a timeout): unread, never off the rule
+            raise Stop(f"cannot tell whether the head of #{n} holds the tip of {base}: the ancestry read failed (decision guard-hooks-fail-closed, a read that cannot run refuses)")
+        if holds is False:
+            return "skip"
+        return "stale" if rebuild_records(wt) else "current"
+    finally:
+        with shared_deadline(READY_PAGE_CLEANUP_SECONDS):
+            drop_worktree(root, tmp, wt)
+
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
 def relayed_head_holds(root, branch, relayed, live):
