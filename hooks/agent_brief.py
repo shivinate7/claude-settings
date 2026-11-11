@@ -27,6 +27,7 @@ COMMON = [
     (True, "- {scope}"),
     (True, "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next."),
     (False, "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>"),
+    (False, "- Pass the commit message with `git commit -F - <<'EOF'` and a heredoc, or with `-m`. Never use `-F <file>` with a file in the scratchpad."),
     (False, "- Name no record path in a commit message. The only exception is the Drops-lines: trailer."),
     (False, "- Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees)."),
     (False, "- Before you end, stop each server you started, by the $! from the same call or through the harness."),
