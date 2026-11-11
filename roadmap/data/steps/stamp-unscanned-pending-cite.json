@@ -2,7 +2,6 @@
   "title": "stamp --check names a pending cite outside scanGlobs",
   "phase": "now",
   "status": "todo",
-  "order": null,
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "why": "A claim commit rewrites pending cites only in scanGlobs files, so a cite elsewhere stays pending, unseen, and breaks the repo's own checks.",
   "note": "Incident: in ssemwal-cdc/claude-sharables PR 57, `merge 57 --confirm` made claim commit ca80aba83. It rewrote pending cites in plugins/*/skills/*/SKILL.md but not in plugins/_shared/skill-render-fidelity.block, because that repo's .github/stamp.json cite.scanGlobs lacks *.block (actions/stamp/stamp.mjs rewriteCites reads only scanGlobs, default **/*.md). Its shared-block check went red and the claim was reverted. Repo-side fix (add plugins/_shared/*.block to scanGlobs) belongs to claude-sharables. Ask for this step: stamp --check refuses or names a pending-cite match in any tracked text file outside scanGlobs and excludeGlobs, with a test red on today's code. Not a stability fix: waits for the fan-out (owner 13:51).",
