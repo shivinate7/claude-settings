@@ -622,12 +622,47 @@ class KeptNameTests(Fixture):
             "args = P.parse_args()\nif args.fix_check:\n    pass\n")
         self.assertEqual(code, 0, out)
 
+    def real_glossary(self):
+        """Put the repo's own GLOSSARY.md in the temp tree. Scope first: the review log row must list `review record`
+        as a "not" name, so each case below reads the row it names."""
+        with open(os.path.join(os.path.dirname(HERE), "GLOSSARY.md"), encoding="utf-8") as f:
+            text = f.read()
+        rows_ = {term: list(names) for term, _homes, names in load_check().rows(text)}
+        self.assertIn("review record", rows_.get("review log", []), "scope: the review log row lacks 'review record'")
+        self.put("GLOSSARY.md", text)
+
+    def problems_of(self, out, rel):
+        """The problems the check gives for one changed file, without the prefix. The temp tree holds no homes of
+        the real rows, so every run also prints home lines: a case reads only the lines that name its own file."""
+        prefix = "check_glossary: FAIL: " + rel + ":"
+        return [line[len("check_glossary: FAIL: "):] for line in out.splitlines() if line.startswith(prefix)]
+
     def test_kept_function_names_in_code_pass(self):
         code, out = self.change(
             "merge/merge_probe.py",
-            "def review_record(run):\n    return review_record_problem(run)\n\n\n"
             "def review_record_problem(run):\n    return None\n")
         self.assertEqual(code, 0, out)
+
+    def test_a_bare_def_review_record_is_flagged_by_the_real_glossary(self):
+        """The real glossary keeps `review_record` only while the name stays there. A bare `def review_record` is the
+        review log's "not" name in code, so it is flagged."""
+        self.real_glossary()
+        _code, out = self.change("merge/merge_probe.py", "def review_record(run):\n    return None\n")
+        self.assertEqual(
+            self.problems_of(out, "merge/merge_probe.py"),
+            ["merge/merge_probe.py:1: name review_record uses 'review record'; the glossary name is 'review log'"],
+            "the bare def review_record was not flagged: the real glossary keeps the name")
+
+    def test_a_review_record_attribute_of_the_kept_flag_passes_by_the_real_glossary(self):
+        """The review log keeps its flag `--review-record`, and argparse derives `review_record` from it. So
+        `a.review_record` passes with or without the kept function name."""
+        self.real_glossary()
+        _code, out = self.change(
+            "merge/merge_probe.py",
+            'import argparse\n\nP = argparse.ArgumentParser()\nP.add_argument("--review-record", action="store_true")\n'
+            "a = P.parse_args()\nif a.review_record:\n    pass\n")
+        self.assertEqual(self.problems_of(out, "merge/merge_probe.py"), [],
+                         "the kept flag's attribute a.review_record was flagged")
 
     def test_a_kept_flag_read_as_an_attribute_of_any_object_passes(self):
         code, out = self.change(
@@ -678,6 +713,20 @@ class KeptNameTests(Fixture):
         self.assertEqual(code, 1, out)
         self.assertIn("merge/merge_probe.py:1", out)
         self.assertIn("merge/merge_probe.py:2", out)
+
+    def test_a_longer_attribute_holding_a_kept_name_stays_flagged(self):
+        """Kept names match whole and in their own spelling. `a.pr_review_record` holds the slug's words and
+        `a.fix_check_helper` holds the flag's attribute, so both stay flagged. The slug `pr-review-record` is no
+        flag, so it derives no attribute: `a._review_record` stays flagged too."""
+        self.real_glossary()
+        _code, out = self.change(
+            "merge/merge_probe.py",
+            "a = P.parse_args()\nx = a.pr_review_record\ny = a.fix_check_helper\nz = a._review_record\n")
+        self.assertEqual(self.problems_of(out, "merge/merge_probe.py"), [
+            "merge/merge_probe.py:2: name pr_review_record uses 'review record'; the glossary name is 'review log'",
+            "merge/merge_probe.py:3: name fix_check_helper uses 'fix check'; the glossary name is 'fix verifier'",
+            "merge/merge_probe.py:4: name _review_record uses 'review record'; the glossary name is 'review log'",
+        ], "a longer attribute holding a kept name was not flagged")
 
     def test_an_unkept_slug_beside_a_kept_one_is_still_flagged(self):
         """The Markdown slug reader still runs on this line: the unkept slug is named."""
