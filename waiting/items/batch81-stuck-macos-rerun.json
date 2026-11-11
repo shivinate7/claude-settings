@@ -1,34 +1,22 @@
 {
   "added": "2026-11-11T21:00:00Z",
-  "context": "Goal: batch 81, which holds the Windows time-limit fix you want in before the archive, lands.\nProblem (rule): its CI run looks stuck on GitHub's side, and your R26 says no session re-runs a job on its own.\nBased on (measured): run 43088666860: the two macOS jobs read \"in progress\" since 13:48 CST; every step of one reads completed and passed; GitHub's jobs API answers 502 for the other; the run itself reads \"queued\".\nBased on (ruling): R26, no self-made reruns.\nDeparts from: main, where a stuck run waits until someone acts \u2014 the batch runner re-runs those two jobs once.\nMeanwhile: the batch runner waits; batches 82 and 83 queue behind 81.",
+  "context": "Run 43088666860 reads completed and failed, yet every job passed or was skipped. Its two gate jobs (all-jobs-passed and ci-done) sat queued with no runner from 14:23 CST, which looks like a GitHub fault.\n\nWhy yours: your R26 ruling keeps a re-run yours, and a cloud session cannot write to GitHub's API (measured 2026-11-11, a REST write through the cloud link answered 403 at 15:04 CST).",
   "holds": "Whether the batch runner may cancel and re-run the two stuck macOS jobs of run 43088666860, once.",
   "home": "ruling R26 (no self-made reruns), exception for this run only",
   "id": "batch81-stuck-macos-rerun",
-  "kind": "decision",
+  "kind": "task",
   "n": 515,
-  "options": [
-    {
-      "gain": "Batch 81 can land today.",
-      "how": "If the two jobs still read in progress at 15:19 CST, the batch runner cancels and re-runs only those two jobs, once.",
-      "key": "a",
-      "label": "Re-run once (Recommended)",
-      "lose": "About one more macOS run of CI minutes."
-    },
-    {
-      "gain": "No re-run.",
-      "how": "Wait for GitHub to finish the two jobs on its own.",
-      "key": "b",
-      "label": "Wait",
-      "lose": "Batch 81, then 82 and 83, wait with no known end."
-    }
-  ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 1,
   "ref": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "reply": "Overtaken, no answer needed (coordinator 15:27 CST). Both macOS jobs of run 43088666860 had already finished and passed, at 14:18 and 14:23 CST. The \"in progress\" GitHub showed was stale. What waits now is the run's final roll-up jobs (all-jobs-passed and ci-done), queued since 14:23 CST. The coordinator is checking with the batch runner, and a new question comes only if that roll-up stays stuck.",
   "repo": "shivinate7/claude-settings",
-  "short": "stuck macOS jobs",
-  "status": "closed",
-  "title": "Re-run the two stuck macOS CI jobs of batch 81 once at 15:19 CST?",
-  "why": "Batch 81 holds the Windows time-limit fix you want in before the archive, and its CI run looks stuck on GitHub's side."
+  "short": "re-run batch 81 gate jobs",
+  "status": "open",
+  "steps": [
+    "Open https://github.com/shivinate7/claude-settings/actions/runs/43088666860.",
+    "Press \"Re-run jobs\", then \"Re-run failed jobs\" (or \"Re-run all jobs\" if that is the only choice).",
+    "Done when the run shows its new attempt. The batch runner watches until 15:52 CST and merges on green."
+  ],
+  "title": "Re-run batch 81's two stuck gate jobs on GitHub",
+  "why": "Batch 81 holds the Windows time-limit fix you want in before the archive. Every job passed, but GitHub never ran the two final gate jobs, so the run reads failed."
 }
