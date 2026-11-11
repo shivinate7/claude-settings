@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:19 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
+the history. Last rewrite: 2026-11-11 11:22 CST. The owner's list closed at 18:43 CST; R21 to R33 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -326,7 +326,8 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   reviews, Sonnet 38% (R9; the share that is noise is unknown). A row moves only on a measured pass
   rate. A move above Sonnet needs the owner's grant (rule roles-sonnet-is-the-ceiling). Runs after
   R32's audit, and folds in docs/todo.md line 9 (roadmap step c201: one lane per role on the
-  next model down). Home: decision agent-model-cap.
+  next model down) and debt lane-model-recheck (whether any lane should run Opus). Home: decision
+  agent-model-cap.
 
 ### 3.8 One rounds record; no round 3 after a pass
 
