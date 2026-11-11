@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 23:59 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
+the history. Last rewrite: 2026-11-11 09:11 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -316,12 +316,18 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   want to do such rigid word grants moreso like if i say send a swarm of opus agents that just works too
   yanno? A is good though but it should be override <anytime> or override not just override and
   override 4h". One route reads the owner's own typed words for overrides and Opus asks alike, judged
-  and fail closed; agent or pasted text never grants. Fast path, no model call: `override` (one act) or
+  and fail closed. Agent or pasted text never grants, except a relay in R18 point 5's form (owner 09:10
+  CST Nov 11, below). Fast path, no model call: `override` (one act) or
   `override` with any length (15, 15m, 90 minutes, 2 hours, 4h). Any other wording is judged. Every
   grant prints one receipt line the owner sees (what it lifts, one act or until when); today a grant
   prints nothing. A refusal no override can lift says so. Departs from: decision owner-override, where
   a longer phrase such as "override 15m please" grants nothing; under R12 the judge reads it. Home:
   decision owner-override, rewritten in place.
+  An override may travel by relay. Owner 09:10 CST Nov 11, in the coordinator's chat, to the question
+  "may an override travel by relay?": "q1 -- yes". A relay counts only in R18 point 5's form: his exact
+  words, their time, and the one session and act they cover, checked against the sender's feedback log.
+  The receiving session prints the same receipt line. Until R18 point 5's check is built (stage 4), only
+  his typed words and a page save grant an override.
 
 ### 3.12 A lane never stalls on a popup
 
@@ -341,8 +347,8 @@ After 3.11, because its third part uses the same owner grant route.
      the parent like a question. A builder first confirms the cloud `dontAsk` mode refuses rather than
      prompts (unverified).
   3. An act that needs the owner's typed word (an override, a guarded settings write) becomes a page
-     item; his save on the page is the grant (skill waiting-page). Agent text and a coordinator relay
-     never grant.
+     item; his save on the page is the grant (skill waiting-page). A relay in R18 point 5's form also
+     grants it (R12); any other agent text never grants.
   4. Cards no mode can stop (repository trust, computer folder, owner-approval cards): a guard refuses
      those tools in a lane, and the lane routes the act to its parent.
   Replaces CLAUDE.md questions-go-to-owner, "The started session may wait on it." Unmeasured: how often
