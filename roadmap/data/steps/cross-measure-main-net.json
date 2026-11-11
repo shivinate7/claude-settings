@@ -1,12 +1,12 @@
 {
-  "title": "Lane lint's cross check counts a conflict only on files both PRs change against main",
-  "phase": "now",
-  "status": "queued",
-  "order": 1016,
-  "owner": "triage",
-  "why": "merge --lane-lint's cross check fails a lane head that merged current main whenever an older sibling PR of the same lane session is stale against main; the conflict comes from main, not from the lane.",
-  "note": "Coordinator 14:05 CST Nov 10. Measured 14:03 CST: #1487@b32eeef2d changes six files, merges clean with main, and fails against parked #1485 #1591 #1608 #1633 #1681 #1723 #1747 on files #1487 never touches. Home: merge/merge.py cross_measure (step stack-cross-measure built it). Fix: count a pair conflict only on files both PRs change against main, or skip parked PRs. Red cases first: a lane head with main merged plus a stale sibling on other files passes; two siblings changing the same file still fail. #1487 waits on it.",
-  "updatedAt": "2026-11-10T14:09:00-06:00",
-  "lane": "",
-  "blockedBy": []
+ "title": "Lane lint's cross check counts a conflict only on files both PRs change against main",
+ "phase": "now",
+ "status": "queued",
+ "order": 1016,
+ "owner": "triage",
+ "why": "merge --lane-lint's cross check fails a lane head that merged current main whenever an older sibling PR of the same lane session is stale against main; the conflict comes from main, not from the lane. Incidents 2026-11-10: #2563 (17:31 CST) blamed on #2573, and #2573 (18:24 CST) blamed on #2562 in hooks/guard_merge.py, a file #2573 does not touch; #2562 lacked main. #2566 passed lint at 17:06 CST while it conflicted with main itself.",
+ "note": "Coordinator 14:05 CST Nov 10. Measured 14:03 CST: #1487@b32eeef2d changes six files, merges clean with main, and fails against parked #1485 #1591 #1608 #1633 #1681 #1723 #1747 on files #1487 never touches. Home: merge/merge.py cross_measure (step stack-cross-measure built it). Fix: count a pair conflict only on files both PRs change against main, or skip parked PRs. Red cases first: a lane head with main merged plus a stale sibling on other files passes; two siblings changing the same file still fail. #1487 waits on it.",
+ "updatedAt": "2026-11-10T14:09:00-06:00",
+ "lane": "",
+ "blockedBy": []
 }
