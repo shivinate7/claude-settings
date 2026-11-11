@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The rule `scratchpad-owner` in `hooks/guard.py` refuses when an agent runs or overwrites a scratchpad file that another agent of its session wrote. An agent runs only its own copy of such a file, made from a read of it, and never another agent's file. Sources: the incidents below, and the owner's word that he never wants to be asked (coordinator relay, 2026-11-11 10:01 CST), which turned each ask into a refusal. A refusal is stricter than an ask, so it opens no safety hole.
+The rule `scratchpad-owner` in `hooks/guard.py` refuses when an agent runs or overwrites a scratchpad file that another agent of its session wrote. An agent runs only its own copy of such a file, made from a read of it, and never another agent's file. Sources: the incidents below, and the owner's grant that he never wants to be asked (coordinator relay, 2026-11-11 10:01 CST), which turned each ask into a refusal. A refusal is stricter than an ask, so it opens no safety hole.
 
 - The run incident: a builder agent in lane `notes-fix-large-1` ran `probe2.py`, a script that another agent had left in the session's shared scratchpad. No guard stopped it (2026-11-08 06:57 CST).
 - The overwrite incident: a test-author took its commit message from a shared scratchpad file that another agent had overwritten. No guard stopped it (PR #1931, a pull request, 2026-11-08).
