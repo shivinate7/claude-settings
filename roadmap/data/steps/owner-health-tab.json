@@ -6,9 +6,9 @@
  "phase": "next",
  "lane": "",
  "why": "Owner 11:35 CST Nov 11: \"i more or less don't understand what i've built and how well built it is\". The repo holds 99 hook files, 110 check scripts, 11 skills and 211 decision records (count 11:37 CST), and the page copy fell 11 h behind with nothing telling him.",
- "note": "Ruling R34 (owner 11:39 CST Nov 11, \"yes i think build it -- let me know if that should be part of the standing artifact or no\"; plan 416aae9, stage 4; page item 507 a). Per G14 it is a tab on claude-settings' one page: rows of what the owner sees, what makes it happen, and how healthy, measured, else \"unknown\". A read-only audit drafts the rows now; the owner judges them; a lane builds the tab later. Row 1 drafted: the mailbox (see step session-mailbox-followups, 11:48 CST).",
+ "note": "Ruling R34 (owner 11:39 CST Nov 11, \"yes i think build it -- let me know if that should be part of the standing artifact or no\"; plan 416aae9, stage 4; page item 507 a). Per G14 it is a tab on claude-settings' one page: rows of what the owner sees, what makes it happen, and how healthy, measured, else \"unknown\". A read-only audit drafts the rows now; the owner judges them; a lane builds the tab later. Row 1 drafted: the mailbox (see step session-mailbox-followups, 11:48 CST). Draft map 11:50 CST (retrospective scratchpad health-map-draft.md): 20 rows, 0 green, 14 amber, 3 red (page copy check; main CI no completed push run since Nov 9; 62 false-alarm lines in docs/debts/notes.md, 22 with \"Fix: none\"), 3 grey (spend, review rounds, decision judge). Biggest blind spot: checks that fail open with no record. Table shape set: what you see | grade | why.",
  "source": "owner 2026-11-11 11:39 CST, relayed by the retrospective session",
  "owner": "triage",
- "updatedAt": "2026-11-11T11:49:00-06:00",
+ "updatedAt": "2026-11-11T11:52:00-06:00",
  "blockedBy": []
 }
