@@ -285,6 +285,11 @@ RULES = [
      ("or with `-m`",)),
     ("rule: never -F with a file in the scratchpad",
      ("Never use `-F <file>`", "scratchpad")),
+    # The server-stop line. Its only pin was WRITER_RULES, which the writer-set check replaced, so it needs a row here.
+    ("rule: before it ends, the agent stops each server it started",
+     ("Before you end", "stop each server you started")),
+    ("rule: a server is stopped by the $! from its call, or through the harness",
+     ("by the $!", "through the harness")),
 ]
 for _label, _parts in RULES:
     add(_label, "context", payload("builder"), rule_check(_parts))
