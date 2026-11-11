@@ -4010,6 +4010,22 @@ test("ask-phase-out: Mark read on a closed item's line leaves a Marked read. lin
   assert.equal(line.lineRole, "status", `the Marked read line's p.sline has role ${line.lineRole}, not status`);
 });
 
+test("ask-phase-out: Mark read on a closed item's line moves focus to its Marked read line, and the Answered sub-line says a marked line stays until the next load", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  // Scope first: the press is the Mark read button of the line of No. 70, and no other element.
+  const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
+  assert.equal(await press.evaluate((b, n) => { const l = b.closest("article"); return !!l && l.id === "line-" + n; }, AP_CLOSED.n), true, `the Mark read press is not on the line of No. ${AP_CLOSED.n}`);
+  await press.click();
+  await apWaitUpdates(page, "items", 1);
+  await mustHave(page, `#tier-answered article#line-${AP_CLOSED.n}.askc.dropped`, `the Marked read line of No. ${AP_CLOSED.n} in its place`);
+  const focused = await page.evaluate(() => (document.activeElement && document.activeElement.id) || "");
+  assert.equal(focused, `line-${AP_CLOSED.n}`, `focus is on ${focused ? "#" + focused : "the body"} after Mark read, not on the Marked read line of No. ${AP_CLOSED.n}`);
+  // Scope first: the sub-line sits in the Answered section's header.
+  await mustHave(page, "#tier-answered header .rsub", "the sub-line of the Answered section");
+  const sub = ((await page.locator("#tier-answered header .rsub").textContent()) || "").replace(/\s+/g, " ").trim();
+  assert.ok(sub.includes("A line you mark read stays as Marked read until the next load."), `the Answered sub-line reads ${JSON.stringify(sub)}, not the line-stays sentence`);
+});
+
 test("ask-phase-out: a read item sits under Show read items, and Mark unread on it writes dismissed null with update", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_READ] }); if (!page) return;
   const fold = page.getByRole("button", { name: /Show \d+ read items?/ });
