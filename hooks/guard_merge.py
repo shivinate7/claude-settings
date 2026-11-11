@@ -15,7 +15,7 @@ from guard_core import (
     strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1452,7 +1452,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
 
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
-LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief starts `Lane brief: <step>. Topic: <topic>.`
+LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
 TOPIC_TAG_PREFIX = TOPIC_TAG
 _MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
 _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
@@ -1481,31 +1481,17 @@ BRIEF_STEP_REASON = (
 )
 
 
-def brief_hit(tool: str, tool_input, transcript: str):
-    """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
-    hold, else None. Only a message whose first non-blank line starts with LANE_BRIEF_MARKER is read; the
-    transcript is read for that message alone. A target whose newest record (get_session, or the
-    create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
-    brief's Topic, an older lane without one by the brief's step against its cs-step tags. Fails closed: any
-    error in the reads is a refusal, because the guard-wide crash path fails open."""
-    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
-        return None
-    message = tool_input.get("message")
-    first = next((line.strip() for line in message.splitlines() if line.strip()), "") if isinstance(message, str) else ""
-    if not _BRIEF_MARKER_LINE.match(first):
-        return None
-    target = tool_input.get("session_id")
-    try:  # cost: one transcript read per brief
-        tags, tagged_after = _own_session_read(transcript, target, created=True) \
-            if transcript and isinstance(target, str) and target else (None, False)
-    except Exception:
-        tags, tagged_after = None, False
-    if tags is None:
-        return "lane brief to a target with no record", BRIEF_NO_RECORD_REASON
-    if ARCHIVE_LANE_TAG not in tags:
-        return None
-    if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
-        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
+BRIEF_GRANT_REASON = (
+    "this brief opens with a Grant line that is empty or a placeholder: it holds a `<`, or no letter or digit, "
+    "after `Grant:`. A template placeholder is no grant. Put the grant and its time after `Grant:`, as the "
+    "owner gave them. (decision agent-model-cap, the lane start)"
+)
+
+
+def topic_hit(first: str, tags):
+    """(matched, reason) when the brief line `first` names a topic the lane holding `tags` does not hold, else None.
+    A lane with a cs-topic tag is judged by the brief's Topic, an older lane without one by the brief's step against
+    its cs-step tags. The one judge for a send_message brief and a create_session start prompt."""
     found = _BRIEF_LINE.match(first)
     step, topic = (found.group("step"), found.group("topic")) if found else (None, None)
     topics = [str(t)[len(TOPIC_TAG_PREFIX):].strip() for t in tags if str(t).startswith(TOPIC_TAG_PREFIX)]
@@ -1518,6 +1504,49 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
     return None
+
+
+def brief_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
+    hold, else None. Only a message whose first non-blank line (after its Grant line, if any) starts with
+    LANE_BRIEF_MARKER is read; the transcript is read for that message alone. A Grant line before such a brief
+    must hold the owner's words (grant_line_holds_words). A target whose newest record (get_session, or the
+    create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
+    brief's Topic, an older lane without one by the brief's step against its cs-step tags (topic_hit). A
+    create_session call that tags a lane is judged the same way, by its prompt against its own tags, with no
+    transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        text = tool_input.get("message")
+    elif is_lane_create_session(tool, tool_input):
+        text = tool_input.get("prompt")
+    else:
+        return None
+    lines = [line.strip() for line in text.splitlines() if line.strip()] if isinstance(text, str) else []
+    grant = None
+    if lines and lines[0].startswith(LANE_GRANT_MARKER):  # a lane brief opens with the owner's Grant line; the marker line follows it
+        grant, lines = lines[0], lines[1:]
+    first = lines[0] if lines else ""
+    if not _BRIEF_MARKER_LINE.match(first):
+        return None
+    if grant is not None and not grant_line_holds_words(grant):
+        return "lane brief under an empty or placeholder Grant line", BRIEF_GRANT_REASON
+    if tool != BRIEF_TOOL:
+        return topic_hit(first, lane_tags(tool_input))
+    target = tool_input.get("session_id")
+    try:  # cost: one transcript read per brief
+        tags, tagged_after = _own_session_read(transcript, target, created=True) \
+            if transcript and isinstance(target, str) and target else (None, False)
+    except Exception:
+        tags, tagged_after = None, False
+    if tags is None:
+        return "lane brief to a target with no record", BRIEF_NO_RECORD_REASON
+    if ARCHIVE_LANE_TAG not in tags:
+        return None
+    if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
+        return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
+    return topic_hit(first, tags)
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
