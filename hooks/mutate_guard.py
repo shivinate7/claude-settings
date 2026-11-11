@@ -40,7 +40,9 @@ CI MODES (decision mutation-report-scores-suites, owner item mutation-ci-job): t
 action actions/mutation-report.
 `--changed <repo> (--profile NAME | --profile-file JSON) --base REF [--head REF] [--limit N] [--budget S] [--suite-timeout S]
 [--jobs N] [--log PATH]` mutates the product lines a change adds past merge-base(base, head), runs the suites the profile's `select`
-lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share.
+lists for each file, and prints `catch share: K/R` and each `untested: path:line`. Exit 1 when mutants were made and none ran,
+or when none ran because the run stopped first (the diff could not be read, a file did not parse, the checkout or the
+install was refused, or the replay raised). A `no mutant ran: ...` line says so, with the cause. Exit 0 otherwise, whatever the share.
 `--known-defects FILE --repo REPO (--profile NAME | --profile-file JSON) [--base REF] [--suite-timeout S] [--log PATH]`
 plants each listed defect in a checkout of HEAD, installs the profile's packages into it as `--changed` does, and runs its
 catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id on REF's list also needs a row, or a
@@ -280,10 +282,14 @@ MUTATIONS = [
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, [header for _, _, header in bodies]):\n'
-     '        return cmd',
-     '    if False:\n        return cmd', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+     '    if (SHELL_HEREDOC if shells_only and not per_body else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
+     '            text, headers):',
+     '    if False:', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+    ("shared-tree: keep no heredoc body in the per-body reading",
+     '        keep = [number for number, header in enumerate(headers)\n'
+     '                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)\n'
+     '                or not _feeds_data(header, shells_only)]',
+     '        keep = []', "guard", 'frozen shell: a heredoc body fed to bash, naming a cat-write onto the config settings'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',
@@ -401,23 +407,29 @@ MUTATIONS = [
      "guard", 'the long force flag'),
     # push-main and push-stray-branch (owner rulings 207 a and 206 a).
     ("push-main: a colon-less main is not a destination",
-     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent and stray.\n                if main():\n                    return "main"',
-     '            elif False:\n                if main():\n                    return "main"', "guard", 'a push of main from a feature branch asks'),
+     '            elif source.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK:\n                # A local origin makes main() empty; the other refspecs are still read for agent and stray.\n                if main():\n                    to_main = True',
+     '            elif False:\n                if main():\n                    to_main = True', "guard", 'a push of main from a feature branch asks'),
     ("push-main: a refspec target of main is not a destination",
-     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():\n                    return "main"',
-     '                if False:\n                    return "main"', "guard", 'HEAD:main from a feature branch asks'),
+     '                if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():\n                    to_main = True',
+     '                if False:\n                    to_main = True', "guard", 'HEAD:main from a feature branch asks'),
     ("push-main: a main refspec ends the read on a local origin",
-     '                if main():\n                    return "main"',
-     '                return main()', "guard", 'local origin, main then HEAD on a branch tracking another name asks stray'),
+     '                if main():\n                    to_main = True\n            elif source in ("HEAD", "@")',
+     '                return main()\n            elif source in ("HEAD", "@")', "guard", 'local origin, main then HEAD on a branch tracking another name asks stray'),
+    ("push-main: a main refspec before an agent name asks push-main",
+     'if not agent and (to_main or',
+     'if (to_main or', "guard", 'network origin, main then the agent name asks the agent rule'),
     ("push-main: --all no longer asks",
-     '    if every:\n        return main()',
-     '    if False:\n        return main()', "guard", 'main, --all reaches main and asks'),
+     '    if every:\n',
+     '    if False:\n', "guard", 'main, --all reaches main and asks'),
+    ("push-main: --all from an agent checkout asks push-main",
+     '        return "agent" if main() and current() and AGENT_BRANCH.fullmatch(current()) else main()',
+     '        return main()', "guard", 'agent checkout, --all with main asks the agent rule'),
     ("push-main: a bare push that writes main no longer asks",
      '        if dest in DEFAULT_BRANCH_FALLBACK:\n            return main()',
      '        if False:\n            return main()', "guard", 'main tracking origin/main, a bare push asks'),
     ("push-main: HEAD on main no longer asks",
-     '        if implied and current() in DEFAULT_BRANCH_FALLBACK and main():',
-     '        if False:', "guard", 'main tracking origin/main, HEAD asks'),
+     '(to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):',
+     '(to_main or False):', "guard", 'main tracking origin/main, HEAD asks'),
     ("push-main: push.default upstream is not read for a bare push",
      '            dest = merge or None',
      '            dest = None', "guard", 'a branch tracking main asks'),
@@ -497,7 +509,7 @@ MUTATIONS = [
      '            dest = cur if merge == cur or (not merge and auto.lower() in ("true", "yes", "on", "1")) else None',
      '            dest = cur if merge == cur else None', "guard",
      'agent branch, a bare push under autoSetupRemote asks'),
-    ("push-agent-branch: the ask is not wired",
+    ("push-agent-branch: the refusal is not wired",
      '                elif kind == "agent":',
      '                elif kind == "agent-off":', "guard", 'agent branch, HEAD asks'),
     ("env-file: a search command's pattern is read as a path",
@@ -673,7 +685,7 @@ MUTATIONS = [
      '                handle.write(line + "\\n")',
      '                pass', "guard", 'log: one line per refusal and none for an allow'),
     ("shared-tree: keep heredoc bodies in every rule",
-     '    return "\\n".join(_split_heredocs(cmd)[0])',
+     '    return "\\n".join(line for at, line in enumerate(cmd.split("\\n")) if at in show)',
      '    return cmd', "guard", 'heredoc: prose naming the stash with no interpreter'),
     ("env-file: name the file in the environment reason, the reviewed defect",
      '        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)',
@@ -1082,16 +1094,16 @@ MUTATIONS = [
      '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
     ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
      "settings asks instead",
-     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)\n'
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)',
-     '    matched = _shell_write_hit(stripped, cwd, is_settings_file)\n'
+     '    matched = shell_write_hit(raw, cwd, is_settings_file)\n'
      '    if matched:\n'
      '        change = cap_change(raw)\n'
      '        if change:\n'
      '            refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, matched),\n'
      '                   matched + " " + change)\n'
-     '    matched = frozen_shell_hit(stripped, cwd)\n'
+     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)\n'
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
     ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
@@ -2053,8 +2065,12 @@ MUTATIONS = [
      '            if where and norm(rel).lstrip("/") in merge_route_paths(merge_conflicts(where) or ()):', '            if False:', "guard",
      "test-author: Edit of a product file its merge conflicts is allowed"),
     ("test-author: the merge route is given to a merge with no test path conflicted",
-     '    if not any(is_test_rel(path) for path in conflicts):', '    if False:', "guard",
+     '    if not any(is_test_rel(path) or is_mutation_test_rel(path) for path in conflicts):', '    if False:', "guard",
      "test-author: Edit of a product file its merge conflicts, with no test path conflicted, is refused"),
+    ("test-author: a merge whose only test path is a mutation test is given no merge route",
+     '    if not any(is_test_rel(path) or is_mutation_test_rel(path) for path in conflicts):',
+     '    if not any(is_test_rel(path) for path in conflicts):', "guard",
+     "test-author: Edit of a product file its merge conflicts, beside a conflicted hooks/mutate_guard.py, is allowed"),
     ("role-diff: a test-author's commit gives the merge route to a merge with no test path conflicted",
      '        if role == AUTHOR_ROLE and all(norm(n) in merge_route_paths(conflicts) for n in names):',
      '        if role == AUTHOR_ROLE and all(norm(n) in conflicts for n in names):', "guard",
@@ -3518,8 +3534,10 @@ def load_profile(args) -> dict:
 
 def changed_main(argv) -> int:
     """The CI report of a change: mutate the product lines it adds past the merge base, run the suites the profile's `select`
-    lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 0 whatever the share:
-    a low share is a report, never a failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
+    lists for each file, print the replay row, `catch share: K/R` and each `untested: path:line`. Exit 1 when mutants were made
+    and none ran, or when none ran because the run stopped first (`no_run_cause` in `replay_pr`'s row), after a
+    `no mutant ran: ...` line that names the cause. Exit 0 otherwise, whatever the share: a low share is a report, never a
+    failure. `--budget` is a wall deadline (see `replay_pr`, `wall_deadline`). A bad argument, or a ref the repository cannot read, exits 2."""
     import argparse
     import json
     parser = argparse.ArgumentParser(prog="mutate_guard.py --changed")
@@ -3560,6 +3578,19 @@ def changed_main(argv) -> int:
         total.update({"base": base, "head": head, "profile": args.profile or args.profile_file})
         with open(args.log, "w", encoding="utf-8") as handle:
             json.dump(total, handle, indent=1)
+    made = sum(row.get("made", 0) for row in rows)
+    not_run = sum(row.get("not_run", 0) for row in rows)
+    # A run that stopped before any mutant ran is a run where no mutant ran, whatever its count. A part that ran mutants
+    # keeps the exit 0 of a run in which some mutant ran: the rule is that no mutant ran at all.
+    stopped = [row["no_run_cause"] for row in rows if row.get("no_run_cause")]
+    if made - not_run == 0 and stopped:
+        print("no mutant ran: %s" % "; ".join(stopped))
+        return 1
+    if made > 0 and made - not_run == 0:
+        why = ("the budget ran out, or no selected suite reaches the changed files" if args.budget is not None
+               else "no selected suite reaches the changed files")
+        print("no mutant ran: %d of %d mutants not run (%s)" % (not_run, made, why))
+        return 1
     return 0
 
 

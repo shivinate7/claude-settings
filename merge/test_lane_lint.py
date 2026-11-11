@@ -20,6 +20,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: the pin
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
+from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
 import merge  # noqa: E402
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
@@ -27,6 +28,10 @@ from workflow_steps import job_block, run_body, step_blocks, step_env, step_key,
 
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(shutil.rmtree, RUN_FOLDER, True)
+
+
+def setUpModule():
+    tm.install_model_guard()  # the test base of test_merge: a join here runs the prose judge, and no case starts `claude -p`
 
 PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
@@ -1669,6 +1674,309 @@ class RunFolderSweep(unittest.TestCase):
         self.assertFalse(os.path.exists(old), "the sweep kept a run folder two days old")
         self.assertTrue(os.path.isdir(new), "the sweep removed a run folder made now")
         self.assertTrue(os.path.isdir(own))
+
+
+def other_comment(cid, n=7):
+    """A comment that is no lint: the filler that pushes a later comment onto the next page."""
+    return {"id": cid, "created_at": "2026-10-02T00:00:00Z", "issue_url": f"https://api.github.com/repos/o/r/issues/{n}",
+            "body": "LGTM", "user": {"login": NOT_OWNER["login"]}, "author_association": NOT_OWNER["association"]}
+
+
+class LintPostsPassComment(CiJobStub, tm.CloudSession):
+    """`merge --lane-lint <pr>` posts one comment on the pull request when the lint passes (decision lanes-run-no-full-ci-job): the marker, the
+    head the lint read, and the verdict. A FAIL, an unknown (with or without a reason) and a commit target post nothing. The lint still runs
+    once, through lane_lint. The fake host's post_comment records each post; the real-Host case reads its comment through the gh shim.
+    setUp mirrors LaneLint.setUp, because subclassing LaneLint would run its cases again."""
+
+    @classmethod
+    def setUpClass(cls):
+        unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
+        cls.run_dir = RUN_FOLDER
+
+    def setUp(self):
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):
+            super().setUp()
+        self.lock = NoLock()
+        self.init_stub()
+        self.posts = []
+        self.host.post_comment = lambda n, body: self.posts.append((n, body))  # the fake host's seam, recorded for each case
+
+    def lane(self, *argv, host=None):
+        """-> (rc, stdout and stderr together) of merge in the lane checkout, outside the cloud as LaneLint runs it. host None is the fake."""
+        out, err = io.StringIO(), io.StringIO()
+        with self.cloud(CLAUDE_CODE_REMOTE=None):
+            try:
+                rc = self.run_merge(*argv, host=host, stdout=out, stderr=err)[0]
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue() + err.getvalue()
+
+    def assert_pass_comment(self, posts, head, out):
+        """`posts` holds one (pull request, body) pair: the body opens with the marker, names the head the lint read, and says PASS."""
+        self.assertEqual(len(posts), 1, "lane-lint on a PASS posted %d comments, want one:\n%s" % (len(posts), out))
+        n, body = posts[0]
+        self.assertEqual(int(n), 7, "the comment went to pull request %s, not #7" % n)
+        lines = body.splitlines()
+        self.assertEqual(lines[:1], [LANE_LINT_MARKER], "the comment does not open with the lane-lint marker:\n" + body)
+        self.assertIn(f"Head: {head}", lines, "the comment does not name the head the lint read:\n" + body)
+        self.assertIn("Result: PASS", lines, "the comment does not say PASS:\n" + body)
+
+    def test_a_pass_posts_one_comment_naming_the_marker_the_head_and_the_verdict(self):
+        head = self.head("feat")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assert_pass_comment(self.posts, head, out)
+
+    def test_a_real_host_posts_the_pass_as_one_rest_comment_on_the_pull_request(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self)
+        head = self.head("feat")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", host=merge.Host())
+        self.assertEqual(rc, 0, out)
+        posted = [(p["n"], p["body"]) for p in (tm.GhHalf.gh_state(self, "posted") or [])]
+        self.assert_pass_comment(posted, head, out)
+
+    def test_a_fail_posts_no_comment_and_refuses(self):  # control: green on the old code
+        self.use_ci_job(FAILING, 1)
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.posts, [], "a FAIL posted a comment:\n" + out)
+
+    def test_an_unknown_posts_no_comment_and_refuses(self):  # control: green on the old code
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out = self.lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.posts, [], "an unknown posted a comment:\n" + out)
+
+    def test_an_unknown_lifted_by_a_reason_posts_no_comment(self):  # control: green on the old code
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out = self.lane("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not installed on this machine")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.posts, [], "an unknown lifted by a reason posted a comment:\n" + out)
+
+    def test_a_commit_target_that_passes_posts_no_comment(self):  # control: green on the old code
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", self.head("feat"))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.posts, [], "a commit target posted a comment, and it has no pull request:\n" + out)
+
+    def test_a_failed_post_after_a_pass_prints_the_pass_and_a_reason_and_exits_zero(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self, post_fail=tm.rest_err(502, "Bad Gateway"))
+        head = self.head("feat")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", host=merge.Host())
+        self.assertEqual(rc, 0, "a PASS whose comment failed to post did not exit 0:\n" + out)
+        self.assertTrue(pass_lines(out), "a PASS whose comment failed to post printed no PASS line:\n" + out)
+        reasons = [l for l in out.splitlines() if "lane-lint" in l.lower() and "comment" in l.lower() and not l.startswith("PASS:")]
+        self.assertTrue(reasons, "a PASS whose comment failed to post printed no reason line that names the lane-lint comment:\n" + out)
+        printed = out[out.index(reasons[0]):]  # the reason on, where the comment body to post by hand must print
+        for part in (LANE_LINT_MARKER, "PR: #7", f"Head: {head}", "Result: PASS"):
+            self.assertIn(part, printed, "a failed post printed no `%s` line of the comment body to post by hand, after the reason:\n%s" % (part, out))
+        self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the failed post was kept as a posted comment")
+
+
+class LintCheckReviewed(tm.ReviewEnv):
+    """`merge --reviewed` leaves a pull request not done unless a lane-lint PASS names its live head (decision lanes-run-no-full-ci-job). The
+    one review record here is done, so only the lint comment decides. A PASS for an older head, a FAIL, and a PASS by a non-owner each leave
+    the pull request not done, and name `merge --lane-lint 7`. The lint comments come from the one comment list read the records use (decision
+    pr-review-record, the cost)."""
+
+    def listing(self, comments, head=tm.REVIEW_HEAD):
+        """-> (rc, stdout and stderr, host) of `merge --reviewed` for pull request 7 at `head`: one done review record, then `comments`."""
+        record = tm.review_comment(1, 7, tm.record_text(rounds=tm.REVIEW_PASS))
+        host = tm.PullsHost([tm.batch_pull(7, head)], {}, comments=[record, *comments])
+        rc, out, err = self.run_args("--reviewed", host=host)
+        return rc, out + err, host
+
+    def assert_not_ready(self, out):
+        self.assertNotIn(" done: ", tm.list_line(self, out, 7), "#7 reads done with no lane-lint PASS at its live head:\n" + out)
+        self.assertIn("merge --lane-lint 7", out, "#7 is not ready, and no line names `merge --lane-lint 7`:\n" + out)
+
+    def test_a_lint_result_with_no_readable_verdict_shows_lint_unknown_and_is_not_done(self):
+        unreadable = dict(lint_comment(2, tm.REVIEW_HEAD), body=f"{LANE_LINT_MARKER}\nPR: #7\nHead: {tm.REVIEW_HEAD}\n")  # no Result line
+        rc, out, host = self.listing([unreadable])
+        self.assertEqual(rc, 0, out)
+        line = tm.list_line(self, out, 7)
+        self.assertIn("lint unknown", line, "#7 does not read lint unknown when its lint comment at the live head has no readable result:\n" + out)
+        self.assertNotIn(" done: ", line, "#7 reads done with an unreadable lint result at its live head:\n" + out)
+
+    def test_a_done_record_with_no_lint_pass_is_not_ready_and_names_the_lane_lint(self):
+        rc, out, host = self.listing([])
+        self.assertEqual(rc, 0, out)
+        self.assert_not_ready(out)
+
+    def test_a_lint_pass_at_the_live_head_leaves_a_done_record_done_with_no_remedy(self):  # control: green on the old code
+        rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out)
+        self.assertIn(" done: ", tm.list_line(self, out, 7), out)
+        self.assertNotIn("merge --lane-lint 7", out, "a pull request with its lint PASS at the live head is told to lint again:\n" + out)
+
+    def test_a_lint_pass_for_an_older_head_does_not_make_the_live_head_ready(self):
+        rc, out, host = self.listing([lint_comment(2, tm.REVIEW_OLD_HEAD)])
+        self.assertEqual(rc, 0, out)
+        self.assert_not_ready(out)
+
+    def test_a_lint_fail_at_the_live_head_does_not_make_it_ready(self):
+        rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD, verdict="FAIL")])
+        self.assertEqual(rc, 0, out)
+        self.assert_not_ready(out)
+
+    def test_a_lint_pass_by_a_non_owner_does_not_make_the_live_head_ready(self):
+        rc, out, host = self.listing([lint_comment(2, tm.REVIEW_HEAD, by=NOT_OWNER)])
+        self.assertEqual(rc, 0, out)
+        self.assert_not_ready(out)
+
+
+class LintCheckJoin(tm.CloudSession):
+    """The batch runner's join: `merge <pr> --confirm` in a cloud session with the batch-runner role refuses a pull request whose live head has
+    no lane-lint PASS (decision lanes-run-no-full-ci-job). The refusal comes before any claim, push or merge, and names `merge --lane-lint <pr>`.
+    The comment list is read through the gh shim, the list the review record reads. A failed read of it refuses the join as lane lint unknown. GhHalf's helpers are called unbound and its setUp is mirrored: subclassing GhHalf would run its cases again."""
+
+    def setUp(self):
+        super().setUp()
+        tm.gh_case_setup(self)  # GhHalf's setUp: the shim on PATH, the wait's clock, and one green check
+
+    def join(self, comments, ran_on=None, **state):
+        """-> (rc, stdout and stderr) of `merge 7 --confirm --head <ran_on>` run by the batch runner, with `comments` as the repo's issue comments.
+        `ran_on` defaults to the live head of feat, read when the call is made (main's runner_confirm does the same)."""
+        tm.GhHalf.set(self, issue_comments=comments, **state)
+        self.put_role("batch-runner")
+        ran_on = ran_on or self.head("feat")
+        with self.cloud():
+            return self.run_merge("7", "--confirm", "--head", ran_on, host=tm.GhHalf.gh_host(self))
+
+    def assert_refused(self, comments, cause, **state):
+        """The join with `comments` and `state` is refused: rc 1, the remedy named, no merge call, no push. `cause` names the case in a failure. -> the output."""
+        before = self.refs()
+        rc, out = self.join(comments, **state)
+        self.assertEqual(rc, 1, f"{cause}: the join went ahead:\n{out}")
+        self.assertIn("merge --lane-lint 7", out, f"{cause}: the refusal does not name `merge --lane-lint 7`:\n{out}")
+        self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), f"{cause}: the join merged #7")
+        self.assertEqual(self.refs(), before, f"{cause}: the join pushed to origin before it refused")
+        return out
+
+    def test_a_join_with_no_lint_pass_at_the_live_head_is_refused_before_any_push(self):
+        self.assert_refused([], "no lane-lint PASS on the pull request")
+
+    def test_a_join_on_a_lint_pass_for_an_older_head_is_refused(self):
+        self.assert_refused([lint_comment(2, tm.REVIEW_OLD_HEAD)], "a lane-lint PASS for an older head")
+
+    def test_a_join_on_a_lint_pass_by_a_non_owner_is_refused(self):
+        self.assert_refused([lint_comment(2, self.head("feat"), by=NOT_OWNER)], "a lane-lint PASS by a non-owner")
+
+    def test_a_join_on_a_lint_fail_at_the_live_head_is_refused(self):
+        self.assert_refused([lint_comment(2, self.head("feat"), verdict="FAIL")], "a lane-lint FAIL at the live head")
+
+    def test_a_join_on_a_lint_pass_at_the_live_head_merges(self):  # control: green on the old code
+        rc, out = self.join([lint_comment(2, self.head("feat"))])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
+
+    def test_a_lint_pass_on_a_later_comment_page_still_joins(self):  # control: green on the old code, a page-two read by the new one
+        comments = [other_comment(i) for i in range(1, 101)] + [lint_comment(200, self.head("feat"))]
+        rc, out = self.join(comments)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
+
+    def test_a_failed_comment_read_refuses_the_join_as_lane_lint_unknown(self):
+        out = self.assert_refused([], "a failed comment read", comments_fail=tm.rest_err(500, "Server Error"))
+        self.assertIn("lane lint unknown", out, "a failed comment read was refused with no line that reads `lane lint unknown`:\n" + out)
+
+
+    def test_the_join_reads_the_comment_list_once_a_page(self):
+        # one read per page of the comment list, and no second read: 101 comments are two pages at per_page 100
+        comments = [other_comment(i) for i in range(1, 101)] + [lint_comment(200, self.head("feat"))]
+        rc, out = self.join(comments)
+        self.assertEqual(rc, 0, out)
+        reads = [l for l in tm.GhHalf.calls(self).splitlines() if l.startswith("GET issues/comments ")]
+        self.assertEqual(len(reads), 2, "the join read the comment list %d times, want 2, one per page:\n%s" % (len(reads), "\n".join(reads)))
+
+    def test_a_head_that_moves_after_the_lint_read_is_refused_before_the_merge(self):
+        # The lint reads the head the PR shows first, and the PASS names it. The branch then moves in origin, and the first head read still
+        # shows the linted head (the lag). confirm reads the PR again under the lock, so the join must refuse the new head before any merge call.
+        linted = self.head("feat")
+        self.competitor_push()
+        # ran_on is the linted head: a live head would be refused by the join's head check before the lint, and confirm's recheck would not run
+        rc, out = self.join([lint_comment(2, linted)], ran_on=linted, lag={"n": 1, "prior": linted})
+        self.assertEqual(rc, 1, "a join whose head moved after the lint read went ahead and merged the new head unchecked:\n" + out)
+        self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "the join merged a head the lint did not read:\n" + out)
+
+    def test_a_rival_claim_commit_on_a_non_record_file_that_lands_after_the_lint_read_is_refused_by_the_lane_lint_head_check(self):
+        # relayed_head_holds reads only the Record-claim trailer, so the join's head check and confirm's relayed-yes check both pass this commit.
+        # Only confirm's linted_head check refuses it, so the refusal must be the lane-lint one, not HEAD_MOVED.
+        linted = self.head("feat")
+        self.feat_commit({"rival.py": "rival = 1\n"}, "Add a rival change", "Record-claim: D-907")
+        out = self.assert_refused([lint_comment(2, linted)], "a Record-claim commit on a non-record file that lands after the lint read", ran_on=linted, lag={"n": 1, "prior": linted})
+        self.assertIn("after its lane-lint was read", out, "the refusal is not the lane-lint head refusal:\n" + out)
+        self.assertNotIn("since the owner's yes was relayed", out, "the refusal is HEAD_MOVED, so the lane-lint head check did not refuse:\n" + out)
+
+
+    def feat_commit(self, files, subject, trailer=None):
+        """One commit on feat, pushed from the second clone: `files` maps a path to its text, and `trailer` (a Record-claim line, or None) ends
+        the message. -> its sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for path, text in files.items():
+            tm.put(os.path.join(o, path), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", subject, *(["-m", trailer] if trailer else []))
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_pass_under_one_claim_commit_lets_the_join_go_ahead(self):
+        # the join resumed after a claim push: the PASS names the head before the claim, and the newest commit is the claim alone
+        linted = self.head("feat")
+        self.feat_commit({"docs/decisions/d901.md": tm.record("D-901", "d901")}, "Claim record numbers", "Record-claim: D-901")
+        rc, out = self.join([lint_comment(2, linted)])
+        self.assertEqual(rc, 0, "a claim-only commit on the linted head refused the join:\n" + out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
+
+    def test_a_pass_under_two_stacked_claim_commits_lets_the_join_go_ahead(self):
+        linted = self.head("feat")
+        self.feat_commit({"docs/decisions/d901.md": tm.record("D-901", "d901")}, "Claim record numbers", "Record-claim: D-901")
+        self.feat_commit({"docs/decisions/d902.md": tm.record("D-902", "d902")}, "Claim record numbers", "Record-claim: D-902")
+        rc, out = self.join([lint_comment(2, linted)])
+        self.assertEqual(rc, 0, "two claim-only commits on the linted head refused the join:\n" + out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), out)
+
+
+    def side_commit(self):
+        """A commit on a branch of its own, off main: in origin, and in no history of feat. -> its sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "side", "origin/main")
+        tm.put(os.path.join(o, "side.txt"), "side\n")
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "A side commit")
+        tm.sh(o, "git", "push", "-q", "origin", "side")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_forged_claim_trailer_on_a_non_record_file_is_refused(self):
+        # a trailer alone is no claim: the newer commit must touch only record files
+        linted = self.head("feat")
+        self.feat_commit({"notes.txt": "forged\n"}, "Claim record numbers", "Record-claim: D-903")
+        self.assert_refused([lint_comment(2, linted)], "a Record-claim trailer on a commit that touches a non-record file")
+
+    def test_a_record_only_commit_with_no_trailer_is_refused(self):
+        linted = self.head("feat")
+        self.feat_commit({"docs/decisions/d904.md": "# D904\n"}, "Add a decision")
+        self.assert_refused([lint_comment(2, linted)], "a commit that touches only record files and has no Record-claim trailer")
+
+    def test_a_normal_commit_after_a_claim_commit_is_refused(self):
+        linted = self.head("feat")
+        self.feat_commit({"docs/decisions/d905.md": "# D905\n"}, "Claim record numbers", "Record-claim: D-905")
+        self.feat_commit({"notes.txt": "normal\n"}, "Fix the notes")
+        self.assert_refused([lint_comment(2, linted)], "a normal commit after a claim commit")
+
+    def test_a_pass_for_a_head_the_live_head_does_not_descend_from_is_refused(self):
+        # the newer commits are claim-only, so only the ancestry of the PASS's head is wrong: it is a commit of its own branch
+        side = self.side_commit()
+        self.feat_commit({"docs/decisions/d906.md": "# D906\n"}, "Claim record numbers", "Record-claim: D-906")
+        self.assert_refused([lint_comment(2, side)], "a lint PASS for a head that is not an ancestor of the live head")
 
 
 if __name__ == "__main__":
