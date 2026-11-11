@@ -666,3 +666,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Note (#2378 builder try 3): only a run that concluded "failure" counts for `--blame`; timed_out and cancelled are refused.
 - Incident: four agents stalled mid-call at the 21:23-22:08 CST session restart and were found 2 h later at a check-in. Guard: steps stall-watch-agents and stall-watch-resume (queued).
 - Note (#2379): the drop in d37ccfc6a is a move, not a loss (test-author judgment). Excused by a Drops-lines line in the PR body, since no real change needed a trailer commit.
+- Note for the sort (runner 8 via coordinator, 01:54 CST): batch 76's prose judge flagged README.md:304-305 as unbacked, and 585 lines went unjudged past the call cap.
+- Incident (#2379 in batch 77, PR #2580): checks-mutate-guard red, an ambiguous mutation anchor `.split(mark)[-1]` after f1b99b5d0 added a second match in guard_core.py. Lane lint and review did not run mutate_guard. Fix lane: test-author (haiku) running.
