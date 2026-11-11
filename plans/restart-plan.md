@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 09:16 CST. The owner's list closed at 18:43 CST; R21 to R24 came after.
+the history. Last rewrite: 2026-11-11 09:20 CST. The owner's list closed at 18:43 CST; R21 to R25 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -405,6 +405,11 @@ After 3.11, because its third part uses the same owner grant route.
   the follow-up plan PR. Home: decision docs-only-prs-skip-review, rewritten in place.
 
 ## Stage 4. Make the roadmap and triage mechanical
+
+- **R25. Stage 4 runs with stage 3.** Owner 09:20 CST Nov 11: "with stage 3, but i think we should in
+  the planning stage itself maybe define how batches will be built". Stage 4's lanes start with the rest
+  of stage 3, once 3.0 lands. How batches are built is settled before stage 3 starts (open: a review and
+  a batch strategy are in progress).
 
 - **D1. The roadmap is mechanical (open).** Owner 14:14 CST Nov 10: "realistically we have the actual
   roadmap be mechanizable like the status/queue/asks/etc". Already ruled: decision stalled-steps (owner
