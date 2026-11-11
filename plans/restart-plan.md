@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:56 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
+the history. Last rewrite: 2026-11-11 12:37 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -704,8 +704,11 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   store and guard logs. A part with no measure says "unknown".
   1. A read-only audit drafts the rows now.
   2. The owner judges the draft.
-  3. A lane builds the tab. R28's shared upkeep refreshes each number at triage status, with no new
-     timer.
+  2a. Owner 12:37 CST Nov 11 judged the 20-row draft: "it's not very pretty and i cant tell if its
+     exhaustive, but for a temporal table i think it's fine as is for now". The draft stands.
+  3. A lane builds the tab, with a designer first. R28's shared upkeep refreshes each number at
+     triage status, with no new timer. A check proves the tab exhaustive: it lists each hook, check
+     and skill that no row names.
   Home: skill roadmap (the page's tabs); docs/map/.
 
 ## Stage 5. Resume lanes
