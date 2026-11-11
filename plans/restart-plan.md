@@ -661,7 +661,12 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   2. Its refusal text says how to challenge, not to withdraw.
   3. The question form's Problem line names the act the yes gates, not the owner's authority.
   4. A red case: a challenge with a measure passes; the same question with no new fact is refused.
-  Home: decision question-form; rule outcomes-stale-decision-protocol.
+  5. Owner 13:04 CST: "maybe the judge hooks that run on our sesisons should identify it frankly just
+     like how it identifies when shared mistakes and other stuff happens". The reply judge gains one
+     item: a reply that names a flaw in a ruling but leaves it to the owner's authority, with no measure
+     or fix. It flags, like its other items, and never refuses.
+  Home: decision question-form; decision reply-judge-samples-never-refuses; rule
+  outcomes-stale-decision-protocol.
 
 - **R37. No fixed word cap, and no "STE" name.** Owner 12:54 CST Nov 11: "i thought i eliminated all
   STE requirements from everywhere in the repo weeks ago (along with hard limits like 30 vs 31 words
