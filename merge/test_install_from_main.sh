@@ -1515,7 +1515,41 @@ case44() {
   else ok "$name"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44"
+# ---- Case 45: origin's main shares no history with local main, and origin is reachable -> the helper refuses: exit 1,
+# one 'install not run' line, no install, and neither local main nor the pin moves. The local-only commit puts local main
+# ahead of the pin, so a helper that installs local main anyway would move the pin and install that commit.
+case45() {
+  name="case45: origin's main unrelated to local main (no merge-base, origin reachable): the helper refuses with exit 1 and one 'install not run' line, runs no install, moves neither main nor the pin"
+  d="$work/case45"; hook_fixture "$d" main same
+  h="$d/home"; SHIM="$d/shim"
+  git clone -q "$d/origin.git" "$d/unrelated"
+  git -C "$d/unrelated" config user.email t@example.com
+  git -C "$d/unrelated" config user.name t
+  git -C "$d/unrelated" checkout -q --orphan other
+  git -C "$d/unrelated" commit -q --allow-empty -m "unrelated root"
+  git -C "$d/unrelated" push -q -f origin other:main
+  unrelated=$(git -C "$d/unrelated" rev-parse HEAD)
+  if git -C "$d/origin.git" merge-base --is-ancestor "$c0" "$unrelated" 2>/dev/null; then
+    bad "$name" "FIXTURE origin's main [$unrelated] descends from the clone's root [$c0], so the histories share a commit"; return
+  fi
+  git -C "$d/clone" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
+  local_main=$(git -C "$d/clone" rev-parse main)
+  run_live "$d/clone"
+
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "helper exited 0 and installed local main $local_main, which shares no history with origin's main $unrelated"
+  elif ! printf '%s\n' "$errs" | grep -q '^install not run: '; then
+    bad "$name" "stderr has no 'install not run' line: $errs"
+  elif [ -e "$h/ran-install.txt" ]; then
+    bad "$name" "an install ran from local main $local_main"
+  elif [ "$(git -C "$d/clone" rev-parse main)" != "$local_main" ]; then
+    bad "$name" "local main moved from $local_main to $(git -C "$d/clone" rev-parse main)"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then
+    bad "$name" "the pinned checkout moved to $(git -C "$d/clone-live" rev-parse HEAD), want $c0"
+  else ok "$name"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
