@@ -5033,7 +5033,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     # A batch route takes only these options; any other option set (a mode flag or a modifier) means it does not stand alone.
     if batch and (any(v != p.get_default(k) for k, v in vars(a).items()
-                      if k not in ("batch_build", "batch_drop", "ready", "on", "base", "lint_unknown_ok", "blame", "run"))
+                      if k not in ("batch_build", "batch_drop", "ready", "on", "base", "lint_unknown_ok", "blame", "run",
+                                 "config", "session", "undo_check_unknown_ok", "base_red_ok"))
                   or (a.batch_build and a.batch_drop)):
         p.error("--batch-build and --batch-drop each stand alone")
     if a.idle_lanes or a.touches or a.release_check:
