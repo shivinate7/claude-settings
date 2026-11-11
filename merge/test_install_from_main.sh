@@ -331,7 +331,9 @@ case8() {
   d="$work/case8"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
   live_clone "$d/clone" payload
   # The origin stays GitHub's URL, which install.sh checks, but every fetch goes to a path with no repository.
-  # The fetch fails here at once, with no network, and the helper installs local main with its WARN line.
+  # This case pins the fail-open on a fetch failure only: the fetch fails here at once, with no network, and the
+  # helper installs local main with its WARN line. A reachable origin is not this case: a local-only commit is
+  # refused (case43), and an origin whose main is unrelated to local main is refused (case45).
   git -C "$d/clone" config "url.$d/no-origin.git.insteadOf" https://github.com/shivinate7/claude-settings.git
   c0=$(git -C "$d/clone" rev-parse main)
   git -C "$d/clone" worktree add -q --detach "$d/clone-live" "$c0"
