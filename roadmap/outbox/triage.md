@@ -630,3 +630,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - 2026-11-10 18:11 CST (#2563 fix check, notes): lint/report_guard.py:2582 comment and lint/test_report_guard_review.py:15 docstring still say review_state; the function is live_review_state.
 
 - note (2026-11-10 18:45 CST, #2559 ask-phase-out round 3 reviewer sonnet): docs/design/ask-phase-out-notes.md:22 reads "Gain: the owner's grant". The Gain is the owner's own Mark read, not a grant (GLOSSARY.md:51, grant = leave to do an act). Reword at the next edit of that file. Low, doc only.
+- note (2026-11-10 18:48 CST, item 488 mailbox Mac card, topic session): card step 4b ran ls-tree on ~/.claude/mail.git, a stale local copy, and printed "no file" for a message that was on the remote. A later card fetches into a throwaway folder first. The card text sits in the undrawn `card` field, so the page item was closed, not edited.
+- note (2026-11-10 18:48 CST, item 488): the Mac's mailbox address is pc/macbook-pro-2-local/...; the host slug keeps "-local". Unknown whether it matches the name the Claude app shows.
