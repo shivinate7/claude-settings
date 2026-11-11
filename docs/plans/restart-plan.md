@@ -4,6 +4,8 @@ Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6w
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
 the history. Last rewrite: 2026-11-10 19:03 CST. The owner's list closed at 18:43 CST; R21 came after.
 
+Refuter: refuter opus, 2026-11-10 19:59 CST, holds with notes (sent to the retrospective session for the owner).
+
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
 Read it top to bottom: six stages in the order they run. Each stage holds the rulings that govern it,
@@ -71,7 +73,7 @@ Step glossary-same-local-cloud. First because every later brief uses its terms.
   agents, whoever started it. Merges rules roles-solo-builds-short-edit-list and
   roles-orchestrator-never-builds. Home: CLAUDE.md, decision session-tiers.
 - **G13. The arbiter is a decider only.** Owner 15:08 CST Nov 10: "isn't arbiter just a decider, why
-  would it ever have subagents"; "yes" to the form. It makes rulings in its repo, one tier below the
+  would it ever have [agents]"; "yes" to the form. It makes rulings in its repo, one tier below the
   owner. It may start only read-only agents (Explore, refuter) to gather evidence. It builds nothing,
   starts no lanes, and grants no Opus. The arbiter session itself runs Opus (agent-model-cap:61).
   Rewrite session-tiers:81 ("a standing session and an orchestrator"). Home: decision session-tiers,
