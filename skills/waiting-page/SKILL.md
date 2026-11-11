@@ -4,12 +4,11 @@ description: Use when a session has a question, a decision or a task for the own
 ---
 
 The waiting page is the one private page per repo or project. Its Questions tab holds every item
-that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only a session that
-reads its own answers at a wake writes an item.
+that waits on the owner. Its Status tab shows the repo's roadmap, read only. Only triage writes an item (owner, 2026-11-10 14:30-14:32 CST). A lane that wears triage's hat in a run with one lane writes as triage (owner, 2026-11-10 14:33 CST).
 
-A lane never writes an item. A lane session ends, and so does an agent. It puts its
-question in its report. The orchestrator writes the item with itself as `owner`. It routes the
-answer back to the lane or its next try.
+A lane never writes an item, unless it wears triage's hat in a run with one lane. A lane puts its
+question in its report, and sends it to its parent in the same turn. Triage writes the item with the asking session as `owner`, and routes the
+answer back to the lane or its next try. Not built: the route from a lane to triage.
 
 Every repo's page is the same template. The page is fixed. All content lives in its database,
 through the ArtifactData tool. Two exceptions are stored in the page itself: a design mockup (see
@@ -29,9 +28,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 
 Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
 
-- `items/<id>`: one per waiting item. The database key and the `id` field must be the same
-  string. The page keys on the database key, and warns on an item whose `id` field is missing or
-  different. Fields: `id`, `n` (a stable number the owner answers by),
+- `items/<id>`: one per waiting item. The database key is the item's id. The `id` field is optional
+  and ignored: the page, the guard and the tools read the key. Fields: `n` (a stable number the owner answers by),
   `kind` (`decision` or `task`), `status` (`open` or `closed`), `added` (ISO time), `ref` (each id
   with its plain name), `title`, `short` (optional, 24 characters or fewer: the name on the wide left list; longer or missing, the list shows `title` cut with an ellipsis), `owner` (the session that reads the answer at its wake), `home` (the step, PR or
   record the answer goes to; a step is its bare step id, so the roadmap upkeep row can match it), `context` (plain text, line breaks kept).
@@ -220,14 +218,14 @@ carries the badge "Answered, filing pending" or "Answered, filed in <home>". It 
 
 ## The writer
 
-Each page has one writer. In a repo, it is the orchestrating session that owns the page. In a
-project with a triage thread, it is triage. The page's name for it is `writer` in `meta/page`. Find
+Each page has one writer: triage (owner, 2026-11-10 14:30-14:32 CST). In a run with one lane, the lane
+wears triage's hat and writes it (owner, 2026-11-10 14:33 CST). The page's name for it is `writer` in `meta/page`. Find
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers"). A repo may name the writer's session id in its
 extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. The key send counts only on a delivered result. A rotation updates it.
 
 - Every other session sends its question to the writer, which writes the item. A lane sends its question
-  to its parent in the same turn, and the orchestrator writes the item ("Add an item", step 0).
+  to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
@@ -259,7 +257,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   - Written: the writer closes the item (`status: "closed"` and `closed` set to now), with the answer and its time in `context`. The owning
     session then files the answer to `home`, as "Route and close" step 1 says. Either way, every
     question and answer ends in the page's record.
-- A lane has no chat with the owner. Its question goes in its report, and a lane session also sends it
+- A lane has no chat with the owner. Its question goes in its report, and a lane also sends it
   to its parent with `send_message` in the same turn. The Stop report guard blocks a lane reply whose
   Input Needed asks a pick or a yes/no unless the same turn sent it to its parent or the writer. A box,
   a page link or a promise does not pass.
@@ -459,10 +457,9 @@ is never changed.
    answer, and two writers clash on the design republish (see "Add a design").
 1. Only the writer does this step. Read the open items with `ArtifactData list items`. Take the next free `n`. Never reuse an `n`
    while its item is open.
-2. Write it with `ArtifactData set items/<id>`. Make `id` a slug of the question, 32 characters
-   or fewer. Never reuse an `id`. If a slug is taken, add a suffix. Always write the `id` field,
-   and make it equal to the key. After the `set`, read the item back (`ArtifactData get
-   items/<id>`). Check `id`, `n`, `kind` and, on a decision, `options`: at least one, each keyed
+2. Write it with `ArtifactData set items/<id>`. Make the key a slug of the question, 32 characters
+   or fewer. Never reuse a key. If a slug is taken, add a suffix. After the `set`, read the item back (`ArtifactData get
+   items/<id>`). Check `n`, `kind` and, on a decision, `options`: at least one, each keyed
    `a`, `b`, `c` in order, and no key `none`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
@@ -809,7 +806,7 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    is unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
-   the orchestrator does (see "Add an item").
+   triage does (see "Add an item").
 
 The mockup leaves the page when its question closes and the page is next republished. The page
 holds 16 MB, so about 300 mockups of 50 KB fit. A frame cannot show another artifact.

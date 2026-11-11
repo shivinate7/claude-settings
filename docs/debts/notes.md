@@ -214,6 +214,10 @@
 - net-error-colon-http-refusal: refusal text ending ': HTTP 5xx (url)', such as a PR title, reads as a network error and retries (merge/merge.py NET_ERROR)
 - no-start-lock-has-no-pid-check: agent lock with no start time has no pid-reuse check; a reused pid keeps the tree, the safe side (janitor/sweep.py)
 - off-line-fork-reads-pre-cut: a branch cut from a later-merged PR branch makes the silent-undo window flag a deliberate removal (lint/check_silent_undo.py)
+- octopus-push-bare-remote-origin: a bare `git push` reads origin even when the branch pushes to another remote. An octopus held only by that remote's refs is refused; one held only by origin's refs passes (hooks/guard_merge.py octopus_push_hit)
+- octopus-push-chain-unread: `git merge a b && git push` passes, because the octopus does not exist when the hook reads the range; conflict-markers has a chain rule and octopus-push has none (hooks/guard_merge.py octopus_push_hit)
+- octopus-push-shell-source: a push source given as a shell variable is read as HEAD, so an octopus on that branch passes; the reader is shared with conflict-markers (hooks/guard_merge.py _plain_source)
+- octopus-push-wrapped-pushes: a push inside `bash -c` or `eval`, and `--all`, `--mirror` or `--tags` alone, are not read (hooks/guard_merge.py octopus_push_hit)
 - old-before-was-flags-history: the history rule flags the word old followed later by was and a colon in one block, so a plain description fails as history (lint/hook_catalog.py)
 - one-term-per-meaning-unchecked: no check reads the 'one term per meaning' clause of output-write-in-ste (CLAUDE.md, lint/rule_mechanisms.json)
 - override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants an override. Decision: owner-override
@@ -1704,6 +1708,7 @@
 - now-central-cmd-unrun: PR #2153 (branch time-from-one-helper): no test runs bin/now-central.cmd; lint/test_now_central.py checks only two substrings in it. Decision: local-time-central.
 - now-central-scope-arm: PR #2153 (branch time-from-one-helper): .github/scripts/ci-scope.sh sends an edit to lint/test_now_central.py alone to the `code` job only, so its macOS and Windows steps skip on such a PR. Decision: local-time-central.
 - now-central-reads-test-clock: PR #2153 (branch time-from-one-helper): bin/now-central reads LOCAL_TIME_NOW through local_time.clock(), so a leaked test export prints a pinned time with no warning. Decision: local-time-central.
+- written-time-shell-variable-steer: the false-alarm fix "put the value in a shell variable" also passes a real ahead write (hooks/guard_merge.py _UPDATED_AT). Fix: none — the decision lists it as a known miss; no incident. Until: 2026-11-21. Decision: local-time-central.
 - relayed-head-heal-merge: the merge tool's heal merge ("Merge origin/<base> and rebuild the records page", merge/merge.py) on top of a relayed head makes a rerun with `--head` refuse and ask for a new yes. Fails closed. A relayed yes never covers it: the heal brings in content the owner never saw (coordinator, 2026-11-08 13:32 CST). Decision: auto-mode-owner-acts
 - relayed-head-page-rebuild: the tool's page-only "Rebuild the records page" commit, made only on a resumed run, also makes a `--head` rerun refuse. Fails closed. Decision: auto-mode-owner-acts
 - relayed-head-fetch-blip: a fetch error in the `--head` compare prints the head-moved refusal, not a network retry, so a blip may cost a needless new yes. Decision: auto-mode-owner-acts

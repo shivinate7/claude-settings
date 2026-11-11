@@ -5020,12 +5020,18 @@ test("distinct pictures with a focus that matches show no alert; extra widths an
 });
 
 // ---------------------------------------------------------------- the database key is the item's key
+// The key of items/<key> is the item's id. The id field is optional and ignored, so a missing one or a differing one is no warning.
 
 const { id: _noId, ...DECISION_NO_ID } = DECISION;
 const warn = (page, key) => card(page, { id: key }).locator(".status.broken");
 
-test("an item stored with no id field is answered under its database key", async (t) => {
-  const page = await open(t, { items: [], rawItems: { k29: { ...DECISION_NO_ID, n: 29 } } }); if (!page) return;
+// The doc key is the item id (roadmap step page-item-id-check).
+test("an item stored with no id field shows no warning, sorts by n, and is answered under its database key", async (t) => {
+  const rawItems = { low: { ...DECISION, id: "low", n: 20 }, k29: { ...DECISION_NO_ID, n: 29 }, high: { ...DECISION, id: "high", n: 40 } };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.equal(await card(page, { id: "k29" }).count(), 1, "no card for the item");
+  assert.equal(await warn(page, "k29").count(), 0, "a warning shows for an item with no id field");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["low", "k29", "high"], "the card is not sorted by n among its items");
   await choose(page, { id: "k29" }, "b");
   await send(page);
   await written(page);
@@ -5034,12 +5040,14 @@ test("an item stored with no id field is answered under its database key", async
   assert.equal(log[0][2], "k29", "the answer key");
   assert.equal(log[0][3].item, "k29");
   assert.equal(log[0][3].choice, "b");
-  assert.match(await warn(page, "k29").textContent(), /no id field.*fix item 29/s);
 });
 
-test("an item whose id field differs from its key warns and is answered under the key", async (t) => {
-  const page = await open(t, { items: [], rawItems: { k30: { ...DECISION, id: "other-id", n: 30 } } }); if (!page) return;
-  assert.match(await warn(page, "k30").textContent(), /id field that differs.*fix item 30/s);
+test("an item whose id field differs from its key shows no warning, sorts by n, and is answered under the key", async (t) => {
+  const rawItems = { low: { ...DECISION, id: "low", n: 20 }, k30: { ...DECISION, id: "other-id", n: 30 }, high: { ...DECISION, id: "high", n: 40 } };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  assert.equal(await card(page, { id: "k30" }).count(), 1, "no card for the item");
+  assert.equal(await warn(page, "k30").count(), 0, "a warning shows for an id field that differs from the key");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), ["low", "k30", "high"], "the card is not sorted by n among its items");
   await choose(page, { id: "k30" }, "a");
   await send(page);
   await written(page);
@@ -5102,7 +5110,7 @@ test("a blocked card says it cannot be sent, disables its controls, and Copy ans
   assert.equal(await page.evaluate(() => answerLine()), "43 a");
 });
 
-test("an item with no id field and a duplicate option key is blocked from Send and Copy, and names the key", async (t) => {
+test("an item with a duplicate option key is blocked from Send and Copy, and names the key", async (t) => {
   const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
   const rawItems = {
     "k50": { ...DECISION_NO_ID, n: 50, options: [opt("x"), opt("x")], pick: "x" },
@@ -7185,6 +7193,103 @@ test("merged_page.py --live hands its JSON to the build as the live file", () =>
   const html = mergedPage("--live", JSON.stringify(live));
   const b = JSON.parse(BUILD_BLOCK.exec(html)[1]);
   assert.ok(b.live && Array.isArray(b.live.threads), "the build did not read the live file: " + JSON.stringify(b.live ?? null));
+});
+
+// The Live work cases share one live file and one way to open the Status tab on it. The read time is fixed, so no case depends on the clock.
+// A case passes only the keys it changes; JSON.stringify drops an undefined key, so { pulls: undefined } builds a file with no pulls list.
+const LIVE_READ = "2026-11-10T12:00:00Z";
+const liveFile = (over = {}) => ({ readAt: LIVE_READ, branches: [], sessions: [], ...over });
+async function liveStatus(t, over) {
+  const page = await open(t, { pageHtml: mergedPage("--live", JSON.stringify(liveFile(over))) });
+  if (page) await openStatus(page);
+  return page;
+}
+const PULL_ONLY = { pulls: [{ number: 7, title: "Lane pull seven", branch: "lane-seven" }] };
+
+// A live file with no threads list: the read stays valid, so the Status tab shows its open pull request and the read time.
+// Only the thread count is unknown, so the page never reads "No thread is open" for it (a made-up zero).
+test("the Status tab with a live file that has no threads list shows its pull request and the read as valid", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  // The live work line is the one whose label reads Live work: the stalled band is also a line, and it may be a not-read one.
+  const line = page.locator(".livenone").filter({ hasText: "Live work" });
+  const shown = (await line.count()) ? (await line.first().textContent()).replace(/\s+/g, " ") : "(no live work line)";
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab draws live work as not read, not its pull request: " + shown);
+  const text = (await page.locator("details.live").textContent()).replace(/\s+/g, " ");
+  assert.match(text, /1 open pull request/, "the live work does not count the open pull request: " + text);
+  assert.match(text, /#7/, "the live work does not show open pull request #7: " + text);
+  assert.match(text, /Lane pull seven/, "the live work does not show the title of open pull request #7: " + text);
+  assert.doesNotMatch(text, /not read/, "the live work reads not read with its pulls and read valid: " + text);
+  assert.doesNotMatch(text, /No thread is open/, "the live work reads no threads, a made-up zero: " + text);
+});
+
+// The control for that case: a live file with no pulls list is not read, whatever its threads list holds.
+test("control: the Status tab with a live file that has no pulls list reads live work not read", async (t) => {
+  const page = await liveStatus(t, { pulls: undefined, threads: [] }); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 0, "the Status tab draws live work with no pulls list as a panel, not as not read");
+  const line = page.locator(".livenone").filter({ hasText: "Live work" });
+  assert.equal(await line.count(), 1, "the Status tab draws no live work line for a live file with no pulls list");
+  assert.match((await line.textContent()).replace(/\s+/g, " "), /not read/, "the live work line does not say not read");
+});
+
+// The threads-unknown marker in the Live work summary. A pill reads as a thread state (failed and stopped share its colour), so an
+// unknown thread count gets a dashed ring and the words, the same ring the panel draws for a line not read.
+const summaryText = (page) => page.locator("details.live > summary").textContent().then((s) => s.replace(/\s+/g, " ").trim());
+
+test("the threads-unknown marker is a ring and the words in the summary, with no threads list", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab does not draw live work as a panel");
+  const marker = page.locator("details.live > summary .thr-unk");
+  assert.equal(await marker.count(), 1, "the summary has no .thr-unk marker: " + (await summaryText(page)));
+  assert.equal((await marker.textContent()).trim(), "threads unknown", "the .thr-unk marker does not read threads unknown");
+  assert.equal(await marker.locator(".rg.unk").count(), 1, "the .thr-unk marker has no .rg.unk ring");
+});
+
+test("the threads-unknown marker is not a tag pill in the summary, with no threads list", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab does not draw live work as a panel");
+  assert.equal(await page.locator("details.live > summary .tag", { hasText: "threads unknown" }).count(), 0,
+    "a .tag pill in the summary reads threads unknown, the look of a thread state: " + (await summaryText(page)));
+});
+
+test("the threads-unknown marker lays out as one inline row whose words do not wrap, with no threads list", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab does not draw live work as a panel");
+  const marker = page.locator("details.live > summary .thr-unk");
+  assert.equal(await marker.count(), 1, "the summary has no .thr-unk marker to lay out");
+  // The summary is a flex box, so the marker is a flex item and Chromium blockifies its computed display: inline-flex reads as flex.
+  // The probe sits in the same summary, so it blockifies the same way and the two values compare.
+  const wantDisplay = await probeOf(page.locator("details.live > summary"), "display", "inline-flex");
+  assert.equal(await computedOf(marker, "display"), wantDisplay, `the marker's display is not inline-flex, so its ring and words do not sit on one row (want ${wantDisplay})`);
+  assert.equal(await computedOf(marker, "whiteSpace"), "nowrap", "the marker's white-space is not nowrap, so its words may break over lines");
+});
+
+test("the threads-unknown marker's ring is in the open panel's thread count row, with no threads list", async (t) => {
+  const page = await liveStatus(t, PULL_ONLY); if (!page) return;
+  assert.equal(await page.locator("details.live").count(), 1, "the Status tab does not draw live work as a panel");
+  await page.locator("details.live > summary").click();
+  const row = page.locator("details.live li", { hasText: "Thread count" });
+  assert.equal(await row.count(), 1, "the open panel has no thread count row");
+  assert.equal(await row.isVisible(), true, "the thread count row is not shown when the live work panel is open");
+  assert.equal(await row.locator(".rg.unk").count(), 1, "the thread count row has no .rg.unk ring, so it reads unknown without the mark the summary carries: " + (await row.textContent()).replace(/\s+/g, " ").trim());
+});
+
+// The controls: an empty threads list is a real zero and gets no marker, and a list with threads keeps each thread's pill and no marker.
+test("control: an empty threads list draws no threads-unknown marker and no threads-unknown pill", async (t) => {
+  const page = await liveStatus(t, { ...PULL_ONLY, threads: [] }); if (!page) return;
+  assert.equal(await page.locator("details.live > summary").count(), 1, "the live work summary is missing");
+  assert.match(await summaryText(page), /1 open pull request/, "the summary does not show its open pull request, so the case did not draw the summary");
+  assert.equal(await page.locator("details.live > summary .thr-unk").count(), 0, "an empty threads list draws a threads-unknown marker: zero is a real read, not unknown");
+  assert.equal(await page.locator("details.live > summary .tag", { hasText: "threads unknown" }).count(), 0, "an empty threads list draws a threads-unknown pill");
+});
+
+test("control: a failed and a stopped thread keep their tag pills and draw no threads-unknown marker", async (t) => {
+  const threads = [{ title: "Failing lane", state: "failed" }, { title: "Stopped lane", state: "stopped" }];
+  const page = await liveStatus(t, { ...PULL_ONLY, threads }); if (!page) return;
+  const summary = page.locator("details.live > summary");
+  assert.equal(await summary.count(), 1, "the live work summary is missing");
+  assert.equal(await summary.locator(".tag.st-failed", { hasText: "1 failed" }).count(), 1, "the summary's failed thread is not a .tag pill: " + (await summaryText(page)));
+  assert.equal(await summary.locator(".tag.st-stopped", { hasText: "1 stopped" }).count(), 1, "the summary's stopped thread is not a .tag pill: " + (await summaryText(page)));
+  assert.equal(await summary.locator(".thr-unk").count(), 0, "a list of threads draws a threads-unknown marker");
 });
 
 // ---------------------------------------------------------------- c135: a question that takes several answers

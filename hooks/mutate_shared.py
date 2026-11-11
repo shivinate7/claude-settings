@@ -1055,6 +1055,9 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     file changed, "NO_TESTS" for product code with no suite changed), reason, made, killed, crashed,
     survived, not_run, survivors [(path, line, label)], unusable {suite: why}, skipped {file: why},
     notes [text]. `made` counts every mutant, so killed + crashed + survived + not_run == made.
+    `no_run_cause` is set only when no mutant ran because the run stopped first (the diff could not be read, no mutant
+    could be made of a file that does not parse, the checkout or the install was refused, or the replay raised): it
+    holds the cause, and `--changed` exits 1 on it.
     A mutant is not_run when no changed suite reaches its file (the profile's `select`), or when the
     `pr_budget` seconds, counted from the start of this call, had passed before it started. It is never
     a survivor. `progress(line)`, when given, gets one line as each mutant finishes.
@@ -1077,6 +1080,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
         files = _changed_files(repo, base, sha)
     except ValueError as error:
         row["reason"] = "cannot read the diff: %s" % error
+        row["no_run_cause"] = row["reason"]
         return row
     code = sorted(p for p, s in files.items() if s != "D" and code_re.search(p) and not (not_re and not_re.search(p)))
     suites = sorted(p for p, s in files.items() if s != "D" and tests_re.search(p))
@@ -1184,12 +1188,15 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
         reasons = sorted(set(parse_errors.values()))
         row["reason"] = ("%s; no mutant could be made" % "; ".join(reasons) if reasons
                          else "no mutant on the lines the pull request added")
+        if reasons:  # the files did not parse: no mutant ran because none could be made
+            row["no_run_cause"] = row["reason"]
         return row
     mutants = _sample(found, limit, seed)
 
     folder, why = _ensure_deps(repo, sha, profile, deps)
     if why:
         row["reason"] = why
+        row["no_run_cause"] = why
         return row
     cwd_rel = profile.get("cwd", "")
     classify = CLASSIFIERS[profile["classify"]]
@@ -1210,6 +1217,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                 _make_checkout(repo, sha, dest, set(profile.get("sparse_skip", [])), clean, folder, profile)
             except (ValueError, OSError) as error:
                 row["reason"] = "checkout failed: %s" % error
+                row["no_run_cause"] = row["reason"]
                 return row
             spare.put(dest)
 
@@ -1383,6 +1391,7 @@ def replay_profile(repo: str, sha: str, profile: dict, **options) -> list:
             row = {"pr": 0, "sha": sha, "title": "", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0,
                    "survived": 0, "not_run": 0, "survivors": [], "unusable": {}, "skipped": {}, "notes": [],
                    "reason": "the replay raised %s: %s" % (type(error).__name__, error)}
+            row["no_run_cause"] = row["reason"]
             try:
                 row["pr"], row["title"] = _pr_of(repo, sha)
             except ValueError:

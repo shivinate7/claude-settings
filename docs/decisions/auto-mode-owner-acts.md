@@ -119,7 +119,7 @@ Owner, 2026-11-01 19:19 CST, typed in the pr-acts-grant lane session: `when an o
 
 - The entry now covers two cases, each named in the visible conversation:
   - The batch's integration PR, or a lone lane's PR, named so by the coordinator or batch runner. Skill `ci-hygiene` (CI upkeep), step 8 (Batch lanes), treats a lone lane as its own integration PR.
-  - The one PR of a solo or one-lane session that no coordinator started, named so by that session.
+  - The one PR of a lane that no coordinator started, named so by that session.
 - A lane PR that joins a batch stays draft. Only the batch's integration PR goes ready.
 - The merge itself is not in this entry (see the standing merge grant record).
 
