@@ -14226,6 +14226,40 @@ class ReviewArgs(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue(getattr(self.host, "merged", False), out + err)
 
+    def test_run_goes_with_touches_or_with_a_batch_blame_and_nothing_else(self):
+        """--run is refused unless it goes with --touches, or with --batch-build NAME --blame PR. Each refusal names its pairing. The blame
+        route gets the run URL as given, since it reads the run by its URL."""
+        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
+        # Setup first: the allowed pairing reads the run, so a refusal below cannot come from a fixture that reads nothing.
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=incident_host(logs={TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}))
+        self.assertEqual(rc, 0, "setup: --touches --run ID did not run:\n" + out + err)
+        for argv, cause in (
+            (("--run", TOUCH_RUN), "--run goes with --touches, or with --batch-build NAME --blame PR"),
+            (("--run", url), "--run goes with --touches, or with --batch-build NAME --blame PR"),
+            (("--blame", "102", "--run", url), "--blame goes with --batch-build NAME"),
+            (("--touches", "--run", url, "--blame", "102"), "--blame goes with --batch-build NAME"),
+            (("--case", TOUCH_CASE_A), "--case and --file go with --touches"),
+            (("--file", TOUCH_GUARD), "--case and --file go with --touches"),
+        ):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_args(*argv, host=incident_host())
+                self.assertIn(cause, err, "the refusal does not name its pairing %r: %s" % (cause, out + err))
+                self.assertEqual(rc, 2, "%s exited %s, not 2: %s" % (" ".join(argv), rc, out + err))
+                self.assertNotIn("Traceback", err, out + err)
+
+    def test_the_blame_route_takes_a_run_url_as_given(self):
+        """--batch-build NAME --blame PR --run URL is accepted, and batch_blame gets PR and the URL as given: the blame route reads the run
+        by its URL, so the URL is not turned into an id."""
+        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
+        real = merge.batch_blame
+        with unittest.mock.patch.object(merge, "batch_blame", return_value=0) as blame:
+            rc, out, err = self.run_args("--batch-build", "nightly", "--blame", "102", "--run", url, host=incident_host())
+        self.assertEqual(blame.call_count, 1, "the blame route did not reach batch_blame: %s" % (out + err))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(passed_to(blame, real, "number"), 102, "batch_blame got a different blamed PR: %s" % (out + err))
+        got = passed_to(blame, real, "url")
+        self.assertEqual(got, url, "batch_blame got %r, not the run URL as given" % got)
+
 class ReviewRecordWrite(ReviewEnv):
     """`merge <pr> --review-record` prints the record for the pull request's live head. It posts nothing and pushes nothing: the lane posts it."""
 
@@ -17193,6 +17227,14 @@ def controls(text):
 
 BATCH_BEGIN, BATCH_END = "<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"  # the marker lines of a batch pull request's frozen block
 
+def passed_to(spy, real, name):
+    """The value a patched function was called with for its parameter `name`, read through the real function's signature, however the caller
+    passed it (by position or by keyword). `real` is the function as it was before the patch."""
+    call = spy.call_args
+    bound = inspect.signature(real).bind(*call.args, **call.kwargs)
+    bound.apply_defaults()  # a parameter the caller left out reads as its default, so the value is never a KeyError
+    return bound.arguments[name]
+
 def freeze_inner(name, lanes, dropped=(), on=None, blamed=()):
     """The lines between a frozen block's markers: `Batch:`, `On: BRANCH SHA` when the batch stacks on one, one `Lane:` line per (PR, head)
     by PR number, then one `Dropped:` per dropped PR and one `Blamed:` per lane a red lint of the batch head blamed."""
@@ -19025,6 +19067,50 @@ class BatchFreeze(CloudSession):
         self.assertTrue(self.host.batch_pulls[pr]["draft"], "control: to_draft() did not set the draft flag")
         self.assertEqual(self.host.to_drafts, [pr], "control: to_draft() did not record its call")
 
+    def test_a_build_takes_a_config_path_and_hands_it_to_batch_build(self):
+        """--config PATH goes with --batch-build, and batch_build gets PATH as its config. The control is a build with no --config: it gets
+        the default path."""
+        real = merge.batch_build
+        with unittest.mock.patch.object(merge, "batch_build", return_value=0) as build:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+            self.assertEqual(rc, 0, "control: a plain build exited %s: %s" % (rc, out))
+            self.assertEqual(passed_to(build, real, "config"), ".github/stamp.json",
+                             "control: a plain build did not hand batch_build the default config path: %s" % out)
+            build.reset_mock()
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "--config", "alt.json")
+            self.assertEqual(rc, 0, "--config alt.json beside --batch-build exited %s, so batch_build did not run: %s" % (rc, out))
+            self.assertEqual(build.call_count, 1, "batch_build ran %d times for one build: %s" % (build.call_count, out))
+            got = passed_to(build, real, "config")
+            self.assertEqual(got, "alt.json", "batch_build got config %r, not the --config path: %s" % (got, out))
+
+    def test_each_option_outside_the_batch_route_is_refused_beside_batch_build(self):
+        """Each option that does not go with --batch-build is refused beside it with the stand-alone text, and batch_build never runs. The
+        control is the build with no extra option: it reaches batch_build. --release-check goes last, so its value is not read as a PR."""
+        real = merge.batch_build
+        refused = (
+            ("7", "--batch-build", "nightly", "101"),
+            ("--batch-build", "nightly", "101", "--confirm"),
+            ("--batch-build", "nightly", "101", "--unlock"),
+            ("--batch-build", "nightly", "101", "--role", "coordinator"),
+            ("--batch-build", "nightly", "101", "--reviewed"),
+            ("--batch-build", "nightly", "101", "--review-record"),
+            ("--batch-build", "nightly", "101", "--lane-lint"),
+            ("--batch-build", "nightly", "101", "--idle-lanes"),
+            ("--batch-build", "nightly", "101", "--release-check", "5"),
+        )
+        with unittest.mock.patch.object(merge, "batch_build", return_value=0) as build:
+            rc, out = self.run_batch("--batch-build", "nightly", "101")
+            self.assertEqual(rc, 0, "control: a plain build exited %s: %s" % (rc, out))
+            self.assertEqual(build.call_count, 1, "control: a plain build did not reach batch_build: %s" % out)
+            for argv in refused:
+                with self.subTest(argv=argv):
+                    build.reset_mock()
+                    rc, out = self.run_batch(*argv)
+                    self.assertIn("--batch-build and --batch-drop each stand alone", out,
+                                  "%s beside --batch-build was not refused by the stand-alone check: %s" % (" ".join(argv), out))
+                    self.assertEqual(rc, 2, "%s beside --batch-build exited %s, not 2: %s" % (" ".join(argv), rc, out))
+                    self.assertEqual(build.call_count, 0, "batch_build ran beside %s" % " ".join(argv))
+
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
 # The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
@@ -19312,6 +19398,21 @@ class TouchesRead(Env):
         rc, out, err = self.run_args("--touches", "--file", TOUCH_GUARD, host=incident_host())
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(out.splitlines(), [touch_head(2390, TOUCH_FIX, "ready") + f"file {TOUCH_GUARD}"], out)
+
+    def test_a_run_url_is_read_as_the_run_id_it_names(self):
+        """--run takes an Actions run URL as well as the id: the URL is read as the id it names, so both forms give one answer."""
+        logs = {TOUCH_RUN: [failed_case(TOUCH_CASE_A)]}
+        url = f"https://github.com/shivinate7/claude-settings/actions/runs/{TOUCH_RUN}"
+        by_id = incident_host(logs=logs)  # the control: the id, as the run's own query reads it
+        rc, out, err = self.run_args("--touches", "--run", TOUCH_RUN, host=by_id)
+        self.assertEqual(by_id.log_calls, [TOUCH_RUN], "setup: the id read did not read run %s: %s" % (TOUCH_RUN, by_id.log_calls))
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(touch_head(2390, TOUCH_FIX, "ready"), out, "setup: the id read did not name #2390:\n" + out)
+        by_url = incident_host(logs=logs)
+        rc, out_url, err_url = self.run_args("--touches", "--run", url, host=by_url)
+        self.assertEqual(by_url.log_calls, [TOUCH_RUN], "--run %s read run %s, not the id it names" % (url, by_url.log_calls))
+        self.assertEqual(rc, 0, out_url + err_url)
+        self.assertEqual(out_url, out, "--run with the URL gave another answer than the id:\n" + out_url)
 
     def test_it_stands_alone_and_needs_a_selector(self):
         for argv in (("--touches",),
