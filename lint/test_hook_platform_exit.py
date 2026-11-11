@@ -16,11 +16,14 @@ must exit 0, silent, with no python start. Where it works, the row must reach py
   only, and none for `pr ready` in another case: python reads those lowercase only. It hands the
   same bytes and the exit code through. Empty stdin still reaches python, which
   reports "CI unknown". Each case asks ci_wake.triggers too, so no row hides a call python watches.
+  The cloud's ready route (ci-wake-mcp-ready): an MCP update_pull_request call with draft false also
+  reaches python, and the PostToolUse matcher covers that tool name.
 - stall_watch: only a MINGW uname exits early. Cygwin and MSYS pythons report os.name "posix".
 Override the settings file with HOOK_PLATFORM_EXIT_SETTINGS.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -43,13 +46,21 @@ PATH_FIRST = 'if command -v cygpath >/dev/null 2>&1; then PATH=$(cygpath -up "$S
 STUB_PYTHON = '#!/bin/sh\necho "$0 $*" >> "$STUB_LOG"\ncat > "$STUB_LOG.stdin"\nexit "${STUB_RC:-0}"\n'
 
 
-def rows(script):
-    """[(event, command)] for every settings.json hook whose command runs hooks/<script>."""
+MCP_READY = "mcp__github__update_pull_request"   # the cloud's ready route: draft false marks a PR ready
+
+
+def script_entries(script):
+    """[(event, matcher, command)] for every settings.json hook whose command runs hooks/<script>."""
     needle = "/%s\"" % script
     with open(SETTINGS, encoding="utf-8") as f:
         events = json.load(f)["hooks"]
-    return [(ev, h["command"]) for ev, entries in events.items() for e in entries
+    return [(ev, e.get("matcher", ""), h["command"]) for ev, entries in events.items() for e in entries
             for h in e["hooks"] if needle in h.get("command", "")]
+
+
+def rows(script):
+    """[(event, command)] for every settings.json hook whose command runs hooks/<script>."""
+    return [(ev, command) for ev, _matcher, command in script_entries(script)]
 
 
 def run_row(command, script, payload="{}", platform="posix", xcrun=True, rc=0, uname=None):
@@ -274,6 +285,40 @@ class CiWake(Quiet):
         # Exit 2 is the wake. A prefilter that swallowed it would never wake the session.
         done, _, _ = run_row(self.command(), self.script, self.payload("gh pr ready 12"), rc=2)
         self.assertEqual(done.returncode, 2)
+
+    @staticmethod
+    def mcp_payload(tool_input, tool=MCP_READY):
+        """A PostToolUse payload for an MCP call, as the harness sends it. The row reads tool_input only."""
+        return json.dumps({"session_id": "abc", "transcript_path": "/t.jsonl", "cwd": "/x",
+                           "hook_event_name": "PostToolUse", "tool_name": tool,
+                           "tool_input": tool_input, "tool_use_id": "toolu_1"})
+
+    def post_matchers(self):
+        found = [m for ev, m, _command in script_entries(self.script) if ev == "PostToolUse"]
+        self.assertTrue(found, "no PostToolUse entry runs ci_wake.py")
+        return found
+
+    def test_post_matcher_covers_the_shell_ready_tools(self):
+        # Control: the Bash and PowerShell calls already reach the row, so their matcher covers them now.
+        matchers = self.post_matchers()
+        for tool in ("Bash", "PowerShell"):
+            with self.subTest(tool=tool):
+                self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                                "no ci_wake matcher covers %s: %r" % (tool, matchers))
+
+    def test_post_matcher_covers_the_mcp_ready_tool(self):
+        matchers = self.post_matchers()
+        self.assertTrue(any(re.fullmatch(m, MCP_READY) for m in matchers),
+                        "no ci_wake matcher covers %s: %r" % (MCP_READY, matchers))
+
+    def test_mcp_ready_call_reaches_python_with_same_bytes(self):
+        # The cloud's ready route (ci-wake-mcp-ready). The row's grep reads tool_input for gh, pr and ready,
+        # and this MCP call's tool_input holds none, so the call must pass the grep to reach python.
+        payload = self.mcp_payload({"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12,
+                                    "draft": False})
+        result = run_row(self.command(), self.script, payload)
+        self.assert_reaches_python(result, self.script)
+        self.assertEqual(result[2], payload.encode("utf-8"))
 
 if __name__ == "__main__":
     unittest.main()
