@@ -2465,7 +2465,7 @@ MESSAGE_ROLE_AUTHOR_REASON = (
 # `make` is an edit verb (`make the fix in X`); `make X green` and `make sure` are cleared by MESSAGE_GREEN and the check
 # in _message_edits.
 MESSAGE_EDIT_VERBS = {"edit", "change", "fix", "update", "modify", "replace", "rewrite", "add", "remove", "delete",
-                      "drop", "re-point", "write", "make"}
+                      "drop", "re-point", "write", "make", "correct", "implement"}
 # A word before a verb that makes it a noun (`the fix`), and a word that makes the verb another agent's act.
 MESSAGE_NOT_VERB_BEFORE = {"the", "a", "an", "this", "that", "these", "those", "your", "my", "its", "their", "our",
                            "one", "no", "any", "each", "every", "some"}
@@ -2476,6 +2476,8 @@ MESSAGE_READ_VERBS = {"run", "rerun", "re-run", "read", "check", "show", "see", 
                       "verify", "inspect", "execute", "report", "look", "compare", "diff", "grep", "list"}
 # A path a read verb names carries only to an anaphor (`fix it`). A path a run verb names never carries.
 MESSAGE_RUN_VERBS = {"run", "rerun", "re-run", "execute", "check", "verify", "report", "grep"}
+# `correct` is also an adjective. A copula earlier in the clause (`X is still correct`) makes it one.
+MESSAGE_COPULAS = {"is", "are", "was", "were", "be", "been", "being", "isn't", "aren't", "looks", "seems"}
 # A word right before an edit verb that makes it a prohibition, and an adverb that may sit between (`don't just fix`).
 MESSAGE_NEGATIONS = {"not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
 MESSAGE_NEGATED_ADVERBS = {"just", "simply", "only", "ever", "even"}
@@ -2543,7 +2545,8 @@ def _message_edit_verb(words, at: int) -> str:
     word, before = words[at][0], words[at - 1][0] if at else ""
     ahead = words[at + 1][0] if at + 1 < len(words) else ""
     if (word not in MESSAGE_EDIT_VERBS or before in MESSAGE_NOT_VERB_BEFORE
-            or (word == "make" and ahead in ("sure", "certain"))):
+            or (word == "make" and ahead in ("sure", "certain"))
+            or (word == "correct" and any(w in MESSAGE_COPULAS for w, _ in words[:at]))):
         return ""
     negator = words[at - 2][0] if at > 1 else ""
     if before in MESSAGE_NEGATIONS or (before in MESSAGE_NEGATED_ADVERBS and negator in MESSAGE_NEGATIONS):
@@ -2641,8 +2644,10 @@ def message_edit_paths(message: str):
 
 
 def _message_spawn_role(transcript: str, agent: str) -> str:
-    """The role of the newest Agent or Task spawn whose answer names `agent`, read from the parent transcript, else ''.
-    The call carries the subagent_type, and the user line that answers it carries toolUseResult.agentId."""
+    """The role of the newest Agent or Task spawn that `agent` addresses, read from the parent transcript, else ''.
+    `agent` is the spawn's name or its agentId, with an optional ` [ref]` suffix. The call carries the subagent_type and
+    the name, and the user line that answers it carries toolUseResult.agentId."""
+    agent = re.sub(r" \[[^\]\s]+\]$", "", agent)
     uses, role = {}, ""
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -2660,6 +2665,8 @@ def _message_spawn_role(transcript: str, agent: str) -> str:
                     if (isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") in SPAWN_TOOLS
                             and isinstance(block.get("input"), dict)):
                         uses[block.get("id")] = block["input"].get("subagent_type")
+                        if block["input"].get("name") == agent:
+                            role = role_key(str(block["input"].get("subagent_type") or "").rsplit(":", 1)[-1])
             elif isinstance(record.get("toolUseResult"), dict) and record["toolUseResult"].get("agentId") == agent:
                 for block in content:
                     if isinstance(block, dict) and block.get("tool_use_id") in uses:
