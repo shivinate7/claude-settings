@@ -1,0 +1,8 @@
+{
+ "id": "lint-clash-blames-wrong-pr",
+ "title": "Lane lint names the PR that clashes with main, not the PR it checks",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "why": "merge --lane-lint's cross-PR merge-tree check fails the PR it lints when another open PR conflicts with main. Measured 2026-11-10: #2563 at 17:31 CST was blamed on #2573; #2573 at 18:24 CST was blamed on #2562 in hooks/guard_merge.py, a file #2573 does not touch. #2562 lacks main and conflicts with main there (git merge-tree, 18:27 CST). A reviewed lane cannot hand over until an unrelated PR merges main. Also #2566 passed lint at 17:06 CST while it conflicted with main itself (note 08590b9fa). Fix: check the linted head against main first; in the cross-PR check, refuse only when the linted PR's own files clash, and name the PR that conflicts with main.",
+ "source": "triage 2026-11-10 18:27 CST (P9)"
+}
