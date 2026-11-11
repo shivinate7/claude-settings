@@ -525,14 +525,18 @@ class LiveWork(Fixture):
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertEqual(self.panel(page)["read"], "unknown (the live file's readAt is not an ISO time: None)")
 
-    def test_missing_threads_or_pulls_list_reads_unknown(self):
+    def test_missing_pulls_list_reads_unknown_whatever_threads_is(self):
+        # Only the pulls list makes the whole read unknown. A threads list that is missing does not (LiveThreadsOptional).
         self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": []})
         page, _ = self.build_from_main("--live", str(self.live))
         self.assertEqual(self.panel(page)["read"], "unknown (the live file has no pulls list)")
         self.assertNotIn("threads", build_info(page)["live"])
         self.write_live({"readAt": "2026-10-26T21:00:00Z", "threads": None, "pulls": {}})
         page, _ = self.build_from_main("--live", str(self.live))
-        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no threads or pulls list)")
+        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no pulls list)")
+        self.write_live({"readAt": "2026-10-26T21:00:00Z"})
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual(self.panel(page)["read"], "unknown (the live file has no pulls list)")
 
     def test_read_at_that_is_not_a_time_reads_unknown(self):
         self.write_live({"readAt": "yesterday", "threads": [], "pulls": []})
@@ -574,9 +578,13 @@ class UpkeepFixture(Fixture):
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
     def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None):
-        """Write the --live file. The sessions, items and landedPulls keys appear only when given, and landed is written
+        """Write the --live file. threads=_ABSENT leaves the threads key out. The sessions, items and landedPulls keys
+        appear only when given, and landed is written
         as given (a case may send a value that is not a list). readAt is five minutes old by default."""
-        value = {"readAt": read_at or iso_ago(5), "threads": list(threads), "pulls": list(pulls)}
+        value = {"readAt": read_at or iso_ago(5)}
+        if threads is not _ABSENT:
+            value["threads"] = list(threads)
+        value["pulls"] = list(pulls)
         if sessions is not None:
             value["sessions"] = list(sessions)
         if items is not None:
@@ -948,6 +956,71 @@ class LandedPulls(UpkeepFixture):
         landed = build_info(page)["landed"]
         self.assertEqual(landed.get("c3"), ["#23"], "control: the merged row on lane/c3 marks c3")
         self.assertNotIn("c2", landed, "LANE/c2 and C2 are not lane/c2 or c2 and mark nothing")
+
+
+class LiveThreadsOptional(UpkeepFixture):
+    """A live file with no threads list reads the rest valid: pulls, sessions and items work as they do with threads.
+    Only the thread count reads unknown (threads is None, threadsWhy says why). The pulls list alone makes the whole
+    read unknown (LiveWork)."""
+
+    NO_THREADS = "unknown (the live file has no threads list)"
+
+    def test_no_threads_list_keeps_the_read_valid(self):
+        value = self.publish(threads=_ABSENT, pulls=[self.draft(7, "c1")])
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+
+    def test_pulls_sessions_and_items_work_without_threads(self):
+        session = self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")
+        for pulls in ([], [self.draft(7, "c1")]):  # an empty and a full pulls list
+            with self.subTest(pulls=len(pulls)):
+                value = self.publish(threads=_ABSENT, pulls=pulls, sessions=[session], items=[self.item(12, lane=None)])
+                page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.panel(page)["read"], value["readAt"])
+                live = build_info(page)["live"]
+                self.assertEqual([p["number"] for p in live["pulls"]], [p["number"] for p in pulls])
+                self.assertIsNone(live["pullWhy"])
+                self.assertIsNone(live["staleWhy"])
+                self.assertIsNone(live["itemsWhy"])
+                self.assertEqual(live["pageItems"], [self.item(12, lane=None)])
+                self.assertEqual([s["id"] for s in live["laneSessions"]], ["session_test01"])
+                self.assertEqual(live["sessionSteps"], ["c1"])
+                self.assertEqual(live["liveSteps"], ["c1"])
+                pair = [line for line in out.splitlines() if line.startswith(build.PAIR_LINE)]
+                self.assertEqual(pair, [build.PAIR_LINE + ": c1 (#7)"] if pulls else [])
+
+    def test_threads_that_is_not_a_list_reads_only_the_thread_count_unknown(self):
+        value = self.publish(threads=_ABSENT, pulls=[self.draft(7, "c1")])
+        for name, threads in (("missing", _ABSENT), ("null", None), ("an object", {})):
+            with self.subTest(threads=name):
+                self.write_live(dict(value, threads=threads) if threads is not _ABSENT else value)
+                page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(self.panel(page)["read"], value["readAt"])
+                live = build_info(page)["live"]
+                self.assertIsNone(live["threads"])
+                self.assertEqual(live["threadsWhy"], self.NO_THREADS)
+                self.assertEqual([p["number"] for p in live["pulls"]], [7])
+
+    def test_missing_threads_list_is_no_skipped_entry_and_no_zero_count(self):
+        value = self.publish(threads=_ABSENT, pulls=[self.draft(7, "c1")])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+        live = build_info(page)["live"]
+        self.assertEqual(live["skipped"], [])
+        self.assertEqual(live["threadsWhy"], self.NO_THREADS)
+        self.assertNotIn("live threads naming no open step: 0", out)
+        row = re.search(r"^  live threads naming no open step: (.*)$", out, re.M)
+        self.assertIsNotNone(row, "the upkeep output has no live threads row with its reason:\n%s" % out)
+        self.assertEqual(row.group(1), self.NO_THREADS)
+
+    def test_threads_list_present_leaves_threads_why_none(self):
+        # A control: a missing key reads as None, so this case holds on the old code too, and guards the new one.
+        value = self.publish(threads=[{"title": "Build a", "state": "working"}], pulls=[self.draft(7, "c1")])
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))  # the open pull on todo c1 is a red line
+        self.assertEqual(self.panel(page)["read"], value["readAt"])
+        live = build_info(page)["live"]
+        self.assertEqual([t["title"] for t in live["threads"]], ["Build a"])
+        self.assertIsNone(live.get("threadsWhy"))
 
 
 class StaleInProgress(UpkeepFixture):
