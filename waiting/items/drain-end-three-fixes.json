@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-11T18:56:00Z",
+  "context": "Goal: the fresh start begins soon, on a main whose CI finishes.\nProblem (goal): three fixes started today are not in the named queue, and waiting for all three would delay the drain's end, so which must land first is your call.\nBased on (measured): main's CI has finished no push run since Nov 9; 11 runs were cut by the Windows guard 20-minute limit (#2591 raises it to 75).\nBased on (read): #2591 has passed all review and waits for the batch; #2593 (the CI-done wake) passed round 3 and is in lint; the mailbox fix #2552 needs a main merge and 3 review rounds.\nDeparts from: main R23, drain only the named queue \u2014 adds: the drain ends without #2593 and #2552, which go into the new sessions' handoffs; #2591 lands first.\nMeanwhile: all three lanes run on; nothing waits on this.",
+  "home": "restart plan, R23 (named queue)",
+  "id": "drain-end-three-fixes",
+  "kind": "decision",
+  "n": 508,
+  "options": [
+    {
+      "gain": "New sessions start soon, and main's CI finishes for them.",
+      "how": "#2591 lands before the archive; #2593 and the mailbox fix go into the handoffs.",
+      "key": "a",
+      "label": "Only #2591 first (Recommended)",
+      "lose": "The cloud CI-done wake and the Windows mail fix land a little later, under new sessions."
+    },
+    {
+      "gain": "Everything started today lands before the restart.",
+      "how": "The drain waits for #2591, #2593 and #2552.",
+      "key": "b",
+      "label": "All three first",
+      "lose": "The restart waits on the mailbox fix's main merge and three review rounds."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 12:52 CST Nov 11",
+  "repo": "shivinate7/claude-settings",
+  "short": "Which of today's three fixes must land before the restart?",
+  "status": "open",
+  "title": "Three fixes started today are not in the named queue. Must any besides #2591 land before the restart?",
+  "why": "Waiting on all three delays the fresh start."
+}
