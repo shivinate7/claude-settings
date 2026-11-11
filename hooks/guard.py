@@ -119,7 +119,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        exists and `refs/remotes/<remote>/<name>` is missing or differs from it. A
                        matching ref is trusted, and the remote is never contacted. It never asks. The
                        same verdict from a main, lane, detached or agent checkout, except `--all` from
-                       an agent checkout, which is push-agent-branch's. A dry run and a local path pass.
+                       an agent checkout, which is push-agent-branch's. It also refuses while a local
+                       branch named like an agent worktree exists that the push sends (every branch for
+                       `--all` and `--branches`; for a glob, the branches its source side matches, under
+                       any target name), whether or not main would update. Its remedy is a push of
+                       named branches. A dry run and a local path pass.
   push-main            ask. A non-forced push whose destination is literally main or master, to a
                        network remote: `main` alone, and `main` with a lane-named branch. An
                        agent-named destination in the same push is push-agent-branch's, which refuses.
@@ -532,8 +536,9 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
+            PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
+            rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -4511,7 +4516,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
-                # A non-forced push of every branch that may update main or master (rule push-all-main, refuses), one
+                # A non-forced push of every branch that may update main or master, or sends a local agent-named
+                # branch (rule push-all-main, refuses), one
                 # that writes main or master by name (rule push-main, asks), an agent-worktree
                 # branch name (rule push-agent-branch, refuses), or an implied destination off the branch's
                 # upstream (rule push-stray-branch, asks). A dry run writes nothing.
@@ -4521,6 +4527,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                                 "push to the default branch")
                 elif kind == "all":
                     refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON, "git push " + " ".join(args))
+                elif kind == "all-agent":
+                    refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))
                 elif kind == "agent":
                     refuse(tool, "deny", "push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args))
                 elif kind == "stray":

@@ -774,6 +774,21 @@ def _glob_reach(spec: str):
     return found
 
 
+def _glob_sends(spec: str, refs) -> list:
+    """The refs among `refs` that the source side of the one-`*` glob refspec `spec` matches."""
+    pre, _, suf = _qualified(spec.partition(":")[0]).partition("*")
+    return [ref for ref in refs if ref.startswith(pre) and ref.endswith(suf) and len(ref) >= len(pre) + len(suf)]
+
+
+def _local_agent_branches(cwd: str):
+    """The full names of the local branches named like an agent worktree, None when the read fails. One
+    `git for-each-ref`; a push of every branch sends them, so a failed read is unknown and unknown is never safe."""
+    answer = guard_core._git(cwd, "for-each-ref", "--format=%(refname)", "refs/heads/") if cwd else None
+    if answer is None or answer.returncode != 0:
+        return None
+    return [ref for ref in answer.stdout.split() if AGENT_BRANCH.fullmatch(ref.removeprefix("refs/heads/"))]
+
+
 def _qualified(ref: str) -> str:
     return ref if ref.startswith("refs/") else "refs/heads/" + ref
 
@@ -801,14 +816,20 @@ def _push_updates_default(cwd: str, remote: str, reach) -> bool:
 
 
 def push_ask_hit(args, cwd: str, overrides=None) -> str:
-    """'main', 'all', 'agent', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict` let through.
+    """'main', 'all', 'all-agent', 'agent', 'stray' or '' for the `git push` arguments `args`, a push `push_verdict`
+    let through.
 
     'all' (rule push-all-main, which refuses and never asks): `--all`, `--branches`, or a glob refspec that sends
-    main or master to its own name (`refs/heads/*:refs/heads/*`), to a network remote, when local main or master exists
-    and the remote-tracking ref (`refs/remotes/<remote>/<name>`) is missing or differs from it. A matching ref is
+    main or master to a name it reaches (`refs/heads/*:refs/heads/*`), to a network remote, when local main or master
+    exists and the remote-tracking ref (`refs/remotes/<remote>/<name>`) is missing or differs from it. A matching ref is
     trusted: the remote is never contacted. The verdict is the same from a main, lane, detached or agent checkout, except
     that `--all` from an agent checkout is 'agent'. Reads on this path: the one `git config --get-regexp` for the
-    remote, one `git symbolic-ref` for `--all` (the agent test), and one `git for-each-ref`.
+    remote, one `git symbolic-ref` for `--all` (the agent test), and one `git for-each-ref` of the tracking refs.
+
+    'all-agent' (rule push-all-main, same refusal, another reason): the same push, when main is not updated, but a local
+    branch named like an agent worktree exists that the push sends: every branch for `--all` and `--branches`, the
+    branches its source side matches for a glob, whatever name its target has. One more `git for-each-ref`, of
+    `refs/heads/`, once the tracking-ref read has found no update. A failed read of it is 'all'.
 
     'agent' (rule push-agent-branch, which refuses where the other two kinds ask): a push whose destination name is an agent-worktree branch name
     (`AGENT_BRANCH`), with or without `-u`, checked before 'stray'. An implied destination is the current
@@ -858,7 +879,10 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
             return ""
         if current() and AGENT_BRANCH.fullmatch(current()):
             return "agent"
-        return "all" if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]) else ""
+        if updates_default([("refs/heads/" + name, name) for name in DEFAULT_BRANCH_FALLBACK]):
+            return "all"
+        sent = _local_agent_branches(cwd)
+        return "all" if sent is None else "all-agent" if sent else ""
     if not plain and _push_tags_only(args):
         return ""
 
@@ -889,7 +913,7 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     else:
         agent = False
         to_main = False
-        reach, unreadable = [], False
+        reach, unreadable, globs = [], False, []
         for spec in plain:
             source, colon, target = spec.partition(":")
             if "*" in spec:
@@ -897,6 +921,8 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
                 glob = _glob_reach(spec)
                 unreadable = unreadable or glob is None
                 reach += glob or []
+                if glob is not None:
+                    globs.append(spec)
             elif colon:
                 # A main destination does not end the scan: an agent name later in the push is refused, not asked.
                 if target.removeprefix("refs/heads/") in DEFAULT_BRANCH_FALLBACK and main():
@@ -912,8 +938,16 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
             else:
                 agent = agent or bool(AGENT_BRANCH.fullmatch(source.removeprefix("refs/heads/")))
         # A glob this cannot read may send main, and unknown is never safe.
-        if not agent and (unreadable or reach) and main() and (unreadable or updates_default(reach)):
-            return "all"
+        if not agent and (unreadable or reach or globs) and main():
+            if unreadable or updates_default(reach):
+                return "all"
+            # A glob reaches a local agent-named branch whatever name its target has, so it is judged by its source.
+            if globs:
+                local = _local_agent_branches(cwd)
+                if local is None:
+                    return "all"
+                if any(_glob_sends(spec, local) for spec in globs):
+                    return "all-agent"
         if not agent and (to_main or (implied and current() in DEFAULT_BRANCH_FALLBACK and main())):
             return "main"
     if agent:
@@ -1518,6 +1552,11 @@ PUSH_ALL_REASON = (
     "Rule (Git): this push sends every branch, and it may update the default branch on the remote: the "
     "remote-tracking ref for it is missing or differs from the local one (rule push-all-main, decision plain-push-asks). "
     "Remedy: push the lane's own branch by name: `git push origin HEAD:<lane-branch>`."
+)
+PUSH_ALL_AGENT_REASON = (
+    "Rule (Git): this push sends every branch it matches, and a local branch named like an agent worktree "
+    "(agent-<hex>, claude/agent-<hex> or worktree-agent-<hex>) is among them (rule push-all-main, decision "
+    "plain-push-asks). Remedy: push the lane's own branch by name: `git push origin HEAD:<lane-branch>`."
 )
 PUSH_AGENT_REASON = (
     "Rule (Git): this push writes a branch named like an agent worktree (agent-<hex>, "
