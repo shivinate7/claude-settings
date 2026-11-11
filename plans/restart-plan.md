@@ -325,7 +325,8 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   rounds, builder third tries, and cost from R32's audit. Known data: Haiku round 1 fails 79% of
   reviews, Sonnet 38% (R9; the share that is noise is unknown). A row moves only on a measured pass
   rate. A move above Sonnet needs the owner's grant (rule roles-sonnet-is-the-ceiling). Runs after
-  R32's audit. Home: decision agent-model-cap.
+  R32's audit, and folds in docs/todo.md line 9 (roadmap step c201: one lane per role on the
+  next model down). Home: decision agent-model-cap.
 
 ### 3.8 One rounds record; no round 3 after a pass
 
