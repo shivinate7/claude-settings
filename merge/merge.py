@@ -920,7 +920,7 @@ class Host:
         self.cwd = cwd    # where `gh` runs, so it names the repo of that directory
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
-        self.heads_fetch = None  # (code, output) of this run's one fetch_heads, made by merge_state only when a commit is missing; None before it
+        self.heads_fetch = None  # (code, output) of this run's one fetch_branch_heads, made by merge_state only when a commit is missing; None before it
 
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
@@ -2920,7 +2920,7 @@ def parse_with(value, own):
         numbers[int(item)] = None
     return list(numbers)
 
-def fetch_heads(root):
+def fetch_branch_heads(root):
     """-> (code, output) of one `git fetch origin` of every branch head into origin/*: the one home of that fetch (cross_measure, merge_state)."""
     return git(root, "fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
 
@@ -2972,7 +2972,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     picked = sorted({m for m, d in rows.items() if lane & set(LANE_SESSION.findall(d.get("body") or ""))} | set(with_prs))
     if not picked:
         return [], [], ""
-    c, out = fetch_heads(root)
+    c, out = fetch_branch_heads(root)
     if c:
         raise Stop(f"the cross-measure of {head[:9]} is unknown: git fetch origin failed: {out} {LANE_LINT_CITE}")
     conflicts, reports, unknown, unfetched = [], [], [], []
@@ -3958,10 +3958,10 @@ def merge_state(h, parents, tree):
     run in the host's checkout). States: "clean" (git's merge is clean and has exactly `tree`), "edited" (clean, and `tree` differs), "conflicted"
     (git's merge conflicts, so a hand edit is expected) or "unknown" (a parent the checkout lacks after one fetch, a git that cannot run the merge,
     or no tree named), never read as clean or conflicted. `why` is one line for "unknown", else "". When a parent is missing, the first call of a
-    run makes one fetch_heads (a branch head that a main-only checkout lacks); a fork's head is on no branch of origin, so it stays unknown."""
+    run makes one fetch_branch_heads (a branch head that a main-only checkout lacks); a fork's head is on no branch of origin, so it stays unknown."""
     root = h.cwd or "."
     if missing_commits(root, *parents) and getattr(h, "heads_fetch", None) is None:
-        h.heads_fetch = fetch_heads(root)
+        h.heads_fetch = fetch_branch_heads(root)
     state, merged, files = merge_tree(root, *parents)
     if state == "unknown":
         fetched = getattr(h, "heads_fetch", None)
@@ -3992,7 +3992,7 @@ def clean_merges_after(h, head, live, base=None):
     REVIEW_MERGE_WALK commits. A commit that changes the tree, a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
     (merge_state "unknown") raise Stop: unknown, never False and never True. Cost: one commit read per commit walked, plus its parent's for an
-    empty commit (each sha read once); one compare and one merge_tree per merge commit; and at most one fetch_heads a run."""
+    empty commit (each sha read once); one compare and one merge_tree per merge commit; and at most one fetch_branch_heads a run."""
     sha, read = live, {}
 
     def commit(s):
@@ -4028,7 +4028,7 @@ def live_review_state(h, rec, live, main):
     lane Stop hook (lint/report_guard.py). It is review_state, except that a stale record whose live head is its Head plus clean merges of main or empty commits
     (clean_merges_after) reads as it does at its Head (decision pr-review-record). A clean-merge read that cannot run keeps the state stale, and
     the why says REVIEW_SURVIVAL_UNKNOWN and why. Cost: clean_merges_after's, only for a stale record. `main` is the repo's default branch, never the pull request's own base
-    (a merge of a stacked pull request's base is no merge of main): the caller names it, because Host.pr rewrites the host's base on every read. The record survives a clean merge of main only (owner, 2026-11-10 14:07 CST; triage, 2026-11-11 09:35 CST)."""
+    (a merge of a stacked pull request's base is no merge of main): the caller names it, because Host.pr rewrites the host's base on every read. The record survives a clean merge of main only."""
     state, why = review_state(rec, live)
     if state != "stale":
         return state, why
