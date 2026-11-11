@@ -926,6 +926,10 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   3. If the relay passes it, deletes go through one home that applies the Oct 30 grant (last commit on
      main or an archive branch), and the guard reads that route. If it refuses, the same token becomes a
      GitHub repository secret, and an Actions workflow does the deletes and the table on GitHub's side.
+  Result, 15:04 CST: the relay refuses writes made with the owner's token too (REST ref delete 403, "Write
+  access to this GitHub API path is not permitted through this proxy"; GraphQL 403). REST reads pass. So
+  the fallback holds: an Actions workflow deletes with GitHub's own token, and the Projects table needs
+  the owner's token as a repository secret.
   Home: decision for the delete route (new); D1 for the table.
 
 - **R34. The page shows how the system works and how healthy each part is.** Owner 11:35 CST Nov 11:
