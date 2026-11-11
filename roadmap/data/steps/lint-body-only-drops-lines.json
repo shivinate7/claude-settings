@@ -1,0 +1,8 @@
+{
+ "id": "lint-body-only-drops-lines",
+ "title": "Lane lint flags a Drops-lines excuse that only the PR body holds",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "why": "Lane lint passes a silent-undo drop excused by a Drops-lines line in the PR body, but CI reads no body (lint/check_silent_undo.py header, lines 41-47), so the batch run can go red on the same drop. Incident 2026-11-10 23:33 CST: triage handed over #2379 with only a body line; the coordinator caught it at 23:43 CST. Fix: lane lint names each path excused by the body alone and asks for a commit trailer.",
+ "source": "triage 2026-11-10 23:45 CST (mistake names its guard)"
+}
