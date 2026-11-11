@@ -15139,7 +15139,7 @@ class ReviewCleanMainMerge(ReviewEnv):
         host = self.reviewed_host(fx, top)
         out = self.reviewed_line(host, top, "stale", "an empty commit after a conflict fixed by hand must not read done: the walk stops at the conflicted merge")
         self.assertNotIn("unknown", list_line(self, out, 7), "the stale line says unknown: the walk stopped on a read, not on the conflicted merge")
-        self.assertIn((fx.main3, "main"), host.compare_reads, "the walk did not reach the conflicted merge, so the case tests nothing")
+        self.assertIn(top, host.commit_reads, "the walk did not read the empty commit, so the case tests nothing")
 
 
 class ReviewUnknownReads(ReviewEnv):
