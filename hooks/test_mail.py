@@ -71,9 +71,8 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
 12. Local read. `bin/mail read` with no --addr takes its session folder from CLAUDE_CODE_SESSION_ID.
    LocalSessionRead runs bin/mail's main in this process with the host set to PC_HOST, since the CLI
    subprocess sees the real host.
-13. A body with a byte that is not UTF-8, piped on stdin, reaches the git call as a lone surrogate. The
-   base commit's UTF-8 encode raises on it, so LoneSurrogateBody is red there. A fix must cover both
-   encodes, the one in git() and the one in blob_sha(), or the send still raises.
+13. Stdin that is not UTF-8 is refused: "not sent: body is not UTF-8" and exit 1. bin/mail reads stdin as strict
+   UTF-8, so a lone surrogate never reaches git(). StdinNotUtf8 pins it.
 14. A git call that reports "Ignoring path" on stderr and exits 0 is an error. The stub kind warn keeps every
    index entry and writes the warning to stderr. IgnoredPathStderr pins that the send then says not sent.
 
@@ -1210,19 +1209,11 @@ class TakeRemovalDropped(MailCase):
                          "a take that did not finish left a done file behind")
 
 
-class LoneSurrogateBody(MailCase):
-    """A body with one byte that is not UTF-8, piped on stdin as bin/mail reads it. The byte decodes to a lone
-    surrogate, which git()'s UTF-8 encode cannot write. The send must still land, with the byte as U+FFFD or '?',
-    and print no traceback. PYTHONIOENCODING=utf-8:surrogateescape makes that stdin decode the same on every
-    platform."""
-
-    STDIN_ENV = {"PYTHONIOENCODING": "utf-8:surrogateescape"}
-    PREFIX = b"Body marker: lone-surrogate "
-    SUFFIX = b" end\n"
+class StdinAsciiBody(MailCase):
+    """An ASCII body piped on stdin is pushed as its own bytes. A body that is not UTF-8 is StdinNotUtf8's case."""
 
     def send_stdin(self, machine, body):
-        return run_cli(machine, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", "-",
-                       stdin=body, env_extra=self.STDIN_ENV)
+        return run_cli(machine, "send", "--to", "cloud/sess-b", "--kind", "request", "--body-file", "-", stdin=body)
 
     def test_control_ascii_body_on_stdin_sends_and_pushes_its_bytes(self):
         store = self.store()
@@ -1236,26 +1227,6 @@ class LoneSurrogateBody(MailCase):
         path = "mail/cloud/sess-b/%s.md" % sent.stdout.split()[1]
         self.assertIn(path, store.files(), "control: the pushed tip holds no %s" % path)
         self.assertTrue(store.read(path, raw=True).endswith(body), "control: the pushed message lost its body bytes")
-
-    def test_non_utf8_byte_on_stdin_sends_with_a_replacement_and_no_traceback(self):
-        store = self.store()
-        sender = self.machine("a", store, session="sess-a")
-        sent = self.send_stdin(sender, self.PREFIX + b"\xff" + self.SUFFIX)
-        self.assertEqual(sent.returncode, 0, "a send of a non-UTF-8 body on stdin exited %d, expected 0: %s"
-                         % (sent.returncode, combined(sent)))
-        self.assertNotIn("Traceback", sent.stderr,
-                         "a send of a non-UTF-8 body on stdin printed a traceback: %r" % sent.stderr)
-        self.assertTrue(sent.stdout.startswith("sent "), "a send of a non-UTF-8 body on stdin printed no sent line: %r"
-                        % sent.stdout)
-        path = "mail/cloud/sess-b/%s.md" % sent.stdout.split()[1]
-        self.assertIn(path, store.files(),
-                      "a send of a non-UTF-8 body on stdin has its message in no pushed tree: %s" % path)
-        body = store.read(path, raw=True).partition(b"\n\n")[2]
-        self.assertTrue(body.startswith(self.PREFIX) and body.endswith(self.SUFFIX),
-                        "the pushed body lost its text around the non-UTF-8 byte: %r" % body)
-        replaced = body[len(self.PREFIX):-len(self.SUFFIX)]
-        self.assertIn(replaced, (b"?", b"\xef\xbf\xbd"),
-                      "the pushed body holds neither '?' nor U+FFFD where the byte was: %r" % replaced)
 
 
 class IgnoredPathStderr(MailCase):
