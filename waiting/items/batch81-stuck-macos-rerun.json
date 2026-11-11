@@ -2,7 +2,7 @@
   "added": "2026-11-11T21:00:00Z",
   "context": "Goal: batch 81 lands today without wasted CI.\nProblem (rule): GitHub's internal error ended run 43088666860 before its two gate jobs ran, and the page offers only \"Re-run all jobs\". Your rule never to merge failing CI means the gate must go green.\nBased on (measured): 19 jobs passed and 33 were skipped. The two gate jobs, all-jobs-passed and ci-done, never got a runner.\nBased on (measured): the run's menu has no cancel and no \"Re-run failed jobs\".\nDeparts from: main, where a batch merges only on a green all-jobs-passed \u2014 option b merges on the 19 passed jobs without it.\nMeanwhile: the batch runner waits; batches 82 and 83 queue behind 81.",
   "holds": "Whether the batch runner may cancel and re-run the two stuck macOS jobs of run 43088666860, once.",
-  "home": "ruling R26 (no self-made reruns), exception for this run only",
+  "home": "this item (a one-time merge act; no standing rule changes)",
   "id": "batch81-stuck-macos-rerun",
   "kind": "decision",
   "n": 515,
@@ -29,11 +29,13 @@
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "b",
   "rank": 1,
   "ref": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "reply": "Answered in the coordinator's chat at 15:36 CST: \"I lean on B for this frankly maybe the next run will go fine or we run the jobs that didn't run by hand so we feel better and then merge but i am not interested in waiting so long\". The coordinator checked by hand that all 18 needed jobs read success, and sent runner 8 to merge batch 81.",
   "repo": "shivinate7/claude-settings",
   "short": "batch 81 re-run or merge",
-  "status": "open",
+  "status": "closed",
   "title": "Batch 81: re-run all jobs once, or merge on the 19 passed jobs?",
   "why": "Batch 81 holds the Windows time-limit fix you want in before the archive. A GitHub fault ended its run before the two gate jobs ran."
 }
