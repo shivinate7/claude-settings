@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 11:45 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
+the history. Last rewrite: 2026-11-11 11:51 CST. The owner's list closed at 18:43 CST; R21 to R34 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -513,7 +513,13 @@ then R29.
   copied in and out? i figured it's just temporally same as with git? it feels weird that it's
   partitioned steps". Decision waiting-data-in-repo rules git the home and the page a view, but
   today sessions and the owner write the page first and git copies it later. The design pass makes
-  git the first write, and names how an owner answer reaches git with no session awake. Box
+  git the first write, and names how an owner answer reaches git with no session awake. Owner
+  11:50 CST: "ya if anything the actual page gets its database disableed if that's possible and then
+  it's never an issue ... remember ij just care about the outcomes not the plumbing to reach it". The
+  outcome: one store, no copy step, no lag; the design pass picks the route. Read 11:52 CST: a page can
+  call the viewer's claude.ai connectors (capability mcp), the built-in Claude Code Remote one included.
+  So an answer can wake its writer today. This account has no GitHub connector, so a page cannot write
+  git directly yet. The other account is unread. Box
   answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
   pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
   1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
