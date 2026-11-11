@@ -836,7 +836,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   the planning stage itself maybe define how batches will be built". Stage 4's lanes start with the rest
   of stage 3, once 3.0 lands. How batches are built is settled before stage 3 starts (R26, item 3.4).
 
-- **D1. The roadmap is mechanical (open).** Owner 14:14 CST Nov 10: "realistically we have the actual
+- **D1. The roadmap is mechanical (ruled g, 15:19 CST Nov 11).** Owner 14:14 CST Nov 10: "realistically we have the actual
   roadmap be mechanizable like the status/queue/asks/etc". Already ruled: decision stalled-steps (owner
   2026-11-06 11:39 and 2026-11-07 12:22 CST) says `doing` is derived from live work, and
   skills/roadmap/build.py prints each stalled step. Not in force: 135 of 396 "doing" steps point at
@@ -930,6 +930,12 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   access to this GitHub API path is not permitted through this proxy"; GraphQL 403). REST reads pass. So
   the fallback holds: an Actions workflow deletes with GitHub's own token, and the Projects table needs
   the owner's token as a repository secret.
+  Ruled g, owner 15:19 CST Nov 11: "i think my answer is G right -- the table view isn't too releveant if we
+  have other ways around it right?". 1. GitHub's auto-delete setting removes a merged PR's branch. 2. An
+  Actions workflow with GitHub's own token deletes the rest the Oct 30 grant allows. 3. A check derives each
+  roadmap step's status from live PRs on the roadmap branch; no Projects table. The owner's token is not
+  needed. The docs say the relay blocks deletes, tags and GraphQL for every token; only a self-hosted
+  environment skips the relay.
   Home: decision for the delete route (new); D1 for the table.
 
 - **R34. The page shows how the system works and how healthy each part is.** Owner 11:35 CST Nov 11:
