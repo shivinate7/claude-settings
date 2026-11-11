@@ -2658,7 +2658,7 @@ def _text_after_ci_line(body, merge_mod):
 def review_record_problem(hook, text):
     """(refusal, note) for a lane reply that claims a review PASS. A reply with no claim, or a session that is not a lane,
     reads nothing. A claim with no PR is refused. Else two REST reads (the PR's live head, its issue comments); the newest
-    review record must name the PR, and merge's live_review_state must call it done for the live head (_live_state). A read
+    review log must name the PR, and merge's live_review_state must call it done for the live head (_live_state). A read
     of the PR or its comments that could not run, or a merge tool that could not load, is a note with UNKNOWN, never a block.
     A clean-merge read that could not run keeps a stale record stale, so it blocks, with a note that says so."""
     claims = review_claims(text)

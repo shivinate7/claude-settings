@@ -61,7 +61,7 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone. The
 - Done review log for the live head: `batch`. A clean merge of main keeps a record for the live head (decision pr-review-record, The review a changed head owes). Not built.
 - Review record open: `lane round n`, n the next round owed. A failed fix check: `lane round 1`.
 - Review log stale, newest record has no Fix check line: fix check.
-- Review log stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: one more fix check (decision pr-review-record). Its prior record must be a PASS that `review_state` accepts. Not built.
+- Review log stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: one more fix verifier (decision pr-review-record). Its prior record must be a PASS that `review_state` accepts. Not built.
 - Review log stale, in any other case: the fresh full review at the live head, as decision pr-review-record (The review a changed head owes) sets it.
 - Label `held`, `parked` or `replaced`, with a `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line: `waits on` that debt or item.
 - Label `batch` on an integration PR: `batch run`. It counts against the batch limit, aged from the label's last `labeled` event.

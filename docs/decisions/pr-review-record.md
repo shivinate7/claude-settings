@@ -15,7 +15,7 @@ Owner, 2026-11-10 14:07 CST, typed in the retrospective session. The coordinator
 
 - A clean merge of main keeps a review log valid. The merge tool proves the merge mechanically.
 - Batch CI catches what the merge breaks.
-- A conflicted merge after a PASS fix check takes one more fix check (a fix after a merge of main).
+- A conflicted merge after a PASS fix verifier takes one more fix verifier (a fix after a merge of main).
 - Any other difference keeps today's rules.
 
 ## The incident
@@ -74,11 +74,11 @@ The review a changed head owes. The first three bullets are the owner's ruling o
 
 - Owner's ruling. A clean merge of main keeps the record. A record stays valid for a live head that differs from its reviewed head only by clean merges of main (no conflict, the lane's own diff unchanged). Every commit after the record's Head, up to the live head, is a merge commit with two parents. Its second parent is on origin/main. Its tree equals `git merge-tree --write-tree` run on its two parents. The merge tool proves this. The record then reads as it did for its reviewed head. No fix check and no fresh review are owed. Batch CI catches what the merge breaks. `merge --reviewed` and the report guard run the check through one function (`live_review_state`). A read or a merge-tree that cannot run keeps the record stale, and the `--reviewed` line says the check is unknown and why. A parent that the checkout lacks is unknown, never a conflict and never clean. The tool fetches origin's branch heads once a run, only when a parent is missing.
 - Coordinator's reading of the owner's ruling (2026-11-10, after incident #2562, an empty commit on a reviewed head that read stale). An empty commit keeps the record too: a commit with one parent whose tree equals that parent's tree. It leaves the lane's diff unchanged.
-- Owner's ruling. A conflicted merge of main after a PASS fix check takes one more fix check (a fix after a merge of main). Its prior record must be a PASS that `review_state` accepts. Its reviewed head is that record's Head.
+- Owner's ruling. A conflicted merge of main after a PASS fix verifier takes one more fix verifier (a fix after a merge of main). Its prior record must be a PASS that `review_state` accepts. Its reviewed head is that record's Head.
 - Owner's ruling. Any other difference keeps today's rules, below.
-- Coordinator pick. A fix after a merge of main gets one fix check.
+- Coordinator pick. A fix after a merge of main gets one fix verifier.
 - Coordinator pick. The PR gets one fresh full review at the live head when any of these holds. A clean merge of main adds none.
-  - the newest record holds a fix check, unless its fix check PASSed and the live head is a conflicted merge of main into the fixed head (the fix after a merge of main above);
+  - the newest record holds a fix verifier, unless its fix verifier PASSed and the live head is a conflicted merge of main into the fixed head (the fix after a merge of main above);
   - a fix check failed;
   - a round read an older head than the live one;
   - the record was made or edited by hand;
@@ -123,12 +123,12 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
-- One fix check per record. A second fix on a fixed head gets the fresh full review in The review a changed head owes, not a fix check. The one exception is a conflicted merge of main after a PASS fix check, which takes one more fix check. A clean merge takes none. `--fix-check` checks in this order:
+- One fix verifier per record. A second fix on a fixed head gets the fresh full review in The review a changed head owes, not a fix verifier. The one exception is a conflicted merge of main after a PASS fix verifier, which takes one more fix verifier. A clean merge takes none. `--fix-check` checks in this order:
   - HEAD must be the Head of the newest earlier record on the PR. Otherwise it refuses (exit 2).
   - If that record has no Fix check line, it accepts the fix check.
   - If that record has a PASS Fix check line, that record must read done under `review_state` on its own Head. The `--head` commit must have exactly two parents. Its first parent must be HEAD. Its second parent must be on the PR's base branch: the base branch contains it, so GitHub's compare reads ahead or identical. Its tree must not be a clean `git merge-tree --write-tree` of the two parents plus an edit. Otherwise it refuses (exit 2).
-  - A conflicted merge passes the tree rule (`git merge-tree` exits 1) when it edits only its conflicted paths: a path git merged without conflict must hold git's own result, and any other edit refuses (exit 2). A clean merge passes when its tree is git's own. A clean merge needs no fix check, but the tool keeps what it did before and does not refuse one. A stacked base merge also keeps its earlier route. A merge that git cannot read, such as one whose parent the checkout lacks, refuses (exit 2), and the refusal says the merge is unknown.
-  - A FAIL Fix check on that record refuses (exit 2).
+  - A conflicted merge passes the tree rule (`git merge-tree` exits 1) when it edits only its conflicted paths: a path git merged without conflict must hold git's own result, and any other edit refuses (exit 2). A clean merge passes when its tree is git's own. A clean merge needs no fix verifier, but the tool keeps what it did before and does not refuse one. A stacked base merge also keeps its earlier route. A merge that git cannot read, such as one whose parent the checkout lacks, refuses (exit 2), and the refusal says the merge is unknown.
+  - A FAIL fix verifier line on that record refuses (exit 2).
 - The clean-merge survival in The review a changed head owes has one home, `live_review_state` in `merge/merge.py`. `merge --reviewed` and the report guard (`lint/report_guard.py`) both call it, so they agree. It walks first parents from the live head, at most 50 commits, back to the record's Head (`clean_merges_after`). Each commit is a clean merge of main (two parents, a second parent that main holds, and git's own clean merge tree) or an empty commit (one parent, and that parent's tree). The report guard's whole review check ends within 70 seconds (`lint/report_guard.py: REVIEW_CHECK_BUDGET = 70`), these reads included. Each `gh` read of its own also ends within 30 seconds (`lint/report_guard.py: REVIEW_READ_TIMEOUT = 30`). When the check cannot run, the record stays stale and the guard still blocks, with a note that says so.
 
 ## Lane picks
