@@ -2880,7 +2880,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None)
             fails += cross_fails
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
-            raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop or LANE_LINT_REMEDY]))
+            raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
     finally:
         drop_worktree(root, tmp, wt)
