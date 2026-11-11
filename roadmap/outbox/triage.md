@@ -659,3 +659,10 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Note: enable_pr_auto_merge (lint/report_guard.py:1939) is a merge route that no rule routes. It is allowed.
 - Note: update_pull_request is routed but unjudged, so `draft: false` marks a PR ready with no rule.
 - Note: hooks/test_mutate_ci.py:1718-1719 repeats WALK_SUITES in place of reading it (rule building-allow-list-is-the-constant).
+
+## 2026-11-10 23:35 CST
+- Note (#1186 round 2, sonnet): a node heredoc written through an assigned `$F` still allows, as on main; no test pins it.
+- Note (#1186 round 2, sonnet): an unexported `F=` before a quoted python heredoc is read as a write, though the child shell sees `$F` empty. Rare false alarm, from code reading.
+- Note (#2378 builder try 3): only a run that concluded "failure" counts for `--blame`; timed_out and cancelled are refused.
+- Incident: four agents stalled mid-call at the 21:23-22:08 CST session restart and were found 2 h later at a check-in. Guard: steps stall-watch-agents and stall-watch-resume (queued).
+- Note (#2379): the drop in d37ccfc6a is a move, not a loss (test-author judgment). Excused by a Drops-lines line in the PR body, since no real change needed a trailer commit.

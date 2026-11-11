@@ -1,12 +1,12 @@
 {
- "title": "Lane lint's cross check counts a conflict only on files both PRs change against main",
+ "title": "Lane lint counts a PR clash only when both heads merge clean with main, and checks the head against main",
  "phase": "now",
- "status": "queued",
+ "status": "doing",
  "order": 1016,
  "owner": "triage",
  "why": "merge --lane-lint's cross check fails a lane head that merged current main whenever an older sibling PR of the same lane session is stale against main; the conflict comes from main, not from the lane. Incidents 2026-11-10: #2563 (17:31 CST) blamed on #2573, and #2573 (18:24 CST) blamed on #2562 in hooks/guard_merge.py, a file #2573 does not touch; #2562 lacked main. #2566 passed lint at 17:06 CST while it conflicted with main itself.",
- "note": "Coordinator 14:05 CST Nov 10. Measured 14:03 CST: #1487@b32eeef2d changes six files, merges clean with main, and fails against parked #1485 #1591 #1608 #1633 #1681 #1723 #1747 on files #1487 never touches. Home: merge/merge.py cross_measure (step stack-cross-measure built it). Fix: count a pair conflict only on files both PRs change against main, or skip parked PRs. Red cases first: a lane head with main merged plus a stale sibling on other files passes; two siblings changing the same file still fail. #1487 waits on it.",
- "updatedAt": "2026-11-10T14:09:00-06:00",
- "lane": "",
+ "note": "Coordinator 14:05 CST Nov 10 queued it; coordinator 22:01 CST Nov 10: build it as a triage build with full review rounds. Fix (plan, opus, refuter opus 23:31 CST: revise, gaps folded in): lane lint checks the head against main (a conflict FAILs and names main); a pair clash counts only when both heads merge clean with main, else it is a report line naming the PR that conflicts with main; all steps run and give one verdict; an integration head's pair clashes are report lines. Departs from the first fix text (a file filter, or skip parked PRs): a stale sibling on the same file still clashes through main's hunk. Measured 23:33 CST: #2577's head clashed with #1426 and #2564, and each of those conflicts with main on the same files, so the main-net rule clears it. Red cases R1-R7 in merge/test_lane_lint.py CrossMeasure. Builder must say what the PR number is for a ref target in merge_reason. Folds in step lint-clash-blames-wrong-pr. #1487 waits on it.",
+ "updatedAt": "2026-11-10T23:35:00-06:00",
+ "lane": "cross-measure-main-net",
  "blockedBy": []
 }
