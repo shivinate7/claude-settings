@@ -1,0 +1,14 @@
+{
+ "id": "feedback-log-tends-itself",
+ "title": "The owner feedback log closes, cleans and lists its own items",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "why": "hooks/feedback_guard.py's Stop check made the retrospective session carry 17 settled standing ids in its handoff; its remedy names only the handoff, never [closed]. That session's log held 126 items (57 rulings and 9 standing still open), none closed by a tool; it closed them by hand at 10:17 CST Nov 11. Owner 10:16 CST: \"this should've been a trigger for something that should've been mechanizable\" and \"it's execution was a little half baked in that it's never cleaned up after or tended to\".",
+ "note": "Ruling R27 (owner 10:16 CST, relayed 10:18 CST; plan 6e0c790 under item 3.6, beside R16 and R24). Parts: (1) a ruling or task item closes itself when its home holds it on main, in the rewrite that marks repeats; (2) each refusal names [closed] as a way out (R24, step refusal-names-way-out); (3) the compaction reminder lists only items that still need work; (4) owner words from the question box or a relay are saved like a typed message. Home: decision owner-feedback-inbox. Stage 3.",
+ "source": "owner 2026-11-11 10:16 CST, relayed by the retrospective session",
+ "owner": "triage",
+ "updatedAt": "2026-11-11T10:18:00-06:00",
+ "blockedBy": []
+}
