@@ -3243,10 +3243,10 @@ def ready_page_state(root, n, host):
     try:
         if head_claim(wt):  # a claim stays at the ready confirm
             return "skip"
-        lacks = ancestor(wt, f"origin/{base}", info["head"])
-        if lacks is None:  # git could not tell (a shallow clone, a timeout): unread, never off the rule
+        holds = ancestor(wt, f"origin/{base}", info["head"])
+        if holds is None:  # git could not tell (a shallow clone, a timeout): unread, never off the rule
             raise Stop(f"cannot tell whether the head of #{n} holds the tip of {base}: the ancestry read failed (decision guard-hooks-fail-closed, a read that cannot run refuses)")
-        if lacks is False:
+        if holds is False:
             return "skip"
         return "stale" if rebuild_records(wt) else "current"
     finally:
