@@ -644,10 +644,11 @@ class KeptNameTests(Fixture):
         self.assertIn("review-record-helper", out)
 
     def test_a_kept_name_on_a_line_does_not_unflag_another_rows_not_name(self):
-        code, out = self.change("merge/merge_probe.py", 'label = "pr-review-record"; fix_check = 1\n')
+        """The kept slug is row review log's; `handover` is row handoff's "not" name, so it stays flagged."""
+        code, out = self.change("merge/merge_probe.py", 'label = "pr-review-record"; handover = 1\n')
         self.assertEqual(code, 1, out)
         self.assertIn("merge/merge_probe.py:1", out)
-        self.assertIn("fix check", out)
+        self.assertIn("handover", out)
 
     # The kept list comes from the glossary file
 
