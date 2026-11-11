@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R41 came after.
+the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R42 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -700,6 +700,22 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      or fix. It flags, like its other items, and never refuses.
   Home: decision question-form; decision reply-judge-samples-never-refuses; rule
   outcomes-stale-decision-protocol.
+
+- **R42 (proposed, waits for the owner's yes). Rulings get acted on, and main moves the way Anthropic
+  moves its own.** Owner 13:39 CST Nov 11: "a report is still just a report yanno that's something for
+  me to read rather than something to act upon". Read 13:41 CST: Anthropic's post "Redesigning source
+  control at Anthropic" (Oct 13, updated Oct 15) says "A proper merge queue, for example, doesn't make
+  much sense at agent scale". It tests after merge and before deploy, with automated bisect and revert.
+  Its Claude Code team scales human approval by the change's risk and tracks reverts as the guard; a
+  webinar on it runs Nov 18. Our batch flow holds a lock on main during each batch run (rule
+  git-no-merge-during-batch-ci), and the baseline counts 147 lane drops in 15 batch merges.
+  1. A step that holds an owner ruling and has no lane is the coordinator's queue. It starts the step
+     under rule parallelism-keep-going, not as a report line. Triage's reply names the step, and the
+     sender's log item points to it, so the feedback guard proves it exists.
+  2. Proposed for stage 3, after a Plan agent and a refuter: a lane merges on its own green checks and
+     its review, sized by risk. Main's CI runs after the merge; a red run bisects and reverts the
+     breaking commit. Sessions install from a stable branch that moves only when main is green.
+  3. Guard numbers: reverts per merge, and the pace numbers. Main must first finish a CI run (#2591).
 
 - **R41. Mods, skills and the output style: keep all, fix seven defects.** Owner 13:36 CST Nov 11:
   "r41 yes on all". Owner 13:25 CST Nov 11: "tell me how my mods and skills work ... are they even good to keep
