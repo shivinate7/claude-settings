@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 13:01 CST. The owner's list closed at 18:43 CST; R21 to R37 came after.
+the history. Last rewrite: 13:04 CST CST. The owner's list closed at 18:43 CST; R21 to R39 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -637,6 +637,31 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   never cut. The brief audit (started 12:48 CST) measures brief length and the narration share of lane
   output first; the line ships if narration is a real share. Home: agents/*.md; decision
   agent-model-cap.
+
+- **R38. The repeat judge skips its own thread and marks without blocking.** Read 13:00 CST Nov 11:
+  decision owner-feedback-inbox, Repeats (owner 2026-11-01 17:57 CST, "a model's meaning match, no
+  glossary") made 8 marks today, 0 true. Two causes: one candidate is given to every item in a Stop, and
+  a session's follow-up items match its own earlier items on the same owner message. Owner 13:03 CST:
+  "yes on the fix !".
+  1. The judge skips a candidate on the item's own home or the same owner message.
+  2. Each item gets its own candidates.
+  3. A mark prints one line and never blocks the turn.
+  The meaning match stays, so a repeat in other words (the carousel and wheel incident) is still caught.
+  Home: decision owner-feedback-inbox, Repeats, rewritten in place.
+
+- **R39 (proposed, waits for the owner's yes). A past ruling is challenged, never deferred to.** Owner
+  13:01 CST Nov 11: "my rules are to be challenged/questioned and never read as absolutes given im
+  imperfect". Owner 13:03 CST: "how can we fix the defference in claude.md or whever it is taht's
+  causing it". Read 13:04 CST: the past-ruling check (hooks/call_judge.py, item 8; hooks/question_form.py,
+  "the owner is never asked twice") refuses any question on a settled point. Its only pass is a
+  `Based on (ruling)` line, read as "a re-ask the ruling allows". It cannot tell a nag from a challenge,
+  so sessions learn to defer.
+  1. Item 8 refuses a re-ask with no new fact. It passes a challenge: the record and its sentence, a
+     measure, the outcome it protected and what protects it now, and a proposed fix.
+  2. Its refusal text says how to challenge, not to withdraw.
+  3. The question form's Problem line names the act the yes gates, not the owner's authority.
+  4. A red case: a challenge with a measure passes; the same question with no new fact is refused.
+  Home: decision question-form; rule outcomes-stale-decision-protocol.
 
 - **R37. No fixed word cap, and no "STE" name.** Owner 12:54 CST Nov 11: "i thought i eliminated all
   STE requirements from everywhere in the repo weeks ago (along with hard limits like 30 vs 31 words
