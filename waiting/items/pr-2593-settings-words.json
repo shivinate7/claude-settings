@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-11T19:04:00Z",
+  "context": "Goal: a cloud session wakes when CI ends after it marks a PR ready.\nProblem (rule): #2593 changes settings.json, and a settings change needs your typed words.\nBased on (read): #2593 adds the GitHub MCP \"update pull request\" call to the CI-wake hook's matcher; the hook runs only when that call marks a PR ready.\nBased on (read): the third review passed, finding the change neither helps nor hurts safety, since the hook only sends a wake and blocks nothing; the quick checks passed.\nDeparts from: main, where the CI-wake hook fires only on the shell ready command \u2014 it also fires when the MCP call marks a PR ready.\nMeanwhile: #2593 waits; the next batch goes on without it.",
+  "home": "decision ci-wait-reads-run-status; PR #2593",
+  "id": "pr-2593-settings-words",
+  "kind": "decision",
+  "n": 510,
+  "options": [
+    {
+      "gain": "Cloud sessions get the CI-done wake, so a lane stops waiting with no wake.",
+      "how": "The batch runner lands #2593 in the next batch, today.",
+      "key": "a",
+      "label": "Land #2593 in the next batch (Recommended)",
+      "lose": "One quick text check on each MCP PR update call."
+    },
+    {
+      "gain": "No settings change before today's sessions are closed and replaced by fresh ones.",
+      "how": "#2593 waits until after the fresh start, for the next round of planned work.",
+      "key": "b",
+      "label": "Hold #2593 until after the fresh start",
+      "lose": "Cloud sessions keep missing the wake until then."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "coordinator 13:04 CST Nov 11; premise P13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Land the CI-wake settings change (#2593) now?",
+  "status": "open",
+  "title": "#2593 changes settings.json so cloud sessions get the CI-done wake. Land it in the next batch?",
+  "why": "A settings change needs your typed words."
+}

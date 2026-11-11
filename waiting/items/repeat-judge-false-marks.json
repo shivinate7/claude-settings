@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-11T19:04:00Z",
+  "context": "Goal: the feedback log catches real repeats without false alarms.\nProblem (rule): the repeat judge is a ruled guard (your ruling 2026-11-01 17:57 CST), and 8 of 8 marks today were false; only you can change a ruled guard.\nBased on (measured): 8 marks, 0 true, in the retrospective session, 11:53-12:58 CST; one Stop gave 3 new items the same candidate, and it matched the session's own follow-up items to its own earlier block on the same thread.\nBased on (ruling): your 12:59 CST question \"also you've said this a bunch -- is something wrong herE?\".\nDeparts from: main blocks the Stop on every mark \u2014 a mark that points at the item's own home or at the session's own block on the same thread is skipped, and other marks print one line without blocking.\nMeanwhile: the retrospective keeps dropping false marks.",
+  "home": "decision owner-feedback-inbox (Repeats bullet); step feedback-log-tends-itself (R27)",
+  "id": "repeat-judge-false-marks",
+  "kind": "decision",
+  "n": 509,
+  "options": [
+    {
+      "gain": "No more false-alarm turns.",
+      "how": "Skip own-thread and own-home matches; other marks print one line and do not block.",
+      "key": "a",
+      "label": "Skip own matches; marks stop blocking (Recommended)",
+      "lose": "A real repeat shows as a note a session could skip."
+    },
+    {
+      "gain": "True repeats still force a merge.",
+      "how": "Add the two skips; marks still block the Stop.",
+      "key": "b",
+      "label": "Keep blocking, add the two skips",
+      "lose": "Other false marks still cost turns."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 13:00 CST Nov 11",
+  "repo": "shivinate7/claude-settings",
+  "short": "Stop the repeat judge's false alarms how?",
+  "status": "open",
+  "title": "The repeat judge marked 8 items today and none were repeats. Should its marks stop blocking?",
+  "why": "Each false mark blocks a Stop and costs a turn."
+}
