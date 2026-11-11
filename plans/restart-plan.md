@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 10:00 CST. The owner's list closed at 18:43 CST; R21 to R26 came after.
+the history. Last rewrite: 2026-11-11 10:05 CST. The owner's list closed at 18:43 CST; R21 to R26 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -217,14 +217,16 @@ it's how the limit batches that's the problem". How many lanes start is left to 
 - **R26. Batches stop wasting CI.** Owner 09:20 CST Nov 11: "i need a review and then a strategy that
   makes me parallelize as much as possible, without losing time when things start merging into main".
   And 09:21 CST: "batch merges themselves were made to avoid CI waits and to have things go faster". In
-  the question box, answered by 10:00 CST, he picked three parts.
+  the question box, answered by 10:00 CST, he picked these parts.
   1. A lane's own checks run what made batches red: the Windows slice, mutation tests on the files it
      touches, and signed-commit cases (folds into 3.5).
   2. A lane dropped from two batches leaves the queue for a fix lane.
   3. No self-made reruns: the merge tool stops the records-page push after a green run, and a red main
      is fixed before the next merge, not waited out.
-  Busy files in turn (lanes on the main guard file and its tests in back-to-back batches; that test file
-  split by rule): open; he asked for more on it first.
+  4. Busy files in turn (box answer 10:05 CST, "Both"). The batch runner puts lanes that touch the
+     same busy file (the main guard file, its tests, its mutation tests) into back-to-back stacked
+     batches, never one batch. The guard test file is split into one file per rule. The split runs
+     first in stage 3, while few lanes are open.
   Stays as ruled: decision batch-freeze-lane-set (owner 2026-11-08 20:24 and 20:31 CST): the set freezes
   at build, the next batch stacks on the running one, a red run drops only the blamed lane. Its tool
   check is this item's step. One batch runner: merging is one at a time under one lock (merge.py).
