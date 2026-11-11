@@ -718,9 +718,17 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   3.15 relaxed. Nothing flags a child line that contradicts a parent rule without an exemption.
   Step child-repo-gap ("Check how far each child repo is from claude-settings main") has been todo since
   Oct 29 with no lane; R44 folds into it.
-  1. First, a read-only audit of the child repos (q_max first): pin age, lines that contradict a parent
-     rule with no exemption, copies, and any outputStyle or hook override.
-  2. Then the split: skill compliance-check is the one-time sweep that brings a repo in line; a check
+  Owner 14:03 CST: "audits feel more like one-timey than they are mechanical ... i'd allow for example
+  one quick scan of a part of q_max". Scan 14:05 CST (q_max 32d4373, CLAUDE.md and workflow pins): its
+  CLAUDE.md cites the parent by rule id, as it should. All 9 claude-settings action pins sit at
+  2ac382cc6 (Nov 8 20:50 CST), 2758 commits behind main, with 50 commits to actions/ since. Its records
+  D-499 and D-833 make the pinned STE sentence-length lint its own law ("npm run lint runs the same
+  lint, at the same pinned commit"), so R37's retirement of that cap will not reach q_max. Its own
+  exception, D-705 (merge over a red browser.yml run, owner 2026-11-07 13:13 CST), cites a grant with a
+  time but not the parent rule it departs from.
+  1. Child CI runs claude-settings actions from the stable branch of R42 part 2, not a commit pin, so
+     each tested change reaches every child at once.
+  2. The split: skill compliance-check is the one-time sweep that brings a repo in line; a check
      in child CI keeps it there. The check flags a contradicting line with no exemption line, and pins
      move when claude-settings main changes an action.
   3. shiv-stylisms content (are its 23 rules still right) joins R35's review, which the owner signs.
