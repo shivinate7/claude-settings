@@ -17020,11 +17020,11 @@ def controls(text):
 
 BATCH_BEGIN, BATCH_END = "<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"  # the marker lines of a batch pull request's frozen block
 
-def freeze_inner(name, lanes, dropped=(), on=None):
+def freeze_inner(name, lanes, dropped=(), on=None, blamed=()):
     """The lines between a frozen block's markers: `Batch:`, `On: BRANCH SHA` when the batch stacks on one, one `Lane:` line per (PR, head)
-    by PR number, then one `Dropped:` per dropped PR."""
+    by PR number, then one `Dropped:` per dropped PR and one `Blamed:` per lane a red lint of the batch head blamed."""
     return [f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *(f"Lane: #{n} {sha}" for n, sha in sorted(lanes)),
-            *(f"Dropped: #{n}" for n in dropped)]
+            *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed))]
 
 def freeze_body(inner):
     return "\n".join([BATCH_BEGIN, *inner, BATCH_END]) + "\n"
@@ -17122,25 +17122,25 @@ class BatchFreeze(CloudSession):
         sh(o, "git", "push", "-q", "-f", "origin", f"batch-{name}")
         return self.head(f"batch-{name}")
 
-    def frozen_batch(self, name, numbers, on=None, draft=False):
+    def frozen_batch(self, name, numbers, on=None, draft=False, blamed=()):
         """The batch a build made: origin's batch-NAME merges each lane in `numbers` no-ff onto origin/main (or, with `on`, onto
         origin/<on>, and its block carries the On line), and one pull request carries the frozen block, a draft when `draft`, else ready.
-        -> the pull request's number."""
+        `blamed` lists the lanes a red lint of the batch head blamed: the only lanes a drop may take off. -> the pull request's number."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", f"batch-{name}", f"origin/{on}" if on else "origin/main")
         for n in numbers:
             sh(o, "git", "merge", "-q", "--no-ff", "-m", f"merge lane {n}", self.heads[n])
         sh(o, "git", "push", "-q", "origin", f"batch-{name}")
-        inner = freeze_inner(name, [(n, self.heads[n]) for n in numbers], on=(on, self.head(on)) if on else None)
+        inner = freeze_inner(name, [(n, self.heads[n]) for n in numbers], on=(on, self.head(on)) if on else None, blamed=blamed)
         return self.host.create_pr(f"batch-{name}", "main", f"Batch {name}", freeze_body(inner), draft=draft)
 
-    def ready_stack(self):
-        """Lanes 101, 102 and 104: a batch-x holds 101 and 102, ready, and a ready batch-nightly holds 104 on batch-x. -> (x's pull request,
-        nightly's pull request, batch-nightly's head)."""
+    def ready_stack(self, blamed=()):
+        """Lanes 101, 102 and 104: a batch-x holds 101 and 102, ready, and a ready batch-nightly holds 104 on batch-x. `blamed` are the
+        lanes a red lint blamed on batch-x. -> (x's pull request, nightly's pull request, batch-nightly's head)."""
         for n in (101, 102, 104):
             self.lane(n)
-        x = self.frozen_batch("x", [101, 102])
+        x = self.frozen_batch("x", [101, 102], blamed=blamed)
         nightly = self.frozen_batch("nightly", [104], on="batch-x")
         return x, nightly, self.head("batch-nightly")
 
@@ -17525,6 +17525,43 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, readies, "--ready on a ready batch called Host.ready: %s" % out)
         self.assertEqual(rc, 0, "--ready on a ready batch exited %s: %s" % (rc, out))
 
+    def test_ready_on_a_ready_batch_whose_head_moved_since_its_lint_is_linted_again(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")  # the lint of the head that passed, then ready
+        self.assertEqual(rc, 0, "setup: the first --ready exited %s: %s" % (rc, out))
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "setup: the first --ready did not mark the batch PR ready: %s" % out)
+        passed = self.head("batch-nightly")
+        self.bump("batch-nightly")  # a claim or a heal moves the head on origin after the lint that passed it
+        self.assertNotEqual(self.head("batch-nightly"), passed, "setup: the head did not move")
+        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")],
+                         "--ready did not lint the moved head once, so a head no lint read is marked ready: %s" % out)
+        self.assertFalse(self.host.batch_pulls[pr]["draft"], "the moved batch PR is not ready after --ready: %s" % out)
+        self.assertEqual(rc, 0, "--ready on the moved head exited %s: %s" % (rc, out))
+
+    def test_a_lint_fail_whose_blame_write_is_refused_says_so_and_the_lane_cannot_be_dropped(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.fail_the_next_body_write()  # the blame a lint FAIL stores is the first body write of this run
+        with self.no_lint_or_ready_check(ready_state=self.lint_fail_naming("lanes/102.txt")):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(self.drop_pr_numbers(out, "nightly"), ["102"], "setup: the red run did not print the drop command for #102: %s" % out)
+        self.assertIn("the blame could not be stored", out, "a refused blame write is not said: %s" % out)
+        self.assertEqual(rc, 1, "the red run exited %s, not 1: %s" % (rc, out))
+        self.assertFalse(any(line.startswith("Blamed:") for line in block_lines(self.body(pr)) or []),
+                         "the refused blame write left a Blamed line in the body: %s" % out)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertIn("no red run of its head blamed it", out, "a drop of #102 is not refused after its blame was not stored: %s" % out)
+        self.assertEqual(rc, 1, "the drop of #102 exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
     def test_ready_with_a_pr_list_other_than_the_frozen_set_is_refused_as_a_build_is(self):
         for n in (101, 102):
             self.lane(n)
@@ -17770,7 +17807,7 @@ class BatchFreeze(CloudSession):
     def test_drop_takes_one_lane_off_the_branch_and_runs_no_lint_or_ready_check(self):
         for n in (101, 102, 103):
             self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
+        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
         self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "setup: lane #102 is not on batch-nightly before the drop")
         with self.no_lint_or_ready_check() as mocks:
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
@@ -17813,7 +17850,7 @@ class BatchFreeze(CloudSession):
     def test_drop_leaves_another_batchs_branch_and_pr_alone(self):
         for n in (101, 102, 103, 104):
             self.lane(n)
-        self.frozen_batch("nightly", [101, 102, 103])
+        self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
         other_pr = self.frozen_batch("other", [104])
         other_head, other_body = self.head("batch-other"), self.body(other_pr)
         self.record_pushes()
@@ -17837,7 +17874,7 @@ class BatchFreeze(CloudSession):
 
     def test_drop_refuses_the_only_lane_and_says_to_close_the_batch(self):
         self.lane(101)
-        pr = self.frozen_batch("nightly", [101])
+        pr = self.frozen_batch("nightly", [101], blamed=(101,))
         snap = self.snapshot(pr)
         self.record_pushes()
         rc, out = self.run_batch("--batch-drop", "nightly", "101")
@@ -17859,7 +17896,7 @@ class BatchFreeze(CloudSession):
     def test_text_outside_the_markers_is_kept_when_a_lane_is_dropped(self):
         for n in (101, 102, 103):
             self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
+        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
         self.host.batch_pulls[pr]["body"] = "Notes kept by hand.\n\n" + self.body(pr) + "\nFooter kept.\n"
         before = self.body(pr)
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
@@ -17887,7 +17924,7 @@ class BatchFreeze(CloudSession):
     def test_a_drop_of_a_ready_batch_returns_it_to_draft_once_before_its_push_and_says_it_needs_ready_again(self):
         for n in (101, 102, 103):
             self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])  # ready
+        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))  # ready
         before = self.head("batch-nightly")
         seen = []
         self.host.on_to_draft = lambda n: seen.append(self.head("batch-nightly"))
@@ -17904,7 +17941,7 @@ class BatchFreeze(CloudSession):
     def test_a_refused_return_to_draft_warns_and_the_drop_still_goes_through(self):
         for n in (101, 102, 103):
             self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])  # ready
+        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))  # ready
         self.host.to_draft_refuse = "no mark-draft route is open to this session"
         self.record_pushes()
         with self.no_lint_or_ready_check():
@@ -17921,7 +17958,7 @@ class BatchFreeze(CloudSession):
     def test_a_drop_of_a_ready_batch_whose_return_to_draft_is_refused_still_says_it_needs_ready_again(self):
         for n in (101, 102, 103):
             self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])  # ready: the drop's return to draft is refused, so the PR stays ready
+        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))  # ready: the drop's return to draft is refused, so the PR stays ready
         self.host.to_draft_refuse = "no mark-draft route is open to this session"
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-drop", "nightly", "102")
@@ -17945,7 +17982,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
 
     def test_a_drop_on_a_ready_base_returns_its_ready_on_batch_to_draft_before_the_rebuild_and_never_lints(self):
-        x, nightly, old_nightly = self.ready_stack()
+        x, nightly, old_nightly = self.ready_stack(blamed=(102,))
         seen = []
         self.host.on_to_draft = lambda n: seen.append((n, self.head("batch-nightly")))
         with self.no_lint_or_ready_check():
@@ -17960,7 +17997,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [], "the drop called Host.ready: %s" % out)
 
     def test_a_refused_return_to_draft_on_a_drop_still_rebuilds_the_ready_on_batch(self):
-        x, nightly, _ = self.ready_stack()
+        x, nightly, _ = self.ready_stack(blamed=(102,))
         self.host.to_draft_refuse = "no mark-draft route is open to this session"
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-drop", "x", "102")
@@ -17972,7 +18009,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
 
     def test_a_restack_of_a_ready_on_batch_whose_return_to_draft_is_refused_still_says_it_needs_ready_again(self):
-        x, nightly, _ = self.ready_stack()
+        x, nightly, _ = self.ready_stack(blamed=(102,))
         self.host.to_draft_refuse = "no mark-draft route is open to this session"
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-drop", "x", "102")
@@ -18105,7 +18142,7 @@ class BatchFreeze(CloudSession):
         self.lane(101)
         self.lane(102, on=101)  # stacked on lane #101: its head contains #101's head
         self.lane(103)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
+        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(101,))
         self.assertTrue(self.ancestor(self.heads[101], self.heads[102]), "setup: lane #102 does not contain lane #101's head")
         self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "setup: lane #102 is not on batch-nightly before the drop")
         with self.no_lint_or_ready_check() as mocks:
@@ -18127,7 +18164,7 @@ class BatchFreeze(CloudSession):
     def test_a_drop_on_a_base_rebuilds_the_batch_stacked_on_it_and_leaves_others(self):
         for n in (101, 102, 103, 104):
             self.lane(n)
-        self.frozen_batch("x", [101, 102])
+        self.frozen_batch("x", [101, 102], blamed=(102,))
         nightly_pr = self.frozen_batch("nightly", [103], on="batch-x")
         self.frozen_batch("free", [104])
         old_nightly, free_head = self.head("batch-nightly"), self.head("batch-free")
@@ -18287,7 +18324,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102, 104):
             self.lane(n)
         self.lane(103, on=101)  # lane #103 stacks on #101: its head contains #101's head
-        self.frozen_batch("bx", [101, 102])
+        self.frozen_batch("bx", [101, 102], blamed=(101,))
         by_pr = self.frozen_batch("by", [103, 104], on="batch-bx")  # batch-by holds #101's commit through #103
         self.assertTrue(self.ancestor(self.heads[101], "origin/batch-by"), "setup: batch-by does not hold lane #101's commit")
         with self.no_lint_or_ready_check() as mocks:
@@ -18309,7 +18346,7 @@ class BatchFreeze(CloudSession):
     def test_a_drop_in_a_shallow_clone_with_two_lanes_left_does_not_stop_on_an_unreadable_ancestor(self):
         for n in (101, 102, 103):
             self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102, 103])
+        pr = self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
         pin = self.head("batch-nightly")
         shallow = os.path.join(self.t, "shallow")
         error = shallow_clone.make(self.bare, shallow, pin)
@@ -18327,7 +18364,7 @@ class BatchFreeze(CloudSession):
     def test_an_unrelated_pr_body_quoting_a_lone_begin_marker_does_not_fail_a_good_drop(self):
         for n in (101, 102, 103):
             self.lane(n)
-        self.frozen_batch("nightly", [101, 102, 103])
+        self.frozen_batch("nightly", [101, 102, 103], blamed=(102,))
         self.lane(990)  # an ordinary lane pull request, not a batch: its body quotes the begin marker on a line of its own
         self.host.batch_pulls[990]["body"] = "A note that quotes the marker:\n" + BATCH_BEGIN + "\nand goes on.\n"
         self.assertIsNone(block_raw(self.host.batch_pulls[990]["body"]), "setup: the quoted marker is read as a whole block")
@@ -18338,7 +18375,7 @@ class BatchFreeze(CloudSession):
     def test_a_batch_whose_block_is_unreadable_is_named_when_restack_cannot_rebuild_it(self):
         for n in (101, 102, 103, 104):
             self.lane(n)
-        self.frozen_batch("nightly", [101, 102])
+        self.frozen_batch("nightly", [101, 102], blamed=(102,))
         late = self.frozen_batch("late", [104], on="batch-nightly")
         self.host.batch_pulls[late]["body"] = "\n".join([BATCH_BEGIN, "Batch: late", "Lane: #104 not-a-sha", BATCH_END]) + "\n"
         rc, out = self.run_batch("--batch-drop", "nightly", "102")
@@ -18360,6 +18397,7 @@ class BatchFreeze(CloudSession):
             self.lane(n)
         rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        self.blame_lane("nightly", 102)  # a red run blames #102 on the built batch, so the drop below is allowed
         recorded = self.head("main")
         self.main_moves()
         moved = self.head("main")
@@ -18378,7 +18416,7 @@ class BatchFreeze(CloudSession):
         lists it dropped, the state a kill leaves. -> the batch's pull request number. The kill is not a Stop, so no handler in the run catches it."""
         for n in numbers:
             self.lane(n)
-        pr = self.frozen_batch("nightly", numbers)
+        pr = self.frozen_batch("nightly", numbers, blamed=(number,))
 
         class Killed(BaseException):
             pass
@@ -18432,7 +18470,7 @@ class BatchFreeze(CloudSession):
         for n in (101, 102, 104):
             self.lane(n)
         self.lane(103, on=101)  # stacked on #101: batch-by holds #101's commit through #103
-        self.frozen_batch("bx", [101, 102])
+        self.frozen_batch("bx", [101, 102], blamed=(101,))
         by_pr = self.frozen_batch("by", [103, 104], on="batch-bx")
         with unittest.mock.patch.object(merge, "restack", return_value=1):  # the restack of batch-by fails after the drop of #101
             self.run_batch("--batch-drop", "bx", "101")
@@ -18453,8 +18491,8 @@ class BatchFreeze(CloudSession):
         for n in (101, 102, 104):
             self.lane(n)
         self.lane(103, on=101)  # stacked on #101: batch-by holds #101's commit through #103
-        self.frozen_batch("bx", [101, 102])
-        self.frozen_batch("by", [103, 104], on="batch-bx")
+        self.frozen_batch("bx", [101, 102], blamed=(101,))
+        self.frozen_batch("by", [103, 104], on="batch-bx", blamed=(103,))
         with unittest.mock.patch.object(merge, "restack", return_value=1):  # the restack of batch-by fails after the drop of #101
             self.run_batch("--batch-drop", "bx", "101")
         self.assertFalse(self.on_origin(self.heads[101], "batch-bx"), "setup: the drop of #101 left it on batch-bx")
