@@ -828,10 +828,10 @@ PUSHLOCALAHEAD = os.path.join(ROOT, "pushlocalahead")    # PUSHAHEAD's state, wi
 # Every-branch fixtures (rule push-all-main): main equal to its tracking ref on a network origin. PUSHALLNOAGENT holds
 # no agent-named local branch; each of the other three adds one, and differs from PUSHALLNOAGENT only in that branch.
 PUSHALLNOAGENT = os.path.join(ROOT, "pushallnoagent")          # main only
-PUSHALLAGENT = os.path.join(ROOT, "pushallagent")              # plus agent-0123456789abcdef
-PUSHALLAGENTWT = os.path.join(ROOT, "pushallagentwt")          # plus worktree-agent-0123456789abcdef
-PUSHALLAGENTCLAUDE = os.path.join(ROOT, "pushallagentclaude")  # plus claude/agent-0123456789abcdef
-PUSHALLAGENTAHEAD = os.path.join(ROOT, "pushallagentahead")    # plus agent-0123456789abcdef; local main one commit ahead
+PUSHALLAGENT = os.path.join(ROOT, "pushallagent")              # plus agent-<hex suffix>
+PUSHALLAGENTWT = os.path.join(ROOT, "pushallagentwt")          # plus worktree-agent-<hex suffix>
+PUSHALLAGENTCLAUDE = os.path.join(ROOT, "pushallagentclaude")  # plus claude/agent-<hex suffix>
+PUSHALLAGENTAHEAD = os.path.join(ROOT, "pushallagentahead")    # plus agent-<hex suffix>; local main one commit ahead
 # The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
