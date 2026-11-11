@@ -1,12 +1,12 @@
 {
- "id": "refusal-names-way-out",
- "title": "Every guard refusal and ask names an allowed way out, and a test proves each one is allowed",
- "status": "todo",
- "why": "guard_core.refuse() takes a free-text reason, and no check requires a way out. Agents stall or route around a guard when its refusal gives none. Harm stopped: hours of stalled lanes and guessed workarounds.",
- "note": "Owner grant, 09:16 CST Nov 11 (\"yes file it for stage 3\"; relayed by the coordinator 09:17). Stage 3, beside plan item 3.6 (the guard cull). File only; no build under the freeze. Rough count on main: 21 'Remedy:' lines in hooks/guard.py against about 121 refuse or ask sites (unmeasured exactly; some sites build the remedy elsewhere). The Stop guard's remedy test (lint/test_report_guard_remedy.py) covers only the paths it has fixtures for. Shape: every refusal and ask carries a Remedy that names an allowed act, and a test runs each remedy through the guard to prove it is allowed (generalize the wait-until remedy test in hooks/test_guard.py). The remedy never names the forbidden target (rule git-remedy-never-names-target). Incidents: lanes 2YRQ and 4VY5 stalled for hours on scratchpad-owner asks (Nov 10). The Stop 'Recovered guard' (lint/report_guard.py) refused the coordinator's report three times at 09:1x CST Nov 11, though each report held a Recovered line: the line sat after 'OTHER:' or inside a Done item, and the refusal never says the line must open its own bullet. Triage's own reports hit the same guard twice tonight.",
- "lane": "",
- "blockedBy": [],
- "updatedAt": "2026-11-11T09:20:00-06:00",
- "owner": "claude-settings",
- "phase": "later"
+  "id": "refusal-names-way-out",
+  "title": "Every guard refusal and ask names an allowed way out, and a test proves each one is allowed",
+  "status": "todo",
+  "why": "guard_core.refuse() takes a free-text reason, and no check requires a way out. Agents stall or route around a guard when its refusal gives none. Harm stopped: hours of stalled lanes and guessed workarounds.",
+  "note": "Owner grant, 09:16 CST Nov 11 (\"yes file it for stage 3\"; relayed by the coordinator 09:17). Stage 3, beside plan item 3.6 (the guard cull). File only; no build under the freeze. Rough count on main: 21 'Remedy:' lines in hooks/guard.py against about 121 refuse or ask sites (unmeasured exactly; some sites build the remedy elsewhere). The Stop guard's remedy test (lint/test_report_guard_remedy.py) covers only the paths it has fixtures for. Shape: every refusal and ask carries a Remedy that names an allowed act, and a test runs each remedy through the guard to prove it is allowed (generalize the wait-until remedy test in hooks/test_guard.py). The remedy never names the forbidden target (rule git-remedy-never-names-target). Incidents: lanes 2YRQ and 4VY5 stalled for hours on scratchpad-owner asks (Nov 10). The Stop 'Recovered guard' (lint/report_guard.py) refused the coordinator's report three times at 09:1x CST Nov 11, though each report held a Recovered line: the line sat after 'OTHER:' or inside a Done item, and the refusal never says the line must open its own bullet. Triage's own reports hit the same guard twice tonight. Incident 2026-11-11 about 10:00 CST: guard rule scratchpad-owner asked the owner (a permission box) when a triage agent wrote `git show 90c05facc:merge/merge.py` over another agent's scratchpad file. Fix lane scratchpad-owner-refuse (coordinator 10:01 CST): a refusal that names a fresh file name, so no box reaches the owner.",
+  "lane": "",
+  "blockedBy": [],
+  "updatedAt": "2026-11-11T10:02:00-06:00",
+  "owner": "claude-settings",
+  "phase": "later"
 }
