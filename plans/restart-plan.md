@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 12:45 CST. The owner's list closed at 18:43 CST; R21 to R35 came after.
+the history. Last rewrite: 2026-11-11 12:52 CST. The owner's list closed at 18:43 CST; R21 to R36 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -614,6 +614,16 @@ branch. Readers: R33's model evaluation and the spend row of R34's tab. No timer
   `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, never `/autocompact` (decision precompact-handoff, rule 1,
   coordinator pick 2026-11-01 17:45). Decision idle-resume-compacts, which lists `/autocompact` as a
   cloud lever, is rewritten to match. Home: decision precompact-handoff, rule 1.
+
+- **R36. Agents write little that no one reads.** Owner 12:49 CST Nov 11: "how much should our
+  subagents be allowed to just "type"". 12:52 CST: "im assuming the brief kinda needs to have a line in
+  terms of how much to talk ... keep verbiage to a minimum something like that? or it's mechanized?
+  unsure i'm deferring to you". Pick, under that deferral: the line goes in
+  each agent role file and the lane start text, which load on their own, never in each brief. Briefs
+  carry only task facts. A check proves each role file holds the line. Reasoning and tool inputs are
+  never cut. The brief audit (started 12:48 CST) measures brief length and the narration share of lane
+  output first; the line ships if narration is a real share. Home: agents/*.md; decision
+  agent-model-cap.
 
 - **R35. The global CLAUDE.md loads only what each session needs.** Owner 12:38 CST Nov 11: "im
   wondering whether i properly keep claude.md's just at the repo level and claude-settings level as its
