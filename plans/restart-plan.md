@@ -337,7 +337,8 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   rate. A move above Sonnet needs the owner's grant (rule roles-sonnet-is-the-ceiling). Runs after
   R32's audit, and folds in docs/todo.md line 9 (roadmap step c201: one lane per role on the
   next model down) and debt lane-model-recheck (whether any lane should run Opus). Home: decision
-  agent-model-cap.
+  agent-model-cap. Owner 13:52 CST Nov 11: "i'd say all three stay on opus for now until 3.7": the
+  coordinator, triage and the batch runner respawn on Opus at the fresh start.
 
 ### 3.8 One rounds record; no round 3 after a pass
 
