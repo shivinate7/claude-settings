@@ -14696,6 +14696,14 @@ class ReviewCleanMainMerge(ReviewEnv):
         self.assert_clean_merge_done(fx)
         self.reviewed_line(self.reviewed_host(fx, fx.octopus), fx.octopus, "stale", "a merge with three parents must not read done")
 
+    def test_f_a_lint_pass_on_the_reviewed_head_does_not_carry_to_a_clean_merge_of_main(self):
+        # The lint gate reads the live head only (decision lanes-run-no-full-ci-job). The default host's lint names the clean merge, so the control reads done.
+        fx = self.real_commits()
+        self.assert_clean_merge_done(fx)
+        record = review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS))
+        self.reviewed_line(self.reviewed_host(fx, fx.clean, comments=[record, lint_of(7, fx.fixed)]), fx.clean, "no lint",
+                           "a lane-lint PASS of the reviewed head must not make a clean merge of main read done: the lint names the live head")
+
 
 class ReviewUnknownReads(ReviewEnv):
     """A commit the checkout lacks reads unknown, never a conflict. A main-only clone fetches origin's heads once when a parent is missing, so a
