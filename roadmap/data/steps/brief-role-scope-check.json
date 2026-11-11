@@ -1,12 +1,12 @@
 {
-  "title": "The agent-brief check refuses a brief that asks a role to write paths its role may not write",
-  "phase": "now",
-  "status": "todo",
-  "order": 991,
-  "owner": "claude-settings",
-  "why": "Triage briefed a test-author to resolve a merge whose only conflict was in a product file; the role may not write it, so one agent run was wasted (note brief-role-scope-mismatch, 11:38 CST Nov 10).",
-  "note": "Filed by triage 11:40 CST Nov 10, from its own mistake on #2268. Check: hooks/agent_brief.py compares the spawn's role with the paths the brief names to write or resolve, and refuses a test-author brief that resolves a product path, or a builder brief that edits a test path. Red case first. Freeze: triage may build it with agents (owner 11:26 CST).",
-  "updatedAt": "2026-11-10T11:38:00-06:00",
-  "lane": "",
-  "blockedBy": []
+ "title": "The agent-brief check refuses a brief that asks a role to write paths its role may not write",
+ "phase": "now",
+ "status": "todo",
+ "order": 991,
+ "owner": "claude-settings",
+ "why": "Triage briefed a test-author to resolve a merge whose only conflict was in a product file; the role may not write it, so one agent run was wasted (note brief-role-scope-mismatch, 11:38 CST Nov 10).",
+ "note": "Owner-shared incident (owner chat 11:24 CST Nov 11, repo 77-rollover): a test-author briefed to \"write red checks for v4.3 rules\" was refused writing harness/check_rules.py; deliverables 1-5 needed tooling (the checker, excel_run.ps1 -Commit, README, runs/.gitignore). The guard was right; the cost was a wasted spawn and an owner question (A builder / B widen scope) that the role rules already answer. Direction: catch it at spawn, before the agent runs; the refusal tells the orchestrator to brief a builder for the tooling first, whose red run on today's code is its proof, then a test-author for the cases. Never widen test-author scope to tooling. Filed by triage 11:40 CST Nov 10, from its own mistake on #2268. Check: hooks/agent_brief.py compares the spawn's role with the paths the brief names to write or resolve, and refuses a test-author brief that resolves a product path, or a builder brief that edits a test path. Red case first. Freeze: triage may build it with agents (owner 11:26 CST). Folded in: step brief-role-scope (Nov 8, lane timing-tests, same check as a warning; one home: the role guard's write-path constants).",
+ "updatedAt": "2026-11-11T11:25:00-06:00",
+ "lane": "",
+ "blockedBy": []
 }
