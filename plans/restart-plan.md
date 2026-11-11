@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-11 09:20 CST. The owner's list closed at 18:43 CST; R21 to R25 came after.
+the history. Last rewrite: 2026-11-11 10:00 CST. The owner's list closed at 18:43 CST; R21 to R26 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -214,6 +214,25 @@ With 3.1, this stops a green batch from being refused at merge.
 Step batch-freeze-lane-set-enforce, already doing. Owner, same answer: "the limit isn't the problem,
 it's how the limit batches that's the problem". How many lanes start is left to this step for now.
 
+- **R26. Batches stop wasting CI.** Owner 09:20 CST Nov 11: "i need a review and then a strategy that
+  makes me parallelize as much as possible, without losing time when things start merging into main".
+  And 09:21 CST: "batch merges themselves were made to avoid CI waits and to have things go faster". In
+  the question box, answered by 10:00 CST, he picked three parts.
+  1. A lane's own checks run what made batches red: the Windows slice, mutation tests on the files it
+     touches, and signed-commit cases (folds into 3.5).
+  2. A lane dropped from two batches leaves the queue for a fix lane.
+  3. No self-made reruns: the merge tool stops the records-page push after a green run, and a red main
+     is fixed before the next merge, not waited out.
+  Busy files in turn (lanes on the main guard file and its tests in back-to-back batches; that test file
+  split by rule): open; he asked for more on it first.
+  Stays as ruled: decision batch-freeze-lane-set (owner 2026-11-08 20:24 and 20:31 CST): the set freezes
+  at build, the next batch stacks on the running one, a red run drops only the blamed lane. Its tool
+  check is this item's step. One batch runner: merging is one at a time under one lock (merge.py).
+  Evidence (audit 09:37 CST, last 15 batch merges, 256 lanes): 3030 CI minutes, 677 on merged heads.
+  74 builds became 15 merges, with 147 lane drops; two lanes were dropped in 5+ batches each. Lane
+  wait, last commit to merge, has a median of 536 min, 397 of it before the build. A lone CI run takes 33-38 min (5 runs). Merge
+  queue: GitHub offers it to organization repos only.
+
 ### 3.5 Lane lint runs once per lane; batch CI fails fast
 
 - **R4.** Owner 14:54 CST Nov 10: "is there no truly fast way that retains accuracy?"; 14:56 CST: "yes D
@@ -408,8 +427,7 @@ After 3.11, because its third part uses the same owner grant route.
 
 - **R25. Stage 4 runs with stage 3.** Owner 09:20 CST Nov 11: "with stage 3, but i think we should in
   the planning stage itself maybe define how batches will be built". Stage 4's lanes start with the rest
-  of stage 3, once 3.0 lands. How batches are built is settled before stage 3 starts (open: a review and
-  a batch strategy are in progress).
+  of stage 3, once 3.0 lands. How batches are built is settled before stage 3 starts (R26, item 3.4).
 
 - **D1. The roadmap is mechanical (open).** Owner 14:14 CST Nov 10: "realistically we have the actual
   roadmap be mechanizable like the status/queue/asks/etc". Already ruled: decision stalled-steps (owner
