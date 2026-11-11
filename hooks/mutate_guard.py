@@ -431,6 +431,12 @@ MUTATIONS = [
      'len(full) >= len(target_pre) + len(target_suf)',
      'len(full) > len(target_pre) + len(target_suf)', "guard",
      'glob refspec refs/heads/main*:refs/heads/main* from a lane checkout'),
+    # Against the fixed text: a colon-less glob keeps its empty target and reads as unreadable. The tag row kills it.
+    # The anchor starts at the partition line: the bare `target = target if colon else source` also sits in _push_dest.
+    ("push-all-main: a colon-less glob refspec is read as unreadable",
+     'spec.partition(":")\n    target = target if colon else source',
+     'spec.partition(":")\n    target = target', "guard",
+     'glob refspec refs/tags/v* (colon-less) from a lane checkout, local main ahead, is silent'),
     ("push-all-main: a matching tracking ref is refused",
      'shas.get("refs/remotes/" + remote + "/" + name) != shas[source]',
      'shas.get("refs/remotes/" + remote + "/" + name) == shas[source]', "guard",
