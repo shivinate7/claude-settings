@@ -20601,6 +20601,17 @@ sendto_allow("the control: an implement message for a test edit, to a test-autho
 # False-alarm control for `correct`: an adjective is no edit verb, so a path said to be correct stays allowed.
 sendto_allow("a test path said to be correct, with no edit verb, is allowed to a builder",
              SENDTO_BUILDER, "tests/x.py is correct.", T_SENDTO_BUILDER)
+# A copula earlier in the clause clears `correct` (guard.py _message_edit_verb), so a copula before an edit `correct`
+# passes these. Each asks a builder to change a test, so each is refused. The control above stays allowed.
+sendto_refuse("a copula before correct, tests/x.py is stale, correct the assertion, is refused to a builder",
+              SENDTO_BUILDER, "tests/x.py is stale, correct the assertion in tests/x.py", T_SENDTO_BUILDER,
+              "test-author", lacks=("tests/x.py",))
+sendto_refuse("a copula before correct, Since the case is wrong, correct tests/x.py, is refused to a builder",
+              SENDTO_BUILDER, "Since the case is wrong, correct tests/x.py", T_SENDTO_BUILDER,
+              "test-author", lacks=("tests/x.py",))
+sendto_refuse("a copula before correct, Please be sure to correct tests/x.py, is refused to a builder",
+              SENDTO_BUILDER, "Please be sure to correct tests/x.py", T_SENDTO_BUILDER,
+              "test-author", lacks=("tests/x.py",))
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
