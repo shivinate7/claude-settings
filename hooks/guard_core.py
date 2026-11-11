@@ -1346,6 +1346,8 @@ def _track_variables(known, segment: str, tokens, ran: bool) -> bool:
     plain `NAME=value` words that surely ran here (`ran`: not in a pipe, not after `||`, not after an `&&`
     whose left side may fail) sets a variable. A value holding a substitution, a quote, a backslash or an
     unread variable, an empty value, and a quoted `~` (bash does not expand it) leave the variable unknown.
+    Only a `~` that starts the value or follows a `:` is a tilde: one inside a name (the Windows
+    `RUNNER~1` temp folder) is a plain character.
     A segment that is not an assignment keeps `known` only when its command cannot set a variable.
     True when the segment is plain assignments with no substitution: its exit status is 0, so an `&&`
     after it runs."""
@@ -1354,7 +1356,7 @@ def _track_variables(known, segment: str, tokens, ran: bool) -> bool:
             name, value = token.split("=", 1)
             read = None
             if (ran and value and not set(value) & set("`'\"(\\")
-                    and not ("~" in value and "%s=~" % name not in segment)):
+                    and not ((value.startswith("~") or ":~" in value) and "%s=~" % name not in segment)):
                 read = _variable_text(known, value)
                 if not read or "$" in read:
                     read = None
