@@ -28,6 +28,11 @@ not part of the change. A problem that both states hold is reported once.
 Comments, docstrings and every other string are prose, and a reviewer reads prose. A sentence that
 names a "not" word passes. A "not" word inside its own term, plural too (`hole` in `safety_holes`),
 is the term. A line that holds `glossary-ok` is skipped, with its reason beside it.
+A row keeps a name when its meaning holds the backticked name, then ` stays` (the review log row keeps its
+slug so). A name of code is kept when its whole words equal a kept name of the row whose "not" name it holds,
+read as a path segment is: `--fix-check`, `fix_check` and `fix-check` are one name. A longer name that holds a
+kept name (`fix_check_line`) and a kept name of another row are still flagged. The kept names are read from
+GLOSSARY.md on each run, never copied here.
 A "not" name written `word (this sense)` retires one sense of an everyday word (`block`, `issue`):
 it is read in paths, anchors and slugs, never in identifiers, strings or hook messages, where code
 may use the other sense. Any other parenthesised tag on a "not" name fails. Claude Code's own names
@@ -55,6 +60,7 @@ SECTION = "## Terms"
 NONE = ("", "-", "—")  # a "not" cell that lists no name
 THIS_SENSE = " (this sense)"  # `issue (this sense)`: read in paths, anchors and slugs, not in code names
 TAG_RE = re.compile(r"[^()]+ \(this sense\)")  # the one allowed form of a tagged "not" name
+KEPT_RE = re.compile(r"`([^`]+)` stays\b")  # a row's meaning keeps a name: the backticked name, then " stays"
 WORD_RE = re.compile(r"[^a-z0-9]+")
 CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")  # batchBranch reads as batch branch
 SKIP_CODE = ("GLOSSARY.md", "docs/records.md", "lint/test_retired_names.py", "lint/test_check_glossary.py",
@@ -130,6 +136,11 @@ def items(cell):
     return [v.strip().strip("`").strip() for v in cell.split(",") if v.strip().strip("`").strip()]
 
 
+class Names(list):
+    """The "not" names of one row. `kept` holds the word lists of the names the row's meaning keeps."""
+    kept = ()
+
+
 def rows(text):
     """(term, homes, not names) for each data row of the table under SECTION."""
     return [row for _line, row in numbered_rows(text)]
@@ -147,7 +158,8 @@ def numbered_rows(text):
             continue
         if c[0].lower() == "term":  # the header row
             continue
-        names = [] if c[3] in NONE else items(c[3])
+        names = Names([] if c[3] in NONE else items(c[3]))
+        names.kept = [words(k) for k in KEPT_RE.findall(c[1])]
         out.append((number, (c[0].strip("`"), items(c[2]), names)))
     return out
 
@@ -193,7 +205,7 @@ def prepared(table):
             if n:
                 for key in ([n[0], n[0] + "s", n[0] + "es"] if len(n) == 1 else [n[0]]):
                     index.setdefault(key, []).append((r, len(got) - 1))
-        rows_.append((term, words(term), got))
+        rows_.append((term, words(term), got, getattr(names, "kept", ())))
     _PREPARED[:] = [table, len(table), (rows_, index)]
     return rows_, index
 
@@ -218,10 +230,12 @@ def name_problems(where, text, table, plain=False, spans=()):
     for r, k in sorted(seen):
         if tick:
             tick()
-        term, spelled, names = rows_[r]
+        term, spelled, names, kept = rows_[r]
         tagged, n = names[k]
         if plain and tagged:
             continue
+        if any(w == k_ for w in forms for k_ in kept):
+            continue  # the whole name is one this row keeps: `--fix-check`, `fix_check`, not `fix_check_line`
         if any(same(w[i:i + len(n)], n) and not any(inside(w, i, len(n), t) for t in (spelled, *spans))
                for w in forms for i in range(len(w) - len(n) + 1)):
             name = table[r][2][k]
