@@ -1805,6 +1805,88 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ dismissed: the page's own Mark read
+
+def case_session_update_naming_dismissed_is_refused():
+    """`dismissed` is written by the page's Mark read only (step ask-phase-out). The page draws it, so its itemFields
+    block lists it, yet a session update that names it is refused on both surfaces. The control is a session update
+    that names only a field, which must pass: a refusal of every update would fail it too."""
+    for value in ("2026-11-10T18:00:00Z", None):
+        data = {"dismissed": value}
+        for surface, got in (("page item_hit", call("item_hit", "update", entry_of(data))),
+                             ("page guard", guard_hit("update", entry_of(data)))):
+            check("%s: a session update naming dismissed=%r is refused" % (surface, value),
+                  got[0] != "" and "dismissed" in str(got[1]).lower(),
+                  "want a refusal naming dismissed, got %r" % (got,))
+    verdict("control: a session update naming only the title passes",
+            call("item_hit", "update", entry_of({"title": "Pick a colour"})), None)
+
+
+# ------------------------------------------------------------------ dismissed: every route refuses it, and the reason names only Mark read
+#
+# Step ask-phase-out (owner pick 480 a): the page's Mark read writes `dismissed`, and no session write does. Each route is
+# refused at the guard, and the reason the guard prints says that only the page's Mark read writes dismissed. The generic
+# item-field reason tells a writer to draw the field on the page, which is wrong here: the page draws dismissed already.
+
+DISMISSED_AT = "2026-11-10T18:00:00Z"
+ONLY_MARK_READ = re.compile(r"\bonly\b[^.]*\bMark read\b[^.]*\bdismissed\b", re.IGNORECASE)
+
+
+def dismissed_routes():
+    """One write per route that names `dismissed`, each as ArtifactData sends it: a str_replace, a set, an update, an
+    update that deletes it, and a batch entry."""
+    base = {"url": PAGE_URL, "collection": "items", "doc_id": DOC}
+    return (
+        ("str_replace on dismissed", dict(base, action="str_replace", field="dismissed", old_str="null", new_str=DISMISSED_AT)),
+        ("set with dismissed", dict(base, action="set", data=page_item(dismissed=DISMISSED_AT))),
+        ("update with dismissed", dict(base, action="update", data={"dismissed": DISMISSED_AT})),
+        ("update deleting dismissed", dict(base, action="update", data={"dismissed": {"__delete__": True}})),
+        ("a batch entry with dismissed", {"url": PAGE_URL, "action": "batch", "writes": [
+            {"op": "update", "collection": "items", "doc_id": DOC, "data": {"dismissed": DISMISSED_AT}}]}),
+    )
+
+
+def dismissed_refused(name, tool_input):
+    """One write that names dismissed, at the guard. It is refused, and the reason it prints says only the page's Mark
+    read writes dismissed, with no generic item-field remedy."""
+    got = guard.data_tool_hit(tool_input, PAGE_REPO)
+    check("%s: refused, naming dismissed" % name, got[0] != "" and "dismissed" in str(got[1]).lower(),
+          "got %r" % (got,))
+    reason = printed_reason(tool_input)
+    check("%s: the reason says only the page's Mark read writes dismissed" % name,
+          bool(ONLY_MARK_READ.search(reason)), reason[:200])
+    check("%s: the reason gives no generic itemFields remedy" % name,
+          "add it to that block" not in reason, reason[:200])
+
+
+def case_dismissed_refused_on_every_route():
+    """A session's write that names `dismissed` is refused on each route, and each refusal's reason names only Mark read."""
+    for name, tool_input in dismissed_routes():
+        dismissed_refused(name, tool_input)
+
+
+def case_dismissed_refused_without_a_readable_field_list():
+    """The same routes with the page's itemFields block unreadable (fields is None). The refusal and its reason still hold."""
+    blank = os.path.join(RUN_FOLDER, "page-without-itemfields.html")
+    os.makedirs(RUN_FOLDER, exist_ok=True)
+    with open(blank, "w", encoding="utf-8") as f:
+        f.write("<!doctype html>\n<html><body><p>A page with no field list.</p></body></html>\n")
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: blank}):
+        check("control: the blank page reads as no field list (fields is None)",
+              question_form._item_fields(blank) is None, "the block read as a list")
+        for name, tool_input in dismissed_routes():
+            dismissed_refused(name + ", with no readable field list", tool_input)
+        verdict("control: an update naming only a title passes with no readable field list",
+                call("item_hit", "update", entry_of({"title": "Pick a colour"})), None)
+
+
+def case_dismissed_reason_keeps_the_generic_remedy_for_other_fields():
+    """Control: a stray top-level field that the page does not list still prints the generic item-field reason."""
+    stray = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": page_item(focus="#fill")}
+    check("control: a stray top-level field keeps the generic itemFields reason",
+          question_form.ITEM_FIELD_REASON in printed_reason(stray), printed_reason(stray)[:200])
+
+
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
 #
 # Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
@@ -2412,7 +2494,10 @@ def case_judged_mixed_writes_all_returned():
 
 
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_item_stray_field_refused_from_a_record_branch_checkout,
+    for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+                 case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
+                 case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
+                 case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
