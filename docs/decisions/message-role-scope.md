@@ -18,7 +18,7 @@ This rule saves a wasted round. It does not stop an unseen test change. `role_wr
 
 ## What a message edits
 
-The verdict is per clause. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write, make (`make the fix in X`). Each edit verb governs one object:
+The verdict is per clause. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write, make (`make the fix in X`), correct, implement. `correct` right after a copula, or a copula and one adverb, is an adjective (`X is correct`, `X looks fully correct`). Each edit verb governs one object:
 
 - The object is the first path after the verb in its clause, and a path joined to it by `and`, `or` or a comma. A later path is a spec or a target: `Make guard.py handle the case in tests/x.py` and `Fix guard.py for/as/to satisfy ... tests/x.py` edit guard.py only.
 - With no path right after the verb (a determiner or `file` may sit between), a noun phrase then `in`, `at`, `of`, `to` or `into` and the path governs that path (`Fix the failing case in X`, `Make the fix in X`, `Add a case to X`). After another preposition (`for`, `as`, `with`) the path is a spec.
@@ -58,7 +58,7 @@ One more guard process start per SendMessage, as the matcher in `settings.json` 
 
 ## Measure
 
-`MUTATE_ONLY=message-role: hooks/test_guard.py`: the `message-role` cases, 20 refusals and 38 passes. `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `message-role:`.
+`GUARD_FAMILY=message-role python3 hooks/test_guard.py`: the `message-role` cases, 29 refusals and 42 passes (2026-11-11). `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `message-role:`.
 
 Kind: process
 Home: hooks/guard.py

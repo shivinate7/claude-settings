@@ -2481,6 +2481,12 @@ MESSAGE_COPULAS = {"is", "are", "was", "were", "be", "been", "being", "isn't", "
 # A word right before an edit verb that makes it a prohibition, and an adverb that may sit between (`don't just fix`).
 MESSAGE_NEGATIONS = {"not", "don't", "dont", "never", "without", "won't", "shouldn't", "mustn't", "cannot", "can't"}
 MESSAGE_NEGATED_ADVERBS = {"just", "simply", "only", "ever", "even"}
+# The one adverb that may sit between a copula and `correct` (`looks fully correct`). A closed set, so a word that
+# ends a clause before an order (`X is stale, correct X`) never reads as one.
+MESSAGE_COPULA_ADVERBS = MESSAGE_NEGATED_ADVERBS | {
+    "not", "now", "still", "quite", "very", "all", "also", "already", "fully", "entirely", "mostly", "partly",
+    "largely", "completely", "totally", "clearly", "probably", "likely", "definitely", "certainly", "technically",
+    "functionally", "perfectly", "exactly", "absolutely", "nearly", "almost", "actually"}
 # A path right after one of these is the target the edit must reach, not its object.
 MESSAGE_TARGET_VERBS = {"pass", "passes", "match", "matches", "satisfy", "satisfies"}
 # The head noun of an edit verb's object, read before the first preposition. A note governs no path
@@ -2539,6 +2545,14 @@ def _message_words(clause: str):
     return words
 
 
+def _message_copula_before(words, at: int) -> bool:
+    """True when a copula sits right before the word at `at`, or one adverb before it (`is correct`, `looks fully
+    correct`), so `correct` there is an adjective. A copula further back (`Since X is wrong, correct Y`) is not."""
+    before = words[at - 1][0] if at else ""
+    return before in MESSAGE_COPULAS or (
+        at > 1 and before in MESSAGE_COPULA_ADVERBS and words[at - 2][0] in MESSAGE_COPULAS)
+
+
 def _message_edit_verb(words, at: int) -> str:
     """'edit' when the word at `at` is an edit verb the receiver is told to do, 'void' when a prohibition clears it
     (`not`, `don't` or `never` right before it, or one adverb between), else ''."""
@@ -2546,7 +2560,7 @@ def _message_edit_verb(words, at: int) -> str:
     ahead = words[at + 1][0] if at + 1 < len(words) else ""
     if (word not in MESSAGE_EDIT_VERBS or before in MESSAGE_NOT_VERB_BEFORE
             or (word == "make" and ahead in ("sure", "certain"))
-            or (word == "correct" and any(w in MESSAGE_COPULAS for w, _ in words[:at]))):
+            or (word == "correct" and _message_copula_before(words, at))):
         return ""
     negator = words[at - 2][0] if at > 1 else ""
     if before in MESSAGE_NEGATIONS or (before in MESSAGE_NEGATED_ADVERBS and negator in MESSAGE_NEGATIONS):
