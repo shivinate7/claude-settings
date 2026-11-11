@@ -37600,7 +37600,7 @@ def cs_refused(guard=None):
 
 
 def cs_reason_check():
-    """A refusal names its rule, says to brief a lane session, ends with the standard override line, and names no target."""
+    """A refusal names its rule, says to brief a lane to make this change, ends with the standard override line, and names no target."""
     offer = ov_home("offer")
     line = offer(CS_RULE) if offer else "override"
     problems = []
@@ -37611,8 +37611,8 @@ def cs_reason_check():
         for want in (CS_RULE, line):
             if want not in reason:
                 problems.append("%s: the reason does not carry %r: %s" % (what, want, reason[-100:]))
-        if "brief a lane session" not in reason.lower():
-            problems.append("%s: the reason does not say to brief a lane session: %s" % (what, reason[:100]))
+        if "brief a lane to make this change" not in reason.lower():
+            problems.append("%s: the reason does not say to brief a lane to make this change: %s" % (what, reason[:100]))
         for named in (row[4], GITMAIN, ROOT, slash(ROOT)):
             if named in reason:
                 problems.append("%s: the reason names the target %r" % (what, named))
@@ -37873,7 +37873,7 @@ def cs_log_refusal_check():
     if fields[5] != CS_PAYLOAD_SID:
         return False, "the session field is %r, want the payload's session" % fields[5]
     text = "\t".join(fields).lower()
-    for remedy in ("brief a lane session", "to allow this act"):
+    for remedy in ("brief a lane", "to allow this act"):
         if remedy in text:
             return False, "the log line holds remedy text %r: %r" % (remedy, fields)
     return True, "one deny line names coordinator-scope and the refused path, and no remedy text"
