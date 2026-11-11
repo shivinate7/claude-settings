@@ -24,9 +24,9 @@
                           PR's issue comments since the PR opened; or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
                           parent is HEAD and whose second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
                           MODEL must be sonnet on every record (exit 2 otherwise).
-                          A review log stays done when the live head differs from its Head only by clean merges of main and empty commits: each
-                          commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them,
-                          or a commit with one parent and that parent's tree. `merge --reviewed` proves it
+                          A review log stays done when the live head differs from its Head only by clean merges of main: each
+                          commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them.
+                          Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
@@ -3951,7 +3951,7 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main and empty commits) clean_merges_after walks between a record's head and the live head
+REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main) clean_merges_after walks between a record's head and the live head
 
 def merge_state(h, parents, tree):
     """-> (state, why): how the merge commit whose parents are `parents` and whose tree is `tree` relates to git's own merge of them (merge_tree,
@@ -3986,13 +3986,13 @@ def edits_outside_conflict(root, parents, tree):
     return sorted(set(f for f in out.split("\0") if f) - set(files))
 
 def clean_merges_after(h, head, live, base=None):
-    """True when every commit after `head`, up to the live head `live`, is a clean merge of main or an empty commit. A clean merge of main has two
+    """True when every commit after `head`, up to the live head `live`, is a clean merge of main. A clean merge of main has two
     parents, a second parent main holds (Host.holds_head, main being `base`, else the host's base), and git's clean merge of its parents as its tree
-    (merge_state). An empty commit has one parent and that parent's tree. The walk follows first parents from `live` and must reach `head` within
-    REVIEW_MERGE_WALK commits. A commit that changes the tree, a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
+    (merge_state). The walk follows first parents from `live` and must reach `head` within
+    REVIEW_MERGE_WALK commits. A commit with one parent (an empty commit too), a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
-    (merge_state "unknown") raise Stop: unknown, never False and never True. Cost: one commit read per commit walked, plus its parent's for an
-    empty commit (each sha read once); one compare and one merge_tree per merge commit; and at most one fetch_branch_heads a run."""
+    (merge_state "unknown") raise Stop: unknown, never False and never True. Cost: one commit read per commit walked (each sha read once);
+    one holds_head compare and one merge_state per merge commit; and at most one fetch_branch_heads a run."""
     sha, read = live, {}
 
     def commit(s):
@@ -4004,28 +4004,21 @@ def clean_merges_after(h, head, live, base=None):
         if sha == head:
             return True
         parents, tree = commit(sha)
-        if len(parents) == 1:  # an empty commit keeps the record; any other single-parent commit changes the lane's diff
-            before = commit(parents[0])[1]
-            if not tree or not before:
-                raise Stop(f"the commit read names no tree for {sha[:9]} or its parent {parents[0][:9]} " + REVIEW_CITE)
-            if tree != before:
-                return False
-        else:
-            if len(parents) != 2 or not h.holds_head(parents[1], base or h.base):
-                return False
-            state, why = merge_state(h, parents, tree)
-            if state == "unknown":
-                raise Stop(why + " " + REVIEW_CITE)
-            if state != "clean":
-                return False
+        if len(parents) != 2 or not h.holds_head(parents[1], base or h.base):  # a one-parent commit, even an empty one, is no merge of main
+            return False
+        state, why = merge_state(h, parents, tree)
+        if state == "unknown":
+            raise Stop(why + " " + REVIEW_CITE)
+        if state != "clean":
+            return False
         sha = parents[0]
     return sha == head  # the head after the last commit the walk may read: REVIEW_MERGE_WALK commits reach it, one more does not
 
-REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main and empty commits follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
+REVIEW_SURVIVAL_UNKNOWN = "whether only clean merges of main follow the reviewed head is unknown"  # the why of a stale record whose clean-merge read could not run
 
 def live_review_state(h, rec, live, main):
     """-> (state, why) of the parsed record `rec` for the live head `live`: the one home of that read, for `merge --reviewed` (reviewed_read) and the
-    lane Stop hook (lint/report_guard.py). It is review_state, except that a stale record whose live head is its Head plus clean merges of main or empty commits
+    lane Stop hook (lint/report_guard.py). It is review_state, except that a stale record whose live head is its Head plus clean merges of main
     (clean_merges_after) reads as it does at its Head (decision pr-review-record). A clean-merge read that cannot run keeps the state stale, and
     the why says REVIEW_SURVIVAL_UNKNOWN and why. Cost: clean_merges_after's, only for a stale record. `main` is the repo's default branch, never the pull request's own base
     (a merge of a stacked pull request's base is no merge of main): the caller names it, because Host.pr rewrites the host's base on every read. The record survives a clean merge of main only."""
@@ -4038,7 +4031,7 @@ def live_review_state(h, rec, live, main):
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
         return state, f"{why}; {REVIEW_SURVIVAL_UNKNOWN} ({' '.join(str(e).split())[:300]})"
     state, why = review_state(rec, rec["head"])
-    return state, why + "; the head is the reviewed head plus clean merges of main or empty commits"
+    return state, why + "; the head is the reviewed head plus clean merges of main"
 
 def lint_check(h, n, info, root, cfgrel):
     """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
