@@ -284,13 +284,13 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
-  scratchpad-owner     ask. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+  scratchpad-owner     deny. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
                        write, the agent's own file, a file that no longer exists, a call with no `agent_id` (its
-                       write deletes the file's record) and a read pass. The record moves before an overwrite ask.
-                       The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
+                       write deletes the file's record) and a read pass. A refused write leaves the record with the first
+                       writer; an override that lifts it moves the record. The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
                        (scratchpad-owner)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
@@ -5833,21 +5833,21 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
 # scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
 # file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
-# agent that runs a scratchpad file another agent recorded asks, and so does a write over such a file. A call
+# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file. A call
 # with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
 # touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
 SCRATCHPAD_WORD = "scratchpad"
 SCRATCHPAD_OWNER_REASON = (
     "Rule (scratchpad-owner): this script was written by another agent of this session, and running it "
     "runs code you have not read. "
-    "Remedy: write your own copy of the script and run that, or ask the orchestrator to hand it to you. "
-    "(decision scratchpad-owner, an agent asks before it runs another agent's scratchpad script)"
+    "Remedy: read the file, write your own copy of the script under a fresh file name, and run that copy. "
+    "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 SCRATCHPAD_OVERWRITE_REASON = (
     "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
     "destroys work that agent may still need. "
-    "Remedy: write your own file under a name of your own, or ask the orchestrator to hand the file to you. "
-    "(decision scratchpad-owner, an agent asks before it runs or overwrites another agent's scratchpad file)"
+    "Remedy: write your own file under a fresh file name of your own. "
+    "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
 # Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
 SCRATCHPAD_REMOVERS = ("rm", "mv")
@@ -5902,8 +5902,8 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
 def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
     """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
-    writes, and asks when a file's record named another agent. The record is written before the ask, because
-    an approval in the UI never reaches the guard again; a file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file and a file
+    writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
+    override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file and a file
     that no longer exists pass (`scratchpad_writer_of`). Run once the call's other rules passed."""
     agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
@@ -5915,11 +5915,16 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
         writer = scratchpad_writer_of(full, session)
         if writer and writer != agent and not taken:
             taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
-    for full in files:
-        if full not in removed:
-            scratchpad_record_writer(full, session, agent)
+
+    def record_writers():
+        for full in files:
+            if full not in removed:
+                scratchpad_record_writer(full, session, agent)
+
     if taken:
-        refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON, taken)
+        # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
+        refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON, taken, on_lift=record_writers)
+    record_writers()
 
 
 def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -6292,11 +6297,11 @@ def judge(payload) -> None:
                     remedies.setdefault(n[0], remedy)
             if names:
                 sim_boot_refusal(tool, names, remedies)
-            # An ask, after the denies above: the shell call runs another agent's scratchpad script.
+            # After the denies above: the shell call runs another agent's scratchpad script.
             owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
             if owned:
-                refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
-            scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: ask on an overwrite, else record the writer
+                refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
+            scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
@@ -6364,7 +6369,7 @@ def judge(payload) -> None:
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
-    scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: ask on an overwrite, else record the writer
+    scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
 
 
 def write_targets(tool_input: dict) -> list:
