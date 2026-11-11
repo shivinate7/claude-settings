@@ -1,22 +1,39 @@
 {
   "added": "2026-11-11T21:00:00Z",
-  "context": "Run 43088666860 reads completed and failed, yet every job passed or was skipped. Its two gate jobs (all-jobs-passed and ci-done) sat queued with no runner from 14:23 CST, which looks like a GitHub fault.\n\nWhy yours: your R26 ruling keeps a re-run yours, and a cloud session cannot write to GitHub's API (measured 2026-11-11, a REST write through the cloud link answered 403 at 15:04 CST).",
+  "context": "Goal: batch 81 lands today without wasted CI.\nProblem (rule): GitHub's internal error ended run 43088666860 before its two gate jobs ran, and the page offers only \"Re-run all jobs\". Your rule never to merge failing CI means the gate must go green.\nBased on (measured): 19 jobs passed and 33 were skipped. The two gate jobs, all-jobs-passed and ci-done, never got a runner.\nBased on (measured): the run's menu has no cancel and no \"Re-run failed jobs\".\nDeparts from: main, where a batch merges only on a green all-jobs-passed \u2014 option b merges on the 19 passed jobs without it.\nMeanwhile: the batch runner waits; batches 82 and 83 queue behind 81.",
   "holds": "Whether the batch runner may cancel and re-run the two stuck macOS jobs of run 43088666860, once.",
   "home": "ruling R26 (no self-made reruns), exception for this run only",
   "id": "batch81-stuck-macos-rerun",
-  "kind": "task",
+  "kind": "decision",
   "n": 515,
+  "options": [
+    {
+      "gain": "A real green gate, with no rule bent.",
+      "how": "On the run's page, press \"Re-run all jobs\" once.",
+      "key": "a",
+      "label": "Re-run all jobs once (Recommended)",
+      "links": [
+        {
+          "label": "Run 43088666860",
+          "url": "https://github.com/shivinate7/claude-settings/actions/runs/43088666860"
+        }
+      ],
+      "lose": "One more full CI run, about 50 minutes by today's run."
+    },
+    {
+      "gain": "No re-run.",
+      "how": "Merge batch 81 on the 19 passed jobs, by your named act.",
+      "key": "b",
+      "label": "Merge on the passed jobs",
+      "lose": "The gate never ran, and branch protection makes it an admin bypass."
+    }
+  ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 1,
   "ref": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "repo": "shivinate7/claude-settings",
-  "short": "re-run batch 81 gate jobs",
+  "short": "batch 81 re-run or merge",
   "status": "open",
-  "steps": [
-    "Open https://github.com/shivinate7/claude-settings/actions/runs/43088666860.",
-    "Press \"Re-run jobs\", then \"Re-run failed jobs\" (or \"Re-run all jobs\" if that is the only choice).",
-    "Done when the run shows its new attempt. The batch runner watches until 15:52 CST and merges on green."
-  ],
-  "title": "Re-run batch 81's two stuck gate jobs on GitHub",
-  "why": "Batch 81 holds the Windows time-limit fix you want in before the archive. Every job passed, but GitHub never ran the two final gate jobs, so the run reads failed."
+  "title": "Batch 81: re-run all jobs once, or merge on the 19 passed jobs?",
+  "why": "Batch 81 holds the Windows time-limit fix you want in before the archive. A GitHub fault ended its run before the two gate jobs ran."
 }
