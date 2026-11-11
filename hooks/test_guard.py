@@ -9667,12 +9667,18 @@ def agent_refused(name, command, cwd=PUSHFEAT, **kw):
     sh(name, command, "deny", PUSH_AGENT_RULE, cwd=cwd, carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS, **kw)
 
 
+def push_sh(name, command, expected, rule=None, **kw):
+    """sh() for a push case. A case that puts a stand-in git first on PATH goes through stand_in_sh, which skips it on
+    Windows: the guard starts git by name, and Windows finds git.exe there, never the extensionless stand-in."""
+    (stand_in_sh if "env_path" in kw else sh)(name, command, expected, rule, **kw)
+
+
 def all_refused(name, tail, cwd=PUSHFEAT, **kw):
     """One plain push the all-branches rule refuses: a deny under its rule id, whose reason prints the lane's remedy,
     names its own cause ("sends every branch", which the agent rule's reason never says) and names no main or master
     target."""
-    sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
-       carries=(PUSH_AGENT_REMEDY, "Rule (Git): ", "sends every branch"), lacks=PUSH_ALL_LACKS, **kw)
+    push_sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
+            carries=(PUSH_AGENT_REMEDY, "Rule (Git): ", "sends every branch"), lacks=PUSH_ALL_LACKS, **kw)
 
 
 def all_allowed(name, tail, cwd=PUSHFEAT, **kw):
@@ -9695,9 +9701,9 @@ def all_update_refused(name, tail, cwd, **kw):
     """One plain push the all-branches rule refuses because it would update main or master, or cannot tell that it
     would not, while a local agent-named branch is also present. The reason opens with the rule id, names the update
     and no agent: the update is judged first."""
-    sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
-       carries=(PUSH_ALL_RULE + ": Rule (Git): ", "may update the default branch", PUSH_AGENT_REMEDY),
-       lacks=("agent",) + PUSH_ALL_LACKS, **kw)
+    push_sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
+            carries=(PUSH_ALL_RULE + ": Rule (Git): ", "may update the default branch", PUSH_AGENT_REMEDY),
+            lacks=("agent",) + PUSH_ALL_LACKS, **kw)
 
 
 # A failed ref read refuses, since unknown is never safe. PUSHFAILSHIM is a git stand-in that fails every for-each-ref
@@ -9713,16 +9719,19 @@ TRACKING_REF_READ = "%(objectname)"
 
 def _build_push_failshim():
     make_git_stand_in(PUSHFAILSHIM, fail_on="for-each-ref")
+    make_git_stand_in(PUSHLOCALFAILSHIM, fail_on=LOCAL_BRANCH_LISTING)
+    make_git_stand_in(PUSHTRACKFAILSHIM, fail_on=TRACKING_REF_READ)
+    if os.name == "nt":
+        # Windows cannot start an extensionless stand-in, so the probes below need a POSIX host.
+        return
     probe = subprocess.run([os.path.join(PUSHFAILSHIM, VCS), "for-each-ref", "refs/heads/main"],
                            cwd=ROOT, capture_output=True)
     if probe.returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: the for-each-ref stand-in exited 0, so it fails no read")
-    make_git_stand_in(PUSHLOCALFAILSHIM, fail_on=LOCAL_BRANCH_LISTING)
     probe = subprocess.run([os.path.join(PUSHLOCALFAILSHIM, VCS), "for-each-ref", "--format=%(refname)", "refs/heads/"],
                            cwd=ROOT, capture_output=True)
     if probe.returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: the local-branch stand-in exited 0, so it fails no listing")
-    make_git_stand_in(PUSHTRACKFAILSHIM, fail_on=TRACKING_REF_READ)
     probe = subprocess.run([os.path.join(PUSHTRACKFAILSHIM, VCS), "for-each-ref", "--format=%(refname) %(objectname)",
                             "refs/heads/main"], cwd=ROOT, capture_output=True)
     if probe.returncode == 0:
