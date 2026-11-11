@@ -809,6 +809,19 @@ PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex beh
 PUSHAGENTSHORT = os.path.join(ROOT, "pushagentshort")  # agent-<7 hex>: a hex tail one character short of the shape
 PUSHAGENTEIGHT = os.path.join(ROOT, "pushagenteight")  # agent-<8 hex>: the exact shape, at its lower bound
 PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with push.autoSetupRemote in its own config
+# --all and --branches fixtures (page item 502). PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET and PUSHAHEADAGENT hold a local
+# main one commit ahead of origin/main, from a main, lane, detached and agent checkout. PUSHNOTRACK has no origin/main
+# ref. PUSHBEHIND has origin/main one commit ahead of local main. PUSHMASTERAHEAD has master, not main, one commit ahead
+# of origin/master. PUSHNOMAIN has neither main nor master. PUSHLOCALAHEAD is PUSHAHEAD with a local-path origin.
+PUSHAHEAD = os.path.join(ROOT, "pushahead")              # main checkout, local main ahead of origin/main
+PUSHAHEADLANE = os.path.join(ROOT, "pushaheadlane")      # lane checkout (feat), local main ahead
+PUSHAHEADDET = os.path.join(ROOT, "pushaheaddet")        # detached checkout, local main ahead
+PUSHAHEADAGENT = os.path.join(ROOT, "pushaheadagent")    # agent checkout (claude/agent-<hex>), local main ahead
+PUSHNOTRACK = os.path.join(ROOT, "pushnotrack")          # lane checkout, local main, no origin/main ref
+PUSHBEHIND = os.path.join(ROOT, "pushbehind")            # main checkout, origin/main ahead of local main
+PUSHMASTERAHEAD = os.path.join(ROOT, "pushmasterahead")  # master checkout, local master ahead; no local main
+PUSHNOMAIN = os.path.join(ROOT, "pushnomain")            # lane checkout; local trunk and feat, no main or master
+PUSHLOCALAHEAD = os.path.join(ROOT, "pushlocalahead")    # PUSHAHEAD's state, with a local-path origin
 # The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -818,6 +831,10 @@ PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is
 PUSH_AGENT_REMEDY = "git push origin HEAD:<lane-branch>"
 PUSH_AGENT_LACKS = ("Approving the prompt", "push origin claude/agent-", "push origin worktree-agent-",
                     "HEAD:claude/agent-", "HEAD:worktree-agent-")
+# The owner's ruling on --all and --branches (page item 502, 2026-11-10 16:08 CST): refused when the push would update
+# main or master on the remote, allowed when it would not. A refusal's remedy never names main or master as a target.
+PUSH_ALL_RULE = "push-all-main"
+PUSH_ALL_LACKS = ("Approving the prompt", "push origin main", "push origin master", "HEAD:main", "HEAD:master")
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -2419,6 +2436,86 @@ def _build_push():
     if run_vcs(PUSHAGENTCFG, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % PUSHAGENTCFG)
 
+    # --all and --branches (page item 502). Each fixture is read back before a case judges it: the local branch,
+    # the remote-tracking ref it is compared with, and the checkout the case names.
+    def _ref(where, ref):
+        return run_vcs(where, "rev-parse", "-q", "--verify", ref).stdout.strip()
+
+    def _head(where):
+        return run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip()
+
+    def _work_commit(where):
+        write(os.path.join(where, "local.txt"), "a commit only this checkout has\n")
+        run_vcs(where, "add", "-A")
+        run_vcs(where, *IDENT, "commit", "-q", "-m", "work")
+
+    for where, checkout, head in ((PUSHAHEAD, None, "refs/heads/main"),
+                                  (PUSHAHEADLANE, "feat", "refs/heads/feat"),
+                                  (PUSHAHEADDET, "--detach", ""),
+                                  (PUSHAHEADAGENT, "claude/agent-a22bb0ed47825117b",
+                                   "refs/heads/claude/agent-a22bb0ed47825117b")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        _work_commit(where)
+        if checkout == "--detach":
+            run_vcs(where, "checkout", "-q", "--detach")
+        elif checkout:
+            run_vcs(where, "checkout", "-q", "-b", checkout)
+        if (_head(where) != head or not _ref(where, "refs/heads/main")
+                or _ref(where, "refs/heads/main") == _ref(where, "refs/remotes/origin/main")):
+            sys.exit("fixture setup failed in build_fixtures: %r needs local main ahead of origin/main, on %r"
+                     % (where, head or "a detached HEAD"))
+
+    make_repo(PUSHNOTRACK, {"base.txt": "base\n"})
+    run_vcs(PUSHNOTRACK, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHNOTRACK, "checkout", "-q", "-b", "feat")
+    if (_ref(PUSHNOTRACK, "refs/remotes/origin/main") or not _ref(PUSHNOTRACK, "refs/heads/main")
+            or _head(PUSHNOTRACK) != "refs/heads/feat"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHNOTRACK needs local main and no origin/main ref")
+
+    make_repo(PUSHBEHIND, {"base.txt": "base\n"})
+    run_vcs(PUSHBEHIND, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHBEHIND, "checkout", "-q", "-b", "side")
+    _work_commit(PUSHBEHIND)
+    run_vcs(PUSHBEHIND, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHBEHIND, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(PUSHBEHIND, "checkout", "-q", "main")
+    if (_head(PUSHBEHIND) != "refs/heads/main" or not _ref(PUSHBEHIND, "refs/remotes/origin/main")
+            or _ref(PUSHBEHIND, "refs/heads/main") == _ref(PUSHBEHIND, "refs/remotes/origin/main")):
+        sys.exit("fixture setup failed in build_fixtures: PUSHBEHIND needs origin/main ahead of local main")
+
+    make_repo(PUSHMASTERAHEAD, {"base.txt": "base\n"})
+    run_vcs(PUSHMASTERAHEAD, "branch", "-m", "main", "master")
+    run_vcs(PUSHMASTERAHEAD, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHMASTERAHEAD, "update-ref", "refs/remotes/origin/master", "HEAD")
+    run_vcs(PUSHMASTERAHEAD, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
+    _work_commit(PUSHMASTERAHEAD)
+    if (_head(PUSHMASTERAHEAD) != "refs/heads/master" or _ref(PUSHMASTERAHEAD, "refs/heads/main")
+            or _ref(PUSHMASTERAHEAD, "refs/heads/master") == _ref(PUSHMASTERAHEAD, "refs/remotes/origin/master")):
+        sys.exit("fixture setup failed in build_fixtures: PUSHMASTERAHEAD needs local master ahead, no local main")
+
+    make_repo(PUSHNOMAIN, {"base.txt": "base\n"})
+    run_vcs(PUSHNOMAIN, "branch", "-m", "main", "trunk")
+    run_vcs(PUSHNOMAIN, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHNOMAIN, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+    run_vcs(PUSHNOMAIN, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    run_vcs(PUSHNOMAIN, "checkout", "-q", "-b", "feat")
+    if (_ref(PUSHNOMAIN, "refs/heads/main") or _ref(PUSHNOMAIN, "refs/heads/master")
+            or _head(PUSHNOMAIN) != "refs/heads/feat"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHNOMAIN must hold no local main or master")
+
+    make_repo(PUSHLOCALAHEAD, {"base.txt": "base\n"})
+    run_vcs(PUSHLOCALAHEAD, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHLOCALAHEAD, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHLOCALAHEAD, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    _work_commit(PUSHLOCALAHEAD)
+    if (run_vcs(PUSHLOCALAHEAD, "config", "--get", "remote.origin.url").stdout.strip() != slash(BRANCHREMOTE)
+            or _ref(PUSHLOCALAHEAD, "refs/heads/main") == _ref(PUSHLOCALAHEAD, "refs/remotes/origin/main")):
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALAHEAD needs a local-path origin, "
+                 "and local main ahead")
+
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
     # ----------------------------------------------------------------- worktree remove/prune
@@ -2724,7 +2821,9 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
               PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
-              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG,
+              PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET, PUSHAHEADAGENT, PUSHNOTRACK, PUSHBEHIND,
+              PUSHMASTERAHEAD, PUSHNOMAIN, PUSHLOCALAHEAD],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -9517,6 +9616,18 @@ def agent_refused(name, command, cwd=PUSHFEAT, **kw):
     sh(name, command, "deny", PUSH_AGENT_RULE, cwd=cwd, carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS, **kw)
 
 
+def all_refused(name, tail, cwd=PUSHFEAT):
+    """One plain push the all-branches rule refuses: a deny under its rule id, whose reason prints the lane's remedy
+    and names no main or master target."""
+    sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
+       carries=(PUSH_AGENT_REMEDY, "Rule (Git): "), lacks=PUSH_ALL_LACKS)
+
+
+def all_allowed(name, tail, cwd=PUSHFEAT):
+    """One plain push the all-branches rule allows: it writes no main or master on the remote, so it prints nothing."""
+    sh("push: " + name, VCS + " push " + tail, "allow", cwd=cwd, silent=True)
+
+
 agent_refused("push: agent branch, HEAD asks", VCS + " push origin HEAD", cwd=PUSHAGENT)
 agent_refused("push: agent branch, -u HEAD asks", VCS + " push -u origin HEAD", cwd=PUSHAGENT)
 agent_refused("push: agent branch, @ asks", VCS + " push origin @", cwd=PUSHAGENT)
@@ -9618,8 +9729,11 @@ push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main"
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
           rule=PUSH_MAIN_RULE)
-push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
-push_case("main, --branches reaches main and asks", "--branches origin", "ask", rule=PUSH_MAIN_RULE)
+# Re-pointed by the owner's ruling on --all and --branches (page item 502): on a lane checkout, local main equal to
+# origin/main, neither push writes main, so both are silent. The refusal and allow rows are in the section below.
+all_allowed("lane checkout, --all with local main equal to origin/main is silent", "--all origin", cwd=PUSHFEAT)
+all_allowed("lane checkout, --branches with local main equal to origin/main is silent", "--branches origin",
+            cwd=PUSHFEAT)
 # A -u push of the local name writes main when the checkout is main, and -u does not hide a second refspec to main.
 push_case("main, -u HEAD on main asks", "-u origin HEAD", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
 push_case("stacked lane, -u HEAD with a second refspec to main asks", "-u origin HEAD main", "ask",
@@ -9724,14 +9838,78 @@ push_case("main tracking origin/main, network origin, HEAD asks push-main", "ori
           rule=PUSH_MAIN_RULE)
 push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
           silent=True)
-push_case("main tracking origin/main, network origin, --all asks push-main", "origin --all", "ask", cwd=PUSHMAINUP,
-          rule=PUSH_MAIN_RULE)
+all_allowed("main tracking origin/main, network origin, --all is silent, local main equal", "origin --all",
+            cwd=PUSHMAINUP)
 
 # ASK, rule push-main. A folder that does not exist cannot be read, and an unreadable config is unknown, which asks.
 # The session's own folder is the local origin, so only the missing folder the push runs in can make it a network one.
 sh("main, cd into a folder that does not exist, then origin main, asks push-main",
    "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=PUSHLOCALMAIN)
+
+# --all and --branches (owner's ruling, page item 502, 2026-11-10 16:08 CST). A plain push of every branch never asks.
+# It is refused when it would update main or master on the remote, and allowed when it would not. The remote's main
+# is read from its remote-tracking ref. A ref that differs from local main, or is missing, counts as an update, since
+# the push may write main. A ref that matches local main is trusted: the guard never contacts the remote.
+# The four checkouts give the same verdict, except the agent rows, which keep PR 2465's push-agent-branch refusal.
+for form in ("--all", "--branches"):
+    all_refused(form + " from a main checkout, local main ahead of origin/main, refuses", form + " origin",
+                cwd=PUSHAHEAD)
+    all_refused(form + " from a lane checkout, local main ahead of origin/main, refuses", form + " origin",
+                cwd=PUSHAHEADLANE)
+    all_refused(form + " from a detached checkout, local main ahead of origin/main, refuses", form + " origin",
+                cwd=PUSHAHEADDET)
+    agent_refused("push: agent checkout, " + form + " with local main ahead, refuses under the agent rule",
+                  VCS + " push " + form + " origin", cwd=PUSHAHEADAGENT)
+all_refused("--all with no remote named, from a main checkout, local main ahead, refuses", "--all", cwd=PUSHAHEAD)
+# A glob refspec from every branch to every branch reaches main as --all does. Its agent row is pinned to this rule:
+# PR 2465's agent rule covers only --all and --branches.
+all_refused("glob refspec refs/heads/*:refs/heads/* from a main checkout, local main ahead, refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEAD)
+all_refused("glob refspec refs/heads/*:refs/heads/* from a lane checkout, local main ahead, refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADLANE)
+all_refused("glob refspec refs/heads/*:refs/heads/* from a detached checkout, local main ahead, refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADDET)
+all_refused("glob refspec refs/heads/*:refs/heads/* from an agent checkout, local main ahead, refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADAGENT)
+all_allowed("glob refspec refs/heads/*:refs/heads/* with local main equal to origin/main is silent",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHFEAT)
+# A glob into another name does not reach main: main lands on lane/main, a new branch.
+all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a main checkout, local main ahead, is silent",
+            "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEAD)
+all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a lane checkout, local main ahead, is silent",
+            "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEADLANE)
+all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a detached checkout, local main ahead, is silent",
+            "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEADDET)
+# A named main or master destination beside --all refuses from any checkout. Git itself refuses --all with a refspec
+# ("--all can't be combined with refspecs", measured on a dry run), so these rows guard a push git does not send.
+all_refused("--all with HEAD:main beside it refuses, from a lane checkout", "--all origin HEAD:main", cwd=PUSHFEAT)
+all_refused("--all with HEAD:master beside it refuses, from a lane checkout", "--all origin HEAD:master", cwd=PUSHFEAT)
+# A tracking ref that is missing, or that differs from local main, refuses. The push may write main.
+all_refused("--all from a lane checkout, no origin/main tracking ref, refuses", "--all origin", cwd=PUSHNOTRACK)
+all_refused("--branches from a lane checkout, no origin/main tracking ref, refuses", "--branches origin",
+            cwd=PUSHNOTRACK)
+all_refused("--all from a main checkout, local main behind origin/main, refuses", "--all origin", cwd=PUSHBEHIND)
+# Master is the other default name: a local master ahead of origin/master refuses, with no local main.
+all_refused("--all from a master checkout, local master ahead of origin/master, refuses", "--all origin",
+            cwd=PUSHMASTERAHEAD)
+all_refused("--branches from a master checkout, local master ahead of origin/master, refuses", "--branches origin",
+            cwd=PUSHMASTERAHEAD)
+# ALLOW: the push writes no main or master. Local main equals the tracking ref, or neither name exists locally.
+all_allowed("--all from a main checkout, local main equal to origin/main, is silent", "--all origin", cwd=PUSHMAIN)
+all_allowed("--branches from a main checkout, local main equal to origin/main, is silent", "--branches origin",
+            cwd=PUSHMAIN)
+all_allowed("--all from a detached checkout, local main equal to origin/main, is silent", "--all origin",
+            cwd=PUSHDETACHED)
+all_allowed("--branches from a detached checkout, local main equal to origin/main, is silent", "--branches origin",
+            cwd=PUSHDETACHED)
+all_allowed("--all with no local main or master, from a lane checkout, is silent", "--all origin", cwd=PUSHNOMAIN)
+all_allowed("--branches with no local main or master, is silent", "--branches origin", cwd=PUSHNOMAIN)
+# DRY RUN AND LOCAL PATHS keep their allow: a dry run writes nothing, and a local path is no network remote.
+all_allowed("--all dry run with local main ahead, is silent", "--all --dry-run origin", cwd=PUSHAHEAD)
+all_allowed("--all to a local-path origin with local main ahead, is silent", "--all origin", cwd=PUSHLOCALAHEAD)
+all_allowed("--branches to a local-path origin with local main ahead, is silent", "--branches origin",
+            cwd=PUSHLOCALAHEAD)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
