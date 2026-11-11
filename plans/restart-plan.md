@@ -716,6 +716,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   are pinned and move only when a session notices (decision action-pins-follow-sessions, which names
   seven pins that drift unseen). That decision's "no bot, no schedule" leaned on the timer ban that
   3.15 relaxed. Nothing flags a child line that contradicts a parent rule without an exemption.
+  Step child-repo-gap ("Check how far each child repo is from claude-settings main") has been todo since
+  Oct 29 with no lane; R44 folds into it.
   1. First, a read-only audit of the child repos (q_max first): pin age, lines that contradict a parent
      rule with no exemption, copies, and any outputStyle or hook override.
   2. Then the split: skill compliance-check is the one-time sweep that brings a repo in line; a check
