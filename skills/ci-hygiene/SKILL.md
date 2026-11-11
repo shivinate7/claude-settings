@@ -76,11 +76,12 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
    changes the running batch's head, so the brake refuses that merge until the next batch is built
    on the new head.
-   The merge tool holds the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
+   The merge tool enforces the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
    builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. A changed set is
-   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then marks the PR
-   ready. `merge --batch-drop NAME PR` drops the lane and its dependents, rebuilds from the frozen set, runs no lane lint, and returns a ready PR
-   to draft. `--on BRANCH` stacks a batch on a running batch.
+   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then the ready
+   checks, then marks the PR ready; it lints again when the head moved since the last lint. A lint FAIL stores the lanes it blames.
+   `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
+   to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
