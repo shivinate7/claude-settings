@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 2026-11-10 19:21 CST. The owner's list closed at 18:43 CST; R21 and R22 came after.
+the history. Last rewrite: 2026-11-10 19:25 CST. The owner's list closed at 18:43 CST; R21 to R23 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -30,6 +30,14 @@ Each is fixed once, before lanes resume, so the resumed lanes run under it.
 
 In progress (owner chat Nov 10, between 13:31 and 14:07 CST: "im drianing as we speak"). The freeze
 holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main.
+
+- **R23. The drain ends at the named queue.** Owner 19:23 CST Nov 10 picked "Named queue". Outcome:
+  with 682 PRs open and 95 merged in a day, draining all of them would hold the plan for about a week.
+  1. The drain ends when the named queue lands: batch 74b (#2574), batch 75, and the coordinator's
+     next-to-release list at 19:23 CST (#2563, #2566, the ten former #2563 waiters, #2575, #2542).
+  2. Triage sorts the other open PRs against this plan. It closes a PR whose purpose a ruling here
+     replaces, with its branch kept so it can reopen. The rest wait as stage 3 input.
+  3. Stage 2 starts as soon as #2575 is on main, without waiting for the sort.
 
 Freeze exception, owner 16:02 CST: "i see yes fix it then". One lane makes the settings.json guard
 matcher route the GitHub MCP write tools to guard.py (hole H1, under R11 below), with a test that every
