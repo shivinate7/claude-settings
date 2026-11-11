@@ -1,0 +1,14 @@
+{
+  "id": "compact-pct-override",
+  "title": "Set CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=92 in settings env and prove it wins in a cloud session",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "Compaction too early wastes context; the cloud may override our value.",
+  "note": "R40 (owner 13:21 CST Nov 11, \"compaction: A\", relayed by the retrospective; plan 8349e6a). After the fresh start, a lane sets CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=92 in the settings env and reads one new cloud session's autocompact_state with get_session. If our value wins, it holds everywhere; if not, the record says so. Home: decision precompact-handoff.",
+  "source": "owner 2026-11-11 13:21 CST, relayed by the retrospective session",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:30:00-06:00",
+  "blockedBy": []
+}

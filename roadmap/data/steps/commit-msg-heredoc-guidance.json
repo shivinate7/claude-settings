@@ -1,0 +1,14 @@
+{
+  "id": "commit-msg-heredoc-guidance",
+  "title": "Agent start rules name git commit -F - with a heredoc as the commit-message form",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "A test-author hit guard scratchpad-commit-msg-owner with git commit -F <file> on a shared scratchpad file; no agent guidance names the allowed form.",
+  "note": "Owner feedback 13:24 CST Nov 11 (relayed by the coordinator 13:25). Read on main 6745ade70: no hit for \"-F -\" or \"heredoc\" in agents/, hooks/agent_brief.py or skills/project-ops/templates. Ask: hooks/agent_brief.py COMMON, the line for types that commit, names git commit -F - <<'EOF' as the form. The guard itself does not change. Edits a hook text, so it takes the reviews hooks/ need. Allowed under the freeze as a fix of an item on main.",
+  "source": "owner feedback 2026-11-11 13:24 CST, relayed by the coordinator",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:30:00-06:00",
+  "blockedBy": []
+}
