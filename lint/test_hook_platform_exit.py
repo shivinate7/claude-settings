@@ -17,7 +17,8 @@ must exit 0, silent, with no python start. Where it works, the row must reach py
   same bytes and the exit code through. Empty stdin still reaches python, which
   reports "CI unknown". Each case asks ci_wake.triggers too, so no row hides a call python watches.
   The cloud's ready route (ci-wake-mcp-ready): an MCP update_pull_request call with draft false also
-  reaches python, and the PostToolUse matcher covers that tool name.
+  reaches python, and the PostToolUse matcher covers that tool name. An MCP call with draft absent or
+  true starts none, even when its body holds the ready words.
 - stall_watch: only a MINGW uname exits early. Cygwin and MSYS pythons report os.name "posix".
 Override the settings file with HOOK_PLATFORM_EXIT_SETTINGS.
 """
@@ -287,11 +288,13 @@ class CiWake(Quiet):
         self.assertEqual(done.returncode, 2)
 
     @staticmethod
-    def mcp_payload(tool_input, tool=MCP_READY):
-        """A PostToolUse payload for an MCP call, as the harness sends it. The row reads tool_input only."""
+    def mcp_payload(tool_input, tool=MCP_READY, compact=False):
+        """A PostToolUse payload for an MCP call, as the harness sends it. The row reads tool_input only.
+        compact drops the spaces after the colons and commas, so a draft field reads "draft":false."""
         return json.dumps({"session_id": "abc", "transcript_path": "/t.jsonl", "cwd": "/x",
                            "hook_event_name": "PostToolUse", "tool_name": tool,
-                           "tool_input": tool_input, "tool_use_id": "toolu_1"})
+                           "tool_input": tool_input, "tool_use_id": "toolu_1"},
+                          separators=(",", ":") if compact else None)
 
     def post_matchers(self):
         found = [m for ev, m, _command in script_entries(self.script) if ev == "PostToolUse"]
@@ -317,6 +320,45 @@ class CiWake(Quiet):
         payload = self.mcp_payload({"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12,
                                     "draft": False})
         result = run_row(self.command(), self.script, payload)
+        self.assert_reaches_python(result, self.script)
+        self.assertEqual(result[2], payload.encode("utf-8"))
+
+    def assert_mcp_watch(self, tool_input, want):
+        """The row's script must (not) watch this MCP call, or the row case built on it proves nothing."""
+        import ci_wake
+        got = bool(ci_wake.mcp_ready_calls(tool_input))
+        self.assertEqual(got, want, "ci_wake.mcp_ready_calls %s %r: re-point this case"
+                         % ("no longer watches" if want else "now watches", tool_input))
+
+    def mcp_row(self, tool_input, compact=False):
+        """-> (payload, row result) for one MCP update_pull_request call. The matcher must cover the tool first."""
+        self.assertTrue(any(re.fullmatch(m, MCP_READY) for m in self.post_matchers()),
+                        "no ci_wake matcher covers %s" % MCP_READY)
+        payload = self.mcp_payload(tool_input, compact=compact)
+        return payload, run_row(self.command(), self.script, payload)
+
+    def test_mcp_ready_call_without_draft_starts_no_python(self):
+        # Finding 1: the row's grep reads all of tool_input, so ready words in the body start python
+        # for a call that marks no PR ready.
+        tool_input = {"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12,
+                      "body": "Next: gh pr ready 12 after review."}
+        self.assertNotIn("draft", tool_input)
+        self.assert_mcp_watch(tool_input, want=False)
+        _, result = self.mcp_row(tool_input)
+        self.assert_does_nothing(result)
+
+    def test_mcp_ready_call_with_draft_true_starts_no_python(self):
+        tool_input = {"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12, "draft": True}
+        self.assert_mcp_watch(tool_input, want=False)
+        _, result = self.mcp_row(tool_input)
+        self.assert_does_nothing(result)
+
+    def test_mcp_ready_call_with_compact_draft_false_reaches_python(self):
+        # Compact JSON: the row's draft pattern allows zero spaces after the colon.
+        tool_input = {"owner": "shivinate7", "repo": "claude-settings", "pullNumber": 12, "draft": False}
+        self.assert_mcp_watch(tool_input, want=True)
+        payload, result = self.mcp_row(tool_input, compact=True)
+        self.assertIn('"draft":false', payload)
         self.assert_reaches_python(result, self.script)
         self.assertEqual(result[2], payload.encode("utf-8"))
 
