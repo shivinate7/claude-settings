@@ -1,0 +1,14 @@
+{
+  "id": "usage-brake",
+  "title": "On a rate-limited account, usage at 90% winds work down and 94% stops new work",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "phase": "next",
+  "lane": "",
+  "why": "A rate-limited account that runs out mid-work loses unsaved work; a gentle wind-down at 90% and a hard stop at 94% let work finish and hand off.",
+  "note": "R43 (owner 13:48 CST Nov 11, relayed by the retrospective; plan 488eba6): \"it might just be somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was basically just that after usage hits 90% everything looks to gently wind down and 94% is a hard brake\". Retrospective's reading, sent to the owner for correction: on an account with a 5-hour or weekly limit, at 90% no new lane or agent starts, and running work finishes and writes its handoff; at 94% every session stops new work; an account with no limit never brakes. A lane first measures whether a hook can read the percentages. Home: new decision usage-brake. This ruling lived only in a Mac coordinator's handoff, so it is a case for the handoff-ruling guard. Triage lookup 13:49: the page held no such ruling; item 169 cites the owner's Nov 1 17:56 CST ruling \"no usage limit; a standing session runs until autocompact\" (for the no-limit account).",
+  "source": "owner 2026-11-11 13:48 CST, relayed by the retrospective session",
+  "owner": "triage",
+  "updatedAt": "2026-11-11T13:50:00-06:00",
+  "blockedBy": []
+}
