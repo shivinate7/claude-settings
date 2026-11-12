@@ -1050,8 +1050,14 @@ case22() {
 
 # ---- Case 23: main checked out in the clone with a tracked change -> tree, change and pin stay; one skip line ----
 case23() {
-  name="case23: SessionStart hook with main checked out in the clone and a tracked change leaves the tree and the change alone, moves the pin to origin/stable, and logs one line"
+  name="case23: SessionStart hook with main checked out in the clone and a tracked change that blocks the fast-forward leaves the tree and the change alone, moves the pin to origin/stable, and logs one line naming main"
   d="$work/case23"; hook_fixture "$d" main
+  # Re-pointed (coordinator ruling, act 2 round 1, 2026-11-12 11:34 CST): a dirty tree is skipped only when the change blocks
+  # the fast-forward, so origin's main now changes notes.txt, and the local edit below blocks it.
+  printf 'origin edit\n' >> "$d/pusher/notes.txt"
+  git -C "$d/pusher" add notes.txt
+  git -C "$d/pusher" commit -q -m "origin edits notes"
+  git -C "$d/pusher" push -q origin HEAD:refs/heads/main
   printf 'local edit\n' >> "$d/clone/notes.txt"
   run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
   why=""
@@ -1643,10 +1649,11 @@ case48() {
   else ok "$name"; fi
 }
 
-# ---- Case 49: CLAUDE_SETTINGS_REF=main -> the hook re-runs the helper, which keeps the pin at local main (the recovery) ----
-# The hook's compare is with stable, and the pin sits at main, so the helper runs; with REF=main the helper pins local main.
+# ---- Case 49: CLAUDE_SETTINGS_REF=main -> the hook's compare is with main, so the pin at main is current and no helper runs ----
+# Re-pointed from "the helper re-runs" (coordinator ruling, act 2 round 1, 2026-11-12 11:34 CST): the hook's p= honours
+# CLAUDE_SETTINGS_REF=main, so a pin at local main is on the recovery ref and the helper does not run.
 case49() {
-  name="case49: SessionStart hook with CLAUDE_SETTINGS_REF=main and the pin at origin's main re-runs the helper, which keeps the pin at local main"
+  name="case49: SessionStart hook with CLAUDE_SETTINGS_REF=main and the pin at origin's main does not re-run the helper, and the pin stays at main"
   d="$work/case49"; hook_fixture "$d" trunk ahead
   git -C "$d/clone" fetch -q origin main
   m1=$(git -C "$d/clone" rev-parse refs/remotes/origin/main)
@@ -1660,12 +1667,170 @@ case49() {
   run_hook "$d"
   unset CLAUDE_SETTINGS_REF
   if [ "$hrc" -ne 0 ]; then bad "$name" "hook exited $hrc: $hout"
-  elif [ "$(tail -n 1 "$d/home/ran-install.txt" 2>/dev/null)" != "$m1" ]; then bad "$name" "the helper did not re-run the installer from local main $m1: [$(cat "$d/home/ran-install.txt" 2>/dev/null)]"
+  elif [ -e "$d/home/ran-install.txt" ]; then bad "$name" "the hook re-ran the helper with CLAUDE_SETTINGS_REF=main, which installed from [$(cat "$d/home/ran-install.txt")]"
   elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$m1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want local main $m1 with CLAUDE_SETTINGS_REF=main"
   else ok "$name"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49"
+# ---- Case 50: no origin/stable -> the helper pins local main and prints one WARN line naming stable (never silent) ----
+case50() {
+  name="case50: the helper with no origin/stable pins local main and prints one WARN line naming stable"
+  d="$work/case50"; h="$d/home"; SHIM="$d/shim"; mkdir -p "$h"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  git init -q --bare -b main "$d/origin.git"
+  git -C "$d/clone" remote add origin "$d/origin.git"
+  git -C "$d/clone" push -q origin main
+  c0=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" worktree add -q --detach --lock --reason "claude-settings live pin" "$d/clone-live" "$c0"
+  git -C "$d/clone" commit -q --allow-empty -m "main moves on"
+  git -C "$d/clone" push -q origin main
+  c1=$(git -C "$d/clone" rev-parse main)
+  if git -C "$d/origin.git" rev-parse -q --verify refs/heads/stable >/dev/null; then
+    bad "$name" "FIXTURE origin has a stable branch, so the no-stable fallback is not what runs"
+    return
+  fi
+  run_live "$d/clone"
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want local main $c1"
+  elif [ "$(printf '%s\n' "$errs" | grep -c 'WARN.*stable')" -ne 1 ]; then bad "$name" "the fallback to local main is silent or repeated: want one WARN line naming stable on stderr: $errs"
+  else ok "$name"; fi
+}
+
+# ---- Case 51: origin/stable pruned from the clone -> the helper pins local main and prints one WARN line naming stable ----
+case51() {
+  name="case51: the helper with origin/stable pruned pins local main and prints one WARN line naming stable"
+  d="$work/case51"; h="$d/home"; SHIM="$d/shim"; mkdir -p "$h"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  git init -q --bare -b main "$d/origin.git"
+  git -C "$d/clone" remote add origin "$d/origin.git"
+  git -C "$d/clone" push -q origin main
+  git -C "$d/clone" push -q origin main:refs/heads/stable
+  c0=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" worktree add -q --detach --lock --reason "claude-settings live pin" "$d/clone-live" "$c0"
+  git -C "$d/clone" commit -q --allow-empty -m "main moves on"
+  git -C "$d/clone" push -q origin main
+  c1=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/origin.git" update-ref -d refs/heads/stable
+  git -C "$d/clone" fetch -q --prune origin
+  if git -C "$d/clone" rev-parse -q --verify refs/remotes/origin/stable >/dev/null; then
+    bad "$name" "FIXTURE the prune left origin/stable in the clone"
+    return
+  fi
+  run_live "$d/clone"
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want local main $c1"
+  elif [ "$(printf '%s\n' "$errs" | grep -c 'WARN.*stable')" -ne 1 ]; then bad "$name" "the fallback after the prune is silent or repeated: want one WARN line naming stable on stderr: $errs"
+  else ok "$name"; fi
+}
+
+# held_main_fixture DIR FILE: a clone checked out on main with a local edit to notes.txt, a pin at origin's stable (c0), and
+# origin's main one commit past it that changes FILE (c1). The pin's stable branch sits at c0, so the pin is current.
+held_main_fixture() {
+  live_clone "$1/clone" stub
+  printf 'notes\n' > "$1/clone/notes.txt"
+  git -C "$1/clone" add -A
+  git -C "$1/clone" commit -q -m notes
+  git init -q --bare -b main "$1/origin.git"
+  git -C "$1/clone" remote add origin "$1/origin.git"
+  git -C "$1/clone" push -q origin main
+  git -C "$1/clone" push -q origin main:refs/heads/stable
+  c0=$(git -C "$1/clone" rev-parse main)
+  git -C "$1/clone" worktree add -q --detach --lock --reason "claude-settings live pin" "$1/clone-live" "$c0"
+  git clone -q "$1/origin.git" "$1/pusher"
+  git -C "$1/pusher" config user.email t@example.com
+  git -C "$1/pusher" config user.name t
+  printf 'origin %s\n' "$2" >> "$1/pusher/$2"
+  git -C "$1/pusher" add -A
+  git -C "$1/pusher" commit -q -m "origin moves main"
+  git -C "$1/pusher" push -q origin HEAD:refs/heads/main
+  c1=$(git -C "$1/pusher" rev-parse HEAD)
+  printf 'local edit\n' >> "$1/clone/notes.txt"
+}
+
+# ---- Case 52: a held main whose tracked change does not block the fast-forward is fast-forwarded ----
+case52() {
+  name="case52: the helper fast-forwards a held main whose tracked change does not block the fast-forward"
+  d="$work/case52"; h="$d/home"; SHIM="$d/shim"; mkdir -p "$h"; make_shim "$SHIM"
+  held_main_fixture "$d" other.txt
+  run_live "$d/clone"
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone" rev-parse main)" != "$c1" ]; then bad "$name" "the held main is $(git -C "$d/clone" rev-parse main), want origin's main $c1: a fast-forward the change does not block was skipped"
+  elif [ "$(tail -n 1 "$d/clone/notes.txt")" != "local edit" ]; then bad "$name" "the tracked change was lost or changed"
+  elif printf '%s\n' "$errs" | grep -q 'WARN.*tracked'; then bad "$name" "a WARN about tracked changes for a fast-forward that is not blocked: $errs"
+  else ok "$name"; fi
+}
+
+# ---- Case 53: a held main whose tracked change blocks the fast-forward is left alone, and one WARN line names main ----
+case53() {
+  name="case53: the helper leaves a held main alone when its tracked change blocks the fast-forward, and prints one WARN line naming main"
+  d="$work/case53"; h="$d/home"; SHIM="$d/shim"; mkdir -p "$h"; make_shim "$SHIM"
+  held_main_fixture "$d" notes.txt
+  run_live "$d/clone"
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone" rev-parse main)" != "$c0" ]; then bad "$name" "the held main moved to $(git -C "$d/clone" rev-parse main), want it left at $c0: a blocked fast-forward ran"
+  elif [ "$(tail -n 1 "$d/clone/notes.txt")" != "local edit" ]; then bad "$name" "the tracked change was lost or changed"
+  elif [ "$(printf '%s\n' "$errs" | grep -c 'WARN.*main')" -ne 1 ]; then bad "$name" "want one WARN line naming main for the blocked fast-forward: $errs"
+  else ok "$name"; fi
+}
+
+# hook_log_warns LOG: the install-log lines that carry a WARN and name stable. Prints the count.
+hook_log_warns() { grep -c 'WARN.*stable' "$1" 2>/dev/null; }
+
+# ---- Case 54: SessionStart hook with no origin/stable keeps the pin at main and logs one WARN line naming stable ----
+case54() {
+  name="case54: SessionStart hook with no origin/stable keeps the pin at main and logs one WARN line naming stable"
+  d="$work/case54"; hook_fixture "$d" trunk same
+  git -C "$d/origin.git" update-ref -d refs/heads/stable
+  git -C "$d/clone" update-ref -d refs/remotes/origin/stable
+  if git -C "$d/clone" rev-parse -q --verify refs/remotes/origin/stable >/dev/null; then
+    bad "$name" "FIXTURE the clone still holds origin/stable"
+    return
+  fi
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  warns=$(hook_log_warns "$d/home/.claude-cfg/claude-settings-install.log")
+  if [ "$hrc" -ne 0 ]; then bad "$name" "hook exited $hrc: $hout"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want main $c0"
+  elif [ "${warns:-0}" -ne 1 ]; then bad "$name" "the install log has ${warns:-0} WARN lines naming stable, want one"
+  else ok "$name"; fi
+}
+
+# ---- Case 55: origin's stable deleted, the clone's copy stale -> the hook moves the pin to main and logs one WARN line naming stable ----
+case55() {
+  name="case55: SessionStart hook with origin's stable deleted moves the pin to origin's main and logs one WARN line naming stable"
+  d="$work/case55"; hook_fixture "$d" trunk same
+  git clone -q "$d/origin.git" "$d/pusher55"
+  git -C "$d/pusher55" config user.email t@example.com
+  git -C "$d/pusher55" config user.name t
+  git -C "$d/pusher55" commit -q --allow-empty -m "main moves on"
+  git -C "$d/pusher55" push -q origin HEAD:refs/heads/main
+  m1=$(git -C "$d/pusher55" rev-parse HEAD)
+  git -C "$d/origin.git" update-ref -d refs/heads/stable
+  if [ "$(git -C "$d/clone" rev-parse refs/remotes/origin/stable)" != "$c0" ] || [ "$m1" = "$c0" ]; then
+    bad "$name" "FIXTURE the clone's origin/stable is not the stale $c0, or main did not move past it"
+    return
+  fi
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  warns=$(hook_log_warns "$d/home/.claude-cfg/claude-settings-install.log")
+  if [ "$hrc" -ne 0 ]; then bad "$name" "hook exited $hrc: $hout"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$m1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want origin's main $m1 after the stable branch went"
+  elif [ "${warns:-0}" -ne 1 ]; then bad "$name" "the install log has ${warns:-0} WARN lines naming stable, want one"
+  else ok "$name"; fi
+}
+
+# ---- Case 56: the hook fast-forwards a held main whose tracked change does not block the fast-forward ----
+case56() {
+  name="case56: SessionStart hook with main checked out in the clone and a tracked change that does not block the fast-forward fast-forwards main"
+  d="$work/case56"; hook_fixture "$d" main
+  printf 'local edit\n' >> "$d/clone/notes.txt"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  if [ "$hrc" -ne 0 ]; then bad "$name" "hook exited $hrc: $hout"
+  elif [ "$(git -C "$d/clone" rev-parse HEAD)" != "$m1" ]; then bad "$name" "the clone's checkout is at $(git -C "$d/clone" rev-parse HEAD), want origin's main $m1: a fast-forward the change does not block was skipped"
+  elif [ "$(tail -n 1 "$d/clone/notes.txt")" != "local edit" ]; then bad "$name" "the tracked change was lost or changed"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want stable $c1"
+  else ok "$name"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49 case50 case51 case52 case53 case54 case55 case56"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
