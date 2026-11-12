@@ -185,6 +185,13 @@ cost() {
   if [ "$j" = "$2" ] && [ "$c" = "$3" ] && [ "$other" = 1 ] && [ "$p" = "$4" ] && [ -z "$left" ]; then echo "ok   $1"
   else echo "FAIL $1 (jobs reads $j want $2; contents reads $c want $3; other api reads $other want 1; python3 starts $p want $4; files left: $left)"; bad=1; fi
 }
+# count_is <label> <pattern> <count>: the reads in the call log of the last case run that contain <pattern>. Used where cost cannot
+# count a read (an earlier attempt's jobs, which cost counts as other).
+count_is() {
+  local got
+  got="$(grep -cF -- "$2" "$tmp/reads")"
+  if [ "$got" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: $got reads of $2, want $3"; bad=1; fi
+}
 # The workflows list as `gh api --paginate` prints it: one JSON document per page.
 cat > "$tmp/workflows" <<'JSON'
 {"total_count": 7, "workflows": [
@@ -221,7 +228,7 @@ run_alarm() {
 }
 t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
   run_alarm "${3:-}" "${4:-}"
-  shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
+  shown="$(grep -v '^::\(warning\|notice\)::' <<<"$out")" # the verdict, without annotations; a cap-end notice is one
   ok=0
   case "$1" in
     green) [ "$shown" = green ] && [ ! -s "$tmp/log" ] && ok=1 ;;
@@ -412,6 +419,33 @@ jobs_of 4742 scope-guard:cancelled:359
 workflow_at 4742 scope-guard
 t green job-cancelled-at-359-minutes-with-no-cap-is-quiet "" "" ""
 
+# Every cancelled run in the window is judged, not only the newest cancelled run of its group. A cap end under a newer green run of the
+# same group still opens the cap-only alarm. Each judged cancelled run reads its jobs once and its workflow file once.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/newer-green-5201 push 5201)" "$(gh_run ci cancelled 2026-01-01 https://runs/older-cap-5200 push 5200)"
+jobs_of 5200 scope-guard:cancelled:40
+workflow_at 5200 scope-guard:37
+t alarm older-cancelled-cap-end-under-a-newer-green-run-opens-the-cap-alarm "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 5200')"
+cost older-cancelled-cap-end-under-a-newer-green-run-reads-its-jobs-and-workflow-once 1 1 0
+runs_are "$(gh_run ci success 2026-01-02 https://runs/newer-green-5211 push 5211)" "$(gh_run ci cancelled 2026-01-01 https://runs/older-under-cap-5210 push 5210)"
+jobs_of 5210 scope-guard:cancelled:2
+workflow_at 5210 scope-guard:37
+t green older-cancelled-under-its-cap-under-a-newer-green-run-stays-quiet "" "" ""
+cost older-cancelled-under-its-cap-under-a-newer-green-run-reads-its-jobs-and-workflow-once 1 1 0
+# Two cancelled runs in the window: the older is over its cap and the newer is under it. The alarm names the older run.
+runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/two-older-over-cap-5220 push 5220)" "$(gh_run ci cancelled 2026-01-02 https://runs/two-newer-under-cap-5221 push 5221)"
+jobs_of 5220 scope-guard:cancelled:40
+jobs_of 5221 scope-guard:cancelled:2
+workflow_at 5220 scope-guard:37
+workflow_at 5221 scope-guard:37
+t alarm two-cancelled-runs-the-older-over-its-cap-names-the-older-run "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 5220')"
+cost two-cancelled-runs-each-read-their-jobs-and-workflow-once 2 2 0
+# A full run window of 100 runs: the oldest is a cancelled cap end and the 99 newer ones succeeded. The cap end still opens the alarm.
+window=(); for i in $(seq 1 99); do window+=("$(gh_run ci success 2026-01-02 "https://runs/window-green-$i" push $((5300 + i)))"); done
+runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/window-oldest-cap-5300 push 5300)" "${window[@]}"
+jobs_of 5300 scope-guard:cancelled:40
+workflow_at 5300 scope-guard:37
+t alarm full-run-window-oldest-cancelled-cap-end-opens-the-cap-alarm "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 5300')"
+cost full-run-window-oldest-cancelled-cap-end-reads-its-jobs-and-workflow-once 1 1 0
 # A failure run whose only red job was cancelled at its cap is red by its conclusion. The alarm names that job, its cap and its
 # minutes, as the cancelled-run path does. Only the issue is pinned here, not the verdict.
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/fail-cap-4740 push 4740)"
@@ -448,41 +482,49 @@ jobs_of 5040 checks:failure scope-guard:cancelled:40
 workflow_at 5040 checks scope-guard:37
 t red mixed-run-with-a-red-job-and-a-cap-end-keeps-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5040')" "actions/runs/5040/jobs"
 
-# A job cancelled at its cap in attempt 1 of a run whose attempt 2 is green: the alarm names it on a "cap end named" line, the
-# verdict is not red, and no issue opens. Attempt 1's jobs come from the attempts endpoint; the latest attempt's jobs do not hold them.
+# A job cancelled at its cap in attempt 1 of a run whose attempt 2 is green opens the cap-only alarm: the title names the job, and the
+# body names the run. Attempt 1's jobs come from the attempts endpoint; the latest attempt's jobs do not hold them.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-cap-4750 push 4750 completed 2)"
 attempt_jobs_of 4750 1 scope-guard:cancelled:40
 jobs_of 4750 scope-guard:success
 workflow_at 4750 scope-guard:37
-named notred cap-end-in-attempt-1-of-a-green-run-is-named-not-red "job scope-guard ran 40 min, cap 37 min, run 4750"
+t alarm cap-end-in-attempt-1-of-a-green-run-opens-the-cap-alarm "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 4750')"
+count_is cap-end-in-attempt-1-of-a-green-run-reads-attempt-1-jobs-once "actions/runs/4750/attempts/1/jobs" 1
+count_is cap-end-in-attempt-1-of-a-green-run-reads-its-workflow-file-once "/contents/" 1
 # Controls: a green run whose earlier attempt has no cap end stays silent.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-under-4751 push 4751 completed 2)"
 attempt_jobs_of 4751 1 scope-guard:cancelled:2
 jobs_of 4751 scope-guard:success
 workflow_at 4751 scope-guard:37
 named green attempt-1-cancelled-under-its-cap-in-a-green-run-stays-silent "!cap end named"
+count_is attempt-1-under-its-cap-in-a-green-run-reads-attempt-1-jobs-once "actions/runs/4751/attempts/1/jobs" 1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-clean-4752 push 4752 completed 2)"
 attempt_jobs_of 4752 1 scope-guard:success
 jobs_of 4752 scope-guard:success
 workflow_at 4752 scope-guard:37
 named green green-run-with-no-cap-end-in-any-attempt-stays-silent "!cap end named"
+# A failure run with a red job in its newest attempt and a cap end in attempt 1: the title stays "CI red on", and the body names the cap end.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-retry-cap-5230 push 5230 completed 2)"
+attempt_jobs_of 5230 1 scope-guard:cancelled:40
+jobs_of 5230 checks:failure scope-guard:success
+workflow_at 5230 checks scope-guard:37
+t red red-run-with-a-cap-end-in-attempt-1-names-it-under-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5230')"
+count_is red-run-with-a-cap-end-in-attempt-1-reads-attempt-1-jobs-once "actions/runs/5230/attempts/1/jobs" 1
+count_is red-run-with-a-cap-end-in-attempt-1-reads-its-newest-jobs-once "actions/runs/5230/jobs" 1
+count_is red-run-with-a-cap-end-in-attempt-1-reads-its-workflow-file-once "/contents/" 1
 
 # A re-run in flight is the group's newest run: its status is in_progress or queued and its attempt is above 1. The group is
 # UNKNOWN (main's judged rule, merge/merge.py base_state), so the alarm reads unknown with a warning and writes no issue. It never
 # reads green, and never falls back to an older run. A first attempt still in progress waits its turn, so the older run is judged (1d).
-# count_is <label> <pattern> <count>: the reads in the call log of the last case run that contain <pattern>.
-count_is() {
-  local got
-  got="$(grep -cF -- "$2" "$tmp/reads")"
-  if [ "$got" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: $got reads of $2, want $3"; bad=1; fi
-}
 runs_are "$(gh_run ci failure 2026-01-01 https://runs/rerun-red-4901 push 4901)" "$(gh_run ci null 2026-01-02 https://runs/rerun-4902 push 4902 in_progress 2)"
 jobs_of 4901 checks:failure
 t unknown rerun-in-flight-hides-an-older-red-run-as-unknown-not-red "" "" ""
+# A queued re-run does not hide an older cancelled cap end: a cap end on main opens its issue whatever the group's newest run is doing.
 runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/rerun-cap-4910 push 4910)" "$(gh_run ci null 2026-01-02 https://runs/rerun-queued-4911 push 4911 queued 2)"
 jobs_of 4910 scope-guard:cancelled:40
 workflow_at 4910 scope-guard:37
-t unknown rerun-queued-hides-an-older-cap-end-as-unknown-not-red "" "" ""
+t raised rerun-queued-does-not-hide-an-older-cap-end "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 4910')"
+cost rerun-queued-does-not-hide-an-older-cap-end-reads-its-jobs-and-workflow-once 1 1 0
 runs_are "$(gh_run ci success 2026-01-01 https://runs/rerun-green-4920 push 4920)" "$(gh_run ci null 2026-01-02 https://runs/rerun-4921 push 4921 in_progress 2)"
 jobs_of 4920 checks:success
 t unknown rerun-in-flight-is-not-green-from-an-older-green-run "" "" ""
