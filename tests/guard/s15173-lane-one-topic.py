@@ -172,19 +172,14 @@ ROLE_TOP = "Lane brief: icon-b. Topic: icons."  # the first line a step-topic-la
 BRIEF_TEMPLATE_PATH = os.path.join(REPO, "skills", "project-ops", "templates", "brief.md")
 with open(BRIEF_TEMPLATE_PATH, encoding="utf-8") as handle:
     BRIEF_TEMPLATE = handle.read()
-BRIEF_TEMPLATE_IDS = {"Coordinator": "session_TPLCOORD01", "Triage": "session_TPLTRIAGE01",
-                      "Batch runner": "session_TPLRUNNER01"}
 
 
-def fill_template(text, ids=None):
-    """The brief template with its grant line, step and topic slugs filled, and each `<label>: session_<id>` placeholder
-    filled from `ids` when it is given. Every other placeholder stays as shipped. The grant line gets a grant the guard
-    takes: a placeholder grant is refused before the role check, so it would hide the role cause."""
+def fill_template(text):
+    """The shipped brief template with its grant line and its step and topic slugs filled. Every other placeholder stays
+    as shipped. The grant line gets a grant the guard takes: a placeholder grant is refused before the role check, so it
+    would hide the role cause."""
     text = text.replace("Grant: <owner words>, <time>", "Grant: B is good, 13:19 CST Nov 10")
-    text = text.replace("<step-slug>", "icon-b").replace("<topic-slug>", "icons")
-    for label, session in (ids or {}).items():
-        text = text.replace(label + ": session_<id>", label + ": " + session)
-    return text
+    return text.replace("<step-slug>", "icon-b").replace("<topic-slug>", "icons")
 
 
 # Allowed: a role label may take no colon, and a number may sit beside it.
@@ -230,8 +225,8 @@ step_allow("the coordinator's own brief form, verbatim, is allowed: a topic t la
            "Triage session_013NEJL42Sv3tJkjpzY7bExj; Batch runner 8 session_013NEJL2vsmyKzJm8jUDt6za.")
 step_allow("a brief with no roles to a target that is no lane is allowed",
            role_path("step-triage"), ROLE_TOP)
-step_allow("the brief template, its slugs and id placeholders filled, is allowed",
-           role_path("step-topic-lane"), fill_template(BRIEF_TEMPLATE, BRIEF_TEMPLATE_IDS))
+step_allow("the shipped brief template, grant and slugs filled, is allowed: its Ask line names the three roles",
+           role_path("step-topic-lane"), fill_template(BRIEF_TEMPLATE))
 
 # Refused: a role label is missing. Each refusal keeps the other two labels present, so a failure names the one cause it
 # tests. A refusal asks for no session id (ROLE_LACKS).
@@ -350,11 +345,6 @@ step_refuse("a brief with no role ids to a target with no record keeps the no-re
 step_refuse("a brief with no role ids and an unreadable transcript keeps the no-record reason",
             role_path("unreadable"), "Lane brief: icon-b. Topic: icons.",
             carries=("holds no get_session",), lacks=("Coordinator:", "Triage:", "Batch runner:"))
-
-# The brief template: its three labels are there with their id placeholders unfilled, so it is allowed, and so is the same
-# template with the ids filled.
-step_allow("the brief template with its session id placeholders unfilled is allowed: its three labels are present",
-           role_path("step-topic-lane"), fill_template(BRIEF_TEMPLATE))
 
 
 # ---- A lane start names each role by its label too (rule lane-one-topic). The start's prompt is the owner's grant,
