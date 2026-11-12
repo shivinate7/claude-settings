@@ -3052,6 +3052,11 @@ class DefaultBase(unittest.TestCase):
         """The FAIL lines and their bullet lines: what a run found, without any base line it prints."""
         return [l for l in text.splitlines() if ": FAIL: " in l or l.startswith("      - ")]
 
+    @classmethod
+    def undoes_main_revert(cls, text):
+        """True when a finding says a change undoes a commit whose subject names Q (main's add, or main's revert of it)."""
+        return any("undoing" in l and "main adds Q" in l for l in cls.findings(text))
+
     @staticmethod
     def named_base(text):
         """The printed lines that name origin/main as the base the run used. The one home of that reading."""
@@ -3128,6 +3133,35 @@ class DefaultBase(unittest.TestCase):
         r.sh("push", "-q", "-u", "origin", "selfb")
         return r
 
+    def pushed_as_other_name(self, local, remote):
+        """main adds Q. The branch `local` is cut at Q, gets one commit, and is pushed as `remote` with -u, so it tracks its
+        own old copy under that name (the same name when local == remote). Then main reverts Q. The branch merges main keeping
+        its own side, which puts Q back, and pushes that merge. Landing the pushed copy on main undoes the revert."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        q = r.commit("main adds Q", date=self.T1, app_txt=BODY + "function Card() {}\nQ1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", local, "--no-track", q)
+        r.commit("%s work" % local, date=self.T2, other_txt="other v2\n")
+        spec = "refs/heads/%s:refs/heads/%s" % (local, remote)  # full refs: a tag of the same name makes a bare name ambiguous
+        r.sh("push", "-q", "-u", "origin", spec)
+        r.sh("checkout", "-q", "main")
+        r.sh("revert", "--no-edit", q, date=self.T3)
+        r.push()
+        r.sh("checkout", "-q", local)
+        r.sh("merge", "-q", "-s", "ours", "--no-ff", "--no-edit", "origin/main", date=self.T4)
+        r.sh("push", "-q", "origin", spec)
+        return r
+
+    def gone_upstream(self):
+        """feat2 stacks on feat1 and tracks origin/feat1. feat1 is deleted on origin and pruned locally: the merge key stays,
+        the upstream is gone."""
+        r = self.stacked_revert()
+        r.sh("push", "-q", "origin", "--delete", "feat1")
+        r.sh("fetch", "-q", "--prune", "origin")
+        return r
+
     def test_no_flag_judges_a_stacked_branch_against_its_base_not_main(self):
         r = self.stacked_revert()
         self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
@@ -3186,6 +3220,41 @@ class DefaultBase(unittest.TestCase):
         self.assertIn("- K1", text, "no --upstream: the branch's own pushed copy was taken as its base, so K1's drop was not judged. "
                                     "Output: %r" % text)
         self.assertTrue(self.named_base(text), "no --upstream: no printed base line names origin/main. Output: %r" % text)
+
+    def test_a_branch_pushed_under_another_name_is_judged_against_main(self):
+        r = self.pushed_as_other_name("foo", "bar")
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/bar",
+                         "premise: foo does not track its pushed copy origin/bar")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertTrue(self.undoes_main_revert(text),
+                        "premise: against origin/main, the pushed copy undoes main's revert of Q. Output: %r" % text)
+        _, text = self.run_main(["--repo", r.dir])
+        self.assertTrue(self.undoes_main_revert(text),
+                        "no --upstream: foo was judged against its old copy origin/bar, not origin/main. Output: %r" % text)
+
+    def test_a_tag_named_like_a_stacked_branch_does_not_hide_its_base(self):
+        r = self.stacked_merge_drop()
+        r.sh("tag", "feat2")  # a tag of the branch's own name, at its head
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 does not track its base origin/feat1")
+        self.assertNotEqual(r.sh("rev-parse", "--verify", "-q", "refs/tags/feat2", ok=False), "",
+                            "premise: the tag feat2 exists")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/feat1"])
+        self.assertIn("- P2", text, "premise: against its base origin/feat1, the merge drops P2. Output: %r" % text)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertIn("- P2", text, "no --upstream: with a tag named feat2, the base origin/feat1 was not used. Output: %r" % text)
+
+    def test_a_gone_upstream_is_named_as_gone_and_judged_against_main(self):
+        r = self.gone_upstream()
+        self.assertEqual(r.sh("config", "--get", "branch.feat2.merge"), "refs/heads/feat1",
+                         "premise: feat2 keeps its merge key")
+        self.assertEqual(r.sh("rev-parse", "--verify", "-q", "refs/remotes/origin/feat1", ok=False), "",
+                         "premise: origin/feat1 is pruned")
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertTrue([l for l in self.named_base(text) if "gone" in l],
+                        "no --upstream: the printed base line does not say the upstream is gone. Output: %r" % text)
+        self.assertTrue(self.undoes_main_revert(text),
+                        "no --upstream: a gone upstream was not judged against origin/main. Output: %r" % text)
 
 
 if __name__ == "__main__":
