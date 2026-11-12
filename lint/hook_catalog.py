@@ -65,6 +65,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+from rule_audit import RULE_FILES  # noqa: E402  the one home of the files a rule anchor sits in
 
 ROOT = os.path.abspath(os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
 PAGE = "docs/catalog.md"
@@ -683,14 +684,17 @@ def collect_records():
     """({section: [(slug, gist, link text, link)]}, problems). A page is written only when no problem stands."""
     rows = {name: [] for name in SECTIONS}
     problems = []
-    if has_file("CLAUDE.md"):
-        text = read("CLAUDE.md")
-        problems += history_problems("CLAUDE.md", text)
+    for rule_file in RULE_FILES:
+        rel = rule_file.replace(os.sep, "/")
+        if not has_file(rel):
+            continue
+        text = read(rel)
+        problems += history_problems(rel, text)
         for rule, gist in mandates(text):
             if gist:
-                rows["Mandates"].append((rule, gist, "CLAUDE.md", "../CLAUDE.md"))
+                rows["Mandates"].append((rule, gist, rel, "../" + rel))
             else:
-                problems.append("CLAUDE.md: the rule %s has no text before its marker" % rule)
+                problems.append("%s: the rule %s has no text before its marker" % (rel, rule))
     notes = layout.path(ROOT, "debt-notes")  # the notes tier: one line per unlikely finding, not a record
     for kind, folder in listed_folders():
         base = os.path.join(ROOT, *folder.split("/"))

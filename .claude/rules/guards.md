@@ -1,0 +1,7 @@
+---
+paths:
+  - "hooks/**"
+  - "lint/**"
+---
+
+# Guards

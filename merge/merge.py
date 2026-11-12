@@ -311,7 +311,7 @@ def ancestor(cwd, tip, base):
     import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
     return git_reads.branch_is_ancestor(cwd, base, tip)
 
-RULE_FILES = ("claude.md", ".claude/claude.md")  # lower case: the match ignores case. Plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
+RULE_FILES = tuple(p.replace(os.sep, "/").lower() for p in stale_cites.RULE_FILES) + (".claude/claude.md",)  # lower case: the match ignores case. The list is lint/rule_audit.py RULE_FILES (the one home), plus the project CLAUDE.md, plus each file under RULE_PREFIX (decision claude-md-change-is-flagged)
 RULE_PREFIX = "output-styles/"
 SETTLE_SECONDS = 30
 NET_RETRIES, NET_PAUSE = 3, 5  # retry a network error 3 times, a short pause between (standing-merge-grant)
