@@ -141,6 +141,9 @@ ARCHOPEN = os.path.join(ROOT, "archopen")      # the slug's pull request is open
 ARCHCLOSED = os.path.join(ROOT, "archclosed")  # the slug's pull request was closed as replaced
 ARCHMERGED = os.path.join(ROOT, "archmerged")  # the slug's pull request was merged
 ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on page two of the open list
+ARCHSCOPE_OUT = os.path.join(ROOT, "archscope-out")  # the lane's repo is outside this session's GitHub scope: its open list answers 404
+ARCHSCOPE_IN = os.path.join(ROOT, "archscope-in")    # the lane's repo is in scope: its open list fails with a transient 500
+ARCHSCOPE_PROXY = os.path.join(ROOT, "archscope-proxy")  # the same out-of-scope repo, as the cloud proxy answers it: a 403 with its sentence
 ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
@@ -881,6 +884,15 @@ else:
         if state.get("pulls_error") and fields.get("state") == state["pulls_error"][0]:  # a list read of that state fails
             if state["pulls_error"][1] == "server":
                 api_error(500, "pulls read broke")
+            if state["pulls_error"][1] == "missing":  # the repo is outside this token's scope: GitHub answers 404 for it
+                api_error(404, "Not Found")
+            if state["pulls_error"][1] == "scope":  # the cloud proxy's 403 for a repo outside this session's GitHub scope
+                sentence = "GitHub access to this repository is not enabled for this session."
+                if "-i" in flags:
+                    sys.stdout.write("HTTP/1.1 403 Forbidden\nContent-Type: application/json\r\n\r\n")
+                sys.stdout.write(json.dumps({"message": sentence, "status": "403"}, separators=(",", ":")))
+                print("gh: %s (HTTP 403)" % sentence)
+                sys.exit(1)
             print("<html>a page that is not JSON</html>")
             sys.exit(0)
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
@@ -953,7 +965,8 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     connection), `others` (its pull requests, rows as `others` takes them), `default_branch` (what its
     own read names; main when unset), `repo_error` ("server": its own read fails with 500; "missing": with 404), `compare_delay_s` (seconds each of its
     compare reads sleeps before it answers) and `pulls_error`
-    ([state, "server" or "junk"]: a list read of that state fails). A repo's answers replace the
+    ([state, "server", "junk", "missing" or "scope"]: a list read of that state fails: "server" with 500, "missing" with 404,
+    "scope" with the cloud proxy's 403 and its sentence, "junk" with a page that is not JSON). A repo's answers replace the
     top-level ones for the calls that name it. A call to a repo the map does not name is a broken tool.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
@@ -1249,6 +1262,11 @@ def build_fixtures():
         {"number": 13, "head": "1" * 40, "ref": "claude/other-lane-x1"},
         {"number": 14, "head": "2" * 40, "ref": "claude/other-lane-x2"},
         dict(slug_head, number=15, head="3" * 40)])
+    # The lane's repo answers 404 on its open pull request list: GitHub's answer for a repo this session's token cannot see,
+    # so a retry can never pass. The same read failing as a 500 is transient in scope, and a retry can pass it.
+    make_fake_gh(ARCHSCOPE_OUT, "main", repos={"o/r": {"pulls_error": ["open", "missing"]}})
+    make_fake_gh(ARCHSCOPE_IN, "main", repos={"o/r": {"pulls_error": ["open", "server"]}})
+    make_fake_gh(ARCHSCOPE_PROXY, "main", repos={"o/r": {"pulls_error": ["open", "scope"]}})
     # Open pull requests on a near-miss head, one per fake. Each holds a lane's id or slug as a substring only: an
     # exact read of the open list allows an archive of the lane named in the case beside it.
     make_fake_gh(ARCHNEAR_C10, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="c10")])

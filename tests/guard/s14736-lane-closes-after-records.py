@@ -9,6 +9,9 @@ FAMILY = "lane-closes-after-records"
 #   - a lane, with no record of the target in the transcript: refuse, and the remedy steers to get_session;
 #   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
 #     cs-step slug refuses. None allows. A read that cannot run refuses: guards fail closed.
+#   - a lane whose repo is outside this session's GitHub scope (GitHub answers 404 on the open list): refuses, and the
+#     reason names the scope and the runner that holds the repo, with no retry advice. A transient failure in scope
+#     (a 5xx) still says retry.
 #   - a lane whose record names branches (external_metadata.current_branches): each branch ahead of its repo's
 #     default branch, on no pull request in any state, refuses. A 404 on the branch's compare means the branch is not
 #     in that repo. Any other failed read refuses. A branch equal to the default, or behind it, or archive/..., is skipped.
@@ -85,6 +88,19 @@ archive_refuse("an own lane record with no record of the target is refused, and 
 archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
                fake_gh_path(GHBROKEN))
 archive_refuse("a lane with no gh on the path is refused", role_path("archive-lane"), GHNONE_PATH)
+# A repo outside this session's GitHub scope answers 404 on its open list. A retry can never pass, so the refusal names
+# the scope and routes the archive to the runner that holds the repo, with no retry. `lacks` takes each retry word as
+# its own string: a tuple in `lacks` is never matched.
+ARCHIVE_SCOPE_PIN = ("scope", "runner")
+archive_refuse("a lane whose repo is outside this session's GitHub scope (404 on its open list) is refused, and the reason names the scope and the runner, with no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ARCHIVE_SCOPE_PIN, lacks=("retry", "Retry"))
+# The cloud proxy answers a repo outside the session's scope with its own 403 and sentence. The same refusal, with no retry.
+archive_refuse("a lane whose repo the cloud proxy refuses as outside this session's GitHub scope (403) is refused, and the reason names the scope and the runner, with no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ARCHIVE_SCOPE_PIN, lacks=("retry", "Retry"))
+# The control: the same read failing as a 500 in an in-scope repo is transient, so the refusal still says retry and
+# names neither the scope nor the runner.
+archive_refuse("a lane whose repo is in scope, with its open list failing as a transient 500, is refused, and the reason still says retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_IN), carries=(("retry", "Retry"),), lacks=ARCHIVE_SCOPE_PIN)
 # Every page of the open list is read: the slug's pull request sits on page two.
 archive_refuse("a lane whose slug pull request is on page two of the open list is refused",
                role_path("archive-lane"), fake_gh_path(ARCHPAGE))
