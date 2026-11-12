@@ -32,7 +32,7 @@
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record. A draft open over 12 h whose newest
                           record is missing, stale (not for the live head, and not kept by clean merges of main), bad or for another PR prints `send back: #N session_ID (REASON)`
-                          instead (`no session` when the body names none); the batch runner sends it back to that lane session.
+                          instead (`no session` when the body names none); the batch runner sends it back to that lane.
                           Cost: no new gh call, process, file or timer; it reads fields the PR list already returns.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
@@ -3822,7 +3822,7 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
-REVIEW_SEND_BACK = "send back: "  # the line `merge --reviewed` prints for a draft the runner returns to its lane session
+REVIEW_SEND_BACK = "send back: "  # the line `merge --reviewed` prints for a draft the runner returns to its lane
 SEND_BACK_HOURS = 12  # a draft open longer than this with no live record is sent back
 REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
 REVIEW_FIX_GUARD_MODEL = "sonnet"  # every fix check runs on this model, whatever Guard or check says (owner item 444 a; decision pr-review-record)
