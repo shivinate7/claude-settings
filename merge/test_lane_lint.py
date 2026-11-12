@@ -19,7 +19,7 @@ count is unmeasured since the batch-head cases were added.
 BatchHeadMutation (class BatchHeadMutation) lints a batch head, `--batch-build NAME --ready`, and the same head by hand-off, `--lane-lint <sha>`,
 on one touched lane. Its pre-join cases run `--lane-lint <pr>` through the gh shim, in a cloud session with the batch-runner role or with none; the
 shim's comment list holds the hand-off PASS record. Cost per case: one run (the batch build or the lint), one ci-job stub start, and one mutate stub
-start where the run starts (the batch head's lint starts none). Measured: its 9 cases took 3.7 s to 3.9 s over two runs.
+start where the run starts (the batch head's lint starts none). Measured: its 10 cases took 3.7 s to 3.8 s over two runs.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -2606,6 +2606,17 @@ class BatchHeadMutation(LaneFixture):
         self.fresh_run()
         self.assert_touches_mutate_file(head)
         rc, text = self.pre_join([lint_comment(501, head, verdict="FAIL")])
+        self.assert_run_starts_once_at(head, text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_batch_runners_pre_join_lint_with_a_hand_off_pass_from_a_non_owner_starts_the_mutation_test_run_once(self):  # the owner filter: a non-owner's PASS does not license the skip
+        self.use_ci_job(PASSING, 0)
+        head = self.touched_lane()
+        self.fresh_run()
+        self.assert_touches_mutate_file(head)
+        comment = lint_comment(501, head, by=NOT_OWNER)
+        self.assertEqual(merge.lint_state([comment["body"]], head), "pass", "precondition: the comment is no PASS for the live head")
+        rc, text = self.pre_join([comment])
         self.assert_run_starts_once_at(head, text)
         self.assertEqual(rc, 0, text)
 
