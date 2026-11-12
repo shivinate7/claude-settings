@@ -521,4 +521,20 @@ sh("silent-write: a PowerShell here-string opener mid-word, then a silenced comm
 TEMP_DIR = None   # back to the system temp for the sections below
 
 
+# A GIT WRITE INSIDE A SHELL WRAPPER (debt guard-bash-c-silent-write). A shell that runs a git write as its own script
+# is judged as the bare form is: the silent-write rule reads each command a wrapper hands on, so a discarded output or
+# git's quiet flag inside the quotes denies. The green control is an ordinary commit in the same wrapper, which allows.
+for _name, _command, _carries in (
+    ("bash -c, a commit with both streams discarded", "bash -c '" + VCS + " commit -m x >/dev/null 2>&1'",
+     "a redirect silences"),
+    ("sh -c, a commit with stdout discarded", "sh -c '" + VCS + " commit -m x >/dev/null'",
+     "a redirect silences"),
+    ("bash -c, a push with git's quiet flag", "bash -c '" + VCS + " push -q'", "moved nothing"),
+):
+    sh("silent-write wrapper: %s denies, as the bare form does" % _name, _command, "deny",
+       "silent-write", carries=_carries, cwd=NOGIT)
+sh("silent-write wrapper: an ordinary commit inside bash -c stays allowed",
+   "bash -c '" + VCS + " commit -m x'", "allow", cwd=NOGIT)
+
+
 # =========================================================================== 3. push and delete
