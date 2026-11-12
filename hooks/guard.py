@@ -50,6 +50,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
+  fetch-head-read      deny. A Bash command that reads FETCH_HEAD (a git show, log, diff, rev-parse,
+                       cat-file or merge of it) with no git fetch earlier in the same command. A fetch
+                       first, a read of origin/<b>, and a mention in quoted text or a grep pass.
+                       (fetch-head-shared-race)
   shared-tree          deny or ask. A command that throws away work, judged against the state of
                        its subject. An empty subject passes. An unreadable subject is allowed and
                        noted as `subject-unread`. (stash-stack-is-a-shared-subject,
@@ -573,6 +577,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            FETCH_HEAD_REASON, fetch_head_read_hit,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
@@ -4255,6 +4260,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = git_env_command_hit(raw, stripped)
     if matched:
         refuse(tool, "deny", "git-env-set", GIT_ENV_REASON, matched)
+
+    # 0c2. A read of FETCH_HEAD that no git fetch earlier in the same command precedes: one file per checkout,
+    # moved by any fetch there (fetch-head-shared-race). `$( )` texts are read as commands of their own.
+    matched = fetch_head_read_hit([stripped, *substitution_commands(raw, stripped)])
+    if matched:
+        refuse(tool, "deny", "fetch-head-read", FETCH_HEAD_REASON, matched)
 
     # 1. Shared trees. The shell runs a command inside `$( )` or backticks, so each such text is
     # read as a command of its own, after the command (rules 1, 2 and 4 read `texts` the same way).

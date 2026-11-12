@@ -2229,6 +2229,90 @@ def hook_bypass_hit(texts):
     return None
 
 
+# ------------------------------------------------------------------ fetch-head-read
+#
+# FETCH_HEAD is one file per checkout, and every fetch in that checkout rewrites it. Read-only agents may share a
+# checkout (parallelism-each-own-checkout), so a read of FETCH_HEAD can return the ref another agent fetched
+# (decision fetch-head-shared-race: 2026-11-12, two audit agents, one PR read wrong). The one safe read sits in the
+# same command as its own fetch, after it: no other command runs between the two. Read off the parsed tokens of
+# a segment whose COMMAND WORD is git, so an echo, a grep pattern, a commit message and quoted text that name the
+# word are never read; a read is a ref argument of a read verb that is FETCH_HEAD, or a range or revision form of
+# it. The walk is `_hook_events`'s: segments in order, then the texts a shell, `eval` or runner hands on, each
+# `$( )` text a command of its own; a fetch in the outer text clears a read in a `$( )` text.
+# Known limits (decision fetch-head-shared-race): `cat .git/FETCH_HEAD` is no git read and passes, `git pull` is
+# no fetch for this check, and a fetch that fails before a `;` read still clears it.
+FETCH_HEAD_REASON = (
+    "Rule (Git): this command reads git's shared fetch result, one file per checkout that every fetch there rewrites, "
+    "so it can return the ref another agent fetched, not the one you did. "
+    "Remedy: fetch into a named ref, `git fetch origin <b>:refs/remotes/origin/<b>`, then read that ref: "
+    "`git show origin/<b>`, `git log origin/<b>`, `git diff origin/<b>` or `git rev-parse origin/<b>`. "
+    "(decision fetch-head-shared-race, a read of the shared fetch file must follow its own fetch)"
+)
+_FETCH_HEAD_READ_VERBS = {
+    "show", "log", "diff", "rev-parse", "cat-file", "merge", "rev-list", "merge-base", "diff-tree", "ls-tree", "describe",
+    "name-rev", "cherry-pick", "checkout", "switch", "reset", "rebase", "format-patch", "shortlog", "show-branch", "blame",
+}
+_FETCH_HEAD_REF = re.compile(r"(?:^|\.\.\.?|\^)FETCH_HEAD(?:$|[:^~@{])")
+_FETCH_HEAD_VALUE_FLAGS = {"--grep", "-S", "-G", "--author", "--committer", "--since", "--until", "--format", "--pretty", "-m", "-F"}
+
+
+def _fetch_head_event(segment: str):
+    """("fetch",) for a segment whose command word is `git fetch`, ("read", matched) for a read verb with a FETCH_HEAD
+    ref argument, else (). A segment shlex cannot parse judges nothing (the fail-open stance)."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ()
+    index = resolve_command(tokens)
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return ()
+    cursor = _git_subcommand_index(tokens, index)
+    if cursor >= len(tokens):
+        return ()
+    verb = tokens[cursor].lower()
+    if verb == "fetch":
+        return ("fetch",)
+    if verb not in _FETCH_HEAD_READ_VERBS:
+        return ()
+    args = tokens[cursor + 1:]
+    for at, arg in enumerate(args):
+        if at and args[at - 1] in _FETCH_HEAD_VALUE_FLAGS:
+            continue   # a pattern or a message, not a ref
+        if arg.startswith("-") or not _FETCH_HEAD_REF.search(arg):
+            continue
+        return ("read", " ".join(tokens[index:cursor + 1]) + " " + arg)
+    return ()
+
+
+def _fetch_head_events(text: str):
+    """The fetch and read events of a command text in order, through the same walk as `_hook_events`."""
+    for segment in split_segments(text):
+        if not segment.strip():
+            continue
+        event = _fetch_head_event(segment)
+        if event:
+            yield event
+        tokens = segment_tokens(segment)
+        if tokens:
+            from guard_env import substitution_commands   # imported late: a family reads only the families before it
+            for inner in inner_commands(tokens):
+                stripped = strip_heredoc_bodies(inner)
+                for each in (stripped, *substitution_commands(inner, stripped)):
+                    yield from _fetch_head_events(each)
+
+
+def fetch_head_read_hit(texts) -> str:
+    """The matched text of the first FETCH_HEAD read in `texts` (the command, then its `$( )` texts) that no git fetch
+    earlier in the command precedes, else ''. A fetch in the outer text clears a read in a `$( )` text."""
+    fetched = False
+    for text in texts:
+        for event in _fetch_head_events(text):
+            if event[0] == "fetch":
+                fetched = True
+            elif not fetched:
+                return event[1]
+    return ""
+
+
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"

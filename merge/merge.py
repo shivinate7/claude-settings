@@ -719,8 +719,13 @@ class GitLock(Lock):
             return None
         if git(self.root, "fetch", "-q", "origin", ref)[0]:
             return out.split()[0], float("inf"), ""
-        msg = git(self.root, "log", "-1", "--format=%B", "FETCH_HEAD")[1]
-        return out.split()[0], expiry_of(msg), msg
+        sha = out.split()[0]
+        # The text is read by the ls-remote sha, never FETCH_HEAD: another fetch in this clone rewrites FETCH_HEAD between the fetch and the
+        # read (decision fetch-head-shared-race). A lock that moved after the ls-remote has no object for that sha here, so it reads as live.
+        c, msg = git(self.root, "log", "-1", "--format=%B", sha)
+        if c:
+            return sha, float("inf"), ""
+        return sha, expiry_of(msg), msg
 
     def acquire(self, b, ttl):
         ref = lock_ref(b)
@@ -3507,8 +3512,8 @@ def relayed_head_holds(root, branch, relayed, live):
     that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
     if live == relayed:
         return True
-    c, out = git(root, "fetch", "-q", "origin", f"refs/heads/{branch}")
-    if c or git(root, "rev-parse", "FETCH_HEAD")[1].strip() != live:
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")  # a named ref: FETCH_HEAD is one file per clone, and another fetch rewrites it (decision fetch-head-shared-race)
+    if c or git(root, "rev-parse", f"refs/remotes/origin/{branch}")[1].strip() != live:
         return False
     c, out = git(root, "log", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{relayed}..{live}")
     if c or not out.strip():
