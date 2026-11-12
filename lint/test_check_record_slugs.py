@@ -651,6 +651,21 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertTrue(self.failed_about(out, "quote-prose", DEBT_NOTES), out)
         self.assertFalse(self.failed_about(out, "quote-ok"), out)
 
+    def test_lone_double_quote_before_the_fix_does_not_hide_it(self):
+        # A lone " is text, as a lone ' is. The second " after the Fix must not pair with the first and blank the Fix.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.put(DEBT_NOTES, NOTES_HEAD
+                 + '- inch-ok: a 12" panel gap. Fix: step:alpha-beta, see "the old note".\n'
+                 + '- inch-prose: a 12" panel gap, see the old block. Fix: pin the base.\n')
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "inch-prose", DEBT_NOTES), out)
+        self.assertFalse(self.failed_about(out, "inch-ok"),
+                         "a lone quote before the Fix hid the valid Fix on its line: " + out)
+
     def test_bullet_fix_line_in_a_new_debt_file_passes(self):
         # A debt file's Fix line counts at column one or after one leading "- ", as its Feel line does.
         self.put(DEBT_NOTES, NOTES_HEAD)
