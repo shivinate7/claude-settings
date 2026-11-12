@@ -1414,7 +1414,7 @@ ARCHIVE_STEP_PREFIX, ARCHIVE_REPO_PREFIX = "cs-step:", "cs-repo:"
 ARCHIVE_NO_RECORD_REASON = (
     "this session's or this agent's transcript holds no get_session record of the target, so the guard cannot tell whether "
     "the target is a lane with records still to land. Run get_session on each target in one message, "
-    "then archive them in the next message. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "then archive them in the next message. (a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_OPEN_REASON = (
     "the lane's records pull request is still open, so closing the lane now strands its records. Wait until "
@@ -1422,7 +1422,7 @@ ARCHIVE_OPEN_REASON = (
 )
 ARCHIVE_TAGS_REASON = (
     "the target's record is a lane with no cs-step tag or no cs-repo tag, so the guard cannot find its "
-    "records pull request. Fix the lane's tags, run get_session on each target in one message, then archive them in the next message. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "records pull request. Fix the lane's tags, run get_session on each target in one message, then archive them in the next message. (a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
@@ -1433,7 +1433,7 @@ ARCHIVE_NO_PR_REASON = (
     "the lane now strands that work. Either open a pull request for that branch and hand it to the batch runner, or "
     "push an archive copy of it under archive/, then retry. If the branch was archived under another name, push one "
     "more copy under the lane's own name, archive/<branch> (archive/<branch>-<n> when that is taken), at the branch tip, then retry. "
-    "(decision session-tiers, a lane closes only after its records pull request has landed)"
+    "(a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_BRANCH_READ_REASON = (
     "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
