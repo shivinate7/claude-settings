@@ -358,10 +358,18 @@ def windows_shaped(*parts):
 # GUARD_TESTS=macos-slice keeps only the cases tagged "macos": the ones that reach a darwin arm. Each row
 # names an arm by file and function, with the cases that reach it. macos_arm_problems() holds the rows to
 # the arms the ast scan finds in hooks/, so an arm with no row fails the run before any case runs.
+# The macOS-only arms, by kind: a sys.platform test that holds on darwin, the else of one that does not,
+# and a ps, lsof or launchctl argument list. Each arm is read in a hooks module the guard suite reaches.
+MACOS_COMMANDS = ("ps", "lsof", "launchctl")
 MACOS_REACH = {
     ("hooks/guard.py", "_read_memory"): lambda family, session: family == "load-brake",
     ("hooks/guard_rm_var.py", "_rm_real"): lambda family, session: family == "rm-var",
     ("hooks/proc_env.py", "holds_session_tag"): lambda family, session: session is not None,
+    ("hooks/git_reads.py", "_process_start_ms"): lambda family, session: family in ("kill", "branch-worktree"),
+    ("hooks/guard_kill.py", "_process_parents"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "_pid_cwd"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "_ps_ppid"): lambda family, session: family == "kill",
+    ("hooks/guard_kill.py", "session_root_pid"): lambda family, session: family == "kill",
 }
 
 
@@ -369,40 +377,76 @@ def macos_reached(family, session):
     return any(reach(family, session) for reach in MACOS_REACH.values())
 
 
-def _is_sys_platform(node):
-    return (isinstance(node, ast.Attribute) and node.attr == "platform"
-            and isinstance(node.value, ast.Name) and node.value.id == "sys")
+def _mentions_sys_platform(node):
+    return any(isinstance(n, ast.Attribute) and n.attr == "platform"
+               and isinstance(n.value, ast.Name) and n.value.id == "sys" for n in ast.walk(node))
 
 
-def _is_darwin_test(node):
-    """True for `sys.platform == "darwin"` and `sys.platform.startswith("darwin")`."""
-    if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq):
-        right = node.comparators[0]
-        return _is_sys_platform(node.left) and isinstance(right, ast.Constant) and right.value == "darwin"
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "startswith":
-        arg = node.args[0] if node.args else None
-        return _is_sys_platform(node.func.value) and isinstance(arg, ast.Constant) and arg.value == "darwin"
-    return False
+def _platform_truth(test):
+    """What a sys.platform test says when sys.platform is darwin: True or False, or None when the test reads
+    a name other than sys, which this scan does not evaluate."""
+    if {n.id for n in ast.walk(test) if isinstance(n, ast.Name)} - {"sys"}:
+        return None
+
+    class DarwinSys:
+        platform = "darwin"
+
+    expr = ast.fix_missing_locations(ast.Expression(body=test))
+    try:
+        return bool(eval(compile(expr, "<platform test>", "eval"), {"sys": DarwinSys}, {}))
+    except Exception:
+        return None
+
+
+def _product_reach():
+    """The hooks modules the guard suite reaches: guard.py and every hooks module it imports, read with the ast.
+    Test files are not product code, so they are left out."""
+    hooks = os.path.dirname(os.path.abspath(__file__))
+    modules = {n[:-3] for n in os.listdir(hooks) if n.endswith(".py") and not n.startswith("test_")}
+    reach, todo = set(), ["guard"]
+    while todo:
+        module = todo.pop()
+        if module in reach:
+            continue
+        reach.add(module)
+        with open(os.path.join(hooks, module + ".py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                names = {node.module.split(".")[0]}
+            else:
+                continue
+            todo.extend((names & modules) - reach)
+    return reach
 
 
 def darwin_arms():
-    """(file, function) of each arm in hooks/ whose if-test reads sys.platform as darwin. The ast reads the
-    code, so a string or a comment that names darwin is not an arm."""
+    """(file, function) of each macOS-only arm in a hooks module the guard reaches. The ast reads the code, so a
+    string or a comment that names darwin, ps or lsof is not an arm."""
     found = set()
     hooks = os.path.dirname(os.path.abspath(__file__))
-    for name in sorted(os.listdir(hooks)):
-        if not name.endswith(".py"):
-            continue
+    for module in sorted(_product_reach()):
+        name = module + ".py"
         path = os.path.join(hooks, name)
         with open(path, encoding="utf-8") as f:
             tree = ast.parse(f.read(), filename=path)
         parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+        def owner(node):
+            while node in parents and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                node = parents[node]
+            return getattr(node, "name", "<module>")
+
         for node in ast.walk(tree):
-            if isinstance(node, (ast.If, ast.IfExp)) and any(_is_darwin_test(t) for t in ast.walk(node.test)):
-                owner = node
-                while owner in parents and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    owner = parents[owner]
-                found.add(("hooks/" + name, getattr(owner, "name", "<module>")))
+            if isinstance(node, (ast.If, ast.IfExp)) and _mentions_sys_platform(node.test):
+                truth = _platform_truth(node.test)
+                if truth or (truth is False and node.orelse):
+                    found.add(("hooks/" + name, owner(node)))
+            if isinstance(node, (ast.List, ast.Tuple)) and node.elts \
+                    and isinstance(node.elts[0], ast.Constant) and node.elts[0].value in MACOS_COMMANDS:
+                found.add(("hooks/" + name, owner(node)))
     return found
 
 
