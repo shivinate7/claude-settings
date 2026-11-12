@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Fails when a hook script that a recent settings.json called is gone from HEAD.
+"""Fails when a hook script that any settings.json version on main called is gone from HEAD.
 
 A running session keeps the hook list it read at start. If a later commit deletes a script
-that list still names, the wrapper exits 2 and the session loses the tool it guards. So a script
-that any settings.json version on main called in the last 14 days stays, as an exit-0 stub if
-retired. The window ends at HEAD's committer date, not at the clock.
+that list still names, the wrapper exits 2 and the session loses the tool it guards. A session
+can be older than any day count, so no window applies: a script that any settings.json version
+on HEAD's first-parent history named stays, as an exit-0 stub if retired. The check never reads
+the clock (owner ruling R37, 2026-11-11, fixed numbers that refuse are retired; the old 14-day
+window was unmeasured).
 
-Versions in scope, on HEAD's first-parent history: every settings.json committed inside the
-window, the one current at window start, and HEAD's own. The check does not read a stub's content.
+Versions in scope: every settings.json on HEAD's first-parent history, HEAD's own included. The
+check does not read a stub's content.
 
     python3 lint/check_hook_stubs.py [--repo DIR]     # DIR defaults to this script's repo
 """
-import datetime
 import json
 import os
 import re
@@ -19,7 +20,6 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-WINDOW_DAYS = 14
 SETTINGS = "settings.json"
 CALL = re.compile(r"\$\{CLAUDE_CONFIG_DIR:-\$HOME/\.claude\}/([^\s\"';|&]+\.(?:py|sh|mjs|js|ps1))")
 NAME = "check_hook_stubs"
@@ -60,15 +60,11 @@ def main(argv):
             return 1
     if git(repo, "rev-parse", "--is-shallow-repository").strip() == "true":
         unknown("shallow clone, settings history is cut")
-    head = datetime.datetime.fromisoformat(git(repo, "log", "-1", "--format=%cI", "HEAD").strip())
-    start = head - datetime.timedelta(days=WINDOW_DAYS)
-    versions = []  # (sha, date), oldest first
+    scope = []  # (sha, date), oldest first
     for line in git(repo, "log", "--first-parent", "--format=%H %cI", "HEAD", "--", SETTINGS).splitlines():
         sha, iso = line.split()
-        versions.append((sha, datetime.datetime.fromisoformat(iso)))
-    versions.reverse()
-    before = [v for v in versions if v[1] <= start]
-    scope = before[-1:] + [v for v in versions if v[1] > start]
+        scope.append((sha, iso[:10]))
+    scope.reverse()
     present = set(git(repo, "ls-tree", "-r", "--name-only", "HEAD").splitlines())
     calls = []  # per version: set of script paths
     for sha, _ in scope:
@@ -83,12 +79,8 @@ def main(argv):
     for path in sorted(scripts - present):
         i = max(k for k, c in enumerate(calls) if path in c)
         sha, date = scope[i]
-        if i + 1 < len(scope):
-            until = (scope[i + 1][1] + datetime.timedelta(days=WINDOW_DAYS)).date().isoformat()
-        else:
-            until = "settings.json stops calling it, plus %d days" % WINDOW_DAYS
-        print("%s: FAIL: %s is gone, but settings.json at %s (%s) still calls it. "
-              "Keep an exit-0 stub until %s." % (NAME, path, sha[:7], date.date().isoformat(), until))
+        print("%s: FAIL: %s is gone, but settings.json at %s (%s) named it. "
+              "Keep an exit-0 stub." % (NAME, path, sha[:7], date))
         bad += 1
     if bad:
         return 1

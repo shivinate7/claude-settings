@@ -42,27 +42,29 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
         `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
         path fans out over a list.
   - `ci`: a CI step name that appears in a `- name:` line of .github/workflows/checks.yml.
-  - `unmechanized`: the literal token, paired with a `reason` of real length. A rule a check
-    could still cover needs a row saying so, and saying why.
-  - `judgment`: the same shape and reason floor as `unmechanized`, with its own pin. A rule
-    only judgment can apply, so no hook or check could judge it. Not counted as a debt.
+  - `unmechanized`: the literal token, paired with a non-empty `reason`. A rule a check
+    could still cover needs a row saying so, and saying why. The check refuses an empty,
+    blank or missing reason. It sets no word count: it cannot judge an argument, so a length
+    would only reward padding.
+  - `judgment`: the same shape as `unmechanized`. A rule only judgment can apply, so no hook
+    or check could judge it. Not counted as a debt.
 
-NON-VACUITY, TWO WAYS. A reader that finds no anchors must never print `ok`: that is this
-repo's own signature defect in a new coat, a check that cannot tell "nothing is wrong" from
-"nothing is known yet". So a fall in the anchor count below RULE_FLOOR fails loud, and names
-the drop, rather than reporting a clean map over a page the parser stopped seeing.
-UNMECHANIZED_EXPECTED and JUDGMENT_EXPECTED are equalities on purpose, not a ceiling: a ceiling lets a mutation that
-deletes an honest `unmechanized` admission pass silently, because the count only falls, which
-reads as debt paid rather than as debt hidden. Both directions are guarded: build a mechanism
-for a rule and lower this pin in the same commit, or add a rule with no mechanism and raise it
-and say why.
+NON-VACUITY, AND NO FIXED NUMBERS. A reader that finds no anchors must never print `ok`: that
+is this repo's own signature defect in a new coat, a check that cannot tell "nothing is wrong"
+from "nothing is known yet". So zero anchors fails loud. The check holds no pinned count of
+anchors, `unmechanized` rows or `judgment` rows (owner ruling R37, 2026-11-11: a fixed number
+that refuses without an owner ruling is retired). It measures instead. It prints the anchor
+count and both row counts from lint/rule_mechanisms.json, and it names each anchor removed
+since origin/main. A removal that takes its row with it passes. A removal that leaves its row
+fails as an orphan row. With no git history or no origin/main, the removed-anchor line says so
+and the count still prints.
 
 WHAT THIS CANNOT SEE, BY NAME. It reads a citation, not the coverage behind it: a row can name
 a real guard rule, or a real test, that does not actually cover what the rule sentence
 demands, and this check passes it anyway. It proves a cited test exists and is collected, not
 that the test goes red on the defect; the fixture tests in lint/test_rule_audit.py and the
 mutants in hooks/mutate_guard.py carry that proof for the checks changed with them. It cannot judge whether an `unmechanized` reason is a good argument,
-only whether one was written at length. And it governs only the RULE_FILES text: a rule
+only whether one was written. And it governs only the RULE_FILES text: a rule
 recorded in a decision file or an agent prompt is a different surface, ungoverned here.
 """
 from __future__ import annotations
@@ -96,16 +98,6 @@ ANCHOR_RE = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
 # Where a rule id sits in each call that writes a guard.log line (0-based argument index).
 GUARD_RULE_ARG = {"refuse": 2, "record": 2, "ask_command": 0}
 CI_STEP_RE = re.compile(r'^\s*-\s*name:\s*(.+?)\s*$', re.MULTILINE)
-
-# FOUR PINNED NUMBERS, HELD DELIBERATELY RATHER THAN COUNTED FRESH EVERY RUN. See the
-# module docstring, "NON-VACUITY, TWO WAYS", for the argument. Update RULE_FLOOR when a rule
-# is deliberately removed. Update UNMECHANIZED_EXPECTED in the SAME commit that builds a
-# mechanism (lower it) or adds an unmechanized rule (raise it, and say why in the message).
-# JUDGMENT_EXPECTED moves the same way for a rule only judgment can apply.
-RULE_FLOOR = 98
-UNMECHANIZED_EXPECTED = 58
-JUDGMENT_EXPECTED = 25
-REASON_MIN_WORDS = 8
 
 KINDS = {"guard", "check", "ci", "unmechanized", "judgment"}
 # A case-registering call whose first argument is a literal case name.
@@ -456,25 +448,16 @@ def check(
     rule_map: dict,
     guard_text: str,
     workflow_text: str,
-    rule_floor: int = RULE_FLOOR,
-    unmechanized_expected: int = UNMECHANIZED_EXPECTED,
-    judgment_expected: int = JUDGMENT_EXPECTED,
 ) -> List[str]:
     """Return every problem found. An empty list means the audit passes.
-
-    `rule_floor`, `unmechanized_expected` and `judgment_expected` default to this repo's own pinned numbers.
-    Fixture tests pass their own, sized to the small CLAUDE.md fragment they build, so a
-    fixture's rule count is never mistaken for a shrunk real document.
     """
     problems: List[str] = []
 
     anchors = claude_md_anchors(claude_text)
-    if len(anchors) < rule_floor:
+    if not anchors:
         problems.append(
-            f"found {len(anchors)} rule anchors in the rule files, fewer than the pinned floor "
-            f"{rule_floor}. An anchor was likely deleted, or this reader broke on a reword. "
-            f"Lower RULE_FLOOR in lint/rule_audit.py deliberately if a rule genuinely went. "
-            f"Never let a shrinking reader report clean."
+            "found no rule anchors in the rule files. The reader broke on a reword, or every "
+            "rule went. A map over nothing is not a clean map."
         )
 
     dupes = sorted({a for a in anchors if anchors.count(a) > 1})
@@ -501,8 +484,6 @@ def check(
     guard_names = guard_rule_names(guard_text)
     ci_names = ci_step_names(workflow_text)
 
-    unmechanized_count = 0
-    judgment_count = 0
     for slug in sorted(rules.keys() & anchor_set):
         entry = rules[slug]
         mech = entry.get("mechanism") if isinstance(entry, dict) else None
@@ -515,16 +496,11 @@ def check(
             continue
 
         if kind in ("unmechanized", "judgment"):
-            if kind == "judgment":
-                judgment_count += 1
-            else:
-                unmechanized_count += 1
-            reason = (mech.get("reason") or "").strip()
-            if len(reason.split()) < REASON_MIN_WORDS:
+            reason = mech.get("reason")
+            if not isinstance(reason, str) or not reason.strip():
                 problems.append(
-                    f"row `{slug}` is `{kind}` with {len(reason.split())} words of "
-                    f"reason. Say what a hook or a check would have to see, in at least "
-                    f"{REASON_MIN_WORDS} words, or the token is a rubber stamp."
+                    f"row `{slug}` is `{kind}` with no reason. Say what a hook or a check "
+                    f"would have to see."
                 )
             continue
 
@@ -574,25 +550,24 @@ def check(
                     f".github/workflows/checks.yml any more. Stale row."
                 )
 
-    if unmechanized_count != unmechanized_expected:
-        direction = "more" if unmechanized_count > unmechanized_expected else "fewer"
-        problems.append(
-            f"{unmechanized_count} rules read `unmechanized`, {direction} than the pinned "
-            f"{unmechanized_expected}. Built a mechanism for one? Lower UNMECHANIZED_EXPECTED "
-            f"in this commit. Added a rule with no mechanism? Raise it and say why. This "
-            f"count moves only in the commit that changes it."
-        )
-
-    if judgment_count != judgment_expected:
-        direction = "more" if judgment_count > judgment_expected else "fewer"
-        problems.append(
-            f"{judgment_count} rules read `judgment`, {direction} than the pinned "
-            f"{judgment_expected}. Gave a rule a machine check? Lower JUDGMENT_EXPECTED "
-            f"in this commit. Added a rule only judgment can apply? Raise it and say why. This "
-            f"count moves only in the commit that changes it."
-        )
-
     return problems
+
+
+def removed_anchor_line(anchors: List[str], root: str = ROOT) -> str:
+    """One report line naming each anchor in origin/main's rule files that this tree no longer has.
+    It reads git only to measure a drop, never to refuse one: with no repository, no git or no
+    origin/main, it says it could not compare, and the anchor count still prints."""
+    base = []
+    for path in RULE_FILES:
+        r = _nowindow.run(["git", "-C", root, "show", "origin/main:" + path.replace(os.sep, "/")],
+                          capture_output=True, encoding="utf-8", errors="replace")
+        if r.returncode:
+            return "rule_audit: removed anchors not compared, no origin/main to read."
+        base.append(r.stdout)
+    removed = sorted(set(claude_md_anchors("\n".join(base))) - set(anchors))
+    if not removed:
+        return "rule_audit: no anchors removed since origin/main."
+    return "rule_audit: %d anchors removed since origin/main: %s." % (len(removed), ", ".join(removed))
 
 
 def main() -> None:
@@ -619,22 +594,25 @@ def main() -> None:
         print(f"rule_audit: FAIL\n - {e}")
         sys.exit(1)
     problems = check(claude_text, rule_map, guard_text(ROOT), workflow_text)
+    anchors = claude_md_anchors(claude_text)
+    removed_line = removed_anchor_line(anchors)
     if problems:
         print("rule_audit: FAIL")
         for p in problems:
             print(" - " + p)
+        print(removed_line)
         sys.exit(1)
 
-    anchors = claude_md_anchors(claude_text)
     rules = rule_map["rules"]
     unmechanized = sum(1 for s in anchors if rules[s]["mechanism"]["kind"] == "unmechanized")
     judgment = sum(1 for s in anchors if rules[s]["mechanism"]["kind"] == "judgment")
     print(
         f"rule_audit: OK. {len(anchors)} rule anchors, "
         f"{len(anchors) - unmechanized - judgment} name a mechanism that resolves, "
-        f"{unmechanized} argue `unmechanized` (pinned at {UNMECHANIZED_EXPECTED}), "
-        f"{judgment} are `judgment` (pinned at {JUDGMENT_EXPECTED})."
+        f"{unmechanized} argue `unmechanized`, "
+        f"{judgment} are `judgment`."
     )
+    print(removed_line)
 
 
 if __name__ == "__main__":
