@@ -1922,8 +1922,8 @@ WRITTEN_TIME_FIELDS = {"items": ("added", "replied", "ruled"), "receipts": ("rea
                        "asks": ("read", "answered")}
 # A time that is ISO 8601: a date, then optionally `T`, hours and minutes, optional seconds, an optional offset.
 _ISO_ANY = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?")
-# A `"updatedAt"` key and its value, `null` or a string, in the text of a step write.
-_UPDATED_AT_VALUE = re.compile(r'(?<!\\)"updatedAt"\s*:\s*(null\b|"((?:[^"\\]|\\.)*)")')
+# A `"updatedAt"` key and its value, `null`, a string or a bare token such as a number, in the text of a step write.
+_UPDATED_AT_VALUE = re.compile(r'(?<!\\)"updatedAt"\s*:\s*(null\b|"((?:[^"\\]|\\.)*)"|[^\s,}\]"]+)')
 BLANK_REASON = (
     "this written time ({what}) is {why}. A time field holds an ISO time. "
     "Read the time with `~/.claude/bin/now-central --iso`, never from memory, write that time, then run the call again. "
@@ -2000,7 +2000,8 @@ def _data_writes(tool_input, collections):
     action = tool_input.get("action")
     writes = [(w.get("op") or w.get("action"), w) for w in tool_input.get("writes") or [] if isinstance(w, dict)] \
         if action == "batch" else [(action, tool_input)]
-    return [(op, entry) for op, entry in writes if entry.get("collection") in collections]
+    return [(op, entry) for op, entry in writes
+            if isinstance(entry.get("collection"), str) and entry["collection"] in collections]
 
 
 def _bad_time(value):
@@ -2038,13 +2039,37 @@ def _blank_times(tool, tool_input, cwd):
     elif tool in WRITE_TOOLS:
         paths = [v.replace("\\", "/") for k in ("file_path", "path") if isinstance(v := tool_input.get(k), str)]
         if any(_STEP_FILE.search(p) for p in paths):
-            texts = [tool_input.get("content"), tool_input.get("new_string")]
-            texts += [e.get("new_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
-            for text in texts:
-                for found in _UPDATED_AT_VALUE.finditer(text) if isinstance(text, str) else ():
-                    value = None if found.group(1) == "null" else found.group(2)
+            edits = [tool_input] + [e for e in tool_input.get("edits") or [] if isinstance(e, dict)]
+            for text in [tool_input.get("content")] + [e.get("new_string") for e in edits]:
+                for value in _updated_at_values(text) if isinstance(text, str) else ():
                     if why := _bad_time(value):
-                        yield "updatedAt " + found.group(1), why
+                        yield "updatedAt " + json.dumps(value), why
+            for edit in edits:
+                # A key-less edit that replaces a whole instant lands its new text as the time. A time fragment such as
+                # `T20:24:00Z` is not judged here, as _written_texts judges no fragment in a step edit either.
+                old, new = edit.get("old_string"), edit.get("new_string")
+                if isinstance(old, str) and isinstance(new, str) and _ISO_ANY.fullmatch(old.strip()) \
+                        and not _TIME_FRAGMENT.fullmatch(new.strip()) and (why := _bad_time(new)):
+                    yield "time " + json.dumps(new), why
+
+
+def _updated_at_values(text):
+    """The value of each `updatedAt` key in the text of a step write: None for null, else the parsed JSON value, or
+    the quoted or bare text of the key's value when the text is not JSON (an edit's piece of a file)."""
+    try:
+        found = []
+        stack = [json.loads(text)]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                found += [v for k, v in node.items() if k == "updatedAt"]
+                stack += node.values()
+            elif isinstance(node, list):
+                stack += node
+        return found
+    except ValueError:
+        return [None if m.group(1) == "null" else m.group(2) if m.group(2) is not None else m.group(1)
+                for m in _UPDATED_AT_VALUE.finditer(text)]
 
 
 def _written_texts(tool: str, tool_input: dict, cwd: str = ""):
@@ -2095,11 +2120,12 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
     the new text of a str_replace on `added`, a whole instant or a time fragment such as `T20:24:00Z`. In a
     roadmap/data/steps/<name>.json file: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new
     text. In a shell command: the last literal `updatedAt` key with a single- or double-quoted value. Only a value
-    with an offset is read. Cost: one clock read, and only when a judged value is present; one local file read,
-    only for an items write that carries `file_path` and no inline data; no transcript or process. Fails open, like stamp_hit.
+    with an offset is read. Cost: one clock read, and only when a judged value is present; no transcript or process.
+    One local file read for a set or update to receipts or asks that carries `file_path` and no inline data, and two
+    for the same write to items (the blank check reads it, then the `added` check). Fails open, like stamp_hit.
     Before the clock is read, a blank (empty, spaces, null) or non-ISO time in a time field of WRITTEN_TIME_FIELDS,
-    or in a step's `updatedAt` key, is refused with BLANK_REASON, which names `now-central --iso`. That needs no
-    clock read; the same file read serves any collection of WRITTEN_TIME_FIELDS."""
+    in a step's `updatedAt` key, or in the new text of a key-less step Edit that replaces a whole instant, is
+    refused with BLANK_REASON, which names `now-central --iso`."""
     if not isinstance(tool_input, dict):
         return None
     for what, why in _blank_times(tool, tool_input, cwd):
