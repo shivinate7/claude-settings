@@ -536,7 +536,7 @@ while True:
         from guard_core import (
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
+            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, bare_segment_dirs, basename, own_c_segment_dirs, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
@@ -560,7 +560,7 @@ while True:
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
+            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_in, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -4289,16 +4289,47 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    # A script a shell wrapper runs (`sh -c`, `bash -lc`, `eval`) is judged as the bare command is.
-    own_segments = [part for text in texts for part in split_segments(text)]
-    for segment in own_segments + [inner for part in own_segments for inner in wrapped_script_segments(part)]:
+    # a git segment with no folder of its own runs where the shell stands when it runs, so each reads
+    # its own folder; a substitution's segments and any line the walk does not know take the whole call's
+    bare_dirs = {}
+    for text_segment, folder in bare_segment_dirs(stripped, cwd):
+        bare_dirs.setdefault(text_segment, []).append(folder)
+    own_dirs = {}   # a segment's own `git -C`, read against the folder the shell stands in when it runs
+    for text_segment, folder in own_c_segment_dirs(stripped, cwd):
+        own_dirs.setdefault(text_segment, []).append(folder)
+    pointer_dirs = {text_segment: list(folders) for dirs in (bare_dirs, own_dirs) for text_segment, folders in dirs.items()}
+    # A script a shell wrapper runs (`sh -c`, `bash -lc`, `eval`) is judged as the bare command is. Each inner
+    # segment keeps the text number of the text it came from and the folder of the outer segment it was unwrapped
+    # from (read now, before the loop pops them); with no folder known it takes the whole call's, as any unknown
+    # segment does.
+    own_segments = [(number, part) for number, text in enumerate(texts) for part in split_segments(text)]
+    segment_runs = [(number, part, False, None) for number, part in own_segments]
+    segment_runs += [(number, inner, True, (bare_dirs.get(part) or own_dirs.get(part) or [None])[0])
+                     for number, part in own_segments for inner in wrapped_script_segments(part)]
+    for text_number, segment, wrapped, outer_dir in segment_runs:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
         own_c = _segment_git_c_target(words) if words else None
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
-            root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+            if wrapped:
+                root = _absolute(own_c, outer_dir or cwd)
+            else:
+                root = own_dirs[segment].pop(0) if text_number == 0 and own_dirs.get(segment) else _absolute(own_c, cwd)
+            work_tree = GIT_WORK_TREE_RE.search(segment)
+            if work_tree:
+                root = _absolute(work_tree.group(2), root)
+        elif wrapped and outer_dir:
+            root = outer_dir
+            work_tree = GIT_WORK_TREE_RE.search(segment)
+            if work_tree:
+                root = _absolute(work_tree.group(2), root)
+        elif not wrapped and text_number == 0 and bare_dirs.get(segment):
+            root = bare_dirs[segment].pop(0)
+            work_tree = GIT_WORK_TREE_RE.search(segment)
+            if work_tree:
+                root = _absolute(work_tree.group(2), root)
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
@@ -4363,11 +4394,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
     # the shared-tree clause keeps governing those calls unchanged.
+    # A git segment moves the HEAD of the folder it runs in (its own `-C`, else where the shell stands when it
+    # runs); a line the walk does not know takes the whole call's folder.
     head_where = head_root(stripped, cwd)
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
-        matched = pointer_head_hit(segment, head_where)
+        folders = pointer_dirs.get(segment)
+        matched = pointer_head_hit(segment, head_in(stripped, folders.pop(0)) if folders else head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 
@@ -4536,15 +4570,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 3b. A trap ported from banchi's `scripts/guard-shell.py`: `ln -s` onto a directory that is
     # already there. It reads the segment's own command word, never a substring, and reads the
-    # filesystem rather than the text.
+    # filesystem rather than the text. Each ln is read in the folder it runs in on the cd walk, since
+    # `_run_dir` answers for the call's git segments, not for an ln in another folder. When the walk
+    # cannot tell that folder, the whole-call answer stands in.
     run_in = _run_dir(stripped, cwd)
     ends = []
     nm_segments = split_segments(stripped, ends)
     for number, segment in enumerate(nm_segments):
-        matched = ln_descends_hit(segment, run_in)
+        folder = dir_before_segment(nm_segments, number, cwd, ends)
+        matched = ln_descends_hit(segment, folder or run_in)
         if matched:
             refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
-        folder = dir_before_segment(nm_segments, number, cwd, ends)
         matched = folder and linked_nm_hit(segment, folder)
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)

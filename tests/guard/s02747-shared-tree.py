@@ -879,12 +879,14 @@ sh("per-file deny: -C lane with --work-tree naming the shared checkout, from a w
 # The setter rows sit in the git-env family, below the shared-tree section.
 GIT_ENV_RULE = "git-env-set"
 # 3. A segment with no -C must not borrow another segment's -C. From the shared checkout, the bare
-# restore runs in the shared checkout whichever side the lane's -C status stands on. main asks the
-# command; chained with the status, it denies as a chained ask command (ask-alone).
-chained_ask("per-file ask: -C lane status, then a bare restore f.txt, from the shared checkout, denies as a chained ask command",
-            VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", cwd=GITMAIN)
-chained_ask("per-file ask: a bare restore f.txt, then -C lane status, from the shared checkout, denies as a chained ask command",
-            VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", cwd=GITMAIN)
+# restore runs in the shared checkout whichever side the lane's -C status stands on, so it denies as
+# shared-tree, as it does alone. lacks pins that the chain is not the reason.
+sh("per-file deny: -C lane status, then a bare restore f.txt, from the shared checkout, denies as shared-tree",
+   VCS + " -C " + slash(GITWT) + " status && " + VCS + " restore f.txt", "deny", "shared-tree",
+   cwd=GITMAIN, lacks=(CHAIN_ASK,))
+sh("per-file deny: a bare restore f.txt, then -C lane status, from the shared checkout, denies as shared-tree",
+   VCS + " restore f.txt && " + VCS + " -C " + slash(GITWT) + " status", "deny", "shared-tree",
+   cwd=GITMAIN, lacks=(CHAIN_ASK,))
 # 4. A PowerShell Set-Location into the shared checkout, from a cwd in no checkout. The cd act does not
 # judge it there, so the shared-tree rule reads the folder it moved to and denies the restore.
 # From a worktree, Set-Location and its aliases (sl, chdir, Push-Location) move into another checkout,

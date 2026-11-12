@@ -39,6 +39,15 @@ sh("pointer: a subdirectory of the pointer checkout is still the pointer checkou
 sh("pointer: -C reaches the pointer checkout from anywhere",
    VCS + " -C " + slash(PTRMAIN) + " switch somebranch", "deny", "pointer-head", cwd=NOGIT,
    config=PTRCFG)
+# A switch named by its own -C is judged in the pointer checkout, though the last git segment names a folder
+# that is no checkout. The pointer rule must read the -C segment's folder, not only the bare segments' folders.
+sh("pointer: a switch with -C into the pointer checkout, then a status in a folder that is no checkout, is refused",
+   VCS + " -C " + slash(PTRMAIN) + " switch somebranch; " + VCS + " -C " + slash(NOGIT) + " status",
+   "deny", "pointer-head", cwd=NOGIT, config=PTRCFG)
+# GREEN. The same shape with the linked worktree of the pointer checkout, whose HEAD is not the pointer's.
+sh("pointer: a switch with -C into the linked worktree, then the same status, is allowed",
+   VCS + " -C " + slash(PTRWT) + " switch somebranch; " + VCS + " -C " + slash(NOGIT) + " status",
+   "allow", cwd=NOGIT, config=PTRCFG)
 
 # THE MOVE TO MAIN IS THE REPAIR. A deny there would wall off the one command that restores the
 # invariant this rule exists to protect.

@@ -156,7 +156,12 @@ def head_root(cmd: str, shell_cwd: str) -> str:
     A `--git-dir` on the line names that HEAD directly, wherever the call runs from. With none,
     the HEAD that moves belongs to the tree the call RUNS in.
     """
-    run_dir = _run_dir(cmd, shell_cwd)
+    return head_in(cmd, _run_dir(cmd, shell_cwd))
+
+
+def head_in(cmd: str, run_dir: str) -> str:
+    """The directory whose HEAD `cmd` moves when its call runs in RUN_DIR: the `--git-dir` it names, else
+    RUN_DIR. A caller that already knows the folder one segment runs in asks here, so a `-C` is not read twice."""
     match = GIT_DIR_RE.search(cmd)
     if not match:
         # NOT `command_root`. A `--work-tree` retargets the FILES and leaves HEAD where the call

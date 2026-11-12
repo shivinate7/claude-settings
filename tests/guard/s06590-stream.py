@@ -207,6 +207,16 @@ sh("ln: a trailing slash says the destination is a directory",
    "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
 sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x realdir", "allow",
    cwd=TRAPLN)
+# A git read in one folder, then an ln in another. The git status is a bare git segment, so the check must read
+# ../trapln from the folder the ln runs in: NOGIT, whose sibling TRAPLN is a folder. The folder the git status ran
+# in, TRAPLN/realdir, has no sibling trapln, so a check that reads that folder would find the name free.
+sh("ln: a ../ name over a folder, after a git read in another folder, denies",
+   "cd " + slash(os.path.join(TRAPLN, "realdir")) + " && " + VCS + " status; cd " + slash(NOGIT)
+   + " && ln -s /opt/tool/x ../trapln", "deny", "ln-over-directory", cwd=TRAPLN)
+# GREEN. The same shape with a free name in the folder the ln runs in: the link is made, so it allows.
+sh("ln: a free name in the folder ln runs in, after a git read in another folder, allows",
+   "cd " + slash(os.path.join(TRAPLN, "realdir")) + " && " + VCS + " status; cd " + slash(NOGIT)
+   + " && ln -s /opt/tool/x brand-new", "allow", cwd=TRAPLN)
 
 # --- a roster command piped into tail or head (rule check-tail)
 #
