@@ -48,3 +48,25 @@ sh("frozen inplace: ruby -rtime -ne on a frozen hook is allowed (control)",
 # A real in-place flag still denies when an include dir comes before it.
 sh("frozen inplace: perl -Iui -pi -e on a frozen hook denies",
    "perl -Iui -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+
+# A digit in the flag cluster: `-0pi` is the record-separator flag `-0` with `-p` and `-i`, so it is an
+# in-place edit and denies. `-0777` is its own word, and the `-pi` after it still denies. `-0` with no i
+# reads the frozen file and writes nothing, so it allows.
+sh("frozen inplace: perl -0pi -e on a frozen hook denies",
+   "perl -0pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen inplace: perl -0777 -pi -e on a frozen hook denies (control)",
+   "perl -0777 -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen inplace: perl -0 -ne on a frozen hook is allowed (control)",
+   "perl -0 -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
+
+# A real in-place edit after another command, joined by `;`, `&&` or `|`, still denies.
+sh("frozen inplace: grep x; perl -pi -e on a frozen hook denies",
+   "grep x; perl -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen inplace: echo a && perl -pi -e on a frozen hook denies",
+   "echo a && perl -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen inplace: echo a | perl -pi -e on a frozen hook denies",
+   "echo a | perl -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+
+# A `#` starts a comment, so the `; perl -pi` after it is text, and the call allows.
+sh("frozen inplace: echo a # c; perl -pi on a frozen hook is a comment and allows",
+   "echo a # c; perl -pi " + CFG_HOOK, "allow", cwd=NOGIT)
