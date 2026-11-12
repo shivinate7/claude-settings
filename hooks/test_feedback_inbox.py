@@ -198,6 +198,16 @@ Page note: hooks/local_time.py `--page-note`, a mode of the same file. A PostToo
   else saves, and a call that saves nothing writes no file. The mode prints no time line. A failed
   save prints one PostToolUse hookSpecificOutput JSON that says the note was not saved.
 
+Closing (R27, decision owner-feedback-inbox): the Stop closes an open ruling or task item whose home holds on
+  main, by appending ` [closed]` to its line in the same rewrite that marks a repeat. A question, a standing
+  item, an unresolved home and a closed line are left as they are. The close goes through lint/tending.close,
+  which the probe can log (FG_TENDING_LOG) or make a no-op (FG_TENDING_NOOP). The standing-id refusal names
+  `[closed]` as a way out. The reorient note lists only items that still need work.
+Question box: a PostToolUse on AskUserQuestion saves the owner's answer as one inbox block, like a typed
+  message. The payload alone picks the path: a Bash result and an empty answer save nothing.
+Relay: no case. A relay arrives in the `<cross-session-message` frame, the same frame as a peer's own send,
+  and no tag tells the two apart (see the owner question in the report).
+
 The expected strings are hardcoded here. The reader in this file follows the format above.
 """
 import importlib.util
@@ -3146,11 +3156,30 @@ class CountingPopen(subprocess.Popen):
         if log and argv and argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower() in ("git", "git.exe"):
             with open(log, "a", encoding="utf-8") as f:
                 f.write(" ".join(argv) + "\n")
+        every = os.environ.get("FG_ALL_STARTS")  # every process start, git or not, as a JSON argv per line
+        if every and argv:
+            with open(every, "a", encoding="utf-8") as f:
+                f.write(json.dumps(argv) + "\n")
         super().__init__(args, *rest, **kwargs)
 
 
 subprocess.Popen = CountingPopen
 decision_watch.invoke_model = stub
+if os.environ.get("FG_TENDING_LOG"):
+    # Each close the guard makes through lint/tending.close is logged with its store's `where`. With
+    # FG_TENDING_NOOP the close returns the text unchanged, so a close made any other way still shows.
+    sys.path.insert(1, os.path.join(sys.argv[1], "..", "lint"))
+    import tending
+    real_close = tending.close
+
+    def logged_close(entry, text, verdicts):
+        with open(os.environ["FG_TENDING_LOG"], "a", encoding="utf-8") as f:
+            f.write(json.dumps({"where": entry.get("where")}) + "\n")
+        if os.environ.get("FG_TENDING_NOOP"):
+            return text
+        return real_close(entry, text, verdicts)
+
+    tending.close = logged_close
 sys.argv = [sys.argv[2]] + sys.argv[3:]
 runpy.run_path(sys.argv[0], run_name="__main__")
 """
@@ -4284,6 +4313,291 @@ def case_page_form_closed_not_page_form_passes():
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
 
 
+# --------------------------------------------------------------------------- closing, refusals, compaction, question box (R27)
+
+HELD_RULING = "- fb-0958-1 [ruling] -> decisions/a-ruling.md"  # a decision the fixture repo tracks on main
+HELD_TASK = "- fb-0958-2 [task] -> debts/a-task.md"  # a debt the fixture repo tracks on main
+UNHELD_RULING = "- fb-0958-2 [ruling] -> decisions/not-yet.md"  # no branch tracks this file
+CLOSED = " [closed]"
+FULL_ITEMS = 40  # a full inbox: one block that holds this many open items
+FIXED_NS = 978307200 * 10 ** 9  # 2001-01-01T00:00:00Z: a sentinel mtime, so a rewrite shows in mtime_ns
+HOME_READS = ("rev-parse", "for-each-ref", "cat-file")  # the git reads a ruling or task home check makes
+GIT_NAMES = ("git", "git.exe")
+
+
+def close_run(cfg, sid, items, handoff_ids=(), extra_env=None, text="settled items"):
+    """Jots one message of `items`, writes a handoff that holds `handoff_ids` as standing ids, then runs one Stop."""
+    write_file(inbox_of(cfg, sid), render_block(text, items=items))
+    write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s standing\n" % i for i in handoff_ids))
+    return guard(cfg, sid, extra_env=extra_env)
+
+
+def case_stop_closes_a_ruling_and_a_task_whose_home_holds():
+    cfg, sid = new_cfg(), "close-held"
+    p = close_run(cfg, sid, (HELD_RULING, HELD_TASK))
+    check("close held: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close held: the ruling line gains [closed] and nothing else",
+          inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED, inbox_line(cfg, sid, "fb-0958-1"))
+    check("close held: the task line gains [closed] and nothing else",
+          inbox_line(cfg, sid, "fb-0958-2") == HELD_TASK + CLOSED, inbox_line(cfg, sid, "fb-0958-2"))
+
+
+def case_stop_closes_a_held_item_after_its_repeat_mark():
+    """The mark goes before [closed], as MARKED reads it: one rewrite carries both."""
+    root = make_repo("close-repeat", tracked=("docs/decisions/wheel.md",), extras=ROLLED_OUT)
+    put_ref(root, STEP_REF, {STEP_DIR + "wheel-speed.json": STEP_JSON})
+    cfg, sid = new_cfg(), "close-repeat"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    item = "- fb-0958-1 [ruling] -> docs/decisions/wheel.md"
+    add_item(cfg, sid, item)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("close repeat: the repeat is judged in one model call", len(calls) == 1, len(calls))
+    check("close repeat: the home holds, so the block does not name the home",
+          "home is not" not in (block_reason(p) or "") and "not a tracked" not in (block_reason(p) or ""), p.desc())
+    check("close repeat: the line holds the repeat mark, then [closed]",
+          inbox_line(cfg, sid, ITEM_ID) == item + MARKED + CLOSED, inbox_line(cfg, sid, ITEM_ID))
+
+
+def case_stop_leaves_an_item_whose_home_does_not_resolve_open():
+    cfg, sid = new_cfg(), "close-unresolved"
+    p = close_run(cfg, sid, (HELD_RULING, UNHELD_RULING))
+    check("close unresolved: the held ruling beside it is closed",
+          inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED, inbox_line(cfg, sid, "fb-0958-1"))
+    check("close unresolved: the item whose home does not resolve keeps its line",
+          inbox_line(cfg, sid, "fb-0958-2") == UNHELD_RULING, inbox_line(cfg, sid, "fb-0958-2"))
+    expect_block("close unresolved: the unresolved home still blocks", p, named=("fb-0958-2",),
+                 unnamed=("fb-0958-1",))
+
+
+def case_stop_closes_only_ruling_and_task_items():
+    cfg, sid = new_cfg(), "close-kinds"
+    question = "- fb-0958-3 [question] -> answered"
+    standing = "- fb-0958-5 [standing] -> handoff"
+    p = close_run(cfg, sid, (HELD_RULING, question, standing), handoff_ids=("fb-0958-5",))
+    check("close kinds: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close kinds: the held ruling is closed",
+          inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED, inbox_line(cfg, sid, "fb-0958-1"))
+    check("close kinds: a question line is not closed by this", inbox_line(cfg, sid, "fb-0958-3") == question,
+          inbox_line(cfg, sid, "fb-0958-3"))
+    check("close kinds: a standing line is not closed by this", inbox_line(cfg, sid, "fb-0958-5") == standing,
+          inbox_line(cfg, sid, "fb-0958-5"))
+
+
+def case_stop_leaves_an_already_closed_item_alone():
+    cfg, sid = new_cfg(), "close-already"
+    closed_end = HELD_RULING + CLOSED
+    closed_mid = "- fb-0958-3 [ruling] -> decisions/a-ruling.md [closed] see the handoff"
+    p = close_run(cfg, sid, (closed_end, closed_mid, HELD_TASK))
+    check("close already: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close already: a line closed at its end gains no second [closed]",
+          inbox_line(cfg, sid, "fb-0958-1") == closed_end, inbox_line(cfg, sid, "fb-0958-1"))
+    check("close already: a line closed mid-line is untouched", inbox_line(cfg, sid, "fb-0958-3") == closed_mid,
+          inbox_line(cfg, sid, "fb-0958-3"))
+    check("close already: the open task beside them is closed",
+          inbox_line(cfg, sid, "fb-0958-2") == HELD_TASK + CLOSED, inbox_line(cfg, sid, "fb-0958-2"))
+
+
+def case_stop_closes_every_held_item_of_a_full_inbox():
+    """Full size: FULL_ITEMS held items in one block, every one closed. Empty: an inbox with no open item is not rewritten."""
+    items = []
+    for n in range(1, FULL_ITEMS + 1):
+        kind, home = ("ruling", "decisions/a-ruling.md") if n % 2 else ("task", "debts/a-task.md")
+        items.append("- fb-0958-%d [%s] -> %s" % (n, kind, home))
+    cfg, sid = new_cfg(), "close-full"
+    p = close_run(cfg, sid, items)
+    marked = [ln for ln in read_or_empty(inbox_of(cfg, sid)).split("\n") if ln.startswith("- fb-")]
+    check("close full: the inbox holds all %d items" % FULL_ITEMS, len(marked) == FULL_ITEMS, len(marked))
+    check("close full: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
+    check("close full: every held item gains [closed]", all(ln.endswith(CLOSED) for ln in marked),
+          [ln for ln in marked if not ln.endswith(CLOSED)][:3])
+    cfg2, sid2 = new_cfg(), "close-empty"
+    write_file(inbox_of(cfg2, sid2), render_block("settled items"))
+    write_file(handoff_of(cfg2, sid2), "# Handoff\n")
+    os.utime(inbox_of(cfg2, sid2), ns=(FIXED_NS, FIXED_NS))
+    guard(cfg2, sid2)
+    check("close empty: an inbox with no open item is not rewritten by its Stop",
+          os.stat(inbox_of(cfg2, sid2)).st_mtime_ns == FIXED_NS, os.stat(inbox_of(cfg2, sid2)).st_mtime_ns)
+
+
+def case_stop_path_closes_through_the_shared_runner():
+    """The Stop calls lint/tending.close for the feedback-log store. With that close made a no-op, nothing
+    closes: no second closer sits in the guard."""
+    cfg, sid = new_cfg(), "close-runner"
+    log = os.path.join(os.path.dirname(cfg), "tending-close.log")
+    close_run(cfg, sid, (HELD_RULING,), extra_env={"FG_TENDING_LOG": log})
+    calls = [json.loads(ln) for ln in read_or_empty(log).splitlines() if ln.strip()]
+    check("close runner: the Stop calls lint/tending.close for the feedback-log store",
+          any(c.get("where") == "external:feedback-log" for c in calls), calls)
+    cfg2, sid2 = new_cfg(), "close-runner-noop"
+    close_run(cfg2, sid2, (HELD_RULING,), extra_env={"FG_TENDING_LOG": os.path.join(os.path.dirname(cfg2), "log"),
+                                                     "FG_TENDING_NOOP": "1"})
+    check("close runner: with the runner's close made a no-op, the held item stays open",
+          inbox_line(cfg2, sid2, "fb-0958-1") == HELD_RULING, inbox_line(cfg2, sid2, "fb-0958-1"))
+
+
+def logged_starts(path):
+    """Each process start the probe logged to `path` (FG_ALL_STARTS), as its argv."""
+    return [json.loads(ln) for ln in read_or_empty(path).splitlines() if ln.strip()]
+
+
+def git_verb(argv):
+    """The git subcommand of a logged argv, past its global options (`-C <dir>`, `-c <name=value>`, `--...`)."""
+    words = list(argv)[1:]
+    while words and words[0].startswith("-"):
+        words = words[2:] if words[0] in ("-C", "-c") else words[1:]
+    return words[0] if words else ""
+
+
+def case_closing_adds_no_process_and_rewrites_the_inbox_only_when_it_closes():
+    cfg, sid = new_cfg(), "close-cost"
+    write_file(inbox_of(cfg, sid), render_block("two held items", items=(HELD_RULING, HELD_TASK)))
+    # The turn state judged both ids already: the Stop makes no model call and no roadmap read, so only the home check runs.
+    write_file(os.path.join(cfg, turns_rel(sid)),
+               json.dumps({"seen": 1, "burst": [], "judged": ["fb-0958-1", "fb-0958-2"]}))
+    log = os.path.join(os.path.dirname(cfg), "all-starts.log")
+    env = {"FG_ALL_STARTS": log}
+    before = snapshot(cfg)
+    guard(cfg, sid, extra_env=env)
+    closing = logged_starts(log)
+    check("close cost: the closing Stop closes both held items",
+          inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED
+          and inbox_line(cfg, sid, "fb-0958-2") == HELD_TASK + CLOSED,
+          [inbox_line(cfg, sid, "fb-0958-1"), inbox_line(cfg, sid, "fb-0958-2")])
+    check("close cost: the home check starts git, so the start log is live", len(closing) > 0, closing)
+    check("close cost: every process the closing Stop starts is git",
+          all(os.path.basename(a[0]) in GIT_NAMES for a in closing), closing)
+    verbs = sorted({git_verb(a) for a in closing})
+    check("close cost: the closing Stop reads git only as the home check does", set(verbs) <= set(HOME_READS),
+          verbs)
+    changed = sorted(written_between(before, snapshot(cfg)))
+    check("close cost: the closing Stop writes the inbox and the turn state, nothing else",
+          set(changed) <= {inbox_rel(sid), turns_rel(sid)}, changed)
+    os.utime(inbox_of(cfg, sid), ns=(FIXED_NS, FIXED_NS))
+    mid, mark = snapshot(cfg), len(logged_starts(log))
+    guard(cfg, sid, extra_env=env)
+    quiet = logged_starts(log)[mark:]
+    check("close cost: a Stop with nothing left to close starts as many processes",
+          len(quiet) == len(closing), "closing=%d quiet=%d" % (len(closing), len(quiet)))
+    rewritten = sorted(written_between(mid, snapshot(cfg)))
+    check("close cost: a Stop with nothing left to close rewrites no inbox",
+          set(rewritten) <= {turns_rel(sid)}, rewritten)
+
+
+def case_handoff_refusal_names_closed_as_a_way_out():
+    """The standing-id refusal names `[closed]` in the same message as the handoff entry it asks for."""
+    cfg, sid = new_cfg(), "refusal-closed"
+    items = ("- fb-0958-2 [standing] -> handoff", "- fb-0958-3 [standing] -> handoff")
+    write_file(inbox_of(cfg, sid), render_block("two settled standing items", items=items))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    p = guard(cfg, sid)
+    reason = block_reason(p) or ""
+    expect_block("refusal closed: standing ids missing from the handoff block", p,
+                 named=("fb-0958-2", "fb-0958-3"))
+    check("refusal closed: the same message names [closed] as a way out", "[closed]" in reason, reason)
+
+
+COMPACT_ITEMS = (
+    "- fb-0958-1 [ruling] -> decisions/a-ruling.md",  # held on main: left out
+    "- fb-0958-2 [task] -> debts/a-task.md",  # held on main: left out
+    "- fb-0958-3 [ruling] -> decisions/not-yet.md",  # no branch holds it: listed
+    "- fb-0958-4 [ruling] -> decisions/a-ruling.md [closed]",  # closed: left out
+    "- fb-0958-5 [standing] -> handoff",  # standing: listed, it still needs the handoff
+)
+COMPACT_LISTED = ["fb-0958-3", "fb-0958-5"]
+
+
+def listed_ids(p):
+    """The ids of the reorient note's `Open feedback items:` list, in order; None when the note is absent."""
+    found = re.search(r"Open feedback items: ([^.\n]*)\.", p.out)
+    return None if found is None else [i.strip() for i in found.group(1).split(",") if i.strip()]
+
+
+def reorient_counted(cfg, sid, log):
+    """reorient() run through the probe, so each process start it makes is logged to `log` (FG_ALL_STARTS)."""
+    return run(probe_path(), payload({"hook_event_name": "SessionStart", "session_id": sid,
+                                      "source": "compact", "cwd": cfg}), cfg,
+               args=(HERE, PRECOMPACT_PATH, "--reorient"), extra_env={"FG_ALL_STARTS": log})
+
+
+def case_reorient_leaves_out_items_whose_home_holds():
+    cfg, sid = new_cfg(), "reo-held"
+    write_file(inbox_of(cfg, sid), render_block("compaction items", items=COMPACT_ITEMS))
+    write_file(sidecar_of(cfg, sid), fixture_repo())
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        tag = state_tag(ok_state)
+        check("reorient held (%s): the message prints" % tag,
+              p.code == 0 and p.out.count("Context was compacted") == 1, p.desc())
+        check("reorient held (%s): only items that still need work are listed, in file order" % tag,
+              listed_ids(p) == COMPACT_LISTED, listed_ids(p))
+    log = os.path.join(os.path.dirname(cfg), "reorient-starts.log")
+    before = snapshot(cfg)
+    reorient_counted(cfg, sid, log)
+    starts = logged_starts(log)
+    check("reorient cost: the reorient starts git for the home check, and no other process",
+          len(starts) > 0 and all(os.path.basename(a[0]) in GIT_NAMES for a in starts), starts)
+    verbs = sorted({git_verb(a) for a in starts})
+    check("reorient cost: the reorient reads git only as the home check does", set(verbs) <= set(HOME_READS),
+          verbs)
+    written = sorted(written_between(before, snapshot(cfg)))
+    check("reorient cost: the reorient writes no file", written == [], written)
+
+
+def case_reorient_names_no_item_when_every_item_is_settled():
+    cfg, sid = new_cfg(), "reo-none"
+    write_file(inbox_of(cfg, sid), render_block("settled", items=(HELD_RULING, HELD_TASK, COMPACT_ITEMS[3])))
+    write_file(sidecar_of(cfg, sid), fixture_repo())
+    for ok_state in (False, True):
+        p = reorient(cfg, sid, ok_state)
+        tag = state_tag(ok_state)
+        check("reorient settled (%s): the message prints" % tag,
+              p.code == 0 and p.out.count("Context was compacted") == 1, p.desc())
+        check("reorient settled (%s): no item id is listed" % tag, not re.search(r"fb-\d{4}-\d", p.out), p.desc())
+
+
+QUESTION_ANSWER = 'The user answered: "Which way should the cap go?"="Option B". Continue.'
+QUESTION_AT = "2026-01-15T18:04:00+00:00"  # 12:04 CST: the clock the hook reads through LOCAL_TIME_NOW
+
+
+def question_hook(cfg, sid, response, tool="AskUserQuestion", starts=None):
+    """Runs the capture as PostToolUse fires after a tool call. The payload alone says what the call was: the
+    owner's words come back as the question box's result, not as a prompt. `starts` (a log path) runs it through
+    the probe, which logs each process start it makes."""
+    raw = payload({"hook_event_name": "PostToolUse", "session_id": sid, "tool_name": tool,
+                   "tool_input": {"questions": [{"question": "Which way should the cap go?",
+                                                  "options": [{"label": "Option A"}, {"label": "Option B"}]}]},
+                   "tool_response": response, "cwd": cfg})
+    if starts is None:
+        return run(LT_PATH, raw, cfg, extra_env={"LOCAL_TIME_NOW": QUESTION_AT})
+    return run(probe_path(), raw, cfg, args=(HERE, LT_PATH),
+               extra_env={"LOCAL_TIME_NOW": QUESTION_AT, "FG_ALL_STARTS": starts})
+
+
+def case_question_box_answer_is_saved_like_a_typed_message():
+    """The positive case is first. The two negatives sit beside it: a Bash result and an empty answer save nothing."""
+    cfg, sid = new_cfg(), "question-box"
+    starts = os.path.join(os.path.dirname(cfg), "question-starts.log")
+    p = question_hook(cfg, sid, QUESTION_ANSWER, starts=starts)
+    check("question box: the hook exits 0", p.code == 0, p.desc())
+    check("question box cost: the capture starts no process", logged_starts(starts) == [], logged_starts(starts))
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    check("question box: the answer is saved as one inbox block", len(blocks) == 1, blocks)
+    if blocks:
+        check("question box: the block is stamped with its Central time", blocks[0]["header"] == PAGE_HEADER,
+              blocks[0]["header"])
+        check("question box: the owner's answer is saved verbatim", "Option B" in (blocks[0]["text"] or ""),
+              blocks[0]["text"])
+    expect_silent("question box: a lone short answer needs no items, so the Stop passes", guard(cfg, sid))
+    cfg2, sid2 = new_cfg(), "question-box-other"
+    question_hook(cfg2, sid2, "fb: a shell line the owner did not type", tool="Bash")
+    check("question box other tool: a Bash result is not saved", not os.path.exists(inbox_of(cfg2, sid2)),
+          captured_texts(cfg2, sid2))
+    cfg3, sid3 = new_cfg(), "question-box-empty"
+    question_hook(cfg3, sid3, "")
+    check("question box empty: an empty answer saves nothing", not os.path.exists(inbox_of(cfg3, sid3)),
+          captured_texts(cfg3, sid3))
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4478,6 +4792,18 @@ CASES = (
     case_page_form_saved_wake_with_a_note_blocks,
     case_page_form_closed_not_page_form_passes,
     case_page_form_undone_wake_passes,
+    case_stop_closes_a_ruling_and_a_task_whose_home_holds,
+    case_stop_closes_a_held_item_after_its_repeat_mark,
+    case_stop_leaves_an_item_whose_home_does_not_resolve_open,
+    case_stop_closes_only_ruling_and_task_items,
+    case_stop_leaves_an_already_closed_item_alone,
+    case_stop_closes_every_held_item_of_a_full_inbox,
+    case_stop_path_closes_through_the_shared_runner,
+    case_closing_adds_no_process_and_rewrites_the_inbox_only_when_it_closes,
+    case_handoff_refusal_names_closed_as_a_way_out,
+    case_reorient_leaves_out_items_whose_home_holds,
+    case_reorient_names_no_item_when_every_item_is_settled,
+    case_question_box_answer_is_saved_like_a_typed_message,
 )
 
 
