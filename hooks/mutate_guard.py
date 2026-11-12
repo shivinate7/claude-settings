@@ -1186,6 +1186,10 @@ MUTATIONS = [
      "matched = agent and scratchpad_message_file(segment, cite_where)",
      "matched = scratchpad_message_file(segment, cite_where)", "guard",
      "scratchpad-message: an orchestrator's commit -F of the same scratchpad file is allowed"),
+    ("scratchpad-commit-msg-owner: a wrapper's inner commit is not judged",
+     "    for text in inner_commands(tokens) if tokens else ():\n        inner_ends = []",
+     "    for text in () if tokens else ():\n        inner_ends = []", "guard",
+     "scratchpad-message: an agent's bash -c commit -F of a scratchpad file is refused"),
     ("shared-tree: restore collapses back to a name match, --staged or not",
      '    staged = "--staged" in args or "-S" in args\n'
      '    worktree = "--worktree" in args or "-W" in args\n'

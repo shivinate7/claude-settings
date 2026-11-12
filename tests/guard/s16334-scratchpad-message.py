@@ -127,6 +127,9 @@ scratch_refuse("scratchpad-message: an agent's sh -c cd into its scratchpad, the
                'sh -c "cd ' + SCRATCH_DIR + " && " + VCS + ' commit -F commit_msg.txt"')
 scratch_refuse("scratchpad-message: an agent's sh -lc cd into its scratchpad, then a relative -F, is refused",
                "sh -lc 'cd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt'")
+# The cd sits outside the wrapper: the relative path resolves only through the outer cd.
+scratch_refuse("scratchpad-message: an agent's cd into its scratchpad, then a bash -c relative -F, is refused",
+               "cd " + SCRATCH_DIR + " && bash -c '" + VCS + " commit -F commit_msg.txt'")
 scratch_refuse("scratchpad-message: a comment opener in a bash -c string does not hide the -F scratchpad commit",
                "bash -c 'echo \"# x\"; " + WRAP_COMMIT + "'")
 scratch_refuse("scratchpad-message: a comment opener on a line of a multi-line bash -c string does not hide the -F scratchpad commit",
