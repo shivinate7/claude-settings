@@ -1402,7 +1402,11 @@ class Host:
                 return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again. {GREEN_CITE}"
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
                 return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
-            got, red, pending, held, ignored, unwaited = self.read_pass(n, sha, names, info["branch"])
+            got = self.checks(n, sha=info["head"])
+            red, pending, ignored = self.classify(got, names, self.ignore, info["branch"])
+            r_red, r_pending = self.run_state(sha)
+            pending, held, unwaited = pending + r_pending, *self.required_only(pending + r_pending, names)  # only what the wait waits on may clear a "no check ran" red
+            red = self.settle(red, held, r_red, [])[0]
             if red:
                 return False, "a check is red: " + "; ".join(red) + " " + GREEN_CITE
             absent = sorted(k for k in names if not got.get(k))
@@ -1434,16 +1438,6 @@ class Host:
             settled = False
             progress(", ".join(pending))
             self.block(pending, got)
-
-    def read_pass(self, n, sha, names, branch, warn=True):
-        """One pass over the checks and the workflow runs of `sha`, the read the wait repeats and the read of head_state. -> (got, red, pending, held, ignored, unwaited).
-        `pending` is every pending check and run; `held` is the part the wait waits on (required_only). Only held may clear a "no check ran" red (settle)."""
-        got = self.checks(n, warn=warn, sha=sha)
-        red, pending, ignored = self.classify(got, names, self.ignore, branch)
-        r_red, r_pending = self.run_state(sha)
-        pending, held, unwaited = pending + r_pending, *self.required_only(pending + r_pending, names)
-        red = self.settle(red, held, r_red, [])[0]
-        return got, red, pending, held, ignored, unwaited
 
     def required_only(self, pending, names):
         """-> (held, dropped) from the pending list of `wait_checks`. Held: a pending check named in `names`, and every `workflow <name>` run
@@ -1639,14 +1633,16 @@ class Host:
         return red, pending, ignored
 
     def head_state(self, n, sha=None):
-        """One pass over the head's own checks and runs, never a wait: green, pending: <the required checks and runs still pending>, red: <name>, or unknown (why).
-        It judges as the wait does (read_pass), so a pending check that is not required does not hold it. Rule M3 merges a head only when this reads green.
+        """One read of the head's own checks, for the preview and for rule M3: green, pending: <the required checks still pending>, or red: <name>. Reads only, never waits.
+        Only a required check holds it, as it holds the wait (a pending check that is not required does not). The workflow runs are not read: a required check with no row yet reads pending.
         `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read."""
         try:
-            sha = sha or self.pr(n)["head"]
-            _, red, _, held, ignored, _ = self.read_pass(n, sha, self.required_names(), self.branch, warn=False)
+            got = self.checks(n, warn=False, sha=sha)
+            names = self.required_names()
+            red, pending, ignored = self.classify(got, names, self.ignore, self.branch)
         except Stop as e:
             return f"unknown ({e})"
+        held = [k for k in pending if k in names]
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(held) if held else "green"
         return s + (" (ignored: " + "; ".join(ignored) + ")" if ignored else "")
 
@@ -3195,7 +3191,7 @@ def draft_step(root, cfg, n, host, info):
     base = info["base"]
     red = head_check_red(host.head_state(n, info["head"]))  # a head that will not merge never goes ready; before any push
     if red:
-        raise Stop(f"the head of #{n} has a red check, so it stays a draft and nothing was pushed {GREEN_CITE}: {red}")
+        raise Stop(f"the head of #{n} has a red check, so it stays a draft and nothing was pushed {GREEN_CITE}: {red}.")
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
         say("merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.")
@@ -3335,7 +3331,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 raise Stop(f"the head under the claim {info['head'][:9]} cannot be read, so whether its checks are green is unknown: {green_sha}. This run claimed nothing.")
         not_green = head_not_green(host.head_state(n, green_sha))
         if not_green:
-            raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}")
+            raise Stop(f"the head's own checks are not green, so nothing was claimed or pushed {GREEN_CITE}: {not_green}.")
         if base != cfg["defaultBranch"]:
             if head_claim(wt):  # an old claim would put real ids into a branch that is not the default
                 raise Stop(f"{info['head'][:7]} on {branch} holds a Record-claim, and {base} is not the default branch {STAMP_CITE}. Revert that commit and run again.")
