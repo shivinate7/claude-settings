@@ -1583,7 +1583,89 @@ case46() {
   else ok "$name"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46"
+# ---- Case 47: the pin at origin's stable tip, main one commit past it -> one fetch of origin, no helper, no move ----
+# The hook's compare is with stable, not main: main is ahead here, so a compare with main would start the helper.
+case47() {
+  name="case47: SessionStart hook with the pin at origin's stable tip and main one commit ahead runs one fetch of origin, no helper, no move"
+  d="$work/case47"; hook_fixture "$d" trunk same
+  git clone -q "$d/origin.git" "$d/pusher47"
+  git -C "$d/pusher47" config user.email t@example.com
+  git -C "$d/pusher47" config user.name t
+  git -C "$d/pusher47" commit -q --allow-empty -m "main moves on"
+  git -C "$d/pusher47" push -q origin HEAD:refs/heads/main
+  m1=$(git -C "$d/pusher47" rev-parse HEAD)
+  if [ "$(git -C "$d/clone" rev-parse refs/remotes/origin/stable)" != "$c0" ] \
+     || [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ] || [ "$m1" = "$c0" ]; then
+    bad "$name" "FIXTURE the pin is not at origin's stable $c0, or main did not move past it"
+    return
+  fi
+  if [ "$(git -C "$d/clone" rev-parse refs/remotes/origin/main)" != "$c0" ]; then
+    bad "$name" "FIXTURE the clone already fetched main $m1 before the hook ran"
+    return
+  fi
+  # A git that logs its fetch arguments and then runs the real git.
+  real=$(command -v git)
+  cat > "$d/shim/git" <<EOF
+#!/bin/sh
+case " \$* " in *" fetch "*) echo "\$*" >> "\$HOME/git-fetches.txt" ;; esac
+exec "$real" "\$@"
+EOF
+  chmod +x "$d/shim/git"
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  # The local main move is a fetch from the clone itself ("fetch -q . ..."), not from origin, so only origin's fetches count.
+  fetches=$(grep -c ' fetch -q origin' "$d/home/git-fetches.txt" 2>/dev/null)
+  last=$(grep ' fetch -q origin' "$d/home/git-fetches.txt" 2>/dev/null | tail -n 1)
+  if [ "$hrc" -ne 0 ]; then bad "$name" "hook exited $hrc: $hout"
+  elif [ -e "$d/home/ran-install.txt" ]; then bad "$name" "the helper ran an install from $(tail -n 1 "$d/home/ran-install.txt"), want no helper with the pin at stable $c0"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then bad "$name" "the pinned checkout moved to $(git -C "$d/clone-live" rev-parse HEAD), want stable $c0"
+  elif [ -s "$d/home/.claude-cfg/claude-settings-install.log" ]; then bad "$name" "the install log was written: [$(cat "$d/home/.claude-cfg/claude-settings-install.log")]"
+  elif [ "${fetches:-0}" -ne 1 ]; then bad "$name" "the hook ran ${fetches:-0} fetches of origin, want exactly 1"
+  elif ! printf '%s\n' "$last" | grep -q ' fetch -q origin$'; then bad "$name" "the fetch of origin is [$last], want fetch -q origin with no refspec"
+  else ok "$name"; fi
+}
+
+# ---- Case 48: the pin at origin's main, stable behind it -> the helper moves the pin to stable and installs from it ----
+case48() {
+  name="case48: SessionStart hook with the pin at origin's main and stable behind it moves the pin to origin's stable and runs the installer from it"
+  d="$work/case48"; hook_fixture "$d" trunk ahead
+  git -C "$d/clone" fetch -q origin main
+  m1=$(git -C "$d/clone" rev-parse refs/remotes/origin/main)
+  git -C "$d/clone-live" checkout -q --detach "$m1"
+  if [ "$(git -C "$d/clone" rev-parse refs/remotes/origin/stable)" != "$c0" ] \
+     || [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$m1" ] || [ "$m1" = "$c1" ]; then
+    bad "$name" "FIXTURE the pin is not at origin's main $m1, or origin/stable is not still $c0"
+    return
+  fi
+  run_hook "$d" || { bad "$name" "no SessionStart command reads CLAUDE.md in $HOOK_SETTINGS"; return; }
+  if [ "$hrc" -ne 0 ]; then bad "$name" "hook exited $hrc: $hout"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want origin's stable $c1 (main is $m1)"
+  elif [ "$(tail -n 1 "$d/home/ran-install.txt" 2>/dev/null)" != "$c1" ]; then bad "$name" "the installer did not run last from the pin at $c1: [$(cat "$d/home/ran-install.txt" 2>/dev/null)]"
+  else ok "$name"; fi
+}
+
+# ---- Case 49: CLAUDE_SETTINGS_REF=main -> the hook re-runs the helper, which keeps the pin at local main (the recovery) ----
+# The hook's compare is with stable, and the pin sits at main, so the helper runs; with REF=main the helper pins local main.
+case49() {
+  name="case49: SessionStart hook with CLAUDE_SETTINGS_REF=main and the pin at origin's main re-runs the helper, which keeps the pin at local main"
+  d="$work/case49"; hook_fixture "$d" trunk ahead
+  git -C "$d/clone" fetch -q origin main
+  m1=$(git -C "$d/clone" rev-parse refs/remotes/origin/main)
+  git -C "$d/clone-live" checkout -q --detach "$m1"
+  if [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$m1" ] || [ "$m1" = "$c1" ]; then
+    bad "$name" "FIXTURE the pin is not at origin's main $m1"
+    return
+  fi
+  CLAUDE_SETTINGS_REF=main
+  export CLAUDE_SETTINGS_REF
+  run_hook "$d"
+  unset CLAUDE_SETTINGS_REF
+  if [ "$hrc" -ne 0 ]; then bad "$name" "hook exited $hrc: $hout"
+  elif [ "$(tail -n 1 "$d/home/ran-install.txt" 2>/dev/null)" != "$m1" ]; then bad "$name" "the helper did not re-run the installer from local main $m1: [$(cat "$d/home/ran-install.txt" 2>/dev/null)]"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$m1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want local main $m1 with CLAUDE_SETTINGS_REF=main"
+  else ok "$name"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
