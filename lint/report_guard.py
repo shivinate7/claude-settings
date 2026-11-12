@@ -3111,9 +3111,11 @@ def triage_hold(hook, records, active):
 # The closed-item check's cite matcher. A cite is the word "item", "items" or "item(s)" (not glued to a word on its
 # left, so "page-item 214" counts; bold may wrap it and its colon, "**Items:**") and the numbers after it on its line:
 # a list joined by comma, "and", "or", "&", "/" or a range dash ("214-216": both ends count, the middle does not), a
-# "(closed)" note after a number, "**214**" and "#214". "items:" at a line end, or a line that opens with "Items"
-# and ends in a label's colon ("Items waiting on you:"), opens a bullet or numbered list: the number after each
-# marker is a cite, the marker is not, and text may follow the number. A list never crosses a line break, so a
+# "(closed)" note after a number, "**214**" and "#214"; the dashes are "-" and the en dash, the words "to" and
+# "through" also join a range, and ";" and "+" also join a list; "item-214" is a cite. "items:" at a line end, or a line that opens with "Items"
+# and ends in a label's colon ("Items waiting on you:", also behind a bullet dash), opens a bullet or numbered list:
+# the number after each marker is a cite, the marker is not, and text may follow the number. Markers nested under a
+# bullet with no number ("- waiting") are that list too; under a numbered bullet they are its own text. A list never crosses a line break, so a
 # bullet under "item 214" is no cite. A number that opens a date (a year first) is no cite. A number after a
 # separator or a marker is a cite only when it is bare: no glued letter or "%" ("3rd", "24h", "5%"), no time or
 # decimal ("10:30"), no small fraction ("11/10"), no count or unit word after it (ITEM_COUNT_WORDS). The number
@@ -3121,14 +3123,15 @@ def triage_hold(hook, records, active):
 # skills/roadmap/build.py's is justified only by lists: that one cites the number right after "item".
 ITEM_HEAD_RE = re.compile(r"(?<![A-Za-z0-9_])item(?:s|\(s\))?(?![A-Za-z0-9_])(?:\*\*)?(:)?(?:\*\*)?", re.I)
 ITEM_GAP_RE = re.compile(r"[ \t]*")
+ITEM_HEAD_GAP_RE = re.compile(r"-(?=\d)|[ \t]*")
 ITEM_LIST_EOL_RE = re.compile(r"[ \t]*\n")
 ITEM_LABEL_RE = re.compile(r"[ \t]+[^\n\d:]{1,60}?(?:\*\*)?:(?:\*\*)?[ \t]*\n")
-ITEM_LINE_START_RE = re.compile(r"(?:\A|\n)[ \t]*(?:\*\*)?\Z")
+ITEM_LINE_START_RE = re.compile(r"(?:\A|\n)[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?\Z")
 ITEM_NUM_RE = re.compile(r"\**#?(\d+)\**")
 ITEM_DATE_TAIL_RE = re.compile(r"(?:-\d{1,2}-\d{1,2}|/\d{1,2}/\d{1,4})(?!\d)")
 ITEM_PAREN_RE = re.compile(r"[ \t]*\([^()\n]*\)")
-ITEM_SEP_RE = re.compile(r"[ \t]*,[ \t]*(?:(?:and|or)[ \t]+|&[ \t]*)?|[ \t]*/[ \t]*|[ \t]*-[ \t]*|[ \t]+(?:and|or)[ \t]+"
-                         r"|[ \t]*&[ \t]*", re.I)
+ITEM_SEP_RE = re.compile(r"[ \t]*,[ \t]*(?:(?:and|or)[ \t]+|&[ \t]*)?|[ \t]*/[ \t]*|[ \t]*[-\u2013][ \t]*"
+                         r"|[ \t]+(?:and|or|to|through)[ \t]+|[ \t]*[&;+][ \t]*", re.I)
 ITEM_COUNT_WORDS = (r"of|more|others?|options?|times|percent|ms|secs?|seconds?|mins?|minutes?|hrs?|hours?|days?|wks?|"
                     r"weeks?|months?|yrs?|years?|am|pm|a\.m\.|p\.m\.|utc|gmt|[cemp][sd]t|jan(?:uary)?|feb(?:ruary)?|"
                     r"mar(?:ch)?|apr(?:il)?|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|"
@@ -3142,34 +3145,40 @@ CLOSED_ITEM_CHECK = "Closed-item guard (rule input-needed-closed-item)"
 def _cite_list(body, pos, seen, checked):
     """Adds to `seen` the numbers of one list that starts at `pos`. `checked`: the first number must be bare too, as
     a list marker's number must. A small number a non-slash separator reaches, then "/" and a small number, is a
-    fraction ("214 and 11/10"); after a slash ("214/381/383") it is a list."""
-    via_slash = False
+    fraction ("214 and 11/10"); after a slash ("214/381/383") it is a list. Returns how many numbers it read."""
+    via_slash, found = False, 0
     while True:
         num = ITEM_NUM_RE.match(body, pos)
         if num is None or ITEM_DATE_TAIL_RE.match(body, num.end()):
-            return
+            return found
         if checked and (ITEM_NOT_ITEM_RE.match(body, num.end()) or not via_slash and len(num.group(1)) <= 2
                         and ITEM_FRACTION_RE.match(body, num.end())):
-            return
+            return found
+        found += 1
         if str(int(num.group(1))) not in seen:
             seen.append(str(int(num.group(1))))
         paren = ITEM_PAREN_RE.match(body, num.end())
         sep = ITEM_SEP_RE.match(body, paren.end() if paren else num.end())
         if sep is None:
-            return
+            return found
         pos, checked, via_slash = sep.end(), True, "/" in sep.group()
 
 
 def _cite_bullets(body, pos, seen):
     """Adds to `seen` the numbers of the bullet or numbered list whose first line starts at `pos`. A marker line at the
     first marker's depth is a list item, and the number after its marker opens a list. A deeper line is the item's
-    own text. A blank line or any other line ends the list."""
-    depth = None
+    own text, except under a list item that holds no number (a label such as "- waiting"): its deeper markers, all at
+    the first one's depth, are the list. A blank line or any other line ends the list."""
+    depth = sub = None
+    label = False
     for line in body[pos:].split("\n"):
         mark = LIST_ITEM.match(line)
         indent = len(line) - len(line.lstrip(" \t"))
         if mark and indent == (indent if depth is None else depth):
-            depth = indent
+            depth, sub = indent, None
+            label = not _cite_list(line, ITEM_GAP_RE.match(line, mark.end()).end(), seen, True)
+        elif mark and label and indent > depth and indent == (indent if sub is None else sub):
+            sub = indent
             _cite_list(line, ITEM_GAP_RE.match(line, mark.end()).end(), seen, True)
         elif depth is None or indent <= depth or not line.strip():
             return
@@ -3190,7 +3199,7 @@ def cited_items(text):
         if label:
             _cite_bullets(body, label.end(), seen)
         else:
-            _cite_list(body, ITEM_GAP_RE.match(body, head.end()).end(), seen, False)
+            _cite_list(body, ITEM_HEAD_GAP_RE.match(body, head.end()).end(), seen, False)
     return seen
 
 
