@@ -88,11 +88,15 @@ def decide(case):
         return "slow", "judged in %.2f s, over the %s s limit" % (elapsed, case["max_seconds"])
     if result.returncode != 0:
         return "error", "exit %d: %s" % (result.returncode, result.stderr.strip()[:200])
+    if case.get("no_permission_key") and '"permissionDecision"' in result.stdout:
+        decision, reason = read_decision(result.stdout)   # names the decision the key came with
+        return "%s with a permissionDecision key" % decision, reason
     return read_decision(result.stdout)
 
 
 def read_decision(stdout):
-    """The (decision, reason) a guard run printed. Empty output is an allow."""
+    """The (decision, reason) a guard run printed. Empty output is an allow. An answer that carries
+    additionalContext and no permissionDecision is an allow whose reason is that context."""
     out = stdout.strip()
     if not out:
         return "allow", ""
@@ -101,6 +105,8 @@ def read_decision(stdout):
         if parsed.get("decision") == "block":   # a SubagentStop block, not a PreToolUse answer
             return "deny", parsed["reason"]
         block = parsed["hookSpecificOutput"]
+        if "permissionDecision" not in block and "additionalContext" in block:
+            return "allow", block["additionalContext"]
         return block["permissionDecision"], block["permissionDecisionReason"]
     except Exception:
         return "unparsable", out[:200]

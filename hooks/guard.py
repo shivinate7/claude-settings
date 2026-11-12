@@ -4,9 +4,11 @@
 Modes:
 - PreToolUse: Before each matched tool call, runs the owner's global rules in a fixed
   order and refuses or asks on the first match. Bad input allows the call.
-- SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
-  against its role, for example a builder that changed a test path. A builder's offence
-  is refused at its first stop; any other role's offence is logged for the reviewer.
+- SubagentStop: When a builder, test-author, record-writer or designer stops, judges its whole
+  diff against its role, for example a builder that changed a test path. A builder's offence
+  is refused at its first stop; any other role's offence is logged for the reviewer. Any agent
+  with an agent_id, of any role, has its last message refused once at its first stop when it
+  names a sha that is no commit in its checkout.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -48,7 +50,26 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        role-diff-unread. An unread diff of any role, builder included, is logged
                        and allowed.
                        (builders-cannot-edit-tests)
-  git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
+  report-sha-missing   deny. An agent's report (the `message` of SubagentHandback, judged in `judge`,
+                       and the last message at SubagentStop, judged in `judge_stop`) that names a
+                       sha-like token that is no commit in the repo at its cwd. One
+                       `git cat-file --batch-check` call. A payload with no valid `agent_id`, no
+                       repo, a git error, or an ambiguous short sha passes. An override lifts it.
+                       The first stop is blocked once, with each reason of that stop in one block.
+  report-sha-shallow, report-sha-unresolved
+                       noted. A missing sha in a shallow clone is allowed. A second stop
+                       (`stop_hook_active`) with a missing sha is allowed.
+                       (agent-report-shas-resolve)
+  message-ref-missing  deny. A send_message whose text names a
+                       commit sha, a `PR #N` or pull URL, or a PR comment link of this repo (the
+                       cwd's origin, read raw) that does not exist. Shas by one `git cat-file`, pull
+                       requests by one `git ls-remote origin`, each comment by one `gh api` (5 s
+                       limit; only a 404 refuses). A failed read allows, and the answer names each ref
+                       unchecked. A message with no ref starts no process. Runs right after
+                       agent-no-remote-tools, so an agent's send is refused there first. The
+                       rules after it that judge a send_message still run.
+                       An override lifts it. (send-message-refs-resolve)
+  git-env-set         deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
   shared-tree          deny or ask. A command that throws away work, judged against the state of
                        its subject. An empty subject passes. An unreadable subject is allowed and
@@ -2836,22 +2857,15 @@ def diff_refusal(tool: str, role: str, root: str) -> None:
         record(tool, "noted", diff_rule(role), found or noted[0])
 
 
-def judge_stop(payload) -> None:
-    """A builder, test-author, record-writer or designer that stops has its own change judged. A
-    builder's test change is refused at the first stop (rule `builder-diff`, with the undo route). A second
-    stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix
-    its tree never loops. A builder's logged change and the other roles' offences log under the role's
-    rule and never refuse. A cwd that is the main checkout and a change that could not be read log too,
-    and allow. A missing cwd logs nothing."""
-    role = agent_role(payload)
-    if not role:
-        return
-    where = str(payload.get("cwd") or "")
-    if not where:
-        return
+def stop_diff_block(payload, role: str, where: str):
+    """A role's own change at its stop. A builder's test change at the first stop is recorded as a deny and
+    returned as the reason text for the one block; a second stop (`stop_hook_active`) is allowed and logs
+    `role-diff-unresolved`. A builder's logged change and the other roles' offences log under the role's
+    rule and never block. A cwd that is the main checkout and a change that could not be read log too.
+    Returns '' when nothing blocks."""
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
-        return
+        return ""
     found, noted = diff_violation(where, role)
     if found != "" and payload.get("stop_hook_active"):
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
@@ -2859,10 +2873,461 @@ def judge_stop(payload) -> None:
         record("SubagentStop", "noted", "role-diff-unread", where)
     elif found and role == BUILDER_ROLE:
         record("SubagentStop", "deny", diff_rule(role), found)
-        print(json.dumps({"decision": "block", "reason": diff_rule(role) + ": " + builder_diff_reason()}))
-        sys.exit(0)
+        return diff_rule(role) + ": " + builder_diff_reason()
     elif found or noted:
         record("SubagentStop", "noted", diff_rule(role), found or noted[0])
+    return ""
+
+
+# Rule report-sha-missing. A report's sha-like token must resolve as a commit in the repo at the payload's cwd
+# (decision agent-report-shas-resolve). A token is a run of 7 to 12, or exactly 40, lowercase hex characters with a
+# digit and a letter a-f. It is not one when it touches - _ / # @ = or a period (a file name, a URL, an agent id,
+# a colour, key=value), or when it sits inside a double-quoted span that closes on the same line or on a `> ` line.
+# Two forms that touch a period are judged: each sha side of a range (`a..b`, `a...b`, and `main..a` or `a..HEAD`
+# with a ref on one side), and a token followed by sentence marks up to a space or the end of the text. A URL is
+# skipped from its scheme on, so text glued before it (a sha as link text) is judged. A diff header line,
+# `index <hex>..<hex>` (blob ids), is skipped; a sentence that starts with the word index is judged.
+HANDBACK_TOOL = "SubagentHandback"
+REPORT_HEX_RUN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]+(?![0-9A-Za-z])")
+REPORT_RANGE_BEFORE = re.compile(r"[0-9A-Za-z_/~^]\.{2,3}$")
+REPORT_RANGE_AFTER = re.compile(r"\.{2,3}[0-9A-Za-z_/~^]")
+REPORT_INDEX_HEADER = re.compile(r"index [0-9a-f]+\.\.[0-9a-f]+")
+# The lookbehind lets a scheme start only at the start of its word, so a long run of letters with no `://` is
+# tried once, not once per letter: without it, the match is quadratic in the run's length.
+REPORT_URL_WORD = re.compile(r"(?<![\w+.-])[A-Za-z][\w+.-]*://\S*")
+REPORT_MARKS_END = re.compile(r"[.,;:)\]*\"`]*(?:\s|$)")
+REPORT_TOUCH = "-_/#@="
+REPORT_QUOTED = re.compile(r'"[^"\n]*"')
+REPORT_QUOTE_LINE = re.compile(r"\s*>(\s|$)")
+REPORT_SHA_MAX = 100   # shas judged in one report: a bound on the one git call's input
+REPORT_SHA_FIX = (
+    "Your report names a commit that does not resolve in this checkout: %s. Check each sha with git here "
+    "before you write it. A commit that exists on origin may not be fetched into this checkout yet: run "
+    "`git fetch origin`, then repeat the report, or cite the commit by branch name. "
+    "With no commit to report, say so and give no sha. "
+)
+REPORT_SHA_REASON = REPORT_SHA_FIX + "Then hand back again. (decision agent-report-shas-resolve)"
+REPORT_SHA_STOP_REASON = REPORT_SHA_FIX + "Fix the report, then stop again. (decision agent-report-shas-resolve)"
+
+
+def report_sha_judged(line: str, run) -> bool:
+    """True when the hex run `run` of `line` is judged: no touching mark, bar the range and sentence-mark forms."""
+    before, after = line[:run.start()], line[run.end():]
+    if before and before[-1] in REPORT_TOUCH:
+        return False
+    if before.endswith(".") and not REPORT_RANGE_BEFORE.search(before):
+        return False
+    if after and after[0] in REPORT_TOUCH:
+        return False
+    if after.startswith(".") and not (REPORT_RANGE_AFTER.match(after) or REPORT_MARKS_END.match(after)):
+        return False
+    return True
+
+
+def report_sha_token(token: str) -> bool:
+    """True when `token` is 7 to 12, or exactly 40, lowercase hex characters with a digit and a letter a-f."""
+    return (re.fullmatch(r"[0-9a-f]+", token) is not None and (7 <= len(token) <= 12 or len(token) == 40)
+            and re.search(r"[0-9]", token) is not None and re.search(r"[a-f]", token) is not None)
+
+
+def report_unquoted(line: str):
+    """`line` with each double-quoted span that closes on it blanked to spaces, or None when the line is a `> ` quote.
+    The one quote rule of report shas and of message refs (decision agent-report-shas-resolve)."""
+    if REPORT_QUOTE_LINE.match(line):
+        return None
+    return REPORT_QUOTED.sub(lambda m: " " * len(m.group()), line)
+
+
+def report_shas(text, limit=REPORT_SHA_MAX) -> list:
+    """The sha-like tokens of a report, each once, in order of first sight, up to `limit` (None: all)."""
+    if not isinstance(text, str):
+        return []
+    found = []
+    for line in text.split("\n"):
+        if REPORT_INDEX_HEADER.match(line):
+            continue
+        line = report_unquoted(line)
+        if line is None:
+            continue
+        line = REPORT_URL_WORD.sub(lambda m: " " * len(m.group()), line)
+        for run in REPORT_HEX_RUN.finditer(line):
+            token = run.group()
+            if report_sha_token(token) and token not in found and report_sha_judged(line, run):
+                found.append(token)
+    return found if limit is None else found[:limit]
+
+
+def sha_git(where: str, limit: int, *args):
+    """One git read in `where` with a limit of `limit` seconds: the finished process, or None when it cannot run."""
+    try:
+        return git_reads._nowindow.run(
+            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=limit)
+    except Exception:
+        return None
+
+
+def sha_resolve_state(tool: str, where: str, shas: list, limit: int = 10):
+    """(missing, unchecked) for `shas` in the repo at `where`: the shas that are no commit, and the shas git gave no
+    clear answer for (git fails, `where` is no repo, or a miss in a shallow clone, noted `report-sha-shallow`). One
+    `git cat-file --batch-check` call, and one `rev-parse` more on a miss, each limited to `limit` seconds."""
+    if not shas:
+        return [], []
+    if not where or not os.path.isdir(where):
+        return [], list(shas)
+    try:
+        done = git_reads._nowindow.run(
+            ["git", "-C", where, "cat-file", "--batch-check"],
+            input="".join(sha + "^{commit}\n" for sha in shas),
+            capture_output=True, encoding="utf-8", errors="replace", timeout=limit)
+    except Exception:
+        return [], list(shas)
+    answers = done.stdout.splitlines()
+    if done.returncode != 0 or len(answers) != len(shas):
+        return [], list(shas)
+    missing = [sha for sha, answer in zip(shas, answers) if answer.rstrip().endswith(" missing")]
+    if not missing:
+        return [], []
+    shallow = sha_git(where, limit, "rev-parse", "--is-shallow-repository")
+    if shallow is None or shallow.returncode != 0:
+        return [], missing
+    if shallow.stdout.strip() == "true":
+        record(tool, "noted", "report-sha-shallow", " ".join(missing))
+        return [], missing
+    return missing, []
+
+
+def sha_resolve(tool: str, where: str, shas: list) -> list:
+    """The shas of `shas` that are no commit in the repo at `where`. [] when git gives no clear answer."""
+    return sha_resolve_state(tool, where, shas)[0]
+
+
+def report_sha_missing(tool: str, payload, text, where: str) -> list:
+    """The shas of an agent's report that are no commit in the repo at `where`. [] when the payload holds no
+    valid agent_id or the report holds no sha."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+        return []
+    return sha_resolve(tool, where, report_shas(text))
+
+
+# Rule message-ref-missing. A send_message names only refs of this repo that exist (decision
+# send-message-refs-resolve): a commit sha (report_shas, and a commit URL of this repo), a pull request (`PR #N`,
+# `pull request #N`, `#N (PR)`, a list of them, a `PR` or `pull` word with other words or marks before a `#N`, this
+# repo's own `owner/repo#N`, a pull URL of this repo) and a PR comment link of this repo. This repo
+# is the owner/repo of the cwd checkout's origin, read raw: `git config --get remote.origin.url`, since `remote
+# get-url` applies insteadOf. A bare #N is skipped. A sha or PR number on a line that names another repo is skipped.
+# Every PR is read by one `git ls-remote origin`, each comment by one `gh api`, up to 5, each with a 5 s limit. Only a
+# clear answer refuses (no refs/pull/N/head, or `HTTP 404` on gh's stderr); any other answer leaves the ref
+# unchecked, and the sender is told which.
+MESSAGE_REF_TOOL = "mcp__claude-code-remote__send_message"
+MESSAGE_REF_REASON = (
+    "Your message names refs this repo does not hold: %s. Check each with git or gh before you send it, and "
+    "name only what exists. A commit that exists on origin may not be fetched into this checkout yet: run "
+    "`git fetch origin`, then send it again. (decision send-message-refs-resolve)"
+)
+MESSAGE_REF_LIMIT = 5   # seconds, for each git (config, cat-file, rev-parse, ls-remote) and gh read
+MESSAGE_REF_MAX = 20    # pull requests, and shas, judged in one message; the rest are named unchecked
+MESSAGE_GH_READS = 5    # comment links read with gh in one message; the rest are named unchecked
+# A PR word, then marks a writer puts between it and the number (`:`, `(`, `**`, a backtick, `number`), then the number.
+MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)\b[\s:*`(]*(?:number\s+)?(#?)(\d+)(?!\w)", re.IGNORECASE)
+# A PR word that may be followed by a number, and the `#N` that comes after other words or marks: `PR is #N`,
+# `PR opened: #N`, `PR - #N`, `PR [#N]`, `Opened the PR as #N`, `pull #N`. The gap holds no digit, `#` or sentence end,
+# so it never reaches a count (`PR: 2500 lines`) or a later sentence.
+# A number ends at a non-word character, so a hex colour (`#0b0f14`) is no PR number. In the gap, a number of exactly
+# 6 or 8 digits is an all-digit colour (`#000000`, `#00000080`), also no PR number.
+# The word stands alone: `pr` inside a name (`msg-ref-pr-forms`, `hooks/pr.py`) is no PR word. `pull` counts only
+# right before its number (`pull #N`) or in `pull request`, so the verb (`pull the list at #8`) is no PR word.
+MESSAGE_PR_WORD = re.compile(
+    r"(?<![\w/.-])(PRs?|pull\s+requests?|pull(?=\s*#\d))(?![\w-]|\.\w)", re.IGNORECASE)
+# The gap is capped at 200 characters: a PR word with no `#N` near it then costs a bounded scan, not one to the line end.
+MESSAGE_PR_GAP = re.compile(r"([^#\d.;!?]{0,200}?)#(?!(?:\d{6}|\d{8})(?!\d))(\d+)(?!\w)")
+MESSAGE_PR_GAP_WORDS = 6   # most words between the PR word and its `#N`; a longer gap is a different sentence
+# A word that says the `#N` is an issue or another item, so `PR merged, see issue #3` names no PR. A verb that closes
+# an issue (`This PR closes #8`, `Fixed #8`) says the same.
+MESSAGE_ISSUE_WORDS = r"issues?|tickets?|bugs?|items?|findings?|debts?"  # glossary-ok: the words a message uses for an issue, matched as text, not names this repo uses
+MESSAGE_CLOSING_WORDS = r"closes|closed|closing|fixes|fixed|fixing|resolves|resolved|resolving"
+MESSAGE_PR_GAP_NOT = re.compile(
+    r"\b(?:%s|%s)\b" % (MESSAGE_ISSUE_WORDS, MESSAGE_CLOSING_WORDS), re.IGNORECASE)
+# The issue word or closing verb right before an `owner/repo#N`, so `Issue o/r#5` and `Fixes o/r#5` name no PR.
+MESSAGE_ISSUE_BEFORE = re.compile(
+    r"\b(?:%s|%s)\W{0,3}$" % (MESSAGE_ISSUE_WORDS, MESSAGE_CLOSING_WORDS), re.IGNORECASE)
+# The most characters a MESSAGE_ISSUE_BEFORE match spans: the longest word plus the 3 of `\W{0,3}`. Searching only this
+# window before a ref keeps each ref's check constant; a search from `pos` still reads the character before it for `\b`.
+MESSAGE_ISSUE_BEFORE_SPAN = max(len(word.replace("?", "")) for word in
+                                (MESSAGE_ISSUE_WORDS + "|" + MESSAGE_CLOSING_WORDS).split("|")) + 3
+# This repo's own `owner/repo#N`, the owner/repo to be compared with the origin.
+MESSAGE_OWN_REF = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)#(\d+)")
+MESSAGE_PR_NUMBERED = re.compile(r"#(\d+)\s*\(\s*(?:PR|pull\s+request)\s*\)", re.IGNORECASE)
+# A further number of a list: after `,`, `and`, `or`, `&` or `+`, with or without its own `#`; or after a space, with `#`.
+MESSAGE_PR_ITEMS = (
+    re.compile(r"\s*,\s*(?:(?:and|or)\s+)?(#?)(\d+)(?!\w)", re.IGNORECASE),
+    re.compile(r"\s+(?:and|or)\s+(#?)(\d+)(?!\w)", re.IGNORECASE),
+    re.compile(r"\s*[&+]\s*(#?)(\d+)(?!\w)"),
+    re.compile(r"\s+(#)(\d+)(?!\w)"),
+)
+MESSAGE_GH_URL = re.compile(
+    r"(?:https?://)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/(pull|issues|commit)/([0-9A-Za-z]+)[^\s#]*"
+    r"(?:#issuecomment-(\d+))?", re.IGNORECASE)
+# The link text of a markdown link whose target is a github.com repo: group 1 is the text, 2 and 3 the owner and repo.
+MESSAGE_LINK_TEXT = re.compile(
+    r"\[([^\]\n]*)\]\(\s*(?:https?://)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/", re.IGNORECASE)
+MESSAGE_ORIGIN_TAIL = re.compile(r"([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
+# An owner/repo and the mark right after it: `#` or `@`, `:`, or the word PR.
+MESSAGE_REPO_MARKED = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)(?=([#@:]|\s+(?i:PRs?)\b))")
+MESSAGE_LOWER_NAME = re.compile(r"[a-z0-9_.-]+")
+MESSAGE_FILE_END = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+from shared_names import BRANCH_PREFIXES  # noqa: E402  the one home of this repo's branch prefixes
+# A remote name or one of this repo's branch prefixes, as the owner part of an owner/repo, is never another repo.
+MESSAGE_NOT_A_REPO = ("origin", "upstream") + tuple(prefix.rstrip("/") for prefix in BRANCH_PREFIXES)
+
+
+MESSAGE_NO_REPO = ("", "")   # message_origin's answer for a cwd that is no git repo: its refs are not judged, and not named
+
+
+def message_origin(where: str):
+    """(owner, repo) lowercased from the raw `remote.origin.url` of the checkout at `where`, or None. MESSAGE_NO_REPO
+    when `where` is no git repo: `--local` exits 128 there and 1 in a repo with no origin."""
+    if not where or not os.path.isdir(where):
+        return None
+    done = sha_git(where, MESSAGE_REF_LIMIT, "config", "--local", "--get", "remote.origin.url")
+    if done is not None and done.returncode == 128:
+        return MESSAGE_NO_REPO
+    if done is None or done.returncode != 0:
+        return None
+    found = MESSAGE_ORIGIN_TAIL.search(done.stdout.strip())
+    return (found.group(1).lower(), found.group(2).lower()) if found else None
+
+
+def message_names_other_repo(line: str, this) -> bool:
+    """True when `line` holds an owner/repo that is not `this`, followed by `#`, `@`, `:` or the word PR. An owner/repo
+    with no such mark is a branch or a path. `origin/`, `upstream/` and this repo's branch prefixes (`lane/`, `archive/`,
+    `claude/`, `handoff/`) never count. The `:` and PR marks count only
+    for a lowercase owner and name that are not all digits, so `CI/CD:`, `Done/Next:` and `2/3:` are labels."""
+    bare = REPORT_URL_WORD.sub(" ", MESSAGE_GH_URL.sub(" ", line))
+    for owner, repo, mark in MESSAGE_REPO_MARKED.findall(bare):
+        if owner.lower() in MESSAGE_NOT_A_REPO or MESSAGE_FILE_END.search(repo):
+            continue
+        if mark not in ("#", "@") and not (MESSAGE_LOWER_NAME.fullmatch(owner) and MESSAGE_LOWER_NAME.fullmatch(repo)
+                                           and not owner.isdigit() and not repo.isdigit()):
+            continue
+        if (owner.lower(), repo.lower()) != this:
+            return True
+    return False
+
+
+def message_other_link_text_blanked(line: str, this) -> str:
+    """`line` with the link text of each link to another repo's github.com page blanked, so `[PR #8](.../o/other/pull/8)`
+    names no PR of this repo. A link to this repo keeps its text. `this` is the origin (owner, repo), or None."""
+    if this is None:
+        return line
+
+    def blank(found):
+        if (found.group(2).lower(), found.group(3).lower()) == this:
+            return found.group()
+        return " " * (len(found.group(1)) + 2) + found.group()[len(found.group(1)) + 2:]
+
+    return MESSAGE_LINK_TEXT.sub(blank, line)
+
+
+def message_pr_list(line: str, at: int, plural: bool):
+    """(the further numbers of a list that starts at `at`, where the list ends). After a singular word a further
+    number needs its own `#`."""
+    prs = []
+    while True:
+        for item in MESSAGE_PR_ITEMS:
+            more = item.match(line, at)
+            if more and (plural or more.group(1) == "#"):
+                break
+        else:
+            return prs, at
+        prs.append(more.group(2))
+        at = more.end()
+
+
+def message_line_prs(line: str) -> list:
+    """The PR numbers a line names in words: `PR #N`, `PR: #N`, `PR (#N)`, `PR number N`, `PRs 7 and 8`, `PRs #7 #8`,
+    `pull request #N`, `#N (PR)`, and a `#N` after other words or marks (`PR is #N`, `PR [#N]`, `pull #N`). After a
+    singular word, a further number in a list needs its own `#`, so `PR #7, 12 files` names one PR. After `:` or `(`,
+    the number needs its `#`, so `PR: 2500 lines` names none."""
+    prs = []
+    for word in MESSAGE_PR_WORD.finditer(line):
+        plural = word.group(1).lower().endswith("s")
+        at = word.end()
+        found = MESSAGE_PR.match(line, word.start())
+        if found:
+            # After `:` or `(`, only a number with `#` is a PR, so `PR: 2500 lines` and `PR (2500 lines)` are counts.
+            if not found.group(2) and re.search(r"[:(]", line[found.end(1):found.start(3)]):
+                continue
+            prs.append(found.group(3))
+            more, at = message_pr_list(line, found.end(), plural)
+            prs += more
+        # Each `#N` after the word is judged by the same gap rule, so `PR #7 is #8` names both.
+        while True:
+            gap = MESSAGE_PR_GAP.match(line, at)
+            # A PR word inside the gap starts its own pass, so the numbers after it are not claimed again here.
+            if not gap or MESSAGE_PR_GAP_NOT.search(gap.group(1)) or MESSAGE_PR_WORD.search(gap.group(1)) \
+                    or len(re.findall(r"[A-Za-z']+", gap.group(1))) > MESSAGE_PR_GAP_WORDS:
+                break
+            prs.append(gap.group(2))
+            more, at = message_pr_list(line, gap.end(), plural)
+            prs += more
+    prs += MESSAGE_PR_NUMBERED.findall(line)
+    return prs
+
+
+def message_refs(text: str, where: str):
+    """(shas, prs, comments, origin) a message names for this repo. Starts a process only when a PR, a link, or a
+    sha on a line that holds an owner/repo with a mark needs the origin; a message with no ref starts none."""
+    origin = []
+
+    def this():
+        if not origin:
+            origin.append(message_origin(where))
+        return origin[0]
+
+    shas, prs, comments = [], [], []
+    prs_seen = set()
+    kept = []   # the lines outside `> ` quotes and double-quoted spans: quoted text may come from another repo
+    for raw in text.split("\n"):
+        line = report_unquoted(raw)
+        if line is None:
+            continue
+        kept.append(line)
+        if MESSAGE_LINK_TEXT.search(line) and this() is not None:
+            line = message_other_link_text_blanked(line, this())
+            raw = message_other_link_text_blanked(raw, this())
+        # report_shas takes the raw line and applies the quote rule itself: a second pass would read the spaces left
+        # by a blanked leading `"..."` as the indent of a `> ` quote line, and skip the rest of the line.
+        found = report_shas(raw, None)
+        numbers = message_line_prs(line)
+        if "#" in line and MESSAGE_OWN_REF.search(line) and this() is not None:
+            numbers += [ref.group(3) for ref in MESSAGE_OWN_REF.finditer(line)
+                        if (ref.group(1).lower(), ref.group(2).lower()) == this()
+                        and not MESSAGE_ISSUE_BEFORE.search(
+                            line, max(0, ref.start() - MESSAGE_ISSUE_BEFORE_SPAN), ref.start())]
+        if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
+                and message_names_other_repo(line, this()):
+            continue
+        for sha in found:
+            if sha not in shas:
+                shas.append(sha)
+        for n in numbers:
+            if n not in prs_seen:   # a set, so a line of many distinct numbers dedupes in linear time
+                prs_seen.add(n)
+                prs.append(n)
+    text = "\n".join(kept)
+    if re.search(r"github\.com", text, re.IGNORECASE):
+        for owner, repo, kind, ident, comment in MESSAGE_GH_URL.findall(text):
+            # With no origin no link can be matched to this repo, so a pull or comment link is named unchecked below.
+            if this() is not None and (owner.lower(), repo.lower()) != this():
+                continue
+            if kind.lower() == "pull" and ident.isdigit() and ident not in prs:
+                prs.append(ident)
+            if kind.lower() == "commit" and this() is not None and report_sha_token(ident.lower()) \
+                    and ident.lower() not in shas:
+                shas.append(ident.lower())
+            if comment and comment not in comments:
+                comments.append(comment)
+    unchecked = []
+    if (prs or comments) and this() == MESSAGE_NO_REPO:
+        prs, comments = [], []
+    elif (prs or comments) and this() is None:
+        unchecked = ["PR #" + n for n in prs] + ["comment " + c for c in comments]
+        prs, comments = [], []
+    unchecked += list(shas[MESSAGE_REF_MAX:]) + ["PR #" + n for n in prs[MESSAGE_REF_MAX:]]
+    unchecked += ["comment " + c for c in comments[MESSAGE_GH_READS:]]
+    return (shas[:MESSAGE_REF_MAX], prs[:MESSAGE_REF_MAX], comments[:MESSAGE_GH_READS],
+            (origin[0] if origin else None), unchecked)
+
+
+def message_pr_missing(where: str, prs: list):
+    """(missing PR numbers, unchecked PR numbers): one `git ls-remote origin` for all of them."""
+    wanted = ["refs/pull/%s/head" % n for n in prs]
+    try:
+        done = git_reads._nowindow.run(
+            ["git", "-C", where, "ls-remote", "origin"] + wanted, capture_output=True, encoding="utf-8",
+            errors="replace", timeout=MESSAGE_REF_LIMIT, env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+    except Exception:
+        return [], prs
+    if done.returncode != 0:
+        return [], prs
+    held = set(re.findall(r"refs/pull/(\d+)/head", done.stdout))
+    return [n for n in prs if n not in held], []
+
+
+def message_comment_state(origin, comment: str) -> str:
+    """'found', 'missing' (gh exits non-zero with `HTTP 404` on stderr) or 'unchecked' for one comment link: one
+    `gh api` read."""
+    try:
+        done = git_reads._nowindow.run(
+            ["gh", "api", "repos/%s/%s/issues/comments/%s" % (origin[0], origin[1], comment)],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=MESSAGE_REF_LIMIT)
+    except Exception:
+        return "unchecked"
+    if done.returncode == 0:
+        return "found"
+    return "missing" if "HTTP 404" in (done.stderr or "") else "unchecked"
+
+
+def message_ref_check(tool: str, tool_input, cwd: str):
+    """(missing, unchecked): the refs of this send_message that do not exist, and the refs no answer was read for."""
+    text = tool_input.get("message")
+    if not isinstance(text, str) or not text or not cwd:
+        return [], []
+    shas, prs, comments, origin, unchecked = message_refs(text, cwd)
+    missing, unknown_shas = sha_resolve_state(tool, cwd, shas, MESSAGE_REF_LIMIT)
+    missing = list(missing)
+    unchecked += unknown_shas
+    if prs:
+        gone, unknown = message_pr_missing(cwd, prs)
+        missing += ["PR #" + n for n in gone]
+        unchecked += ["PR #" + n for n in unknown]
+    for comment in comments:
+        state = message_comment_state(origin, comment)
+        if state == "missing":
+            missing.append("comment " + comment)
+        elif state == "unchecked":
+            unchecked.append("comment " + comment)
+    return missing, unchecked
+
+
+MESSAGE_PENDING_NOTE: list = []   # the note of unchecked refs, set while judging and printed by main() on an allow
+
+
+def message_unchecked_note(unchecked: list) -> str:
+    """The additionalContext that names each ref no answer was read for. It carries no git or gh error text, and no log is written."""
+    return ("message-ref-missing: could not check " + ", ".join(unchecked)
+            + " (no clear answer from git, the remote or gh, or over the limit of a send); the message was sent unchecked.")
+
+
+def print_message_note(note: str) -> None:
+    # No permissionDecision: an explicit allow would skip a permission prompt the main session shows.
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": note}}))
+
+
+def judge_stop(payload) -> None:
+    """A builder, test-author, record-writer or designer that stops has its own change judged (rule
+    `builder-diff` for a builder's test change, with the undo route). Any agent with a valid `agent_id` has
+    its last message judged for a sha that is no commit (rule `report-sha-missing`). The first stop that
+    breaks either rule is blocked once, and the one block gives each reason. A second stop
+    (`stop_hook_active`) is allowed and logs `role-diff-unresolved` and `report-sha-unresolved`, so an agent
+    that cannot fix its tree or its report never loops. A missing cwd logs nothing."""
+    role = agent_role(payload)
+    where = str(payload.get("cwd") or "")
+    diff_reason = sha_reason = ""
+    if role and where:
+        diff_reason = stop_diff_block(payload, role, where)
+    missing = report_sha_missing("SubagentStop", payload, payload.get("last_assistant_message"), where)
+    if missing:
+        if payload.get("stop_hook_active"):
+            record("SubagentStop", "noted", "report-sha-unresolved", " ".join(missing))
+        else:
+            record("SubagentStop", "deny", "report-sha-missing", " ".join(missing))
+            sha_reason = "report-sha-missing: " + REPORT_SHA_STOP_REASON % ", ".join(missing)
+    if diff_reason or sha_reason:
+        reason = diff_reason + " " + sha_reason if diff_reason and sha_reason else diff_reason + sha_reason
+        print(json.dumps({"decision": "block", "reason": reason}))
+        sys.exit(0)
 
 
 SPAWN_TOOLS = ("Agent", "Task")
@@ -6066,6 +6531,14 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
+    # 0, report-sha-missing. An agent's hand-back names only commits its repo holds (decision agent-report-shas-resolve).
+    # First, before any rule that reads git: a hand-back with no sha-like token starts no git process.
+    if tool == HANDBACK_TOOL:
+        missing = report_sha_missing(tool, payload, tool_input.get("message"), cwd)
+        if missing:
+            refuse(tool, "deny", "report-sha-missing", REPORT_SHA_REASON % ", ".join(missing), " ".join(missing))
+        if payload.get("agent_id"):
+            return   # no other rule judges an agent's hand-back, and each of them reads git
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
@@ -6135,6 +6608,16 @@ def judge(payload) -> None:
     # agent's create_session is refused here. An override lifts it.
     if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
         refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
+
+    # 8c. message-ref-missing. A send_message names only refs that exist (decision send-message-refs-resolve). After
+    # agent-no-remote-tools, so an agent's send is refused there first. It does not return: message-time-matches-clock
+    # still judges the send, and its refusal wins over the note of an unchecked ref, which main() prints only on an allow.
+    if tool == MESSAGE_REF_TOOL:
+        gone, unchecked = message_ref_check(tool, tool_input, cwd)
+        if gone:
+            refuse(tool, "deny", "message-ref-missing", MESSAGE_REF_REASON % ", ".join(gone), ", ".join(gone))
+        if unchecked:
+            MESSAGE_PENDING_NOTE.append(message_unchecked_note(unchecked))
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
@@ -6437,6 +6920,8 @@ def main() -> None:
         record(str(payload.get("tool_name", "")), "crash", "guard-crash",
                cap_safe(type(exc).__name__ + ": " + str(exc), 200))
         sys.exit(0)  # fail open on a guard defect
+    if MESSAGE_PENDING_NOTE:
+        print_message_note(MESSAGE_PENDING_NOTE[0])
     sys.exit(0)
 
 

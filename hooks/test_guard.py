@@ -129,6 +129,8 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
+    "report-sha-missing": "an agent's SubagentHandback and its SubagentStop: a sha-like token that does not resolve as a commit in the cwd's repo is refused; a shallow clone and a stop_hook_active stop are allowed and noted; the quoted, quote-line, URL, colour, UUID and upper-case forms are not judged; one git cat-file call per judged hand-back",
+    "message-ref-missing": "a send_message that names a commit, a pull request or a PR comment of the cwd's repo that does not exist is refused, judged in a main session only (no agent_id), because rule agent-no-remote-tools refuses an agent's send_message first; a ref of another repo, a bare #N, a failed gh or ls-remote (allowed, the output names the ref) and a message with no ref are allowed; a message with no ref and no github.com link starts no git or gh process, a markdown link to github.com starts one git config, and PRs #7 and #8 start one ls-remote",
     "impeccable": "impeccable is review-only",
     "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",
@@ -352,7 +354,7 @@ def windows_shaped(*parts):
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
-        max_seconds=None, env=None, guard=None, **tool_input):
+        max_seconds=None, env=None, guard=None, no_permission_key=False, **tool_input):
     """Register one case.
 
     `guard` is the path of a copy of hooks/guard.py to run in place of this repository's, for the
@@ -403,6 +405,8 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "guard": guard,
         # An allow that must print NOTHING, not even context. Only a case that says so is held to it.
         "silent": silent,
+        # An allow whose output must hold additionalContext and no permissionDecision key (see decide).
+        "no_permission_key": no_permission_key,
         # The temp folder this case's guard run reads as its own (see TEMP_DIR above).
         "temp": TEMP_DIR,
         "tool_input": tool_input,

@@ -3058,6 +3058,20 @@ MUTATIONS = [
      "                if match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
      "                if False and match and match[1] not in BRIEF_DESTRUCTIVE_SKIP",
      "guard", "brief-destructive-git: builder brief that orders `git reset --hard origin/main` is denied"),
+    # ---- report-sha-missing (decision agent-report-shas-resolve): the hand-back refusal, the one deny line.
+    ("report-sha-missing: the hand-back refusal is never printed, so a made-up sha is delivered",
+     '            refuse(tool, "deny", "report-sha-missing", REPORT_SHA_REASON % ", ".join(missing), " ".join(missing))',
+     '            pass',
+     "guard", "report-sha-missing: an Explore hand-back naming a made-up sha is refused"),
+    ("report-sha-missing: the stop is never blocked for a made-up sha",
+     '            sha_reason = "report-sha-missing: " + REPORT_SHA_STOP_REASON % ", ".join(missing)',
+     '            sha_reason = ""',
+     "guard", "report-sha-missing: a reviewer's first stop naming a made-up sha is blocked"),
+    # ---- message-ref-missing (decision send-message-refs-resolve): the one deny line.
+    ("message-ref-missing: the refusal is never printed, so a message naming a missing PR is sent",
+     '            refuse(tool, "deny", "message-ref-missing", MESSAGE_REF_REASON % ", ".join(gone), ", ".join(gone))',
+     '            pass',
+     "guard", "message-ref-missing: PR #8, which the repo does not have, is refused and named, main session"),
     # Rule brief-claim-has-probe: one mutant per edge the cases pin.
     ("brief-claim: the check never fires, so an unprobed claim about main passes",
      '    return brief_claim_gaps(tool_input.get("prompt"))',
