@@ -3366,8 +3366,8 @@ class DecisionGlossCollapseTests(unittest.TestCase):
 
 class PromotedRuleTests(unittest.TestCase):
     """Plain-prose lint (decisions/plain-prose-lint.md): a rule either blocks or does not exist,
-    and six advisory codes are the one exception. Three rules block: STE001, STE011, STE013.
-    Six are advisory: STE003, STE007, STE008, STE009, STE015, STE017 are
+    and seven advisory codes are the one exception. Three rules block: STE001, STE011, STE013.
+    Seven are advisory: STE003, STE007, STE008, STE009, STE015, STE017, STE022 are
     warnings that the linter reports and no guard ever blocks on. Each case here proves a rule
     fires at its severity, the thing a table-row edit alone cannot prove. STE006 and STE018 are
     deleted, so they get their own no-finding cases instead, since a deleted rule has no
@@ -3450,7 +3450,7 @@ class PromotedRuleTests(unittest.TestCase):
         findings = self.lint(text)
         self.assertIn("STE001", [f.code for f in findings])
 
-    def test_errors_are_exactly_the_three_blocking_codes_and_warnings_the_six_advisory_ones(self):
+    def test_errors_are_exactly_the_three_blocking_codes_and_warnings_the_seven_advisory_ones(self):
         severities = {code: rule.severity for code, rule in ste_lint.RULES.items()}
         self.assertEqual({c for c, s in severities.items() if s == "error"}, set(ERROR_CODES))
         self.assertEqual({c for c, s in severities.items() if s == "warning"}, set(ADVISORY_CODES))
@@ -3888,7 +3888,7 @@ class RewriteStampTests(unittest.TestCase):
 # These errors fail CI's STE lint on changed lines (plain-prose-lint):
 ERROR_CODES = ("STE001", "STE011", "STE013")
 # These six are advisory: reported as warnings, never a failed run.
-ADVISORY_CODES = ("STE003", "STE007", "STE008", "STE009", "STE015", "STE017")
+ADVISORY_CODES = ("STE003", "STE007", "STE008", "STE009", "STE015", "STE017", "STE022")
 # One input per advisory code. Each holds that code's finding and no error finding, and none is
 # text a fixer rewrites, so a failing run comes from the severity alone.
 ADVISORY_SAMPLES = {
@@ -3898,6 +3898,7 @@ ADVISORY_SAMPLES = {
     "STE009": "Do not set up the server unless you read the runbook first.\n",
     "STE015": "<!-- ste: procedural -->\n\nRestart the service if the health check fails.\n",
     "STE017": "The linter ensures the file is valid before it runs.\n",
+    "STE022": "The gate refuses the push.\n",
 }
 
 
@@ -4007,7 +4008,7 @@ class AdvisoryCodesTests(unittest.TestCase):
                 self.assertEqual(rc, 0)
 
 
-    def test_a03_all_six_in_one_file_still_pass_the_cli(self):
+    def test_a03_all_seven_in_one_file_still_pass_the_cli(self):
         text = "\n".join(ADVISORY_SAMPLES.values())
         rc, data = run_lint_cli(text)
         self.assertEqual({f["code"] for f in data["findings"]} & set(ERROR_CODES), set())
