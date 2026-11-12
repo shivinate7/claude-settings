@@ -1176,6 +1176,33 @@ class ClaudeMdFlag(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out, ".Claude/claude.md", "Output-Styles/A.md")
 
+class GitLockReadsStdoutOnly(Env):
+    """GitLock.read of the ls-remote listing. A stderr line on a successful call is no lock, and only a 40-hex sha names one."""
+    def listing(self, stdout, stderr="", rc=0):
+        real = merge._nowindow.run
+        def run(args, *a, **k):
+            if "ls-remote" in args:
+                return subprocess.CompletedProcess(args, rc, stdout, stderr)
+            return real(args, *a, **k)
+        p = unittest.mock.patch.object(merge._nowindow, "run", run)
+        p.start(); self.addCleanup(p.stop)
+
+    def test_a_stderr_line_with_an_empty_listing_is_no_lock(self):
+        self.listing("", "warning: redirecting to https://example.invalid/repo.git\n")
+        self.assertIsNone(self.lock.read("main"))
+
+    def test_a_listing_whose_first_token_is_no_sha_stops(self):
+        self.listing("not-a-sha\trefs/heads/merge-lock/main\n")
+        with self.assertRaises(merge.Stop):
+            self.lock.read("main")
+
+    def test_a_stderr_line_beside_a_real_listing_leaves_the_sha_alone(self):
+        sha = "a" * 40
+        self.listing(f"{sha}\trefs/heads/merge-lock/main\n", "warning: noise\n")
+        real_git = merge.git
+        with unittest.mock.patch.object(merge, "git", lambda cwd, *a, **k: (1, "") if "fetch" in a else real_git(cwd, *a, **k)):  # the fetch of its message fails: the read keeps the sha
+            self.assertEqual(self.lock.read("main")[0], sha)
+
 class Race(Env):
     def test_two_runs_one_lock(self):
         lock2 = merge.GitLock(self.other, now=lambda: self.now)
