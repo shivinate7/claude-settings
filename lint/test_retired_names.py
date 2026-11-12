@@ -219,7 +219,8 @@ class RenamedProse(unittest.TestCase):
 
     def test_the_scanner_flags_the_old_words_and_passes_the_kept_names(self):
         for line in ("Print the review record for the head.", "Jot it to the feedback inbox.",
-                     "The check reads the inbox file at each Stop.", "Saves nothing to the inbox."):
+                     "The check reads the inbox file at each Stop.", "Saves nothing to the inbox.",
+                     "Read the review records at each Stop.", "Two inboxes hold the notes."):
             self.assertTrue(renamed_term(line), line)
         for line in ("Each PR keeps its `pr-review-record`.", "merge <pr> --review-record prints the review log.",
                      "Read `<session_id>.inbox.md` and `owner-feedback-inbox`.", "The review log is done."):
