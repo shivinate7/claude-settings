@@ -96,6 +96,7 @@ GUARD_TESTS_MODES = ("", "windows-slice")
 FAMILIES = {
     "shared-tree": "stash, reset, restore, checkout and the subject read",
     "branch-worktree": "branch delete and worktree remove/prune",
+    "branch-slug-no-git": "a new branch name holding the word git is refused at checkout -b, -B or --orphan, switch -c or -C, branch <new>, worktree add -b and a push to a name the clone holds no remote ref for; an existing branch, a name without the word and a quoted echo pass",
     "two-worktrees-one-branch": "a checkout, switch or worktree add that would take a branch another worktree of the clone holds is refused; the forms that take no such branch, and the holder's own checkout, pass",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
     "pointer-edit": "the pointer checkout's own files: a Write, Edit, MultiEdit or NotebookEdit into them is refused, naming EnterWorktree; its .git, a linked worktree, a target outside it, a stood-down pointer and the read tools pass",
