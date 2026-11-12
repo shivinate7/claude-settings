@@ -34,7 +34,7 @@
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for lane fan-code-workflows",
   "ref": "coordinator 15:01 CST Nov 12",
-  "reply": "Closed 15:42 CST: you had already typed `override 4h` in the lane at 15:04 CST; it covers the merges until 19:04 CST, so no new override is needed.",
+  "reply": "Closed: you had already typed `override 4h` in the lane at 15:04 CST; it covers the merges until 19:04 CST, so no new override is needed.",
   "repo": "shivinate7/claude-settings",
   "short": "Override for four main merges",
   "status": "closed",

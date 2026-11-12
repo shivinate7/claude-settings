@@ -41,7 +41,7 @@
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "pick": "a",
   "ref": "triage pick, Nov 12, 13:33 CST",
-  "reply": "Closed 15:31 CST: you overruled the narrow fix; the lane revives PR #1533's full fix, brings it up to date with main and sends it to review.",
+  "reply": "Closed: you overruled the narrow fix; the lane revives PR #1533's full fix, brings it up to date with main and sends it to review.",
   "repo": "shivinate7/claude-settings",
   "short": "Narrow fix for triage page checks",
   "stands": true,

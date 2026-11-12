@@ -36,7 +36,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:22 CST",
-  "reply": "Closed 15:31 CST: you kept the pick; a short job's limit is never below the median of all limits.",
+  "reply": "Closed: you kept the pick; a short job's limit is never below the median of all limits.",
   "repo": "shivinate7/claude-settings",
   "short": "Lowest CI time limit for a very short job",
   "stands": true,

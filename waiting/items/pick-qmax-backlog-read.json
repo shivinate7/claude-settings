@@ -29,7 +29,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:51 CST",
-  "reply": "Closed 15:35 CST: you kept the pick. Your note went to batch runner 11: an old q_max PR whose session was paused is revived as a lane, never closed, and each verdict says whether the work was paused.",
+  "reply": "Closed: you kept the pick. Your note went to batch runner 11: an old q_max PR whose session was paused is revived as a lane, never closed, and each verdict says whether the work was paused.",
   "repo": "shivinate7/claude-settings",
   "short": "Runner 11 judges q_max's old PRs",
   "stands": true,

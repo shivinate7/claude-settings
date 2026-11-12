@@ -45,7 +45,7 @@
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
-  "ref": "coordinator pick, Nov 12, 12:51 CST; reworded 15:31 CST after your 15:26 CST note; corrected 15:42 CST to keep ruling close-replaced-at-open",
+  "ref": "coordinator pick, Nov 12, 12:51 CST; reworded after your 15:26 CST note; corrected to keep ruling close-replaced-at-open",
   "repo": "shivinate7/claude-settings",
   "short": "Which old PRs close",
   "stands": true,

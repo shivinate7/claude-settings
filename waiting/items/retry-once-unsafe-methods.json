@@ -12,8 +12,7 @@
       "id": "send-writes-once",
       "key": "a",
       "label": "Send a write once",
-      "lose": "One more run to type when a write's reply is lost and the PR is still open.",
-      "note": "Recommendation moved to c at 15:35 CST, when c was added; letters a and b unchanged."
+      "lose": "One more run to type when a write's reply is lost and the PR is still open."
     },
     {
       "gain": "A lost reply on a write is retried with no run to repeat.",
@@ -25,7 +24,7 @@
     },
     {
       "gain": "No double merge or double comment, and a lost reply no longer makes you run it again.",
-      "how": "After a lost reply on a write, the tool first checks whether the write happened: for a merge, is the PR merged; for a comment, is the comment there. It retries only if not, up to 3 times. A write with no check is sent once. The lane adds the checks to PR #2964.",
+      "how": "After a lost reply on a write, the tool first checks whether the write happened, and retries only if not, up to 3 times. The lane checked each write: a merge (is the PR merged), taking the merge lock, deleting a branch, and opening a PR each get a check; lock and body edits are safe to repeat already; a comment is matched by its text; moving another run's lock stays send-once. The merge and the lock land first in PR #2964, the rest as new steps.",
       "id": "check-then-retry",
       "key": "c",
       "label": "Check, then retry (Recommended)",
@@ -35,12 +34,12 @@
           "url": "https://github.com/shivinate7/claude-settings/pull/2964"
         }
       ],
-      "lose": "A larger change: each kind of write needs its own check, and the lane's PR grows."
+      "lose": "A larger change, landed in parts; a comment retry costs one extra read, and two comments with the same text read as one."
     }
   ],
   "owner": "lane retry-net-method-safe (session_013NEJL1ubMb2G2VdQNW823R)",
   "pick": "c",
-  "ref": "lane retry-net-method-safe 15:19 CST Nov 12, PR #2964; option c added 15:35 CST after your 15:28 CST note",
+  "ref": "lane retry-net-method-safe 15:19 CST Nov 12, PR #2964; option c added after your 15:28 CST note",
   "repo": "shivinate7/claude-settings",
   "short": "Writes sent once on a server error",
   "status": "open",

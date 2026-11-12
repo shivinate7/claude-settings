@@ -22,8 +22,7 @@
           "url": "https://github.com/shivinate7/q_max/pull/1161"
         }
       ],
-      "lose": "The other route is not taken unless you choose b.",
-      "note": "Recommendation moved to c at 15:33 CST, when c and d were added; letters a and b unchanged."
+      "lose": "Both PRs wait until the test-run fix lands and runner 11 merges again."
     },
     {
       "gain": "The PR merges sooner.",
@@ -82,7 +81,7 @@
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "c",
-  "ref": "coordinator pick, Nov 12, 12:51 CST (its clock); options c and d added 15:31 CST after your 15:26 CST note",
+  "ref": "coordinator pick, Nov 12, 12:51 CST (its clock); options c and d added after your 15:26 CST note",
   "repo": "shivinate7/claude-settings",
   "short": "Fix debt-close test run for q_max #1163",
   "stands": true,
