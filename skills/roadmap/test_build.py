@@ -4521,6 +4521,20 @@ class IdleLanes(UpkeepFixture):
                 self.assertEqual([e for e in entries if sid in e], [],
                                  "a lane waiting on %s got a line under its doing steps: %r" % (wait, entries))
 
+    def test_a_done_or_todo_step_under_a_lane_id_does_not_hold_it(self):
+        # c8 is done and c9 is todo, and each names session_a. Only a doing step holds a lane, so session_a is archived as
+        # today. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c8": {"status": "done", "order": 8, "lane": "session_a"},
+                   "c9": {"status": "todo", "order": 9, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")])
+        steps, _marks = self.steps_and_marks()
+        self.assertEqual([(steps[k].get("status"), steps[k].get("lane")) for k in ("c8", "c9")],
+                         [("done", "session_a"), ("todo", "session_a")],
+                         "scope: c8 and c9 do not read done and todo under session_a")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)", "session_b (c2; topic -)"],
+                         "a done or todo step under session_a changed the lane's archive line")
+
 
 class SharedTagNames(unittest.TestCase):
     """The roadmap's tag names have one home, hooks/shared_names.py. build reads the very objects, so a
