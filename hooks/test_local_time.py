@@ -2704,10 +2704,9 @@ def case_override_lift_logs_the_guard_named():
 
 
 def case_override_relayed_grants_nothing():
-    # A prompt that a notice, the harness or another agent wrote grants nothing and writes no state file. Until a relay
-    # check exists, only typed words and a page save grant an override (owner's ruling Q1, 09:10 CST Nov 11). The bare
-    # keyword and the fast form meet the same gate as the plain ask. Each case gives the judge yes, so a missing gate
-    # shows as a grant.
+    # A prompt that a notice, the harness or another agent wrote grants nothing and writes no state file. Only typed
+    # words and a page save grant an override. The bare keyword and the fast form meet the same gate as the plain ask.
+    # Each case gives the judge yes, so a missing gate shows as a grant.
     fast, bare = "override 15m please", "override 15m"
     own = [owner_turn("set up the lane")]
     system_own = transcript_file(own + [transcript_record("user", fast, prompt_source=SYSTEM_SOURCE)])
