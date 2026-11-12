@@ -15,7 +15,7 @@ so its own cases run in merge/test_merge.py and not again here.
 import collections, json, re, unittest
 
 import test_merge as tm  # the one home of the fixtures (merge/test_merge.py)
-from test_merge import PullsHost, batch_pull, batch_lines_of, green, running, record_of, review_comment
+from test_merge import PullsHost, batch_pull, batch_lines_of, green, running, record_of, review_comment, freeze_body, freeze_inner, lint_of
 
 REPLACED, CARRIED, REOPENED = "close as replaced: ", "close as carried: ", "reopen: "
 
@@ -386,6 +386,120 @@ class CarryOnlyDrafts(CloseEnv):
         self.assertEqual(closes(False), [], "a ready #9 with the head of the lower #5 closed as carried")
 
 
+class CarrySkipsFrozen(CloseEnv):
+    """A done draft that an open batch's frozen block lists (`Lane: #N <head>`, as merge --batch-build writes it) is held by that batch, so it
+    closes nothing. A done draft that no open batch lists still closes under its holder. Batch #9 is a draft in every case here."""
+
+    def wake(self, pulls, done, compares, closed=()):
+        """-> the alpha block of a wake over `pulls`. The numbers in `done` are done drafts: a record and a lane lint at their head, CI green."""
+        comments = [c for n in done for c in (record_of(n, head_of(n)), lint_of(n, head_of(n)))]
+        checks = {head_of(n): green() for n in done}
+        host = closed_host("o/alpha", pulls=pulls, comments=comments, closed=closed, check_rows=checks, compares=compares)
+        return block_of(self, self.reviewed(host), "o/alpha")
+
+    def test_a_done_draft_frozen_in_an_open_batch_closes_nothing(self):
+        frozen = freeze_body(freeze_inner("nightly", [(5, head_of(5)), (6, head_of(6))]))
+        drafts = [named_pull(5, head_of(5), draft=True), named_pull(6, head_of(6), draft=True)]
+        compares = {(head_of(5), head_of(9)): "ahead", (head_of(6), head_of(9)): "ahead"}
+        # Control: the same batch with no frozen block closes #5 and #6 under #9, so the empty result below comes from the freeze.
+        control = kind_lines(self.wake([*drafts, named_pull(9, head_of(9), draft=True)], [5, 6], compares), CARRIED)
+        self.assertEqual(control, ["close as carried: o/alpha #5 by #9", "close as carried: o/alpha #6 by #9"], "control: no close line for #5 and #6 under #9:\n" + "\n".join(control))
+        block = self.wake([*drafts, named_pull(9, head_of(9), body=frozen, draft=True)], [5, 6], compares)
+        self.assertEqual(kind_lines(block, CARRIED), [], "a lane that open batch #9 freezes closed as carried:\n" + "\n".join(block))
+
+    def test_a_done_draft_no_open_batch_freezes_still_closes_under_its_holder(self):
+        # Pin: #5 and #6 are frozen in #9 and close nothing. #7 is a done draft that no batch lists, and open ready #8 holds it: #7 still closes.
+        frozen = freeze_body(freeze_inner("nightly", [(5, head_of(5)), (6, head_of(6))]))
+        pulls = [named_pull(5, head_of(5), draft=True), named_pull(6, head_of(6), draft=True), named_pull(7, head_of(7), draft=True),
+                 named_pull(8, head_of(8)), named_pull(9, head_of(9), body=frozen, draft=True)]
+        compares = {(head_of(5), head_of(9)): "ahead", (head_of(6), head_of(9)): "ahead", (head_of(7), head_of(8)): "ahead"}
+        lines = kind_lines(self.wake(pulls, [5, 6, 7], compares), CARRIED)
+        self.assertIn("close as carried: o/alpha #7 by #8", lines, "a done draft that no batch freezes does not close under its holder:\n" + "\n".join(lines))
+
+    def test_once_the_batch_closes_unmerged_its_lanes_are_no_longer_skipped(self):
+        # Pin: #9 is closed unmerged, so no open batch lists #5 or #6. Open ready #10 holds both, so each closes under #10.
+        frozen = freeze_body(freeze_inner("nightly", [(5, head_of(5)), (6, head_of(6))]))
+        pulls = [named_pull(5, head_of(5), draft=True), named_pull(6, head_of(6), draft=True), named_pull(10, head_of(10))]
+        compares = {(head_of(5), head_of(10)): "ahead", (head_of(6), head_of(10)): "ahead"}
+        lines = kind_lines(self.wake(pulls, [5, 6], compares, closed=[closed_pull(9, head_of(9), body=frozen)]), CARRIED)
+        self.assertEqual(lines, ["close as carried: o/alpha #5 by #10", "close as carried: o/alpha #6 by #10"],
+                         "the lanes of a closed batch are still skipped, or the holder #10 does not carry them:\n" + "\n".join(lines))
+
+    def test_once_the_batch_merges_its_lanes_close_nothing(self):
+        # Pin: #9 merged, so main holds #5 and #6, and no open pull request holds them. A done draft whose head main holds is never carried.
+        frozen = freeze_body(freeze_inner("nightly", [(5, head_of(5)), (6, head_of(6))]))
+        pulls = [named_pull(5, head_of(5), draft=True), named_pull(6, head_of(6), draft=True)]
+        compares = {(head_of(5), "main"): "ahead", (head_of(6), "main"): "ahead"}
+        lines = kind_lines(self.wake(pulls, [5, 6], compares, closed=[closed_pull(9, head_of(9), body=frozen, merged=True)]), CARRIED)
+        self.assertEqual(lines, [], "a done draft that main holds closed as carried after its batch merged:\n" + "\n".join(lines))
+
+
+class CloseThenBuild(CloseEnv, tm.CloudSession):
+    """The batch leg of the frozen-lane skip. A wake over alpha prints its close lines. The batch runner closes each pull request a line names,
+    as the host would. Then `merge --batch-build nightly` runs on this case's own origin. The lanes, the batch and its frozen block come from
+    test_merge.py's BatchFreeze helpers, called unbound (the one home of those fixtures), and the wake reads the same heads."""
+
+    def setUp(self):
+        super().setUp()
+        self.heads = {}  # lane PR number -> its head on origin, as BatchFreeze.lane leaves it
+
+    def build(self, numbers, blamed=()):
+        """Lanes `numbers`, and their draft batch `nightly`. -> the batch pull request's number."""
+        for n in numbers:
+            tm.BatchFreeze.lane(self, n)
+        return tm.BatchFreeze.frozen_batch(self, "nightly", list(numbers), draft=True, blamed=blamed)
+
+    def wake_and_close(self, pr):
+        """A wake over alpha reads the batch `pr` and its lanes. The batch runner closes each pull request a close line names. -> the close lines."""
+        bh = self.head("batch-nightly")
+        lanes = sorted(self.heads)
+        pulls = [named_pull(n, self.heads[n], draft=True) for n in lanes]
+        pulls.append({**batch_pull(pr, bh, draft=True, head_ref="batch-nightly"), "body": self.host.batch_pulls[pr]["body"]})
+        compares = {(self.heads[n], bh): "ahead" for n in lanes}
+        comments = [c for n in lanes for c in (record_of(n, self.heads[n]), lint_of(n, self.heads[n]))]
+        checks = {self.heads[n]: green() for n in lanes}
+        host = closed_host("o/alpha", pulls=pulls, comments=comments, check_rows=checks, compares=compares)
+        lines = kind_lines(block_of(self, self.reviewed(host), "o/alpha"), CARRIED)
+        for line in lines:
+            self.host.batch_pulls[int(re.search(r"#(\d+) by", line).group(1))]["state"] = "CLOSED"
+        return lines
+
+    def ready(self):
+        """-> (rc, output) of `merge --batch-build nightly --ready`, with the lint and the ready checks scripted to pass."""
+        with tm.BatchFreeze.no_lint_or_ready_check(self, ready_state="pass"):
+            return tm.BatchFreeze.run_batch(self, "--batch-build", "nightly", "--ready")
+
+    def test_the_ready_build_after_a_wake_does_not_stop_on_a_closed_lane(self):
+        pr = self.build([5, 6])
+        self.wake_and_close(pr)
+        rc, out = self.ready()
+        self.assertNotIn("CLOSED, not open", out, "the ready build stopped on a lane that a wake closed:\n" + out)
+        self.assertEqual(rc, 0, "the ready build after a wake exited %s:\n%s" % (rc, out))
+        self.assertEqual(self.host.readies, [pr], "the ready build after a wake did not mark #%d ready:\n%s" % (pr, out))
+
+    def test_the_ready_build_after_a_drop_does_not_stop_on_a_closed_lane(self):
+        pr = self.build([5, 6], blamed=[6])  # #6 is blamed, so a drop may take it off
+        self.wake_and_close(pr)
+        with tm.BatchFreeze.no_lint_or_ready_check(self):
+            rc, out = tm.BatchFreeze.run_batch(self, "--batch-drop", "nightly", "6")
+        self.assertEqual(rc, 0, "control: the drop of #6 exited %s:\n%s" % (rc, out))
+        self.assertIn("merge: #6 dropped from batch nightly.", out, "control: the drop of #6 did not run:\n" + out)
+        rc, out = self.ready()
+        self.assertNotIn("CLOSED, not open", out, "the ready build after a drop stopped on a lane that a wake closed:\n" + out)
+        self.assertEqual(rc, 0, "the ready build after a drop exited %s:\n%s" % (rc, out))
+
+    def test_the_same_set_again_after_a_wake_does_not_stop_on_a_closed_lane(self):
+        pr = self.build([5, 6])
+        self.wake_and_close(pr)
+        with tm.BatchFreeze.no_lint_or_ready_check(self):
+            rc, out = tm.BatchFreeze.run_batch(self, "--batch-build", "nightly", "6", "5")
+        self.assertNotIn("CLOSED, not open", out, "the same set again stopped on a lane that a wake closed:\n" + out)
+        self.assertEqual(rc, 0, "the same set again exited %s:\n%s" % (rc, out))
+        rc, out = self.ready()
+        self.assertNotIn("CLOSED, not open", out, "the ready build after the same set again stopped on a closed lane:\n" + out)
+        self.assertEqual(rc, 0, "the ready build after the same set again exited %s:\n%s" % (rc, out))
+
+
 class BatchSkipsClosed(CloseEnv):
     """A PR on a close line cannot join a batch: the batch line drops it."""
 
@@ -414,6 +528,16 @@ class ReopenClosed(CloseEnv):
         lines = self.reopened(closed=[closed_pull(4, head_of(4)), closed_pull(9, head_of(9))],
                               extra_comments=[review_comment(90, 4, "Carried by #9")])
         self.assertEqual(lines, ["reopen: o/alpha #4 (replacer #9 dropped)"], "\n".join(lines))
+
+    def test_a_carried_link_whose_open_carrier_lost_its_head_reopens_nothing(self):
+        # Pin of the named limit carrier-lost-head-stays-closed: #4 is closed with the note `Carried by #9`, and open #9 no longer holds #4's
+        # head (no compare, so diverged). reopen_lines reopens nothing for a Carried link with an open tail, so no line prints. Control: with #9
+        # closed unmerged, the same note reopens #4. Passes today.
+        note = [review_comment(90, 4, "Carried by #9")]
+        lines = self.reopened(closed=[closed_pull(4, head_of(4))], extra_pulls=[named_pull(9, head_of(9))], extra_comments=note)
+        self.assertEqual(lines, [], "#4 reopened while its open carrier #9 has lost its head:\n" + "\n".join(lines))
+        control = self.reopened(closed=[closed_pull(4, head_of(4)), closed_pull(9, head_of(9))], extra_comments=note)
+        self.assertEqual(control, ["reopen: o/alpha #4 (replacer #9 dropped)"], "control: the closed carrier #9 does not reopen #4:\n" + "\n".join(control))
 
     def test_a_replacer_that_no_longer_names_it_reopens(self):
         lines = self.reopened(closed=[closed_pull(4, head_of(4))], extra_pulls=[named_pull(7, head_of(7))],
