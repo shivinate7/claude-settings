@@ -25,6 +25,7 @@ import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shall
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
+import layout  # noqa: E402  where each kind of record lives, one home (lint/layout.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
@@ -16096,6 +16097,9 @@ GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/"
                   ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
 # The PR template stays a guard path with no exception: CI's excuse checks read the PR bodies it seeds. Its folder form is a hit too.
 PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/x.md"
+# The model record. Its round rows set the model each reviewer runs on, so a docs-only edit of them moves review models, and the guard holds it
+# (decision agent-model-cap). Built from the layout and the guard's file name, so a moved record changes this path, never a copy of it.
+MODEL_RECORD = "/".join((layout.path(os.path.dirname(HERE), "decisions"), hook_guard.ROLE_TABLE_FILE))
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
@@ -16159,8 +16163,18 @@ class ReviewGuardHits(unittest.TestCase):
 
     def test_a_diff_of_prose_decision_records_and_docs_is_no_guard_change(self):
         # docs/ is no guard path, so a prose-only diff of docs and decision records holds no hit (decision docs-only-prs-skip-review).
-        # Control, green on main. A decision record that holds a guard's round rows is not in this case (see the report).
         self.assertEqual(review_fn(self, "guard_hits")(["docs/decisions/docs-only-prs-skip-review.md", "docs/map/hooks.md", "docs/todo.md"]), [])
+
+    def test_the_model_record_is_a_guard_hit(self):
+        # Scope first: the record is in the repo and holds the round table the hit is for, so a moved record reads as stale, not as a pass.
+        with open(os.path.join(os.path.dirname(HERE), *MODEL_RECORD.split("/")), encoding="utf-8") as handle:
+            self.assertIn("| Role | Round | Model | Effort |", handle.read(), f"{MODEL_RECORD} holds no round table, so this case proves nothing")
+        self.assertEqual(review_fn(self, "guard_hits")([MODEL_RECORD]), [MODEL_RECORD],
+                         "a docs-only edit of the model record's round rows is no guard change, but it moves review models")
+
+    def test_another_decision_record_is_no_guard_hit(self):
+        # The control for the model record: a decision record with no round table is still no hit.
+        self.assertEqual(review_fn(self, "guard_hits")(["docs/decisions/docs-only-prs-skip-review.md"]), [])
 
     def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
         self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
@@ -16244,6 +16258,14 @@ class ReviewGuardRefusal(ReviewGuardEnv):
             with self.subTest(entry=entry):
                 self.host.changed = [(path, "modified", 0)]
                 self.assert_refused(*self.run_args(*self.review_argv()), path)
+
+    def test_guard_no_refuses_the_model_record_whatever_its_kind(self):
+        # A docs-only edit of the round rows moves review models, so the record is a guard change under a docs-only kind too.
+        # The guard refuses it before the kind is checked, so the Guard reason holds for both kinds.
+        for kind in ("normal", "docs-only"):
+            with self.subTest(kind=kind):
+                self.host.changed = [(MODEL_RECORD, "modified", 0)]
+                self.assert_refused(*self.run_args(*self.review_argv(kind)), MODEL_RECORD, holds="so --guard no is false")
 
     def test_a_hooks_markdown_file_refuses(self):
         self.host.changed = [("hooks/README.md", "modified", 0)]
