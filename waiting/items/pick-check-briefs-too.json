@@ -4,6 +4,11 @@
   "home": "step pick-ack-past-ruling (a pick a past ruling covers is acked, not asked)",
   "id": "pick-check-briefs-too",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:22:18Z",
+    "choice": "b",
+    "note": "Saved b, 15:22 CST."
+  },
   "n": 644,
   "options": [
     {
@@ -29,9 +34,10 @@
   ],
   "owner": "lane pick-ack-past-ruling (PR #2932, via coordinator session_013NEJL1gw6EdrSyvHkTUEx6)",
   "ref": "lane pick-ack-past-ruling, PR #2932 head 3c38ce6db, via coordinator 14:27 CST Nov 12",
+  "reply": "Closed 15:25 CST: the check also reads lane briefs and agent messages; relayed to lane pick-ack-past-ruling and the coordinator.",
   "repo": "shivinate7/claude-settings",
   "short": "Pick check: briefs too?",
-  "status": "open",
+  "status": "closed",
   "title": "The past-ruling check on coordinator picks also reads lane briefs",
   "why": "It sets how far a check that quotes old rulings reaches, after your 14:25 CST remark."
 }

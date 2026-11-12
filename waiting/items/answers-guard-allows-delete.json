@@ -1,29 +1,30 @@
 {
   "added": "2026-11-12T20:11:00Z",
-  "context": "Goal: no session can forge your saved answer on the waiting page.\nProblem (rule): the guard refuses set, update and str_replace on an answer, but lets a session delete one, which the decision's words do not allow.\nBased on (read): skill waiting-page, \"Route and close\", deletes each routed answer; a delete writes no false answer.\nDeparts from: main has no answer guard \u2014 adds one that refuses writes to answers, with or without deletes.",
+  "context": "Goal: no session can fake your saved answer on this page.\nProblem (rule): the new answer guard must either refuse or allow a session deleting your saved answer, and your ruling on the guard's words does not say which.\nBased on (read): a saved answer is stored as an answer record, and sessions act on it as your word; the new guard (built in lane answers-session-write-guard, not merged) refuses any session that writes or edits one, so no session can make up a pick for you.\nBased on (read): triage deletes your answer record when it rewords or reopens an item, so the page asks you again (skill waiting-page); since today a close keeps it (step answer-kept-on-close).\nBased on (read): a delete cannot fake a pick; at worst it loses one, and the item shows as unanswered again.\nDeparts from: main has no answer guard \u2014 adds one that refuses writes to answers, with or without deletes.",
   "home": "step answers-session-write-guard (a session cannot forge your page answers)",
   "id": "answers-guard-allows-delete",
   "kind": "decision",
   "n": 635,
   "options": [
     {
-      "gain": "Routing and reopening keep working; no forged answer can be written.",
+      "gain": "Triage keeps rewording and reopening items with no extra step from you; no fake answer can be written.",
       "how": "The guard refuses set, update and str_replace on answers; a delete passes. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
       "key": "a",
       "label": "Allow a delete",
-      "lose": "A stray delete of your answer is not stopped; you would save it again.",
+      "lose": "A stray delete of your answer is not stopped; the item shows unanswered and you save it again.",
       "widens": true
     },
     {
       "gain": "Your saved answer can never vanish by a session's act.",
-      "how": "Every session write to answers is refused, a delete included; the page writer types override to route or reopen.",
+      "how": "Every session write to answers is refused, a delete included.",
       "key": "b",
       "label": "Refuse a delete too (Recommended)",
-      "lose": "Each route or reopen needs an override."
+      "lose": "Each time triage rewords or reopens an item you already answered, you type override in triage's session."
     }
   ],
   "owner": "lane answers-session-write-guard (session_013NEJL2bk5JjA6fXmQ5SooN)",
   "ref": "lane answers-session-write-guard, head 53e065d31, via coordinator 14:11 CST Nov 12",
+  "reply": "Reworded 15:25 CST with more context, as you asked.",
   "repo": "shivinate7/claude-settings",
   "short": "Answer guard: allow delete?",
   "status": "open",

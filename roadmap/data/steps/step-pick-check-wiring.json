@@ -1,0 +1,14 @@
+{
+ "id": "step-pick-check-wiring",
+ "title": "Triage runs the step-pick check at each batch-merge review, from a fresh ArtifactData read, and the check refuses a stale answers file",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane step-pick-claims-match-page 15:22 CST Nov 12: the check is built on pick a (a session feeds an answers file read with ArtifactData), but no step, skill or hook names which session runs it or when; the file's read time is printed, not checked for freshness.",
+ "source": "lane step-pick-claims-match-page 15:22 CST Nov 12",
+ "note": "Name triage as the runner in skill waiting-page and in the batch-merge review (plans/reweigh-2026-11-12.md \"Repeat\"): export the answers with ArtifactData, run the check, file each mismatch. The check refuses an answers file read more than a set time before the run (number from a measured gap, not guessed). Red first on an old read time. After the check's PR merges.",
+ "updatedAt": "2026-11-12T15:26:23-06:00"
+}

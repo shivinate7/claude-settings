@@ -4,6 +4,11 @@
   "home": "step base-hash-on-base (a pre-existing claim names a hash on the base)",
   "id": "report-base-own-branch",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:22:18Z",
+    "choice": "a",
+    "note": "Saved a, 15:22 CST."
+  },
   "n": 637,
   "options": [
     {
@@ -29,9 +34,10 @@
   ],
   "owner": "lane base-hash-on-base (session_013NEJKyrMqGGt4eRzJmrKwn)",
   "ref": "lane base-hash-on-base, PR #2892, 14:14 CST Nov 12",
+  "reply": "Closed 15:25 CST: kept as a note; relayed to lane base-hash-on-base, and #2892 merges as built.",
   "repo": "shivinate7/claude-settings",
   "short": "Own branch as base: note or refuse",
-  "status": "open",
+  "status": "closed",
   "title": "A report naming its own branch as the base for a pre-existing claim",
   "why": "Closing it widens what the report check refuses."
 }

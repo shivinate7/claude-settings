@@ -4,6 +4,11 @@
   "home": "step answers-session-write-guard",
   "id": "act-type-2bk5-draft-pr-yes",
   "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-12T21:22:18Z",
+    "choice": "a",
+    "note": "Saved as done 15:22 CST: \"i think ia lrdy did this? if not\"."
+  },
   "n": 648,
   "options": [
     {
@@ -29,9 +34,10 @@
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for lane answers-session-write-guard",
   "ref": "coordinator 15:04 CST Nov 12",
+  "reply": "Closed 15:25 CST: your save is relayed to the lane as your yes; if the lane still needs your typed words in its own chat, it tells triage and this item reopens.",
   "repo": "shivinate7/claude-settings",
   "short": "Type yes: draft PR for the answers guard",
-  "status": "open",
+  "status": "closed",
   "title": "Type your yes in lane answers-session-write-guard so it opens its draft PR",
   "why": "The lane opens the PR only on your own typed word."
 }

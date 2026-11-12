@@ -1,6 +1,6 @@
 {
   "added": "2026-11-12T20:24:00Z",
-  "context": "Goal: questions your rulings already answer stop reaching you.\nProblem (rule): PR #2929's new check refuses an open question where exactly one option does not widen a shared tool, and that also refuses a question that asks you to revisit the ruling itself.\nBased on (ruling): decision uniform-over-variants: a repo changes to fit a shared tool, never the tool to fit a repo.\nDeparts from: main lets a revisit question reach you \u2014 PR #2929 refuses it.",
+  "context": "Goal: questions your rulings already answer stop reaching you.\nProblem (rule): a general check would also stop a question asking you to change your shared-tool ruling itself, and only you can say whether that question may still reach you.\nBased on (read): this is not a guard for one kind of question; PR #2929 adds one general check on every question a session sends you: when every option but one would bend a shared tool to fit one repo, your ruling already picks the remaining option, so the check refuses the question and the session takes that option itself.\nBased on (read): in a question about changing the ruling itself, the option to change it bends the tool by definition, so the same check refuses it.\nBased on (ruling): decision uniform-over-variants: a repo changes to fit a shared tool, never the tool to fit a repo.\nDeparts from: main lets every such question reach you \u2014 PR #2929 refuses the ones your ruling answers, and this item decides whether a question about changing the ruling is refused as well.",
   "home": "decision uniform-over-variants (a repo changes to fit a shared tool, never the tool to fit a repo)",
   "id": "uniform-answered-revisit",
   "kind": "decision",
@@ -30,6 +30,7 @@
   ],
   "owner": "lane widening-question-not-asked (session_013NEJKzNDgCKgjct5ZNZtN7)",
   "ref": "lane widening-question-not-asked, PR #2929, via coordinator 14:23 CST Nov 12",
+  "reply": "Reworded 15:25 CST: the check is general (any question your shared-tool ruling already answers); this item is only about its corner case.",
   "repo": "shivinate7/claude-settings",
   "short": "Revisit question: refused or allowed",
   "status": "open",
