@@ -4555,9 +4555,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif not read_verb("push", args):
                 record_hit, record_reason = review_log_hit(transcript, lambda: push_destinations(args, where, overrides), where)
                 if record_hit and record_reason == REVIEW_LOG_FIX_REASON:
-                    refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)
+                    refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)  # glossary-ok: the rule id, a literal
                 elif record_hit:
-                    ask_command("push-needs-review-record", record_reason, record_hit, "push before its review log")
+                    ask_command("push-needs-review-record", record_reason, record_hit, "push before its review log")  # glossary-ok: the rule id, a literal
                 # A non-forced push of every branch that may update main or master, or sends a local agent-named
                 # branch (rule push-all-main, refuses), one
                 # that writes main or master by name (rule push-main, asks), an agent-worktree

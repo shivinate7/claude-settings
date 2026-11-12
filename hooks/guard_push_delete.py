@@ -1582,7 +1582,7 @@ PUSH_ASK_REASON = (
 # (one dict lookup per id). The merge module loads only when the scan finds a report with the Done-line shape,
 # or a posted comment with a `Fix check:` line.
 REVIEW_LOG_REASON = (
-    "push-needs-review-record: a reviewer report in this session has no posted review log at the head it "
+    "push-needs-review-record: a reviewer report in this session has no posted review log at the head it "  # glossary-ok: the decision slug, a literal
     "reviewed, and a push now moves that head. Order: record first, then the push. Render the record with "
     "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
     "GitHub MCP comment tool, then push. (decision push-needs-review-record)"
