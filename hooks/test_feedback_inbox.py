@@ -1799,6 +1799,58 @@ def case_page_unfiled_remedy_offers_the_read_back():
           "read item 98 back from the page" in reason and "ArtifactData" in reason, reason)
 
 
+# The owner's wrong refusals (feedback inbox 75): a read of the item one turn before the message that names it.
+# Each row: (n, the item the read returns, the owner's message, the page item's id).
+ONE_TURN = (
+    (496, ("cull-496", {"id": "cull-496", "n": 496}), "rename item 496 now", "fb-0961-4"),
+    (499, ("cull-499", {"id": "cull-499", "n": 499}), "rename item 499 now", "fb-0961-9"),
+)
+
+
+def one_turn_line(item_id, n):
+    """The inbox item line of a page item whose number is n."""
+    return "- %s [page] -> page:%d" % (item_id, n)
+
+
+def case_page_read_one_turn_before_the_message_proves_the_filing():
+    """A read-back of item 496 or 499 made one turn before the owner's message, with a send after the message,
+    files the item, so the guard must not refuse it. Red today: read_back takes only the reads after the
+    message's owner record, so the filing check refuses with "no read-back". The copy is read at two sizes,
+    3 items and 40 items, neither holding the number (P8)."""
+    for n, doc, text, item_id in ONE_TURN:
+        sent = "Ruling on item %d now" % n
+        for label, key, files in (("a copy of 3 items", "unfiled", UNFILED),
+                                  ("a copy of 40 items", "filed-forty", FORTY)):
+            p = page_run(new_cfg(), "page-one-turn-read", [(text, (one_turn_line(item_id, n),))],
+                         [owner_rec("what does item %d say" % n),
+                          used_rec("ArtifactData", tool_input("get", collection="items", doc_id=doc[0]), tool_id="rb0"),
+                          result_rec("rb0", response_of([doc])),
+                          owner_rec(text), send_rec(sent)],
+                         cwd=record_repo(key, copy_files(files)))
+            reason = block_reason(p) or ""
+            check("page filing: n %d, read one turn before its message, %s: the send is proved, so the reason is "
+                  "not the send reason" % (n, label), "no send" not in reason, reason)
+            check("page filing: n %d, read one turn before its message, %s: not refused" % (n, label),
+                  p.code == 0 and p.out.strip() == "", reason or p.desc())
+
+
+def case_page_read_after_the_message_and_no_read_control():
+    """Green control beside the red case, passing on the same code: a read of item 496 or 499 after the owner's
+    message, with its send, files the item. With no read at all, the unfiled number still refuses, with the
+    export remedy naming the number. Both legs pass today."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    for n, doc, text, item_id in ONE_TURN:
+        sent = "Ruling on item %d now" % n
+        p = page_run(new_cfg(), "page-read-after", [(text, (one_turn_line(item_id, n),))],
+                     [owner_rec(text), used_rec("ArtifactData", tool_input("get", collection="items", doc_id=doc[0]),
+                                                tool_id="rb1"),
+                      result_rec("rb1", response_of([doc])), send_rec(sent)], cwd=repo)
+        expect_silent("page filing control: n %d read after its message, with its send, passes" % n, p)
+        p = page_run(new_cfg(), "page-no-read", [(text, (one_turn_line(item_id, n),))],
+                     [owner_rec("what does item %d say" % n), owner_rec(text), send_rec(sent)], cwd=repo)
+        expect_unfiled("page filing control: n %d, no read, unfiled, still refuses" % n, p, item_id, str(n))
+
+
 # --------------------------------------------------------------------------- repo cases
 
 def case_repo_send_naming_the_repo_passes():
@@ -4367,6 +4419,8 @@ CASES = (
     case_page_read_back_proves_the_filing,
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
     case_page_unfiled_remedy_offers_the_read_back,
+    case_page_read_one_turn_before_the_message_proves_the_filing,
+    case_page_read_after_the_message_and_no_read_control,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,
