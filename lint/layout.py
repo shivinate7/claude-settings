@@ -272,7 +272,7 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
-WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds
+WAITING_COLLECTIONS = ("items", "answers", "groups", "asks", "meta")  # what the waiting page's database holds and the copy exports; `usage` (the page's press counts) is held too but never exported
 
 
 def artifacts(root):

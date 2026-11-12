@@ -2299,6 +2299,7 @@ async function sendAll() {
   if (!state.db || state.sending) return;
   const st = staged();
   if (!st.length && !withdrawn().length) return;
+  countUse("answers-send");
   state.sending = true; edited(); renderBar();
   const gone = withdrawn().length ? await withdrawAll() : [];
   if (!st.length) { if (gone.length) openSent(gone, new Date().toISOString()); render(); state.sending = false; renderBar(); return; }
@@ -2416,6 +2417,7 @@ function answerLine() {
 // One home for the clipboard write. A frame without permission refuses it, so each caller shows its own fallback.
 async function copyText(text) { try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; } }
 $("copy").addEventListener("click", async () => {
+  countUse("copy-answers");
   const text = answerLine() || "No answers yet.", box = $("copyBox");
   if (await copyText(text)) { state.barNote = "Copied. Paste it in chat."; box.hidden = true; }
   else { box.hidden = false; box.value = text; box.select(); state.barNote = "Select and copy the text in the box."; }
@@ -2874,6 +2876,7 @@ function clearAskNotes() {
 function addAsk() {
   const s = askState, box = $("askText"), text = box.value.trim();
   if (!text || text.length > ASK_MAX) return;
+  countUse("ask-add");
   clearAskNotes();
   s.stack = s.stack.filter((r) => !r.gone);
   s.stack.push({ k: ++askRowN, text });
@@ -2898,6 +2901,7 @@ async function sendAsk(rk) {
     if (text) { s.stack.push({ k: ++askRowN, text }); box.value = ""; saveAskDraft(); }
     batch = s.stack.filter((r) => !r.state && r.edit == null);
     if (!batch.length) { renderAsks(); return; }
+    countUse("ask-send");
     clearAskNotes();
   }
   const where = rp ? rk : "box";
@@ -3131,11 +3135,13 @@ $("dClose").onclick = () => closeDesign(); $("dBack").onclick = () => closeDesig
 $("tabD").onclick = (e) => { e.preventDefault(); openDesign(""); };
 // Status hides #qView and never removes it, so a note typed on a card survives a switch. A load always opens Questions.
 function showTab(which) {
+  const was = state.tab;
   state.tab = which;
   const q = which === "q";
   $("qView").hidden = !q; $("sPanel").hidden = q;
   [["tabQ", q], ["tabStatus", !q]].forEach(([id, on]) => { $(id).setAttribute("aria-selected", String(on)); $(id).tabIndex = on ? 0 : -1; });
   setTitle();
+  if (!q && was !== "s") countUse("status-tab");
   if (!q) document.dispatchEvent(new Event("statusshown"));
 }
 $("tabQ").onclick = (e) => { e.preventDefault(); showTab("q"); };
@@ -3171,6 +3177,14 @@ function render() {
 }
 
 render(); renderAsks();
+// Counts one press of the page in usage/<key> as { n, at }. The press never waits on it, and every error is swallowed. It reads and writes nothing with no store, and it is never called on a load.
+function countUse(key) {
+  const db = state.db; if (!db) return;
+  (async () => {
+    const ref = db.collection("usage").doc(key), cur = await ref.get(), prior = cur && cur.exists ? cur.data() : null;
+    await ref.set({ n: (prior && Number.isFinite(prior.n) ? prior.n : 0) + 1, at: new Date().toISOString() });
+  })().catch(() => {});
+}
 (async () => {
   let db = null;
   try { db = await window.claude?.use?.("db"); } catch (e) { db = null; }
@@ -3715,7 +3729,9 @@ const VIEWS = [["plan", "Plan"], ["log", "Changes"], ["ref", "Reference"], ["rec
 const NOPLAN = (what) => `<section class="box"><p class="lead">${what} appear here once the plan can be read.</p></section>`;
 function renderPlan() { if (!hasData) return; renderNow(); renderRail(); renderPhase(); renderSide(); renderLog(); }
 function setView(v) {
+  const was = ui.view; // build() and a restored view call it with the view already set, so only a change counts
   ui.view = v;
+  if (v !== was) countUse("view-" + v);
   root.querySelectorAll("[data-view]").forEach((b) => { b.setAttribute("aria-selected", String(b.dataset.view === v)); b.tabIndex = b.dataset.view === v ? 0 : -1; });
   VIEWS.forEach(([k]) => { $("v-" + k).hidden = k !== v; });
   saveView();
@@ -3772,7 +3788,7 @@ root.addEventListener("click", (e) => {
     return;
   }
   if ((n = hit("[data-how]"))) { ui.how = !ui.how; renderPhase(); const x = root.querySelector("[data-how]"); if (x) x.focus(); return; }
-  if ((n = hit("[data-tile]"))) { const k = n.dataset.tile, o = n.getAttribute("aria-expanded") !== "true"; n.setAttribute("aria-expanded", String(o)); o ? ui.tiles.add(k) : ui.tiles.delete(k); return; }
+  if ((n = hit("[data-tile]"))) { const k = n.dataset.tile, o = n.getAttribute("aria-expanded") !== "true"; n.setAttribute("aria-expanded", String(o)); o ? ui.tiles.add(k) : ui.tiles.delete(k); if (o) countUse("tile-" + k.toLowerCase().replace(/[^a-z0-9-]/g, "_")); return; }
   const toggle = (btn, set, key) => { const p = btn.closest("li, .tp, .donefold"); const o = !p.classList.contains("open"); p.classList.toggle("open", o); btn.setAttribute("aria-expanded", String(o)); o ? set.add(key) : set.delete(key); };
   if ((n = hit("[data-row]"))) { toggle(n, ui.open, n.dataset.row); return; }
   if ((n = hit("[data-tp]"))) { toggle(n, ui.tps, n.dataset.tp); return; }
