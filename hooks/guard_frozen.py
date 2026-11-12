@@ -1244,6 +1244,47 @@ _PY_TEMP = "\0temp"   # a folder a python or node temp call made: no path of the
 _PY_TEMP_CALLS = ("mkdtemp", "mkstemp", "gettempdir", "TemporaryDirectory", "run_folder")
 
 
+_PY_RUN_FOLDER = "\0run_folder"   # an env key: the script's `run_folder` is lint/_test_temp.py's, bound by import and nothing else
+
+
+def _py_run_folder_is_helper(tree) -> bool:
+    """True when the script imports `run_folder` from `_test_temp` and binds that name no other way (a def,
+    a lambda, an assignment, a parameter, another import). A `run_folder` the script makes itself may name
+    any folder, so a join on it is no temp head. Any scope counts: the check is the whole tree, not an order."""
+    import ast
+    imported = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if (alias.asname or alias.name) == "run_folder":
+                    if node.module == "_test_temp" and node.level == 0 and alias.name == "run_folder":
+                        imported = True
+                    else:
+                        return False
+        elif isinstance(node, ast.Import):
+            if any((alias.asname or alias.name.split(".")[0]) == "run_folder" for alias in node.names):
+                return False
+        elif isinstance(node, ast.Name):
+            if node.id == "run_folder" and not isinstance(node.ctx, ast.Load):
+                return False
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.name == "run_folder":
+                return False
+        elif isinstance(node, ast.arg):
+            if node.arg == "run_folder":
+                return False
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name == "run_folder":
+                return False
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)):
+            if node.name == "run_folder":
+                return False
+        elif isinstance(node, ast.MatchMapping):
+            if node.rest == "run_folder":
+                return False
+    return imported
+
+
 def _py_call_name(node):
     import ast
     func = node.func
@@ -1265,7 +1306,10 @@ def _py_temp_head(node, env):
     if isinstance(node, ast.Call):
         name = _py_call_name(node)
         if name == "run_folder":   # lint/_test_temp.py: its one argument is the root, so only the bare call is a temp folder
-            return not node.args and not node.keywords
+            func = node.func
+            from_helper = _PY_RUN_FOLDER in env if isinstance(func, ast.Name) else \
+                isinstance(func.value, ast.Name) and func.value.id == "_test_temp"
+            return from_helper and not node.args and not node.keywords
         if name in _PY_TEMP_CALLS:
             return len(node.args) < 3 and not any(isinstance(arg, ast.Starred) for arg in node.args) \
                 and not any(keyword.arg in ("dir", None) for keyword in node.keywords)
@@ -1360,9 +1404,12 @@ def _py_env_at(tree, script: str = ""):
     came from: `__file__` is that path, so `dirname(__file__)` is the script's own folder."""
     top = {id(statement) for statement in tree.body}
     events = _py_bindings(tree)
+    run_folder_is_helper = _py_run_folder_is_helper(tree)
 
     def env_at(call):
         env = {"__file__": [script]} if script else {}
+        if run_folder_is_helper:
+            env[_PY_RUN_FOLDER] = [_PY_TEMP]
         for end, name, value, node in events:
             if end > (call.lineno, call.col_offset):
                 break
