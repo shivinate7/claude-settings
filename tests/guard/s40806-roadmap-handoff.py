@@ -8,7 +8,9 @@ FAMILY = "merge"  # rule roadmap-one-writer's lane handoff allow: GUARD_FAMILY=m
 # other push to the record branch is refused, as today.
 #
 # The changed paths are read with git against refs/remotes/origin/roadmap, the tip the guard reads with no fetch. A
-# local roadmap branch is never the base. Each lane branch is cut from that tip, so its handoff is the only change.
+# local roadmap branch is never the base, so a lane cut from one carries that branch's commits into the push, and the
+# push is refused. The range is judged commit by commit: a merge commit or a root commit hides its paths from diff-tree,
+# so either one in the range is refused. Most lane branches are cut from the tip, so their handoff is the only change.
 # Section 40806 runs after the LOG_CHECKS join at section 40805, so its log check joins LOG_CHECKS directly.
 
 HANDOFF_DIR = os.path.join(ROOT, "handoff")
@@ -41,12 +43,16 @@ def _handoff_commit(where, ops):
         sys.exit("fixture setup failed in _apply: the commit in %r failed. stderr: %s" % (where, done.stderr.strip()))
 
 
-def _handoff_repo(name, branch, commits=(), local_roadmap=False, broken_tip=False, no_tip=False, detached=False):
+def _handoff_repo(name, branch, commits=(), local_roadmap=False, broken_tip=False, no_tip=False, detached=False,
+                  orphan_root=False, merged_tip=False):
     """A checkout on `branch`, cut from the record tip. origin/roadmap is that tip, a ref the guard reads with no fetch.
     `commits` is a list of commits, each a list of ops. local_roadmap adds a local roadmap branch one commit past the
-    tip, a base that would differ from origin's. broken_tip points origin/roadmap at a commit the object store lacks,
-    so the changed paths cannot be read. no_tip leaves origin/roadmap unset, as a single-branch clone does. detached
-    leaves HEAD on no branch after the commits. Built on first use."""
+    tip, and cuts the lane from it, so origin/roadmap..HEAD carries that unpushed commit. broken_tip points
+    origin/roadmap at a commit the object store lacks, so the changed paths cannot be read. no_tip leaves
+    origin/roadmap unset, as a single-branch clone does. detached leaves HEAD on no branch after the commits.
+    orphan_root starts the lane from a root commit that adds docs/root.md, so the range holds a root commit. merged_tip
+    moves origin/roadmap one commit past the tip after the commits, then merges that newer tip into the lane, so the
+    range holds a merge commit. Built on first use."""
     where = os.path.join(HANDOFF_DIR, name)
 
     def build():
@@ -59,12 +65,26 @@ def _handoff_repo(name, branch, commits=(), local_roadmap=False, broken_tip=Fals
             if run_vcs(where, "checkout", "-q", "-b", "roadmap").returncode != 0:
                 sys.exit("fixture setup failed in _handoff_repo: local roadmap in %r failed" % where)
             _handoff_commit(where, [("put", "docs/extra.md", "local only\n")])
-            if run_vcs(where, "checkout", "-q", "main").returncode != 0:
-                sys.exit("fixture setup failed in _handoff_repo: back to main in %r failed" % where)
-        if run_vcs(where, "checkout", "-q", "-b", branch).returncode != 0:
+        if orphan_root:
+            if run_vcs(where, "checkout", "-q", "--orphan", branch).returncode != 0:
+                sys.exit("fixture setup failed in _handoff_repo: orphan branch %r in %r failed" % (branch, where))
+            _handoff_commit(where, [("put", "docs/root.md", "root\n")])
+        elif run_vcs(where, "checkout", "-q", "-b", branch).returncode != 0:
             sys.exit("fixture setup failed in _handoff_repo: branch %r in %r failed" % (branch, where))
         for ops in commits:
             _handoff_commit(where, ops)
+        if merged_tip:
+            if run_vcs(where, "checkout", "-q", "-b", "newer-tip", "refs/remotes/origin/roadmap").returncode != 0:
+                sys.exit("fixture setup failed in _handoff_repo: newer tip in %r failed" % where)
+            _handoff_commit(where, [("put", "roadmap/data/steps/newer.json", "{}\n")])
+            if run_vcs(where, "update-ref", "refs/remotes/origin/roadmap", "HEAD").returncode != 0:
+                sys.exit("fixture setup failed in _handoff_repo: the moved origin tip in %r failed" % where)
+            if run_vcs(where, "checkout", "-q", branch).returncode != 0:
+                sys.exit("fixture setup failed in _handoff_repo: back to branch %r in %r failed" % (branch, where))
+            merged = run_vcs(where, *IDENT, "merge", "--no-ff", "-m", "merge the newer record tip", "newer-tip")
+            if merged.returncode != 0:
+                sys.exit("fixture setup failed in _handoff_repo: the merge in %r failed: %s"
+                         % (where, merged.stderr.strip()))
         if detached and run_vcs(where, "checkout", "-q", "--detach").returncode != 0:
             sys.exit("fixture setup failed in _handoff_repo: detaching %r failed" % where)
         head = run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip()
@@ -125,6 +145,12 @@ HANDOFF_REPO = {
     "local-roadmap": _handoff_repo("local-roadmap", "lane/outbox-a",
                                    [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]],
                                    local_roadmap=True),
+    # The lane merged a newer record tip into its branch: the range holds the merge, whose paths diff-tree hides.
+    "merged-tip": _handoff_repo("merged-tip", "lane/outbox-a",
+                                [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]], merged_tip=True),
+    # The lane starts from a root commit: the range holds it, and diff-tree hides a root commit's paths.
+    "root-commit": _handoff_repo("root-commit", "lane/outbox-a",
+                                 [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]], orphan_root=True),
     "broken-tip": _handoff_repo("broken-tip", "lane/outbox-a",
                                 [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]], broken_tip=True),
     # An earlier commit adds a file outside the handoff and a later one removes it: the tree diff against the tip
@@ -171,8 +197,6 @@ record_allow("roadmap-one-writer handoff: a handoff for a lane's second cs-step 
              HANDOFF_PUSH, role_path("hand-two"), cwd=HANDOFF_REPO["add-e"])
 record_allow("roadmap-one-writer handoff: a handoff for a 32-character slug is allowed",
              HANDOFF_PUSH, role_path("hand-long"), cwd=HANDOFF_REPO["long-slug"])
-record_allow("roadmap-one-writer handoff: the changed paths are read against origin/roadmap, not a local roadmap",
-             HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["local-roadmap"])
 # Triage keeps its full allow: none of these is read as a lane's handoff.
 record_allow("roadmap-one-writer handoff: triage's push of two files is allowed",
              HANDOFF_PUSH, TRIAGE, cwd=HANDOFF_REPO["two-files"])
@@ -209,6 +233,25 @@ record_refuse("roadmap-one-writer handoff: a push with no changed paths is refus
 record_refuse("roadmap-one-writer handoff: an earlier commit with a file outside the handoff is refused, "
               "though the last commit is the handoff alone",
               HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["earlier-commit"])
+# A lane cut from an unpushed local roadmap: its commit is in origin/roadmap..HEAD, so the push would carry it.
+record_refuse("roadmap-one-writer handoff: a lane cut from an unpushed local roadmap is refused, since the range "
+              "from origin/roadmap carries the local commit",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["local-roadmap"])
+# A range with a merge commit: the merge's paths hide from diff-tree, so the push is refused, not read as the handoff.
+record_refuse("roadmap-one-writer handoff: a lane that merged a newer record tip into its branch is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["merged-tip"])
+record_refuse("roadmap-one-writer handoff: a lane's refused merge says to rebase the commits onto the record tip",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["merged-tip"], carries="rebase")
+record_refuse("roadmap-one-writer handoff: a lane's refused merge says no merge commit",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["merged-tip"], carries="no merge commit")
+# A range with a root commit: the root's paths hide from diff-tree, so the push is refused.
+record_refuse("roadmap-one-writer handoff: a lane whose range starts at a root commit is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["root-commit"])
+# The range is read before a commit made in the same call exists, so the chain is refused: the remedy says so.
+record_refuse("roadmap-one-writer handoff: a commit and a push in one call is refused, and the remedy says to commit "
+              "in its own call first",
+              VCS + " add roadmap/outbox/outbox-a-handoff.md && " + VCS + " commit -m handoff && " + HANDOFF_PUSH,
+              LANE, cwd=HANDOFF_REPO["no-diff"], carries="commit in its own call first")
 sh("roadmap-one-writer handoff: a forced push of the own handoff is refused, by force-push",
    VCS + " push --force origin HEAD:roadmap", "deny", transcript=LANE, env=ROLE_ENV, cwd=HANDOFF_REPO["modify-own"])
 record_refuse("roadmap-one-writer handoff: a coordinator's push of a handoff is refused",
@@ -264,29 +307,35 @@ record_refuse("roadmap-one-writer handoff: a lane's own handoff push with no ori
               HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["no-tip"], carries=("fetch", "retry the handoff push"))
 
 
-# The path read costs one git spawn per push that reaches the record branch from a lane. Each push is judged with
-# a stand-in git on PATH, which logs every spawn.
-HANDOFF_COST_LABEL = ("roadmap-one-writer: a lane's handoff push reads one changed-path list, a push to another "
-                      "branch reads none, and a push the rule refuses on its tags reads at most one")
+# The handoff check's own git spawns, matched by the argv the check builds: the range read, the path read and the
+# branch read. Another rule spawns the same verbs for its own reads (octopus-push reads a pushed range), so a spawn is
+# counted by these argv prefixes, never by the verb alone. Each push is judged with a stand-in git on PATH, which logs
+# every spawn.
+HANDOFF_SPAWNS = ("rev-list --parents refs/remotes/", "diff-tree --stdin", "symbolic-ref -q --short HEAD")
+HANDOFF_COST_LABEL = ("roadmap-one-writer: a lane's handoff push spawns the range read and the path read, and the "
+                      "branch read only when no cs-step tag names its slug; a push by another session or to another "
+                      "branch spawns none of the three")
 
 
-def _path_read(line):
-    """True when one logged git spawn reads a changed-path list: a diff that names --name-status, --name-only or
-    --raw, or a diff-tree. The conflict-markers check's `git diff --check` is not one."""
+def _spawn_argv(line):
+    """A logged git spawn's argv as one string, without the -C and -c pairs that lead it."""
     words = line.split()
     while len(words) >= 2 and words[0] in ("-C", "-c"):
         words = words[2:]
-    if "--check" in words:
-        return False
-    if words[:1] == ["diff-tree"]:
-        return True
-    return words[:1] == ["diff"] and bool({"--name-status", "--name-only", "--raw"} & set(words))
+    return " ".join(words)
+
+
+def _handoff_spawns(log):
+    """The count of each HANDOFF_SPAWNS argv in the log, in the same order."""
+    lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+    argvs = [_spawn_argv(line) for line in lines]
+    return tuple(sum(1 for argv in argvs if argv.startswith(prefix)) for prefix in HANDOFF_SPAWNS)
 
 
 def handoff_push_cost_case():
-    """A lane's push that reaches the record branch reads its changed paths once, allowed or refused, since the paths
-    decide it. A push to another branch reads none. A push the rule refuses on its tags may read at most one, because
-    the guard need not read the paths there. Why: decision session-tiers, the roadmap-one-writer cost line."""
+    """A lane's push that reaches the record branch spawns the range read and the path read, and the branch read when
+    no cs-step tag names its slug, allowed or refused, since the paths decide it. A push by triage, by another session
+    or to another branch spawns none of the three. Why: decision session-tiers, the roadmap-one-writer cost line."""
     if os.name == "nt":
         return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
     log, path = _stand_in_git("handoffcost")
@@ -299,30 +348,33 @@ def handoff_push_cost_case():
         got, _reason = decide({"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path,
                                "config": None, "agent_id": None, "tool_input": {"command": command},
                                "transcript": transcript, "env": ROLE_ENV})
-        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
-        return got, sum(1 for line in lines if _path_read(line))
+        return got, _handoff_spawns(log)
 
-    # label, command, transcript, checkout, the verdict, whether the read count is exact, the read count.
+    # label, command, transcript, checkout, the verdict, and the counts of HANDOFF_SPAWNS the check must spawn.
     rows = (
-        ("a lane's handoff", HANDOFF_PUSH, LANE, HANDOFF_REPO["modify-own"], "allow", True, 1),
-        ("a lane's handoff for another lane's slug", HANDOFF_PUSH, LANE, HANDOFF_REPO["add-other"], "deny", True, 1),
-        ("a lane's push to lane/foo", VCS + " push origin lane/foo", LANE, HANDOFF_REPO["modify-own"], "allow", True, 0),
-        ("a triage push to roadmap", HANDOFF_PUSH, TRIAGE, HANDOFF_REPO["modify-own"], "allow", False, 1),
+        ("a lane's handoff", HANDOFF_PUSH, LANE, HANDOFF_REPO["modify-own"], "allow", (1, 1, 1)),
+        ("a lane's handoff named by a cs-step tag", HANDOFF_PUSH, role_path("hand-two"), HANDOFF_REPO["add-e"],
+         "allow", (1, 1, 0)),
+        ("a lane's handoff for another lane's slug", HANDOFF_PUSH, LANE, HANDOFF_REPO["add-other"], "deny", (1, 1, 1)),
+        ("a lane's push to lane/foo", VCS + " push origin lane/foo", LANE, HANDOFF_REPO["modify-own"], "allow",
+         (0, 0, 0)),
+        ("a triage push to roadmap", HANDOFF_PUSH, TRIAGE, HANDOFF_REPO["modify-own"], "allow", (0, 0, 0)),
         ("a coordinator's push to roadmap", HANDOFF_PUSH, role_path("coordinator"), HANDOFF_REPO["modify-own"],
-         "deny", False, 1),
+         "deny", (0, 0, 0)),
+        ("another session's lane record", HANDOFF_PUSH, role_path("hand-other"), HANDOFF_REPO["modify-own"],
+         "deny", (0, 0, 0)),
     )
     problems = []
-    for label, command, transcript, cwd, want, exact, reads in rows:
-        got, count = judge(command, cwd, transcript)
+    for label, command, transcript, cwd, want, counts in rows:
+        got, spawned = judge(command, cwd, transcript)
         if got != want:
             problems.append("%s: verdict %s, want %s" % (label, got, want))
-        if (count != reads) if exact else (count > reads):
-            problems.append("%s: %d changed-path reads, want %s%d"
-                            % (label, count, "" if exact else "at most ", reads))
+        if spawned != counts:
+            problems.append("%s: range, path and branch spawns %s, want %s" % (label, spawned, counts))
     if problems:
         return False, "; ".join(problems)
-    return True, "one changed-path read for a lane's push to the record branch, none for another branch, at most one " \
-                 "for a push refused on its tags"
+    return True, "a lane's push spawns the range read and the path read, and the branch read without a cs-step tag; " \
+                 "triage, another session and another branch spawn none"
 
 
 LOG_FAMILY[HANDOFF_COST_LABEL] = FAMILY
