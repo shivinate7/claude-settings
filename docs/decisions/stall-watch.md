@@ -75,6 +75,17 @@ guard rule, so the watcher does the waiting and the session is told once.
   CPU time is life too (coordinator ruling, 2026-11-08 05:02 CST): a child with no output, such as
   `cmd | tail -1`, is working while its CPU time advances. Any process under the job's shell counts;
   the shell's own time does not.
+  A waiter is life too (step stall-watch-ends-quiet-jobs): a process under the job's shell that is not a
+  shell and has a live child (merge on its git children) is never reported, however long the job is quiet.
+  A shell is no waiter, so `( )`, `$( )` and a loop body that wait on a `sleep` are still ended, and so is a
+  `sleep` with a live child (dash runs the last command of `( sleep N & sleep N )` by exec). Limit: a copy that
+  exec'd another command, `( git fetch & git fetch )`, reads as a waiter. The ps `comm` column gives the
+  name; the check adds no process or call.
+  A lone pause is life until its command's first output: a job that is one `sleep N` and one command
+  (`sleep 420; gh api ...`, joined by `;`, `&&` or a newline; the command a simple command or a pipeline) is
+  not reported before its first output byte. The hook reads the original and passes `--lone-pause 1`.
+  Limit: a hung command after the pause is never reported. A second pause, a second list item, `&`, `||` or a
+  group makes the job an ordinary one.
   Cost: no new process, timer or file. The once-a-second `ps` that reads the job's state reads the
   process table with CPU time, and the watcher compares each process to its last reading. On Linux ps
   gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall. So may a serial
