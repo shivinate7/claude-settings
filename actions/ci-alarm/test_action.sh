@@ -147,7 +147,8 @@ jobs_of() {
 attempt_jobs_of() { local id="$1" att="$2"; shift 2; jobs_of "$id.a$att" "$@"; }
 # workflow_file <run id> [file name]: the file served at that run's head, read from stdin. Default ci.yml under .github/workflows.
 workflow_file() {
-  local dir="$tmp/contents/$(printf '%040x' "$1")/.github/workflows"
+  local dir
+  dir="$tmp/contents/$(printf '%040x' "$1")/.github/workflows"
   mkdir -p "$dir" && cat > "$dir/${2:-ci}.yml"
 }
 # workflow_at <run id> <job[:cap]>...: a ci workflow with one job per argument. A job with no cap has no timeout-minutes line.
