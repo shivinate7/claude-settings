@@ -541,6 +541,8 @@ class MailCase(unittest.TestCase):
         self.hold(())
 
     def hold(self, platforms):
+        if MAIL_MODULE is None:  # no hooks/mail.py: each case fails on its own outcome assert (load_hook)
+            return
         patcher = mock.patch.object(MAIL_MODULE, "HELD_PLATFORMS", platforms, create=True)
         patcher.start()
         self.addCleanup(patcher.stop)
