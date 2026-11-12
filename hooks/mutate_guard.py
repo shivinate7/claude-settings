@@ -1712,6 +1712,22 @@ MUTATIONS = [
      '            if char in "()" and not quote and not (char == "(" and index',
      '            if char in "" and not quote and not (char == "(" and index',
      "guard", "worktree-home relative escape: (mkdir ../tmp) from the home is refused"),
+    # The relative-write allowance in `escapes` (relative_write_escape): a write into the system temp or the
+    # session scratchpad passes only with no `..`, outside the primary checkout, and in that temp or scratchpad.
+    # Each mutant drops one clause, then the whole allowance.
+    ("worktree-home: a relative write whose path climbs with .. is allowed through into the system temp",
+     r'".." not in re.split(r"[\\/]", word)',
+     "True",
+     "guard", "worktree-home relative escape: mkdir -p ../../../../tmp from the home, a folder outside"),
+    ("worktree-home: a relative write into the primary checkout is allowed through when it lands in the system temp",
+     "and not (primary and path_is_inside(target, primary) is True)",
+     "and True",
+     "guard", "worktree-home relative escape: cd <primary checkout> && mkdir probe, a relative write into the "
+     "primary checkout, is refused by worktree-home itself"),
+    ("worktree-home: the relative-write allowance is off, so a write after an absolute cd into the scratchpad is refused",
+     r'        if (".." not in re.split(r"[\\/]", word)',
+     r'        if (False and ".." not in re.split(r"[\\/]", word)',
+     "guard", "worktree-home relative escape: cd <session scratchpad> && mkdir probe"),
     ("worktree-home: an unreadable home record denies instead of allowing",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status != "home":',

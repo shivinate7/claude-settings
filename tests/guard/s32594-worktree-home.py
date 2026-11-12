@@ -939,6 +939,9 @@ _relesc_add("worktree-home relative escape: cd <home> && mkdir ../tmp, a write t
             any_of=CD_ESCAPE_RULES)
 _relesc_add("worktree-home relative escape: cd <primary checkout> && mkdir probe, a relative write into the "
             "primary checkout, is refused", "deny", "cd %(primary)s && mkdir probe", "home", any_of=CD_ESCAPE_RULES)
+_relesc_add("worktree-home relative escape: cd <primary checkout> && mkdir probe, a relative write into the "
+            "primary checkout, is refused by worktree-home itself", "deny", "cd %(primary)s && mkdir probe", "home",
+            rule="worktree-home")
 
 
 # The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes
