@@ -1398,7 +1398,7 @@ class Stale(unittest.TestCase):
     # The 618 sequence: triage closed the item, the close copied the answer into lastAnswer, and answers/<id> stayed. A close keeps
     # the answer (SKILL.md, "Route and close"), so the kept-answer line never tells the writer to delete it. Only a reword or an
     # overturn deletes an answer; a reopen keeps it. Ruling: triage, 15:01 CST Nov 12 (pick a: page_grant rule 4 stays, lane checks
-    # run before close, park unchanged, kept-answer line stays without delete remedy), recorded at roadmap commit 23559d419.
+    # run before close, park unchanged, kept-answer line stays without delete remedy), recorded in the roadmap record.
 
     def test_a_kept_line_on_a_closed_item_with_its_last_answer_never_tells_the_writer_to_delete_the_answer(self):
         current, _ = self.current_and_behind()

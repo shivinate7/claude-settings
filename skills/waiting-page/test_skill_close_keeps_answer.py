@@ -31,7 +31,7 @@ A negation does not undo a delete. Only a sentence whose wording is one of APPRO
 "never", "not", "do not", "without" and "skip" in any other sentence leave the delete an instruction.
 
 Ruling: triage, 15:01 CST Nov 12 (pick a: page_grant rule 4 stays, lane checks run before close, park unchanged, kept-answer
-line stays without delete remedy), recorded at roadmap commit 23559d419.
+line stays without delete remedy), recorded in the roadmap record.
 """
 import os
 import re
