@@ -83,6 +83,8 @@ MERGE_NAMES = ("MERGE_TOOLS", "TRUST_TOOLS", "ARCHIVE_TOOL", "BRIEF_TOOL")
 GITHUB_WRITE_TOOLS = tuple("mcp__github__" + short for short in (
     "merge_pull_request", "create_pull_request", "push_files", "create_or_update_file", "delete_file",
     "update_pull_request"))
+# The auto-merge call lands a head on the base as a merge does, so the guard judges it too (guard_merge.MERGE_TOOLS).
+AUTO_MERGE_TOOL = "mcp__github__enable_pr_auto_merge"
 
 
 def load_hook(name, path):
@@ -187,6 +189,19 @@ class JudgedToolMatcher(unittest.TestCase):
     def test_guard_matcher_covers_the_six_github_write_tools(self):
         self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
         missed = self.unmatched(GITHUB_WRITE_TOOLS)
+        if missed:
+            self.fail("no guard matcher covers: %s" % ", ".join(missed))
+
+    def test_guard_merge_judges_enable_pr_auto_merge(self):
+        # Scope first: guard_merge.py loads and names its merge tools. Then the auto-merge call is one of them.
+        merge = load_hook("guard_merge_auto_judged", GUARD_MERGE_SOURCE)
+        self.assertTrue(merge.MERGE_TOOLS, "guard_merge.MERGE_TOOLS is empty: nothing is judged as a merge")
+        self.assertIn(AUTO_MERGE_TOOL, merge.MERGE_TOOLS,
+                      "guard_merge.MERGE_TOOLS does not name %s: the guard never judges an auto-merge call" % AUTO_MERGE_TOOL)
+
+    def test_guard_matcher_covers_enable_pr_auto_merge(self):
+        self.assertTrue(self.matchers, "no guard.py entry in settings.json PreToolUse")
+        missed = self.unmatched([AUTO_MERGE_TOOL])
         if missed:
             self.fail("no guard matcher covers: %s" % ", ".join(missed))
 

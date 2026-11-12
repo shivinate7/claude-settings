@@ -492,6 +492,50 @@ sh("merge-checks: a heredoc body that names a merge is data",
    env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
 
 
+# =========================================================================== 5b-auto. enable_pr_auto_merge
+#
+# `mcp__github__enable_pr_auto_merge` queues the merge that GitHub makes once the required checks pass, so it lands the head on
+# the base as a merge does. The guard judges it as the merge tool's call: a head that is not settled is refused, and so is a
+# head while another ready pull request on the base runs CI and does not hold it. A read that cannot run is unknown, and denies.
+# The controls are the same call where no CI blocks the head, and each stays allowed.
+
+AUTO_MERGE_TOOL = "mcp__github__enable_pr_auto_merge"
+
+
+def auto_merge_case(name, expected, env, carries=(), lacks=()):
+    """One enable_pr_auto_merge call on pull request 12 of y/x, read against the fake gh folder `env`. A deny is merge-checks."""
+    add(name, expected, "merge-checks" if expected == "deny" else None, tool=AUTO_MERGE_TOOL, cwd=NOGIT, pullNumber=12,
+        repo="x", owner="y", env_path=env + os.pathsep + PY_PATH, config=MERGECFG, carries=carries, lacks=lacks,
+        silent=expected == "allow")
+
+
+# Controls: the head is settled, or the busy pull request's CI has passed, holds this head, is a draft, or is on another base.
+auto_merge_case("merge-auto: enable_pr_auto_merge on a settled head with no other ready pr is allowed", "allow", GHMAIN)
+auto_merge_case("merge-auto: enable_pr_auto_merge is allowed when the other ready pr's required check has passed", "allow", GHBATCHDONE)
+auto_merge_case("merge-auto: enable_pr_auto_merge is allowed while another ready pr that holds this head has a check pending",
+                "allow", GHBATCHCONTAIN)
+auto_merge_case("merge-auto: enable_pr_auto_merge is allowed past another ready pr that is a draft", "allow", GHBATCHDRAFT)
+auto_merge_case("merge-auto: enable_pr_auto_merge is allowed past another ready pr on another base", "allow", GHBATCHBASE)
+
+# Denials: a head that is not settled, or another ready pull request whose CI runs and does not hold this head. The last one is
+# on page two of the open list, so the whole list is read, not its first page.
+auto_merge_case("merge-auto: enable_pr_auto_merge is refused while this head's required check is pending", "deny", GHPEND,
+                carries="pending")
+auto_merge_case("merge-auto: enable_pr_auto_merge is refused while this head's check has failed", "deny", GHRED, carries="red")
+auto_merge_case("merge-auto: enable_pr_auto_merge is refused while another ready pr's check is pending and its head does not hold this one",
+                "deny", GHBATCHDIVERGED, carries="#2")
+auto_merge_case("merge-auto: enable_pr_auto_merge is refused while another ready pr's workflow runs",
+                "deny", GHRUNBLOCK, carries=("#2", "ci-checks"))
+auto_merge_case("merge-auto: enable_pr_auto_merge is refused while the busy pr is on page two of the open list",
+                "deny", GHBATCHPAGE2, carries=("#2", "pending"))
+auto_merge_case("merge-auto: enable_pr_auto_merge is unknown, and denies, when the read cannot run", "deny", GHBROKEN,
+                carries="unknown")
+# A refusal's remedy never names the merge tool's merge act (git-remedy-never-names-target): the merge tool's own
+# remedy (`merge <pr> --confirm`) is that act, so it must not reach the auto-merge refusal.
+auto_merge_case("merge-auto: the refusal of a pending head names no merge act, so it hands Claude no way round", "deny", GHPEND,
+                carries="not settled", lacks=("--confirm", "run the merge tool"))
+
+
 # =========================================================================== 5c. a bare merge in a repo that uses the merge tool
 #
 # A bare `gh pr merge` in a repo whose `.github/stamp.json` has a `merge` block skips the shared merge
