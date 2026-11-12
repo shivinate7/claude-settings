@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-12T21:56:00Z",
+  "context": "Goal: a session on Windows wakes when its background command ends, as it does in the cloud.\nProblem (risk): nobody knows whether Claude Code on Windows wakes a session when a background command finishes, and sessions there rely on it.\nBased on (read): you offered to test it at 15:50 CST; nothing waits on it.\nDeparts from: main \u2014 adds nothing; the answer is recorded for Windows sessions.\nWhy yours: no computer of yours is connected to any session (measured 2026-11-12 15:50 CST, the folder list was empty).",
+  "home": "step background-command wake on Windows (retrospective)",
+  "id": "windows-wake-test",
+  "kind": "task",
+  "n": 657,
+  "options": [
+    {
+      "gain": "Windows sessions can rely on the wake.",
+      "how": "Paste into Claude Code on Windows: \"Run `sleep 5; echo done` with run_in_background true. Then end your turn at once and say nothing more. When the command's exit wakes you, reply only: WOKE.\" If it replies WOKE by itself, pick this.",
+      "id": "woke",
+      "key": "a",
+      "label": "It woke",
+      "lose": "A minute of your time."
+    },
+    {
+      "gain": "Windows sessions get a check-in instead.",
+      "how": "Same paste; pick this if it stays silent until you type.",
+      "id": "no-wake",
+      "key": "b",
+      "label": "It did not wake",
+      "lose": "A minute of your time."
+    },
+    {
+      "gain": "No time spent.",
+      "how": "Nothing to do.",
+      "id": "skip",
+      "key": "c",
+      "label": "Skip the test",
+      "lose": "The Windows wake stays unknown."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 15:51 CST Nov 12 (you offered in chat at 15:50 CST)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Windows wake test (optional)",
+  "status": "open",
+  "title": "Optional: check that a finished background command wakes Claude Code on Windows",
+  "why": "It needs Claude Code on your Windows machine."
+}

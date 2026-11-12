@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-12T21:56:00Z",
+  "context": "Goal: the batch gate is as short as it can be once the Linux splits and your macOS ruling (R61) land.\nProblem (goal): after those land, the Windows job checks-windows-rest is the longest gate job at about 31 minutes, so every batch still waits about 32 minutes.\nBased on (measured): checks-windows-rest took 31.7 and 30.1 minutes on two batch PR runs; most of it is Windows starting processes (274 seconds of guard wrappers on Windows against 28 on Linux).\nBased on (measured): the touched-tests job ran 1288 times in 24 hours, each fetching full history for 19 to 30 seconds.\nDeparts from: main runs checks-windows-rest as one job and fetches full history for touched-tests \u2014 the job splits into 2 or 3 parallel jobs and touched-tests fetches only recent history.",
+  "home": "decision test-strategy-reset; skill ci-hygiene",
+  "id": "ci-windows-rest-split",
+  "kind": "decision",
+  "n": 654,
+  "options": [
+    {
+      "gain": "The gate drops from about 32 to about 16 minutes, and about 430 Linux minutes a day leave drafts.",
+      "how": "checks-windows-rest runs as 2 or 3 jobs side by side, and touched-tests fetches only recent history.",
+      "id": "split-and-shallow",
+      "key": "a",
+      "label": "Split the job and fetch less history (Recommended)",
+      "lose": "No coverage lost; the split works around slow Windows process starts rather than fixing them."
+    },
+    {
+      "gain": "Each suite runs once per batch, about 290 runner minutes saved per batch.",
+      "how": "As a, plus the push-to-main run is skipped when its files equal the green batch PR head (8 of 8 merges matched), with the full Windows shards moved into the PR run.",
+      "id": "skip-matching-push",
+      "key": "b",
+      "label": "a, and skip the main run when it matches the batch",
+      "lose": "No check of each commit on main; your macOS nightly skip and the red-main gate read main runs and need rework; no speed gain, since Linux and Windows never queue."
+    },
+    {
+      "gain": "About 60 Windows minutes saved per batch.",
+      "how": "As a, plus the full Windows guard shards stop running on the push to main, and one mutation test runs on Linux only.",
+      "id": "drop-windows-full-shards",
+      "key": "c",
+      "label": "a, and drop the full Windows guard shards on main",
+      "lose": "Guard cases not tagged for Windows are no longer checked on Windows."
+    },
+    {
+      "gain": "No work and no risk.",
+      "how": "Nothing changes.",
+      "id": "keep",
+      "key": "d",
+      "label": "Keep as is",
+      "lose": "Each batch keeps waiting about 32 minutes on one Windows job."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
+  "ref": "retrospective 15:53 CST Nov 12, Linux and Windows CI audit (runs 43288661492, 43234925158)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Shorter batch gate after the macOS cuts",
+  "status": "open",
+  "title": "Split the longest Windows check job and fetch less history for touched-tests",
+  "why": "Each option trades CI time against coverage on main, which is your call."
+}

@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T21:56:00Z",
+  "context": "Goal: a guard that asks you about a model setting asks only when a session really tries to write it.\nProblem (risk): a prompt asked you to let hooks/probe.py write an Opus model setting into a local settings file until 2027-01-14, but probe.py never runs that command, so the prompt may be a false alarm from the model-cap guard.\nBased on (read): the retrospective advised deny; round-3 builders set Opus per spawn and need no settings write.\nDeparts from: main \u2014 adds nothing; the answer decides whether the model-cap guard needs a fix.\nWhy yours: the prompt appeared on your screen, and no session logs which one raised it (measured 2026-11-12, the retrospective found no record of it).",
+  "home": "step agent-model-cap false alarms",
+  "id": "model-cap-prompt-source",
+  "kind": "task",
+  "n": 656,
+  "options": [
+    {
+      "gain": "The guard's false alarm can be traced and fixed.",
+      "how": "Write the session's title, or where you saw the prompt, in the note box, then Save.",
+      "id": "name-session",
+      "key": "a",
+      "label": "Name the session",
+      "lose": "A minute of your time."
+    },
+    {
+      "gain": "Nothing more to do.",
+      "how": "Save with no note; the retrospective files it as a note only.",
+      "id": "dont-know",
+      "key": "b",
+      "label": "You don't know",
+      "lose": "The false alarm stays untraced until it happens again."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 15:51 CST Nov 12 (your chat question 15:50 CST)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Which session asked to set Opus",
+  "status": "open",
+  "title": "Say which session showed you the prompt to write an Opus setting until Jan 14",
+  "why": "Only you saw the prompt, so only you can say where it came from."
+}

@@ -1,0 +1,14 @@
+{
+ "id": "ready-pr-touched-tests",
+ "title": "Measure whether the merging head runs the lane-touched tests a ready PR skips",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane R42 part 2 15:52 CST Nov 12 (record-writer for act 5, PR #2993): a PR moved to ready runs nothing in the lane-touched-tests job; unknown whether checks.yml covers those tests on the merging head.",
+ "source": "lane merge-flow-after-anthropic 15:52 CST Nov 12",
+ "note": "Read one ready PR run and the batch run that merges it; report which lane-touched tests ran where. If none ran on the merging head, file the fix. Decision draft-until-reviewed.",
+ "updatedAt": "2026-11-12T15:56:59-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "red-main-wakes-runner",
+ "title": "After each merge the batch runner sets a one-time check-in that reads the push run on main",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane R42 part 2 refuter gap 1, 15:52 CST Nov 12: a red main push run wakes no session; act 3 names the breaking merge but nothing reads it.",
+ "source": "lane merge-flow-after-anthropic 15:52 CST Nov 12; rule git-ci-wait-checks-in",
+ "note": "The batch runner sets one check-in per merge for the push run on main, and again after each red job, wider apart (decision ci-wait-reads-run-status). Red test first on a red push run with no wake.",
+ "updatedAt": "2026-11-12T15:56:59-06:00"
+}

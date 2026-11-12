@@ -1,0 +1,15 @@
+{
+ "id": "stall-watch-clock-pins",
+ "title": "The stall-watch tests stop asserting wall-clock bounds",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective CI audit 15:53 CST Nov 12: hooks/test_stall_watch.py:287 and :452 assert secs <= 5.0 and <= 3.0, and the suite runs 195-330 s; this breaks decision test-strategy-reset rule 2 (no wall-clock bounds).",
+ "source": "retrospective 15:53 CST Nov 12",
+ "note": "Replace both bounds with an event or count check that does not read the clock; red first on a slow runner stub. Express under R55 (CI fixes).",
+ "updatedAt": "2026-11-12T15:56:59-06:00",
+ "order": -295
+}
