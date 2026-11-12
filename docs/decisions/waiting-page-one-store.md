@@ -2,9 +2,9 @@
 
 ## The ruling
 
-Owner, 2026-11-12 12:40 CST, relayed by the coordinator at 12:52 CST, as written: "the artifact is never operated upon by two accounts at the same time ... before it runs on another account i tend to wind it all down ... so as long as the artifact/data gets exported in a timely enough matter (not real time) it's morerso okay from that aspect of acocunt switching ... now if there are other problems /concerns like even within the same account the setup with all the lanes + triage is causing some sorta internal lag ... then we should still be open to the switchr otue".
+Owner, 2026-11-12 12:40 CST, relayed by the coordinator, as written: "the artifact is never operated upon by two accounts at the same time ... before it runs on another account i tend to wind it all down ... so as long as the artifact/data gets exported in a timely enough matter (not real time) it's morerso okay from that aspect of acocunt switching ... now if there are other problems /concerns like even within the same account the setup with all the lanes + triage is causing some sorta internal lag ... then we should still be open to the switchr otue".
 
-Basis: owner R28, 2026-11-11 11:50 CST (restart plan item 3.14, `docs/plans/restart-plan.md` 554-555): "i just care about the outcomes not the plumbing to reach it". Owner, 2026-11-12 11:24 CST, through the retrospective: "it shouldn't be a skill thing though it should be pretty mechanized". Owner, 12:10 CST, relayed at 12:11 CST: "Custom connectors are not allowed".
+Basis: owner R28, 2026-11-11 11:50 CST (restart plan item 3.14, `docs/plans/restart-plan.md` 554-555): "remember ij [sic] just care about the outcomes not the plumbing to reach it". Owner, 2026-11-12 11:24 CST, through the retrospective: "it shouldn't be a skill thing though it should be pretty mechanized". Owner, 12:10 CST, relayed by the coordinator: "Custom connectors are not allowed -- so we can do route B".
 
 - The page's database is the one store. Sessions read and write it live through ArtifactData. The page keeps `db` and `comments`, and nothing changes on the page.
 - The copy in git is a backup for an account move and for recovery. It is exported in a timely way, not in real time. No session reads it as the truth.
@@ -24,7 +24,7 @@ Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the own
 
 - The Questions tab reads the database live (`onSnapshot`, 3181-3193). A lane's write shows at once. The page does not drift from the store, because the page is the store's view.
 - What drifts is the backup. The writer copies it by hand at each wake (`skills/waiting-page/reference/copies-and-accounts.md`). On 2026-11-11 it went 11 hours stale because the Stop check
-  missed a cloud writer (step `waiting-export-miss-cloud`: `hooks/feedback_guard.py` 1353-1355 matches the writer id against the bare session id only).
+  missed a cloud writer. The cause is a code read, and its red case is the first act of step `waiting-export-miss-cloud`: `hooks/feedback_guard.py` 1353-1355 matches the writer id against the bare session id only. The step note for this decision measured the copy 58 items behind the database at 12:40 CST (577 against 519).
 - The Status tab is baked into the page and changes only on a republish (`page.html` 1017, 3198-3202). That lag is the republish, not the database.
 - It is unknown which of these the owner saw as stale data. The two accounts, which he winds down before a switch, are the only case where the database and git must agree.
 
@@ -32,8 +32,8 @@ Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the own
 
 Each is a measured event in the same account, never a guess. The one who meets it files a debt that points to this decision, and triage asks the owner for the switch.
 
-1. A session acts on an answer older than the database's current copy of that item. Check: `page_grant.py` prints a changed or withdrawn answer on its re-read (SKILL.md "Read the answers").
-2. Two writers clobber one document: an `if_version` conflict on a write, or a `set` that dropped `closed` or `dismissed` (SKILL.md "The database").
+1. The owner reports a card that shows data older than a lane's write. His report is the check; nothing else reads it.
+2. A write loses a field another writer set: an item that was closed or marked read shows open again, because a `set` replaced the document (SKILL.md "The database"). The writer sees it at its wake. A refused close that the writer retries (SKILL.md 452-453) is normal and does not count.
 3. A Send takes long enough to read as lag. Step `waiting-lag-read` prints each answer's delay from `at` to its receipt `read`. The threshold is unmeasured. The owner's report of a stale card counts too.
 
 ## If route B is triggered
@@ -69,7 +69,7 @@ The R28 steps `prose-tending-contract`, `prose-tending-move-stores`, `feedback-l
 
 ## Why
 
-Protects: the owner sees live data on the page, and a lost page or an account switch loses little, because a timely copy sits in git. It also protects against building a second system the owner does not need.
+Protects: the owner sees live data on the page, and a lost page or an account switch loses what the copy has not yet caught, which the export check bounds. It also protects against building a second system the owner does not need.
 
 ## Cost
 
