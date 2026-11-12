@@ -768,9 +768,11 @@ def assert_finding(case, got, path, undo, earlier):
 class LaneUndo(unittest.TestCase):
     """The lane undo read, in its two shapes only. A non-merge lane commit undoes an earlier lane commit when it puts a
     whole file or a hunk back to its text before that commit (the earlier commit changed six lines or more there), or
-    when it nets a loss of lines the lane added to a test file. Moves, renames and merges are not read here. Each case
-    asserts the lane's commits before its verdict (P7). Controls are the false alarms: a fix-up, a refactor that keeps
-    lines, a test line replaced by a better one."""
+    when it nets a loss of lines the lane added to a test file. A commit that renames a file is read across the rename:
+    the text before it at the old name, the text after it at the new name. Merges are not read here. A lane finding is
+    report-only: it is printed and marked report-only, and it does not set the exit code. Each case asserts the lane's
+    commits before its verdict (P7). Controls are the false alarms: a fix-up, a refactor that keeps lines, a test line
+    replaced by a better one."""
     CARD = BODY + "function Card() {}\n"  # app.txt as base_repo() leaves it
     CASE = "".join("card test case line %d\n" % i for i in range(1, 7))  # six lines a lane adds
     BLOCK = "".join("incident test line %d\n" % i for i in range(1, 50))  # 49 lines: a full-size drop
@@ -805,6 +807,19 @@ class LaneUndo(unittest.TestCase):
         a, b = self.drop_app_lines()
         self.assertEqual(self.lane(), [a, b])
         assert_finding(self, r.verdict(), "app.txt", b, a)
+
+    def main_run(self):
+        """main() on the lane's repo, as the CLI runs it. -> (exit code, printed lines)."""
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(io.StringIO()) as out:
+            os.environ.pop("CI", None)
+            code = C.main(["--repo", self.r.dir, "--upstream", "origin/main", "--head", "HEAD"])
+        return code, out.getvalue().splitlines()
+
+    def assert_report_only(self, lines, path, undo, earlier):
+        """One printed line names the path, the undoing commit and the earlier commit it undoes, and is marked report-only."""
+        named = [x for x in lines if path in x and undo[:9] in x and earlier[:9] in x]
+        self.assertTrue(named, "no printed line names %s, undoing %s and earlier %s: %r" % (path, undo[:9], earlier[:9], lines))
+        self.assertTrue(any("report-only" in x for x in named), "the lane undo line is not marked report-only: %r" % named)
 
     def test_a_whole_file_put_back_byte_for_byte_to_its_pre_lane_blob_is_red(self):
         r = self.r
@@ -1169,8 +1184,9 @@ class LaneUndo(unittest.TestCase):
         self.assertEqual(r.sh("show", b + ":tests/card_renamed.txt").splitlines()[:-1], r.sh("show", a + ":tests/card.txt").splitlines())  # scope: B keeps every line A holds and appends one
         self.assertEqual(r.verdict(), [], "a rename that appends one line drops nothing, so the old path is not read as put back")
 
-    def test_a_lane_that_deletes_the_eight_lines_it_added_to_a_test_file_is_red(self):
-        """Control for the moved-lines case: the same eight lines taken out of the file, not moved within it, still read as a lane undo."""
+    def test_a_lane_that_deletes_the_eight_lines_it_added_to_a_test_file_is_report_only(self):
+        """Control for the moved-lines case: the same eight lines taken out of the file, not moved within it, are a lane undo
+        finding. It is printed and marked report-only, and the run exits 0."""
         r = self.r
         kept = "".join("card kept line %d\n" % i for i in range(1, 21))
         self.main_then_lane("tests/card.txt", kept)
@@ -1181,6 +1197,11 @@ class LaneUndo(unittest.TestCase):
         self.assertNotIn("eight test line 1", r.sh("show", b + ":tests/card.txt").splitlines())  # scope: B deletes the eight lines
         self.assertEqual(r.sh("show", b + ":tests/card.txt").splitlines(), kept.splitlines())  # scope: B holds main's text only
         assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+        code, lines = self.main_run()
+        with self.subTest("printed and marked report-only"):
+            self.assert_report_only(lines, "tests/card.txt", b, a)
+        with self.subTest("exit 0"):
+            self.assertEqual(code, 0, "a lane undo finding alone exits %d: %r" % (code, lines))
 
     def test_a_lane_that_moves_its_eight_test_lines_within_the_file_is_green(self):
         """A line counts as lost only when it is gone from the whole file. B moves the lane's eight lines to the end of the file, so each one is still there."""
@@ -1194,6 +1215,66 @@ class LaneUndo(unittest.TestCase):
         self.assertNotEqual(r.sh("show", b + ":tests/card.txt"), r.sh("show", a + ":tests/card.txt"))  # scope: B moves the block, so the text changes
         self.assertEqual(sorted(r.sh("show", b + ":tests/card.txt").splitlines()), sorted(r.sh("show", a + ":tests/card.txt").splitlines()))  # scope: B only reorders A's lines
         self.assertEqual(r.verdict(), [], "moving the lane's eight lines within the file reads them as lost, though each is still in the file")
+
+    def test_a_lane_that_renames_a_test_file_and_drops_three_of_its_eight_lines_is_report_only(self):
+        """B renames the file and takes three of A's eight lines out of it in one commit. The rename is read across, so the
+        drop is a lane undo finding: printed and marked report-only, and the run exits 0."""
+        r = self.r
+        kept = "card test kept line\n"
+        self.main_then_lane("tests/card.txt", kept)
+        a = r.commit("A: add eight test lines", tests__card_txt=kept + self.EIGHT)
+        r.sh("mv", "tests/card.txt", "tests/card_renamed.txt")
+        b = r.commit("B: rename the test file and drop three of its lines", tests__card_renamed_txt=kept + "".join(self.EIGHT.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertTrue(r.sh("show", "--format=", "-M", "--name-status", b).startswith("R"), "scope: B renames the file")
+        self.assertNotIn("tests/card.txt", r.sh("ls-tree", "-r", "--name-only", b).split())  # scope: B moves the file off the old path
+        self.assertNotIn("eight test line 1", r.sh("show", b + ":tests/card_renamed.txt").splitlines())  # scope: B drops A's line 1
+        self.assertIn("eight test line 8", r.sh("show", b + ":tests/card_renamed.txt").splitlines())  # scope: B keeps A's line 8
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+        code, lines = self.main_run()
+        with self.subTest("printed and marked report-only"):
+            self.assert_report_only(lines, "tests/card.txt", b, a)
+        with self.subTest("exit 0"):
+            self.assertEqual(code, 0, "a lane undo finding alone exits %d: %r" % (code, lines))
+
+    def test_a_lane_undo_finding_and_a_main_lost_line_in_one_range_exit_1_from_the_main_finding_only(self):
+        """The lane undo finding is report-only. The merge of main in the same range drops a line main added, so main's
+        own reads FAIL and set the exit code, and no lane undo line is among those FAILs."""
+        r = self.r
+        a, b = self.drop_app_lines()
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds a line", app_txt=self.CARD + "added by main\n")
+        r.push()
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-commit", "--no-ff", "origin/main")
+        r.put("app.txt", self.CARD)  # the hand drop: the merge takes main's line back out
+        r.sh("add", "-A")
+        r.sh("commit", "-q", "-m", "Merge main")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(self.lane(), [a, b, m])  # scope: the merge is the last lane commit
+        self.assertNotIn("added by main", r.sh("show", "HEAD:app.txt").splitlines())  # scope: the merge drops main's line
+        code, lines = self.main_run()
+        fails = [x for x in lines if "FAIL" in x]
+        with self.subTest("the lost-line finding is a FAIL"):
+            self.assertTrue(any("merge %s drops" % m[:9] in x for x in fails), "no FAIL names the merge %s that drops main's line: %r" % (m[:9], lines))
+        with self.subTest("no lane undo line is a FAIL"):
+            self.assertFalse(any("lane undo" in x for x in fails), "a lane undo finding is printed as a FAIL: %r" % fails)
+        with self.subTest("the lane undo finding is printed and marked report-only"):
+            self.assert_report_only(lines, "app.txt", b, a)
+        with self.subTest("exit 1"):
+            self.assertEqual(code, 1, "the main finding did not exit 1: %r" % lines)
+
+    def test_a_lane_drop_of_test_lines_excused_by_the_drops_lines_trailer_prints_no_lane_line_and_exits_0(self):  # control
+        """The trailer excuses the test-line shape too: the check reads no finding, main prints no lane undo line, and it exits 0."""
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove three of the lines\n\n%s: tests/card.txt -- the owner cut three lines" % C.TRAILER,
+                     tests__card_txt="".join(self.EIGHT.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [e, c])  # scope: C is the second lane commit
+        self.assertEqual(r.verdict(), [], "the trailer excuses the drop, so the check reads no finding")
+        code, lines = self.main_run()
+        self.assertFalse([x for x in lines if "lane undo" in x], "a lane undo line is printed for an excused drop: %r" % lines)
+        self.assertEqual(code, 0, "an excused lane drop exits %d: %r" % (code, lines))
 
 
 class IntegrationBase(unittest.TestCase):
