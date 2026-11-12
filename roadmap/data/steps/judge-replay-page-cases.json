@@ -1,0 +1,14 @@
+{
+ "id": "judge-replay-page-cases",
+ "title": "The 5 call_judge.page replay cases ship with verdicts a CI run recorded",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL11UY3p6jnSXrTspmu",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Draft PR #2737 (step judge-replay-corpus) ships without the 5 call_judge.page replay cases (53 of 58 proven), because their expected verdicts can only be recorded by a CI run with the secret. No unrecorded verdict enters a batch (coordinator 07:41 CST).",
+ "source": "coordinator 08:35 CST Nov 12, via lane fan-code-workflows",
+ "note": "Code. (1) checks.yml gains a workflow_dispatch input judge_replay_only that runs only the scope job and the judge-replay job (red case first); build it after cap PR #2653 merges, since checks.yml is shared. (2) Dispatch it once on the follow-up branch. (3) Add the 5 page cases, each with repo shivinate7/claude-settings, with their recorded verdicts. Not started 08:36 CST.",
+ "updatedAt": "$T"
+}
