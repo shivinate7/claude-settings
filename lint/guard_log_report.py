@@ -17,8 +17,7 @@ was written has no zone: `when` is its naked time and `at` is None, never assume
 --between START END (aware ISO 8601 times) prints the rows whose `at` falls in [START, END], and the
 count of old lines that could fall in it under some zone, for the batch pace read (window()).
 --rule narrows --between to one rule id (the pace read uses load-brake).
-In a cloud session (CLAUDE_CODE_REMOTE=true) that read prints `n/a (cloud)` and no count.
-The brake guards the owner's own machine."""
+A cloud session reads it the same way: the brake runs there too (owner, 14:36 CST Nov 10)."""
 import argparse
 import os
 import re
@@ -29,14 +28,13 @@ from datetime import datetime, timedelta, timezone
 # One home for the placeholder: hooks/guard_core.py. lint/ and hooks/ land side by side, in the
 # repo and under ~/.claude, so the hop holds in both places (lint/report_guard.py does the same).
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER, is_cloud  # noqa: E402
+from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
 OVERRIDE = "override"  # a refusal an owner override lifted: counted, and a key only when present
 FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first line in the whole log, or "never"
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
-BRAKE_RULE = "load-brake"
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
 MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
@@ -216,9 +214,6 @@ def main(argv):
         sys.stdout.reconfigure(errors="replace")
     if args.between and any(t.tzinfo is None for t in args.between):
         ap.error("--between takes times with a UTC offset, such as 2026-11-01T16:55:00-06:00")
-    if args.between and args.rule == BRAKE_RULE and is_cloud():
-        print("n/a (cloud)")  # the brake guards the owner's own machine, so a cloud pace read reports n/a, not a count
-        return 0
     ids = None
     if args.all_rules:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script folder off the path
