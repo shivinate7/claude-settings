@@ -108,7 +108,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
     def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
-                 remote_session_id=None, path_dir=None, trace_file=None):
+                 remote_session_id=None, path_dir=None, trace_file=None, ref=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
@@ -118,6 +118,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
         path_dir: a folder put first on PATH, such as a git shim's folder, or None for the runner's own PATH.
         trace_file: a file git appends its own trace to (GIT_TRACE), or None for no trace.
+        ref: the CLAUDE_SETTINGS_REF value, or None to unset it (the recovery is off unless a case turns it on).
         """
         where = self.primary if session_cwd is None else session_cwd
         # Forward slashes: the hook reads "cwd" with sed, and a doubled backslash is not a path.
@@ -133,6 +134,9 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
+        env.pop("CLAUDE_SETTINGS_REF", None)
+        if ref is not None:
+            env["CLAUDE_SETTINGS_REF"] = ref
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
         if remote_session_id is not None:
@@ -1708,6 +1712,20 @@ class SessionStartStableFreshnessTests(GitFixtureMixin, SessionStartAgentWorktre
         lines = self.run_hook()
         self.assertEqual(self.stale_lines(lines), [("2", "origin/main")],
                          "want one stale line counting main 2 behind origin/main, got %r" % lines)
+
+    def test_under_ref_main_the_stale_line_counts_against_origin_main_though_stable_exists(self):
+        # CLAUDE_SETTINGS_REF=main, the recovery, makes main the ref the pin follows, so the count is against origin/main,
+        # even though origin has a stable branch that the pin sits at.
+        vcs(self.primary, "push", "-q", "origin", "main:refs/heads/stable")
+        vcs(self.primary, "checkout", "-q", "--detach")
+        pin = self.head_sha()
+        self.assertEqual(self.resolve("origin/stable"), pin, "scope: origin/stable is not the pin's commit")
+        main_next = self.other_commit("main moves on", "main")
+        self.assertNotEqual(main_next, pin, "scope: origin's main did not move past the pin")
+        lines = self.run_hook(ref="main")
+        self.assertEqual(self.resolve("origin/main"), main_next, "scope: the hook did not fetch origin's main")
+        self.assertEqual(self.stale_lines(lines), [("1", "origin/main")],
+                         "under CLAUDE_SETTINGS_REF=main want one stale line counting the pin 1 behind origin/main, got %r" % lines)
 
 
 if __name__ == "__main__":
