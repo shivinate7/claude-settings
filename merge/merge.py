@@ -113,9 +113,10 @@
                           timeout-minutes, on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
                           nonzero exit (a table is judged by its counts, not its exit code). It prints its wall time and killed,
                           survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only then: one run of that
-                          command (11 to 16 min, a reviewer's figure, unmeasured); on any other head, one `git diff --name-only`. The batch head's
-                          lint (--batch-build --ready) starts no mutation test run: CI runs that job on the batch head. It prints "mutation test
-                          run skipped here: it runs at the lane's hand-off lint" when the diff touches a mutation test file.
+                          command (11 to 16 min, a reviewer's figure, unmeasured); on any other head, one `git diff --name-only`. The branch-name call
+                          --batch-build --ready starts no mutation test run: CI runs that job on the batch head. It prints "mutation test
+                          run skipped here: it runs at the lane's hand-off lint" when the diff touches a mutation test file. The call on the
+                          integration PR's number runs it, since no hand-off PASS names that PR.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -3138,7 +3139,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), mutate_ru
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
     A head whose diff touches a mutation test file runs the mutation test at the hand-off lint. The batch runner's pre-join lint (`pre_join`, a recorded
     batch-runner role) skips it when a hand-off PASS comment names the live head, and runs it for any other head; a local batch runner records no role, so it always runs it.
-    The batch head's caller passes `mutate_run` False: CI runs the job on the batch head. A skip prints MUTATE_SKIPPED."""
+    Only the branch-name call `--batch-build --ready` passes `mutate_run` False: CI runs the job on the batch head. A skip prints MUTATE_SKIPPED.
+    The PR-number call on the integration PR has no hand-off PASS, so it runs the mutation test."""
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
