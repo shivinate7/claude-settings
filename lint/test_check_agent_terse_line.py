@@ -9,12 +9,13 @@ agent file's frontmatter. A code span stays inside one paragraph. A list item's 
 counts. A comment opener inside inline code opens nothing, even across a line break. A fence marker
 in the middle of a line opens nothing. A lone quote in prose hides nothing, and a lone backtick does
 not pair across a blank line. A comment opened mid-line ends at its paragraph break, and a comment opened at a
-line start hides the rest of the line it closes on. The line may wrap over a line break.
+line start hides the rest of the line it closes on. The line may wrap over a line break. A heading, a fence, a list
+item, a quote or a rule line ends a comment opened mid-line above it. The scan's cost grows no faster than linear.
 A file that cannot be read is unknown (exit 2, named), never clear.
 
 The no-argument run reads the module's ROOT when it runs. These cases patch ROOT to a fixture tree.
 """
-import contextlib, io, os, shutil, sys, tempfile, unittest
+import contextlib, io, os, shutil, sys, tempfile, time, unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -335,6 +336,66 @@ class BodyCases:
         self.assertEqual(self.verdict("- item\n  <!-- open\n\n" + TERSE_LINE), (0, ""),
                          "an unclosed line-start comment in a list item hid the terse line after the list item ended")
 
+    # A heading, a fence, a list item, a quote or a rule line interrupts a paragraph, so a comment opened mid-line
+    # above one ends there. Each row has a control beside it: the same block after a comment closed on its line.
+    def assert_block_ends_an_unclosed_comment(self, block, name):
+        self.assertEqual(self.verdict("Write <!-- open --> to open.\n" + block + "\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment and a %s was hidden" % name)
+        self.assertEqual(self.verdict("Write <!-- open\n" + block + "\n" + TERSE_LINE + "\n-->")[0], 0,
+                         "a comment opened above a %s ran past it, so the line below it was hidden" % name)
+
+    def test_a_heading_ends_an_unclosed_mid_line_comment(self):
+        # Control first: the comment ends with its paragraph, so a heading and a blank line leave the line below counted.
+        self.assertEqual(self.verdict("Write <!-- open\n## Heading\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after an unclosed comment, a heading and a blank line was hidden")
+        self.assert_block_ends_an_unclosed_comment("## Heading", "heading")
+
+    def test_a_list_item_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("- item", "list item")
+
+    def test_a_quote_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("> quote", "quote")
+
+    def test_a_rule_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("***", "rule line")
+
+    def test_a_nested_list_item_ends_an_unclosed_mid_line_comment(self):
+        self.assertEqual(self.verdict("- a\n  Write <!-- open -->\n  - b\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment in a nested item was hidden")
+        self.assertEqual(self.verdict("- a\n  Write <!-- open\n  - b\n" + TERSE_LINE + "\n-->")[0], 0,
+                         "a comment opened above a nested item ran into it, so the line below it was hidden")
+
+    def test_a_fence_ends_an_unclosed_mid_line_comment(self):
+        self.assertEqual(self.verdict("Write <!-- x -->\n```\n" + TERSE_LINE + "\n```")[0], 1,
+                         "control: a line in a fence after a closed comment counted as holding the line")
+        self.assertEqual(self.verdict("Write <!-- x\n```\n-->\n" + TERSE_LINE + "\n```")[0], 1,
+                         "a comment opened above a fence ran into it, so a line inside the fence counted")
+
+    def test_a_fence_after_an_unclosed_mid_line_comment_does_not_hide_the_text_after_it(self):
+        self.assertEqual(self.verdict("```\n-->\n```\n\n" + TERSE_LINE), (0, ""),
+                         "control: a fence holding --> hid the line after it")
+        self.assertEqual(self.verdict("Write <!-- x\n```\n-->\n```\n\n" + TERSE_LINE), (0, ""),
+                         "a comment opened above a fence ran past the fence's first line, so the text after the fence was hidden")
+
+    # The list ends at a column-0 heading or fence. An indented comment after one is top-level, not in the list.
+    def test_a_column_zero_heading_ends_the_list_before_an_indented_comment(self):
+        self.assertEqual(self.verdict("- item\n# Heading\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment below a heading was hidden")
+        self.assertEqual(self.verdict("- item\n# Heading\n  <!-- open\n\n" + TERSE_LINE)[0], 1,
+                         "a list still open after a column-0 heading ended an unclosed comment early, so the line after it counted")
+
+    def test_a_column_zero_fence_ends_the_list_before_an_indented_comment(self):
+        self.assertEqual(self.verdict("- item\n```\ncode\n```\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment below a fence was hidden")
+        self.assertEqual(self.verdict("- item\n```\ncode\n```\n  <!-- open\n\n" + TERSE_LINE)[0], 1,
+                         "a list still open after a column-0 fence ended an unclosed comment early, so the line after it counted")
+
+    def test_the_outer_item_width_returns_after_a_nested_item(self):
+        self.assertEqual(self.verdict("- a\n  - b\n\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment under the outer item was hidden")
+        self.assertEqual(self.verdict("- a\n  - b\n\n  <!-- open\n\n" + TERSE_LINE)[0], 0,
+                         "after a nested item the outer item's width was not restored, so an unclosed comment hid the line below the list")
+
     def test_a_file_that_cannot_be_read_is_unknown_not_clear(self):
         root = fixture_root()
         path = os.path.join(root, self.NAME)
@@ -385,6 +446,58 @@ class RoleFileBody(BodyCases, unittest.TestCase):
 
 class LaneTextBody(BodyCases, unittest.TestCase):
     NAME = LANE_TEXT
+
+
+class ScannerCases(unittest.TestCase):
+    """body_text on raw text. A file read turns CRLF into LF, so only the scanner itself sees a CRLF line end."""
+
+    def test_a_crlf_blank_line_ends_a_comment_opened_above_it(self):
+        self.assertIn(TERSE_LINE, C.body_text("Write <!-- open\n\n" + TERSE_LINE + "\n-->"),
+                      "control: the line after an LF blank line was hidden")
+        self.assertIn(TERSE_LINE, C.body_text("Write <!-- open\r\n\r\n" + TERSE_LINE + "\r\n-->"),
+                      "a CRLF blank line did not end a comment opened above it, so the line below it was hidden")
+
+
+class ScanCost(unittest.TestCase):
+    """The scan's cost grows no faster than its input. The bound is a same-process ratio, not a clock limit (P5)."""
+    NAME = os.path.join("agents", "builder.md")
+    SMALL, BIG = 500, 2000  # repeats of a shape: the big input is 4 times the small one
+    LIMIT = 8.0  # a linear scan takes about 4 times as long on 4 times the input; a quadratic one about 16
+
+    def timed(self, body, runs):
+        """The fastest of `runs` checks of one file. The file is written once, outside the timing."""
+        path = write(fixture_root(), self.NAME, doc(body))
+        best = None
+        for _ in range(runs):
+            start = time.perf_counter()
+            check_files(path)
+            elapsed = time.perf_counter() - start
+            best = elapsed if best is None else min(best, elapsed)
+        return best
+
+    def growth(self, make):
+        """How many times longer the big input takes than the small one, both measured in this process."""
+        return self.timed(make(self.BIG), runs=2) / self.timed(make(self.SMALL), runs=3)
+
+    def test_a_long_paragraph_of_openers_grows_no_faster_than_linear(self):
+        ratio = self.growth(lambda n: "x <!-- " * n + "\n\n" + TERSE_LINE)
+        self.assertLess(ratio, self.LIMIT,
+                        "a paragraph of unclosed openers 4 times as long took %.1f times as long to read: "
+                        "the scan is worse than linear" % ratio)
+
+    def test_a_long_list_of_line_start_comments_grows_no_faster_than_linear(self):
+        ratio = self.growth(lambda n: "- item\n" + "  <!-- x -->\n" * n + "\n" + TERSE_LINE)
+        self.assertLess(ratio, self.LIMIT,
+                        "a list of 4 times as many line-start comments took %.1f times as long to read: "
+                        "the scan is worse than linear" % ratio)
+
+    def test_both_long_shapes_still_count_the_line_after_them(self):
+        paragraph = write(fixture_root(), self.NAME, doc("x <!-- " * self.SMALL + "\n\n" + TERSE_LINE))
+        self.assertEqual(check_files(paragraph), (0, ""),
+                         "a long paragraph of unclosed openers hid the line after it")
+        listed = write(fixture_root(), self.NAME, doc("- item\n" + "  <!-- x -->\n" * self.SMALL + "\n" + TERSE_LINE))
+        self.assertEqual(check_files(listed), (0, ""),
+                         "a long list of line-start comments hid the line after the list")
 
 
 def make_tree(root, missing=(), bare=(), lane_bare=False):
