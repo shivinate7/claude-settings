@@ -10,16 +10,20 @@ Three parts, one file:
      Function cases (fn:) call question_form.chat_page_label_hit(item_id, options, chat_text) directly.
      Wiring cases (wire:) run hooks/guard.py as a hook process with a transcript_path holding the chat question,
      the way the page-item write path reads a chat text.
+  1e. Round 2 (coordinator ruling 07:57 CST Nov 12, citing the owner's 12:35 CST Nov 8 words): the page label must
+     equal the chat label after folding, and only the chat label may be the shorter one, at a word boundary. A chat
+     line the check cannot read (A, em dash, text; **A** text; a cite with no colon) is checked or noted. A page
+     letter the chat question never writes is refused. A curly apostrophe or an em dash folds equal to its plain
+     form. A payload with no transcript_path logs one noted line.
   2. The `recommended` field. The page stars `recommended`, falling back to `pick`. The widening guard
      (widens_pick_hit, rule uniform-pick) also refuses a `recommended` that names a widening option. The page draws
      `recommended` (its itemFields block lists it).
   3. The page's own copy of the star and the answer label is tested in skills/waiting-page/tests/page.test.mjs.
      page_grant.py's ignoring of the answer `label` is tested in skills/waiting-page/test_page_grant_label.py.
 
-Red on the base commit, before the builder's change: every wire: case that expects a refusal, and the recommended and field cases,
-fail on an assert about the verdict (the check is not wired, the field is not drawn). The fn: cases cannot run
-there, because chat_page_label_hit is not built yet: they report "not built", which is not a red (P3). Run with the
-argument `behaviour` to skip them, which is the red-run form. Without it, every case runs.
+Red on the round-2 base: the cases of part 1e and the re-pointed fn: case fail on an assert about the verdict, and
+every other case passes. The fn: cases run there, because chat_page_label_hit is built. Run with the argument
+`behaviour` to skip them, for a base without that function. Without it, every case runs.
 
 Standard library only, no test runner. Run it from the repository root:
 
@@ -125,11 +129,15 @@ def case_fn_case_and_spaces_fold():
             fn_label(ITEM, OPTIONS, "\n".join(("a)   KEEP it   AS is", "b) allow   MERGE --role"))))
 
 
-def case_fn_prefix_either_way_passes():
+def case_fn_chat_short_form_passes_page_short_refused():
+    """Owner, 12:35 CST Nov 8: "A and B mean the same". Coordinator ruling, 07:57 CST Nov 12: the page label must equal
+    the chat label after folding case, spaces and punctuation, and only the chat label may be the shorter one. So a
+    chat short form that the label starts with passes, and a page label shorter than the chat's line is refused,
+    naming b. The lines are cited to the item, so the check reads them."""
     fn_pass("fn: a chat short form that the label starts with passes",
-            fn_label(ITEM, OPTIONS, "\n".join((CHAT_A, CHAT_B_SHORT))))
-    fn_pass("fn: a label that is a prefix of a longer chat line passes",
-            fn_label(ITEM, label_options("Allow"), "\n".join((CHAT_A, "b) Allow merge --role, then wait"))))
+            fn_label(ITEM, OPTIONS, chat_question((CHAT_A, CHAT_B_SHORT))))
+    fn_refuse("fn: a page label shorter than the chat's line is refused, naming b",
+              fn_label(ITEM, label_options("Allow"), chat_question((CHAT_A, "b) Allow merge --role, then wait"))), "b")
 
 
 def case_fn_differing_label_refuses_naming_the_letter():
@@ -197,12 +205,24 @@ def guard_hook(name, call, transcript):
     for key in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID"):
         env.pop(key, None)
     payload = {"session_id": "label-session", "tool_name": "ArtifactData", "cwd": tcj.PAGE_REPO,
-               "tool_input": dict(call, url=tcj.PAGE_URL), "transcript_path": transcript}
+               "tool_input": dict(call, url=tcj.PAGE_URL)}
+    if transcript is not None:  # None: the payload carries no transcript_path key at all
+        payload["transcript_path"] = transcript
     got = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
                          env=env, timeout=120)
     if got.returncode != 0:
         return "error", "exit %d: %s" % (got.returncode, got.stderr.strip()[:200])
     return decision_of(got.stdout)
+
+
+def noted_rule_rows(name):
+    """The guard.log rows of this run's guard folder `name` that note RULE. Empty when there is no log."""
+    path = os.path.join(tcj.ROOT, "label-cfg", name, "guard.log")
+    rows = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            rows = [line.split("\t") for line in f if line.strip()]
+    return [row for row in rows if len(row) > 3 and row[2] == "noted" and row[3] == RULE]
 
 
 def set_write(doc, options=None):
@@ -328,12 +348,7 @@ def case_wire_unreadable_transcript_is_allowed_and_noted():
     decision, reason = guard_hook("unreadable", set_write(ITEM), missing)
     check("control: a missing transcript allows the write", decision == "allow",
           "want an allow, got %s: %r" % (decision, reason[:200]))
-    path = os.path.join(tcj.ROOT, "label-cfg", "unreadable", "guard.log")
-    rows = []
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            rows = [line.split("\t") for line in f if line.strip()]
-    noted = [row for row in rows if len(row) > 3 and row[2] == "noted" and row[3] == RULE]
+    noted = noted_rule_rows("unreadable")
     check("control: a missing transcript logs one noted line for %s" % RULE, len(noted) == 1,
           "want one noted line, got %r" % (noted,))
 
@@ -421,6 +436,108 @@ def case_wire_footer_second_item_is_allowed():
                 set_write(FOOT_TWO, options_with_a("Wait a day")), transcript)
 
 
+# ------------------------------------------------------------------ 1e. round 2: the label rule's edges
+
+def options_with_c():
+    """OPTIONS plus a third option, c, that no chat question in these cases writes."""
+    return copy.deepcopy(OPTIONS) + [{"key": "c", "label": "Wait a day", "gain": "g", "lose": "l"}]
+
+
+def wire_checked_or_noted(name, call, transcript):
+    """A chat form the check cannot read is either checked (a deny naming the rule) or skipped with one noted line for
+    the rule. The builder picks which. A silent allow with no note is the fault."""
+    decision, reason = guard_hook(name, call, transcript)
+    noted = noted_rule_rows(name)
+    checked = decision == "deny" and RULE in reason
+    check(name, checked or (decision == "allow" and len(noted) == 1),
+          "want a deny naming %s, or an allow with one noted line, got %s with %d noted line(s): %r"
+          % (RULE, decision, len(noted), reason[:200]))
+
+
+def case_fn_chat_short_form_mid_word_refused():
+    """A chat short form must stop at a word boundary. "No" stops mid-word in "Node.js rewrite", and "Keep" stops
+    mid-word in "Keeping it as is", so each pair is a mismatch, and the letter is named."""
+    fn_refuse("fn: a chat form that stops mid-word (No, for Node.js rewrite) is refused, naming a",
+              fn_label(ITEM, options_with_a("Node.js rewrite"), chat_question(("a) No", CHAT_B))), "a")
+    fn_refuse("fn: a chat form that stops mid-word (Keep, for Keeping it as is) is refused, naming a",
+              fn_label(ITEM, options_with_a("Keeping it as is"), chat_question(("a) Keep", CHAT_B))), "a")
+
+
+def case_wire_unparsed_dash_form_is_checked_or_noted():
+    """The chat line "A <em dash> Red" is an option line the check does not read. Its "Red" differs from the page's a,
+    so a form that is read refuses the write. A form that is skipped logs one noted line."""
+    transcript = write_transcript("unparsed-dash", chat_question(("A — Red", CHAT_B)))
+    wire_checked_or_noted("wire: a chat line 'A <em dash> Red' is checked or noted, not silently skipped",
+                          set_write(ITEM), transcript)
+
+
+def case_wire_unparsed_bold_form_is_checked_or_noted():
+    """The chat line "**A** Red" is an option line the check does not read. The same test as the dash form."""
+    transcript = write_transcript("unparsed-bold", chat_question(("**A** Red", CHAT_B)))
+    wire_checked_or_noted("wire: a chat line '**A** Red' is checked or noted, not silently skipped",
+                          set_write(ITEM), transcript)
+
+
+def case_wire_unparsed_cite_is_checked_or_noted():
+    """The cite "Page item <id>" has no colon, so the check does not read it as a cite, and the chat's a) Red is not
+    compared. Read, the cite refuses the write. Skipped, it must log one noted line."""
+    transcript = write_transcript("unparsed-cite", chat_question(("Page item " + ITEM, "a) Red", CHAT_B), cite=None))
+    wire_checked_or_noted("wire: a cite 'Page item <id>' with no colon is checked or noted, not silently skipped",
+                          set_write(ITEM), transcript)
+
+
+def case_fn_extra_page_letter_is_refused():
+    """The page adds option c, which the chat question never writes. The chat shows no c, so the write is a mismatch
+    and c is named."""
+    fn_refuse("fn: a page option c that the chat question never writes is refused, naming c",
+              fn_label(ITEM, options_with_c(), chat_question((CHAT_A, CHAT_B))), "c")
+
+
+def case_wire_extra_page_letter_is_refused():
+    """The same extra option, judged at the write: a set that adds c, which the chat question never wrote, is refused."""
+    transcript = write_transcript("extra-letter", chat_question((CHAT_A, CHAT_B)))
+    wire_refuses("wire: a set that adds option c, which the chat question never wrote, is refused",
+                 set_write(ITEM, options_with_c()), transcript)
+
+
+def case_fn_curly_apostrophe_folds_equal():
+    """A curly apostrophe is the same mark as a straight one. A label and a chat line that differ only in it are equal,
+    so the write passes. Refusing them is a false alarm."""
+    fn_pass("fn: a chat line with a curly apostrophe, equal to the label's straight one, passes",
+            fn_label(ITEM, options_with_a("Don't merge the batch"),
+                     chat_question(("a) Don’t merge the batch", CHAT_B))))
+
+
+def case_fn_em_dash_folds_equal():
+    """An em dash folds to a hyphen, in either direction: a chat line and a label that differ only in that mark are
+    equal, so the write passes."""
+    fn_pass("fn: a chat em dash equal to the label's hyphen passes",
+            fn_label(ITEM, options_with_a("Hold - the batch"), chat_question(("a) Hold — the batch", CHAT_B))))
+    fn_pass("fn: a label em dash equal to the chat's hyphen passes",
+            fn_label(ITEM, options_with_a("Hold — the batch"), chat_question(("a) Hold - the batch", CHAT_B))))
+
+
+def no_transcript_noted(name, transcript, state):
+    """A write whose payload carries `transcript` (None: no transcript_path key) is allowed, and logs one noted line for
+    the rule, as an unreadable transcript does. `state` names the payload's state in the check names."""
+    decision, reason = guard_hook(name, set_write(ITEM), transcript)
+    check("control: a payload with %s is allowed" % state, decision == "allow",
+          "want an allow, got %s: %r" % (decision, reason[:200]))
+    noted = noted_rule_rows(name)
+    check("wire: a payload with %s logs one noted line for %s" % (state, RULE), len(noted) == 1,
+          "want one noted line, got %r" % (noted,))
+
+
+def case_wire_no_transcript_key_is_noted():
+    """A payload with no transcript_path key passes the label check and logs nothing. It must log one noted line."""
+    no_transcript_noted("no-key", None, "no transcript_path key")
+
+
+def case_wire_empty_transcript_path_is_noted():
+    """A payload with an empty transcript_path passes the label check and logs nothing. It must log one noted line."""
+    no_transcript_noted("empty-path", "", "an empty transcript_path")
+
+
 # ------------------------------------------------------------------ 2. the recommended field (uniform-pick)
 
 def decision_with(**over):
@@ -480,7 +597,7 @@ def case_pick_is_a_drawn_field():
 
 # ------------------------------------------------------------------ the run
 
-CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_prefix_either_way_passes,
+CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_chat_short_form_passes_page_short_refused,
          case_fn_differing_label_refuses_naming_the_letter, case_fn_no_cited_id_passes,
          case_fn_other_item_passes, case_fn_letter_missing_from_chat_passes, case_fn_letter_is_position,
          case_wire_differing_set_is_refused, case_wire_differing_update_is_refused,
@@ -495,7 +612,12 @@ CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_prefix
          case_wire_grouped_with_question_lines_reads_below, case_fn_footer_cite_reads_the_options_above,
          case_fn_footer_cite_reads_past_gain_and_lose_lines, case_wire_footer_first_item_reads_its_own_lines,
          case_wire_footer_first_item_refuses_the_next_label, case_wire_footer_second_item_reads_its_own_lines,
-         case_wire_footer_second_item_is_allowed)
+         case_wire_footer_second_item_is_allowed,
+         case_fn_chat_short_form_mid_word_refused, case_wire_unparsed_dash_form_is_checked_or_noted,
+         case_wire_unparsed_bold_form_is_checked_or_noted, case_wire_unparsed_cite_is_checked_or_noted,
+         case_fn_extra_page_letter_is_refused, case_wire_extra_page_letter_is_refused,
+         case_fn_curly_apostrophe_folds_equal, case_fn_em_dash_folds_equal,
+         case_wire_no_transcript_key_is_noted, case_wire_empty_transcript_path_is_noted)
 FN_CASES = tuple(c for c in CASES if c.__name__.startswith("case_fn_"))
 
 
