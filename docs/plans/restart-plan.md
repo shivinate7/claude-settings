@@ -45,12 +45,12 @@ Nov 11 (GitHub read): #2379 and #2431 in batch 79 (#2587, draft, CI not started)
 
 - **R23. The drain ends at the named queue.** Owner 19:23 CST Nov 10 picked "Named queue". Outcome:
   with 682 open and 95 merged since 00:00 CST (GitHub search, coordinator, 2026-11-10 19:23 CST), draining all of them would hold the plan for about a week.
-  1. The drain ends when the named queue lands: batch 74b (#2574), batch 75, and the coordinator's
+  1. The drain ends when the named queue lands: batch 74b (#2574), batch 75, and the coordinator's (step:drain-sort-against-plan)
      next-to-release list at 19:23 CST (#2563, #2566, the ten former #2563 waiters, #2575, #2542).
      #1805 left the queue for item 3.6 (owner 09:12 CST Nov 11).
-  2. Triage sorts the other open PRs (662 at 23:51 CST, coordinator) against this plan. It closes a PR whose purpose a ruling here
+  2. Triage sorts the other open PRs (662 at 23:51 CST, coordinator) against this plan. It closes a PR whose purpose a ruling here (step:drain-sort-against-plan)
      replaces, with its branch kept so it can reopen. The rest wait as stage 3 input.
-  3. Stage 2 starts as soon as #2575 is on main, without waiting for the sort.
+  3. Stage 2 starts as soon as #2575 is on main, without waiting for the sort. (step:drain-sort-against-plan)
 
 Freeze exception, owner 16:02 CST: "i see yes fix it then". One lane makes the settings.json guard
 matcher route the GitHub MCP write tools to guard.py (hole H1, under R11 below), with a test that every
@@ -207,9 +207,9 @@ Under R16, the missing guard: a main job that ends at its cap raises an alarm at
 - **R3.** Owner 14:09 CST Nov 10: "time limits as a rule make little to no sense when they feel
   arbitrary and are not outcomes related ... I understand keeping time limits at some point for letting
   hung tests end". Form accepted 14:10 CST ("yes, that three-part form matches what I meant"):
-  1. Stop on silence, not total time: a run ends only after it prints nothing for a while.
-  2. A stop reads "hung", never "failed": never red, never a merge refusal; retried once, then reported.
-  3. A total-time limit that must stay (CI billing) comes from measured green runs each time, never a
+  1. Stop on silence, not total time: a run ends only after it prints nothing for a while. (step:time-limits-end-hangs-only)
+  2. A stop reads "hung", never "failed": never red, never a merge refusal; retried once, then reported. (step:time-limits-end-hangs-only)
+  3. A total-time limit that must stay (CI billing) comes from measured green runs each time, never a (step:time-limits-end-hangs-only)
      number stored in code.
   Details, owner 14:24 CST Nov 10 (answers to triage's four points):
   - A check that gives a verdict (lint, tests, Retire) stops on silence, reads "hung", retries once. Any
@@ -251,12 +251,12 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   makes me parallelize as much as possible, without losing time when things start merging into main".
   And 09:21 CST: "batch merges themselves were made to avoid CI waits and to have things go faster". In
   the question box, answered by 10:00 CST, he picked these parts.
-  1. A lane's own checks run what made batches red: the Windows slice, mutation tests on the files it
+  1. A lane's own checks run what made batches red: the Windows slice, mutation tests on the files it (step:lane-lint-windows-guard-slice)
      touches, and signed-commit cases (folds into 3.5).
-  2. A lane dropped from two batches leaves the queue for a fix lane.
-  3. No self-made reruns: the merge tool stops the records-page push after a green run, and a red main
+  2. A lane dropped from two batches leaves the queue for a fix lane. (step:batch-freeze-lane-set-enforce)
+  3. No self-made reruns: the merge tool stops the records-page push after a green run, and a red main (step:batch-freeze-lane-set-enforce)
      is fixed before the next merge, not waited out.
-  4. Busy files in turn (box answer 10:05 CST, "Both"). The batch runner puts lanes that touch the
+  4. Busy files in turn (box answer 10:05 CST, "Both"). The batch runner puts lanes that touch the (step:batch-freeze-lane-set-enforce) (step:test-guard-split-per-rule)
      same busy file (the main guard file, its tests, its mutation tests) into back-to-back stacked
      batches, never one batch. The guard test file is split into one file per rule. The split runs
      first in stage 3, while few lanes are open.
@@ -367,11 +367,11 @@ it's how the limit batches that's the problem". How many lanes start is left to 
   The outcome those rulings protect stays: no side's tests are silently dropped. A check now protects
   it, and the builder resolves the merge. The check reads test files with the language's own parser.
   At the merge commit it refuses each of these:
-  1. A test case from either parent is missing, renamed or moved to another file.
-  2. A test case's body differs from both parents' versions.
-  3. A skip or expected-fail mark, or a changed assertion, that neither parent had.
-  4. New test content that neither parent had. That stays a test-author's work.
-  5. A change to test config beyond one parent's version, or any change to a mutation test. Page
+  1. A test case from either parent is missing, renamed or moved to another file. (step:merge-conflict-mixed-roles)
+  2. A test case's body differs from both parents' versions. (step:merge-conflict-mixed-roles)
+  3. A skip or expected-fail mark, or a changed assertion, that neither parent had. (step:merge-conflict-mixed-roles)
+  4. New test content that neither parent had. That stays a test-author's work. (step:merge-conflict-mixed-roles)
+  5. A change to test config beyond one parent's version, or any change to a mutation test. Page (step:merge-conflict-mixed-roles)
      item 447 a (owner 2026-11-08 17:19 CST) stands: a merge that conflicts in a mutation test
      still goes to a test-author.
   Each case is shown red on a dropped or weakened test before the route opens. Until then the old route
@@ -460,16 +460,16 @@ After 3.11, because its third part uses the same owner grant route.
   hole"; 16:18 CST: "yes" to the form. Outcome: a popup inside a lane is a stall the owner cannot see,
   which costs speed and buys no accuracy. Every popup becomes a refusal plus a routed question, never a
   silent allow, so safety stays the same or stricter.
-  1. A lane never opens the question box: a guard refuses it in any session with a parent. The lane
+  1. A lane never opens the question box: a guard refuses it in any session with a parent. The lane (step:lane-no-popup)
      sends the question to its parent, triage puts it on the page, and the lane keeps working on what
      does not depend on it, or ends its turn.
-  2. A lane starts in a mode where an act not pre-allowed is refused, not asked; the refused act goes to
+  2. A lane starts in a mode where an act not pre-allowed is refused, not asked; the refused act goes to (step:lane-no-popup)
      the parent like a question. A builder first confirms the cloud `dontAsk` mode refuses rather than
      prompts (unverified).
-  3. An act that needs the owner's typed word (an override, a guarded settings write) becomes a page
+  3. An act that needs the owner's typed word (an override, a guarded settings write) becomes a page (step:lane-no-popup)
      item; his save on the page is the grant (skill waiting-page). A relay in R18 point 5's form also
      grants it (R12); any other agent text never grants.
-  4. Cards no mode can stop (repository trust, computer folder, owner-approval cards): a guard refuses
+  4. Cards no mode can stop (repository trust, computer folder, owner-approval cards): a guard refuses (step:lane-no-popup)
      those tools in a lane, and the lane routes the act to its parent.
   Replaces CLAUDE.md questions-go-to-owner, "The started session may wait on it." Unmeasured: how often
   lanes have stalled on a popup so far. Home: CLAUDE.md questions-go-to-owner; decision
@@ -479,7 +479,7 @@ After 3.11, because its third part uses the same owner grant route.
   be fixed too". The card was "Allow Claude to use db write (claude-artifacts)?". Outcome: triage stalls
   on a card for an act that is always allowed, so the owner's answers wait. The hooks that judge a page
   write (call_judge.py, guard.py) still run, so no check is lost.
-  1. Read on main, 19:02 CST: `settings.json` already allows `mcp__claude-artifacts__db_write` and the
+  1. Read on main, 19:02 CST: `settings.json` already allows `mcp__claude-artifacts__db_write` and the (step:page-write-no-card)
      other page tools. The cloud card shows anyway. Owner 19:13 CST, a second card in a Degen session:
      "even this artifact write needed my permission". That card names the tool as `claude-artifacts:
      db write`, the allowed name, so a missing name is not the whole cause. Suspects: that session's
@@ -492,15 +492,15 @@ After 3.11, because its third part uses the same owner grant route.
      call even with `db_write` allowed. That session also showed two tool names the allow list lacks:
      `mcp__claude-artifacts__db_usage` and `mcp__claude-artifacts__read_artifact`. Auto mode rightly
      refused its try to write its own allow list.
-  2. Until the fix lands, a page writer sends its writes in the main session, as `batch` calls of up to
+  2. Until the fix lands, a page writer sends its writes in the main session, as `batch` calls of up to (step:page-write-no-card)
      50 writes each, one card per call. It never writes the page from an agent.
-  3. The page hooks match `ArtifactData` only, so they skip a write named `mcp__claude-artifacts__db_write`.
+  3. The page hooks match `ArtifactData` only, so they skip a write named `mcp__claude-artifacts__db_write`. (step:artifact-guard-matcher-names)
      Open PR #2549 (artifact-guard-matcher-names) adds those names. It lands with this fix.
-  4. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that
+  4. Owner 19:04 CST: "claude also added new artifact commands that start with db (surf the web) that (step:page-write-no-card)
      im guessing we need to add too now to the allow list". `ArtifactData` now has nine actions: get,
      list, query, profiles, set, update, str_replace, delete, batch. The allow list names six tools.
      A web search found no public list of the new tool names.
-  5. The fix lane first reproduces the card in a cloud session. It reads the real tool names from that
+  5. The fix lane first reproduces the card in a cloud session. It reads the real tool names from that (step:page-write-no-card)
      session's tool listing, never from a guess. It then allows every page database action under each
      name the card checks. A test proves a page write in a cloud session shows no card.
 - **D3. How much a lane writes (open).** Owner 16:46 CST Nov 10: "lane's own chat never reaches me
@@ -531,11 +531,11 @@ then R29.
   check asked this session to keep 17 settled items in its handoff. Its remedy named only "put them in
   the handoff", never "mark [closed]". So the session copied ids to pass the check. Measured 10:17 CST in
   this session's log: 126 items, 57 rulings and 9 standing items still open, none closed by a tool.
-  1. A ruling or task item closes itself when its home holds it on main. The Stop check already proves
+  1. A ruling or task item closes itself when its home holds it on main. The Stop check already proves (step:feedback-log-tends-itself)
      the home; it marks the line [closed] in the same rewrite that marks repeats.
-  2. Each refusal of the check names [closed] as a way out, beside the handoff (R24).
-  3. The compaction reminder lists only items that still need work.
-  4. Owner words that reach a session by the question box or by relay are saved like a typed message.
+  2. Each refusal of the check names [closed] as a way out, beside the handoff (R24). (step:feedback-log-tends-itself)
+  3. The compaction reminder lists only items that still need work. (step:feedback-log-tends-itself)
+  4. Owner words that reach a session by the question box or by relay are saved like a typed message. (step:feedback-log-tends-itself)
   Home: decision owner-feedback-inbox. Runs with R16, which files a told mistake as a missing guard.
 - **R28. Every prose store is tended one shared way.** Owner 10:19 CST Nov 11: "everything that marks
   prose should share the same "tending" mechanism ... it should be more uniform, standardized, and
@@ -563,22 +563,22 @@ then R29.
   GitHub API. That is the own-site route, now a full option beside the other two. Box
   answer before 10:22 CST: "i think a skim audit just for some overarching context and to avoid common
   pitfalls is best .. thetn shared/log-fix, then a deeper audit". Order:
-  1. A read-only skim audit of how each store is tended now (started before 10:22 CST).
-  2. A design pass sets one shared contract in lint/layout.json: per store, the item shape, a "still
+  1. A read-only skim audit of how each store is tended now (started before 10:22 CST). (step:prose-tending-contract)
+  2. A design pass sets one shared contract in lint/layout.json: per store, the item shape, a "still (step:prose-tending-contract)
      true?" test, and a close step. One runner calls it from points that already run: the merge
      check, the Stop hooks, compaction and triage status. No new timer or process. R27 is its first
      user.
-  3. A deeper audit, then each other store moves over when a lane next touches it.
+  3. A deeper audit, then each other store moves over when a lane next touches it. (step:prose-tending-move-stores)
   Home: a new decision for the shared contract; R27's step waits on step 2.
 - **R29. One job, one shared home, across all repos.** Owner 10:22 CST Nov 11: "it would be optimal if
   something identified shared savings opportunities like this in a sense across my repos
   retroactively and proactively". Answer 10:24 CST: "A" (file it after R28's deeper audit). Today
   lint/find_copies.py finds only word-for-word copies of this repo's files, and only in the compliance
   check; the plan refuter reads only its own repo.
-  1. Looking back: at each compliance check, a meaning match finds the same job built twice across
+  1. Looking back: at each compliance check, a meaning match finds the same job built twice across (step:shared-job-finder)
      repos. Each find goes to this repo's triage as a candidate for one shared home.
-  2. Looking ahead: the plan refuter asks "does this job already exist?" before a build starts.
-  3. Both read one list of jobs and their homes.
+  2. Looking ahead: the plan refuter asks "does this job already exist?" before a build starts. (step:shared-job-finder)
+  3. Both read one list of jobs and their homes. (step:shared-job-finder)
   It reuses R28's deeper-audit way of reading stores. It adds no new process. The cross-repo read needs a
   session on the owner's computer, or each repo attached to a cloud session. Starts after R28 step 3.
 
@@ -601,11 +601,11 @@ cache write costs 2x input; a cache read costs $0.20 per million on Opus 5.5 and
 which is 1/40 of the write. So a ping every 55 minutes costs less than one rewrite for any idle gap
 under about 40 hours. Unmeasured: what our Stop hooks and judges add to each ping. Owner 13:22 CST:
 "A on keeping sessions warm too".
-  1. Rule outcomes-mechanize-rules keeps its reason and drops the blanket "never on a timer": a timer
+  1. Rule outcomes-mechanize-rules keeps its reason and drops the blanket "never on a timer": a timer (step:timer-rule-reason-only)
      is allowed when its record shows it costs less than it saves.
-  2. A standing session sets a one-time check-in 55 minutes after its last turn, while it expects
+  2. A standing session sets a one-time check-in 55 minutes after its last turn, while it expects (step:keep-warm-check-in)
      another wake within 40 hours. A lane whose PR merged is archived at once instead.
-  3. One night on one standing session measures the ping cost, hooks included, before it spreads.
+  3. One night on one standing session measures the ping cost, hooks included, before it spreads. (step:keep-warm-check-in)
 
 - **R32. A token audit, then cuts.** Owner 10:57 CST Nov 11: "i also wonder when the coordinator spawns
   lanes if there's ways to be more token efficient (here, and elsewhere tbh -- worried i overuse tokens
@@ -633,7 +633,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   median 64 h, Sonnet 28 h. Standing sessions, both Opus and missed by that listing: coordinator
   $1,839 and triage $1,567 since Nov 3. Not seen: hook judges, local sessions, the other account.
   The cuts, owner 11:21 and 11:23 CST Nov 11 (waiting page item 506):
-  1. d with a. The coordinator and triage get a measured Sonnet trial inside R33's evaluation. "a: i
+  1. d with a. The coordinator and triage get a measured Sonnet trial inside R33's evaluation. "a: i (step:model-table-one-home)
      agree fold into d": earlier compaction is set per model, so Opus can compact tighter than Sonnet, through the
      per-model key `modelSettings.<model>.autoCompactWindow` (decision precompact-handoff, rule 1).
      Owner: "opus could compact tigheter than sonnet no?". Yes; that key sets it per model. Why the
@@ -681,9 +681,9 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   glossary") made 8 marks today, 0 true. Two causes: one candidate is given to every item in a Stop, and
   a session's follow-up items match its own earlier items on the same owner message. Owner 13:03 CST:
   "yes on the fix !".
-  1. The judge skips a candidate on the item's own home or the same owner message.
-  2. Each item gets its own candidates.
-  3. A mark prints one line and never blocks the turn.
+  1. The judge skips a candidate on the item's own home or the same owner message. (step:repeat-judge-never-blocks)
+  2. Each item gets its own candidates. (step:repeat-judge-never-blocks)
+  3. A mark prints one line and never blocks the turn. (step:repeat-judge-never-blocks)
   The meaning match stays, so a repeat in other words (the carousel and wheel incident) is still caught.
   Home: decision owner-feedback-inbox, Repeats, rewritten in place.
 
@@ -694,12 +694,12 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   "the owner is never asked twice") refuses any question on a settled point. Its only pass is a
   `Based on (ruling)` line, read as "a re-ask the ruling allows". It cannot tell a nag from a challenge,
   so sessions learn to defer.
-  1. Item 8 refuses a re-ask with no new fact. It passes a challenge: the record and its sentence, a
+  1. Item 8 refuses a re-ask with no new fact. It passes a challenge: the record and its sentence, a (step:ruling-challenge-passes)
      measure, the outcome it protected and what protects it now, and a proposed fix.
-  2. Its refusal text says how to challenge, not to withdraw.
-  3. The question form's Problem line names the act the yes gates, not the owner's authority.
-  4. A red case: a challenge with a measure passes; the same question with no new fact is refused.
-  5. Owner 13:04 CST: "maybe the judge hooks that run on our sesisons should identify it frankly just
+  2. Its refusal text says how to challenge, not to withdraw. (step:ruling-challenge-passes)
+  3. The question form's Problem line names the act the yes gates, not the owner's authority. (step:ruling-challenge-passes)
+  4. A red case: a challenge with a measure passes; the same question with no new fact is refused. (step:ruling-challenge-passes)
+  5. Owner 13:04 CST: "maybe the judge hooks that run on our sesisons should identify it frankly just (step:ruling-challenge-passes)
      like how it identifies when shared mistakes and other stuff happens". The reply judge gains one
      item: a reply that names a flaw in a ruling but leaves it to the owner's authority, with no measure
      or fix. It flags, like its other items, and never refuses.
@@ -726,9 +726,9 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   lint, at the same pinned commit"), so R37's retirement of that cap will not reach q_max. Its own
   exception, D-705 (merge over a red browser.yml run, owner 2026-11-07 13:13 CST), cites a grant with a
   time but not the parent rule it departs from.
-  1. Child CI runs claude-settings actions from the stable branch of R42 part 2, not a commit pin, so
+  1. Child CI runs claude-settings actions from the stable branch of R42 part 2, not a commit pin, so (step:child-repo-gap)
      each tested change reaches every child at once.
-  2. The split: skill compliance-check is the one-time sweep that brings a repo in line; a check
+  2. The split: skill compliance-check is the one-time sweep that brings a repo in line; a check (step:child-repo-gap)
      in child CI keeps it there. The check flags a contradicting line with no exemption line, and pins
      move when claude-settings main changes an action.
   3. shiv-stylisms content (are its 23 rules still right) joins R35's review, which the owner signs.
@@ -750,10 +750,10 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   Its Claude Code team scales human approval by the change's risk and tracks reverts as the guard; a
   webinar on it runs Nov 18. Our batch flow holds a lock on main during each batch run (rule
   git-no-merge-during-batch-ci), and the baseline counts 147 lane drops in 15 batch merges.
-  1. A step that holds an owner ruling and has no lane is the coordinator's queue. It starts the step
+  1. A step that holds an owner ruling and has no lane is the coordinator's queue. It starts the step (step:ruled-step-coordinator-queue)
      under rule parallelism-keep-going, not as a report line. Triage's reply names the step, and the
      sender's log item points to it, so the feedback guard proves it exists.
-  2. Proposed for stage 3, after a Plan agent and a refuter: a lane merges on its own green checks and
+  2. Proposed for stage 3, after a Plan agent and a refuter: a lane merges on its own green checks and (step:merge-flow-after-anthropic)
      its review, sized by risk. Main's CI runs after the merge; a red run bisects and reverts the
      breaking commit. Sessions install from a stable branch that moves only when main is green.
   3. Guard numbers: reverts per merge, and the pace numbers. Main must first finish a CI run (#2591).
@@ -775,17 +775,17 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   scratchpad mods-skills-audit.md and decision-watch-audit.md): all 5 mods, 11 skills and shiv-stylisms
   are in the right folders and earn their place. Decision watch runs in cloud too (167 turns logged in
   this session).
-  1. When the given path fails, decision watch finds the transcript by session id. Its UNKNOWN names
+  1. When the given path fails, decision watch finds the transcript by session id. Its UNKNOWN names (step:decision-watch-finds-transcript)
      the path and shows once per session, and so does the silent "no transcript" case. Red cases first:
      Windows backslash, drive letter, `~`, Git Bash `/c/`, a second config dir, a long folder name.
-  2. The cloud installer skips `__pycache__` when it hashes a skill, so it stops backing up waiting-page
+  2. The cloud installer skips `__pycache__` when it hashes a skill, so it stops backing up waiting-page (step:install-hash-skips-pycache)
      at each start (23 copies, 38 MB here).
-  3. waiting-page SKILL.md (883 lines) splits by topic and drops its PR history.
-  4. The rule map counts the reply judge's four style rules; the 20-line hand-off bullet in
+  3. waiting-page SKILL.md (883 lines) splits by topic and drops its PR history. (step:waiting-page-skill-split)
+  4. The rule map counts the reply judge's four style rules; the 20-line hand-off bullet in (step:rule-mechanisms-style-count)
      shiv-stylisms splits.
-  5. Decision question-form says what the code does: a Departs from line on every question.
-  6. One stale note and the unused ponytail marketplace go.
-  7. Owner 13:33 CST: "i also frankly dont see some mods that i do see on local claude like the
+  5. Decision question-form says what the code does: a Departs from line on every question. (step:question-form-departs-every)
+  6. One stale note and the unused ponytail marketplace go. (step:notes-204-ponytail-drop)
+  7. Owner 13:33 CST: "i also frankly dont see some mods that i do see on local claude like the (step:cloud-mod-bands-missing)
      weather context thing". His screenshot shows the weather band on a local session and none on this
      cloud one. The mods are installed here and their hooks run (decision watch logs each turn), so the
      gap is in the drawing. The plugin docs say a cloud session draws in no screen of its own. A lane
@@ -808,9 +808,9 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   against his 2026-11-02 13:22 CST ruling "drop Simplified Technical English (STE) as a named
   standard, everywhere". 73 of 3561 commits on main since Nov 4 fix the lint. Owner 12:56 CST: "A --
   and im sure this 30 word thing is only one of many stale digit level hooks".
-  1. STE001 stops failing; wordiness and repetition go to reviewers and judges, which never count.
+  1. STE001 stops failing; wordiness and repetition go to reviewers and judges, which never count. (step:fixed-number-limits-census)
   2. The lint, its action, its codes and the rule anchor drop "STE" from their names.
-  3. A read-only census (started 12:57 CST) lists every fixed number that refuses or fails. Each one
+  3. A read-only census (started 12:57 CST) lists every fixed number that refuses or fails. Each one (step:fixed-number-limits-census)
      the owner did not rule is retired, or derived from measured runs as in 3.2.
   Owner 13:10 CST: "on fixed numbers A". The census (scratchpad limits-census.md) lists about 45
   numbers; item 3 covers each one the owner did not rule. Two contradictions go in too: merge.py warns
@@ -824,9 +824,9 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   in .claude/rules). The global file holds 3,890 words on every turn of every repo, and its size check
   counts lines (108 of 200), not words. Owner 12:40 CST: "yes that's fine it would need my sign off (the
   actual results of the review) but just marking it as an item for review is good to dos onow".
-  1. A read-only audit maps each global section to the repos and session roles where it matters.
-  2. The owner signs off the results before any section moves.
-  3. A lane moves the signed-off sections to path-scoped rules or skills, and the size check counts
+  1. A read-only audit maps each global section to the repos and session roles where it matters. (step:global-claude-md-scope-audit)
+  2. The owner signs off the results before any section moves. (step:global-claude-md-scope-audit)
+  3. A lane moves the signed-off sections to path-scoped rules or skills, and the size check counts (step:global-claude-md-scope-audit)
      words too.
   Home: lint/check_claude_md_size.py; rule tokens-folder-rules-load-by-path.
 
@@ -858,16 +858,16 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   ... we never protect against maliciousness only carelessness/negligence", points 1-4 agreed; 16:57
   CST: "agreed yes -- but it should also be known by sessions how to carry my grant so that way it's not
   like problematic or a cause of pain".
-  1. Only triage watches the page; a Send wakes triage alone.
-  2. Each item names who wakes for it: the asker, plus any party it lists. Triage sends exactly those
+  1. Only triage watches the page; a Send wakes triage alone. (step:page-wakes-and-relays)
+  2. Each item names who wakes for it: the asker, plus any party it lists. Triage sends exactly those (step:page-wakes-and-relays)
      sessions one message (page link, item id, the pick); each reads its answer from the page.
-  3. Each answer has one home, the page. A question goes only to the page; the chat holds one line, "on
+  3. Each answer has one home, the page. A question goes only to the page; the chat holds one line, "on (step:page-wakes-and-relays)
      the page, item N". A hook moves a question with options from a reply onto the page and leaves that
      line, so it does not rest on the session remembering. An answer typed in chat goes onto the page at
      once.
-  4. Never reply in a page comment thread; the item is rewritten instead (questions-go-to-owner, owner
+  4. Never reply in a page comment thread; the item is rewritten instead (questions-go-to-owner, owner (step:page-wakes-and-relays)
      2026-10-28 02:44 CDT). A hook enforces it over the platform's own suggestion.
-  5. A relay counts when it carries the owner's exact words, their time, and the one act they cover, in
+  5. A relay counts when it carries the owner's exact words, their time, and the one act they cover, in (step:page-wakes-and-relays)
      one form every session knows: `Grant: "<exact words>" (owner, <time>) covers <act>`. A guard in the
      sending session checks the words are in its own feedback log (catches a paraphrase, a widened act or
      a wrong item); the receiver acts with no page round-trip. A relay in another shape is refused with
@@ -884,14 +884,14 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   than just append". And: "does this make sense? in general something like notes/debts probably should be
   visible from the artifact itself too"; 17:03 CST: "why it's so hard for AI to track the time"; 17:11
   CST: "approved".
-  1. Owner item 358 lands first (sightings and expiry, one debt-fix lane per batch; step
+  1. Owner item 358 lands first (sightings and expiry, one debt-fix lane per batch; step (step:notes-sightings-expiry)
      notes-sightings-expiry, PR #1619, not on main). It gives the 190 `Until:` lines a reader.
-  2. Triage owns debts and notes as it owns the roadmap: its whole review at each batch merge merges
+  2. Triage owns debts and notes as it owns the roadmap: its whole review at each batch merge merges (step:triage-owns-debts-notes)
      families into one line, closes what is stale or past `Until:`, and rewrites the rest to what is
      true now.
-  3. The page shows both: notes count, growth, oldest and largest families; the debt count fixed (today
+  3. The page shows both: notes count, growth, oldest and largest families; the debt count fixed (today (step:triage-owns-debts-notes)
      122 counts README.md and notes.md); the cull panel reads live numbers (today 47, from Oct 20).
-  4. The writing tool stamps every page and roadmap time from the clock, never the model; a guard
+  4. The writing tool stamps every page and roadmap time from the clock, never the model; a guard (step:page-time-field-valid)
      refuses a blank or unreadable time (step page-time-field-valid). Cause: about 190 blank times
      written Nov 10 from a misread clock tool, repaired by hand.
   Evidence (audit 17:06 CST, main 2d6f67f7c): notes.md 1,918 lines (504 KB), up 27% since Nov 7; 120
@@ -903,15 +903,15 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   account: "its moreso that a session ended coordinwtor and all and a new coordinator and sessions
   respawned and somehow no one rewrote the session ids to now be the new ones". Outcome: an answer
   wakes a dead session, and the owner has to ask who does the work.
-  1. Cause (read on main): skill project-ops keeps the roster in the claude.ai project instructions,
+  1. Cause (read on main): skill project-ops keeps the roster in the claude.ai project instructions, (step:roster-on-record-branch)
      "so keep no second copy in the repo". No session can write there, so sessions copy ids into page
      items and briefs, and nothing rewrites those copies.
-  2. The roster moves to the record branch, where triage writes it. The session that starts a standing
+  2. The roster moves to the record branch, where triage writes it. The session that starts a standing (step:roster-on-record-branch)
      session or lane sends triage the new id in the same turn. Triage rewrites that roster line.
-  3. A page item, brief or handoff names a lane slug or role, never a session id (CLAUDE.md
+  3. A page item, brief or handoff names a lane slug or role, never a session id (CLAUDE.md (step:roster-on-record-branch)
      git-slug-then-claim-number already says so for lanes). The wake path reads the id from the roster
      when it sends. A guard refuses a page write that stores a session id.
-  4. Fits R18 point 2: each item names who wakes, by slug or role.
+  4. Fits R18 point 2: each item names who wakes, by slug or role. (step:roster-on-record-branch)
   Home: skill project-ops; skill waiting-page.
 - **R45. How cloud sessions delete branches.** Owner
   14:25 CST Nov 11: "im good with either an actions workflow or a github token -- github token seems
@@ -919,11 +919,11 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   Measured 14:21 CST: the cloud relay drops a branch-delete push; a new-branch push works. Origin holds
   2,338 branches (331 under archive/), because a cloud archive push adds a branch and the delete fails.
   Probe github-projects-probe, 14:23 CST: the cloud cannot read or write GitHub Projects.
-  1. The owner makes one GitHub token (repo and project scopes) and adds it to the cloud environment as
+  1. The owner makes one GitHub token (repo and project scopes) and adds it to the cloud environment as (step:cloud-branch-delete)
      SHIV_GITHUB_TOKEN.
-  2. A session tests one branch delete and one Projects read with it. The relay, not GitHub, refuses
+  2. A session tests one branch delete and one Projects read with it. The relay, not GitHub, refuses (step:cloud-branch-delete)
      today, so the test may fail.
-  3. If the relay passes it, deletes go through one home that applies the Oct 30 grant (last commit on
+  3. If the relay passes it, deletes go through one home that applies the Oct 30 grant (last commit on (step:cloud-branch-delete)
      main or an archive branch), and the guard reads that route. If it refuses, the same token becomes a
      GitHub repository secret, and an Actions workflow does the deletes and the table on GitHub's side.
   Result, 15:04 CST: the relay refuses writes made with the owner's token too (REST ref delete 403, "Write
@@ -967,11 +967,11 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   a tab on claude-settings' page, not a new artifact. Each row names what the owner sees, what makes it
   happen (hooks, checks, skills, decisions), and how healthy it is, measured from git, CI, the debt
   store and guard logs. A part with no measure says "unknown".
-  1. A read-only audit drafts the rows now.
-  2. The owner judges the draft.
+  1. A read-only audit drafts the rows now. (step:owner-health-tab)
+  2. The owner judges the draft. (step:owner-health-tab)
   2a. Owner 12:37 CST Nov 11 judged the 20-row draft: "it's not very pretty and i cant tell if its
      exhaustive, but for a temporal table i think it's fine as is for now". The draft stands.
-  3. A lane builds the tab, with a designer first. R28's shared upkeep refreshes each number at
+  3. A lane builds the tab, with a designer first. R28's shared upkeep refreshes each number at (step:owner-health-tab)
      triage status, with no new timer. A check proves the tab exhaustive: it lists each hook, check
      and skill that no row names.
   Home: skill roadmap (the page's tabs); docs/map/.
