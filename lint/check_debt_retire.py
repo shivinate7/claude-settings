@@ -105,8 +105,8 @@ def scratch(wt, head, prefix="debt-retire-"):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def run_span(wt, span, timeout):
-    """(kind, text) for one test: red on a non-zero exit, unknown when it could not run, else None."""
+def run_span(wt, span, timeout, keep=5):
+    """(kind, text) for one test: red on a non-zero exit, unknown when it could not run, else None. The red text holds the last `keep` output lines."""
     argv = list(INTERPRETERS[os.path.splitext(span)[1]])
     exe = shutil.which(argv[0])
     if not exe:
@@ -119,8 +119,8 @@ def run_span(wt, span, timeout):
     except OSError as e:
         return "unknown", "%s did not start: %s" % (span, e)
     if r.returncode:
-        tail = " | ".join((r.stdout + r.stderr).strip().splitlines()[-5:])
-        return "red", "%s exited %d%s" % (span, r.returncode, ": " + tail[:400] if tail else "")
+        tail = " | ".join((r.stdout + r.stderr).strip().splitlines()[-keep:])
+        return "red", "%s exited %d%s" % (span, r.returncode, ": " + tail[:400 if keep == 5 else None] if tail else "")
     return None
 
 
@@ -136,13 +136,13 @@ def run_on_birth(wt, head, birth, span, timeout):
         os.makedirs(os.path.dirname(os.path.join(tree, span)), exist_ok=True)
         with open(os.path.join(tree, span), "wb") as f:
             f.write(shown.stdout)
-        one = run_span(tree, span, timeout)
+        one = run_span(tree, span, timeout, keep=10**6)  # the whole output: a node load error prints first
     if one is None:
         return "red", "%s passes on the birth commit %s (the commit that added the debt), so it catches nothing" % (span, birth[:9])
     if one[0] == "unknown":
         return one
     if LOAD_ERROR.search(one[1]):
-        return "unknown", "%s could not load on the birth commit %s: %s" % (span, birth[:9], one[1])
+        return "unknown", "%s could not load on the birth commit %s: %s" % (span, birth[:9], one[1][:400])
     return None
 
 
