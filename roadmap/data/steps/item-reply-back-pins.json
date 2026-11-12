@@ -1,0 +1,14 @@
+{
+ "id": "item-reply-back-pins",
+ "title": "Tests pin the opened line's \"Reply from <owner>\" head and the gone-item row's \"You asked\" head",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The opened line's \"Reply from <owner>\" head carries no time today, and the gone-item row's head reads \"You asked\" (page.html lineEl and the ask row head); no test pins either.",
+ "source": "lane fan-prose-unmapped-2, 09:40 CST Nov 12 (coordinator ok to \"leave both as main has them\")",
+ "note": "Test, skills/waiting-page/tests/page.test.mjs. Pins main's behaviour as it is. Ready, no lane.",
+ "updatedAt": "2026-11-12T09:41:00-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "thread-gap-container-query",
+ "title": "Ask and item threads space with gap and size with a container query",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "PR #2778 (adds reply-back to page questions) widens the margin rule on `.thread .reply + .myreply` and `.thread .myreply + .lhead` (house rule ux-gap-on-parent wants gap) and adds a 520 px screen-width query for `.card > .fwait .ftext` (rule ux-component-reads-its-box wants a container query).",
+ "source": "lane fan-prose-unmapped-2, 09:40 CST Nov 12; coordinator pick 09:37 CST (merge #2778 plus one debt)",
+ "note": "Debt, code: skills/waiting-page/page.html. Move ask and item threads to gap and a container query together. Ready, no lane.",
+ "updatedAt": "2026-11-12T09:41:00-06:00"
+}
