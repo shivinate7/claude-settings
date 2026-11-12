@@ -3042,6 +3042,38 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+def guard_commits_after_review(root, base, head, review_head):
+    """-> [(sha, guard paths)] of each non-merge commit the lane added past `review_head`, oldest first, that changes a guard or check path (guard_hits). The lane's
+    own commits only: those that `origin/<base>` lacks. A merge commit is no such commit, so a clean merge of main that carries a guard edit is not one. A review head
+    this clone lacks is fetched once; one it still lacks, or a failed read, is a Stop (unknown, never a pass)."""
+    if git(root, "cat-file", "-e", f"{review_head}^{{commit}}")[0]:
+        git(root, "fetch", "-q", "origin", review_head)
+    if git(root, "cat-file", "-e", f"{review_head}^{{commit}}")[0]:
+        raise Stop(f"the lint of {head[:9]} is unknown, not a pass: the review record's head {review_head[:9]} is not in this clone, so the commits after it cannot be listed. Run again. {LANE_LINT_CITE}")
+    c, shas = git(root, "rev-list", "--no-merges", "--reverse", head, f"^{review_head}", f"^origin/{base}")
+    if c:
+        raise Stop(f"the lint of {head[:9]} is unknown, not a pass: listing the commits after the review record failed: {shas} {LANE_LINT_CITE}")
+    out = []
+    for sha in shas.split():
+        c, names = git(root, "diff-tree", "-r", "--root", "--no-commit-id", "--name-only", "--no-renames", "-z", sha)
+        if c:
+            raise Stop(f"the lint of {head[:9]} is unknown, not a pass: reading the files of {sha[:9]} failed: {names} {LANE_LINT_CITE}")
+        hits = guard_hits([x for x in names.split("\0") if x])
+        if hits:
+            out.append((sha, hits))
+    return out
+
+def unreviewed_guard_fails(root, host, n, info, base, head):
+    """-> the FAIL lines of lane lint for pull request `n`: one per guard or check commit on the lane past the head its newest review record names (decision pr-review-record).
+    A record that names the commit, or a later head, clears it. A pull request with no review record, or none that parses, has none to measure against, so it gets no line here."""
+    rows = host.review_records(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
+    recs = [r for r in (parse_review(body) for body, *_ in rows) if r]
+    if not recs:
+        return []
+    review_head = recs[-1]["head"]
+    return [f"{sha[:9]} changes {', '.join(paths)} after the last review record, which names {review_head[:9]}. Ask for a review that names it. {REVIEW_CITE}"
+            for sha, paths in guard_commits_after_review(root, base, head, review_head)]
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -3078,6 +3110,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         if why is not None:
             fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again.")
         if target.isdigit():
+            fails += unreviewed_guard_fails(root, host, int(target), info, base, head)
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None)
             fails += cross_fails
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
