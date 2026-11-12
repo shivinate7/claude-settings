@@ -2282,7 +2282,8 @@ def case_cross_repo_remedy_detector_is_calibrated():
     """(3 detector) The remedy detector flags the three ways a refusal asks for a session id: the reason main prints for
     the form, the remedy main prints for a missing one, and the remedy for the writer's own session. It passes four
     reasons a builder can write for the form: one that names the form and the role, one that refuses it, one that says
-    write a role, and one that says use the role. Green on main: it reads the detector, on fixed strings, not the rule."""
+    write a role, and one that says use the role. It reads the detector on fixed strings, not the rule, so a reword of
+    the rule's text does not move this case."""
     flagged = (
         "A repo other than the page's own needs `checked_with`: the session id of that repo's triage, coordinator or "
         "owner's-computer session that said the owner has not ruled.",
@@ -2308,7 +2309,7 @@ def case_cross_repo_remedy_detector_is_calibrated():
 
 def case_cross_repo_role_checked_with_passes():
     """(1) R22 point 3: a role in checked_with on another repo's open decision passes. The roles are coordinator, triage
-    and owner's-computer. Control, green on main: the same role on the page's own repo passes, since the compare is
+    and owner's-computer. Control: the same role on the page's own repo passes, since the compare is
     skipped there."""
     scope_open_foreign_item("(1)")
     for role in ROLES:
@@ -2319,7 +2320,7 @@ def case_cross_repo_role_checked_with_passes():
 
 def case_cross_repo_lane_slug_checked_with_passes():
     """(2) R22 point 3: a lane slug in checked_with on another repo's open decision passes, the longest slug (32
-    characters) too. Control, green on main: a lane slug on the page's own repo passes."""
+    characters) too. Control: a lane slug on the page's own repo passes."""
     scope_open_foreign_item("(2)")
     check("(2) fixture: the longest lane slug is 32 characters", len(LANE_SLUG_MAX) == 32,
           "got %d characters" % len(LANE_SLUG_MAX))
@@ -2333,7 +2334,7 @@ def case_cross_repo_session_id_is_refused():
     """(3) R22 point 3: a session id (`session_` plus id) in checked_with on another repo's open decision is refused. The
     reason names a role or a lane slug and gives no session id as the remedy. The refusal holds at the cross check, on
     both page surfaces, and on the guard in a cloud session and in a local one (env unset): the stored form is refused
-    whatever the session kind. Control, green on main: 'batch runner 9' is neither a role nor a lane slug, and is still
+    whatever the session kind. Control: 'batch runner 9' is neither a role nor a lane slug, and is still
     refused, naming checked_with."""
     scope_open_foreign_item("(3)")
     cross_refusal_checks("(3) checked_with is the session id %s" % CHECKED, "set", ma144(checked=CHECKED))
@@ -2355,9 +2356,9 @@ def case_cross_repo_session_id_is_refused():
 
 def case_cross_repo_missing_checked_with_names_role_or_slug():
     """(4) A missing or empty checked_with on another repo's open decision is still refused (case (i) holds the refusal).
-    Its reason names a role or a lane slug and gives no session id as the remedy. On main the reason asks the writer to
-    write a session id, so this case is red on the reason, not on the refusal. Control, green on main: the same item with
-    no checked_with on the page's own repo passes."""
+    Its reason names a role or a lane slug and gives no session id as the remedy. The reason is pinned as well as the
+    refusal, because the writer acts on the reason. Control: the same item with no checked_with on the page's own repo
+    passes."""
     cross_refusal_checks("(4) checked_with missing", "set", ma144())
     cross_refusal_checks("(4) checked_with empty", "set", ma144(checked=""))
     at_page_refusal_checks("(4) checked_with missing", "set", ma144_write(), tcj.origin_page_repo())
