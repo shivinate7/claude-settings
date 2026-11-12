@@ -425,25 +425,6 @@ await test('turn.complete trigger 7: a hung transcript lookup holds next(e) unti
   assert.doesNotMatch(allLog(fast), /SKIP /, `a fast lookup wrote a SKIP line (returned after ${Date.now() - t1} ms)`)
 })
 
-// Decision decision-watch-finds-transcript: a turn whose transcript is not found shows one UNKNOWN notice per session,
-// as an in-session toast. The SKIP line stays in the log. A turn is done once its STOP seen line is written, so turnDone
-// waits for that line; flush() then drains the microtasks the turn queued, and a toast it queued has been called.
-await test('turn.complete no transcript: the first turn shows one UNKNOWN notice, and the next turn of the same session shows none', async () => {
-  const h = await load(host())
-  missingLookup(h)
-  const turnDone = async turnId => {
-    const stopSeen = waitLog(h, /STOP seen/)
-    await fire(h, 'turn.complete', turnEvent({ turnId }), {})
-    await stopSeen
-    await flush()
-  }
-  await turnDone('t1')
-  same(h.toasts.length, 1, 'notices shown after the first turn with no transcript')
-  assert.ok(h.toasts[0].startsWith(UNKNOWN), `the notice is not an UNKNOWN: ${JSON.stringify(h.toasts[0])}`)
-  await turnDone('t2')
-  same(h.toasts.length, 1, 'notices shown after the second turn of the same session')
-})
-
 // ---- the transcript fallback (decision decision-watch-finds-transcript). When the mod's own derived path misses, the mod
 // still hands the turn to the script, and the script finds the transcript by session id. The script also owns the
 // once-per-session UNKNOWN, so the mod keeps no seen state of its own.
