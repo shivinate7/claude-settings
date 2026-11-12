@@ -92,6 +92,10 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+# A lane start's title opens with LANE_TITLE_FORM, so the owner's sidebar shows which branch a lane runs (rule
+# lane-title-slug). The pattern reads a branch slug: lower-case letters and digits, joined by single hyphens.
+LANE_TITLE_FORM = "Lane <branch slug>:"
+LANE_TITLE_OPENING = re.compile(r"Lane [a-z0-9]+(?:-[a-z0-9]+)*:")
 # A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
 # lane-effort-pin and lane-one-topic).
 LANE_GRANT_MARKER = "Grant:"

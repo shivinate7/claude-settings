@@ -10,7 +10,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
   triage and the batch runner together, as a trio, before any lane. It holds lane state
   and writes each lane brief. It starts each lane in roadmap order, with `model` (the lane row's),
-  `source_url` (the repo) and effort `medium`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
+  `source_url` (the repo), effort `medium` and `title` `Lane <branch slug>: <task>`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
   and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
