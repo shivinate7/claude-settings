@@ -20,7 +20,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
+from unittest import mock
 
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
@@ -28,6 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SIM_LEASE = os.environ.get("SIM_LEASE") or os.path.join(HERE, "..", "bin", "sim-lease")
 FAKE_GUARD_LOAD = os.path.join(HERE, "guard_load_fake_test.py")
 ROWS_PATH = os.path.join(HERE, "..", "hooks", "load_rows_test.py")
+GUARD_LOAD_PATH = os.path.join(HERE, "..", "hooks", "guard_load.py")  # the real reader, never the fake
+GB = 2 ** 30  # a GB as guard_load counts it
 REAL_PS = shutil.which("ps") or "/bin/ps"
 RUN_FOLDER = None
 SLOT_UDID = None  # read from the tool under test in setUpModule: the one home of the device IDs
@@ -359,6 +363,39 @@ class SharedRows(LeaseCase):
         else:
             self.assertEqual(r.returncode, 1, "%s: the %s take is granted, and the row says refused"
                              % (row["name"], device))
+
+
+class RealReader(unittest.TestCase):
+    """The real hooks/guard_load.py read_load, with its memory read made to raise (decision one-load-definition). The
+    read gives memory unread and still reads the disk, and no exception leaves read_load. Both reads are patched, so
+    no case reads this machine."""
+
+    def setUp(self):
+        self.guard_load = load_module(GUARD_LOAD_PATH, "guard_load_reader_case")
+
+    def read_under(self, free_gb, total_gb):
+        """read_load with the memory read raising and the home drive at free_gb of total_gb: its reading, or the
+        exception it raised."""
+        usage = types.SimpleNamespace(free=int(free_gb * GB), total=int(total_gb * GB))
+        with mock.patch.object(self.guard_load, "_read_memory", side_effect=OSError("memory read failed")), \
+                mock.patch("shutil.disk_usage", return_value=usage):
+            try:
+                return self.guard_load.read_load()
+            except Exception as exc:
+                return exc
+
+    def test_a_raising_memory_read_leaves_memory_unread_and_the_disk_read(self):
+        for free, total, level in ((500.0, 926.0, "normal"), (4.9, 926.0, "full")):
+            with self.subTest(disk="%s GB free of %s GB" % (free, total)):
+                reading = self.read_under(free, total)
+                if isinstance(reading, Exception):
+                    self.fail("read_load raised %s: a raising memory read must give memory unread"
+                              % type(reading).__name__)
+                self.assertAlmostEqual(reading["disk_free_gb"], free, places=2, msg="the disk free was not read")
+                self.assertIsNone(reading["memory_pct"], "memory_pct is not unread when its read raises")
+                verdict = self.guard_load.load_verdict(reading)
+                self.assertEqual(verdict["unread"], ["memory"], "the verdict does not name memory as unread")
+                self.assertEqual(verdict["level"], level, "the level is not the disk's level")
 
 
 class Give(LeaseCase):

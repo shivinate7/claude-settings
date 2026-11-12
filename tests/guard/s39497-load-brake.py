@@ -117,6 +117,8 @@ def under_fake(read, fake):
         return 0
 
     def sysctlbyname(name, oldp, oldlenp, newp, newlen):
+        if fake.get("memory_raises"):
+            raise OSError("the fake memory read failed")
         getattr(oldp, "_obj", oldp).value = 100 - int(fake["memory"])
         return 0
 
@@ -201,7 +203,13 @@ try:
                 out["raised"] = type(exc).__name__ + ": " + str(exc)[:80]
     else:
         if "fake" in spec and holders:
-            spec["reading"] = under_fake(holders[0].read_load, spec["fake"])
+            # A read_load that raises under the fake host is the guard's raising read (THE SEAM: every reading then
+            # counts as normal). The stub raises where the guard calls it, so the guard judges it, not the probe.
+            try:
+                spec["reading"] = under_fake(holders[0].read_load, spec["fake"])
+            except Exception as exc:
+                out["fake_raised"] = type(exc).__name__ + ": " + str(exc)[:80]
+                spec["reading"] = "raise"
         if "reading" in spec:
             def read_load():
                 out["reads"] += 1
@@ -271,12 +279,12 @@ def lb_gb(free, total):
     return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0):
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, memory_raises=False):
     """A fake host for THE FAKE HOST: `busy` the CPU share the tick samples would show, `load` the 1-minute
-    load average, `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on
-    the disk."""
+    load average, `memory` the percent in use, and the disk in GB. `memory_raises` makes darwin's memory read
+    raise. The defaults are a quiet host with room on the disk."""
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free}
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "memory_raises": memory_raises}
 
 
 def lb_reading(**changes):
@@ -1330,3 +1338,26 @@ for shared_row in test_load_rows.ROWS:
                lb_decision_check(shared_tool, shared_row["reading"],
                                  shared_row_want(shared_row["level"], shared_tool, shared_background),
                                  background=shared_background))
+
+
+# A MEMORY READ THAT RAISES (decision one-load-definition: a failed read is unread, and one failure hides no other).
+# read_load gives memory unread and still reads the disk. Were the per-reading guard gone, the raise would escape
+# read_load, the guard would count every reading normal, and a full disk would pass.
+def lb_memory_raise_reader_check(reading):
+    """read_load under a memory read that raises: memory_pct is None, and the disk pair is read as given."""
+    if reading.get("memory_pct") is not None:
+        return False, "memory_pct is %r, want None: the memory read raised" % (reading.get("memory_pct"),)
+    free, total = reading.get("disk_free_gb"), reading.get("disk_total_gb")
+    if free is None or total is None:
+        return False, "the disk pair is %r free of %r GB, want it read: one failed read hides no other" % (free, total)
+    if abs(free - 4.9) > 0.01 or abs(total - 926.0) > 0.01:
+        return False, "disk %r GB free of %r GB, want 4.9 free of 926" % (free, total)
+    return True, "memory unread, disk 4.9 GB free of 926 GB read"
+
+
+lb_add("memory read raises, darwin: read_load gives memory unread and still reads the disk",
+       lb_reader_fake(lb_fake("darwin", memory_raises=True, disk_free=4.9, disk_total=926.0),
+                      lb_memory_raise_reader_check))
+lb_add("memory read raises, disk full: a foreground Agent is refused at full, not passed",
+       lb_decision_check("Agent", None, "deny", names=(lb_gb(4.9, 926.0),), background=None,
+                         fake=lb_fake("darwin", memory_raises=True, disk_free=4.9, disk_total=926.0)))
