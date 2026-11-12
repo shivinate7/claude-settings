@@ -2603,10 +2603,33 @@ def case_challenged_reason_names_the_refuter():
           "inputs and the line", not missing, "missing from the reason: %s" % (missing or sorted(table)))
 
 
+# Round 2. Text that reads as a placeholder but is only a word: none, TBD, todo, n/a, an ellipsis and a lone em dash.
+# Real text that holds one of those words is not a placeholder, and an edit that empties the text is refused.
+CHALLENGED_PLACEHOLDER_TEXTS = ("none", "TBD", "todo", "n/a", "...", "—")
+CHALLENGED_REAL_TEXT = "Against the pick (sonnet): none of the options keep the lint gate"
+
+
+def case_challenged_placeholder_words():
+    for text in CHALLENGED_PLACEHOLDER_TEXTS:
+        line = "Against the pick (sonnet): " + text
+        challenged_text("the Against the pick text %r is a miss" % text, line, False)
+        challenged_decision("a decision whose Against the pick text is %r is refused" % text, "set",
+                            page_item(against=line), CHALLENGED_REFUSAL)
+        challenged_page("a page decision whose Against the pick text is %r is refused" % text, "set",
+                        page_item(against=line), CHALLENGED_REFUSAL)
+    challenged_text("real text that starts with none, and says more, passes", CHALLENGED_REAL_TEXT, True)
+    challenged_page("a page decision whose text starts with none, and says more, passes", "set",
+                    page_item(against=CHALLENGED_REAL_TEXT), None)
+    context_replace("that leaves the Against the pick text empty, after a space, is refused", AGAINST,
+                    "Against the pick (sonnet): ", CHALLENGED_REFUSAL)
+    context_replace("that swaps the line for a lone placeholder word is refused", AGAINST,
+                    "Against the pick (sonnet): TBD", CHALLENGED_REFUSAL)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_challenged_predicate, case_challenged_decision_form, case_challenged_item_hit,
-                 case_challenged_reason_names_the_refuter,
+                 case_challenged_reason_names_the_refuter, case_challenged_placeholder_words,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
                  case_item_stray_field_refused_from_a_record_branch_checkout,

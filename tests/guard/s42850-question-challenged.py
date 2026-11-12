@@ -123,3 +123,17 @@ add("question challenged: a batch of decisions that each carry the line is allow
     writes=[{"op": "set", "collection": "items", "doc_id": QC_DOC, "data": qc_item()},
             {"op": "set", "collection": "items", "doc_id": "challenged-second",
              "data": qc_item(id="challenged-second")}])
+
+# Round 2. A str_replace that empties the text of the line, and placeholder text that reads as a word: none, TBD,
+# todo, n/a, an ellipsis and a lone em dash. Real text that holds one of those words is not a placeholder.
+QC_PLACEHOLDER_TEXTS = ("none", "TBD", "todo", "n/a", "...", "—")
+
+qc_replace("a str_replace that leaves the Against the pick text empty, after a space, is denied", "deny",
+           OJ_AGAINST, "Against the pick (sonnet): ")
+qc_replace("a str_replace that swaps the line for a lone placeholder word is denied", "deny",
+           OJ_AGAINST, "Against the pick (sonnet): TBD")
+for _text in QC_PLACEHOLDER_TEXTS:
+    qc("an Against the pick text that is only %s is denied" % _text, "deny",
+       qc_item(context=oj_ctx(against="Against the pick (sonnet): " + _text)))
+qc("an Against the pick text that starts with none, and says more, is allowed", "allow",
+   qc_item(context=oj_ctx(against="Against the pick (sonnet): none of the options keep the lint gate")))
