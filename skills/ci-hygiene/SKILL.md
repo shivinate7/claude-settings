@@ -175,9 +175,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     once per batch; R62, Linux and Windows once per batch; R63, install.sh tests on Linux and macOS.
     The push to main starts no suite on a tree that a green batch PR run tested. If main's head
     already has a green run, the nightly run skips. The no-merge-onto-red-main gate reads that
-    PR run. On a slow platform, a macOS job runs only the tests whose subject is macOS, and a Windows
-    job runs a Windows-tagged slice. Windows keeps its full guard and merge shards, once, in the
-    batch PR run. A lane's touched-tests macOS leg runs only for files whose subject is macOS. The
+    PR run. A macOS job runs only the tests whose subject is macOS. Windows keeps its full guard and
+    merge shards, once, in the batch PR run. Dropping them to a tagged slice is held (R62 part 4). A lane's touched-tests macOS leg runs only for files whose subject is macOS. The
     install.sh tests run on both Linux and macOS. Steps: ci-mac-once-per-batch, ci-linux-windows-once.
     Child repos adopt this later (R64).
 18. **Profile before you refactor test setup.** Compare setup time to test-body time. If the saving is
