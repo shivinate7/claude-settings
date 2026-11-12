@@ -1789,10 +1789,15 @@ def case_past_ruling_challenge_page_item_gets_item_8():
 
 
 def case_past_ruling_item_refuses_a_bare_re_ask():
+    # A bare re-ask is refused by two sentences of the item: a new fact alone is not a pass, and a re-ask that is not such
+    # a challenge is refused. The item says no re-ask passes on a fact alone, so the check reads both sentences.
     item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
-    lower = item.lower()
-    check("bare re-ask: the item refuses a re-ask with no new measure or fact",
-          "refuse" in lower and "no new" in lower and ("measure" in lower or "fact" in lower), item[:300])
+    flat = " ".join(item.split())[:300]
+    sentences = [s.strip() for s in sentences_of(item)]
+    check("bare re-ask: the item says a new fact alone is not a pass",
+          any("a new fact alone is not a pass" in s for s in sentences), flat)
+    check("bare re-ask: the item refuses a re-ask that is not such a challenge",
+          "refuse a re-ask that is not such a challenge" in sentences, flat)
 
 
 def case_past_ruling_item_never_says_withdraw():
