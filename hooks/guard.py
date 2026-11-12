@@ -4445,7 +4445,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
         matched = lane_number_named(segment, raw, cite_where, before)
-        if matched.startswith(UNREAD_MARK):   # a gh pr merge file: cite-by-id never reads merge
+        if matched.startswith(UNREAD_MARK):   # backstop: cite-by-id above reads the same files, merge too
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
