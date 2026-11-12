@@ -40,15 +40,17 @@
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
                           and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
-                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base (a done PR
-                          that is ready with CI running and has no holder is not compared; the carried close and the batch line share each compare); no
-                          new process, file or timer.
+                          the base, at most one compare per done PR and other open PR on the base, and at most one compare per done PR against the
+                          base. A done PR that is ready with CI running reads no compare, holder or not, as on main. Two PRs with one head read no
+                          compare. The carried close and the batch line share each compare, so no pair is read twice; no new process, file or timer.
                           After the batch line, three kinds of line for the batch runner, which closes and reopens; the tool posts and closes nothing:
                             close as replaced: OWNER/NAME #N by #R   open R holds a `Replaces #N` line, N is another open PR on R's base (lowest R wins;
                                                                      a loop of any length closes none, nor a claim on a PR that
                                                                      leads back to itself; a claim stands even from a PR itself replaced)
-                            close as carried: OWNER/NAME #A by #B    A is done and another open PR B on A's base holds A's head (lowest B; two PRs
-                                                                     with one head close only the higher number). A PR named replaced holds nothing,
+                            close as carried: OWNER/NAME #A by #B    A is a draft with a done record, and another open PR B on A's base, draft or
+                                                                     ready, holds A's head (lowest B; two drafts with one head close only the higher
+                                                                     number). A ready PR is never carried: one that another holds is only left off
+                                                                     the batch line, as on main. A PR named replaced holds nothing,
                                                                      so it carries no PR. A done PR whose head the base already holds is
                                                                      not carried (it is off the batch line too, one shared compare).
                                                                      If a compare fails, the line is
@@ -4155,25 +4157,26 @@ def replaced_closes(pulls):
         found.setdefault(n, r)
     return found
 
-def on_base(h, heads, held, n, base):
-    """True when `base` holds the head of pull request n (Host.holds_head: ahead or identical, a Stop on a failed read). `held` memoizes {n: bool}, so
-    the carried close and the batch line share one compare per pull request."""
-    if n not in held:
-        held[n] = h.holds_head(heads[n], base)
-    return held[n]
+def pr_holds(h, held, head, other):
+    """True when `other` (a head sha or the base) holds `head` (Host.holds_head: ahead or identical, a Stop on a failed read). `held` memoizes
+    {(head, other): bool}, so the carried close and the batch line share each compare: at most one per pair per wake."""
+    if (head, other) not in held:
+        held[head, other] = h.holds_head(head, other)
+    return held[head, other]
 
-def carried_closes(h, heads, nums, base, held):
-    """-> {A: B}: each pull request A of `nums` (done, on the base) with the lowest-numbered other open pull request B on the base whose head holds
-    A's head (Host.holds_head, a Stop on a failed read). `heads` is {number: head sha} of the open pull requests on the base. Two pull requests with
-    one head hold each other, so the lower number is the holder and the higher one closes; that needs no compare read. This is the one place the
-    batch line and the carried close read "held", so a PR on one is off the other. The caller leaves a pull request named replaced out of `heads`:
-    it is closing, so it carries nothing. An A whose head `base` already holds is never carried: nothing of it is left to carry, and B's hold on
-    it says nothing about B. That compare (on_base, memoized in `held`) runs only for an A that has a holder B."""
+def carried_closes(h, heads, drafts, base, held):
+    """-> {A: B}: each pull request A of `drafts` (a draft with a done record, on the base) with the lowest-numbered other open pull request B on the
+    base whose head holds A's head (pr_holds, a Stop on a failed read). B may be a draft or ready. Only a draft is carried: closing a ready pull request
+    would end its CI run and its merge, so a ready one that another holds is only kept off the batch line (reviewed_block), as on main. `heads` is
+    {number: head sha} of the open pull requests on the base. Two pull requests with one head hold each other, so the lower number is the holder
+    and the higher one closes; that needs no compare read. The caller leaves a pull request named replaced out of `heads`: it is closing, so it
+    carries nothing. An A whose head `base` already holds is never carried: nothing of it is left to carry, and B's hold on it says nothing about
+    B. That compare runs only for an A that has a holder B. Each compare is memoized in `held`, shared with the batch line."""
     found = {}
-    for a in nums:
+    for a in drafts:
         for b in sorted(heads):
-            if b != a and (b < a if heads[b] == heads[a] else h.holds_head(heads[a], heads[b])):
-                if not on_base(h, heads, held, a, base):
+            if b != a and (b < a if heads[b] == heads[a] else pr_holds(h, held, heads[a], heads[b])):
+                if not pr_holds(h, held, heads[a], base):
                     found[a] = b
                 break
     return found
@@ -4272,16 +4275,18 @@ def reviewed_lines(h):
 def reviewed_block(h):
     """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, at most one batch line, then the close and reopen lines.
     The batch line names the done pull requests on the host's base, ascending, except one that another open pull request names as its replacer
-    (replaced_closes), one whose head another open pull request on that base holds (carried_closes, drafts included: the batch would merge it
-    twice), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that is ready with CI running
-    (Host.ready_busy). `open batch now` when no ready pull request on that base has CI running, else `build next batch on the running head`.
+    (replaced_closes), one that closes as carried (carried_closes: drafts only), one whose head another open pull request on that base holds, the
+    holder a draft or ready (as on main: the batch would merge it twice; a carried pull request is closing, so it holds nothing, and one head is
+    held with no compare), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that is ready with CI
+    running (Host.ready_busy, checked first, so it reads no compare). `open batch now` when no ready pull request on that base has CI running, else `build next batch on the running head`.
     No pull request left, no batch line. With no open pull request the block ends with REOPEN_UNCHECKED and reads nothing more. The tool posts and closes nothing: the batch runner closes each pull request on a close line.
     A Stop in a read for the batch line keeps the reviewed lines, prints `batch line unknown (reason)` in place of the batch line, and ok is False;
     a Stop in the compares that decide a carried close also prints `close as carried unknown (reason)`; a Stop in a reopen read prints
     `reopen unknown (reason)`; a Stop in reviewed_read raises. Extra cost over reviewed_read: only when a done pull request exists on the base, the
-    branch protection read and each ready pull request's check runs, statuses and workflow runs, then one compare per done pull request and other
-    open pull request on the base, and one compare per done pull request against the base (shared with the carried close, so a pull request
-    whose head the base holds is on neither line). The close lines read nothing more. The reopen lines
+    branch protection read and each ready pull request's check runs, statuses and workflow runs, then at most one compare per done pull request
+    and other open pull request on the base, and at most one compare per done pull request against the base, all memoized in `held` and shared
+    with the carried close (pr_holds), so a pull request whose head the base holds is on neither line. A done pull request that is ready with CI
+    running reads no compare, as on main; two pull requests with one head read none. The close lines read nothing more. The reopen lines
     read pulls/N once for each closed pull request with a closing note, and pulls/R once when its replacer R is not open (reopen_lines)."""
     lines, done, pulls, notes = reviewed_read(h)
     out, ok, tail = [f"repo {h.repo}:", *lines], True, []
@@ -4293,14 +4298,19 @@ def reviewed_block(h):
     if nums:
         heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base and d["number"] not in replaced}
         try:
-            carried = carried_closes(h, heads, nums, h.base, held)
+            drafts = {d["number"] for d in pulls if d.get("draft")}
+            carried = carried_closes(h, heads, [n for n in nums if n in drafts], h.base, held)
         except Stop as e:
             why = " ".join(str(e).split())
             batch, tail, ok = [f"{REVIEW_BATCH_UNKNOWN}({why})"], [f"{CLOSE_CARRIED_UNKNOWN}({why})"], False
         else:
             try:
                 busy = h.ready_busy(pulls, h.base)
-                left = [n for n in nums if n not in busy and n not in carried and not on_base(h, heads, held, n, h.base)]
+
+                def held_by_other(n):  # as on main, but a carried PR is closing, so it holds nothing; one head is held with no compare
+                    return any(m != n and m not in carried and (sha == heads[n] or pr_holds(h, held, heads[n], sha)) for m, sha in sorted(heads.items()))
+
+                left = [n for n in nums if n not in busy and n not in carried and not held_by_other(n) and not pr_holds(h, held, heads[n], h.base)]
                 if left:
                     batch = [f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in left)]
             except Stop as e:
@@ -4433,8 +4443,9 @@ def reviewed_roots(roots, hosts, config):
     is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
-    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
-    request and other open pull request on the base, and one compare per done pull request against the base, plus the reopen reads of reviewed_block
+    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, the compares of reviewed_block (at
+    most one per done pull request and other open pull request on the base, at most one per done pull request against the base, none for a done
+    pull request that is ready with CI running), plus the reopen reads of reviewed_block
     (at most two per closed pull request with a closing note); no new process, file or timer."""
     lines, ok = [], True
     for r in roots:
