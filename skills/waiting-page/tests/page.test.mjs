@@ -1168,6 +1168,24 @@ test("a 1564px mockup at 390 wide scrolls in its box, and the cue shows", async 
   assert.equal((await cueState(page, it.id)).disp, "flex", "the cue is not drawn on a picture that scrolls");
 });
 
+// Gutter edge, from the round-1 review of the grow-to-a-phone rule: a picture that scrolls at the card's width, and fits whole once the gutter narrows it,
+// draws whole at the narrowed width. It is never taller than F + 1 and never scrolls. At 540 wide two options share a row with a budget of 200:
+// a 390 x 980 picture is 503 high at 200 wide, over F + 1 = 481, and 478 high at 190 wide, the card less the 10px gutter.
+test("a tall picture that fits once the gutter narrows it draws whole at the narrowed width, no taller than F + 1, at 540 wide", async (t) => {
+  const it = picItem("gutter-edge", 86, { count: 2 });
+  const page = await open(t, { items: [it], designData: SAME(TALL_PIC(980)), viewport: { width: 540, height: 900 } }); if (!page) return;
+  await framesAt(page, 2, 980);
+  await boxesSettled(page, it.id);
+  const room = await budget(page, it.id), F = Math.max(480, Math.ceil((room * 844) / 390));
+  const boxes = await optBoxes(page, it.id);
+  assert.equal(boxes.length, 2, "the card does not hold the two options the case gave it");
+  for (const b of boxes) {
+    assert.ok(b.wrapH <= F + 1, `${b.opt} box is ${b.wrapH} high, over F + 1 = ${F + 1}`);
+    assert.ok(!/scroll/.test(b.cls), `${b.opt} picture scrolls, though it fits once the gutter narrows it`);
+    assert.ok(b.wrapW <= room + 3, `${b.opt} box is ${b.wrapW} wide, over the card's ${room + 2}`);
+  }
+});
+
 // Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a picture scrolls only when its drawn height is over the phone's fit plus 1px.
 // A phone is 844 high, so 845 draws 1px over the phone's fit at 390 wide and still draws whole; 846 draws 2px over and scrolls.
 test("a mockup 1px taller than a phone draws whole at the card's width, with no scroll and no cue, at 390 wide", async (t) => {
