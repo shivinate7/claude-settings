@@ -3173,8 +3173,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), mutate_ru
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        no_ci = state == "unknown" and any(NO_CI_WHY in l for l in lines)  # a repo with no CI has no checks.yml for the mutation run to read; its Stop below names the starter step
         mutate, mutate_fails, skipped = "", [], False
-        if state == "pass" or (liftable and unknown_ok.strip()):  # a lint that fails or stays unknown stops without the run's minutes
+        if not no_ci and (state == "pass" or (liftable and unknown_ok.strip())):  # a lint that fails or stays unknown stops without the run's minutes
             c, changed = git(root, "diff", "--no-renames", "--name-only", f"origin/{base}...{head}")  # no renames: a moved file lists its old path too, as CI's scope reads it
             if c:  # no merge base to list from (the clash check above reads an unrelated history as unknown, so this is a rare read failure): unknown, never a guess
                 raise Stop(f"cannot list the files the head changes against {base}: {changed} {LANE_LINT_REMEDY}")
@@ -3189,7 +3190,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), mutate_ru
     if mutate_fails:
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs: the diff touches a mutation test file, and its {mutate}:", *mutate_fails, LANE_LINT_REMEDY]))
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
-    if state == "unknown" and any(NO_CI_WHY in l for l in lines):  # ci-job found no workflow folder or no workflow file: a repo with no CI, which no flag lifts. A workflow with no `checks` job stays a liftable unknown
+    if no_ci:  # ci-job found no workflow folder or no workflow file: a repo with no CI, which no flag lifts. A workflow with no `checks` job stays a liftable unknown
         raise Stop("\n".join([f"the lint of {short} against {base} has no CI to run:", *lines, STARTER_CI_FIX + " Push, then run `merge --lane-lint` again. " + LANE_LINT_CITE]))
     if skipped and (state == "pass" or (liftable and unknown_ok.strip())):
         say(MUTATE_SKIPPED)
