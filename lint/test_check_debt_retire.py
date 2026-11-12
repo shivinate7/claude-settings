@@ -226,7 +226,7 @@ class Closes(Case):
         self.assertEqual(self.ran(), [], "a non-test path ran")
         self.assertEqual(pairs(found), [("d-config", "prose")])
 
-    def test_4c_a_retire_naming_a_test_the_pr_deletes_is_prose(self):
+    def test_4c_a_retire_naming_a_test_the_pr_deletes_is_refused(self):
         self.repo(debts={"d-gone": PASS})
         self.change(rm=["docs/debts/d-gone.md", "tests/test_pass.py"])
         found = self.findings()
@@ -401,6 +401,23 @@ class RedOnBirth(Case):
         self.close(PROSE)
         self.findings()
         self.assertEqual(self.ran_on_birth(), [])
+
+    def test_b9_a_debt_with_no_birth_commit_in_the_history_is_unknown(self):
+        self.close(PASS)
+        with unittest.mock.patch.object(D, "birth_commit", lambda wt, head, old: None):
+            self.assertEqual(pairs(self.findings()), [("d-b", "unknown")], "no birth commit read as a catch")
+
+    def test_b10_a_green_cite_does_not_clear_a_missing_named_test(self):
+        self.close("Delete the old helper. Check: `tests/test_gone.py`.")
+        body = "Done.\n\nRetire-run: d-b -- %s\n" % RUN_URL
+        found = self.findings(pr_body=body, run_state=Runs(("success", self.head)))
+        self.assertEqual(pairs(found), [("d-b", "red")], "a cite cleared a test file that does not exist")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not on PATH")
+    def test_b11_a_mjs_test_that_cannot_load_on_the_birth_commit_is_unknown(self):
+        self.repo(debts={"d-b": "Delete the old helper. Check: `tests/test_new.mjs`."})
+        self.change(write={"tests/test_new.mjs": "import './newmod.mjs';\n", "tests/newmod.mjs": "export {};\n"}, rm=["docs/debts/d-b.md"])
+        self.assertEqual(pairs(self.findings()), [("d-b", "unknown")], "a node load error at birth read as a catch")
 
 
 class RetireRun(Case):
