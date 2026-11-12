@@ -619,6 +619,29 @@ def case_wire_unread_forms_with_the_page_text_are_allowed():
         wire_allows("control: a chat line '%s' with the page's text is allowed" % line, set_write(ITEM), transcript)
 
 
+def wire_zero_noted(name, call, transcript):
+    """A clean write is allowed and logs no noted line for the rule. The five red cases above accept one noted line, so
+    a fix that notes every write would pass them. This control refuses it."""
+    decision, reason = guard_hook(name, call, transcript)
+    noted = noted_rule_rows(name)
+    check(name, decision == "allow" and not noted,
+          "want an allow with no noted line for %s, got %s with %d noted line(s): %r"
+          % (RULE, decision, len(noted), reason[:200]))
+
+
+def case_wire_clean_writes_log_no_noted_line():
+    """Keep-green control, green on every old commit. Three clean paths: a set whose labels match the chat, a set whose
+    chat question cites another item, and a set whose chat question cites no item. Each is allowed and logs no noted
+    line for the rule."""
+    wire_zero_noted("wire: a clean set whose labels match the chat logs no noted line for the rule",
+                    set_write(ITEM), write_transcript("clean-matching", chat_question((CHAT_A, CHAT_B))))
+    wire_zero_noted("wire: a clean set whose chat cites another item logs no noted line for the rule",
+                    set_write(ITEM),
+                    write_transcript("clean-other-item", chat_question((CHAT_A, CHAT_B_MISMATCH), cite=OTHER_ITEM)))
+    wire_zero_noted("wire: a clean set whose chat cites no item logs no noted line for the rule",
+                    set_write(ITEM), write_transcript("clean-no-cite", chat_question((CHAT_A, CHAT_B_MISMATCH), cite=None)))
+
+
 # ------------------------------------------------------------------ 2. the recommended field (uniform-pick)
 
 def decision_with(**over):
@@ -702,7 +725,7 @@ CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_chat_s
          case_wire_one_word_colonless_cite_is_checked_or_noted, case_wire_one_word_colon_cite_is_refused,
          case_wire_option_word_form_is_checked_or_noted, case_wire_bare_letter_form_is_checked_or_noted,
          case_wire_no_space_form_is_checked_or_noted, case_wire_bold_paren_form_is_checked_or_noted,
-         case_wire_unread_forms_with_the_page_text_are_allowed)
+         case_wire_unread_forms_with_the_page_text_are_allowed, case_wire_clean_writes_log_no_noted_line)
 FN_CASES = tuple(c for c in CASES if c.__name__.startswith("case_fn_"))
 
 
