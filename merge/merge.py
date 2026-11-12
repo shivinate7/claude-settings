@@ -1253,16 +1253,18 @@ class Host:
 
     def ruleset_names(self):
         """-> the check names that the base's ruleset requires: every context of every required_status_checks rule that applies to the base,
-        in order, once each. None when no rule requires a check, which hands the names to the classic protection. One read of rules/branches/<base>,
-        which answers [] when no ruleset applies. Any failed read raises Stop, an HTTP 404 included: the classic list is no stand-in for an unread ruleset."""
-        c, out = self.api(f"rules/branches/{self.base}")
+        in order, once each. None when no rule requires a check, which hands the names to the classic protection. Reads rules/branches/<base>, every page
+        (pages: one call when one page holds them), which answers [] when no ruleset applies. Any failed read, of any page, raises Stop, an HTTP 404 included:
+        the classic list is no stand-in for an unread ruleset, and a check rule on a page not read would be a check not required."""
+        remedy = f"cannot read the rules of {self.base} {PIN_CITE}. Set merge.requiredChecks to a list of check names."
         try:
-            rules = json.loads(out) if not c else None
-            if not isinstance(rules, list):
-                raise ValueError(out)
+            rules = self.pages(f"rules/branches/{self.base}")
+        except Stop as e:
+            raise Stop(f"{remedy}\n{e}")
+        try:
             names = [s["context"] for r in rules if isinstance(r, dict) and r.get("type") == "required_status_checks" for s in r["parameters"]["required_status_checks"]]
-        except (ValueError, KeyError, TypeError):
-            raise Stop(f"cannot read the rules of {self.base} {PIN_CITE}. Set merge.requiredChecks to a list of check names.\n{out}")
+        except (KeyError, TypeError):
+            raise Stop(f"{remedy}\n{rules}")
         return list(dict.fromkeys(names)) or None
 
     def protection_names(self):
