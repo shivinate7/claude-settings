@@ -36,6 +36,11 @@ Limits:
 - A runner word the guard does not know in front of python (`stdbuf -o0 python3 f.py`) leaves the body python's, so it is allowed.
 - A runner word outside the guard's interpreter list (ash, nodejs, perl5.36) is not known, so `python3 f.py && ash f.py` is allowed.
 - An unknown runner drops the body, as on main, for a non-.sh file name and for stdin. A .sh name stays read, so `mysh f.sh` is refused.
+- A PowerShell here-string is read as shell lines when `iex` or `Invoke-Expression` takes it after a space.
+- It is also read when `[scriptblock]::Create(` builds a block from it, or when it is piped into iex or a pwsh that reads stdin.
+- Not read: `iex(@"`, `Create (@"`, a pwsh switch the guard does not know before the stdin dash, and `ForEach-Object { iex $_ }`. Main reads none of them.
+- A here-string given to `Set-Content` is allowed.
+- A here-string held in a variable is not read, even when a later line runs it (`iex $b`, `$b | iex`). Main allows it too.
 - The guard does not judge a `gh api` POST to the pulls endpoint, or `hub pull-request`. Each can open a non-draft PR.
 - A short-flag cluster such as `-dt x` is refused, a rare false alarm.
 - A pull request that turns draft during the merge wait is not stopped.
