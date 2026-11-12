@@ -39,8 +39,10 @@ SUMMARY_LINE = re.compile(r"^merge: \d+ lanes to archive\b", re.M)
 ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
 HOLD = "HOLD: handoff %s is not on the record branch"
 HANDOFF = "roadmap/outbox/%s-handoff.md"
-HELD_ONE = re.compile(r"^merge: 2 lanes to archive, 1 held\b", re.M)
-HELD_ALL = re.compile(r"^merge: 2 lanes to archive, 2 held\b", re.M)
+# N counts the clear lanes only; a held lane is printed with its HOLD marker and counted in M.
+HELD_ONE = "merge: 1 lanes to archive, 1 held. Run get_session on each alone, then archive it."
+HELD_ALL = "merge: 0 lanes to archive, 2 held. Run get_session on each alone, then archive it."
+MIXED = "merge: 3 lanes to archive, 1 held. Run get_session on each alone, then archive it."
 # Each bad slug with the path a naive join would read on the record branch, so a builder that skips the check reads
 # the lane clean. The `..` path is written at the file it resolves to, since git refuses a `..` in a path.
 BAD_SLUGS = (("", "roadmap/outbox/-handoff.md"), ("a/b", "roadmap/outbox/a/b-handoff.md"),
@@ -196,13 +198,29 @@ class IdleLanesCli(unittest.TestCase):
         self.assertEqual(len(found), 1, "lane %s is not listed once: out: %r" % (sid, out))
         return found[0]
 
+    def land_steps(self, stems):
+        """Commit one done step per stem on the record branch, numbered from 3 (c1 and c2 are in setUp)."""
+        roadmap.git(self.repo, "checkout", "-q", "roadmap")
+        for order, stem in enumerate(stems, start=3):
+            step = dict(roadmap.STEP, order=order, status="done")
+            (self.repo / "roadmap" / "data" / "steps" / (stem + ".json")).write_text(json.dumps(step), encoding="utf-8")
+        roadmap.git(self.repo, "add", "-A")
+        roadmap.git(self.repo, "commit", "-q", "-m", "steps " + ", ".join(stems))
+
+    def assert_unknown_never_clear(self, out, sid):
+        """Lane `sid` is flagged unknown, on its line or as an entry naming it, and no line reads it clear."""
+        flagged = [line for line in out.splitlines() if sid in line and "unknown (" in line]
+        self.assertTrue(flagged, "no unknown flag names %s: out: %r" % (sid, out))
+        clear = [line for line in out.splitlines() if line.startswith(sid + " ") and "unknown (" not in line]
+        self.assertEqual(clear, [], "%s reads clear: out: %r" % (sid, out))
+
     def test_tagged_lane_whose_handoff_is_not_on_the_record_branch_is_marked_held(self):
         self.publish([archived("session_t", "c1", "alpha"), lane("session_u", "c2")])
         self.record_from_origin()
         out = self.run_idle()
         self.assertIn(HOLD % "alpha", self.lane_line(out, "session_t"), out)
         self.assertEqual(self.lane_line(out, "session_u"), "session_u (c2; topic -)", out)
-        self.assertRegex(out, HELD_ONE)
+        self.assertEqual(out.splitlines()[-1:], [HELD_ONE], out)
 
     def test_tagged_lane_whose_handoff_is_on_the_record_branch_is_listed_clean(self):
         # The held lane keeps this case red on the current code: a fixture with no held lane reads the same there.
@@ -211,7 +229,7 @@ class IdleLanesCli(unittest.TestCase):
         out = self.run_idle()
         self.assertEqual(self.lane_line(out, "session_f"), "session_f (c1; topic -)", out)
         self.assertIn(HOLD % "gamma", self.lane_line(out, "session_t"), out)
-        self.assertRegex(out, HELD_ONE)
+        self.assertEqual(out.splitlines()[-1:], [HELD_ONE], out)
 
     def test_untagged_lane_is_listed_with_no_marker_beside_a_held_lane(self):
         # The held lane keeps this case red on the current code: a fixture with no held lane reads the same there.
@@ -220,7 +238,7 @@ class IdleLanesCli(unittest.TestCase):
         out = self.run_idle()
         self.assertEqual(self.lane_line(out, "session_u"), "session_u (c1; topic -)", out)
         self.assertIn(HOLD % "delta", self.lane_line(out, "session_t"), out)
-        self.assertRegex(out, HELD_ONE)
+        self.assertEqual(out.splitlines()[-1:], [HELD_ONE], out)
 
     def test_handoff_committed_only_on_main_is_not_on_the_record_branch(self):
         # The file is on main's disk, so a check of the checkout's files reads the lane clean. Only the record branch
@@ -230,7 +248,7 @@ class IdleLanesCli(unittest.TestCase):
         out = self.run_idle()
         self.assertIn(HOLD % "alpha", self.lane_line(out, "session_t"), out)
         self.assertEqual(self.lane_line(out, "session_u"), "session_u (c2; topic -)", out)
-        self.assertRegex(out, HELD_ONE)
+        self.assertEqual(out.splitlines()[-1:], [HELD_ONE], out)
 
     def test_every_listed_lane_held_counts_them_all(self):
         self.publish([archived("session_a", "c1", "alpha"), archived("session_b", "c2", "beta")])
@@ -238,7 +256,7 @@ class IdleLanesCli(unittest.TestCase):
         out = self.run_idle()
         self.assertIn(HOLD % "alpha", self.lane_line(out, "session_a"), out)
         self.assertIn(HOLD % "beta", self.lane_line(out, "session_b"), out)
-        self.assertRegex(out, HELD_ALL)
+        self.assertEqual(out.splitlines()[-1:], [HELD_ALL], out)
 
     def test_bad_archive_slug_flags_its_lane_unknown_never_clear(self):
         # Each bad slug's naive path is on the record branch, so a builder that joins the slug unchecked reads it clean.
@@ -248,11 +266,7 @@ class IdleLanesCli(unittest.TestCase):
             with self.subTest(slug=slug):
                 self.publish([archived("session_x", "c1", slug), lane("session_u", "c2")])
                 _, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
-                flagged = [line for line in out.splitlines() if "session_x" in line and "unknown (" in line]
-                self.assertTrue(flagged, "no unknown flag names session_x: out: %r, err: %r" % (out, err))
-                clear = [line for line in out.splitlines()
-                         if line.startswith("session_x ") and "unknown (" not in line]
-                self.assertEqual(clear, [], "session_x reads clear for slug %r: out: %r" % (slug, out))
+                self.assert_unknown_never_clear(out, "session_x")
                 self.assertEqual(self.lane_line(out, "session_u"), "session_u (c2; topic -)", out)
 
     def test_unreadable_record_branch_after_a_held_lane_reads_unknown_exit_1_no_summary(self):
@@ -269,6 +283,48 @@ class IdleLanesCli(unittest.TestCase):
                         "no unknown line: out: %r, err: %r" % (out, err))
         self.assertEqual(code, 1, "an unreadable record branch exits %d, so a caller reads the list as read" % code)
         self.assertNotRegex(out, SUMMARY_LINE)
+
+    def test_summary_counts_only_the_clear_lanes_beside_one_held_lane(self):
+        # The three clear lanes are the control: they list exactly as today, so the summary is what this case reads.
+        self.land_steps(["c3", "c4"])
+        self.publish([lane("session_a", "c1"), lane("session_b", "c2"), lane("session_c", "c3"),
+                      archived("session_t", "c4", "alpha")])
+        self.record_from_origin()
+        out = self.run_idle()
+        for sid, step in (("session_a", "c1"), ("session_b", "c2"), ("session_c", "c3")):
+            self.assertEqual(self.lane_line(out, sid), "%s (%s; topic -)" % (sid, step), out)
+        self.assertIn(HOLD % "alpha", self.lane_line(out, "session_t"), out)
+        self.assertEqual(out.splitlines()[-1:], [MIXED], out)
+
+    def test_handoff_stored_as_a_tree_at_its_path_reads_held_not_clean(self):
+        # A directory sits where the handoff file belongs, with a file under it: the handoff is not on the record branch.
+        self.publish([archived("session_t", "c1", "alpha"), lane("session_u", "c2")])
+        self.record_from_origin(record=[(HANDOFF % "alpha") + "/notes.md"])
+        out = self.run_idle()
+        self.assertIn(HOLD % "alpha", self.lane_line(out, "session_t"), out)
+        self.assertEqual(self.lane_line(out, "session_u"), "session_u (c2; topic -)", out)
+
+    def test_nul_bearing_slugs_read_their_lanes_unknown_never_clear(self):
+        # A slug with a NUL byte cannot be sent to git, so its handoff read fails: each lane reads unknown. The clear
+        # control shows the list was read.
+        self.land_steps(["c3"])
+        self.record_from_origin()
+        self.publish([archived("session_n1", "c1", "al\x00pha"), archived("session_n2", "c2", "be\x00ta"),
+                      lane("session_u", "c3")])
+        _, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assert_unknown_never_clear(out, "session_n1")
+        self.assert_unknown_never_clear(out, "session_n2")
+        self.assertEqual(self.lane_line(out, "session_u"), "session_u (c3; topic -)", out)
+
+    def test_nul_slug_reads_unknown_even_when_the_path_cut_at_the_nul_is_on_the_record_branch(self):
+        # "al" is the slug cut at its NUL. The record branch holds that cut slug's handoff, so a reader that cuts the
+        # slug reads the lane clear. The slug is refused, so it reads unknown.
+        self.land_steps(["c3"])
+        self.record_from_origin(record=[HANDOFF % "al"])
+        self.publish([archived("session_x", "c1", "al\x00pha"), lane("session_u", "c3")])
+        _, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assert_unknown_never_clear(out, "session_x")
+        self.assertEqual(self.lane_line(out, "session_u"), "session_u (c3; topic -)", out)
 
 
 if __name__ == "__main__":
