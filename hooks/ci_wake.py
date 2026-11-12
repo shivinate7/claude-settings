@@ -77,22 +77,13 @@ def gh(args, cwd, timeout=READ_TIMEOUT):
     """-> (rc, stdout, stderr). gh is found with shutil.which: a list-form call of a bare "gh"
     misses a .cmd launcher on Windows. A timeout kills gh and never waits on its pipes."""
     try:
-        import _nowindow  # the one home of a no-window child start
-    except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
-        _nowindow = subprocess
-    exe = shutil.which("gh")
-    if exe is None:
-        raise Unknown("gh is not on PATH")
+        import git_reads  # the one gh runner (git_reads.gh_run)
+    except ImportError as e:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
+        raise Unknown("gh runner unavailable: %s" % type(e).__name__)
     try:
-        p = _nowindow.Popen([exe, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, cwd=cwd)
-        out, err = p.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        p.kill()
-        raise Unknown("gh %s timed out" % " ".join(args[:2]))
-    except OSError as e:
-        raise Unknown("gh %s failed: %s" % (" ".join(args[:2]), type(e).__name__))
-    return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+        return git_reads.gh_run(args, cwd, timeout)
+    except git_reads.GhUnread as e:
+        raise Unknown(str(e))
 
 
 def gh_json(args, cwd, gone=""):

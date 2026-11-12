@@ -1,8 +1,8 @@
 """The git and session reads the guard and the janitor share: one `git` call, the primary
 checkout, a tree's status, the default branch, a branch's proof of survival, a worktree's lock
 and whether a live session stands in it. The roadmap build also imports it for `github_repo`, the one
-reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares. `open_pull_requests` is the one
-`gh` read, for the guard's rule lane-start-open-pr.
+reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares. `gh_run` is the one `gh` runner
+(hooks/ci_wake.py calls it too); `open_pull_requests` is the read of the guard's rule lane-start-open-pr.
 
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
 so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
@@ -12,6 +12,7 @@ library only, plus `_nowindow` and `shared_names`, and it imports no guard modul
 import calendar
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -315,29 +316,46 @@ def github_repo(root, extras=_READ_EXTRAS):
     return origin_slug(done.stdout)
 
 
-# The one bounded read of a repo's open pull requests (guard rule lane-start-open-pr). One `gh` process, 10 s cap.
-GH_PR_LIST_TIMEOUT = 10
-GH_PR_LIST_FIELDS = "number,title,body,headRefName,isDraft"
-GH_PR_LIST_LIMIT = "100"
+class GhUnread(Exception):
+    """A gh read that could not run. The message is the reason."""
+
+
+def gh_run(args, cwd=None, timeout=10):
+    """-> (returncode, stdout, stderr) of one `gh` call. The one gh runner: the CI wake hook (hooks/ci_wake.py) and the
+    guard's open pull request read both call it. gh is found with shutil.which, since a list-form call of a bare "gh"
+    misses a .cmd launcher on Windows. Raises GhUnread when gh is missing, will not start or times out."""
+    exe = shutil.which("gh")
+    if exe is None:
+        raise GhUnread("gh is not on PATH")
+    try:
+        done = _nowindow.run([exe, *args], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", cwd=cwd, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise GhUnread("gh %s timed out" % " ".join(args[:2]))
+    except OSError as exc:
+        raise GhUnread("gh %s failed: %s" % (" ".join(args[:2]), type(exc).__name__))
+    return done.returncode, done.stdout, done.stderr
+
+
+# One page of open pull requests, by REST (the cloud proxy refuses the GraphQL `gh pr list`). A page of this size
+# may be cut short, so it proves no absence.
+OPEN_PR_PAGE = 100
 
 
 def open_pull_requests(repo):
-    """(list, "") of the open pull requests of GitHub repo `owner/name`, each a dict of GH_PR_LIST_FIELDS, or
-    (None, why) when the read failed: no gh, a timeout, a non-zero exit, output that is not a JSON list. One gh
-    process, no file, no retry; the caller decides what a failed read means."""
-    argv = ["gh", "pr", "list", "--repo", repo, "--state", "open", "--json", GH_PR_LIST_FIELDS,
-            "--limit", GH_PR_LIST_LIMIT]
+    """(list, "") of the open pull requests of GitHub repo `owner/name` as REST prints them (number, title, body,
+    head.ref), at most OPEN_PR_PAGE, or (None, why) when the read failed: no gh, a timeout, a non-zero exit, output
+    that is not a JSON list. One gh process, 10 s, no file, no retry; the caller decides what a failed read means.
+    Fields, not a query string: a `&` in an argument is a command separator to cmd.exe behind a .cmd launcher."""
+    args = ["api", "-X", "GET", "repos/%s/pulls" % repo, "-f", "state=open", "-f", "per_page=%d" % OPEN_PR_PAGE]
     try:
-        done = _nowindow.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                             timeout=GH_PR_LIST_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return None, "gh timed out after %d s" % GH_PR_LIST_TIMEOUT
-    except OSError as exc:
-        return None, "gh did not start (%s)" % type(exc).__name__
-    if done.returncode != 0:
-        return None, "gh exited %d" % done.returncode
+        code, out, _ = gh_run(args, timeout=10)
+    except GhUnread as exc:
+        return None, str(exc)
+    if code != 0:
+        return None, "gh exited %d" % code
     try:
-        prs = json.loads(done.stdout)
+        prs = json.loads(out)
     except ValueError:
         return None, "gh printed no JSON"
     return (prs, "") if isinstance(prs, list) else (None, "gh printed no JSON list")
