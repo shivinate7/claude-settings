@@ -4343,7 +4343,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 words = segment_tokens(segment)
                 inner = nested_script(words) if words else ""
                 if inner:
-                    pending.append(str(inner))
+                    pending.append(inner)
 
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so

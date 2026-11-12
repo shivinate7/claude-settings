@@ -107,7 +107,7 @@ for _name, _cmd in (("a bare reset", " reset"), ("a reset of HEAD", " reset HEAD
                     ("-q", " reset -q"), ("a path unstage", " reset -- f.txt"), ("a HEAD path unstage", " reset HEAD -- f.txt"),
                     ("a HEAD path unstage, no dashes", " reset HEAD f.txt")):
     sh("reset: an agent's " + _name + " only unstages and stays allowed", VCS + _cmd, "allow", cwd=GITWT, **AGENT_RESET)
-# Review round 1 finding 1: a script handed to another shell is read as a command of its own.
+# A script handed to another shell is read as a command of its own.
 for _name, _cmd in (("sh -c", "sh -c '" + VCS + " reset --soft HEAD~1'"), ("bash -c", 'bash -c "' + VCS + ' reset --mixed HEAD~1"'),
                     ("eval", 'eval "' + VCS + ' reset --soft HEAD~1"'), ("sh -c in sh -c", "sh -c \"sh -c '" + VCS + " reset HEAD~1'\"")):
     sh("reset: an agent's reset at another commit inside " + _name + " is refused", _cmd, "deny", "agent-git-reset",
