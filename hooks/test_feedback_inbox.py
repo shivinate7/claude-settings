@@ -4113,7 +4113,7 @@ def case_batch_bound_does_not_clear_a_standing_word_elsewhere():
 
 # The lane brief that a once: home must pass (lane mailbox-wake-routes), in full. Its one owner grant, "start it", covers one
 # helper session, and the once: item names that session. In "Hand in any PR to the batch runner" the handoff verb takes
-# "any PR" as its object, and no act verb follows it in the clause, so the noun bars nothing.
+# "any PR" as its object, and no act verb follows it in the message (a "(tag cs-build:...)" label is none), so the noun bars nothing.
 FB1338_BRIEF = (
     "Grant: owner 13:37 CST Nov 12, relayed by the retrospective, to \"start mailbox-wake-routes; it needs one extra cloud session to post test comments\": \"ya yes start it\". Covers one short-lived helper session that only posts test comments for the measure; you archive it when done.",
     "",
@@ -4150,7 +4150,7 @@ def case_you_make_bound_does_not_lift_the_standing_bar():
 
 def case_one_shot_brief_in_full_with_a_task_phrase_passes():
     """The lane brief in full, with its one-shot grant and its once: home. "Hand in any PR to the batch runner" gives
-    "any PR" to a handoff verb as its object, with no act verb after it in the clause, so the home passes."""
+    "any PR" to a handoff verb as its object, with no act verb after it in the message, so the home passes."""
     mod = guard_module()
     out = mod.problems(mod.parse(render_block("\n".join(FB1338_BRIEF), items=(REPRO_ITEM,))), "")
     check("lane brief in full, one-shot grant with its once: home: not refused for 'any PR' as a handoff object",
@@ -4203,10 +4203,10 @@ def case_real_standing_wordings_stay_refused_with_a_once_home():
 
 
 # The scope-noun rule. A scope noun (all, any or every before repo, PR, branch, open, green, new or future) bars a
-# once: home, except when it stands IMMEDIATELY as the object of a handoff verb (hand in, hand, send, post, report) in
-# the same clause (no comma, semicolon, colon or dash between them), and the rest of that clause holds no act verb stem
-# (merge, merging, push, delete, deploy, release, publish, ship, land, close, approve). No sentence split: an
-# abbreviation, a URL, a newline or a bullet changes nothing.
+# once: home, except when it stands IMMEDIATELY as the object of a handoff verb (hand in, hand, send, post, report), and
+# no act verb stem (merge, merging, push, delete, deploy, release, publish, ship, land, close, approve, revert, rebase,
+# or tag as a verb) follows the noun anywhere later in the message, or sits before the verb in the noun's clause. That
+# clause runs back to the nearest comma, semicolon, colon, dash, period or newline. A "(tag cs-build:...)" label is no act.
 SCOPE_REFUSED_TEXTS = (
     "Approved. Merge any\nPR.",
     "Approved. Merge all\nopen PRs.",
@@ -4220,14 +4220,15 @@ SCOPE_REFUSED_TEXTS = (
     "Approved, i.e. any PR.",
     "Approved v2. Any PR.",
 )
-HANDOFF_PASSES_TEXTS = (  # the scope noun is the handoff object, and no act verb follows it in its clause
+HANDOFF_PASSES_TEXTS = (  # the scope noun is the handoff object, and no act verb follows it in the message
+    "approved. Hand in any PR.",
     "Approved. Send any PR to triage.",
     "approved. Post any PR to triage.",
     "Approved. Hand in any PR for review.",
     "Approved. Hand in any PR to the batch runner.",
     "Approved. Hand in any PR, then review it.",
 )
-HANDOFF_OBJECT_ANY_FORM_TEXTS = (  # the verb stands right before the noun, so what comes before the verb changes nothing
+HANDOFF_OBJECT_ANY_FORM_TEXTS = (  # the verb stands right before the noun; an abbreviation, a newline or a URL before it changes nothing
     "Approved, e.g. send any PR to triage.",
     "Approved, i.e. send any PR to triage.",
     "Approved etc. send any PR to triage.",
@@ -4263,7 +4264,7 @@ def case_scope_noun_bars_a_once_home_wherever_it_sits():
 
 
 def case_handoff_object_keeps_its_once_home():
-    """Green control: a scope noun that a handoff verb takes as its object, with no act verb after it in the clause, keeps
+    """Green control: a scope noun that a handoff verb takes as its object, with no act verb after it in the message, keeps
     its once: home. Each text is a grant first, so the pass is the rule's, not a non-grant's."""
     mod = guard_module()
     for text in HANDOFF_PASSES_TEXTS:
@@ -4306,8 +4307,8 @@ def case_act_stem_in_the_handoff_clause_bars_its_object():
 
 
 def case_handoff_with_a_later_merge_stays_barred():
-    """Green control: a merge after the handoff object still bars the once: home, in its clause or a later one of the same
-    sentence. Each text is a grant first."""
+    """Green control: a merge after the handoff object still bars the once: home, in its clause or anywhere later in the
+    message. Each text is a grant first."""
     mod = guard_module()
     for text in HANDOFF_STILL_BARRED_TEXTS:
         check("handoff with a later merge %r: is a grant" % text, mod.is_grant(text), text)
@@ -4324,6 +4325,92 @@ def case_handoff_object_passes_after_any_form():
         check("handoff object after %r: is a grant" % text, mod.is_grant(text), text)
         out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
         check("handoff object after %r: its once: home passes" % text, not any("has no home" in s for s in out), out)
+
+
+# The act scope of the scope-noun rule. An act that follows the handoff object anywhere later in the message bars its
+# once: home, past a comma, semicolon, colon or dash too. An act before the handoff verb bars it when the act sits in the
+# noun's clause, which runs back to the nearest comma, semicolon, colon, dash, period or newline. A reach back to the
+# grant word would bar the measured brief: its "push access" sits before its noun, in an earlier sentence.
+ACT_PAST_CLAUSE_END_TEXTS = (  # the act follows the noun past a comma, semicolon, colon or dash
+    "Approved. Hand in any PR to triage, then merge it.",
+    "Approved. Hand in any PR to triage; merge it.",
+    "Approved. Hand in any PR to triage: push it.",
+    "Approved. Hand in any PR to triage - deploy it.",
+)
+ACT_BEFORE_VERB_TEXTS = (  # the act sits before the handoff verb, in the noun's clause
+    "Approved, merge and send any PR to triage.",
+)
+REVERT_REBASE_TEXTS = (  # act stems the handoff clause does not hold today
+    "Approved. Send any PR to triage and revert it.",
+    "Approved. Send any PR to triage and rebase it.",
+)
+TAG_VERB_TEXTS = (  # "tag" as a verb with its object
+    "Approved. Send any PR to triage and tag it.",
+)
+TAG_LABEL_TEXTS = (  # green controls: a "(tag cs-build:...)" label is no act; the measured brief keeps two of them
+    "approved. Hand in any PR to the batch runner (tag cs-build:batch-runner).",
+    "approved. Hand in any PR to triage (tag cs-build:triage).",
+)
+EARLIER_SENTENCE_TEXTS = (  # green control: an act in an earlier sentence, before the handoff verb, is another item
+    "approved. Merge PR 12. Hand in any PR to triage.",
+)
+LATER_SENTENCE_TEXTS = (  # green control: an act after the noun's period still bars its home, to the message's end
+    "approved. Hand in any PR to triage. Merge it.",
+    "approved. Hand in any PR to triage. Push it.",
+)
+
+
+def expect_once_home_barred(texts, label):
+    """Each text is a grant, and its once: home is barred with the standing word's reason."""
+    mod = guard_module()
+    for text in texts:
+        check("%s %r: is a grant" % (label, text), mod.is_grant(text), text)
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("%s %r: its once: home is barred" % (label, text),
+              any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
+def expect_once_home_passes(texts, label):
+    """Each text is a grant, and its once: home passes."""
+    mod = guard_module()
+    for text in texts:
+        check("%s %r: is a grant" % (label, text), mod.is_grant(text), text)
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("%s %r: its once: home passes" % (label, text), not any("has no home" in s for s in out), out)
+
+
+def case_act_past_a_clause_end_bars_the_handoff_object():
+    """An act that follows the handoff object past a comma, semicolon, colon or dash bars its once: home. The head reads
+    only up to the first such mark, so each text passes there."""
+    expect_once_home_barred(ACT_PAST_CLAUSE_END_TEXTS, "act past a clause end")
+
+
+def case_act_before_the_handoff_verb_bars_the_handoff_object():
+    """An act before the handoff verb, in the noun's clause, bars its once: home. "Approved, merge and send any PR" reads
+    as a merge of any PR."""
+    expect_once_home_barred(ACT_BEFORE_VERB_TEXTS, "act before the handoff verb")
+
+
+def case_revert_and_rebase_in_the_handoff_clause_bar_the_handoff_object():
+    """Revert and rebase are act stems: after the handoff object they bar its once: home, as merge and push do."""
+    expect_once_home_barred(REVERT_REBASE_TEXTS, "revert or rebase")
+
+
+def case_tag_verb_in_the_handoff_clause_bars_the_handoff_object():
+    """A tag verb with its object, "tag it", after the handoff object is an act, so its once: home is barred."""
+    expect_once_home_barred(TAG_VERB_TEXTS, "tag verb")
+
+
+def case_tag_labels_and_earlier_sentences_do_not_bar_the_handoff_object():
+    """Green control: a "(tag cs-build:...)" label after the handoff object is no act, and an act in an earlier sentence,
+    before the handoff verb, is another item. The measured brief keeps its labels and its earlier "push access"."""
+    expect_once_home_passes(TAG_LABEL_TEXTS + EARLIER_SENTENCE_TEXTS, "label or earlier sentence")
+
+
+def case_act_after_a_later_sentence_still_bars_the_handoff_object():
+    """Green control, refused today: an act after the noun's period still bars its once: home, anywhere later in the
+    message. A read that stops at the period would pass these."""
+    expect_once_home_barred(LATER_SENTENCE_TEXTS, "act in a later sentence")
 
 
 # --------------------------------------------------------------------------- page-form-to-template cases
@@ -4810,6 +4897,12 @@ CASES = (
     case_act_stem_in_the_handoff_clause_bars_its_object,
     case_handoff_with_a_later_merge_stays_barred,
     case_handoff_object_passes_after_any_form,
+    case_act_past_a_clause_end_bars_the_handoff_object,
+    case_act_before_the_handoff_verb_bars_the_handoff_object,
+    case_revert_and_rebase_in_the_handoff_clause_bar_the_handoff_object,
+    case_tag_verb_in_the_handoff_clause_bars_the_handoff_object,
+    case_tag_labels_and_earlier_sentences_do_not_bar_the_handoff_object,
+    case_act_after_a_later_sentence_still_bars_the_handoff_object,
     case_page_form_asked_comment_with_a_note_blocks,
     case_page_form_step_without_the_template_blocks,
     case_page_form_step_naming_the_template_passes,
