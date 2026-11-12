@@ -1,0 +1,14 @@
+{
+ "id": "archive-batch-check",
+ "title": "One checked pass covers many idle lanes at archive, without weakening the records-landed check",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "session_013NEJKzCV3NzW5wxzNQ6fWU",
+ "owner": "coordinator",
+ "blockedBy": ["handoff-lands-tracked-first"],
+ "why": "Guard lane-closes-after-records needs a get_session of each target, alone in its own turn, before each archive_session, and refuses when gh cannot read the lane's branches. Archiving 35 idle lanes costs 70 turns (coordinator, 10:27 CST Nov 12).",
+ "source": "coordinator 10:27 and 10:28 CST Nov 12; lane archive-flow",
+ "note": "Idea (lane archive-flow): `merge --idle-lanes` already reads each lane's records-landed state (steps landed, no open PR, no open page item, handoff flag). The guard accepts a lane named in a fresh, unflagged idle-lanes list as its check, in place of its own get_session turn; the stranded-branch read stays. A guard change: test-author red cases first, builder, reviewer, review cap three; the guard's pinned gh call counts re-point red then green. Home: merge --idle-lanes (rule building-one-home-per-capability). Coordinator 10:28 CST: build it in lane archive-flow after the list-flag PR is handed in; 35 idle lanes wait on it. Open design points: how the guard proves the list is fresh without a new file or timer; a list read in the guard costs one run of the idle-lanes reader per archive batch.",
+ "updatedAt": "2026-11-12T10:30:00-06:00"
+}
