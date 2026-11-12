@@ -1,0 +1,14 @@
+{
+ "id": "agent-git-reset-refused",
+ "title": "Refuse git reset in an agent's Bash call",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident: a builder ran `git reset --soft` in its own worktree (no change made, but no guard stopped it) (lane writer-lists-awaiting-threads).",
+ "source": "coordinator 12:57 CST Nov 12 (its clock), from lane writer-lists-awaiting-threads hand-in to runner 10",
+ "note": "Mistake: an agent runs git reset. Harm: it can drop work in a shared tree (rule shared-trees-no-destructive-git). Fix: refuse `git reset` in an agent's Bash call. Red first on the incident. Coordinator follow-up (undoable), start when ready.",
+ "updatedAt": "2026-11-12T12:53:38-06:00"
+}
