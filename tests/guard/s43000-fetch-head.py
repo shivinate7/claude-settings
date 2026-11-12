@@ -97,11 +97,14 @@ fetch_head_refused("fetch-head read in a $( ) text before a fetch in the same co
                    "echo $(" + VCS + " show FETCH_HEAD:p); " + VCS + " fetch -q origin x", cwd=GITWT)
 
 # Allowed: the name of the file or a path, never a ref. rev-parse --git-path prints where the file lives, and a
-# path that ends in FETCH_HEAD.md under a ref names a file in that ref, not the fetch result.
+# path named FETCH_HEAD.md, alone or under a ref, names a file, not the fetch result. The last one is what a
+# suffix check on the name would refuse, so it pins that the name's dot does not make it a ref.
 sh("fetch-head allowed, rev-parse --git-path prints the file's path, not its ref",
    VCS + " rev-parse --git-path FETCH_HEAD", "allow", cwd=GITWT)
 sh("fetch-head allowed, cat of a file named FETCH_HEAD.md is no git read",
    "cat FETCH_HEAD.md", "allow", cwd=GITWT)
+sh("fetch-head allowed, show of a path named FETCH_HEAD.md is no ref",
+   VCS + " show FETCH_HEAD.md", "allow", cwd=GITWT)
 sh("fetch-head allowed, a path named FETCH_HEAD.md under origin/main is no ref",
    VCS + " show origin/main:FETCH_HEAD.md", "allow", cwd=GITWT)
 
