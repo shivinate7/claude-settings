@@ -2586,6 +2586,80 @@ def case_cross_repo_update_checked_with_needs_repo():
           {"repo": PAGE_REPO_NAME, "checked_with": LANE_SLUG}, PAGE_REPO_NAME)
 
 
+# ------------------------------------------------------------------ checked_with: the value's shape, on any repo
+#
+# Decision cross-repo-question-checked: a lane slug is lowercase letters, digits and hyphens, 32 characters at most, and
+# a session id is refused whoever the session is. Each case pins one of those on the values the rule judges.
+# The page's own repo returns before the session-id check, so the own-repo case reads that order. Each case asserts its
+# scope before its subject (P7): an open decision on another repo, or a control on the page's own repo.
+
+PLACEHOLDER_WORDS = ("none", "pending", "unknown", "not-checked", "tbd", "yes", "done", "n-a")  # words that name no lane
+LANE_SLUG_OVER = LANE_SLUG_MAX + "x"  # 33 characters: one past the longest lane slug
+CURLY_ROLE = "owner’s-computer"  # the role with a curly apostrophe (U+2019): no role, and no apostrophe in a slug
+SLUG_SHAPE = (r"lowercase|a-z", r"hyphen|dash", r"\b32\b")  # the shape a refusal names: characters, separator, length
+
+
+def names_slug_shape(reason):
+    """The reason states a lane slug's shape: its characters, its separator and its 32-character limit."""
+    return isinstance(reason, str) and all(re.search(f, reason, re.I) for f in SLUG_SHAPE)
+
+
+def case_cross_repo_placeholder_is_no_lane_slug():
+    """A placeholder word (none, pending, unknown, ...) matches the lane slug shape but names no lane, so a foreign
+    decision whose checked_with is one is refused, on both page surfaces. Control: a slug that starts with a placeholder
+    word and goes on (yes-tab-bar) is a lane slug and passes, so the refusal is by the whole word, not by its prefix."""
+    scope_open_foreign_item("(5)")
+    for word in PLACEHOLDER_WORDS:
+        cross("(5) checked_with is the placeholder %s" % word, "set", ma144(checked=word), PAGE_REPO_NAME,
+              ("checked_with",))
+    at_page("(5) checked_with is the placeholder none", "set", ma144_write(checked="none"), tcj.origin_page_repo(),
+            ("checked_with",))
+    cross("(5 control) checked_with is the lane slug yes-tab-bar, passes", "set", ma144(checked="yes-tab-bar"),
+          PAGE_REPO_NAME)
+
+
+def case_cross_repo_session_id_on_own_repo_is_refused():
+    """A session id in checked_with is refused whoever the session is, including on the page's own repo, where the compare
+    returns first. Scope first: a role on the own repo passes, so the own-repo path is the one judged. Both page surfaces
+    refuse the id, and the reason names checked_with and the session id."""
+    cross("(6 scope) checked_with is the role triage on the page's own repo, passes", "set",
+          ma144(repo=PAGE_REPO_NAME, checked="triage"), PAGE_REPO_NAME)
+    cross("(6) checked_with is the session id %s on the page's own repo" % CHECKED, "set",
+          ma144(repo=PAGE_REPO_NAME, checked=CHECKED), PAGE_REPO_NAME, ("checked_with", "session id"))
+    at_page("(6) checked_with is the session id %s on the page's own repo" % CHECKED, "set",
+            ma144_write(repo=PAGE_REPO_NAME, checked=CHECKED), tcj.origin_page_repo(), ("checked_with", "session id"))
+
+
+def case_cross_repo_lane_slug_over_32_is_refused():
+    """A lane slug of 33 characters is no lane slug (LANE_SLUG_MAX), so a foreign decision whose checked_with is one is
+    refused, naming checked_with. Control: the 32-character slug passes. Dropping the length bound turns this case red."""
+    scope_open_foreign_item("(7)")
+    check("(7) fixture: the over-long lane slug is 33 characters", len(LANE_SLUG_OVER) == 33,
+          "got %d characters" % len(LANE_SLUG_OVER))
+    cross("(7) checked_with is a 33-character lane slug", "set", ma144(checked=LANE_SLUG_OVER), PAGE_REPO_NAME,
+          ("checked_with",))
+    cross("(7 control) checked_with is the 32-character lane slug, passes", "set", ma144(checked=LANE_SLUG_MAX),
+          PAGE_REPO_NAME)
+
+
+def case_cross_repo_curly_apostrophe_is_refused_with_shape():
+    """A role with a curly apostrophe is neither a role nor a lane slug, so a foreign decision whose checked_with is one is
+    refused. The refusal states the lane slug's shape, so the writer fixes the value in one try. The shape is checked on
+    the function's reason and on the reason the guard prints, the one the writer reads. Control: the same role with a
+    straight apostrophe passes."""
+    scope_open_foreign_item("(8)")
+    data = ma144(checked=CURLY_ROLE)
+    cross("(8) checked_with is the curly-apostrophe role", "set", data, PAGE_REPO_NAME, ("checked_with",))
+    got = call("cross_repo_hit", "set", data, PAGE_REPO_NAME)
+    check("(8) the refusal reason states the lane slug's shape", names_slug_shape(got),
+          "want the slug's characters, separator and 32-character limit in the reason, got %r" % (got,))
+    printed = guard_refusal(writer_input(checked=CURLY_ROLE, owner="coordinator"), None)
+    check("(8) the reason the guard prints states the lane slug's shape", names_slug_shape(printed),
+          "want the slug's characters, separator and 32-character limit in the printed reason, got %r" % (printed,))
+    cross("(8 control) checked_with is the straight-apostrophe role owner's-computer, passes", "set",
+          ma144(checked="owner's-computer"), PAGE_REPO_NAME)
+
+
 # ------------------------------------------------------- judged_item_writes reads a file_path at the payload cwd
 #
 # An items write whose data is a file (`file_path`, no `data`) is read by _write_data against the cwd it is given. The
@@ -2699,6 +2773,8 @@ def main():
                  case_cross_repo_writer_session_is_not_the_checker, case_cross_repo_writer_session_controls,
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
+                 case_cross_repo_placeholder_is_no_lane_slug, case_cross_repo_session_id_on_own_repo_is_refused,
+                 case_cross_repo_lane_slug_over_32_is_refused, case_cross_repo_curly_apostrophe_is_refused_with_shape,
                  case_cross_repo_remedy_detector_is_calibrated, case_cross_repo_role_checked_with_passes,
                  case_cross_repo_lane_slug_checked_with_passes, case_cross_repo_session_id_is_refused,
                  case_cross_repo_missing_checked_with_names_role_or_slug,
