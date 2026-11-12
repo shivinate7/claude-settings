@@ -4,10 +4,13 @@
 # An agent's `git push origin HEAD:<branch>` is refused when a commit it sends names, in its Co-Authored-By
 # trailer, a model (family word plus version) that differs from the model the agent runs. The agent's model
 # is the last assistant record of its own transcript: `<transcript minus .jsonl>/subagents/agent-<id>.jsonl`.
-# The trailers are read by git's trailer parsing, from the commits no remote ref holds, never from the shell
-# text. A trailer that names no model, a missing or unreadable transcript, a model id that maps to no name, an
-# orchestrator's push (no agent_id) and a push with nothing new all pass. The rule id is commit-trailer-model,
-# the same as its decision id; the check itself is guard_trailer.py.
+# The trailers come from two places. Git's own trailer parsing reads the commits no remote ref holds. A commit the
+# same call makes does not exist yet, so the guard reads its message from the call: the -m values, a -F file that
+# exists before the call, and a heredoc fed to -F -. Each message is judged by its last paragraph. Other shell text,
+# such as an echo, is never read. A dry run (push -n, --dry-run) sends nothing and passes. A trailer that names no
+# model, a missing or unreadable transcript, a model id that maps to no name, an orchestrator's push (no agent_id)
+# and a push with nothing new all pass. The rule id is commit-trailer-model, the same as its decision id. The check
+# is guard_trailer.py; guard.py reads the call's own commit text (commit_message_texts).
 FAMILY = "commit-trailer-model"
 CTM_RULE = "commit-trailer-model"
 CTM_BRANCH = "ctm-topic"
