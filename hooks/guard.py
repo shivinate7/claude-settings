@@ -4703,7 +4703,8 @@ def data_tool_judge(tool_input, cwd="", session_id=None):
 def data_tool_label_hit(item_writes, transcript_path, cwd=""):
     """(rule, matched) of rule `option-labels-match-chat` for the item writes the page rules passed: a label that
     differs from the chat question's text for its letter. It runs here, not in question_form.item_hit, because it
-    reads the transcript. An unreadable transcript is unknown: it allows and logs one `noted` line."""
+    reads the transcript. An unreadable transcript, or a payload with no transcript_path, is unknown: it allows
+    and logs one `noted` line."""
     import question_form
     try:
         return question_form.page_label_hit(item_writes, transcript_path, cwd)

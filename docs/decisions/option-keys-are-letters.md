@@ -39,12 +39,12 @@ The waiting page shows an option by its position, as a letter: the first option 
 
 A letter also means the same option in the chat and on the page. Guard rule `option-labels-match-chat` (`hooks/question_form.py`, functions `chat_page_label_hit` and `page_label_hit`, run by `hooks/guard.py` `data_tool_label_hit`) refuses a set or update of an open decision on this repo's waiting page. The refusal holds when an option label differs from the chat's text for the same letter.
 
-  - A chat question cites its item in a line `Page item: <id>` and writes one line per option, `a) <text>`, the letters in the page's order. The check reads the newest assistant text in the last 1 MiB of the session's transcript that cites the item's id and writes option lines for it.
+  - A chat question cites its item in a line `Page item: <id>` (the colon may be left out when the id holds a digit or a hyphen) and writes one line per option, the letter then the text: `a) <text>`, `a. <text>`, `**A** <text>` or `A — <text>`, the letters in the page's order. The check reads the newest assistant text in the last 1 MiB of the session's transcript that cites the item's id and writes option lines for it.
   - A reply puts each cite on one side of its options, read per reply (`_own_option_lines`). A reply with an option line before its first cite and none after its last cite has its cites below: each cite owns the option lines between the cite before it and itself. In any other reply, each cite owns the option lines after its own line, up to the next cite. The side is read per reply because the text between two cites reads the same in both shapes.
-  - A letter is a position, as above. A label's own opening letter tag is dropped before the compare. Texts are compared folded (case, spacing and markdown marks), and equal when either starts with the other, so the chat may shorten a label.
-  - It passes when no chat text cites the item, or the chat cites another item. It passes when the chat writes no line for a letter, or the write carries no `options`. A task, a note and a closed item pass.
+  - A letter is a position, as above. A label's own opening letter tag is dropped before the compare. Texts are compared folded (case, spacing, markdown marks, a curly apostrophe as `'`, an em or en dash as `-`, a closing `.,;:!` cut). They are equal when the chat text is the label, or the label's start up to a word boundary: the chat may shorten a label, the page never may (owner, 12:35 CST Nov 8, "A and B mean the same"; coordinator ruling 07:57 CST Nov 12). A chat `No` does not match a page `Node.js rewrite`.
+  - It passes when no chat text cites the item, or the chat cites another item. When the chat writes two or more option letters, a page option at a letter the chat does not write is refused. A chat that writes one letter only passes (coordinator call, 07:57 CST Nov 12), as does a write that carries no `options`. A task, a note and a closed item pass.
   - The reason says: the chat and the page carry the same option text in the same order. It names no target.
-  - Cost: no new process. It reads the transcript's tail once per call, only for a write that carries `options`, and writes nothing unless it refuses. An unreadable transcript allows and logs one `noted` line.
+  - Cost: no new process. It reads the transcript's tail once per call, only for a write that carries `options`, and writes nothing unless it refuses. An unreadable transcript, and a payload with no `transcript_path`, each allow and log one `noted` line. The read is up to 1 MiB per page write that carries `options`.
   - Known limit: only an assistant text block counts. A question asked in the chat box (`AskUserQuestion`) is not read.
   - Known limit: a chat question that cites no item is not compared, and a write with no later chat to compare passes. The rule judges two copies only when the chat names the item.
   - Known limit: a chat question written after the page item is not checked until the item is written again.
@@ -54,8 +54,10 @@ A letter also means the same option in the chat and on the page. Guard rule `opt
   - Known limit: a reply that puts one cite above its options and another below is read by one side, so one of its items reads another item's lines. So is a reply that cites its items once before any option line and again below each question's options.
   - Known limit: a line that opens with one letter, a `)`, `.` or `:` and a space reads as an option line. A trailing `A: I recommend b.` can flip the read and refuse a matching write. How often it happens is unmeasured.
   - Known limit: a cite's id ends at a space or at `*`, `_` or `` ` ``, the markdown marks (`PAGE_ITEM_CITE`). An item id is a slug of letters, digits and hyphens, so it holds none of them. An id with `_` would be cut short.
-  - Known limit: an unreadable or missing transcript allows the write and logs one `noted` line.
-  - Known limit: the prefix match works both ways, so a chat "Allow" matches a page "Allow merge --role", and the reverse passes too.
+  - Known limit: an unreadable or missing transcript, or a payload with no `transcript_path`, allows the write and logs one `noted` line.
+  - Known limit: a chat question that cites its item but writes option lines in a form the check cannot read (for example `Option A: text` or `A text`) is not compared, and no line is logged.
+  - Known limit: a chat with a letter the page lacks (the chat lists a, b, c and the page a, b) passes.
+  - Known limit: a colon-less cite whose id has no digit and no hyphen is not read as a cite.
   - Known limit: the widening guard (`uniform-pick`) still reads `pick` beside `recommended`. Reading `recommended` alone needs an owner ruling.
 
 Incident:

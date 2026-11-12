@@ -1298,8 +1298,12 @@ def option_letter_hit(op: str, data) -> str:
 # in a line "Page item: <id>" and writes each option as "a) <text>". A write of that item whose option label for
 # a letter differs from the chat's text for that letter is refused. Letters are positions, as in
 # option_letter_hit.
-PAGE_ITEM_CITE = re.compile(r"Page item:[ \t*_`]*([^\s*_`]+)", re.I)  # anywhere in a line: a cite may end a sentence
-CHAT_OPTION_LINE = re.compile(r"^[ \t>*-]*\**\(?([A-Za-z])[).:]\**[ \t]+(\S.*)$", re.M)
+# A cite is anywhere in a line (it may end a sentence). Without the colon it counts only when the id has a digit or a
+# hyphen, so prose such as "this page item has" is no cite.
+PAGE_ITEM_CITE = re.compile(r"Page item(?:[ \t]*:|[ \t]+(?=[^\s*_`]*[-\d]))[ \t*_`]*([^\s*_`]+)", re.I)
+# An option line opens with its letter as "a)", "a.", "a:", "**A**" or "A <dash> ", then the text.
+CHAT_OPTION_LINE = re.compile(
+    r"^[ \t>*-]*\**\(?([A-Za-z])(?:[).:]\**|\*\*|[ \t]+[\u2014\u2013-])[ \t]+(\S.*)$", re.M)
 CHAT_TAIL_BYTES = 1 << 20  # how far back from the transcript's end the cited chat question is looked for
 LABELS_REASON = ("A question sent to the chat and the page carries the same option text in the same order, so "
                  "a letter means one option on both. Rewrite the page item's options to match the chat "
@@ -1308,9 +1312,22 @@ LABELS_REASON = ("A question sent to the chat and the page carries the same opti
                  "and on the page)")
 
 
+FOLD_MARKS = str.maketrans({"\u2019": "'", "\u2018": "'", "\u2014": "-", "\u2013": "-"})
+
+
 def _fold(text) -> str:
-    """Lowercase, markdown marks dropped, whitespace folded: the form two option texts are compared in."""
-    return " ".join(re.sub(r"[*_`]", "", str(text)).lower().split())
+    """Lowercase, markdown marks dropped, whitespace folded, curly apostrophes and em or en dashes made plain, a
+    closing sentence mark cut: the form two option texts are compared in."""
+    plain = re.sub(r"[*_`]", "", str(text)).translate(FOLD_MARKS).lower()
+    return " ".join(plain.split()).rstrip(".,;:!")
+
+
+def _chat_short_form(chat, page) -> bool:
+    """True when the folded chat text equals the folded page label, or is the label's start up to a word boundary.
+    The chat may be the shorter one (owner, 12:35 CST Nov 8: "A and B mean the same"); the page never is."""
+    if not page.startswith(chat):
+        return False
+    return len(page) == len(chat) or not page[len(chat)].isalnum()
 
 
 def _cited_ids(text) -> set:
@@ -1349,21 +1366,26 @@ def _own_option_lines(text, item_id) -> dict:
 def chat_page_label_hit(item_id, options, chat_text) -> str:
     """The refusal text when `chat_text` cites page item `item_id` ("Page item: <id>") and writes an option line
     ("a) <text>") whose text differs from the label of the option at that letter's position in `options`, else "".
-    Texts are compared folded, and equal when either starts with the other (the chat may shorten a label).
-    A chat that cites no item or another one, an option the chat gives no line, and a label or line with no
-    text pass."""
+    Texts are compared folded, and equal when the chat text is the label or its start up to a word boundary (only
+    the chat may shorten a label). When the chat writes two or more letters, a page option at a letter it does not
+    write is refused too. A chat that cites no item or another one, a chat that writes one letter only, and a label
+    or line with no text pass."""
     if not isinstance(chat_text, str) or not isinstance(options, list) or not isinstance(item_id, str):
         return ""
     lines = _own_option_lines(chat_text, item_id)
     for i, option in enumerate(options):
         letter = _letter_of(i)
         label = option.get("label") if isinstance(option, dict) else None
-        if letter not in lines or not isinstance(label, str):
+        if not isinstance(label, str):
+            continue
+        if letter not in lines:
+            if len(lines) >= 2 and _fold(label):
+                return "option %s: the page has it, the chat question writes no option %s" % (letter, letter)
             continue
         tag = LABEL_TAG.match(label)
         page = _fold(label[tag.end():] if tag else label)
         chat = _fold(lines[letter])
-        if page and chat and not (page.startswith(chat) or chat.startswith(page)):
+        if page and chat and not _chat_short_form(chat, page):
             return "option %s: the page says %r, the chat says %r" % (letter, label.strip(), lines[letter].strip())
     return ""
 
@@ -1390,10 +1412,9 @@ def chat_text_citing(transcript_path, item_id) -> str:
 def page_label_hit(writes, transcript_path, cwd=""):
     """(rule, matched) for the first set or update in `writes` whose open-decision options carry a label that
     differs from the chat's text for its letter (chat_page_label_hit), else ("", ""). The transcript is read
-    only for a write that carries options, and only as far back as CHAT_TAIL_BYTES. Raises OSError when the
-    transcript cannot be read: the caller treats that as unknown."""
-    if not isinstance(transcript_path, str) or not transcript_path:
-        return PASS
+    only for a write that carries options, and only as far back as CHAT_TAIL_BYTES. Raises ValueError when a
+    write carries options and the payload names no transcript, and OSError when the transcript cannot be read:
+    the caller treats each as unknown."""
     for op, entry in writes:
         if op not in ("set", "update"):
             continue
@@ -1402,6 +1423,8 @@ def page_label_hit(writes, transcript_path, cwd=""):
         item_id = entry.get("doc_id")
         if not isinstance(options, list) or not isinstance(item_id, str):
             continue
+        if not isinstance(transcript_path, str) or not transcript_path:
+            raise ValueError("no transcript_path in the payload")
         hit = chat_page_label_hit(item_id, options, chat_text_citing(transcript_path, item_id))
         if hit:
             return LABELS_RULE, hit
