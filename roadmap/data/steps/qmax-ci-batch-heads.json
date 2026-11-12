@@ -6,9 +6,9 @@
  "lane": "session_013NEJL3c2ydrzZiY1thTQ6e",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-11T23:28:00-06:00",
+ "updatedAt": "2026-11-12T12:02:57-06:00",
  "title": "q_max CI runs its jobs on the merge tool's batch branches (batch-*), not only claude/int-batch-*",
  "why": "q_max checks.yml runs jobs only for claude/int-batch-*, so a merge-tool batch head named batch-* skips every job and reads green (batch runner 11, #1158, 23:28 CST Nov 11).",
  "source": "coordinator 23:27 CST Nov 11, from batch runner 11",
- "note": "Stability fix. Lane started 23:27 CST Nov 11. Related: step all-skipped-reads-green."
+ "note": "Stability fix. Lane started 23:27 CST Nov 11. Related: step all-skipped-reads-green. Owner page save 11:59 CST Nov 12: item 539 pick a: batch runner 11 merges q_max #1161 once with the red-main flag on the owner's typed override (D-705)."
 }

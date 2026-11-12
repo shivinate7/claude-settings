@@ -1,0 +1,14 @@
+{
+ "id": "sim-lease-load-brake",
+ "title": "The simulator lease reads the load brake's measure, not the load average",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner page item 554 pick a, 11:59 CST Nov 12: two rulings clashed; the load brake decision says never the load average.",
+ "source": "owner page save 11:59 CST Nov 12, item 554",
+ "note": "bin/sim-lease calls the load brake's one measure (memory in use and free disk) and drops MAX_5MIN, MAX_1MIN and SLOT2_5MIN (lines 49-51, refusals at 180 and 189). Red first. Rewrite decision sim-lease-tool in place.",
+ "updatedAt": "2026-11-12T12:02:57-06:00"
+}
