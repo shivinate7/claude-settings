@@ -13045,6 +13045,16 @@ class ExpressPath(ScopedRepo, Env):
         for m in markers:
             self.assertIn(m.lower(), out.lower(), "the refusal does not name %r:\n%s" % (m, out))
 
+    @staticmethod
+    def brake_text(out):
+        """The batch brake's text in a refusal: from the line that says the pull request does not merge to its base, to the end of the
+        output, less merge's closing sentence. Nothing before the brake is compared."""
+        lines = out.splitlines()
+        start = next((i for i, l in enumerate(lines) if "does not merge to" in l), None)
+        if start is None:
+            return None
+        return "\n".join(lines[start:]).split(" No override lifts", 1)[0]
+
     def test_the_store_path_is_one_constant(self):
         self.assertEqual(getattr(merge, "RULED_STORE_PATH", None), "roadmap/rulings/{id}.json",
                          "merge.RULED_STORE_PATH is not the one store path the express check reads")
@@ -13173,22 +13183,28 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assert_refused(rc, out, before, "unknown")
 
-    def test_a_live_batch_run_still_refuses_and_names_the_cancel(self):
+    def test_a_live_batch_run_under_express_refuses_with_the_plain_brake_text(self):
+        """Under --express a live batch run still refuses, with the brake text it has without the flag: the express path adds no sentence."""
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
         self.assert_prose_only()  # the express check passes, so the refusal is the batch brake's
         self.host.batch = [BATCH_BLOCKER]
         before = self.refs()
         rc, out = self.run_express()
-        self.assert_refused(rc, out, before, "#2", "cancel")
+        self.assert_refused(rc, out, before, "#2")
         self.assertIn((7, "main"), self.host.batch_calls, "the batch brake was not read, so the refusal is not the brake's:\n" + out)
+        self.assertNotIn("cancel", out.lower(), "the express brake refusal names a cancel:\n" + out)
+        plain_rc, plain_out = self.run_merge("7", "--confirm")
+        self.assertEqual(plain_rc, 1, plain_out)
+        self.assertEqual(self.brake_text(out), self.brake_text(plain_out), "the express brake text differs from the plain one:\n%s\n--- plain:\n%s" % (out, plain_out))
 
-    def test_without_express_the_batch_refusal_names_no_cancel(self):
+    def test_without_express_the_batch_refusal_is_the_plain_brake(self):
         self.host.body = "Ruling: r55\n"
         self.host.batch = [BATCH_BLOCKER]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("#2", out, out)
+        self.assertIn("does not merge to main", out, "the refusal without --express is not the batch brake:\n" + out)
         self.assertNotIn("cancel", out.lower(), "the batch refusal without --express names a cancel:\n" + out)
         self.assertFalse(getattr(self.host, "merged", False), out)
 
@@ -13205,8 +13221,9 @@ class ExpressPath(ScopedRepo, Env):
         self.assertTrue(self.host.merged, out)
 
     def test_the_head_scope_script_is_not_the_one_read(self):
-        """The classifier reads origin/main's ci-scope.sh. A head whose own copy writes every flag off and exits 0 is still refused,
-        because the PR adds hooks/note.py, which main's script turns code on for. A HEAD: read would accept it."""
+        """The classifier reads origin/main's ci-scope.sh. This head edits that script to write every flag off and exit 0: a HEAD: read
+        would run that copy and accept it. Main's copy refuses it for two reasons: a diff that touches ci-scope.sh turns every flag on
+        through main's own arm, and hooks/note.py turns code on. The refusal names hooks/note.py because the diff lists it."""
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
         self.stub_scope(self.ALL_OFF_PRELUDE)  # feat's own copy: every flag off, exit 0
