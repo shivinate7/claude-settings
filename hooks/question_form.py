@@ -1303,11 +1303,13 @@ def option_letter_hit(op: str, data) -> str:
 # too, whatever the id (CHAT_LOOSE_CITE, read by `_cites`).
 PAGE_ITEM_CITE = re.compile(r"Page item(?:[ \t]*:|[ \t]+(?=[^\s*_`]*[-\d]))[ \t*_`]*([^\s*_`]+)", re.I)
 CHAT_LOOSE_CITE = re.compile(r"Page item[ \t]+[ \t*_`]*([^\s*_`]+)", re.I)
-# An option line opens with its letter as "a)", "a.", "a:", "**A**", "**a**)", "A <dash> " or "Option A:", then the
-# text. After `)` the space may be left out ("a)Blue").
+# An option line opens with its letter as "a)", "a.", "a:", "**A**", "**A** <dash> ", "**a**)", "A <dash> " or
+# "Option A:", then the text. After `)` the space may be left out ("a)Blue"). A spaced dash after a bold letter is the
+# separator, not text, so "**A** \u2014 Blue" reads as "Blue".
 CHAT_OPTION_LINE = re.compile(
     r"^[ \t>*-]*\**(?:[Oo]ption[ \t]+)?\(?([A-Za-z])"
-    r"(?:\*\*[).:][ \t]+|\)\**[ \t]*|[.:]\**[ \t]+|\*\*[ \t]+|[ \t]+[\u2014\u2013-][ \t]+)(\S.*)$", re.M)
+    r"(?:\*\*[).:][ \t]+|\)\**[ \t]*|[.:]\**[ \t]+|\*\*[ \t]+(?:[\u2014\u2013-][ \t]+)?|[ \t]+[\u2014\u2013-][ \t]+)"
+    r"(\S.*)$", re.M)
 # A line of one letter, a space and text ("A Blue"). It is no option line: reading it as one would read prose as
 # options. A page option's letter that opens such a line, with no option line of its own, is noted.
 CHAT_BARE_LINE = re.compile(r"^[ \t>*-]*\**\(?([A-Za-z])[ \t]+(\S.*)$", re.M)
