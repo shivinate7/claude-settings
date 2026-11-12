@@ -340,8 +340,8 @@ def reader_line_numbers(out, rel):
     return [int(line.split(":")[1]) for line in reader_lines(out) if line.startswith(rel + ":")]
 
 
-class GuardHoleCases(unittest.TestCase):
-    """Holes a session could reach by mistake in normal work (decision guard-guards-mistakes-only)."""
+class UnflaggedReaderCases(unittest.TestCase):
+    """Unflagged readers a session could reach by mistake in normal work (decision guard-guards-mistakes-only)."""
 
     def test_shell_read_of_the_copy_items_fails(self):
         for form, rel, command in SHELL_FORMS:
