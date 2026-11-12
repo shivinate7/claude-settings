@@ -1441,6 +1441,39 @@ class LockRetake(Env):
             self.lock.acquire("main", 600)
         self.assertEqual(self.head("merge-lock/main"), held)
 
+class LockTextByFetchedSha(Env):
+    """GitLock.read takes the lock commit's text by the sha it fetched, never by FETCH_HEAD (decision merge-lock). FETCH_HEAD is one file per
+    clone, and a fetch of another ref in that clone rewrites it, so a read through FETCH_HEAD can return that ref's commit as the lock's text."""
+    EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+    def rival_lock(self):
+        """Another run's live lock on origin, pushed by the other clone. -> the lock's text."""
+        msg = merge.lock_message(600, self.now)
+        sha = sh(self.other, "git", "commit-tree", self.EMPTY_TREE, "-m", msg)
+        sh(self.other, "git", "push", "-q", "origin", f"{sha}:{merge.lock_ref('main')}")
+        return msg
+
+    def test_a_fetch_of_another_ref_after_the_lock_fetch_does_not_change_the_lock_text(self):
+        message = self.rival_lock()
+        real, lock = merge.git, merge.lock_ref("main")
+        def racing(cwd, *a, input=None):
+            out = real(cwd, *a, input=input)
+            if a[:1] == ("fetch",) and a[-1:] == (lock,):
+                real(cwd, "fetch", "-q", "origin", "refs/heads/feat")  # another fetch in this clone lands before the read
+            return out
+        with unittest.mock.patch.object(merge, "git", racing):
+            cur = self.lock.read("main")
+        self.assertIsNotNone(cur, "the lock read found no lock on origin")  # scope: a lock is there to read
+        self.assertEqual(cur[2].strip(), message, "the lock read took its text from another ref's commit, read through FETCH_HEAD")
+
+    def test_the_lock_read_passes_no_FETCH_HEAD_to_git(self):
+        self.rival_lock()
+        with unittest.mock.patch.object(merge, "git", side_effect=merge.git) as calls:
+            cur = self.lock.read("main")
+        self.assertIsNotNone(cur, "the lock read found no lock on origin")  # scope: a lock is there to read
+        named = [c.args for c in calls.call_args_list if any("FETCH_HEAD" in a for a in c.args)]
+        self.assertEqual(named, [], "the lock read passed FETCH_HEAD to git: %r" % (named,))
+
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
         old = self.head()
