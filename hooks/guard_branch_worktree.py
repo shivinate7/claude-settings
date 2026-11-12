@@ -271,7 +271,7 @@ BRANCH_SLUG_REFUSE_REASON = (
     "not run its own checkout or push. "
     "Remedy: pick a slug without that word, such as the lane's topic in plain words, and create the branch "
     "under that name. A branch that already exists keeps its name. "
-    "(rule branch-slug-no-git, a new branch name never holds the word)"
+    "(decision branch-slug-no-git, a new branch name never holds the word git)"
 )
 BRANCH_SLUG_WORD = "git"
 # `git branch` flags that tune a create and take no value. Any other flag makes the call one this rule
