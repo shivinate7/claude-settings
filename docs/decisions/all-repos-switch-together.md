@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner ruling Q1 a, recorded 2026-11-12 15:27 CST: all repos switch together. The per-lane merge target of R42 part 2 (`docs/plans/restart-plan.md`, entry R42) takes effect in every repo on one day. No repo switches alone.
+Owner ruling Q1 a (the switch), 2026-11-12 09:42 CST, relayed by the coordinator at 09:50 CST: all repos switch together. The per-lane merge target of R42 part 2 (`docs/plans/restart-plan.md`, entry R42) takes effect in every repo together. No repo switches alone.
 
 State: target, not live. Every repo still batches. The switch lands with the removal act, act 4 of R42 part 2, which is a branch in progress.
 

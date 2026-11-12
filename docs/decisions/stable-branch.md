@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner ruling, recorded 2026-11-12 15:27 CST, under R42 part 2: sessions and installers run from a branch named `stable` on origin. A workflow run moves it after a green push run of checks on main. The move is fast-forward only.
+Owner approved the design with the refuter's changes, 2026-11-12 09:48 CST, relayed by the coordinator at 09:50 CST. Under R42 part 2, sessions and installers run from a branch named `stable` on origin. A workflow run moves it after a green push run of checks on main. The move is fast-forward only.
 
 State: target, not live. The mover is open pull request 2793. No `stable` branch is on origin yet.
 
