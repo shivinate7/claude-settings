@@ -13250,7 +13250,7 @@ class MergeRoleCheck(CloudSession):
         err = self.assert_writer_refused("--role", "lane")
         self.assertIn("merge --lane-lint", err, "the --role refusal does not name merge --lane-lint")
 
-    def test_the_confirm_refusal_names_no_retired_tier_word(self):
+    def test_the_confirm_refusal_names_no_retired_term(self):
         # The refusal's cite (ROLE_CITE) says a session's tier. The glossary term is session role; tier is retired.
         rc, out, err = self.run_main("7", "--confirm")
         self.assertEqual(rc, 1, out + err)
