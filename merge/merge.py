@@ -107,8 +107,8 @@
                           is not open or not found, and the linted PR itself are each a stop; a repeated number is read once). Missed
                           case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
                           with no session URL has no lane PRs, so only --with finds any. A commit or ref target is measured against its base only, and is not cross-measured.
-                          A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs, at this hand-off
-                          lint only, the command of the head's checks-mutate-guard job (CI step "Guard mutation test") in that same worktree, after a passing lint.
+                          A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs, after a passing lint, the command of the head's checks-mutate-guard job (CI step "Guard mutation test") in that same worktree.
+                          The run happens at the hand-off lint; the batch runner's pre-join lint skips it when a hand-off PASS names the live head.
                           It FAILs on any survivor, on any wrong-cause or unknown mutant (as CI does), on a run past that job's
                           timeout-minutes, on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
                           nonzero exit (a table is judged by its counts, not its exit code). It prints its wall time and killed,
@@ -3124,7 +3124,7 @@ def mutate_run_check(wt):
         failures.append("the run's own tally: " + re.search(r"^\d+ of \d+ mutations killed \(.*\)\s*$", out, re.M).group(0).strip())
     return f"mutation test run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
 
-def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), mutate_run=True):
+def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), mutate_run=True, pre_join=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
@@ -3136,8 +3136,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), mutate_ru
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
-    A head whose diff touches a mutation test file runs the mutation test only for `mutate_run` (the hand-off caller, `--lane-lint`). The batch head's
-    caller passes False: the lane's hand-off lint already ran it, and CI runs the job on the batch head. It prints MUTATE_SKIPPED instead."""
+    A head whose diff touches a mutation test file runs the mutation test at the hand-off lint. The batch runner's pre-join lint (`pre_join`, a recorded
+    batch-runner role) skips it when a hand-off PASS comment names the live head, and runs it for any other head; a local batch runner records no role, so it always runs it.
+    The batch head's caller passes `mutate_run` False: CI runs the job on the batch head. A skip prints MUTATE_SKIPPED."""
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
@@ -3173,7 +3174,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), mutate_ru
             if c:  # no merge base to list from (the clash check above reads an unrelated history as unknown, so this is a rare read failure): unknown, never a guess
                 raise Stop(f"cannot list the files the head changes against {base}: {changed} {LANE_LINT_REMEDY}")
             if any(MUTATE_TEST_FILE.fullmatch(f) for f in changed.splitlines()):
-                if mutate_run:
+                if mutate_run and not (pre_join and target.isdigit() and hand_off_pass(host, int(target), info, head)):
                     mutate, mutate_fails = mutate_run_check(wt)
                 else:
                     skipped = True
@@ -3898,6 +3899,14 @@ def lint_state(bodies, head):
             got = [m.group(1) for m in (re.fullmatch(r"Result: (PASS|FAIL)", l) for l in lines) if m]
             return got[0].lower() if got else "unknown"
     return "none"
+
+def hand_off_pass(host, n, info, head):
+    """True when a lane-lint PASS comment on pull request `n` names `head`, read as the join reads it. A failed read, no comment, another head and a non-PASS result are False."""
+    try:
+        lints = host.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
+    except Stop:
+        return False
+    return lint_state(lints.get(n, []), head) == "pass"
 
 def lint_heads(bodies):
     """-> the distinct heads the lane-lint comments of `bodies` (oldest first) name, newest first."""
@@ -5357,7 +5366,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
                 with_prs = parse_with(a.with_prs, int(a.pr)) if a.with_prs is not None else ()  # a bad list stops before any read
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs)  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, pre_join=read_merge_role() == "batch-runner")  # before the role check and any lock: it merges and pushes nothing
         if a.release_check:
             try:
                 c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)  # -C names the checkout; None is the process directory's
