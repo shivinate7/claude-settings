@@ -417,7 +417,7 @@ await test('F7 register: two overlapping runs over the same 8 files make at most
 await test('F7 register: the same single file in two overlapping runs makes one call', async () => {
   const t = host({ diff: fileDiff('lim/solo.txt', 'solo'), model: answerNextTurn })
   await Promise.all([t.run(), t.run()])
-  assert.equal(t.calls.length, 1)
+  assert.equal(t.calls.length, 1, `one file in two overlapping runs: ${t.calls.length} model calls, not 1 (the in-flight call was not shared)`)
 })
 await test('F7 register: after overlapping runs settle, a later run still makes calls (not a lifetime cap)', async () => {
   const three = Array.from({ length: 3 }, (_, i) => fileDiff(`lim/late${i}.txt`, `late${i}`)).join('')
@@ -563,7 +563,7 @@ await test('R2-5 makeLimiter timeoutMs: a hung call holds its slot to the 20 ms 
   try {
     const L = need('makeLimiter')(1, { timeoutMs: 20 })
     const hung = L.run('a', () => new Promise(() => {}))
-    assert.equal(await L.run('b', async () => 'B'), null) // still busy at once
+    assert.equal(await L.run('b', async () => 'B'), null, 'a second run was admitted over the cap of 1') // still busy at once
     mock.timers.tick(19)
     await new Promise(r => setImmediate(r)) // a bound that fired early frees its slot in microtasks: flush them so the probe sees it
     assert.equal(await L.run('c', async () => 'C'), null, 'the slot was freed before its 20 ms bound')
