@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 0.11,
   "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
-  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: claude-settings outbox mailaudit-cloud-setup.md bullets 1 and 2. README.md:66-103 says only 'Expect sonnet'. Partly related: guard-browser-once. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
-  "updatedAt": "2026-11-11T22:50:00-06:00",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: claude-settings outbox mailaudit-cloud-setup.md bullets 1 and 2. README.md:66-103 says only 'Expect sonnet'. Partly related: guard-browser-once. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane readme-fixes (coordinator 23:04 CST Nov 11, item 521): draft PR #2617, head db5804b68, in lane lint.",
+  "updatedAt": "2026-11-11T23:06:00-06:00",
   "owner": "triage",
   "lane": "session_013NEJL4FXU8ZofTh3kiuyAG",
   "blockedBy": []
