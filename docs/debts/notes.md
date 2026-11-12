@@ -2180,3 +2180,8 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- dropped-mark-copies-batch-name: `DROPPED_MARK` in `merge/merge.py` copies the `BATCH_NAME` pattern; if `BATCH_NAME` loosens, markers stop counting silently. Found in PR 2893. Decision: roles-findings-are-debts-or-notes.
+- comment-bodies-second-comment-read: `Host.comment_bodies` in `merge/merge.py` sits beside `issue_comments`, which calls itself the one home; the reason (per PR, no `since`) is not stated. Found in PR 2893. Decision: roles-findings-are-debts-or-notes.
+- fix-lane-term-used-loosely: "fix lane" also names a red-CI or held-change lane in CLAUDE.md and session-tiers; the glossary row narrows it to a two-drop takeover. Found in PR 2893. Decision: roles-findings-are-debts-or-notes.
+- two-drop-refusal-stops-whole-build: one two-drop lane stops the whole `--batch-build`; the message does not say to rerun without it. Found in PR 2893. Decision: roles-findings-are-debts-or-notes.
+- batch-name-reuse-counts-once: a batch rebuilt under the same name counts once toward the two-drop limit. Found in PR 2893. Decision: roles-findings-are-debts-or-notes.

@@ -1138,6 +1138,10 @@ class Host:
         if c:
             raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
 
+    def comment_bodies(self, n):
+        """-> each comment body on pull request n, all pages. A failed read is a Stop, never an empty list: that would read as a lane never dropped."""
+        return [d.get("body") or "" for d in self.pages(f"issues/{n}/comments")]
+
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: review_records without the timestamps."""
         return {n: [row[0] for row in rows] for n, rows in self.review_records(since).items()}
@@ -4512,6 +4516,25 @@ def holds(root, head, ref):
         raise Stop(f"cannot read whether {ref} holds {head[:9]} (a missing object). {FREEZE_CITE}")
     return got
 
+DROPPED_MARK = re.compile(r"<!-- batch-dropped: ([a-z0-9-]{1,32}) -->")
+DROP_LIMIT = 2  # a lane dropped from this many batches leaves the queue for a fix lane (plan R26 part 2)
+
+def dropped_batches(h, n):
+    """-> the batch names that dropped lane PR n, read from its marker comments (`batch_drop` posts one per drop)."""
+    return {m.group(1) for body in h.comment_bodies(n) for m in DROPPED_MARK.finditer(body)}
+
+def mark_dropped(h, n, name):
+    """Post lane PR n's `batch-dropped` marker for batch `name` once. -> the batch names that dropped n, this one included.
+    Only the lane a red run blamed is marked: a dependent comes off with it and is not at fault."""
+    names = dropped_batches(h, n)
+    if name not in names:
+        h.post_comment(n, f"<!-- batch-dropped: {name} -->\nDropped from batch {name}.")
+    return names | {name}
+
+def fix_lane_line(n, names):
+    return (f"#{n} was dropped from {len(names)} batches ({', '.join(sorted(names))}): it leaves the batch queue for a fix lane. "
+            f"Open a fix lane for it as a new pull request; the new pull request joins a batch with a clean count.")
+
 def build_integration_branch(root, name, start, lanes, lease=None, body=None):
     """Merge each lane head of `lanes`, [(PR, head)], no-ff onto `start`, each keeping its own commit, in a temporary worktree, and push
     batch-NAME. -> the new head. With `lease` (the sha origin holds now) the push is a force-with-lease, and a rebuild that changed nothing pushes nothing.
@@ -4828,6 +4851,9 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
             raise Stop(f"#{n} is {infos[n]['state']}, not open, so it cannot join batch {name}. {FREEZE_CITE}")
         if infos[n]["base"] != base:
             raise Stop(f"#{n} targets {infos[n]['base']}, and batch {name} targets {base}. Nothing was pushed. Retarget #{n}, or give --base {infos[n]['base']}. {FREEZE_CITE}")
+    out = [fix_lane_line(n, names) for n in numbers if len(names := dropped_batches(h, n)) >= DROP_LIMIT]  # a build and --ready alike: a frozen lane that left the queue is not readied
+    if out:
+        raise Stop("\n".join(out) + f"\nNothing was pushed. {FREEZE_CITE}")
     heads ={n: infos[n]["head"] for n in numbers}  # read once, now: this is the freeze
     merged_on = False
     if on:
@@ -4980,7 +5006,15 @@ def batch_drop(root, h, name, number):
     say(f"merge: #{number} dropped from batch {name}.", *(f"merge: #{n} dropped too: its head contains #{number}'s head." for n in dependents),
         f"merge: batch {name} now holds lanes {lane_list(kept)}.")
     needs_ready(name, drafted)
-    return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
+    rc = 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
+    try:  # last: a refused post never skips the restack. It costs one count, which only loosens a speed rule
+        names = mark_dropped(h, number, name)
+    except Stop as e:
+        say(f"merge: the drop of #{number} is done, but its marker was not posted ({e}); it counts one drop less toward the fix lane.")
+    else:
+        if len(names) >= DROP_LIMIT:
+            say(fix_lane_line(number, names))
+    return rc
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
