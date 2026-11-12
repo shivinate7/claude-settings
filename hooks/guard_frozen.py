@@ -263,9 +263,8 @@ def _script_mutates(script: str) -> bool:
         return True
     for segment in split_segments(script):
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
-        # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
-        if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+        # `sed -i` is no mutating word: `writes_to` reads it by the sed option reader, so it must get that far.
+        if _mutates_as_command(command, rest) or (command == "sed" and _sed_options(rest)[1]):
             return True
     return False
 
@@ -287,12 +286,10 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return command == "sed" and _sed_options([_unquoted(word) for word in words])[1]
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
-        return True
-    return False
+    return _sed_in_place_span(target, cmd)
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -1096,18 +1093,23 @@ def _sed_s_flag_runs(script: str) -> bool:
     return False
 
 
-def _sed_expressions(words) -> list:
-    """The scripts a sed command line gives with `-e`, read as sed's option parser reads them: a separate word
-    (`-e S`, `--expression S`), glued (`-eS`, `--expression=S`), or the `e` ending a short-option group
-    (`-ne S`, `-Ee S`, `-neS`). In a group, `f` and `l` take the rest as their own argument and `i` takes it
-    as a backup suffix, so `-ie` has no script. Options end at `--`."""
-    scripts, at = [], 0
+def _sed_options(words) -> tuple:
+    """The scripts a sed command line gives with `-e`, and whether it edits files in place, read as sed's
+    option parser reads them. A script is a separate word (`-e S`, `--expression S`), glued (`-eS`,
+    `--expression=S`), or follows the `e` ending a short-option group (`-ne S`, `-Ee S`, `-neS`). The in-place
+    flag is `--in-place`, `--in-place=SUFFIX`, or an `i` in a short-option group (`-i`, `-ri`, `-ibak`,
+    `-i.bak`). In a group, `f` and `l` take the rest as their own argument and `i` takes it as a backup
+    suffix, so `-ie` is in place with no script. A group spelt `-ei` or `-nei` also counts as in place: sed
+    reads the `i` as the script, but the fail-closed side refuses it. Options end at `--`."""
+    scripts, in_place, at = [], False, 0
     while at < len(words):
         word = words[at]
         at += 1
         if word == "--":
             break
-        if word.startswith("--expression="):
+        if word == "--in-place" or word.startswith("--in-place="):
+            in_place = True
+        elif word.startswith("--expression="):
             scripts.append(word[len("--expression="):])
         elif word == "--expression":
             if at < len(words):
@@ -1122,10 +1124,22 @@ def _sed_expressions(words) -> list:
                     elif at < len(words):
                         scripts.append(words[at])
                         at += 1
+                    in_place = in_place or bool(re.match(r"[A-Za-eg-km-z]*i", rest))
                     break
-                if letter in "fli":
+                if letter == "i":
+                    in_place = True
                     break
-    return scripts
+                if letter in "fl":
+                    break
+    return scripts, in_place
+
+
+def _sed_in_place_span(target: str, cmd: str) -> bool:
+    """True when a sed call in the text edits files in place and names the target after its `sed` word, in
+    one segment. The words between are read by `_sed_options`, split at blanks, so a quoted script that
+    holds an option-like word still counts, the fail-closed side."""
+    return any(_sed_options(found.group(1).split())[1]
+               for found in re.finditer(r"\bsed\b([^\n;|&]*)" + target, cmd))
 
 
 def _runs_a_substitution(word: str) -> bool:
@@ -1153,7 +1167,7 @@ def _runs_its_text(command: str, rest) -> bool:
                 or (subcommand == "submodule" and "foreach" in plain)
                 or (subcommand == "bisect" and plain[:1] == ["run"]))
     if command == "sed":
-        scripts = _sed_expressions(words)
+        scripts = _sed_options(words)[0]
         if not scripts:
             scripts = [word for word in words if not word.startswith("-")][:1]
         return any(_SED_RUNS_OR_WRITES.search(script) or _sed_s_flag_runs(script) for script in scripts)
