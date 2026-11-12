@@ -620,6 +620,8 @@ OV_LAST_LINE_NO_GRANT = [
     ("a closed block, then the Opus word and a length with a trailing word", LAST_LINE_BLOCK + "override opus 2h please"),
     ("a closed block, then the word with a line of other text after it", LAST_LINE_BLOCK + "override\nthen do X"),
     ("an unclosed code fence before the form on the last line", "Notes for the lane:\n```\nx = 1\n\noverride 15m"),
+    # The owner never types pasted text, so an unclosed pasted block must not grant either.
+    ("an unclosed pasted block before the form on the last line", "<pasted_content>\nreport\n\noverride 12h"),
 ]
 
 
@@ -636,7 +638,7 @@ def case_override_off_on_the_last_line():
     cfg = ov_cfg()
     ov_type(cfg, "override 12h")
     before = ov_pass(cfg)
-    proc = ov_type(cfg, "Linked sessions now\n- a: idle\n\noverride off")
+    proc = ov_type(cfg, "<system-reminder>\nLinked sessions now\n- a: idle\n</system-reminder>\n\noverride off")
     check("override: `override off` on the last line after a block removes the override",
           before is not None and proc is not None and ov_pass(cfg) is None and not ov_pass_files(cfg),
           "before %r, after %r, files %r" % (before, ov_pass(cfg), ov_pass_files(cfg)))
@@ -668,6 +670,9 @@ def case_override_last_line_refuses_a_fired_seed_or_foreign_body():
     last_line_refused("a fired task's stored body, its form on the last line",
                       fired_reminder_prompt("Check the nightly build and report.") + "\n\noverride 15m")
     seed = "Brief for the lane: fix the parser.\n\noverride 15m"
+    for name, path in seed_transcripts():
+        last_line_refused("a cloud session's seed brief, %s, its form on the last line" % name, seed,
+                          transcript=path, remote=CLOUD_SESSION)
     short = transcript_file([owner_turn(seed)])
     fixture_checks("a cloud seed brief in a short transcript", short, 1, False)
     last_line_refused("a cloud session's seed brief in a short transcript, its form on the last line", seed,
@@ -2487,10 +2492,10 @@ def case_override_ask_off_word_leaves_the_override_standing():
           "before %r, after %r" % (before, ov_pass(cfg)))
 
 
-def case_override_ask_cloud_seed_never_asks():
-    # A cloud session with no earlier owner turn: the words are the seed's, so the judge is never asked, whatever the
-    # transcript holds. The missing, empty and full-size transcripts reach the states real use reaches.
-    no_owner_turn = (
+def seed_transcripts():
+    """The transcripts a cloud session's seed prompt can meet, each with its name: no transcript_path, a missing file, an
+    empty file, records with no owner turn, and a full-size one with no owner turn. None holds an earlier owner turn."""
+    return (
         ("no transcript_path in the payload", None),
         ("a transcript file that is missing", missing_transcript()),
         ("an empty transcript file", transcript_file([])),
@@ -2498,7 +2503,12 @@ def case_override_ask_cloud_seed_never_asks():
          transcript_file([assistant_turn("reading the brief"), tool_result_turn()])),
         ("a full-size transcript with no owner turn", transcript_file([assistant_turn("filler " * 60)] * 2000)),
     )
-    for name, path in no_owner_turn:
+
+
+def case_override_ask_cloud_seed_never_asks():
+    # A cloud session with no earlier owner turn: the words are the seed's, so the judge is never asked, whatever the
+    # transcript holds. The missing, empty and full-size transcripts reach the states real use reaches.
+    for name, path in seed_transcripts():
         for prompt, allowed in (("yes override that", {None}), ("override that for 15 minutes please", {None, "once"})):
             ask_no_grant("a seed prompt in a cloud session, %s, `%s`" % (name, prompt), prompt, allowed,
                          transcript=path, remote="cse_seed0001")
