@@ -64,7 +64,8 @@ Saves: an idle session otherwise never reads mail until a person types. A messag
 Known gaps, kept as notes (round 2 review). Two starts in the same millisecond against one stale lock can end one waiter at once with one spurious wake. They never leave two waiters for long. A waiter killed between its temp write and the link leaves a `wait-*.lock.<pid>.tmp` file. The baseline retry ignores the lock deadline when `--max-seconds` is under 300. `--interval` has no ceiling. The wake line does not strip left-to-right marks or zero-width characters.
 Windows scope. The Windows-safe timeout kills the child tree and never calls `communicate()` after the kill. Only the wait uses it. Turn start, send, take and read keep `git()` as on main, because the owner's fence leaves the send path unchanged. So the turn-start hang in debt mail-windows-timeout-hang stays open.
 Wake, cloud: checked Nov 12 on main bcbeaa26a, 15:46 CST, in the retrospective session. A 5 s command started with `run_in_background` exited 0 and woke that cloud session after its turn had ended. Proven 1 of 1, in the main checkout shell. A long command of this cloud lane (the lane lint) also woke it after the shell moved it to the background.
-Unmeasured: the wake on a Mac and on Windows, and the Windows git timeout branch (tested by injection only). The shell refused `run_in_background` in this lane's worktree.
+Wake, Windows: checked Nov 12, 15:56 CST, by the owner's retest on his own machine. A 60 s background sleep woke his local session from idle, and it replied WOKE. Proven 1 of 1. An earlier run at 15:51 CST does not count: a Stop hook re-prompted that turn before the command exited.
+Unmeasured: the wake on a Mac, and the Windows git timeout branch (tested by injection only). The shell refused `run_in_background` in this lane's worktree.
 
 ## The 10-message stop on the Mac
 
