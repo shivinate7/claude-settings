@@ -1572,6 +1572,10 @@ SCOPE_SCRIPT = os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")  # 
 CHECKS_YML = ("name: checks\non: pull_request\njobs:\n"  # checks-merge-install comes first: a test that appends steps puts them in `checks`, the last job
              "  checks-merge-install:\n    runs-on: ubuntu-latest\n    steps:\n"
              "      - name: Merge install suite\n        run: python3 hooks/x.py\n"
+             "  checks-install-checkout:\n    runs-on: ubuntu-latest\n    steps:\n"
+             "      - name: Install checkout suite\n        run: python3 hooks/x.py\n"
+             "  checks-merge-git:\n    runs-on: ubuntu-latest\n    steps:\n"
+             "      - name: Merge git suite\n        run: python3 hooks/x.py\n"
              "  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
              "      - name: Record slug check\n        run: python3 lint/check_slugs.py\n"
              "      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n")
@@ -1841,9 +1845,10 @@ class SmallBaseMove(Env):
         def hits(workflow):
             put(os.path.join(root, ".github", "workflows", "checks.yml"), workflow)
             return [f for f, _ in merge.hit_suites(root, ["docs/guide.md"], set())]
-        self.assertIn("hooks/test_reads_guide.py", hits(checks + merge_install))
+        split = "".join(merge_install.replace("checks-merge-install", j) for j in ("checks-install-checkout", "checks-merge-git"))
+        self.assertIn("hooks/test_reads_guide.py", hits(checks + merge_install + split))
         with self.assertRaises(merge.Stop, msg="hit_suites read a workflow with no checks-merge-install job and did not stop") as cm:
-            hits(checks)
+            hits(checks + split)
         self.assertIn("checks-merge-install", str(cm.exception))
 
     def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
