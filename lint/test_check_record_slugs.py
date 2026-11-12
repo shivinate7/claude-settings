@@ -741,6 +741,42 @@ class RecordSlugsTests(unittest.TestCase):
                         "a bullet added in a renamed notes file was not checked: " + out)
         self.assertEqual(rc, 1, out)
 
+    def test_notes_file_renamed_inside_the_debt_folder_passes(self):
+        # A pure rename adds no note: the bullets are the base's own, and the notes file is no debt.
+        self.put(DEBT_NOTES, NOTES_HEAD + "".join(VALID_LINES))
+        self.commit_base()
+        self.move(DEBT_NOTES, "debts/notes-old.md")
+        self.commit_change()
+        self.assertTrue(self.renames() and all(line.startswith("R") for line in self.renames()),
+                        "scope: the notes file must arrive by rename, got %r" % self.renames())
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, "a notes file renamed inside the debt folder was read as a debt file: " + out)
+
+    def test_notes_file_renamed_inside_the_debt_folder_with_valid_fix_bullets_passes(self):
+        # The renamed file's new bullet carries a valid step Fix, so it passes, and the rename itself is no debt.
+        self.put(DEBT_NOTES, NOTES_HEAD + "".join(VALID_LINES))
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.move(DEBT_NOTES, "debts/notes-old.md")
+        self.put("debts/notes-old.md", NOTES_HEAD + "".join(VALID_LINES) + NEW_VALID_STEP)
+        self.commit_change()
+        self.assertTrue(self.renames() and all(line.startswith("R") for line in self.renames()),
+                        "scope: the notes file must arrive by rename, got %r" % self.renames())
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, "a notes file renamed inside the debt folder, with valid Fix bullets, was refused: " + out)
+
+    def test_notes_file_renamed_inside_the_debt_folder_still_judges_a_bare_bullet(self):
+        # The control for the two cases above: a bullet with no Fix that the renamed file adds is still red.
+        self.put(DEBT_NOTES, NOTES_HEAD + "".join(VALID_LINES))
+        self.commit_base()
+        self.move(DEBT_NOTES, "debts/notes-old.md")
+        self.put("debts/notes-old.md", NOTES_HEAD + "".join(VALID_LINES) + NEW_NO_FIX)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertTrue(self.failed_about(out, "new-note"),
+                        "a bullet with no Fix added in a renamed notes file passed: " + out)
+        self.assertEqual(rc, 1, out)
+
     def test_numbered_bullet_without_a_fix_is_red(self):
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
