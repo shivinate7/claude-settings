@@ -311,6 +311,18 @@ except (FileNotFoundError, ValueError):
 held = [e for e in state.get("leases", []) if isinstance(e, dict)]
 sys.exit(0 if any(str(e.get("pid")) == sys.argv[2] and str(e.get("slot")) == sys.argv[3] for e in held) else 1)'
 lease_slot() { python3 -I -c "$SLOT_CHECK" "$1" "$2" "$3"; }
+# lease_session FILE PID SESSION exits 0 when FILE holds a lease whose pid is PID and whose session is SESSION, as written.
+SESSION_CHECK='import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        state = json.load(f)
+except (FileNotFoundError, ValueError):
+    sys.exit(1)
+held = [e for e in state.get("leases", []) if isinstance(e, dict)]
+sys.exit(0 if any(str(e.get("pid")) == sys.argv[2] and e.get("session") == sys.argv[3] for e in held) else 1)'
+lease_session() { python3 -I -c "$SESSION_CHECK" "$1" "$2" "$3"; }
+lease_at_boot_session() { lease_session "$work/lease_at_boot" "$tool_pid" "$1"; }
+lease_at_xc_session() { lease_session "$work/lease_at_xc" "$tool_pid" "$1"; }
 lease_at_boot_holds() { lease_holds "$work/lease_at_boot" "$tool_pid"; }
 lease_at_boot_slot() { lease_slot "$work/lease_at_boot" "$tool_pid" "$1"; }
 lease_at_xc_holds() { lease_holds "$work/lease_at_xc" "$tool_pid"; }
@@ -1089,6 +1101,28 @@ need "the lease held during xcodebuild is slot 2" lease_at_xc_slot 2
 need "lease released after the run" lease_released
 release_slot1
 end_case "87 reuse of the Duo of slot 2 while slot 1 is held by another: slot 2's lease is held during xcodebuild and released after"
+
+# A reused Duo whose slot another live holder keeps past SIM_LEASE_WAIT: exit 1, no boot and no run, and the stderr line
+# names the holder's pid. The holder's pid is matched as a whole number, so a longer pid does not pass.
+fresh; hold_slot1; booted "iPhone Duo" $DUO1; run SIM_LEASE_WAIT=2
+need "exit 1" rc_is 1
+need "no boot" no_boot
+need "no xcodebuild" no_xcodebuild
+need "stderr names the holder's pid" grep -Eq "(^|[^0-9])$slot_holder([^0-9]|\$)" "$work/run.err"
+release_slot1
+end_case "88 reuse of a Duo whose slot another live holder keeps past the wait: exit 1, no boot, no run, stderr names the holder pid"
+
+# The writer side: a run with CLAUDE_CODE_SESSION_ID=X writes a lease whose session is X, on the own-boot path (89) and on
+# the reuse path (90). The lease is read while it is held: at the boot, or during xcodebuild.
+fresh; run CLAUDE_CODE_SESSION_ID=writer-own-boot-89
+need "exit code" rc_is 0
+need "the lease at boot records session X" lease_at_boot_session writer-own-boot-89
+end_case "89 own boot with CLAUDE_CODE_SESSION_ID=X: the lease held at the boot records session X"
+
+fresh; booted "iPhone Duo" $DUO1; run CLAUDE_CODE_SESSION_ID=writer-reuse-90
+need "exit code" rc_is 0
+need "the lease held during xcodebuild records session X" lease_at_xc_session writer-reuse-90
+end_case "90 reuse of a booted Duo with CLAUDE_CODE_SESSION_ID=X: the lease held during xcodebuild records session X"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
