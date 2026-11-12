@@ -338,7 +338,7 @@ mtc_set("an added exactly 14:14 at -06:00 in items is allowed", "allow",
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-06:00"})
 # Passes: `added` is judged in collection items only. Other collections are not judged, though 36 minutes off.
 mtc_set("an added 36 minutes ahead in a collection other than items is allowed: only collection items is judged",
-        "allow", {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="receipts")
+        "allow", {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="groups")
 mtc_set("an added 36 minutes ahead in receipts is allowed: only collection items is judged", "allow",
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="receipts")
 # Passes: other fields are not judged. `replied` in receipts and `ruled` in items are 3 hours off, and pass.
