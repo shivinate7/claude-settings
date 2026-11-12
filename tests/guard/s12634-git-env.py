@@ -318,6 +318,15 @@ sh("git env set: Bash printf into a profile, a directive split by adjacent quote
 sh("git env set: Bash printf into a profile, a doubled backslash before n inside a name, denies",
    r"printf GIT_\\nDIR=/x >> ~/.bashrc", "deny", GIT_ENV_RULE, cwd=NOGIT)
 
+# A git location variable set by a command is refused with no override lift (never_lifted). The text is
+# override.NO_OVERRIDE, copied here because the override section loads after this one and cannot be read yet.
+NEVER_LIFTED = ("No override lifts this refusal.",)
+MON_GIT_ENV = "GIT_DIR=/x ls"
+monitor("Monitor: a command that sets GIT_DIR is refused, and no override lifts it", MON_GIT_ENV, "deny",
+        GIT_ENV_RULE, carries=NEVER_LIFTED)
+sh("Bash twin of the Monitor case: a command that sets GIT_DIR is refused, and no override lifts it",
+   MON_GIT_ENV, "deny", GIT_ENV_RULE, cwd=NOGIT, carries=NEVER_LIFTED)
+
 # =========================================================================== hook bypass
 # A git commit, merge or push that skips the git hooks is denied under rule hook-bypass. Five spellings of
 # one act: `-c core.hooksPath=...` on the command (the key in any case), `--no-verify` on commit, merge or

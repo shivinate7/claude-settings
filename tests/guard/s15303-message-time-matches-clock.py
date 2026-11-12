@@ -320,6 +320,28 @@ mtc_bash("a Bash literal on line 2 of a multi-line single-quoted string is refus
          r"""printf '%s\n' 'step one
 updatedAt="2026-11-07T14:30:00-06:00"'""")
 
+
+def mtc_monitor(name, expected, command):
+    """One Monitor call whose command text carries, or does not carry, a literal updatedAt value. The Monitor tool's
+    command is a shell command, so the same literal in Bash is judged the same way (see mtc_bash)."""
+    mtc_write(name, expected, "Monitor", command=command, **MON_FIELDS)
+
+
+def mtc_monitor_json(stamp):
+    """The JSON form of a step's updatedAt, written by printf: the command text a Monitor or Bash call carries."""
+    return ("printf '%s\\n' '{\"id\": \"silent-undo-edit-pass\", \"updatedAt\": \"" + stamp + "\"}'"
+            " > \"$D/silent-undo-edit-pass.json\"")
+
+
+# Refused: a Monitor call's command carries the literal 14:30 at -06:00, and its Bash twin is refused the same way.
+mtc_monitor("a Monitor call with updatedAt 14:30 at -06:00 is refused", "deny",
+            mtc_monitor_json("2026-11-07T14:30:00-06:00"))
+mtc_bash("a Bash twin of the Monitor call with updatedAt 14:30 at -06:00 is refused", "deny",
+         mtc_monitor_json("2026-11-07T14:30:00-06:00"))
+# Passes: the same Monitor call at 14:14 CST, the clock's own time, is allowed, so the refusal is about the value.
+mtc_monitor("a Monitor call with updatedAt 14:14 at -06:00, the clock's own time, is allowed", "allow",
+            mtc_monitor_json("2026-11-07T14:14:00-06:00"))
+
 # Refused: 20:16Z is 2 minutes ahead, past the 1-minute limit. This is the incident's own value.
 mtc_set("an added 20:16Z, 2 minutes ahead, in items is refused: the incident value is past the limit", "deny",
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:16:00Z"})

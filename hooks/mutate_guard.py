@@ -925,7 +925,7 @@ MUTATIONS = [
     ("live-stream: never refuse a live stream",
      '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
-     '        if matched:\n'
+     '        if matched and stream_family:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)',
      '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
@@ -933,7 +933,7 @@ MUTATIONS = [
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)', "guard", 'stream: tail -f never ends'),
     ("waiter: never refuse a waiter loop (Rule 9)",
      '    matched = waiter_verdict(split_segments(stripped), background)\n'
-     '    if matched:\n'
+     '    if matched and stream_family:\n'
      '        if poller:',
      '    matched = waiter_verdict(split_segments(stripped), background)\n'
      '    if False:\n'
@@ -2997,6 +2997,41 @@ MUTATIONS = [
      '        return handoff if os.path.isfile(handoff) else ""',
      '        return handoff',
      "guard", "handoff-unread: a call is allowed when the flag is set and the handoff is missing"),
+    # ---- Monitor (decision agents-wait-with-monitor): its command is judged like a Bash command, minus the stream family.
+    ("monitor: the stream family refuses a Monitor call, so a followed log is denied",
+     '    stream_family = tool != MONITOR_TOOL\n',
+     '    stream_family = True\n',
+     "guard", "Monitor: a followed log piped to grep is allowed"),
+    ("monitor: a Monitor call is never judged as a shell command",
+     '    if tool in SHELL_TOOLS or tool == MONITOR_TOOL:\n        command = tool_input.get("command", "") or ""\n',
+     '    if tool in SHELL_TOOLS:\n        command = tool_input.get("command", "") or ""\n',
+     "guard", "Monitor: reset throws the tree away, as in Bash"),
+    # ---- Monitor in the three gates that judge a shell command: the built code names SHELL_COMMAND_TOOLS (Bash,
+    # PowerShell, Monitor). Each anchor is that built line, so each is STALE until the change lands.
+    ("scratchpad-owner: the run form skips a Monitor call, so agent B's Monitor run of agent A's script is allowed",
+     '    command = str(tool_input.get("command", "") or "") if tool in SHELL_COMMAND_TOOLS else ""\n',
+     '    command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""\n',
+     "guard", "scratchpad-owner: monitor 1 agent B's Monitor run of agent A's script"),
+    ("scratchpad-owner: the write form skips a Monitor call, so agent B's Monitor redirect is allowed",
+     '        elif tool in SHELL_COMMAND_TOOLS:\n            command = str(tool_input.get("command", "") or "")\n'
+     '            if SCRATCHPAD_WORD not in command and',
+     '        elif tool in SHELL_TOOLS:\n            command = str(tool_input.get("command", "") or "")\n'
+     '            if SCRATCHPAD_WORD not in command and',
+     "guard", "scratchpad-owner: monitor 2 agent B's Monitor redirect over agent A's file"),
+    ("message-time-matches-clock: the written-value gate skips a Monitor call, so a literal 14:30 at -06:00 is allowed",
+     '    if tool in SHELL_COMMAND_TOOLS and isinstance(command, str) and "updatedAt" in command:\n',
+     '    if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:\n',
+     "guard", "message-time-matches-clock: a Monitor call with updatedAt 14:30 at -06:00 is refused"),
+    # ---- Monitor's watch gate: waiter_verdict's watch_only path decides a Monitor call's `gh run watch` (refused)
+    # and its `gh pr checks --watch` (allowed). Each required case is in tests/guard/s06590-stream.py.
+    ("monitor: the watch-only gate returns any watcher, so a Monitor gh pr checks --watch is refused",
+     '    if watch_only:\n        return run_watch\n',
+     '    if watch_only:\n        return watcher\n',
+     "guard", "ci-wait: Monitor runs gh pr checks 1 --watch, allowed as a background watch is"),
+    ("monitor: the watch-only gate returns nothing, so a Monitor gh run watch is let through",
+     '    if watch_only:\n        return run_watch\n',
+     '    if watch_only:\n        return ""\n',
+     "guard", "ci-wait: Monitor runs gh run watch 123, refused as its Bash twin is"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",

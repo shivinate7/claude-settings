@@ -59,6 +59,10 @@ def _force_utf8_streams() -> None:
 
 
 SHELL_TOOLS = ("Bash", "PowerShell")
+MONITOR_TOOL = "Monitor"   # runs a shell command, but may follow a stream (decision agents-wait-with-monitor)
+# The one home of "a tool whose `command` is a shell command". A rule that treats Monitor as Bash tests this list.
+# SHELL_TOOLS stays the two shells, for the hooks that read only those.
+SHELL_COMMAND_TOOLS = SHELL_TOOLS + (MONITOR_TOOL,)
 READ_ONLY_TOOLS = ("Read", "Grep")
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 

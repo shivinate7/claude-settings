@@ -664,6 +664,22 @@ for _tool, _command in (
     add("ci-wait: foreground %s %s stays refused" % (_tool, _command), "deny", "waiter",
         tool=_tool, cwd=NOGIT, command=_command)
 
+# A Monitor call's command gets the shell verdict, and the stream family exempts Monitor from its rules.
+# The ci-wait ruling (decision ci-wait-reads-run-status) names `gh run watch` only, so a
+# Monitor `gh run watch` is refused. A background `gh pr checks --watch` is allowed (decision
+# agents-wait-with-monitor, its waiter bullets), and Monitor counts as background, so a Monitor
+# `gh pr checks --watch` is allowed. Each Monitor case has its foreground Bash twin beside it.
+monitor("ci-wait: Monitor runs gh run watch 123, refused as its Bash twin is", "gh run watch 123", "deny", "waiter")
+sh("ci-wait: Bash twin of the Monitor run of gh run watch 123, in the foreground, stays refused",
+   "gh run watch 123", "deny", "waiter", cwd=NOGIT)
+monitor("ci-wait: Monitor runs gh pr checks 1 --watch, allowed as a background watch is", "gh pr checks 1 --watch", "allow")
+sh("ci-wait: Bash twin of the Monitor run of gh pr checks 1 --watch, in the foreground, stays refused",
+   "gh pr checks 1 --watch", "deny", "waiter", cwd=NOGIT)
+# The Bash background twin of the Monitor watch above. A background `gh pr checks --watch` is allowed
+# (decision agents-wait-with-monitor), so this case pins the Bash side of that split.
+add("waiter: gh pr checks 1 --watch under run_in_background is allowed", "allow", cwd=NOGIT,
+    command="gh pr checks 1 --watch", run_in_background=True)
+
 # Every remedy the stream family prints, reached by its own trigger. The two checks are apart, so
 # each goes red alone: the refused call or bin/merge is named, and the CI-wake notice is not named.
 for _label, _trigger in (
@@ -1180,6 +1196,28 @@ add("background-end: a bash pwsh -c with a backslash before ; hides npm run dev,
 add("background-end: a PowerShell cd with a quoted backslash path before ; still denies npm run dev",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY, tool="PowerShell",
     command=r'cd "C:\x\"; npm run dev', run_in_background=True)
+
+# --- the Monitor tool: the stream family never refuses it (decision agents-wait-with-monitor). Each
+# "Bash twin" pins that the same text is refused in a Bash call, so the Monitor allow beside it is a real
+# exemption. The Bash twins of the narrated merge and of the server are the cases "narrate: merge --confirm
+# piped to tail hides its heartbeat" and "background-end: a python http.server under run_in_background with
+# no note is refused", above.
+MON_STREAM = "tail -f /tmp/x.log | grep --line-buffered ERROR"
+MON_LOOP = "while true; do gh pr checks 1; sleep 30; done"
+monitor("Monitor: a followed log piped to grep is allowed", MON_STREAM, "allow", silent=True)
+sh("Bash twin of the Monitor case: the followed log is refused", MON_STREAM, "deny", "live-stream",
+   cwd=NOGIT)
+monitor("Monitor: a polling loop with a pause is allowed", MON_LOOP, "allow", silent=True)
+sh("Bash twin of the Monitor case: the polling loop is refused", MON_LOOP, "deny", "waiter",
+   cwd=NOGIT)
+monitor("Monitor: a narrated merge piped to tail is allowed", "merge 12 --confirm 2>&1 | tail -18",
+        "allow", silent=True)
+monitor("Monitor: a server with no end note is allowed", "python3 -m http.server 3202", "allow",
+        silent=True)
+# A stream exempts only its own rules. A hard reset after it is still refused, so the exemption cannot
+# return early from the whole judge: rule shared-tree (judge_shell, before rule 3) still denies.
+monitor("Monitor: a followed log, then a hard reset, is refused as the reset",
+        MON_STREAM + "; " + VCS + " reset --hard origin/main", "deny", "shared-tree")
 
 
 # =========================================================================== 2c-bis. the WSL launch allow list

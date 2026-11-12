@@ -596,6 +596,16 @@ def register_simulator_bypass_cases():
     )
     for name, command in allowed:
         sh("control: " + name, command, "allow", cwd=NOGIT)
+    # The same texts through the Monitor tool, with the verdicts above. The sim-test hold is the route guard.
+    for name, command in denied:
+        monitor("Monitor: " + name, command, "deny", "simulator-boot-bypass", carries="sim-test")
+    for name, command in allowed:
+        monitor("Monitor: " + name, command, "allow", silent=True)
+    monitor("Monitor: sim-test hold keeps its device, allowed silently", "sim-test --hold --for 900",
+            "allow", silent=True)
+    # A stream does not hide a raw boot after it: the stream rules are exempt, the boot rule still refuses.
+    monitor("Monitor: a followed log, then a raw boot, is refused as the boot",
+            MON_STREAM + "; " + raw, "deny", "simulator-boot-bypass", carries="sim-test")
 
 
 def sim_bypass_override_check(timed):
