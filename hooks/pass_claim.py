@@ -57,8 +57,9 @@ FENCE_RE = re.compile(r"```.*?```", re.S)
 CODE_SPAN_RE = re.compile(r"`[^`\n]*`|\"[^\"\n]*\"|“[^”\n]*”")
 SENTENCE_RE = re.compile(r"(?<=[.!?;])\s+|\n")
 TOKEN_RE = re.compile(r"[a-z0-9]+(?:['’][a-z]+)?|[,;:/|()—–]|\s[-–—]{1,2}\s")
-# A path-like token, one with a slash touching a word character or a file extension, is no claim word:
-# "tests/guard/s42900-pass-claim-send.py". A spaced slash is a clause break.
+# A path-like token, one with a slash touching a word character or a file extension, holds no claim word: in
+# "tests/guard/s42900-pass-claim-send.py" the "pass" is dropped, and the other words stay, so "Lint/tests passed." still
+# claims. A spaced slash is a clause break.
 PATH_RE = re.compile(r"\S*\w/\S*|\S*/\w\S*|\S*\w\.[a-z][a-z0-9]{0,4}\b\S*", re.I)
 # A singular check noun before "pass" names a run, not a result: "a second lint pass". "Lint passes" claims, and so
 # does "Lint: PASS", whose colon and capitals keep it out of this form.
@@ -86,6 +87,11 @@ def _words(text):
     for hyphen, joined in HYPHEN_WORDS:
         text = text.replace(hyphen, joined)
     return [t if t[0].isalnum() else BOUNDARY for t in TOKEN_RE.findall(text)]
+
+
+def _path_words(found):
+    """A path-like token's words, less its claim words: "tests/guard/x-pass.py" reads "tests guard x py"."""
+    return " " + " ".join(w for w in re.findall(r"[A-Za-z0-9]+", found.group()) if w.lower() not in CLAIM_WORDS) + " "
 
 
 def _infinitive(tokens, at):
@@ -120,7 +126,7 @@ def _sentence_needs(sentence):
     check noun beside it, and none of the exempt forms: a negation or condition in its clause, a named speaker in the
     five words before it, a count."""
     # STAT_RE first: a path strip would eat the "3/5" of "3/5 tests passed" and leave "tests passed".
-    tokens = _words(NOUN_PASS_RE.sub(r"\1", PATH_RE.sub(" ", STAT_RE.sub(" ", sentence))))
+    tokens = _words(NOUN_PASS_RE.sub(r"\1", PATH_RE.sub(_path_words, STAT_RE.sub(" ", sentence))))
     needs = []
     for at, word in enumerate(tokens):
         if word not in CLAIM_WORDS:
