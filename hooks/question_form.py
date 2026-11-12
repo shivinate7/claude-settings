@@ -903,10 +903,15 @@ def task_str_replace_hit(entry):
 
 def decision_form_hit(op: str, data):
     """(rule, matched) when this write of a waiting-page decision breaks the form. A closed item and a
-    record that is not a decision pass. An update is judged for the fields it carries, and only with kind
-    decision: the guard cannot see the stored kind."""
+    record that is neither a decision nor a task pass. An update is judged for the fields it carries, and
+    only with kind decision or task: the guard cannot see the stored kind. A task that carries a non-empty
+    `options` list gets the Departs from check alone (rule question-departs), on its `context`: the Goal,
+    Problem and Based on lines and the gain and lose effects are a decision's form. A task with no options
+    passes."""
     if not isinstance(data, dict) or data.get("status") == "closed":
         return PASS
+    if data.get("kind") == "task":
+        return _task_departs_hit(op, data)
     if op == "set":
         if data.get("kind") not in (None, "decision"):
             return PASS
@@ -924,6 +929,18 @@ def decision_form_hit(op: str, data):
         if hit[0]:
             return hit
     if judged_context:
+        miss = departs_hit(str(data.get("context") or ""))
+        if miss:
+            return DEPARTS_RULE, miss
+    return PASS
+
+
+def _task_departs_hit(op: str, data):
+    """The Departs from check for a task with options: set always, update only when it carries `context`."""
+    options = data.get("options")
+    if not isinstance(options, list) or not options:
+        return PASS
+    if op == "set" or "context" in data:
         miss = departs_hit(str(data.get("context") or ""))
         if miss:
             return DEPARTS_RULE, miss
