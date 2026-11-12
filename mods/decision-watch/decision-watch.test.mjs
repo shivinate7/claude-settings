@@ -502,10 +502,9 @@ await test('turn.complete no transcript anywhere: one UNKNOWN on the first turn,
   same(h.toasts.length, 1, 'notices after a mod reload of the same session (the seen mark must live outside the mod)')
 })
 
-// ---- /dw after a missed transcript (coordinator pick, 2026-11-12 09:30 CST; owner R41 item 1 covers the background judge
-// only). A /dw the owner asked for shows the UNKNOWN on every miss. The /dw spawn carries DW_EXPLICIT=1, the explicit-run
-// marker the script reads (a guessed contract point until the builder lands it). The background judge keeps its
-// once-per-session mark in its own state folder, so /dw neither consumes nor resets it.
+// ---- /dw after a missed transcript. A /dw the owner asked for shows the UNKNOWN on every miss. The /dw spawn carries
+// DW_EXPLICIT=1, the explicit-run marker the script reads. The background judge keeps its once-per-session mark in its
+// own state folder, so a /dw neither consumes nor resets it.
 
 await test('/dw twice in one session, transcript missing: both show the UNKNOWN naming the path, each spawn marked explicit', async () => {
   const h = await load(host())

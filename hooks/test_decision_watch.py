@@ -2177,11 +2177,10 @@ def case_fallback_unknown_without_session_id_shows_every_time():
 
 
 # --------------------------------------------------------------------------- fallback: the explicit /dw
-# A /dw the owner asked for shows the failed-path UNKNOWN on every miss, never the once-per-session mark. The
-# background judge keeps the mark (case_fallback_unknown_shows_once_per_session). The seam is the env var below: the
-# mod's /dw sets it to "1" on each script spawn, and the script reads it in run() (coordinator pick, 2026-11-12 09:30
-# CST; owner R41 item 1 covers the background judge only). Old code ignores the marker, so each case below fails on
-# the once-per-session mark alone, except the control.
+# A /dw the owner asked for shows the failed-path UNKNOWN on every miss. The once-per-session mark exists for the
+# background judge, which runs unasked on every turn and would repeat the same line. The seam is the env var below:
+# the mod's /dw sets it to "1" on each script spawn, and run() reads it. The cases here need the marker; the control
+# does not.
 
 EXPLICIT_ENV = "DW_EXPLICIT"
 
