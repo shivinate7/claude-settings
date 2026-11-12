@@ -5,7 +5,7 @@
   "order": 266.0,
   "owner": "coordinator",
   "why": "Lane record-claim-cites-code measured 226 STALE009 hits on the full tree. A sample of 10 found 8 real, 1 borderline and 1 false (coordinator, 15:28 CST Nov 7).",
-  "note": "Waits on #1893. The coordinator starts the lane when #1893 merges. The sweep fixes the real cites only, and lists the false ones for the check's lane. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1539 closed unmerged; #1893 holds every #1539 commit. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes. Lane code-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
-  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "note": "Waits on #1893. The coordinator starts the lane when #1893 merges. The sweep fixes the real cites only, and lists the false ones for the check's lane. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1539 closed unmerged; #1893 holds every #1539 commit. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes. Lane code-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Dead-wait re-point 11:58 CST Nov 12 (step dead-pr-waits part a; triage Explore Sonnet audit, PR states read via GitHub): wait on #2687 (open; its body names this step) instead of #1893.",
+  "updatedAt": "2026-11-12T11:59:20-06:00",
   "lane": "session_013NEJL3VvsFr2K1WX9t5ch3"
 }

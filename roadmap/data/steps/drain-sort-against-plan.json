@@ -1,11 +1,11 @@
 {
   "id": "drain-sort-against-plan",
   "title": "Sort every open PR outside the named queue against the restart plan",
-  "status": "ready",
+  "status": "done",
   "repo": "shivinate7/claude-settings",
   "why": "R23, owner pick 19:23 CST Nov 10 (\"Named queue\"). The drain ends when the named queue lands: batch 74b (#2574); batch 75 (#2568, #2571, #2570, #1099, #1338, #2573, #2559); and #2563, #2566, the ten former #2563 waiters (#1186, #1805, #2534, #2431, #2268, #2378, #1166, #2366, #2379, #2562), #2575, #2542. Triage sorts every other open PR (663 (GitHub search, triage 2026-11-11 00:01 CST)) against the plan. It closes a PR whose purpose a plan ruling replaces, keeps its branch so it can reopen, and leaves the rest as stage 3 input. Stage 2 starts once #2575 is on main, not after the sort. Open: #2572 and #2483 sit outside the named queue (the coordinator closes #2483 as replaced by gh-write-cloud). A cloud session closes through the GitHub tools, since gh writes are refused there. Coordinator 19:27-19:31 CST: #2562 and #2268 stay parked for the sort (eight waiters remain in the queue); #2572 waits for the sort; after batch 74b landed (main e6b879c8b), #2413 and #2564 (parked, R1/R4), stacks D and B (#1803, #2164, #2276, #2301, #2321, #1975, #2015) and #2156 also go to the sort.",
   "source": "retrospective session relay 19:24 CST and coordinator 19:25 CST Nov 10 (R23); plan stage 1, commit 5d0baed",
   "lane": "",
-  "note": "Lane prose-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Back to triage 11:50 CST Nov 12 (lane fan-prose-unmapped-1): a triage act.",
-  "updatedAt": "2026-11-12T11:52:25-06:00"
+  "note": "Lane prose-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Back to triage 11:50 CST Nov 12 (lane fan-prose-unmapped-1): a triage act. Sort done 11:58 CST Nov 12 (triage Explore Sonnet audit over 338 open PRs; 151 skipped as live-owned): #1803 closed as replaced by R20 part 2 (branch kept). #1773, #1939 and #1994 match R9, but page item 501 holds them for the owner. Not flagged: #2709 clashes with R22 point 3, and its live lane holds it.",
+  "updatedAt": "2026-11-12T11:59:20-06:00"
 }
