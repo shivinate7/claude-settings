@@ -57,6 +57,9 @@ jobs:
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -72,6 +75,13 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
         run: bash .github/scripts/ci-scope.sh
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: scope
+
   checks:
     runs-on: ubuntu-latest
     needs: scope
@@ -80,6 +90,9 @@ jobs:
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -635,6 +648,13 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks
+
   # The merge tool and install suites, split off `checks` for wall time: `checks` took 33.4 min in run 41730427997 and
   # these CI steps took about 16 of them. Each keeps its own `if:`, its shell and its cap. This job has no scope condition of
   # its own, like `checks`: its suites carry the `code` flag.
@@ -645,6 +665,9 @@ jobs:
     # 29 green, slowest green 26.7 min (run 43148329817); run 43164094808 attempt 1 ended at the old cap, 30.2 min, cancelled (attempt 2 was green, 25.1 min).
     # Slow steps: the install.sh checkout-detection suite (own cap below) and the Merge tool git-half fixture suite, 689 s (run 43164094808). The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -707,6 +730,13 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh hooks/test_cloud_setup.sh
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-merge-install
+
   # The guard fixture suite, shard 1 of 2. checks-guard-2 runs shard 2; hooks/test_guard.py holds the shard switch.
   checks-guard:
     runs-on: ubuntu-latest
@@ -715,6 +745,9 @@ jobs:
     # Both shards share one cap. The unsplit suite measured median 21.1, slowest 27.2 min (run 42682869856, attempt 1 ended at the
     # old 27 min cap; its re-run took 27.0). Per-shard time projected at about half, unmeasured.
     timeout-minutes: 60 # provisional
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
@@ -743,6 +776,13 @@ jobs:
           GUARD_SHARD: 1/2
         run: python3 hooks/test_guard.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-guard
+
   # The guard fixture suite, shard 2 of 2, a copy of checks-guard (same steps, same scope flag).
   checks-guard-2:
     runs-on: ubuntu-latest
@@ -751,6 +791,9 @@ jobs:
     # Both shards share one cap. The unsplit suite measured median 21.1, slowest 27.2 min (run 42682869856, attempt 1 ended at the
     # old 27 min cap; its re-run took 27.0). Per-shard time projected at about half, unmeasured.
     timeout-minutes: 60 # provisional
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_guard == 'true' || github.event_name != 'pull_request' }}
@@ -779,6 +822,13 @@ jobs:
           GUARD_SHARD: 2/2
         run: python3 hooks/test_guard.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-guard-2
+
   # The bin/shoot suite, in its own job so that a slow browser install never uses up the cap of the
   # `checks` lint job. bin/shoot needs Playwright and Chromium, and this runner has neither. The job
   # installs the copy that .github/shoot/package-lock.json pins, through actions/playwright-setup.
@@ -790,6 +840,9 @@ jobs:
     # 29 green, slowest 7.9 min (run 42700538152, before the waiting page suite moved out); 3.1 min or less since run 42826151332.
     # The browser install is the only network step. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
@@ -825,6 +878,13 @@ jobs:
         run: |
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-shoot
+
   # The waiting page suite, split from checks-shoot after it ran 9.5 min there and the job hit its
   # 10 min cap (decision ci-job-caps). Same install and same scope conditions as checks-shoot.
   checks-waiting-page:
@@ -835,6 +895,9 @@ jobs:
     # and 42717988296). Re-measure on a green run and at 5 green runs, then set cap = slowest / 0.7,
     # rounded up (decision ci-job-caps).
     timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
@@ -858,6 +921,13 @@ jobs:
           python3 --version && git --version
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-waiting-page
+
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
   pointer-windows:
@@ -866,6 +936,9 @@ jobs:
     # Cap 10 min, about 2.4x the slowest of 30 runs, 4.2 min, for install-set.test.ps1 on a slow runner
     # (decision ci-job-caps).
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.pointer_windows == 'true' || github.event_name != 'pull_request' }}
@@ -899,6 +972,13 @@ jobs:
         timeout-minutes: 3
         run: powershell -NoProfile -ExecutionPolicy Bypass -File install-bin-eol.test.ps1
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: pointer-windows
+
   # /bin/bash on macOS is 3.2.57 (2007) and /var is a symlink to /private/var. The
   # checkout-detection suite, the ios-ship suite, the sim-test suite and the duo-fold suite (bash 3.2 scripts for macOS) are the only checks
   # whose result depends on either. checks-macos below covers the rest of the suite, so this job stays narrow, on purpose.
@@ -908,6 +988,9 @@ jobs:
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main, latest attempt of each (run 42445434802 to run 43184587111):
     # 29 green, median 23.0, slowest 31.3 min (run 43184587111). The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request' }}
@@ -951,6 +1034,13 @@ jobs:
         if: ${{ (needs.scope.outputs.shell_macos == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         run: bash lint/test_duo_fold.sh
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: shell-macos
+
   # The owner runs this repo on macOS. Before this job, every Python suite in the checks
   # and checks-windows jobs above proved itself only on Linux and Windows, never on a real
   # Mac, so janitor/install_launchd.py -- the one installer built for the Mac -- had no
@@ -967,6 +1057,9 @@ jobs:
     # push median 20.5 min, pull request median 18.7 (n 13 each).
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
@@ -1196,6 +1289,13 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-macos
+
   # The second half of checks-macos, split off for wall time: that job took 40.6 min in run 41730427997. The guard suite runs
   # in 2 shards, one per job, and the slow CI steps are shared out between the jobs. Same scope flag, same `if:`
   # on every CI step as checks-macos. Both jobs start on every pull request (`needs: scope` only); the scope flag gates
@@ -1207,6 +1307,9 @@ jobs:
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 25.5, slowest 30.7 min (run 43197518392). The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
@@ -1261,6 +1364,13 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_schtasks.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-macos-b
+
   # The Windows suites run in four jobs (checks-windows, checks-windows-guard, checks-windows-merge, checks-windows-rest), and the guard and merge jobs add shard jobs off pull_request. Six python suites in the checks job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
@@ -1276,6 +1386,9 @@ jobs:
     needs: scope
     # Cut F moved the guard suite out. Run time since the install.sh leg left is unmeasured; 10 min leaves room.
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows == 'true' || github.event_name != 'pull_request' }}
@@ -1376,6 +1489,13 @@ jobs:
         shell: bash
         run: bash .github/scripts/mod-tests.sh
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows
+
   # The mutation test for the guard, moved off `checks` by cut F so it runs in parallel.
   checks-mutate-guard:
     runs-on: ubuntu-latest
@@ -1388,6 +1508,9 @@ jobs:
     # is a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
     # Now 75, above the 3600 s suite cap in hooks/mutate_guard.py, so the suite cap fires first (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1413,6 +1536,13 @@ jobs:
         timeout-minutes: 5 # provisional: no CI run yet; 101 s measured locally
         run: python3 hooks/test_guard_beat.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-mutate-guard
+
   # The mutation report of a batch (decision mutation-report-scores-suites, owner item mutation-ci-job, 2026-11-05). It runs on
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
   # A pull request from any other branch skips its steps, so the job reads passed. A push or a schedule reaches the action,
@@ -1428,6 +1558,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: scope
     timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.mutation_report == 'true' || github.event_name != 'pull_request' }}
@@ -1446,6 +1579,13 @@ jobs:
         with:
           profile: claude_settings
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: mutation-report
+
   # The guard fixture suite on Windows, split off checks-windows by cut F. On pull_request it runs only the cases
   # tagged windows (the slice step below), whole, in this job. Push, schedule and
   # workflow_dispatch run the full suite in shards: shard 1 here, the rest in checks-windows-guard-<i>, which never
@@ -1458,6 +1598,9 @@ jobs:
     # runs from 42700538152 to 43038567637 (Nov 9 to Nov 11) cut a shard at 20.05 to 20.08 min with no red test; green shards took
     # 15.27 to 19.98 min. Stopgap cap 75 min (owner 12:11 CST Nov 10, decision ci-job-caps).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1482,12 +1625,22 @@ jobs:
           GUARD_TESTS: windows-slice
         run: python hooks/test_guard.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-guard
+
   checks-windows-guard-2:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1504,12 +1657,22 @@ jobs:
           GUARD_SHARD: 2/3
         run: python hooks/test_guard.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-guard-2
+
   checks-windows-guard-3:
     runs-on: windows-latest
     needs: scope
     if: ${{ github.event_name != 'pull_request' }}
     # A shard of checks-windows-guard: its figures and cap are there.
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1526,6 +1689,13 @@ jobs:
           GUARD_SHARD: 3/3
         run: python hooks/test_guard.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-guard-3
+
   # The merge suites on Windows. The slice runs whole here on pull_request; off pull_request the full git-half
   # suite runs in shards, shard 1 here and the rest in checks-windows-merge-<i> (the shard switch in merge/test_merge.py).
   checks-windows-merge:
@@ -1534,6 +1704,9 @@ jobs:
     # Off pull_request (the PR slice has median 2.2). 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 17.6, slowest 21.2 min (run 43155288101). All 5 merge shards share cap 75. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request' }}
@@ -1567,6 +1740,13 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python merge/test_cmd.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-merge
+
   checks-windows-merge-2:
     runs-on: windows-latest
     needs: scope
@@ -1575,6 +1755,9 @@ jobs:
     # 29 green, median 16.8, slowest 20.7 min (run 43197518392), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1591,6 +1774,13 @@ jobs:
           MERGE_SHARD: 2/5
         run: python merge/test_merge.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-merge-2
+
   checks-windows-merge-3:
     runs-on: windows-latest
     needs: scope
@@ -1599,6 +1789,9 @@ jobs:
     # 29 green, median 17.1, slowest 21.2 min (run 43197518392), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1615,6 +1808,13 @@ jobs:
           MERGE_SHARD: 3/5
         run: python merge/test_merge.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-merge-3
+
   checks-windows-merge-4:
     runs-on: windows-latest
     needs: scope
@@ -1623,6 +1823,9 @@ jobs:
     # 29 green, median 16.5, slowest 21.1 min (run 43136344305), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1639,6 +1842,13 @@ jobs:
           MERGE_SHARD: 4/5
         run: python merge/test_merge.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-merge-4
+
   checks-windows-merge-5:
     runs-on: windows-latest
     needs: scope
@@ -1647,6 +1857,9 @@ jobs:
     # 29 green, median 16.0, slowest 18.2 min (run 43119184355), same window as checks-windows-merge.
     # Cap 75 is shared by the 5 shards (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -1663,6 +1876,13 @@ jobs:
           MERGE_SHARD: 5/5
         run: python merge/test_merge.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-merge-5
+
   # The janitor sweep suites, moved out of checks-windows-rest (decision ci-job-caps). Fixture suite 8.2 min slowest,
   # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 75 min = 3.8x.
   checks-windows-sweep:
@@ -1670,6 +1890,9 @@ jobs:
     needs: scope
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request' }}
@@ -1690,12 +1913,22 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
         run: python janitor/mutate_sweep.py
 
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-sweep
+
   checks-windows-rest:
     runs-on: windows-latest
     needs: scope
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main (run 42445434802 on; run 43184587111 was still running):
     # 29 green, slowest 30.4 min (run 43070476960). Slowest step: Guard wrappers fixture suite, 277 s. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request' }}
@@ -1917,6 +2150,13 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         shell: bash
         run: bash actions/stamp/test_action.sh
+
+      # A red job wakes the watching session at once; ci-done names any the step could not.
+      - name: Wake the batch runner (red job)
+        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+        uses: $/actions/ci-done-comment
+        with:
+          job: checks-windows-rest
 
   # The one check branch protection requires. It fails on a needed job that failed, was cancelled or was
   # skipped, so every needed job runs on a ready PR and puts its scope condition on its steps, never on the job.
