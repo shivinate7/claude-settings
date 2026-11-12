@@ -214,6 +214,64 @@ test("a pick saves the id of the option picked, beside its letter", async (t) =>
   assert.equal(a.optionId, "red", "the saved answer does not carry the id of the option picked");
 });
 
+// The item as triage leaves it after a reorder: letters follow position, so Blue takes a and Red takes b. Each key stays a
+// letter, so the page's letter checks read the item as valid.
+const LETTERS_MOVED = [{ ...IDED[1], key: "a" }, { ...IDED[0], key: "b" }];
+
+// A pick keeps the id and the label the option had when the owner picked it. The item re-snapshots with the letters moved
+// after the pick, and Send still saves the option picked: Red, with id red and label "A: Red" as it read at pick time.
+test("a pick keeps the id and label it had when picked, after the letters move", async (t) => {
+  const it = mk("moved-pick", 41, { pick: "a", options: IDED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await choose(page, it, "a");
+  await page.evaluate((moved) => window.__putItem(moved), { ...it, options: LETTERS_MOVED });
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.equal(a.choice, "a", "the answer does not hold the letter the owner picked");
+  assert.equal(a.optionId, "red", "the saved id is not the id of the option picked, Red");
+  assert.equal(a.label, "A: Red", "the saved label is not the label the option had when it was picked");
+});
+
+// The same for a multi item: the ids of the options ticked, from before the letters moved, in the order ticked.
+test("a multi pick keeps the ids it had when ticked, after the letters move", async (t) => {
+  const it = mk("moved-multi", 42, { multi: true, pick: [], options: IDED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await choose(page, it, "a");
+  await choose(page, it, "b");
+  await page.evaluate((moved) => window.__putItem(moved), { ...it, options: LETTERS_MOVED });
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], it.id);
+  const a = (await answers(page))[it.id];
+  assert.deepEqual(a.choice, ["a", "b"], "the answer does not hold the letters the owner ticked");
+  assert.deepEqual(a.optionId, ["red", "blue"], "the saved ids are not the ids of the options ticked, from before the move");
+});
+
+// Control, green on the current head: a decision whose options carry no id saves no optionId.
+test("a decision whose options carry no id saves no optionId", async (t) => {
+  const page = await open(t); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id);
+  const a = (await answers(page))[DECISION.id];
+  assert.equal(a.choice, "a", "the answer does not hold the pick the owner made");
+  assert.equal("optionId" in a, false, "a saved answer names an optionId for an option with no id");
+});
+
+// Control, green on the current head: an option's note is drawn on its card, in that option's label.
+test("an option's note is drawn on its card", async (t) => {
+  const it = mk("noted-option", 43, { options: [
+    { key: "a", label: "Red", how: "h", gain: "g", lose: "l", note: "Now means the red that shipped." },
+    { key: "b", label: "Blue", how: "h", gain: "g", lose: "l" },
+  ] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await card(page, it).locator(`label[for="o-${it.id}-a"]`).count(), 1, "option a is not drawn on the card");
+  const noted = card(page, it).locator(`label[for="o-${it.id}-a"] .optnote`);
+  assert.equal(await noted.count(), 1, "the option's note is not drawn on its card");
+  assert.equal((await noted.textContent()).trim(), "Now means the red that shipped.", "the card draws another note than the option's");
+  assert.equal(await card(page, it).locator(`label[for="o-${it.id}-b"] .optnote`).count(), 0, "a note is drawn on an option with none");
+});
+
 test("the list has three tiers read from holds and by, then Pick stands last", async (t) => {
   const items = [
     mk("calm-dec", 1), { ...TASK, id: "calm-task", n: 2 },
