@@ -2288,8 +2288,9 @@ class LiveStatusPhase(UpkeepFixture):
 class BlockedNoOpenBlocker(UpkeepFixture):
     """The upkeep row `blocked with no open blocker`: each blocked step whose blockedBy names no open step. A blocker is
     open when its status is not done; a blocker that names no step does not hold the step, and is named in its entry.
-    A step with an open blocker is never listed, nor is a step that is not blocked. A blockedBy that is absent or not a
-    list lists the step as unreadable, and never crashes the build."""
+    A step with an open blocker is never listed, nor is a step that is not blocked. A missing or null blockedBy names no
+    blocker, so the step is listed plainly. Any other non-list blockedBy, or a list holding a non-string, lists the step
+    as unreadable, and never crashes the build."""
 
     ROW = "blocked with no open blocker"
 
@@ -2343,8 +2344,21 @@ class BlockedNoOpenBlocker(UpkeepFixture):
                          (2, ["c7 (unknown blocker c99)", "c8 (unknown blocker c98)"]),
                          "a blocker that names no step does not hold the step, and the entry names it")
 
+    def test_a_missing_or_null_blocked_by_lists_the_step_plainly(self):
+        for name, value in (("absent", _ABSENT), ("null", None)):
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("c6", status="blocked", blockedBy=value, order=6)
+                try:
+                    listed = self.listed("a blocked step whose blockedBy is %s is not listed" % name)
+                except AssertionError:
+                    raise
+                except Exception as err:  # the crash is the defect, so it fails by name, not as an error
+                    self.fail("upkeep crashed on a blockedBy that is %s: %s: %s" % (name, type(err).__name__, err))
+                self.assertEqual(listed, (1, ["c6"]), "a missing or null blockedBy names no blocker, so the step is listed plainly")
+
     def test_an_unreadable_blocked_by_is_listed_and_never_crashes(self):
-        for name, value in (("absent", _ABSENT), ("string", "c9"), ("null", None), ("number", 3), ("object", {"id": "c9"})):
+        for name, value in (("string", "c9"), ("number", 3), ("object", {"id": "c9"}), ("list of a number", [3])):
             with self.subTest(name):
                 git(self.repo, "checkout", "-q", "roadmap")
                 self.commit_step("c6", status="blocked", blockedBy=value, order=6)
@@ -2355,7 +2369,7 @@ class BlockedNoOpenBlocker(UpkeepFixture):
                 except Exception as err:  # the crash is the defect, so it fails by name, not as an error
                     self.fail("upkeep crashed on a blockedBy that is %s: %s: %s" % (name, type(err).__name__, err))
                 self.assertEqual(listed, (1, ["c6 (blockedBy unreadable)"]),
-                                 "a blockedBy that is not a list lists the step as unreadable")
+                                 "a blockedBy of another type, or a list with a non-string, lists the step as unreadable")
 
     def test_the_row_prints_right_after_the_in_progress_row(self):
         self.commit_step("c2", status="blocked", blockedBy=[], order=2)
