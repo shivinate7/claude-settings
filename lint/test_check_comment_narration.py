@@ -644,7 +644,7 @@ class ExampleIds(Case):
         self.assertEqual(rc, 0, out)
         self.assertNoHit(out, "short.py", 2)
 
-    def test_comma_list_of_400_ids_after_an_example_marker_is_clean_and_fast(self):
+    def test_comma_list_of_400_ids_after_an_example_marker_is_clean(self):
         ids = [self.example_id(i) for i in range(400)]
         rc, out = self.scan_bounded("comma.py", "e.g. " + ", ".join(ids))
         self.assertNotIn("Traceback", out)
