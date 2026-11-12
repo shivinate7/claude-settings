@@ -4,7 +4,7 @@
 
 **Also.** A local lane session has no cloud id either. `override.remote_session_id` reads the id only from `CLAUDE_CODE_REMOTE_SESSION_ID`. So rule `orchestrator-merge-write` (decision `builders-cannot-edit-tests`, the merge route) allows a local lane's merge write, with no log line (test hooks/test_guard.py::orchestrator-merge-write: an Edit in a merge with no session id in the env is allowed silently, with no guard.log line). Harm: a local lane can resolve a merge's test or product conflict itself, the act this rule exists to stop. The owner ruling below applies: build nothing on local identity until a Mac and Windows fix exists.
 
-**Where.** `hooks/guard.py` rule `roadmap-one-writer` (one writer for the roadmap branch). Roadmap step `local-triage-tier-proof` (local triage tier proof). For the local lane: `override.remote_session_id` in `hooks/override.py`, read by `orchestrator_merge_write_hit` in `hooks/guard.py`.
+**Where.** `hooks/guard.py` rule `roadmap-one-writer` (one writer for the roadmap branch). Roadmap step `local-triage-tier-proof` (local triage tier proof).
 
 **Decision.** `session-tiers` (session roles). For the local lane: `builders-cannot-edit-tests` (the merge route).
 
