@@ -259,11 +259,12 @@ def batch_held_hit(args, where: str, tool: str, overrides=None) -> str:
     (decision batch-freeze-lane-set): a ready pull request on the default base, from another branch, holds the
     branch's remote tip (the compare `tip...head` reads ahead or identical). The tip is the local
     `refs/remotes/<remote>/<branch>`. A push with no remote tip, or one that moves nothing, is silent. A list or
-    compare that cannot be read, a check that raises, or a destination name the shell fills in (`$X`), allows the push and logs one
-    `push-batch-unread` line. A tip the default branch already holds (merged) is silent, with no gh call. A move is
+    compare that cannot be read, a check that raises, a destination or source name the shell fills in (`$X`), a glob
+    destination, a destination no read names (push.default=matching, a detached HEAD) or a default-branch read that cannot
+    answer, allows the push and logs one `push-batch-unread` line. A tip the default branch already holds (merged) is silent, with no gh call. A move is
     a destination with no deletion part: `HEAD:lane :old` judges `lane`. `--all` judges each local branch that differs
     from its remote-tracking ref.
-    Cost: one `git rev-parse` of the tip per branch written (none for main, master or a forced push), a second
+    Cost: a push with no remote argument adds no process: its remote read is the config read push_ask_hit reuses. One `git rev-parse` of the tip per branch written (none for main, master or a forced push), a second
     for the source when a tip exists, the default-branch reads and one `git merge-base --is-ancestor` per default name
     (plus one `git rev-parse --is-shallow-repository` when it answers no) only when the push moves a tip, and one
     `git for-each-ref` for `--all`; the gh reads only for a tip not merged: one open list (one call per 100 rows) and
@@ -274,14 +275,20 @@ def batch_held_hit(args, where: str, tool: str, overrides=None) -> str:
     unread = ""
     try:
         for remote, dest, source in push_moves(args, where, overrides):
-            if "$" in dest or "`" in dest:   # a name the shell fills in: the guard cannot read it
-                unread = "the destination name %s cannot be read" % dest
+            if dest is None or "*" in dest or "$" in dest or "`" in dest:   # no read names it: a glob matches many, a `$X` is filled in by the shell
+                unread = "the destination %s cannot be read" % (dest or "name")
+                continue
+            if "$" in source or "`" in source:
+                unread = "the source %s cannot be read" % source
                 continue
             tip = _rev(where, "refs/remotes/%s/%s" % (remote, dest))
             if not tip or _rev(where, source) in (None, tip):
                 continue
             defaults = _push_default_branches(where, remote)   # read only for a push that moves a tip
-            if defaults is None or dest in defaults:
+            if defaults is None:
+                unread = "the default branches of %s cannot be read" % remote
+                continue
+            if dest in defaults:
                 continue
             # A tip the default branch already holds is merged: no pull request needs it frozen, and no gh read is made.
             # Only a True answer counts; a read that could not tell goes on to the gh read.

@@ -48,6 +48,9 @@ def _push_current_branch(cwd: str):
     return answer.stdout.strip().removeprefix("refs/heads/")
 
 
+_BARE_CURRENT = {}   # cwd -> the current branch `_push_bare_destination` read, so `_push_bare_remote` spawns no second read
+
+
 def _push_bare_destination(cwd: str, overrides=None):
     """Where a push with no refspec goes, read through push.default, else None (unknown).
 
@@ -55,7 +58,7 @@ def _push_bare_destination(cwd: str, overrides=None):
     branch's upstream ref. `matching`, `nothing`, an unset upstream or an unreadable config is
     unknown, and unknown is never safe.
     """
-    current = _push_current_branch(cwd)
+    current = _BARE_CURRENT[cwd] = _push_current_branch(cwd)
     mode = _push_config(cwd, "push.default", overrides)
     if current is None or mode is None:
         return None
@@ -637,21 +640,25 @@ def push_moves(args, cwd: str, overrides=None):
     default names (main, master). A forced, leased, `+`, mirror, `--delete` or tags-only push gives []. A `:ref`
     refspec is a deletion, not a move: it is skipped, and its sibling refspecs still count. `--all` and
     `--branches` name each local branch whose remote-tracking ref holds another commit. The remote is the named
-    one, else `origin`. A bare push has the source `HEAD`; a colon-less refspec is its own source. Reads: those
-    `push_destinations` already shares, and one `git for-each-ref` for `--all`."""
+    one. A push that names none goes where git sends a bare push (`_push_bare_remote`). A bare push has the
+    source `HEAD`; a colon-less refspec is its own source. A destination that cannot be named stays in the list
+    as None, and a glob refspec as its `*` name, so the caller can log them unread. Reads: those
+    `push_destinations` already shares, one `git config --get-regexp` for a push with no remote (the read
+    `push_ask_hit` reuses), and one `git for-each-ref` for `--all`."""
     force, mirror, every, _includes, _unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or delete or any(s.startswith("+") for s in plain):
         return []
     if not plain and not every and _push_tags_only(args):
         return []
-    remote = remote or "origin"
     if every:
-        return _all_moves(remote, cwd)
+        return _all_moves(remote or _push_bare_remote(cwd, overrides), cwd)
+    destinations = push_destinations(args, cwd, overrides)   # first: a bare push's read of the current branch is reused below
+    remote = remote or _push_bare_remote(cwd, overrides)
     moves = []
-    for spec, dest in zip(plain or [""], push_destinations(args, cwd, overrides)):
+    for spec, dest in zip(plain or [""], destinations):
         if spec.startswith(":"):
             continue
-        if dest and "*" not in dest and dest not in DEFAULT_BRANCH_FALLBACK:
+        if dest not in DEFAULT_BRANCH_FALLBACK:
             moves.append((remote, dest, spec.partition(":")[0] or "HEAD"))
     return moves
 
@@ -714,25 +721,61 @@ def _push_tags_only(args) -> bool:
     return False
 
 
+_BRANCH_CONFIG = {}   # (cwd, with_default) -> {config key: value}, None when git cannot answer; one hook process
+
+
+def _push_config_found(cwd: str, with_default: bool):
+    """{key: value} of the push config a branch's push reads, None when git cannot answer. One
+    `git config --get-regexp` spawn, shared by every reader in the hook process: `_push_branch_config` and
+    `_push_bare_remote`. `with_default` adds push.default, push.autoSetupRemote and remote.pushDefault."""
+    key = (cwd, with_default)
+    if key not in _BRANCH_CONFIG:
+        pattern = (r"^(branch\.|remote\.pushdefault$|push\.(default|autosetupremote)$)" if with_default
+                   else r"^branch\.")
+        answer = guard_core._git(cwd, "config", "--get-regexp", pattern) if cwd else None
+        found = None
+        if answer is not None and answer.returncode in (0, 1):
+            found = {}
+            for line in answer.stdout.splitlines():
+                name, _, value = line.partition(" ")
+                found.setdefault(name, value.strip())
+        _BRANCH_CONFIG[key] = found
+    return _BRANCH_CONFIG[key]
+
+
 def _push_branch_config(cwd: str, current: str, with_default: bool, overrides=None):
     """(remote, merge, push.default, push.autoSetupRemote) of `current`: '' for a key that is unset, None for
     all four when git cannot answer. The last two are read only with `with_default`. One
     `git config --get-regexp` spawn answers all of them. A `git -c` override of either wins, as in
     `_push_config`."""
-    pattern = r"^(branch\.|push\.(default|autosetupremote)$)" if with_default else r"^branch\."
-    answer = guard_core._git(cwd, "config", "--get-regexp", pattern) if cwd else None
-    if answer is None or answer.returncode not in (0, 1):
+    found = _push_config_found(cwd, with_default)
+    if found is None:
         return None, None, None, None
-    found = {}
-    for line in answer.stdout.splitlines():
-        key, _, value = line.partition(" ")
-        found.setdefault(key, value.strip())
+
     def key(name):
         return overrides[name] if overrides and name in overrides else found.get(name, "")
 
     return (found.get("branch." + current + ".remote", ""),
             found.get("branch." + current + ".merge", "").removeprefix("refs/heads/"),
             key("push.default"), key("push.autosetupremote"))
+
+
+def _pick_remote(get, current: str) -> str:
+    """The remote git sends a push that names none to: `branch.<cur>.pushRemote`, else `remote.pushDefault`, else
+    `branch.<cur>.remote`, else origin. `get` reads one lowercase config key and gives '' for an unset one."""
+    return (get("branch." + current + ".pushremote") or get("remote.pushdefault")
+            or get("branch." + current + ".remote") or "origin")
+
+
+def _push_bare_remote(cwd: str, overrides=None) -> str:
+    """The remote name a push with no remote argument goes to (`_pick_remote`). An unreadable config gives origin.
+    Reads the current branch `_push_bare_destination` already read, else one `git symbolic-ref`."""
+    current = _BARE_CURRENT[cwd] if cwd in _BARE_CURRENT else _push_current_branch(cwd)
+    found = _push_config_found(cwd, True)
+    if found is None:
+        return "origin"
+    return _pick_remote(lambda key: overrides[key.lower()] if overrides and key.lower() in overrides
+                        else found.get(key, ""), current or "")
 
 
 # Rule push-main judges the remote a push goes to. A URL is a network remote when it carries a scheme
@@ -788,8 +831,7 @@ def _push_goes_to_network(remote: str, cwd: str, current, overrides=None, resolv
 
     if not remote:
         cur = current() or ""
-        remote = (get("branch." + cur + ".pushremote") or get("remote.pushdefault")
-                  or get("branch." + cur + ".remote") or "origin")
+        remote = _pick_remote(get, cur)
     if resolved is not None:
         resolved["name"] = remote
     return _push_url_is_network(get("remote." + remote + ".pushurl") or get("remote." + remote + ".url"))
