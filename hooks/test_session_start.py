@@ -455,12 +455,25 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
 
-    # decision session-tiers: only a solo or one-lane session the owner started merges its own PR, so its sentence names that shape
-    def test_the_no_parent_merge_sentence_names_solo_or_one_lane(self):
+    # The no-parent merge sentence names claude-settings, the one repo a lane the owner started may merge in (standing-merge-grant:
+    # the grant holds there alone), and says nothing wider. The retired wording solo or one-lane is not in it: the term is lane.
+    def test_the_no_parent_merge_sentence_names_claude_settings(self):
         told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
         for sentence in told:
-            self.assertIn("solo or one-lane", sentence, "the no-parent merge sentence does not name solo or one-lane: %r" % sentence)
+            self.assertIn("claude-settings", sentence, "the no-parent merge sentence names no repo: %r" % sentence)
+
+    def test_the_no_parent_merge_sentence_is_not_wider_than_claude_settings(self):
+        told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
+        self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
+        for sentence in told:
+            self.assertNotIn("repo merge grant", sentence, "the no-parent merge sentence reads as any repo: %r" % sentence)
+
+    def test_the_no_parent_merge_sentence_names_no_retired_solo_or_one_lane(self):
+        told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
+        self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
+        for sentence in told:
+            self.assertNotIn("solo or one-lane", sentence, "the no-parent merge sentence says solo or one-lane, a retired term: %r" % sentence)
 
     def hand_off_sentence(self):
         """The tier line's one sentence that hands a branch to the batch runner. Asserts that scope before any content."""
