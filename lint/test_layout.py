@@ -1740,6 +1740,27 @@ class ProtectedPaths(Tree):
         self.keyed([{"path": "fixtures/../src/", "why": "generated"}])
         self.refused("fixtures/../src/")
 
+    def keyed_alone(self, value):
+        """An extras file that holds the protected-paths key and no "kinds" beside it."""
+        self.put(EXTRAS, json.dumps({"protected-paths": value}))
+
+    def test_a_file_holding_only_the_protected_list_is_read(self):
+        self.keyed_alone([{"path": "fixtures/", "why": "generated"}])
+        try:
+            found = self.fn()(self.tree)
+        except self.layout.LayoutError as err:
+            self.fail("protected_paths refused an extras file that holds only the protected-paths key: %s" % err)
+        self.assertEqual([(e["path"], e["why"]) for e in found], [("fixtures/", "generated")],
+                         "a file holding only the protected-paths key did not read its entry")
+
+    def test_a_file_holding_only_an_empty_protected_list_has_no_protected_paths(self):
+        self.keyed_alone([])
+        try:
+            found = self.fn()(self.tree)
+        except self.layout.LayoutError as err:
+            self.fail("protected_paths refused an extras file that holds only an empty protected-paths list: %s" % err)
+        self.assertEqual(found, [], "a file holding only an empty protected-paths list has protected paths")
+
 
 if __name__ == "__main__":
     unittest.main()
