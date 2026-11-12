@@ -1,0 +1,14 @@
+{
+ "id": "child-lint-pin-fetch",
+ "title": "A fresh cloud runner checking a child repo fetches the claude-settings commit the child's lint pins, with no hand steps",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A fresh cloud runner lacks the claude-settings commit a child repo's lint pins (q_max pins 2ac382c), so its checks fail until it fetches that commit and sets CLAUDE_SETTINGS_DIR by hand. Every fresh child-repo runner hits this.",
+ "source": "coordinator 23:17 CST Nov 11, from batch runner 11 at 23:16 CST",
+ "note": "Related: R44 (child CI follows the claude-settings stable branch) and step child-repo-gap; neither covers a runner fetching the pinned commit, so it is its own step. Fold it into the stable-branch work if that removes per-child pins.",
+ "updatedAt": "2026-11-11T23:20:00-06:00"
+}
