@@ -4370,6 +4370,22 @@ class SessionBoard(UpkeepFixture):
         count, detail = self.row(out, self.ROW)
         return count, self.entries(detail)
 
+    def upkeep_direct(self, repo):
+        """The stdout of build.upkeep called the way main calls it, with `repo` as the checkout (None names no checkout,
+        which main never passes). The record and live reads run from main, as build_from_main runs them."""
+        self.on_main()
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        ref = build.main_ref(self.repo, "main")
+        marks, strays, unread = build.landed_marks(self.repo, ref, "main", steps)
+        work = build.live_work(str(self.live), steps, self.SLUG)
+        marks = build.add_marks(marks, build.pull_landed_marks(self.repo, ref, steps, work))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            build.upkeep(steps, build.added_at(source), marks, strays, work, self.SLUG, repo, "main", unread, ref)
+        return out.getvalue()
+
     def assertSameEntries(self, entries, expected, cause):
         self.assertEqual(sorted(entries), sorted(expected), "%s; the board read %r" % (cause, entries))
 
@@ -4602,6 +4618,24 @@ class SessionBoard(UpkeepFixture):
         self.assertEqual(len(entries), 1, "a repo with no GitHub name reads %r, not one unknown entry" % (entries,))
         self.assertTrue(entries[0].startswith("unknown ("), "the entry is not an unknown: %r" % (entries,))
 
+    def test_session_board_with_no_github_name_reads_one_unknown_entry_not_an_empty_board(self):
+        # live_work already reads a missing GitHub name as the live read's own reason, which session_board returns first.
+        # So its `not slug` line is reached only on a usable read with the name passed in empty. The control is the same
+        # read with the name given.
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        work, steps = self.read()
+        self.assertIsNone(build.live_why(work), "scope: the live read is not usable, so the board's name line is not reached")
+        self.assertSameEntries(self.board(work, steps), ["session_a (waiting for action; c1; no PR)"],
+                               "control: the board does not list the session when the GitHub name is given")
+        for slug in (None, ""):
+            with self.subTest(slug=slug):
+                try:
+                    entries = self.board(work, steps, slug)
+                except Exception as err:  # a session row with this repo's tag makes repo_tag_names raise on a None slug
+                    self.fail("session_board raised %r for slug %r, not one unknown entry" % (err, slug))
+                self.assertEqual(entries, ["unknown (the repo's GitHub name could not be read)"],
+                                 "session_board with slug %r does not read one unknown entry: %r" % (slug, entries))
+
     def test_stale_live_read_reads_one_unknown_entry(self):
         self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
         self.assertEqual(self.board_entries(), ["session_a (waiting for action; c1; no PR)"],
@@ -4728,6 +4762,15 @@ class SessionBoard(UpkeepFixture):
         count, detail = self.row(out, self.ROW)
         self.assertEqual(count, 1, "the flagged sessions row with no live file counts %d, not one unknown entry" % count)
         self.assertTrue(detail.startswith("unknown ("), "the flagged sessions row is not an unknown: %r" % (detail,))
+
+    def test_upkeep_row_with_no_checkout_named_prints_one_unknown_line_not_a_count_of_zero(self):
+        # main always names the checkout, so this is a direct call with repo None. The control is the same call with the
+        # checkout named: it lists the session, so the read is usable and only the None branch differs.
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        self.assertEqual(self.row(self.upkeep_direct(self.repo), self.ROW), (1, "session_a (waiting for action; c1; no PR)"),
+                         "control: the flagged sessions row does not list the session with the checkout named")
+        self.assertEqual(self.row(self.upkeep_direct(None), self.ROW), (1, "unknown (the checkout was not named)"),
+                         "with no checkout named the flagged sessions row does not print one unknown line")
 
     def test_upkeep_row_reads_zero_when_no_session_is_flagged(self):
         self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
