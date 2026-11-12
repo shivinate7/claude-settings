@@ -204,9 +204,9 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   `dismissed`. A session answering a dismissed record uses `update`, which keeps it (see "Route an ask"). A reply goes through the same
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
   answered by <owner of the ask `re` names>: <text>." An item reply's comment reads "Replied on the waiting page. Writer: <writer>.
-  Ask <id> on item No. <n>, owned by <owner of the item>: <text>." The page shows an item reply in its item's card, or in its line when the
-  item is one (a closed item, or an answered and filed one), and never in the Asks list or its count, while the item or its line is on
-  the page. While a reply waits, the line's Mark read is off, and an answer to a reply later than the Mark read brings the line back.
+  Ask <id> on item No. <n>, owned by <owner of the item>: <text>." While the item or its line is on the page, the page shows an item reply in its
+  item's card, or in its line when the item is one (a closed item, or an answered and filed one). It never shows the reply in the Asks list
+  or its count. While a reply waits, the line's Mark read is off, and an answer to a reply later than the Mark read brings the line back.
   Once the item is no longer on the page, the reply is its own Asks row, "Re: an item no longer on this page",
   and it counts while it has no `reply`. The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
