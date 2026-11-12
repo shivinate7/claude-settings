@@ -1694,7 +1694,7 @@ jobs:
     runs-on: windows-latest
     needs: scope
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main (run 42445434802 on; run 43184587111 was still running):
-    # 29 green, slowest 30.4 min (run 43070476960). Slowest step: Guard wrappers fixture suite, 270 s. The stopgap ends with roadmap step time-pinned-tests-go.
+    # 29 green, slowest 30.4 min (run 43070476960). Slowest step: Guard wrappers fixture suite, 277 s. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
