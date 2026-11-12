@@ -6,12 +6,14 @@ precompact-handoff, item 13). A refusal for a missing line also carries a ready-
 the transcript the guard has already read. These cases pin what the draft holds:
 
 - a Recovered draft names only the sources the transcript after the compaction shows: git, page, digest;
+- a source counts only when its call's result came back without is_error, paired by tool_use_id;
 - with no source read after the compaction, the Recovered draft is `Recovered: none`;
 - a draft pasted back into the report unchanged passes the guard;
 - a missing Handoff gave line drafts a placeholder, never `Handoff gave: none`, since the hook cannot know the facts;
 - a report with no compaction, or with an unsourced item, drafts nothing;
 - drafting starts no process and opens no file;
-- the Stop block the owner sees carries the draft.
+- the Stop block the owner sees carries the draft;
+- a draft line in the Stop block ends before the next refusal reason, so a pasted line carries none of it.
 
 The fixture, the record builders and the run folder come from lint/test_report_guard.py, the one home, borrowed by name
 here. No model call is made. Run with:
@@ -49,13 +51,15 @@ def tearDownModule():
     trg.tearDownModule()
 
 
-def call(name, input_):
-    """One tool call and its result, as the two transcript records they are."""
-    return [trg.tool_use_msg(name, input_), trg.tool_result_msg()]
+def call(name, input_, ok=True):
+    """One tool call and its result, paired by tool_use_id as a transcript pairs them. `ok` False makes the result
+    an error (is_error true): a call that failed."""
+    use_id = "toolu_" + uuid.uuid4().hex
+    return [trg.tool_use_msg(name, input_, id_=use_id), trg.tool_result_msg(tool_use_id=use_id, is_error=not ok)]
 
 
-def git_read():
-    return call("Bash", {"command": "git log --oneline -1"})
+def git_read(ok=True):
+    return call("Bash", {"command": "git log --oneline -1"}, ok)
 
 
 def code_read():
@@ -63,12 +67,12 @@ def code_read():
     return call("Read", {"file_path": "/fixture/repo/lint/report_guard.py"})
 
 
-def digest_read():
-    return call("Read", {"file_path": "/fixture/config/handoffs/cc-fixture.md"})
+def digest_read(ok=True):
+    return call("Read", {"file_path": "/fixture/config/handoffs/cc-fixture.md"}, ok)
 
 
-def page_read():
-    return call("Artifact", {"action": "read", "url": "https://claude.ai/artifact/fixture-page"})
+def page_read(ok=True):
+    return call("Artifact", {"action": "read", "url": "https://claude.ai/artifact/fixture-page"}, ok)
 
 
 def compacted(*middle):
@@ -78,6 +82,29 @@ def compacted(*middle):
 
 def compacts(records):
     return any(rec.get("subtype") == "compact_boundary" for rec in records)
+
+
+def _content(rec):
+    content = (rec.get("message") or {}).get("content")
+    return content if isinstance(content, list) else []
+
+
+def errored(records):
+    """The results in `records` that set is_error true and answer a call the records make, paired by tool_use_id."""
+    blocks = [b for rec in records for b in _content(rec) if isinstance(b, dict)]
+    called = {b.get("id") for b in blocks if b.get("type") == "tool_use"}
+    return [b for b in blocks if b.get("type") == "tool_result" and b.get("is_error") is True
+            and b.get("tool_use_id") in called]
+
+
+def cited(report):
+    """The report with a bare record id, D12, in its Next line. The Cite-gloss guard refuses it: no gloss beside it."""
+    return report.replace("ship it", "ship it per D12")
+
+
+def landed():
+    """A git commit: the turn lands, and the Stop check reads the reply's reasons on a landed turn only."""
+    return call("Bash", {"command": "git commit -m x"})
 
 
 def drafted(refusal, label):
@@ -173,8 +200,58 @@ class RecoveredDraftTests(unittest.TestCase):
         self.assertEqual(again, "", "the Handoff gave draft %r, pasted unchanged, still refuses: %r" % (draft, again))
 
 
+class ErroredSourceTests(unittest.TestCase):
+    """A call whose result is an error is no source: the transcript did not show the read it asked for."""
+
+    def test_an_errored_source_call_drafts_no_source(self):
+        cases = {
+            "a digest Read that errored": digest_read(ok=False),
+            "a git status that errored": call("Bash", {"command": "git status"}, ok=False),
+            "an Artifact read that errored": page_read(ok=False),
+            # Full size: a long run of failed reads of the handoff file, none of them read.
+            "100 digest Reads that errored": [r for _ in range(100) for r in digest_read(ok=False)],
+        }
+        for label, middle in cases.items():
+            with self.subTest(case=label):
+                records = compacted(*middle)
+                self.assertTrue(compacts(records), "the transcript holds no compaction for %s" % label)
+                self.assertTrue(errored(records), "the transcript holds no errored result for %s, so the failed path "
+                                "is not what runs" % label)
+                draft = drafted(RG.recovered_problem(records, REPORT), "Recovered:")
+                self.assertEqual(draft, "Recovered: none",
+                                 "the Recovered draft for %s is %r, not Recovered: none, though its result errored"
+                                 % (label, draft))
+
+    def test_a_failed_call_beside_a_good_one_drafts_only_the_good_source(self):
+        records = compacted(*call("Bash", {"command": "git status"}, ok=False), *page_read())
+        self.assertTrue(errored(records), "the transcript holds no errored git result, so the mixed path is not what runs")
+        draft = drafted(RG.recovered_problem(records, REPORT), "Recovered:")
+        # Catches: one failed call dropping every source, or a failed call counting as its source.
+        self.assertEqual(draft_sources(draft), ["page"],
+                         "the Recovered draft %r names %r; the git call errored and the page read did not"
+                         % (draft, draft_sources(draft)))
+
+
 class DraftControlTests(unittest.TestCase):
     """Cases the draft must leave alone. They pass on the code before the draft, so they hold it to today's refusals."""
+
+    def test_a_successful_call_drafts_its_source(self):
+        # Control, green on the code before the change: a call whose result is fine still drafts its source. A failed
+        # read followed by a good retry of the same file drafts that file, so the failed call is not what counts.
+        cases = {
+            "a git read": (git_read(), ["git"]),
+            "a digest read": (digest_read(), ["digest"]),
+            "a page read": (page_read(), ["page"]),
+            "a failed digest read, then a good retry": (digest_read(ok=False) + digest_read(), ["digest"]),
+        }
+        for label, (middle, want) in cases.items():
+            with self.subTest(case=label):
+                records = compacted(*middle)
+                self.assertTrue(compacts(records), "the transcript holds no compaction for %s" % label)
+                draft = drafted(RG.recovered_problem(records, REPORT), "Recovered:")
+                self.assertEqual(draft_sources(draft), want,
+                                 "the Recovered draft for %s is %r and names %r, not %r"
+                                 % (label, draft, draft_sources(draft), want))
 
     def test_no_compaction_drafts_nothing(self):
         records = [trg.human("do the task"), *git_read()]
@@ -218,20 +295,47 @@ class DraftStopTests(unittest.TestCase):
         self.folder = tempfile.mkdtemp(dir=trg.RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.folder, True)
 
-    def test_the_stop_block_carries_the_drafted_line(self):
-        records = compacted(*git_read(), trg.assistant_text(REPORT))
-        direct = RG.recovered_problem(records, REPORT)
-        draft = drafted(direct, "Recovered:")
-        self.assertIsNotNone(draft, "the refusal carries no Recovered draft: %r" % direct)
+    def stop_block(self, records):
+        """The Stop hook's output for `records` as a transcript: the block the owner sees, or None when it prints none."""
         path = trg.write_transcript(records, self.folder)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
                 "session_id": "cc-" + uuid.uuid4().hex}
         run = trg.run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet"))
         self.assertEqual(run.returncode, 0, run.stderr[-300:])
-        out = json.loads(run.stdout) if run.stdout.strip() else None
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def test_the_stop_block_carries_the_drafted_line(self):
+        records = compacted(*git_read(), trg.assistant_text(REPORT))
+        direct = RG.recovered_problem(records, REPORT)
+        draft = drafted(direct, "Recovered:")
+        self.assertIsNotNone(draft, "the refusal carries no Recovered draft: %r" % direct)
+        out = self.stop_block(records)
         self.assertIsNotNone(out, "the Stop printed no block for a report with no carry lines")
         self.assertEqual(out.get("decision"), "block")
         self.assertIn(draft, out["reason"], "the Stop block leaves out the draft %r: %r" % (draft, out["reason"]))
+
+    def test_a_draft_line_ends_before_the_next_reason_in_the_stop_block(self):
+        # The Cite-gloss reason follows the drafts in the block. A draft line a session pastes carries none of it.
+        cases = {
+            "both carry lines missing": (cited(REPORT), ("Recovered:", "Handoff gave:")),
+            "only the Recovered line missing": (cited(trg.report_lines("Handoff gave: none")), ("Recovered:",)),
+        }
+        for label, (report, labels) in cases.items():
+            with self.subTest(case=label):
+                # Scope first: the report is refused for its bare id, and the Stop block carries that refusal.
+                self.assertTrue(RG.report_shape_ok(report), "the report is not in the Done-block shape: %r" % report)
+                self.assertEqual(RG.bare_cite(report), "D12", "the report holds no bare id for the Cite-gloss reason")
+                out = self.stop_block(compacted(*landed(), *git_read(), trg.assistant_text(report)))
+                self.assertIsNotNone(out, "the Stop printed no block for %s" % label)
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("Cite-gloss guard", out["reason"],
+                              "the Stop block holds no Cite-gloss reason for %s: %r" % (label, out["reason"]))
+                for name in labels:
+                    line = next((ln for ln in out["reason"].split("\n") if name in ln), None)
+                    self.assertIsNotNone(line, "the Stop block holds no %s line for %s: %r"
+                                         % (name, label, out["reason"]))
+                    self.assertNotIn("Cite-gloss", line, "the %s draft line for %s carries the next reason: %r"
+                                     % (name, label, line))
 
 
 if __name__ == "__main__":
