@@ -214,6 +214,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
+  pass-claim-cites-verdict
+                       deny. A SendMessage or send_message whose text says a check passed ("passed", "passes", "green" or
+                       "clean" within four words of lint, CI, tests, checks, suite, ci-job or build) with no verbatim
+                       `PASS <cmd> (<secs>s)` line in a non-sidechain Bash call's result, from a `verdict` call of this
+                       session's transcript. Backticks, a fence, a question, a negation or condition, a named speaker
+                       and a count ("12 passed") are no claim. An unreadable transcript passes. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
@@ -575,7 +581,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            BRIEF_TOOL, DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -4924,6 +4930,12 @@ def page_design_hit(writes, tool_input, cwd):
     return None
 
 
+PASS_CLAIM_REASON = ("Pass-claim guard (rule pass-claim-cites-verdict): this message says a check passed, and no verdict "
+                     "line of this session's transcript shows it. Remedy: run it through verdict, as `verdict <cmd>`; "
+                     "its PASS line is the cite. A claim an agent made can be sent as its report, such as "
+                     "\"builder reports green\". (decision guard-remedy-not-to-owner)")
+
+
 # ------------------------------------------------------------------ SendMessage to a cloud session
 #
 # SendMessage addresses an agent by name. A `session_...` id is no agent name, and auto mode refused such a call, so
@@ -6226,6 +6238,13 @@ def judge(payload) -> None:
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+
+    # A send that says a check passed with no verdict line in this session's transcript (rule pass-claim-cites-verdict).
+    if tool in ("SendMessage", BRIEF_TOOL):
+        import pass_claim
+        claimed = pass_claim.send_problem(tool_input.get("message"), payload.get("transcript_path"))
+        if claimed:
+            refuse(tool, "deny", "pass-claim-cites-verdict", PASS_CLAIM_REASON, claimed)
 
     # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
     stamped = stamp_hit(tool, tool_input)

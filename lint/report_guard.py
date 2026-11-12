@@ -3092,6 +3092,21 @@ def triage_hold(hook, records, active):
         return ""
 
 
+def pass_claim_reason(text, records):
+    """The refusal when a report line claims a check passed with no verdict line in the transcript, else ''.
+    Logic lives in hooks/pass_claim.py. Fails open on any error, with one stderr line."""
+    try:
+        _hooks_on_path()
+        import pass_claim
+        claim = pass_claim.problem(block_text(text), records)
+        return owner_line("Pass-claim guard (rule pass-claim-cites-verdict)",
+                          "a report line says a check passed, and no verdict line of this session's transcript shows it: "
+                          + repr(claim)) if claim else ""
+    except Exception as exc:
+        print("pass-claim guard failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        return ""
+
+
 def main():
     try:
         hook = json.load(sys.stdin)
@@ -3182,6 +3197,7 @@ def main():
             last_human_idx = i
 
     text = reply
+    claimed = pass_claim_reason(text, records)
     # The pick check reads the turn after the last incoming message, a peer's included (a lane's input),
     # and runs whether or not the transcript holds a human record. Landing and the report's shape still
     # anchor on the last human message.
@@ -3232,6 +3248,7 @@ def main():
         pick.append(hand_off)
         pick.append(cannot)
         pick.append(review)
+        pick.append(claimed)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -3285,6 +3302,8 @@ def main():
         reasons.append(cannot)
     if review:
         reasons.append(review)
+    if claimed:
+        reasons.append(claimed)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:
