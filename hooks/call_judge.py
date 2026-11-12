@@ -135,8 +135,21 @@ PAST_RULING_ITEM = (
     "the question asks the owner to decide what a listed ruling already decides, or when its premise is "
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
-    "a re-ask the ruling allows is fine. This item passes when no list follows. "
+    "a re-ask the ruling allows is fine. A measured challenge passes too (rule outcomes-stale-decision-protocol): "
+    "a question that names the record and quotes its sentence, gives a measure of what the sentence claims or the "
+    "word \"unmeasured\", says what outcome the ruling protected and what protects that outcome now, and proposes a "
+    "fix. Refuse a re-ask that brings no new measure or fact and offers no such challenge. "
+    "A challenge only asks; it never grants anything. "
+    "This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
+)
+# Appended to every past-ruling denial in refuse(), so a reason that came back bare still tells the session how to
+# challenge. It never tells the session to give the question up: a ruling is an argument the owner may be asked to
+# revisit (R39 in docs/plans/restart-plan.md). The challenge is judged as a question and read by no grant reader.
+CHALLENGE_HOW = (
+    "To challenge the ruling, send the question again as a challenge that names the record and quotes its "
+    "sentence, gives a measure of its claim or the word \"unmeasured\", says what outcome the ruling protected and "
+    "what protects that outcome now, and proposes a fix. A challenge with those parts passes this check."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
@@ -329,13 +342,21 @@ def explore_off_model(tool, args):
     return "sonnet" not in model and "opus" not in model
 
 
+def how_to_challenge(rule):
+    """CHALLENGE_HOW, with a leading space, for a past-ruling refusal; else ''. A spawn refusal imports no question_form."""
+    if rule == SPAWN_RULE:
+        return ""
+    import question_form
+    return " " + CHALLENGE_HOW if rule == question_form.PAST_RULING_RULE else ""
+
+
 def refuse(payload, tool, args, rule, reason):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
     reason = reason.strip()
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
-    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
+    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE) + how_to_challenge(rule)  # both paths carry it
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))

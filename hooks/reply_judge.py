@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against eight rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on" or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against nine rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on" or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -70,7 +70,7 @@ BLOCKED_ON = re.compile(r"\bblocked\s+on\b", re.I)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
-                "style-limits-kept-silently", "style-question-form")
+                "style-limits-kept-silently", "style-question-form", "outcomes-stale-decision-protocol")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
@@ -81,7 +81,7 @@ GH_SWITCH_SENTENCE = ("A block that hands the owner a gh command starts, after a
                       % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
 
 INSTRUCTIONS = (
-    "Judge the final reply below against eight rules. "
+    "Judge the final reply below against nine rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
@@ -130,6 +130,10 @@ INSTRUCTIONS = (
     + WIDENS_LABEL_SENTENCE +
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
+    "outcomes-stale-decision-protocol: flag a reply that cites a ruling or decision as law, an authority the owner may not "
+    "question, against a measured harm or flaw it names in that ruling, and offers no challenge: no record and sentence, "
+    "no measure or the word unmeasured, no outcome the ruling protected, and no proposed fix. "
+    "Never flag a reply that offers a challenge with those parts, or one that only cites a ruling as the reason for an act. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
