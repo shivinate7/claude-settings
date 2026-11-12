@@ -10,5 +10,5 @@
  "why": "merge --batch-build let degen #584, which changes a guard or check, join a mixed batch (#643 with #616); degen's other runner then closed batch 23k (batch runner 11, reported by the coordinator 23:50 CST Nov 11).",
  "source": "coordinator 23:50 CST Nov 11, from batch runner 11",
  "note": "Code change in the merge tool; a real incident, so a step. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Lane started 07:20 CST Nov 12 (coordinator, Sonnet, medium). Superseded 08:42 CST Nov 12: the coordinator withdrew its 07:29 pick (a guard change goes alone); its 08:20 pick groups disjoint, clean-merging code PRs, guard changes included. PR #2738 closes unmerged (batch runner 10).",
- "updatedAt": "$T"
+ "updatedAt": "2026-11-12T10:13:00-06:00"
 }

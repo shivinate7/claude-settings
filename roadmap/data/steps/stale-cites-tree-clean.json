@@ -1,0 +1,14 @@
+{
+ "id": "stale-cites-tree-clean",
+ "title": "The repo-wide stale-cite check passes on main",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "`stale_cites --tree` reports 158 findings on main (lane fan-prose-waiting-page, 09:55 CST Nov 12), none in that lane's files.",
+ "source": "lane fan-prose-waiting-page, 09:55 CST Nov 12",
+ "note": "Prose. Needs its own lane. Ready, no lane.",
+ "updatedAt": "2026-11-12T10:13:00-06:00"
+}

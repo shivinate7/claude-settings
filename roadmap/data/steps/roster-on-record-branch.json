@@ -7,5 +7,5 @@
   "source": "retrospective session relay 19:21 CST Nov 10 (R22); plan stage 4, commit b6d80c4",
   "lane": "session_013NEJL3y5kzHLeSuCU1GriT",
   "note": " Lane prose-unmapped-5 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). From lane fan-code-waiting-page via coordinator 07:38 CST Nov 12: guard rule question-checked-with-repo (hooks/question_form.py about lines 1440-1490) requires a session id in checked_with for a cross-repo item, but R22 point 3 refuses a page write that stores one. This step retargets that rule and its tests to a role or lane slug in the same change; SKILL.md edits wait for skill-text-once's PR. Triage 07:44 CST Nov 12: the SKILL.md hold covers skills/waiting-page/SKILL.md only (skill-text-once, PR #1441), not skills/project-ops/SKILL.md, so draft PR #2661 may go to batch runner 10. No other step owns the question-checked-with-repo retarget; this lane builds it as a code part (test-author red first, builder, review).",
-  "updatedAt": "$T"
+  "updatedAt": "2026-11-12T10:13:00-06:00"
 }

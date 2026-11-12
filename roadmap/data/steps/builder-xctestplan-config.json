@@ -1,0 +1,14 @@
+{
+ "id": "builder-xctestplan-config",
+ "title": "The xctestplan config change held out of #2725",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Held out of #2725 by coordinator pick 08:27 CST Nov 12 and owner page item 437 option a; lane fan-code-unmapped asked that it be filed.",
+ "source": "coordinator 09:47 CST Nov 12, from lane fan-code-unmapped (09:47 CST report)",
+ "note": "Code. The lane report names the step only; the brief comes from #2725 and item 437. Ready, no lane.",
+ "updatedAt": "2026-11-12T10:13:00-06:00"
+}

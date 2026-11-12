@@ -5,8 +5,8 @@
   "order": 90,
   "owner": "triage",
   "why": "Item 280, deferred by the owner (19:08 CST Nov 6: \"do whichever is already built and leave deferred\"). Built today: Reset stays out of Recent; History undoes it (mailaudit #202).",
-  "note": "Re-ask on the page when mailaudit's Recent list next changes. Home record: mailaudit docs/decisions/recent-checks-can-be-undone.md. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Skipped by lane fan-prose-decisions (coordinator 08:47 CST Nov 12): it lives in mailaudit and the owner deferred it 19:08 CST Nov 6. Back to ready, no lane.",
-  "updatedAt": "2026-11-12T08:46:00-06:00",
+  "note": "Re-ask on the page when mailaudit's Recent list next changes. Home record: mailaudit docs/decisions/recent-checks-can-be-undone.md. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Skipped by lane fan-prose-decisions (coordinator 08:47 CST Nov 12): it lives in mailaudit and the owner deferred it 19:08 CST Nov 6. Back to ready, no lane. Skipped by lane fan-prose-decisions (10:09 CST Nov 12): mailaudit repo work; goes to a mailaudit session.",
+  "updatedAt": "2026-11-12T10:13:00-06:00",
   "lane": "",
   "repo": "shivinate7/mailaudit"
 }

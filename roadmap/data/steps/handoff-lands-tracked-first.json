@@ -1,14 +1,14 @@
 {
  "id": "handoff-lands-tracked-first",
- "status": "todo",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-11T22:50:00-06:00",
- "title": "An archived session's handoff lands somewhere tracked before the archive",
+ "updatedAt": "2026-11-12T10:13:00-06:00",
+ "title": "Lanes commit their handoff to the record branch and tag themselves archive-ready; the starter archives",
  "why": "The drain handoffs were written only in their containers and were lost with them at the Nov 11 respawn, the old triage handoff among them.",
  "source": "coordinator ask 22:49 CST Nov 11, from the retrospective order 22:44 CST",
- "note": "Done when: the archive or the rotation steps refuse or warn while a session handoff exists only in its container; the handoff goes to handoffs/ on the record branch first. Related: step handoff-checkpoint-before-cloud-compact; operating-model rotation step 3."
+ "note": "Done when: the archive or the rotation steps refuse or warn while a session handoff exists only in its container; the handoff goes to handoffs/ on the record branch first. Related: step handoff-checkpoint-before-cloud-compact; operating-model rotation step 3. Folds step lane-tags-archive-ready (owner rulings in the retrospective's chat 09:42 and 09:47 CST Nov 12, archivals option a): whoever starts a session answers for archiving it; the batch runner archives PR lanes after each merge, the coordinator archives every other finished session it started at each wake. Before it tags itself archive-ready, a lane runs a four-point self-check (work landed or handed off, no unpushed branch, handoff written, no owner question waiting) and commits its handoff to roadmap/outbox/<slug>-handoff.md; the tag names the slug, so the path is derived. Homes: decision session-tiers, Archiving scope (rewrite in place, keeps Nov 6 pick a and G3); skills/project-ops/templates/brief.md. First test whether a lane may add its own tag."
 }

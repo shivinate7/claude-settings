@@ -10,5 +10,5 @@
  "why": "Triage wrote step times 1 to 2 minutes ahead of the clock (07:38 and 07:40 CST Nov 12) by passing the time as an argument to a scratchpad script; the guard message-time-matches-clock reads only times written inline, so it did not refuse.",
  "source": "triage self-report 07:41 CST Nov 12 (rule building-mistake-names-its-guard)",
  "note": "A real slip, so a step. First check whether an argument shaped like an ISO time can be read without false alarms on test fixtures.",
- "updatedAt": "$T"
+ "updatedAt": "2026-11-12T10:13:00-06:00"
 }

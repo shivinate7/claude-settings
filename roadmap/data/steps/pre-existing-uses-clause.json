@@ -1,14 +1,14 @@
 {
  "id": "pre-existing-uses-clause",
  "title": "The pre-existing check and the comment-narration check use the shared clause parser",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1rreXGu8xv7m6nN3h",
  "owner": "triage",
  "blockedBy": [],
  "why": "Decision checks-share-the-clause-parser line 5 says every prose-reading check uses the parser lint/_clause.py; lint/report_guard.py pre_existing_problem (step pre-existing-needs-main-run) and lint/check_comment_narration.py gloss_ids do not import it. Line 5 stays unchanged.",
  "source": "coordinator pick 08:51 CST Nov 12 (can be undone), via lane fan-prose-unmapped-4",
- "note": "Code. Port both checks to lint/_clause.py. Unlaned: the lane asked only that it be filed.",
- "updatedAt": "$T"
+ "note": "Code. Port both checks to lint/_clause.py. Unlaned: the lane asked only that it be filed. Lane fan-prose-unmapped-4 builds it on #2765's branch carry-pre-existing-needs-main-run as its own commits (coordinator pick a, 09:45 CST).",
+ "updatedAt": "2026-11-12T10:13:00-06:00"
 }

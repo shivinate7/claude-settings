@@ -4,6 +4,7 @@ Ruling p' (restart-plan R45, owner 16:44 CST Nov 11): "Triage closes the stale d
 List: main's skills/roadmap/build.py upkeep row "draft PRs over 12 h with no live lane", read from a live file of 751 open PRs and 1200 sessions at 09:45 CST: 625 drafts.
 Held back: 186 that live work still needs (named in the open-PR owner list by a live lane, named by an open step on a live lane, listed in a ready PR, or named by an open page item).
 To close: 439. Closed: 439, finished 10:10 CST Nov 12, with no closing comment (one per PR would send about 440 notifications). The past-ruling guard confirmed that ruling p' (decision stalled-steps) grants the close.
+Owner yes, 09:49 CST Nov 12, in the coordinator's session (option a): "close the 436 PRs listed in plans/stale-drafts-2026-11-12.md, minus #1755 and #1725"; no close comments, no branch deletes. The close also took #1755 and #1725 (the coordinator's 09:49 CST hold sat unread): lane fan-code-handoffs-2 carries both from their branches, which stay; do not delete them (coordinator 10:11 CST).
 A closed PR keeps its branch and reopens from its page.
 
 ## To close
@@ -144,7 +145,7 @@ A closed PR keeps its branch and reopens from its page.
 | #1721 | step/next-waiver-scope | 2026-11-08T01:41 | yes |
 | #1723 | notes-fix-shell-c-dashdash | 2026-11-08T01:44 | yes |
 | #1724 | quoted-brace-filter-false-alarm | 2026-11-08T01:53 | yes |
-| #1725 | reviewed-head-push-ask | 2026-11-08T01:54 | yes |
+| #1725 | reviewed-head-push-ask | 2026-11-08T01:54 | yes, carry pending (keep branch) |
 | #1727 | step/next-waiver-followups | 2026-11-08T02:02 | yes |
 | #1728 | red-run-first-word-limits | 2026-11-08T02:04 | yes |
 | #1730 | stall-watch-resume | 2026-11-08T02:08 | yes |
@@ -155,7 +156,7 @@ A closed PR keeps its branch and reopens from its page.
 | #1747 | notes-fix-frozen-followups | 2026-11-08T02:39 | yes |
 | #1750 | step-names-its-gap | 2026-11-08T02:52 | yes |
 | #1752 | build-workflow-glob-r3 | 2026-11-08T02:56 | yes |
-| #1755 | lint-before-record-push | 2026-11-08T03:02 | yes |
+| #1755 | lint-before-record-push | 2026-11-08T03:02 | yes, carry pending (keep branch) |
 | #1757 | gap-check-merge-rebase | 2026-11-08T03:08 | yes |
 | #1759 | lane/lane-finds-triage-text | 2026-11-08T03:14 | yes |
 | #1761 | red-run-strip-wording | 2026-11-08T03:24 | yes |

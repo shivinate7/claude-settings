@@ -10,5 +10,5 @@
  "why": "Next step named by lane fan-prose-unmapped-6 after spend-log-per-batch (#2662): the spend line format, a test that proves its cost, and the session-tiers duty line.",
  "source": "coordinator 07:57 CST Nov 12, from lane fan-prose-unmapped-6",
  "note": "Code. Put on lane fan-code-check-cost-pins by triage 07:58 CST Nov 12; builds after #2662 merges. Lane 07:59 CST Nov 12: waits on #2662 (decision spend-log-per-batch); the line format and cost test are unruled until that decision text lands.",
- "updatedAt": "$T"
+ "updatedAt": "2026-11-12T10:13:00-06:00"
 }

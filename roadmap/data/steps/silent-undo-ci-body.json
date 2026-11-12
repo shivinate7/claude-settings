@@ -7,5 +7,5 @@
   "lane": "session_013NEJL1rreXGu8xv7m6nN3h",
   "why": "#1677 lets the local silent-undo check accept a valid Retire-run line, but CI's step does not read the PR body or the cited run, so CI still refuses.",
   "note": "Fix: the CI step reads the PR body through an env var and the cited run through merge.py's reader. Stacked on #1677. Coordinator 18:39 CST Nov 7. Built as draft #1712; the lane handed it to runner 8 (coordinator 20:58 CST: all of its PRs are handed off). PR mapping read from the PR titles and bodies, 20:59 CST Nov 7. Its PR #1712 was closed unmerged 2026-11-08, and main has no --pr-body-env (read 07:38 CST Nov 12). #1969 carries the work; lane fan-prose-unmapped-4 may carry it forward (coordinator pick 1, 07:31 CST). Lane fan-prose-unmapped-4 carries #1969 on top of carried #1785, 08:11 CST Nov 12; the merge is being re-cut by file (test-author first, then a fresh builder).",
-  "updatedAt": "$T"
+  "updatedAt": "2026-11-12T10:13:00-06:00"
 }
