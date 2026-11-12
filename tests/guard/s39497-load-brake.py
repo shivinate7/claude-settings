@@ -629,6 +629,7 @@ lb_add("neutral default: a lane call in another family's case meets a neutral lo
 LB_MEM_BUSY = lb_names("memory", "91.7", "91", "92")
 LB_MEM_FULL = lb_names("memory", "97.2", "97")
 LB_MEM90 = lb_names("memory", "90.0", "90")
+LB_MEM851 = lb_names("memory", "85.1", "85")
 LB_CPU_WORD = re.compile(r"cpu", re.I)   # a refusal that names the CPU at all
 
 # Agent and Task: every way a call says run_in_background, at normal, busy and full. At busy only a value
@@ -703,6 +704,21 @@ lb_add("disk 100 GB, 9 GB free, run_in_background true: busy, refused, names dis
 lb_add("disk 100 GB, 12 GB free, run_in_background true: not busy, allowed",
        lb_decision_check("Agent", None, "allow", background=True,
                          fake=lb_fake("darwin", disk_total=100.0, disk_free=12.0)))
+# THE BUSY BAR AT ITS EDGES. Busy is memory over 85.0 (85.0 is not busy), or disk free under the smaller of 10% of the
+# disk and 15 GB: 14.9 GB of 926 GB is busy and 15.0 is not, 9.9 GB of 100 GB is busy and 10.0 is not. These pin the bar
+# as the brake has it today. The Workflow call is refused at busy and allowed otherwise, with one read each.
+lb_add("memory 85.0%: not busy, Workflow allowed",
+       lb_decision_check("Workflow", lb_reading(memory_pct=85.0), "allow"))
+lb_add("memory 85.1%: busy, Workflow refused, names memory 85.1%",
+       lb_decision_check("Workflow", lb_reading(memory_pct=85.1), "deny", LB_MEM851))
+lb_add("disk 926 GB, 14.9 GB free: busy, Workflow refused, names disk 14.9 GB free of 926 GB",
+       lb_decision_check("Workflow", lb_reading(disk_free_gb=14.9, disk_total_gb=926.0), "deny", (lb_gb(14.9, 926),)))
+lb_add("disk 926 GB, 15.0 GB free: not busy, Workflow allowed",
+       lb_decision_check("Workflow", lb_reading(disk_free_gb=15.0, disk_total_gb=926.0), "allow"))
+lb_add("disk 100 GB, 9.9 GB free: busy, Workflow refused, names disk 9.9 GB free of 100 GB",
+       lb_decision_check("Workflow", lb_reading(disk_free_gb=9.9, disk_total_gb=100.0), "deny", (lb_gb(9.9, 100),)))
+lb_add("disk 100 GB, 10.0 GB free: not busy, Workflow allowed",
+       lb_decision_check("Workflow", lb_reading(disk_free_gb=10.0, disk_total_gb=100.0), "allow"))
 lb_add("disk GB not clamped: a 926 GB disk with 119 GB free reads disk_total_gb 926 and disk_free_gb 119",
        lb_reader_fake(lb_fake("darwin", disk_total=926.0, disk_free=119.0), lb_gb_unclamped))
 # Memory 80% is under the 85% that memory alone needs, so it is not busy. The brake reads no CPU: the load average
