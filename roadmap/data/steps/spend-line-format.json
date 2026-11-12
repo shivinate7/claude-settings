@@ -1,0 +1,14 @@
+{
+ "id": "spend-line-format",
+ "title": "The spend line has one format, a cost test proves it, and session-tiers names the duty",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2kVC8YJi3BaQYqf3W",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Next step named by lane fan-prose-unmapped-6 after spend-log-per-batch (#2662): the spend line format, a test that proves its cost, and the session-tiers duty line.",
+ "source": "coordinator 07:57 CST Nov 12, from lane fan-prose-unmapped-6",
+ "note": "Code. Put on lane fan-code-check-cost-pins by triage 07:58 CST Nov 12; builds after #2662 merges.",
+ "updatedAt": "2026-11-12T07:58:00-06:00"
+}

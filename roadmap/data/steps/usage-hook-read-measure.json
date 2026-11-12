@@ -1,0 +1,14 @@
+{
+ "id": "usage-hook-read-measure",
+ "title": "Measure whether a hook can read the usage percentages on each surface",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2kVC8YJi3BaQYqf3W",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The usage brake (step usage-brake) waits on this: main reads rateLimits only in the desktop status line mod, desktop surface only; cloud and terminal hooks are unmeasured (docs/decisions/usage-brake.md, Before any build).",
+ "source": "coordinator 07:57 CST Nov 12, from lane fan-prose-unmapped-6",
+ "note": "Code measure. Put on lane fan-code-check-cost-pins by triage 07:58 CST Nov 12.",
+ "updatedAt": "2026-11-12T07:58:00-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "handoff-ruling-guard",
+ "title": "A guard refuses a ruling kept only in a handoff",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The owner's usage-brake ruling (Nov 11 13:48 CST) lived only in a Mac coordinator's handoff and reached no tracked home; no guard on main checks rulings in a handoff (handoff-sections and handoff-checked-stamp check section names and premise stamps).",
+ "source": "coordinator pick 07:57 CST Nov 12, from lane fan-prose-unmapped-6 (docs/decisions/usage-brake.md, Handoff case, PR #2663)",
+ "note": "Code. Unlaned: a code lane on hooks/guard.py, after guard-tables-per-section.",
+ "updatedAt": "2026-11-12T07:58:00-06:00"
+}
