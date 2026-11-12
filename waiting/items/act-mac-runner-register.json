@@ -41,6 +41,7 @@
   ],
   "owner": "lane ci-batch-mac-runner (session_013NEJL1Pg1yXejPVGo7aocY)",
   "ref": "lane ci-batch-mac-runner 15:10 CST Nov 12",
+  "reply": "Noted 15:16 CST: you will set it up in a couple of hours, as a second runner on the same MacBook for claude-settings (a repo-level runner on a personal account serves one repo). Until then batches stay on GitHub's macOS machines; the item stays open.",
   "repo": "shivinate7/claude-settings",
   "short": "Register the Mac runner and add its secret",
   "status": "open",
