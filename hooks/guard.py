@@ -3012,7 +3012,8 @@ def report_sha_missing(tool: str, payload, text, where: str) -> list:
 
 # Rule message-ref-missing. A send_message names only refs of this repo that exist (decision
 # send-message-refs-resolve): a commit sha (report_shas, and a commit URL of this repo), a pull request (`PR #N`,
-# `pull request #N`, `#N (PR)`, a list of them, a pull URL of this repo) and a PR comment link of this repo. This repo
+# `pull request #N`, `#N (PR)`, a list of them, a `PR` or `pull` word with other words or marks before a `#N`, this
+# repo's own `owner/repo#N`, a pull URL of this repo) and a PR comment link of this repo. This repo
 # is the owner/repo of the cwd checkout's origin, read raw: `git config --get remote.origin.url`, since `remote
 # get-url` applies insteadOf. A bare #N is skipped. A sha or PR number on a line that names another repo is skipped.
 # Every PR is read by one `git ls-remote origin`, each comment by one `gh api`, up to 5, each with a 5 s limit. Only a
@@ -3028,14 +3029,34 @@ MESSAGE_REF_LIMIT = 5   # seconds, for each git (config, cat-file, rev-parse, ls
 MESSAGE_REF_MAX = 20    # pull requests, and shas, judged in one message; the rest are named unchecked
 MESSAGE_GH_READS = 5    # comment links read with gh in one message; the rest are named unchecked
 # A PR word, then marks a writer puts between it and the number (`:`, `(`, `**`, a backtick, `number`), then the number.
-MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)\b[\s:*`(]*(?:number\s+)?(#?)(\d+)", re.IGNORECASE)
+MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)\b[\s:*`(]*(?:number\s+)?(#?)(\d+)(?!\w)", re.IGNORECASE)
+# A PR word that may be followed by a number, and the `#N` that comes after other words or marks: `PR is #N`,
+# `PR opened: #N`, `PR - #N`, `PR [#N]`, `Opened the PR as #N`, `pull #N`. The gap holds no digit, `#` or sentence end,
+# so it never reaches a count (`PR: 2500 lines`) or a later sentence.
+# A number ends at a non-word character, so a hex colour (`#0b0f14`) is no PR number. In the gap, a number of exactly
+# 6 or 8 digits is an all-digit colour (`#000000`, `#00000080`), also no PR number.
+# The word stands alone: `pr` inside a name (`msg-ref-pr-forms`, `hooks/pr.py`) is no PR word. `pull` counts only
+# right before its number (`pull #N`) or in `pull request`, so the verb (`pull the list at #8`) is no PR word.
+MESSAGE_PR_WORD = re.compile(
+    r"(?<![\w/.-])(PRs?|pull\s+requests?|pull(?=\s*#\d))(?![\w-]|\.\w)", re.IGNORECASE)
+MESSAGE_PR_GAP = re.compile(r"([^#\d.;!?]*?)#(?!(?:\d{6}|\d{8})(?!\d))(\d+)(?!\w)")
+MESSAGE_PR_GAP_WORDS = 6   # most words between the PR word and its `#N`; a longer gap is a different sentence
+# A word in the gap that says the `#N` is an issue or another item, so `PR merged, see issue #3` names no PR. A verb
+# that closes an issue (`This PR closes #8`) says the same.
+MESSAGE_PR_GAP_NOT = re.compile(
+    r"\b(?:issues?|tickets?|bugs?|items?|findings?|debts?|closes|fixes|resolves)\b", re.IGNORECASE)
+# The issue word right before an `owner/repo#N`, so `Issue o/r#5` names no PR.
+MESSAGE_ISSUE_BEFORE = re.compile(
+    r"\b(?:issues?|tickets?|bugs?|items?|findings?|debts?)\W{0,3}$", re.IGNORECASE)
+# This repo's own `owner/repo#N`, the owner/repo to be compared with the origin.
+MESSAGE_OWN_REF = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)#(\d+)")
 MESSAGE_PR_NUMBERED = re.compile(r"#(\d+)\s*\(\s*(?:PR|pull\s+request)\s*\)", re.IGNORECASE)
 # A further number of a list: after `,`, `and`, `or`, `&` or `+`, with or without its own `#`; or after a space, with `#`.
 MESSAGE_PR_ITEMS = (
-    re.compile(r"\s*,\s*(?:(?:and|or)\s+)?(#?)(\d+)", re.IGNORECASE),
-    re.compile(r"\s+(?:and|or)\s+(#?)(\d+)", re.IGNORECASE),
-    re.compile(r"\s*[&+]\s*(#?)(\d+)"),
-    re.compile(r"\s+(#)(\d+)"),
+    re.compile(r"\s*,\s*(?:(?:and|or)\s+)?(#?)(\d+)(?!\w)", re.IGNORECASE),
+    re.compile(r"\s+(?:and|or)\s+(#?)(\d+)(?!\w)", re.IGNORECASE),
+    re.compile(r"\s*[&+]\s*(#?)(\d+)(?!\w)"),
+    re.compile(r"\s+(#)(\d+)(?!\w)"),
 )
 MESSAGE_GH_URL = re.compile(
     r"(?:https?://)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/(pull|issues|commit)/([0-9A-Za-z]+)[^\s#]*"
@@ -3101,27 +3122,47 @@ def message_other_link_text_blanked(line: str, this) -> str:
     return MESSAGE_LINK_TEXT.sub(blank, line)
 
 
+def message_pr_list(line: str, at: int, plural: bool):
+    """(the further numbers of a list that starts at `at`, where the list ends). After a singular word a further
+    number needs its own `#`."""
+    prs = []
+    while True:
+        for item in MESSAGE_PR_ITEMS:
+            more = item.match(line, at)
+            if more and (plural or more.group(1) == "#"):
+                break
+        else:
+            return prs, at
+        prs.append(more.group(2))
+        at = more.end()
+
+
 def message_line_prs(line: str) -> list:
     """The PR numbers a line names in words: `PR #N`, `PR: #N`, `PR (#N)`, `PR number N`, `PRs 7 and 8`, `PRs #7 #8`,
-    `pull request #N`, `#N (PR)`. After a singular word, a further number in a list needs its own `#`, so
-    `PR #7, 12 files` names one PR. After `:` or `(`, the number needs its `#`, so `PR: 2500 lines` names none."""
+    `pull request #N`, `#N (PR)`, and a `#N` after other words or marks (`PR is #N`, `PR [#N]`, `pull #N`). After a
+    singular word, a further number in a list needs its own `#`, so `PR #7, 12 files` names one PR. After `:` or `(`,
+    the number needs its `#`, so `PR: 2500 lines` names none."""
     prs = []
-    for found in MESSAGE_PR.finditer(line):
-        # After `:` or `(`, only a number with `#` is a PR, so `PR: 2500 lines` and `PR (2500 lines)` are counts.
-        if not found.group(2) and re.search(r"[:(]", line[found.end(1):found.start(3)]):
-            continue
-        prs.append(found.group(3))
-        plural = found.group(1).lower().endswith("s")
-        at = found.end()
+    for word in MESSAGE_PR_WORD.finditer(line):
+        plural = word.group(1).lower().endswith("s")
+        at = word.end()
+        found = MESSAGE_PR.match(line, word.start())
+        if found:
+            # After `:` or `(`, only a number with `#` is a PR, so `PR: 2500 lines` and `PR (2500 lines)` are counts.
+            if not found.group(2) and re.search(r"[:(]", line[found.end(1):found.start(3)]):
+                continue
+            prs.append(found.group(3))
+            more, at = message_pr_list(line, found.end(), plural)
+            prs += more
+        # Each `#N` after the word is judged by the same gap rule, so `PR #7 is #8` names both.
         while True:
-            for item in MESSAGE_PR_ITEMS:
-                more = item.match(line, at)
-                if more and (plural or more.group(1) == "#"):
-                    break
-            else:
+            gap = MESSAGE_PR_GAP.match(line, at)
+            if not gap or MESSAGE_PR_GAP_NOT.search(gap.group(1)) \
+                    or len(re.findall(r"[A-Za-z']+", gap.group(1))) > MESSAGE_PR_GAP_WORDS:
                 break
-            prs.append(more.group(2))
-            at = more.end()
+            prs.append(gap.group(2))
+            more, at = message_pr_list(line, gap.end(), plural)
+            prs += more
     prs += MESSAGE_PR_NUMBERED.findall(line)
     return prs
 
@@ -3150,6 +3191,10 @@ def message_refs(text: str, where: str):
         # by a blanked leading `"..."` as the indent of a `> ` quote line, and skip the rest of the line.
         found = report_shas(raw, None)
         numbers = message_line_prs(line)
+        if "#" in line and MESSAGE_OWN_REF.search(line) and this() is not None:
+            numbers += [ref.group(3) for ref in MESSAGE_OWN_REF.finditer(line)
+                        if (ref.group(1).lower(), ref.group(2).lower()) == this()
+                        and not MESSAGE_ISSUE_BEFORE.search(line[:ref.start()])]
         if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
                 and message_names_other_repo(line, this()):
             continue
