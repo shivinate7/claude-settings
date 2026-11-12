@@ -147,7 +147,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, collections, contextlib, datetime, fnmatch, functools, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, collections, contextlib, datetime, fnmatch, functools, io, json, math, os, pathlib, platform, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -3051,8 +3051,9 @@ def ci_job_run(wt, *args, notes=None, path_front=None, unset=()):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-GUARD_JOB = "checks-windows-guard"  # checks.yml's job that runs the guard suite on Windows; on a pull request one step of it, the slice, runs
-SLICE_STEP = "Guard fixture suite (Windows slice)"  # that step: the run a lane lint makes when ci-scope.sh turns the guard flag on (decision lanes-run-no-full-ci-job)
+GUARD_JOB = "checks-windows-guard"  # checks.yml's job that runs the guard suite on Windows; on a pull request one CI step of it, the slice, runs
+SLICE_STEP = "Guard fixture suite (Windows slice)"  # that CI step: the run a lane lint makes when ci-scope.sh turns the guard flag on (decision lanes-run-no-full-ci-job)
+GUARD_ENV_PREFIXES = ("GUARD_", "MUTATE_ONLY")  # the env the guard runner reads; hooks/test_guard.py's section_child_run drops the same prefixes from its child's env
 
 def python_front(dirs):
     """-> a folder holding a `python` that runs this interpreter, put on PATH for the slice's step (its run: is `python hooks/test_guard.py`), or None when
@@ -3072,7 +3073,7 @@ def guard_slice(wt, base, dirs):
     """The Windows guard slice a lane lint runs (decision lanes-run-no-full-ci-job): `ci-job checks-windows-guard --step SLICE_STEP --base origin/<base>` in `wt`.
     -> None when no slice is due, else ci_job_run's (state, lines, log, liftable). The head's workflow is read in-process: a repo with no GUARD_JOB or no
     SLICE_STEP is never asked. Then the repo's ci-scope.sh (ci_scope_run) says whether the diff turns the guard and code flags on; a script that is missing or
-    cannot answer runs the slice, as ci-scope.sh's own fail-safe turns every job on. No shard runs: ci-job runs the one step, and GUARD_SHARD is dropped from its env.
+    cannot answer runs the slice, as ci-scope.sh's own fail-safe turns every job on. No shard runs: ci-job runs the one CI step. Every GUARD_* and MUTATE_ONLY variable of the caller's env is dropped, so the step reads only the env checks.yml gives it.
     A workflow that cannot be read is unknown, never a pass. `dirs` collects the folders the caller removes (python_front)."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     from workflow_steps import job_block, job_workflow, step_blocks, step_key  # the one home of the step parser
@@ -3098,7 +3099,8 @@ def guard_slice(wt, base, dirs):
                 os.remove(out_file)
         if c == 0 and "false" in (flags.get("guard"), flags.get("code")):
             return None
-    return ci_job_run(wt, GUARD_JOB, "--step", SLICE_STEP, "--base", f"origin/{base}", path_front=python_front(dirs), unset=("GUARD_SHARD", "GUARD_TESTS"))
+    return ci_job_run(wt, GUARD_JOB, "--step", SLICE_STEP, "--base", f"origin/{base}", path_front=python_front(dirs),
+                      unset=tuple(k for k in os.environ if k.startswith(GUARD_ENV_PREFIXES)))
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
@@ -3160,7 +3162,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         if sliced is not None:
-            named += f" The Windows guard slice ({SLICE_STEP}) ran and passed."
+            named += f" The Windows guard slice ({SLICE_STEP}) ran and passed on this {platform.system() or 'unknown'} host ({socket.gethostname()}), so it is no proof of a Windows run unless that host is Windows."
         tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
         say(f"PASS: lint of {short} against {base} passes{named}. {tail}", *pin_notes, *report_lines)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
