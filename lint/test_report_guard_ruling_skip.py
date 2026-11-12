@@ -385,7 +385,7 @@ class RulingSkipTests(RulingSkipFixture):
                 self.assertEqual(self.model_calls(), [], "%s: the model ran on a Done item with no pick" % label)
 
     # A pick word and a ruling word that do not govern each other make no pick under a ruling.
-    # A cite may say "on item <N> <key>" after the ruling, as the owner's ruling on item 284 b does.
+    # A cite names a ruling, an item and a time, and may put "on" before the item. A valid cite must not be refused.
 
     def test_r8_pick_words_that_name_no_pick_under_a_ruling_pass(self):
         for label, line in (
