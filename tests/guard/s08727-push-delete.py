@@ -851,6 +851,72 @@ def agent_refused(name, command, cwd=PUSHFEAT, **kw):
     sh(name, command, "deny", PUSH_AGENT_RULE, cwd=cwd, carries=(PUSH_AGENT_REMEDY,), lacks=PUSH_AGENT_LACKS, **kw)
 
 
+def push_sh(name, command, expected, rule=None, **kw):
+    """sh() for a push case. A case that puts a stand-in git first on PATH goes through stand_in_sh, which skips it on
+    Windows: the guard starts git by name, and Windows finds git.exe there, never the extensionless stand-in."""
+    (stand_in_sh if "env_path" in kw else sh)(name, command, expected, rule, **kw)
+
+
+def all_refused(name, tail, cwd=PUSHFEAT, **kw):
+    """One plain push the all-branches rule refuses: a deny under its rule id, whose reason prints the lane's remedy,
+    names its own cause ("sends every branch", which the agent rule's reason never says) and names no main or master
+    target."""
+    push_sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
+            carries=(PUSH_AGENT_REMEDY, "Rule (Git): ", "sends every branch"), lacks=PUSH_ALL_LACKS, **kw)
+
+
+def all_allowed(name, tail, cwd=PUSHFEAT, **kw):
+    """One plain push the all-branches rule allows: it writes no main or master on the remote, so it prints nothing."""
+    sh("push: " + name, VCS + " push " + tail, "allow", cwd=cwd, silent=True, **kw)
+
+
+def all_agent_refused(name, tail, cwd):
+    """One plain push the all-branches rule refuses for a local agent-named branch that --all or --branches would send
+    to origin, while main equals its tracking ref. A deny under its rule id, whose reason names an agent, prints the
+    lane's remedy, and names neither a main target nor an agent branch as its target. The reason may not say that main
+    would update, since in these fixtures it would not."""
+    sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
+       carries=(PUSH_ALL_RULE + ": Rule (Git): ", "sends every branch", "named like an agent worktree", "agent",
+                PUSH_AGENT_REMEDY),
+       lacks=PUSH_ALL_LACKS + PUSH_ALL_AGENT_LACKS + ("may update the default branch",))
+
+
+def all_update_refused(name, tail, cwd, **kw):
+    """One plain push the all-branches rule refuses because it would update main or master, or cannot tell that it
+    would not, while a local agent-named branch is also present. The reason opens with the rule id, names the update
+    and no agent: the update is judged first."""
+    push_sh("push: " + name, VCS + " push " + tail, "deny", PUSH_ALL_RULE, cwd=cwd,
+            carries=(PUSH_ALL_RULE + ": Rule (Git): ", "may update the default branch", PUSH_AGENT_REMEDY),
+            lacks=("agent",) + PUSH_ALL_LACKS, **kw)
+
+
+# A failed ref read refuses, since unknown is never safe. PUSHFAILSHIM is a git stand-in that fails every for-each-ref
+# and runs the real git for the rest, so PUSHFEAT's tracking-ref read comes back unknown although local main equals it.
+PUSHFAILSHIM = os.path.join(ROOT, "pushfailshim")
+# PUSHTRACKFAILSHIM fails only the read of the tracking refs (the update test), so the local-branch listing answers.
+PUSHTRACKFAILSHIM = os.path.join(ROOT, "pushtrackfailshim")
+TRACKING_REF_READ = "%(objectname)"
+
+
+def _build_push_failshim():
+    make_git_stand_in(PUSHFAILSHIM, fail_on="for-each-ref")
+    make_git_stand_in(PUSHTRACKFAILSHIM, fail_on=TRACKING_REF_READ)
+    if os.name == "nt":
+        # Windows cannot start an extensionless stand-in, so the probes below need a POSIX host.
+        return
+    probe = subprocess.run([os.path.join(PUSHFAILSHIM, VCS), "for-each-ref", "refs/heads/main"],
+                           cwd=ROOT, capture_output=True)
+    if probe.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: the for-each-ref stand-in exited 0, so it fails no read")
+    probe = subprocess.run([os.path.join(PUSHTRACKFAILSHIM, VCS), "for-each-ref", "--format=%(refname) %(objectname)",
+                            "refs/heads/main"], cwd=ROOT, capture_output=True)
+    if probe.returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: the tracking-ref stand-in exited 0, so it fails no read")
+
+
+lazy_fixture([PUSHFAILSHIM, PUSHTRACKFAILSHIM], _build_push_failshim)
+
+
 agent_refused("push: agent branch, HEAD asks", VCS + " push origin HEAD", cwd=PUSHAGENT)
 agent_refused("push: agent branch, -u HEAD asks", VCS + " push -u origin HEAD", cwd=PUSHAGENT)
 agent_refused("push: agent branch, @ asks", VCS + " push origin @", cwd=PUSHAGENT)
@@ -952,8 +1018,11 @@ push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main"
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
           rule=PUSH_MAIN_RULE)
-push_case("main, --all reaches main and asks", "--all origin", "ask", rule=PUSH_MAIN_RULE)
-push_case("main, --branches reaches main and asks", "--branches origin", "ask", rule=PUSH_MAIN_RULE)
+# On a lane checkout with local main equal to origin/main, --all and --branches are silent: neither push writes main.
+# The refusal and allow rows are in the section below.
+all_allowed("lane checkout, --all with local main equal to origin/main is silent", "--all origin", cwd=PUSHFEAT)
+all_allowed("lane checkout, --branches with local main equal to origin/main is silent", "--branches origin",
+            cwd=PUSHFEAT)
 # A -u push of the local name writes main when the checkout is main, and -u does not hide a second refspec to main.
 push_case("main, -u HEAD on main asks", "-u origin HEAD", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
 push_case("stacked lane, -u HEAD with a second refspec to main asks", "-u origin HEAD main", "ask",
@@ -1058,14 +1127,175 @@ push_case("main tracking origin/main, network origin, HEAD asks push-main", "ori
           rule=PUSH_MAIN_RULE)
 push_case("main tracking origin/main, local origin, --all is silent", "origin --all", "allow", cwd=PUSHLOCALMAIN,
           silent=True)
-push_case("main tracking origin/main, network origin, --all asks push-main", "origin --all", "ask", cwd=PUSHMAINUP,
-          rule=PUSH_MAIN_RULE)
+all_allowed("main tracking origin/main, network origin, --all is silent, local main equal", "origin --all",
+            cwd=PUSHMAINUP)
 
 # ASK, rule push-main. A folder that does not exist cannot be read, and an unreadable config is unknown, which asks.
 # The session's own folder is the local origin, so only the missing folder the push runs in can make it a network one.
 sh("main, cd into a folder that does not exist, then origin main, asks push-main",
    "cd " + slash(os.path.join(ROOT, "pushmissing")) + " && " + VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=PUSHLOCALMAIN)
+
+# --all and --branches never ask. A plain push of every branch is refused when it would update main or master on the
+# remote, and allowed when it would not. The remote's main is read from its remote-tracking ref. A ref that differs from
+# local main, or is missing, counts as an update, since the push may write main. A ref that matches local main is trusted:
+# the guard never contacts the remote.
+# The four checkouts give the same verdict, except the agent rows. The agent-branch rule refuses an agent checkout's
+# --all and --branches, since the agent branch in that push would still reach origin.
+for form in ("--all", "--branches"):
+    all_refused(form + " from a main checkout, local main ahead of origin/main, refuses", form + " origin",
+                cwd=PUSHAHEAD)
+    all_refused(form + " from a lane checkout, local main ahead of origin/main, refuses", form + " origin",
+                cwd=PUSHAHEADLANE)
+    all_refused(form + " from a detached checkout, local main ahead of origin/main, refuses", form + " origin",
+                cwd=PUSHAHEADDET)
+    agent_refused("push: agent checkout, " + form + " with local main ahead, refuses under the agent rule",
+                  VCS + " push " + form + " origin", cwd=PUSHAHEADAGENT)
+all_refused("--all with no remote named, from a main checkout, local main ahead, refuses", "--all", cwd=PUSHAHEAD)
+# A glob refspec from every branch to every branch reaches main as --all does. Its agent row is pinned to this rule:
+# the agent-branch rule covers only --all and --branches.
+all_refused("glob refspec refs/heads/*:refs/heads/* from a main checkout, local main ahead, refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEAD)
+all_refused("glob refspec refs/heads/*:refs/heads/* from a lane checkout, local main ahead, refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADLANE)
+all_refused("glob refspec refs/heads/*:refs/heads/* from a detached checkout, local main ahead, refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADDET)
+all_refused("glob refspec refs/heads/*:refs/heads/* from an agent checkout, local main ahead, refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHAHEADAGENT)
+# git's `*` matches an empty name, so `main*` and `*main` each name main itself and reach it as `*` does. The lane
+# checkout keeps PUSHAHEADLANE's fixture: local main ahead of its tracking ref, on a network origin.
+all_refused("glob refspec refs/heads/main*:refs/heads/main* from a lane checkout, local main ahead, refuses",
+            "origin refs/heads/main*:refs/heads/main*", cwd=PUSHAHEADLANE)
+all_refused("glob refspec refs/heads/*main:refs/heads/*main from a lane checkout, local main ahead, refuses",
+            "origin refs/heads/*main:refs/heads/*main", cwd=PUSHAHEADLANE)
+all_refused("quoted glob refspec refs/heads/main*:refs/heads/main* from a lane checkout, local main ahead, refuses",
+            "origin 'refs/heads/main*:refs/heads/main*'", cwd=PUSHAHEADLANE)
+# Master is the other default name: a glob that names master itself refuses, with no local main.
+all_refused("glob refspec refs/heads/master*:refs/heads/master* from a master checkout, local master ahead, refuses",
+            "origin refs/heads/master*:refs/heads/master*", cwd=PUSHMASTERAHEAD)
+all_refused("glob refspec refs/heads/*master:refs/heads/*master from a master checkout, local master ahead, refuses",
+            "origin refs/heads/*master:refs/heads/*master", cwd=PUSHMASTERAHEAD)
+all_allowed("glob refspec refs/heads/*:refs/heads/* with local main equal to origin/main is silent",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHFEAT)
+# A star that cannot name main stays silent: lane* matches no default branch, with the refusals' own lane fixture.
+all_allowed("glob refspec refs/heads/lane*:refs/heads/lane* from a lane checkout, local main ahead, is silent",
+            "origin refs/heads/lane*:refs/heads/lane*", cwd=PUSHAHEADLANE)
+# A main-matching glob is silent when local main equals its tracking ref: the push writes nothing to main.
+all_allowed("glob refspec refs/heads/main*:refs/heads/main* with local main equal to origin/main is silent",
+            "origin refs/heads/main*:refs/heads/main*", cwd=PUSHMAIN)
+all_allowed("glob refspec refs/heads/*main:refs/heads/*main with local main equal to origin/main is silent",
+            "origin refs/heads/*main:refs/heads/*main", cwd=PUSHMAIN)
+# A glob to a local-path origin is no network push, however far local main is ahead of its tracking ref.
+all_allowed("glob refspec refs/heads/*:refs/heads/* to a local-path origin with local main ahead, is silent",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHLOCALAHEAD)
+# A glob into another name does not reach main: main lands on lane/main, a new branch.
+all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a main checkout, local main ahead, is silent",
+            "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEAD)
+all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a lane checkout, local main ahead, is silent",
+            "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEADLANE)
+all_allowed("glob refspec refs/heads/*:refs/heads/lane/* from a detached checkout, local main ahead, is silent",
+            "origin refs/heads/*:refs/heads/lane/*", cwd=PUSHAHEADDET)
+# A colon-less glob names the same ref on both sides: `refs/tags/v*` is `refs/tags/v*:refs/tags/v*`. Its source
+# cannot name main, so it sends no main and is silent, even with local main ahead of its tracking ref.
+all_allowed("glob refspec refs/tags/v* (colon-less) from a lane checkout, local main ahead, is silent",
+            "origin 'refs/tags/v*'", cwd=PUSHAHEADLANE)
+all_allowed("glob refspec refs/heads/lane/* (colon-less) from a lane checkout, local main ahead, is silent",
+            "origin 'refs/heads/lane/*'", cwd=PUSHAHEADLANE)
+# A colon-less glob whose source reaches main maps onto itself and reaches main, so it refuses as the colon form does.
+all_refused("glob refspec refs/heads/* (colon-less) from a lane checkout, local main ahead, refuses",
+            "origin 'refs/heads/*'", cwd=PUSHAHEADLANE)
+all_refused("glob refspec refs/heads/main* (colon-less) from a lane checkout, local main ahead, refuses",
+            "origin 'refs/heads/main*'", cwd=PUSHAHEADLANE)
+# A tracking ref that is missing, or that differs from local main, refuses. The push may write main.
+all_refused("--all from a lane checkout, no origin/main tracking ref, refuses", "--all origin", cwd=PUSHNOTRACK)
+all_refused("--branches from a lane checkout, no origin/main tracking ref, refuses", "--branches origin",
+            cwd=PUSHNOTRACK)
+all_refused("--all from a main checkout, local main behind origin/main, refuses", "--all origin", cwd=PUSHBEHIND)
+# Master is the other default name: a local master ahead of origin/master refuses, with no local main.
+all_refused("--all from a master checkout, local master ahead of origin/master, refuses", "--all origin",
+            cwd=PUSHMASTERAHEAD)
+all_refused("--branches from a master checkout, local master ahead of origin/master, refuses", "--branches origin",
+            cwd=PUSHMASTERAHEAD)
+# ALLOW: the push writes no main or master. Local main equals the tracking ref, or neither name exists locally.
+all_allowed("--all from a main checkout, local main equal to origin/main, is silent", "--all origin", cwd=PUSHMAIN)
+all_allowed("--branches from a main checkout, local main equal to origin/main, is silent", "--branches origin",
+            cwd=PUSHMAIN)
+all_allowed("--all from a detached checkout, local main equal to origin/main, is silent", "--all origin",
+            cwd=PUSHDETACHED)
+all_allowed("--branches from a detached checkout, local main equal to origin/main, is silent", "--branches origin",
+            cwd=PUSHDETACHED)
+all_allowed("--all with no local main or master, from a lane checkout, is silent", "--all origin", cwd=PUSHNOMAIN)
+all_allowed("--branches with no local main or master, is silent", "--branches origin", cwd=PUSHNOMAIN)
+# DRY RUN AND LOCAL PATHS keep their allow: a dry run writes nothing, and a local path is no network remote.
+all_allowed("--all dry run with local main ahead, is silent", "--all --dry-run origin", cwd=PUSHAHEAD)
+all_allowed("--all to a local-path origin with local main ahead, is silent", "--all origin", cwd=PUSHLOCALAHEAD)
+all_allowed("--branches to a local-path origin with local main ahead, is silent", "--branches origin",
+            cwd=PUSHLOCALAHEAD)
+# A second remote is read under its own name. On PUSHUPSTREAM, local main equals upstream/main and origin has no main.
+# A bare --all resolves to upstream through branch.feat.remote, so it is silent as well.
+all_allowed("--all to a second remote whose main ref equals local main, is silent", "--all upstream", cwd=PUSHUPSTREAM)
+all_allowed("--all with no remote named, a branch tracking a second remote, is silent", "--all", cwd=PUSHUPSTREAM)
+all_refused("--all to origin, which has no main ref, from a branch tracking a second remote, refuses", "--all origin",
+            cwd=PUSHUPSTREAM)
+# A failed ref read refuses: the tracking ref cannot be read, so the push may write main.
+all_refused("--all from a lane checkout, a failed ref read, refuses", "--all origin", cwd=PUSHFEAT,
+            env_path=PUSHFAILSHIM + os.pathsep + GIT_PATH)
+
+# REFUSED, rule push-all-main, for a local agent-named branch. --all and --branches send every local branch to origin,
+# so a branch named like an agent worktree reaches origin although main equals its tracking ref. The refusal's remedy is
+# a push of named branches. The glob refspec that sends every branch to main is refused the same way.
+for form in ("--all", "--branches"):
+    all_agent_refused(form + " with a local agent-named branch, main matching its tracking ref, refuses",
+                      form + " origin", cwd=PUSHALLAGENT)
+    all_agent_refused(form + " with a local worktree-agent-named branch, main matching its tracking ref, refuses",
+                      form + " origin", cwd=PUSHALLAGENTWT)
+    all_agent_refused(form + " with a local claude/agent-named branch, main matching its tracking ref, refuses",
+                      form + " origin", cwd=PUSHALLAGENTCLAUDE)
+all_agent_refused("glob refspec refs/heads/*:refs/heads/* with a local agent-named branch, main matching its tracking "
+                  "ref, refuses", "origin refs/heads/*:refs/heads/*", cwd=PUSHALLAGENT)
+# Green controls beside them. The same fixture with no agent-named branch is silent, and a push of a named branch is
+# unchanged by an agent-named branch that sits in the same repo.
+for form in ("--all", "--branches"):
+    all_allowed(form + " with no agent-named local branch, main matching its tracking ref, is silent", form + " origin",
+                cwd=PUSHALLNOAGENT)
+all_allowed("glob refspec refs/heads/*:refs/heads/* with no agent-named local branch, main matching its tracking ref, "
+            "is silent", "origin refs/heads/*:refs/heads/*", cwd=PUSHALLNOAGENT)
+push_case("origin feature with a local agent-named branch present, is silent", "origin feature", "allow",
+          cwd=PUSHALLAGENT, silent=True)
+
+# REFUSED, rule push-all-main, when the listing of the local branches fails. The tracking refs show no update, so the
+# agent test reads the local branches next. A failed read is unknown, and unknown is never safe. PUSHALLBROKEN holds an
+# agent-named branch, and a packed ref that the listing of refs/heads/ cannot read.
+all_refused("--all with a failed read of the local branches, main matching its tracking ref, refuses", "--all origin",
+            cwd=PUSHALLBROKEN)
+all_refused("--branches with a failed read of the local branches, main matching its tracking ref, refuses",
+            "--branches origin", cwd=PUSHALLBROKEN)
+all_refused("glob refspec refs/heads/*:refs/heads/* with a failed read of the local branches refuses",
+            "origin refs/heads/*:refs/heads/*", cwd=PUSHALLBROKEN)
+# A failed read of the tracking refs refuses for the update even when a local agent-named branch is present: the
+# tracking read is judged first, so the reason is the update's, not the agent's.
+all_update_refused("--all with a failed read of the tracking refs, and a local agent-named branch, refuses for the update",
+                   "--all origin", cwd=PUSHALLAGENT, env_path=PUSHTRACKFAILSHIM + os.pathsep + GIT_PATH)
+# REFUSED for the update, not for the agent branch. Local main is one commit past its tracking ref, and a local
+# agent-named branch is present, so the reason names the update: the update is judged first.
+for form in ("--all", "--branches"):
+    all_update_refused(form + " with main ahead of its tracking ref and a local agent-named branch refuses for the update",
+                       form + " origin", cwd=PUSHALLAGENTAHEAD)
+all_update_refused("glob refspec refs/heads/*:refs/heads/* with main ahead of its tracking ref and a local agent-named "
+                   "branch refuses for the update", "origin refs/heads/*:refs/heads/*", cwd=PUSHALLAGENTAHEAD)
+# REFUSED, a glob whose source side matches a local agent-named branch, though it reaches no main or master.
+all_agent_refused("glob refspec agent-*:agent-* with a local agent-named branch refuses, though it reaches no main",
+                  "origin agent-*:agent-*", cwd=PUSHALLAGENT)
+all_agent_refused("glob refspec refs/heads/agent-*:refs/heads/agent-* with a local agent-named branch refuses, though "
+                  "it reaches no main", "origin refs/heads/agent-*:refs/heads/agent-*", cwd=PUSHALLAGENT)
+# SILENT, a glob is judged by the local branches its source side matches. A glob that sends main and no agent-named
+# branch is silent beside one, and so is a glob whose prefix and suffix overlap inside a name no branch carries.
+all_allowed("glob refspec refs/heads/main* with a local agent-named branch, main matching its tracking ref, is silent",
+            "origin refs/heads/main*:refs/heads/main*", cwd=PUSHALLAGENT)
+all_allowed("glob refspec refs/heads/agent-*x with a local agent-named branch, no branch ends in x, is silent",
+            "origin refs/heads/agent-*x:refs/heads/agent-*x", cwd=PUSHALLAGENT)
+all_allowed("glob refspec whose prefix and suffix overlap, with a local agent-named branch, is silent",
+            "origin refs/heads/agent-*-0123456789abcdef:refs/heads/agent-*-0123456789abcdef", cwd=PUSHALLAGENT)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.

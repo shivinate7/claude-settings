@@ -372,6 +372,27 @@ PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex beh
 PUSHAGENTSHORT = os.path.join(ROOT, "pushagentshort")  # agent-<7 hex>: a hex tail one character short of the shape
 PUSHAGENTEIGHT = os.path.join(ROOT, "pushagenteight")  # agent-<8 hex>: the exact shape, at its lower bound
 PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with push.autoSetupRemote in its own config
+# --all and --branches fixtures. PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET and PUSHAHEADAGENT hold a local
+# main one commit ahead of origin/main, from a main, lane, detached and agent checkout. PUSHNOTRACK has no origin/main
+# ref. PUSHBEHIND has origin/main one commit ahead of local main. PUSHMASTERAHEAD has master, not main, one commit ahead
+# of origin/master. PUSHNOMAIN has neither main nor master. PUSHLOCALAHEAD is PUSHAHEAD with a local-path origin.
+PUSHAHEAD = os.path.join(ROOT, "pushahead")              # main checkout, local main ahead of origin/main
+PUSHAHEADLANE = os.path.join(ROOT, "pushaheadlane")      # lane checkout (feat), local main ahead
+PUSHAHEADDET = os.path.join(ROOT, "pushaheaddet")        # detached checkout, local main ahead
+PUSHAHEADAGENT = os.path.join(ROOT, "pushaheadagent")    # agent checkout (claude/agent-<hex>), local main ahead
+PUSHNOTRACK = os.path.join(ROOT, "pushnotrack")          # lane checkout, local main, no origin/main ref
+PUSHBEHIND = os.path.join(ROOT, "pushbehind")            # main checkout, origin/main ahead of local main
+PUSHMASTERAHEAD = os.path.join(ROOT, "pushmasterahead")  # master checkout, local master ahead; no local main
+PUSHNOMAIN = os.path.join(ROOT, "pushnomain")            # lane checkout; local trunk and feat, no main or master
+PUSHLOCALAHEAD = os.path.join(ROOT, "pushlocalahead")    # PUSHAHEAD's state, with a local-path origin
+# Every-branch fixtures (rule push-all-main): main equal to its tracking ref on a network origin. PUSHALLNOAGENT holds
+# no agent-named local branch; each of the other three adds one, and differs from PUSHALLNOAGENT only in that branch.
+PUSHALLNOAGENT = os.path.join(ROOT, "pushallnoagent")          # main only
+PUSHALLAGENT = os.path.join(ROOT, "pushallagent")              # plus agent-<hex suffix>
+PUSHALLAGENTWT = os.path.join(ROOT, "pushallagentwt")          # plus worktree-agent-<hex suffix>
+PUSHALLAGENTCLAUDE = os.path.join(ROOT, "pushallagentclaude")  # plus claude/agent-<hex suffix>
+PUSHALLAGENTAHEAD = os.path.join(ROOT, "pushallagentahead")    # plus agent-<hex suffix>; local main one commit ahead
+PUSHALLBROKEN = os.path.join(ROOT, "pushallbroken")            # PUSHALLAGENT, whose listing of refs/heads/ fails
 # The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -381,6 +402,13 @@ PUSH_AGENT_RULE = "push-agent-branch"   # a non-forced push whose destination is
 PUSH_AGENT_REMEDY = "git push origin HEAD:<lane-branch>"
 PUSH_AGENT_LACKS = ("Approving the prompt", "push origin claude/agent-", "push origin worktree-agent-",
                     "HEAD:claude/agent-", "HEAD:worktree-agent-")
+# --all and --branches never ask. They are refused when the push would update main or master on the remote, and
+# allowed when it would not. A refusal's remedy never names main or master as a target.
+PUSH_ALL_RULE = "push-all-main"
+PUSH_ALL_LACKS = ("Approving the prompt", "push origin main", "push origin master", "HEAD:main", "HEAD:master")
+# A refusal for an agent-named branch names no agent branch in its remedy (rule git-remedy-never-names-target).
+PUSH_ALL_AGENT_LACKS = ("push origin agent-", "HEAD:agent-", "push origin claude/agent-", "HEAD:claude/agent-",
+                        "push origin worktree-agent-", "HEAD:worktree-agent-")
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1753,6 +1781,54 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: BRANCHNOBASE unexpectedly has a "
                   "local main")
 
+# The bad packed-refs record: its name sorts before every ref the every-branch fixtures hold.
+BROKEN_REF = b"refs/heads/aaa-broken"
+
+
+def _break_branch_listing(where):
+    """Make `where`, an every-branch fixture, a repo whose listing of refs/heads/ fails while its tracking read answers.
+
+    Git reads packed-refs from the first name a read seeks to onward, so one bad record fails every read that reaches
+    it. The tracking read's first name is refs/heads/main, and it seeks there, so a record sorted before that name is
+    not reached. The listing of refs/heads/ seeks to a prefix that sorts first, so it reaches the record and fails.
+    Every probe runs git itself, never the guard, so a mutant of the guard cannot break the build.
+    """
+    packed = run_vcs(where, "pack-refs", "--all")
+    path = os.path.join(where, ".git", "packed-refs")
+    if (packed.returncode != 0 or not os.path.isfile(path)
+            or os.path.exists(os.path.join(where, ".git", "refs", "heads", "main"))):
+        sys.exit("fixture setup failed in build_fixtures: pack-refs --all in %r did not move the refs into "
+                 "packed-refs. stderr: %s" % (where, packed.stderr.strip()))
+    with open(path, "rb") as handle:
+        header, *records = handle.read().split(b"\n")
+    records = [line for line in records if line]
+    # The junk sha has the width of a real one, so the file keeps its fixed-width records. It is not hex.
+    width = len(records[0].split(b" ", 1)[0])
+    index = next((i for i, line in enumerate(records) if line.split(b" ", 1)[1] > BROKEN_REF), len(records))
+    records.insert(index, b"g" * width + b" " + BROKEN_REF)
+    # Binary mode keeps LF line endings on Windows, which git reads as record ends.
+    with open(path, "wb") as handle:
+        handle.write(b"\n".join([header] + records) + b"\n")
+    listing = run_vcs(where, "for-each-ref", "--format=%(refname)", "refs/heads/")
+    if listing.returncode == 0 or "packed-refs" not in listing.stderr:
+        sys.exit("fixture setup failed in build_fixtures: the listing of refs/heads/ in %r should fail on packed-refs, "
+                 "got exit %d, stderr: %s" % (where, listing.returncode, listing.stderr.strip()))
+    tracking = run_vcs(where, "for-each-ref", "--format=%(refname) %(objectname)",
+                       "refs/heads/main", "refs/heads/master", "refs/remotes/origin/main", "refs/remotes/origin/master")
+    shas = {}
+    for line in tracking.stdout.splitlines():
+        ref, _, sha = line.partition(" ")
+        shas[ref] = sha
+    if tracking.returncode != 0 or not shas.get("refs/heads/main") or shas["refs/heads/main"] != shas.get(
+            "refs/remotes/origin/main"):
+        sys.exit("fixture setup failed in build_fixtures: the tracking read of %r should answer with main equal to "
+                 "origin/main, got exit %d, stdout: %r" % (where, tracking.returncode, tracking.stdout))
+    head = run_vcs(where, "symbolic-ref", "-q", "HEAD")
+    if head.stdout.strip() != "refs/heads/main":
+        sys.exit("fixture setup failed in build_fixtures: %r should sit on refs/heads/main, symbolic-ref reads %r"
+                 % (where, head.stdout.strip()))
+
+
 def _build_push():
     """The push destinations: the feat, main, trunk and upstream repos and their remotes."""
     materialize(BRANCHREMOTE)  # PUSHLOCAL's origin is this bare remote, a local path
@@ -1876,6 +1952,15 @@ def _build_push():
             or run_vcs(PUSHUPSTREAM, "config", "--get", "branch.feat.remote").stdout.strip() != "upstream"):
         sys.exit("fixture setup failed in build_fixtures: PUSHUPSTREAM needs origin/HEAD -> develop, "
                  "upstream/HEAD -> main and feat tracking upstream")
+    # The second remote's main is read back before a case names it: local main equals upstream/main, and origin
+    # has no main at all, so a push that reads the wrong remote's tracking refs changes its verdict.
+    local_main = run_vcs(PUSHUPSTREAM, "rev-parse", "-q", "--verify", "refs/heads/main").stdout.strip()
+    if (not local_main
+            or local_main != run_vcs(PUSHUPSTREAM, "rev-parse", "-q", "--verify",
+                                     "refs/remotes/upstream/main").stdout.strip()
+            or run_vcs(PUSHUPSTREAM, "rev-parse", "-q", "--verify", "refs/remotes/origin/main").returncode == 0):
+        sys.exit("fixture setup failed in build_fixtures: PUSHUPSTREAM needs local main equal to upstream/main "
+                 "and no origin/main")
 
     for where, mode, merge in ((PUSHUP, "upstream", "main"), (PUSHUPSELF, "upstream", "feat"),
                                (PUSHNOUP, "upstream", None), (PUSHMATCH, "matching", None)):
@@ -1985,6 +2070,113 @@ def _build_push():
         sys.exit("fixture setup failed in build_fixtures: %r must set push.autoSetupRemote in its config" % PUSHAGENTCFG)
     if run_vcs(PUSHAGENTCFG, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
         sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % PUSHAGENTCFG)
+
+    # --all and --branches. Each fixture is read back before a case judges it: the local branch,
+    # the remote-tracking ref it is compared with, and the checkout the case names.
+    def _ref(where, ref):
+        return run_vcs(where, "rev-parse", "-q", "--verify", ref).stdout.strip()
+
+    def _head(where):
+        return run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip()
+
+    def _work_commit(where):
+        write(os.path.join(where, "local.txt"), "a commit only this checkout has\n")
+        run_vcs(where, "add", "-A")
+        run_vcs(where, *IDENT, "commit", "-q", "-m", "work")
+
+    for where, checkout, head in ((PUSHAHEAD, None, "refs/heads/main"),
+                                  (PUSHAHEADLANE, "feat", "refs/heads/feat"),
+                                  (PUSHAHEADDET, "--detach", ""),
+                                  (PUSHAHEADAGENT, "claude/agent-a22bb0ed47825117b",
+                                   "refs/heads/claude/agent-a22bb0ed47825117b")):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        _work_commit(where)
+        if checkout == "--detach":
+            run_vcs(where, "checkout", "-q", "--detach")
+        elif checkout:
+            run_vcs(where, "checkout", "-q", "-b", checkout)
+        if (_head(where) != head or not _ref(where, "refs/heads/main")
+                or _ref(where, "refs/heads/main") == _ref(where, "refs/remotes/origin/main")):
+            sys.exit("fixture setup failed in build_fixtures: %r needs local main ahead of origin/main, on %r"
+                     % (where, head or "a detached HEAD"))
+
+    make_repo(PUSHNOTRACK, {"base.txt": "base\n"})
+    run_vcs(PUSHNOTRACK, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHNOTRACK, "checkout", "-q", "-b", "feat")
+    if (_ref(PUSHNOTRACK, "refs/remotes/origin/main") or not _ref(PUSHNOTRACK, "refs/heads/main")
+            or _head(PUSHNOTRACK) != "refs/heads/feat"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHNOTRACK needs local main and no origin/main ref")
+
+    make_repo(PUSHBEHIND, {"base.txt": "base\n"})
+    run_vcs(PUSHBEHIND, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHBEHIND, "checkout", "-q", "-b", "side")
+    _work_commit(PUSHBEHIND)
+    run_vcs(PUSHBEHIND, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHBEHIND, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(PUSHBEHIND, "checkout", "-q", "main")
+    if (_head(PUSHBEHIND) != "refs/heads/main" or not _ref(PUSHBEHIND, "refs/remotes/origin/main")
+            or _ref(PUSHBEHIND, "refs/heads/main") == _ref(PUSHBEHIND, "refs/remotes/origin/main")):
+        sys.exit("fixture setup failed in build_fixtures: PUSHBEHIND needs origin/main ahead of local main")
+
+    make_repo(PUSHMASTERAHEAD, {"base.txt": "base\n"})
+    run_vcs(PUSHMASTERAHEAD, "branch", "-m", "main", "master")
+    run_vcs(PUSHMASTERAHEAD, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHMASTERAHEAD, "update-ref", "refs/remotes/origin/master", "HEAD")
+    run_vcs(PUSHMASTERAHEAD, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
+    _work_commit(PUSHMASTERAHEAD)
+    if (_head(PUSHMASTERAHEAD) != "refs/heads/master" or _ref(PUSHMASTERAHEAD, "refs/heads/main")
+            or _ref(PUSHMASTERAHEAD, "refs/heads/master") == _ref(PUSHMASTERAHEAD, "refs/remotes/origin/master")):
+        sys.exit("fixture setup failed in build_fixtures: PUSHMASTERAHEAD needs local master ahead, no local main")
+
+    make_repo(PUSHNOMAIN, {"base.txt": "base\n"})
+    run_vcs(PUSHNOMAIN, "branch", "-m", "main", "trunk")
+    run_vcs(PUSHNOMAIN, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHNOMAIN, "update-ref", "refs/remotes/origin/trunk", "HEAD")
+    run_vcs(PUSHNOMAIN, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    run_vcs(PUSHNOMAIN, "checkout", "-q", "-b", "feat")
+    if (_ref(PUSHNOMAIN, "refs/heads/main") or _ref(PUSHNOMAIN, "refs/heads/master")
+            or _head(PUSHNOMAIN) != "refs/heads/feat"):
+        sys.exit("fixture setup failed in build_fixtures: PUSHNOMAIN must hold no local main or master")
+
+    make_repo(PUSHLOCALAHEAD, {"base.txt": "base\n"})
+    run_vcs(PUSHLOCALAHEAD, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHLOCALAHEAD, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHLOCALAHEAD, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    _work_commit(PUSHLOCALAHEAD)
+    if (run_vcs(PUSHLOCALAHEAD, "config", "--get", "remote.origin.url").stdout.strip() != slash(BRANCHREMOTE)
+            or _ref(PUSHLOCALAHEAD, "refs/heads/main") == _ref(PUSHLOCALAHEAD, "refs/remotes/origin/main")):
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALAHEAD needs a local-path origin, "
+                 "and local main ahead")
+
+    # The every-branch fixtures (rule push-all-main). Scope before subject: each reads back that the checkout is main,
+    # that main equals its tracking ref (one commit ahead of it for PUSHALLAGENTAHEAD), and that its local branches are
+    # exactly main and the one agent-named branch the fixture names (or main alone), so no case judges a fixture that
+    # holds a branch it does not name.
+    for where, branch, ahead in ((PUSHALLNOAGENT, None, False), (PUSHALLAGENT, "agent-0123456789abcdef", False),
+                                 (PUSHALLAGENTWT, "worktree-agent-0123456789abcdef", False),
+                                 (PUSHALLAGENTCLAUDE, "claude/agent-0123456789abcdef", False),
+                                 (PUSHALLAGENTAHEAD, "agent-0123456789abcdef", True),
+                                 (PUSHALLBROKEN, "agent-0123456789abcdef", False)):
+        make_repo(where, {"base.txt": "base\n"})
+        run_vcs(where, "remote", "add", "origin", PUSHREMOTE)
+        run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        if ahead:
+            _work_commit(where)
+        if branch:
+            run_vcs(where, "branch", branch)
+        heads = sorted(run_vcs(where, "for-each-ref", "--format=%(refname)", "refs/heads/").stdout.split())
+        want = sorted(["refs/heads/main"] + (["refs/heads/" + branch] if branch else []))
+        main_equal = _ref(where, "refs/heads/main") == _ref(where, "refs/remotes/origin/main")
+        main_ok = bool(_ref(where, "refs/heads/main")) and main_equal == (not ahead)
+        if _head(where) != "refs/heads/main" or not main_ok or heads != want:
+            sys.exit("fixture setup failed in build_fixtures: %r needs main equal to origin/main and local branches "
+                     "%s, got %s" % (where, want, heads))
+    _break_branch_listing(PUSHALLBROKEN)
+
 
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
@@ -2291,7 +2483,10 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
               PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
-              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG,
+              PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET, PUSHAHEADAGENT, PUSHNOTRACK, PUSHBEHIND,
+              PUSHMASTERAHEAD, PUSHNOMAIN, PUSHLOCALAHEAD,
+              PUSHALLNOAGENT, PUSHALLAGENT, PUSHALLAGENTWT, PUSHALLAGENTCLAUDE, PUSHALLAGENTAHEAD, PUSHALLBROKEN],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)

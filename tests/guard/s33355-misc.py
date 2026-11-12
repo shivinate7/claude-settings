@@ -79,7 +79,8 @@ LOG_CHECKS = (
      worktree_home_cross_checkout_cost_case),
     ("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
      "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
-     "no config read for HEAD:<branch>, one rev-list for each pushed ref not to main or master, "
+     "no read for HEAD:<branch>, a --all or glob push reads the remote's URL and its tracking refs, "
+     "one rev-list for each pushed ref not to main or master, "
      "and reads the transcript only at the record branch",
      record_push_cost_case),
     ("conflict-markers: the cost probe judges a clean commit as no hit, under a stand-in git (the control)",

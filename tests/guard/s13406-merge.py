@@ -1105,7 +1105,11 @@ def record_push_cost_case():
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
-    `HEAD:<branch>` adds no config read. A stray push (rule push-stray-branch: an implied destination off the
+    `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
+    branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
+    update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and
+    the same two for-each-ref reads, and no branch. A local-path origin stops after the URL read. No push spawns
+    `ls-remote`, `fetch` or `push`. A stray push (rule push-stray-branch: an implied destination off the
     upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The octopus-push
     rule (decision octopus-push-refused) adds one `git rev-list` for each pushed ref whose destination is not
     main or master, with or without a remote-tracking ref. The conflict-markers
@@ -1161,10 +1165,27 @@ def record_push_cost_case():
         # the conflict check rejects that base and reads the upstream: two diff reads.
         ("a stray push, HEAD on a branch tracking another name", "push origin HEAD",
          {"rev-parse": 2, "symbolic-ref": 2, "config": 1, "diff": 2, "rev-list": 1}, PUSHSTRAY),
+        # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
+        # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
+        # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.
+        # A local-path origin stops after the config read. The guard's other checks add to those counts
+        # on the same call: record_writer_hit reads the bare destination of a push with no refspec (a --all push is one:
+        # symbolic-ref and push.default), and the conflict-markers check reads its bases, three for a glob, which names
+        # no tracking ref, with the default base's symbolic-ref and rev-parse.
+        ("a --all push to a network remote", "push --all origin",
+         {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 2}),
+        ("a glob push to a network remote", "push origin refs/heads/*:refs/heads/*",
+         {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 2, "diff": 3, "rev-list": 1}),
+        ("a --all push to a local-path origin", "push --all origin",
+         {"rev-parse": 1, "symbolic-ref": 1, "config": 2}, PUSHLOCALAHEAD),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
             problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
+        # Nothing contacts the remote: the push-main and push-all-main reads are local, and a push reads no remote's refs.
+        for reach in ("ls-remote", "fetch", "push", "remote"):
+            if reach in kinds:
+                problems.append("%s: git spawns %r, which contacts or names the remote" % (label, reach))
         if label == "a bare push" and not any("push.default" in line for line in lines):
             problems.append("a bare push: no read of push.default")
         if label == "a HEAD push" and any("push.default" in line for line in lines):
