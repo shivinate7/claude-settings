@@ -12,9 +12,8 @@ reader is hooks/ci_wait_cap.py: cap_minutes() reads the file on each call, throu
 rule git-ci-wait-checks-in and the decision ci-wait-reads-run-status state the cap in words, and the cases
 here hold each copy to the file.
 
-Red until the data file and the reader exist. Cases in DataFileTests, ReaderTests and the decision's
-cap check fail on the named cause. The rule's cap check fails on the rule's text. ControlTests,
-ScannerTests and the anchor counts pass on today's text: they show the readers work before the red.
+A case that fails names its cause in the message. A bad data file must make cap_minutes() raise: a
+return of None or 0 is a failure, not a quiet cap. ControlTests and ScannerTests show the readers work.
 """
 import datetime
 import importlib.util
@@ -193,7 +192,7 @@ class ReaderTests(ScratchCase):
         self.assertEqual(first, 37, "cap_minutes() did not return the 37 that the file holds")
         self.assertEqual(second, 41, "cap_minutes() kept 37 after the file changed to 41: it caches the value")
 
-    def test_a_missing_empty_or_malformed_file_yields_no_cap(self):
+    def test_a_missing_empty_or_malformed_file_raises(self):
         module = load_reader(self)
         bad = {
             "absent": None,
@@ -211,11 +210,8 @@ class ReaderTests(ScratchCase):
                     try:
                         value = module.cap_minutes()
                     except Exception:
-                        value = None  # a loud failure, which the claim allows
-                usable = isinstance(value, int) and not isinstance(value, bool) and value > 0
-                self.assertFalse(usable or (value is not None and not isinstance(value, int)),
-                                 "cap_minutes() returned %r for a %s file: it must raise, return None, "
-                                 "or return 0 or less" % (value, label))
+                        continue  # the loud failure the reader's docstring promises
+                self.fail("cap_minutes() returned %r for the '%s' file: it must raise" % (value, label))
 
 
 class RuleTests(unittest.TestCase):
