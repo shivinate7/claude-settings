@@ -336,7 +336,7 @@ jobs:
       - name: Windows split guard
         run: python3 lint/test_windows_split.py
 
-      - name: Guard joined-order F821 (undefined names across the guard sections)
+      - name: Guard joined-order lint (F and E9 across the guard sections)
         run: python3 lint/test_guard_joined_f821.py
 
       - name: Guard tables (FAMILIES, LOG_CHECKS, REASON_MAY_NAME: placement and compare)
