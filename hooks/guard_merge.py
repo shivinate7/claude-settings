@@ -9,7 +9,9 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
@@ -402,6 +404,10 @@ def gh_write_of(segment: str) -> str:
 # base and one of the head, a temporary worktree, one run of the generator and the worktree's removal. No file stays and no
 # process outlives the call. The whole read shares READY_PAGE_TIMEOUT; the worktree's removal has its own 10 s, so the hook's
 # 60 s timeout holds. A read that cannot run, or runs out of time, refuses as unknown (decision guard-hooks-fail-closed).
+# A call that names a repo other than the checkout's origin reads that repo's heads, which the checkout's origin lacks, through a
+# temporary clone: one temp dir and one git init, whose fetches run only on a call that marks ready for another repo. The dir is
+# removed when the read ends, also on an error or a timeout. The gate stays the cwd's: ready_page_hit judges the checkout's own
+# merge-tool stamp, because the child repo's stamp is on its base, which only the clone's fetch reads.
 READY_PAGE_TIMEOUT = 40
 READY_PAGE_MCP_TOOL = "mcp__github__update_pull_request"
 READY_PAGE_STALE_REASON = (
@@ -433,22 +439,58 @@ def ready_page_calls(tool: str, tool_input: dict, command: str):
     return ci_wake.triggers(command, tool == "PowerShell")
 
 
+READY_PAGE_REPO = re.compile(r"^(?:github\.com/)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+READY_PAGE_ORIGIN = re.compile(r"(?:^|[/@])github\.com[:/]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+def _ready_page_slug(pattern, text: str) -> str:
+    """The lower-case owner/name a repo text or origin URL names, or "". GitHub names compare without case."""
+    found = pattern.search(text.strip())
+    return (found.group(1) + "/" + found.group(2)).lower() if found else ""
+
+
+def _ready_page_local_origin(module, repo: str, where: str) -> bool:
+    """True when the checkout's origin is `repo`. The URL is read as written (`config --get`): `remote get-url` expands insteadOf
+    rewrites, which would turn a GitHub URL into a local path. An unset origin or a failed read is False."""
+    code, url = module.git(where, "config", "--get", "remote.origin.url")
+    return code == 0 and _ready_page_slug(READY_PAGE_ORIGIN, url) == _ready_page_slug(READY_PAGE_REPO, repo) != ""
+
+
 def ready_page_read(selector: str, repo: str, where: str):
     """-> (state, detail): ("stale"/"current"/"skip", the pull request's number) or ("unknown", the one cause).
-    Never raises: an unloadable tool, a Stop, a timeout and any other failure are one unknown with its cause."""
+    Never raises: an unloadable tool, a Stop, a timeout and any other failure are one unknown with its cause.
+    A repo that is not the checkout's origin is read in a temporary clone of it, which holds no path in a cause."""
     module = merge_module()
     if module is None:
         return "unknown", "the merge tool could not be loaded"
     selector = selector[1:] if selector[:1] == "#" and selector[1:].isdigit() else selector
+    clone = ""
     try:
         with module.shared_deadline(READY_PAGE_TIMEOUT):
-            host = module.Host(repo=repo or None, cwd=where)
+            root = where
+            if repo and not _ready_page_local_origin(module, repo, where):
+                slug = _ready_page_slug(READY_PAGE_REPO, repo)
+                if not slug:
+                    return "unknown", "the repository name is not OWNER/NAME"
+                clone = os.path.realpath(tempfile.mkdtemp(prefix="ready-page-"))
+                for args in (("init", "-q"), ("remote", "add", "origin", "https://github.com/%s.git" % slug)):
+                    code, out = module.git(clone, *args)
+                    if code:
+                        raise RuntimeError("git %s failed in the temporary clone: %s" % (args[0], out))
+                root = clone
+            host = module.Host(repo=repo or None, cwd=root)
             number = host.pr_number(selector)
-            state = module.ready_page_state(where, number, host)
+            state = module.ready_page_state(root, number, host)
     except subprocess.TimeoutExpired:  # its text names the resolved program path
         return "unknown", "a read timed out after %d s" % READY_PAGE_TIMEOUT
     except Exception as e:  # a Stop, a missing gh, malformed JSON: all unread
-        return "unknown", " ".join(str(e).split()) or type(e).__name__
+        text = " ".join(str(e).split())
+        for path in {clone, os.path.realpath(clone)} - {""}:
+            text = text.replace(path, "the temporary clone")
+        return "unknown", text or type(e).__name__
+    finally:
+        if clone:
+            shutil.rmtree(clone, ignore_errors=True)
     return state, str(number)
 
 
