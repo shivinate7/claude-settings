@@ -257,6 +257,20 @@ def judged_red(runs):
     return merge is not None and bool(merge.Host.judge_runs(runs)[0])
 
 
+def required_job(run_):
+    """The conclusion of `run_`'s REQUIRED_CHECK job, or None when the run has no such job. The import
+    is here, not at the top, so a missing sibling ends in an unknown line, never a traceback."""
+    from required_check import REQUIRED_CHECK
+    return next((j.get("conclusion") for j in run_.get("jobs") or [] if j.get("name") == REQUIRED_CHECK), None)
+
+
+def is_draft_run(run_):
+    """A draft PR's run: a pull_request run that ended `success` with its REQUIRED_CHECK job skipped, so the
+    ready run is still to come. A dispatch run skips that job too, and a red or running run must reach judge_runs."""
+    return (run_.get("event") == "pull_request" and run_.get("conclusion") == "success"
+            and required_job(run_) == "skipped")
+
+
 def wait_for(sha, cwd, deadline, repo=""):
     """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
@@ -271,7 +285,7 @@ def wait_for(sha, cwd, deadline, repo=""):
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
-    seen, viewed, relisted = set(), [], False
+    seen, viewed, relisted, drafts = set(), [], False, []
     while True:
         try:
             listed = gh_json(list_args, cwd)
@@ -294,6 +308,8 @@ def wait_for(sha, cwd, deadline, repo=""):
             raise   # a first-list view, or judged runs that are not red: unread runs could be red or running
         seen.update(r["databaseId"] for r in fresh)
         ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
+        drafts += [r for r in ran if is_draft_run(r)]
+        ran = [r for r in ran if not is_draft_run(r)]   # a draft run (required check skipped) is no ready run
         viewed = ran + viewed   # newest first: gh lists newest first, and a later list shows newer runs
         if ran and not relisted:
             relisted = True
@@ -302,7 +318,7 @@ def wait_for(sha, cwd, deadline, repo=""):
             return viewed
         left = deadline - time.monotonic()
         if left <= 0:
-            raise Unknown("no run yet")
+            raise Unknown("no ready run yet" if drafts else "no run yet")
         time.sleep(min(next(gaps), left))
 
 
@@ -315,6 +331,9 @@ def verdict(sha, runs):
     if pending:
         raise Unknown("still running: " + ", ".join(pending))
     if not red:
+        if not any(required_job(r) == "success" for r in runs):
+            from required_check import REQUIRED_CHECK
+            raise Unknown("no ready run yet: no run on this head has a passed %s job" % REQUIRED_CHECK)
         return "CI green on %s: no failing jobs" % sha[:7]
     names, cancelled = [], True
     for text in red:

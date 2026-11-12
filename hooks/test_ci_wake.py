@@ -129,6 +129,8 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+sys.path.insert(0, HERE)
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check name
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 # Absolute: each case runs the hook with its own temp folder as cwd, so a relative path breaks there.
 MODULE = os.path.abspath(os.environ.get("CI_WAKE_MODULE") or os.path.join(HERE, "ci_wake.py"))
@@ -516,22 +518,22 @@ def powershell(command):
 
 READY = [pr(12)]
 TWO_PRS = [pr(12), pr(13, branch="second-branch", sha=SHA_B)]
-GREEN = run(901, "checks", "success", [job("lint", "success"), job("unit", "success")])
+GREEN = run(901, "checks", "success", [job("lint", "success"), job("unit", "success"), job(REQUIRED_CHECK, "success")])
 RED = run(902, "checks", "failure",
           [job("lint", "success"), job("unit", "failure"), job("e2e", "failure")])
 RED_B = run(911, "checks", "failure", [job("unit", "failure")], sha=SHA_B)
 CANCEL_903 = run(903, "checks", "cancelled", [job("unit", "cancelled")])
-RAN_904 = run(904, "checks", "success", [job("unit", "success")])
+RAN_904 = run(904, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")])
 CANCEL_905 = run(905, "checks", "cancelled", [job("unit", "cancelled")])
-INPROG_906 = run(906, "checks", "success", [job("unit", "success")], in_progress_at_list=True)
-LATE_906 = run(906, "checks", "success", [job("unit", "success")], in_progress_at_list=True,
+INPROG_906 = run(906, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")], in_progress_at_list=True)
+LATE_906 = run(906, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")], in_progress_at_list=True,
                in_progress_reads=2)  # in progress for 2 reads of `run view`, completed at the 3rd
 LATE_907 = run(907, "codeql", "success", [job("scan", "success")], in_progress_at_list=True,
                in_progress_reads=3)  # in progress for 3 reads, completed at the 4th
 PENDING = run(908, "checks", None, [], status="in_progress")  # never ends: only the deadline wakes the hook
 HOLD = run(909, "checks", None, [], status="in_progress", ping=True)  # a live watcher: its status read pings, then it pauses
-BAD_STATUS = run(912, "checks", "success", [job("unit", "success")], fail_status=True)  # its status read exits 1
-QUEUED_913 = run(913, "checks", "success", [job("unit", "success")], in_progress_reads=2,
+BAD_STATUS = run(912, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")], fail_status=True)  # its status read exits 1
+QUEUED_913 = run(913, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")], in_progress_reads=2,
                  early_status="queued")  # queued for 2 reads of `run view`, completed at the 3rd
 # The draft PR's run: every job skipped. DRAFT_LIVE lists with no conclusion at the first list, and ends
 # skipped. DRAFT_DONE lists skipped from the first list.
@@ -542,7 +544,7 @@ DRAFT_DONE = run(921, "checks", "skipped", [job("unit", "skipped")])
 def late(run_id, appears, conclusion="success", jobs=None):
     """The real run of `gh pr ready`, which the lists before list number `appears` do not show. It
     lists in progress when it first shows, and its first status read is in progress too."""
-    jobs = jobs or [job("lint", "success"), job("unit", "success")]
+    jobs = jobs or [job("lint", "success"), job("unit", "success"), job(REQUIRED_CHECK, "success")]
     return run(run_id, "checks", conclusion, jobs, appears_at_list=appears, unfinished_to_list=appears,
                in_progress_reads=1)
 
@@ -791,6 +793,36 @@ def case_skipped_only_head_is_no_run_yet():
           count(res, "run", "list") == 2, why(res))
 
 
+def case_draft_run_with_one_success_is_not_green():
+    """The draft PR's run ends `success` with one job run and the rest skipped, the required check
+    (REQUIRED_CHECK) among the skipped. It is no ready run: unknown "no ready run yet", never green.
+    A ready run with the required check passed reads green; one with it failed reads red."""
+    draft = run(950, "checks", "success", [job("scope", "success"), job("unit", "skipped"),
+                                           job("lint", "skipped"), job(REQUIRED_CHECK, "skipped")])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [draft]), extra={"CI_WAKE_DEADLINE": "4"})
+    expect_verdict("draft run, one job success, rest skipped", res, "unknown")
+    v = verdict_of(res)
+    check("draft run, one job success: the line says no ready run yet",
+          v is not None and "no ready run yet" in v[2], why(res))
+    ready = run(951, "checks", "success", [job("scope", "success"), job("unit", "success"),
+                                           job(REQUIRED_CHECK, "success")])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [ready]))
+    expect_verdict("ready run, required check passed", res, "green")
+    red = run(952, "checks", "failure", [job("unit", "failure"), job(REQUIRED_CHECK, "failure")])
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [red]))
+    expect_verdict("ready run, a red job", res, "red", names_in=("unit",))
+    dispatch_red = dict(run(953, "checks", "failure", [job("unit", "failure"), job(REQUIRED_CHECK, "skipped")]),
+                        event="workflow_dispatch")
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [dispatch_red, ready]))
+    expect_verdict("red dispatch run (rollup skipped) beside a ready green run", res, "red", names_in=("unit",))
+    dispatch_run = dict(run(954, "checks", "in_progress", [job("unit", "in_progress"), job(REQUIRED_CHECK, "skipped")],
+                            status="in_progress"), event="workflow_dispatch")
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [dispatch_run, ready]), extra={"CI_WAKE_DEADLINE": "4"})
+    expect_verdict("running dispatch run beside a ready green run", res, "unknown")
+    both = run_hook(bash("gh pr ready 12"), fixture(READY, [ready, draft]))
+    expect_verdict("draft run beside a ready run", both, "green")
+
+
 def case_draft_pr_starts_no_watch():
     """gh pr ready on a PR whose view says isDraft true starts no watch: silent, no run read."""
     res = run_hook(bash("gh pr ready 12"), fixture([pr(12, draft=True)], [GREEN]))
@@ -933,7 +965,7 @@ def case_the_at_once_relist_judges_the_newest_run_of_a_name():
     first run of each name in list order, which is newest first, so the newer run must be judged in place of the
     green one. Control: both runs listed at the first list, newest first, judge red. Red row: the newer run
     shows only at the re-list, after the green run was judged, and the verdict must still be red."""
-    ok = run(100, "CI", "success", [job("lint", "success"), job("unit", "success")])
+    ok = run(100, "CI", "success", [job("lint", "success"), job("unit", "success"), job(REQUIRED_CHECK, "success")])
     late_fail = run(101, "CI", "failure", [job("unit", "failure")], appears_at_list=2,
                     unfinished_to_list=2, in_progress_reads=1)
     together = run(101, "CI", "failure", [job("unit", "failure")])
@@ -1040,7 +1072,7 @@ def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
     judged run; from then on each list is 30 s or more after the one before it, so the stream costs one gh
     list per 30 s, not one per run at +0 s. Only the pace is checked: a run first shown after the re-list is
     not judged here."""
-    stream = [run(940 + k, "checks", "success", [job("unit", "success")], appears_at_list=k + 1)
+    stream = [run(940 + k, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")], appears_at_list=k + 1)
               for k in range(12)]
     raised, clock, calls, deadline = wait_for_on_fakes(stream, 3600)
     times = list_times(calls)
@@ -1448,7 +1480,7 @@ def case_wait_for_lists_again_until_a_real_run_shows():
     """wait_for: the real run (922) shows at list 3, after a draft run listed skipped. wait_for lists
     again, 30 s or more apart, and reads that run. Main lists twice, 20 s apart, and gives up."""
     label = "wait_for, draft run skipped, real run at the third list"
-    runs = [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success")], appears_at_list=3)]
+    runs = [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")], appears_at_list=3)]
     raised, clock, calls, deadline = wait_for_on_fakes(runs, 3600)
     times, detail = list_times(calls), wait_detail(raised, clock, calls, deadline)
     check("%s: returns, no exception" % label, raised is None, detail)
@@ -1505,7 +1537,7 @@ def case_lists_paced_takes_one_at_once_relist_per_wait():
     listed = ["run", "list", "--commit", SHA]
     judged = ["run", "view", "930", "--json", "databaseId,name,status,conclusion,jobs"]
     skipped = ["run", "view", "931", "--json", "databaseId,name,status,conclusion,jobs"]
-    probe_runs = [run(930, "checks", "success", [job("unit", "success")]),
+    probe_runs = [run(930, "checks", "success", [job("unit", "success"), job(REQUIRED_CHECK, "success")]),
                   run(931, "checks", "skipped", [job("unit", "skipped")])]
     rows = (
         ("judged, skipped, at-once list, then 30 s", True,
@@ -2087,6 +2119,7 @@ def main():
     expect_verdict("uncaught error: tool_input is not an object", res, "unknown")
 
     case_skipped_only_head_is_no_run_yet()
+    case_draft_run_with_one_success_is_not_green()
     case_draft_pr_starts_no_watch()
     case_import_error_wakes_unknown()
     case_final_flush_error_wakes_unknown()
