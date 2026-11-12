@@ -11,7 +11,7 @@ from guard_core import (
     HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
     PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
     dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
-    segment_tokens, split_segments, strip_heredoc_bodies,
+    segment_tokens, split_segments, strip_heredoc_bodies, _walk_heredocs,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -245,6 +245,33 @@ def _mutates_as_command(command: str, words) -> bool:
 _SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
 
 
+def _perl_in_place(words) -> bool:
+    """True when a perl command's switches hold `-i` (an in-place edit, as `sed -i`), alone or in a
+    cluster (`-pi`, `-i.bak`, `-pie`). A switch that takes the rest of its word as an argument ends the
+    cluster; a word that is no switch ends the switches, so `-i` after a script file is the script's."""
+    words = iter(words)
+    for word in words:
+        if word == "--" or not re.match(r"-[A-Za-z0-9]", word):
+            return False
+        for at, char in enumerate(word[1:], 1):
+            if char == "i":
+                return True
+            if char in "eE" and at == len(word) - 1:
+                next(words, None)   # `-e` at the end of its word: the script is the next word
+            if char in "eEFIMmVdDCx":
+                break
+    return False
+
+
+def _perl_edits(path: str, cmd: str) -> bool:
+    """True when a perl command in CMD edits in place (`_perl_in_place`) and names PATH. CMD is one
+    segment of `_shell_write_hit`, so a `;` in a quoted script ends nothing."""
+    return any(_perl_in_place(match.group(1).split()) and re.search(re.escape(path), match.group(1))
+               for match in re.finditer(r"\bperl(?:\.exe)?\b([^\n]*)", cmd))
+
+
+
+
 def _script_mutates(script: str) -> bool:
     """True when a `sh -c` script may change files through a command of its own. No script found, or one
     with a substitution or group in it, counts as a write, as it always did."""
@@ -254,7 +281,8 @@ def _script_mutates(script: str) -> bool:
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
         if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)) or (
+                command == "perl" and _perl_in_place(rest)):
             return True
     return False
 
@@ -276,12 +304,13 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return (command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+                ) or (command == "perl" and _perl_edits(path, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
-    return False
+    return _perl_edits(path, cmd)
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -1214,9 +1243,11 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
 # the same command writes it with a heredoc first, from that heredoc body.
 # A quoted `<<'EOF'` body is read too: the interpreter runs it. Python is read with `ast`, so a path
 # in a printed string or a comment is text and a path held in a variable is still found. A body
-# `ast` cannot parse is read by a literal path beside a write call. Node is read by pattern.
+# `ast` cannot parse is read by a literal path beside a write call. Node, perl and ruby are read by pattern.
 _PY_HEADER = SCRIPT_HEADERS["py"]
 _NODE_HEADER = SCRIPT_HEADERS["js"]
+_PERL_HEADER = SCRIPT_HEADERS["perl"]
+_RUBY_HEADER = SCRIPT_HEADERS["ruby"]
 _PY_COMMAND = re.compile(r"^python[\d.]*(?:\.exe)?$")
 _NODE_COMMAND = re.compile(r"^(?:node|nodejs|bun|deno)(?:\.exe)?$")
 _PY_C_FLAG = re.compile(r"^-[A-Za-z]*c$")
@@ -1579,6 +1610,108 @@ def py_spots(script: str):
     return out
 
 
+# Names that let a python script hand text to a shell or run it as code. A script whose parse tree
+# holds none of them cannot make a string in it a shell line. Judged by parsed names, never by words in a string.
+_PY_RUNS_TEXT = frozenset((
+    "os", "subprocess", "shutil", "importlib", "exec", "eval", "__import__", "compile", "pty", "ctypes",
+    "runpy", "builtins", "getattr", "globals", "vars", "posix", "nt", "_os", "modules", "asyncio"))
+_PY_PLAIN_DUNDERS = ("__name__", "__file__", "__doc__")
+_PY_CODING = re.compile(r"^[ \t]*#.*coding[:=][ \t]*(?![ \t]|utf-?8\b)", re.IGNORECASE | re.MULTILINE)
+
+
+def python_body_is_text(body: str) -> bool:
+    """True when BODY parses with `ast` and its tree names none of _PY_RUNS_TEXT and no dunder but
+    `__name__`, `__file__` and `__doc__`, in an import, a name or an attribute. A string, a comment and an
+    f-string's text are never read as names. A body that does not parse, or declares a source encoding
+    other than utf-8, is not text. What such a body writes to a file is `_py_hit`'s to judge."""
+    import ast
+    import textwrap
+    if _PY_CODING.search("\n".join(body.split("\n")[:2])):
+        return False
+    try:
+        tree = ast.parse(textwrap.dedent(body))
+    except Exception:   # a syntax error, a null byte, a tree too deep to parse
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name.split(".")[0] for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [(node.module or "").split(".")[0]] + [alias.name for alias in node.names]
+        elif isinstance(node, (ast.Name, ast.Attribute)):
+            names = [node.id if isinstance(node, ast.Name) else node.attr]
+        else:
+            continue
+        for name in names:
+            if name in _PY_RUNS_TEXT or (name.startswith("__") and name not in _PY_PLAIN_DUNDERS):
+                return False
+    return True
+
+
+_PY_ARGUMENT = re.compile(r"-|-[BEIORSbdqsuv]+|<<-?[A-Za-z_]\w*")
+
+
+def _python_header_alone(raw: str, header: str) -> bool:
+    """True when RAW, with its heredoc bodies stripped, is the one line HEADER, and that line is one
+    segment: a python that reads its program from the heredoc, with plain flags only. A pipe, a redirect,
+    `;`, `&&`, `&`, `$(`, a backtick, `{`, `(`, a function, a loop or any other line fails, since a shell
+    may run what the body prints."""
+    if [line for line in _strip_heredoc_bodies_unconditionally(raw).split("\n") if line.strip()] != [header]:
+        return False
+    ends = []
+    segments = split_segments(header, ends)
+    tokens = segment_tokens(segments[0]) if len(segments) == 1 and ends == [""] else None
+    return (bool(tokens) and bool(_PY_COMMAND.match(basename(tokens[0])))
+            and all(_PY_ARGUMENT.fullmatch(word) for word in tokens[1:])
+            and sum(word.startswith("<<") for word in tokens) == 1)
+
+
+# The extensions of a file that holds text a shell does not run. A python body that writes any other name,
+# a name with no extension, or a name it cannot read, stays in view: its strings may be a script's lines.
+_PY_TEXT_EXTENSIONS = frozenset((".json", ".md", ".txt", ".csv"))
+
+
+def _python_writes_text_files_only(body: str) -> bool:
+    """True when every file the parsed BODY writes (`_py_written`) has a literal name that ends in one of
+    `_PY_TEXT_EXTENSIONS`. A body that does not parse is not."""
+    import ast
+    import textwrap
+    try:
+        tree = ast.parse(textwrap.dedent(body))
+        env_at = _py_env_at(tree)
+        for call, expression in _py_written(tree, env_at):
+            paths = _py_paths(expression, env_at(call))
+            if not paths or any(
+                    os.path.splitext(basename(path))[1].lower() not in _PY_TEXT_EXTENSIONS for path in paths):
+                return False
+    except Exception:
+        return False   # unread: the body stays in view
+    return True
+
+
+def drop_text_python_bodies(raw: str) -> str:
+    """RAW with the lines of a quoted python heredoc body dropped, for a rule that reads shell lines. It
+    drops only when RAW is that one heredoc and nothing else (`_python_header_alone`), the body is text
+    (`python_body_is_text`), it writes only text files (`_python_writes_text_files_only`), and all three
+    readings of the walk (bash's, the contraction one, main's) give the same one body. Else RAW is kept."""
+    if "<<" not in raw:
+        return raw
+    walks = []   # (span, body) of each reading
+    for contractions, legacy in ((False, False), (True, False), (False, True)):
+        spans = []
+        _, bodies, unclosed = _walk_heredocs(raw, contractions, legacy, spans=spans)
+        if unclosed or len(bodies) != 1:
+            return raw
+        walks.append((spans[0], bodies[0]))
+    span, (quote, body, header) = walks[0]
+    if (quote and all(walk == walks[0] for walk in walks)
+            and _python_header_alone(raw, header) and python_body_is_text(body)
+            and _python_writes_text_files_only(body)):
+        return "\n".join(line for at, line in enumerate(raw.split("\n")) if not span[0] <= at < span[1])
+    return raw
+
+
+
+
 _JS_STR = (r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)(?![\w$]|\s*[.(])"""
            r"""|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))""")
 _JS_ONE = re.compile(
@@ -1662,6 +1795,85 @@ def _js_hit(body: str, cwd: str, predicate, script: str = "") -> str:
             if predicate(path, cwd):
                 return path
     return ""
+
+
+# A perl or ruby body is read by literal path, as node is: the written operand of a write call is a string,
+# or a variable a plain assignment bound. Each pattern ends in the three groups of that operand (_RB_STR):
+# single-quoted, double-quoted, a name.
+_RB_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|[\$@]?([A-Za-z_]\w*))"""
+_PL_OPEN = r"""\bopen\s*\(?\s*(?:my\s+)?[\$\w]+\s*,\s*['"]\s*"""
+_PL_RB_ASSIGN = re.compile(r"""(?<![\w$@])[\$@]?([A-Za-z_]\w*)\s*=\s*(?:'([^'\n]*)'|"([^"\n]*)")""")
+_PL_RB_WRITE = (
+    re.compile(_PL_OPEN + r"""(?:\+<|\+?>>?)[^'"]*['"]\s*,\s*""" + _RB_STR),              # perl 3-arg open
+    re.compile(_PL_OPEN + r"""\+?>>?\s*()([^'"\s]+)['"]()"""),                            # perl 2-arg open
+    re.compile(r"\b(?:rename|copy|move|FileUtils\s*\.\s*(?:cp|mv|cp_r|copy_file|install))(?:\s*\(\s*|\s+(?=['\"$]))"
+               + _RB_STR + r"\s*,\s*" + _RB_STR),                                          # destination of a copy
+    re.compile(r"\b(?:File|IO)\s*\.\s*(?:write|binwrite)\s*\(?\s*" + _RB_STR),
+    re.compile(r"""\bFile\s*\.\s*open\s*\(?\s*""" + _RB_STR + r"""\s*,\s*['"][^'"]*[wa+][^'"]*['"]"""),
+)
+
+
+def _pl_rb_code(body: str) -> str:
+    """BODY with each string's contents and each `#` comment blanked to spaces, so offsets stay aligned
+    with BODY. A write call is a hit only where this copy still shows its first character; the path is
+    read from BODY. Strings are '...' and "..." with backslash escapes and may span lines. A quote
+    that finds no closer stays code, so a stray one hides nothing after it. `$#`, `$'` and `$"` are
+    variables, not openers. Known limit: `#{...}` inside a ruby string and `%q()` strings are not
+    read as code."""
+    out = list(body)
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch == "$":
+            i += 2
+        elif ch == "#":
+            end = body.find("\n", i)
+            end = n if end < 0 else end
+            out[i:end] = " " * (end - i)
+            i = end
+        elif ch in "'\"":
+            at = i + 1
+            while at < n and body[at] != ch:
+                at += 2 if body[at] == "\\" else 1
+            if at >= n:
+                i += 1
+                continue
+            for k in range(i + 1, at):
+                if body[k] != "\n":
+                    out[k] = " "
+            i = at + 1
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _pl_rb_hit(body: str, cwd: str, predicate) -> str:
+    code = _pl_rb_code(body)
+
+    def in_code(match):
+        return code[match.start()] == body[match.start()]
+
+    env = {}
+    for match in _PL_RB_ASSIGN.finditer(body):
+        if in_code(match):
+            env.setdefault(match.group(1), []).append(
+                match.group(2) if match.group(2) is not None else match.group(3))
+    for pattern in _PL_RB_WRITE:
+        at = 0
+        while True:
+            match = pattern.search(body, at)
+            if not match:
+                break
+            at = match.start() + 1   # a match that starts in a string must not hide one that starts in code
+            if not in_code(match):
+                continue
+            single, double, name = match.groups()[-3:]
+            for path in [single or double] if single or double else env.get(name, ()):
+                if predicate(path, cwd):
+                    return path
+    return ""
+
+
 
 
 def _inline_script_at(tokens):
@@ -1817,12 +2029,13 @@ def interpreter_may_write(raw: str) -> bool:
     """True when `raw` holds a heredoc or an inline flag and a write call an interpreter body could make:
     the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
     return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
-        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
+        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw)
+        or any(pattern.search(raw) for pattern in _PL_RB_WRITE))
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False) -> str:
-    """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
-    Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
+    """Return the path a python, node, perl or ruby script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
+    Read: the body of each heredoc fed to one of them, quoted or not, and each `python -c` and
     `node -e` script. With `script_files`, also each script file a python or node command runs by name
     (read from disk, and from each heredoc of the same command that writes it before the run). Only the
     builder-test check asks for that: it reads files, which no other caller pays for. A script that only
@@ -1834,20 +2047,41 @@ def interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = Fa
         return ""
 
 
+def _header_dir(segments, ends, header: str, nth: int, cwd: str) -> str:
+    """The folder the shell is in when the command that holds a heredoc's header runs: the NTH segment (the last, when
+    fewer) of SEGMENTS that sits inside HEADER and holds `<<`, so a leading `cd` moves the body's relative paths as it
+    moves a `python -c` script's. CWD when no such segment is found or the folder cannot be told."""
+    holding = [at for at, segment in enumerate(segments) if "<<" in segment and segment.strip() in header]
+    if not holding:
+        return cwd
+    try:
+        return dir_before_segment(segments, holding[min(nth, len(holding) - 1)], cwd, ends) or cwd
+    except Exception:
+        return cwd
+
+
 def _interpreter_write_hit(raw: str, cwd: str, predicate, script_files: bool = False) -> str:
     if "<<" in raw:
         seen = set()
+        ends = []
+        segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
         for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
+            earlier = {}   # header line -> bodies seen on it so far in this reading
             for _quote, body, header in _split_heredocs(raw, reading)[1]:
-                if (header, body) in seen:
+                nth = earlier[header] = earlier.get(header, -1) + 1
+                at = _header_dir(segments, ends, header, nth, cwd)
+                if (header, body, at) in seen:
                     continue
-                seen.add((header, body))
+                seen.add((header, body, at))
                 if _PY_HEADER.search(header):
-                    hit = _py_hit(body, cwd, predicate)
+                    reader = _py_hit
                 elif _NODE_HEADER.search(header):
-                    hit = _js_hit(body, cwd, predicate)
+                    reader = _js_hit
+                elif _PERL_HEADER.search(header) or _RUBY_HEADER.search(header):
+                    reader = _pl_rb_hit
                 else:
                     continue
+                hit = reader(body, at, predicate)
                 if hit:
                     return hit
     if any(flag in raw for flag in _INLINE_FLAG_WORDS):

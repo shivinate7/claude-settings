@@ -11,7 +11,7 @@ Each `$VAR` or `${VAR}` reads as its value at that point. Inside single quotes n
 
 Why this option: it refuses only when the resolved target is frozen, so ordinary commands that write to `$OUT` stay allowed. Refusing any write to an unresolved variable when a frozen path is mentioned would fire on a read that writes nowhere frozen, and a guard that cries wolf is spent.
 
-Rule 7 is a fence, not a wall. `settings.json` deny rules still refuse a direct Write or Edit. Owner, 2026-10-07: a value built from another env var, as `D="$CLAUDE_CONFIG_DIR/state/x"`, stays open. A `cp` with a frozen source is refused (`MUTATING_COMMAND` over-refuses `cp` and `mv` on purpose).
+Rule 7 is a fence, not a wall. `settings.json` deny rules still refuse a direct Write or Edit. Owner, 2026-10-07: a value built from another env var, as `D="$CLAUDE_CONFIG_DIR/state/x"`, stays open. A plain `cp` from a frozen file is a read and is allowed; a copy never overwrites a frozen file (item 408 a, owner, 2026-11-08 06:13 CST). An `mv` from a frozen file is refused, since it removes the file.
 
 Kind: process
 Home: hooks/guard_frozen.py
