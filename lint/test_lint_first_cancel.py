@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Proves the lint-first half of step lane-lint-once-fail-fast (owner ruling R4, 14:56 CST Nov 10; decision lanes-run-no-full-ci-job).
+"""Proves the lint-first half of step lane-lint-once-fail-fast (decision lanes-run-no-full-ci-job).
 
 Batch CI runs a `lint` job beside the heavy jobs, never before them (no added wait on a green run). A red lint posts the red comment
 early through the `red-lint-comment` job, which wakes a waiting session before the heavy jobs end. The run is not cancelled (coordinator,
@@ -34,7 +34,7 @@ class LintFirst(unittest.TestCase):
         self.assertIsNotNone(lint, "no lint job in checks.yml")
         self.assertRegex(lint, r"bin/ci-job checks --lint --base \"?origin/", "the lint job does not run `bin/ci-job checks --lint --base origin/<base>`, the one home of the lint steps")
 
-    def test_lint_job_does_not_gate_the_heavy_jobs(self):
+    def test_no_heavy_job_needs_the_lint_job(self):
         text, _, _ = blocks()
         for name in re.findall(r"^  ([a-z0-9-]+):\s*$", text, re.M):
             if name in (COMMENT, "all-jobs-passed", "ci-done"):
