@@ -23,12 +23,14 @@ Not measured: how many findings were real, and how many findings each round rais
 
 Net value at round 3 (guard or check: yes): after a round-2 PASS, 0 negative in 646 records with a net value, 119 zero. After a round-2 FAIL, 9 negative in 695, 110 zero. Guard or check: no changes: 423 heads, round 3 reached by 73.
 
-Reading: haiku round 1 FAILs most guard changes, and sonnet round 2 still FAILs 27% of those haiku passed, so haiku misses real defects. Round 3 after a round-2 PASS catches 4% and held back nothing (0 negative net value). All 9 negative net values follow a round-2 FAIL.
+Reading: haiku round 1 FAILs most guard heads, and sonnet round 2 still FAILs 27% of those haiku passed, so haiku misses some defects. Round 3 after a round-2 PASS caught 4% and held back nothing.
 
 ## The proposal, for the owner
 
-- a. Round 1 on sonnet for every guard or check change (haiku stays for the rest). Owner item 359 a already says so; only 43 round-1 records show sonnet, so check that the spawn applies it.
-- b. Round 3 and its net-value test only after a round-2 FAIL. After a round-2 PASS, skip it. Loses: 29 catches in 675 and a net-value line on those. Gains: one fewer sonnet round on about 675 heads.
+Already ruled, not re-asked: round 1 on Sonnet for a guard or check change (item 359 a); round 3 only for a change fixed under a fix check, and a change that passes round 1 is done (owner, R9, 2026-11-10 15:44 CST, corrected 16:07 CST, relayed; step `rounds-rules-one-record`; item 471 a, 2026-11-09 23:39 CST). The 675 round-3 heads after a round-2 PASS above predate that ruling. Their 4.3% FAIL rate and 0 negative net value are the measure of what the ruling drops.
+
+Open, from the step's deferred note: should round 1 run Sonnet for every logic change, not only guard and check changes? Measure: haiku round 1 FAILs 84% of guard or check heads, sonnet 44% (43 records, a small sample). The share of haiku FAILs that were noise is unmeasured.
+
 - c. Add a `Findings:` line to the record (blocker, should-fix, wording counts), so the next measure can say how many findings were real. Item 359 c labels findings but the record keeps none.
 
 Kind: process
