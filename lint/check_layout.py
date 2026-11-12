@@ -2,7 +2,7 @@
 """Checks that every reader of a record path takes it from lint/layout.json, and holds none of its own.
 
 lint/layout.json is the one list of where each kind of file lives (decision one-layout-every-repo).
-Three things can drift from it, and this check reads each:
+Four things can drift from it, and this check reads each:
 
   1. The hooks' literals. hooks/guard.py reads the layout file at run time from RECORD_LAYOUT_FILE,
      its own literal. That literal must equal LAYOUT_FILE in lint/layout.py. hooks/git_reads.py reads the
@@ -17,6 +17,9 @@ Three things can drift from it, and this check reads each:
   3. The actions and the stamp examples. Each action input that names the records folder defaults
      to "" (the layout's folder), its script assigns no record path, and each stamp example keeps
      its record folders under docs/.
+  4. The copies. .github/pull_request_template.md (this repo's template) and
+     skills/project-ops/templates/pull_request_template.md (the copy an adopting repo gets) must be
+     byte-equal. A difference names both paths. A copy that cannot be read is unknown, which is red too.
 
     python3 lint/check_layout.py [--root DIR]
 
@@ -43,6 +46,7 @@ NOT_READERS = ("test_", "mutate_", "prove_")
 ACTION_INPUTS = (("actions/ruling-kind/action.yml", "records-dir"), ("actions/ste-lint/action.yml", "decisions-dir"))
 ACTION_SCRIPTS = ("actions/ruling-kind/check.sh", "actions/ste-lint/run.sh")
 STAMP_EXAMPLES = "actions/stamp/examples"
+COPIES = (".github/pull_request_template.md", "skills/project-ops/templates/pull_request_template.md")  # must stay byte-equal
 
 
 def read(rel):
@@ -169,6 +173,21 @@ def problems():
             folder = kind.get("folder", "")
             if folder and not folder.startswith("docs/"):
                 found.append("%s: kind %s keeps its records at %r, outside docs/" % (rel, kind.get("id"), folder))
+    found.extend(copy_problems())
+    return found
+
+
+def copy_problems():
+    """One line when the COPIES differ, or one per copy that cannot be read (unknown, never green)."""
+    data, found = [], []
+    for rel in COPIES:
+        try:
+            with open(os.path.join(ROOT, *rel.split("/")), "rb") as handle:
+                data.append(handle.read())
+        except OSError as err:
+            found.append("%s: unknown: cannot read this copy of the pull request template: %s" % (rel, type(err).__name__))
+    if not found and data[0] != data[1]:
+        found.append("%s and %s differ; keep the two copies byte-equal" % COPIES)
     return found
 
 
