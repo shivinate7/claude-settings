@@ -365,9 +365,8 @@ sh("builder-test: git commit of a merge that resolves the package.json jest key 
    "git commit -q -m merge", "deny", rule=BDIFF, **dict(B, cwd=MCONF_JEST_STAGED))
 # ---- a package.json conflict in two hunks: `version` (not owned) and the `jest` key (owned). Git keeps the two
 # conflicts apart, since four unchanged lines sit between them. Debt manifest-hunk-edit-refused: an Edit that resolves
-# the version hunk leaves the jest markers in the file, so it is refused today. That allow case is HELD. It is red on
-# the current guard, so it registers only when GUARD_HELD_CASES names the debt's slug, which hooks/test_manifest_hunk_edit.py
-# sets. CI runs this section without the gate, so the held case is not in its run.
+# the version hunk leaves the jest markers in the file, so it is refused today. That allow case is HELD: it is red on the
+# current guard, so it lives in tests/held/, outside this folder, and this section's run never holds it.
 MCONF_TWO = os.path.join(ROOT, "mconflict-two-hunk")
 
 
@@ -381,11 +380,6 @@ def _two_hunk_repo():
 
 
 lazy_fixture([MCONF_TWO], _two_hunk_repo)
-if os.environ.get("GUARD_HELD_CASES") == "manifest-hunk-edit-refused":
-    add("builder-test: Edit that resolves the version hunk of a two-hunk package.json conflict is allowed", "allow",
-        tool="Edit", file_path="package.json",
-        old_string='<<<<<<< HEAD\n  "version": "1.0.1",\n=======\n  "version": "1.1.0",\n>>>>>>> feature',
-        new_string='  "version": "1.2.0",', **dict(B, cwd=MCONF_TWO))
 add("builder-test: Edit that resolves the jest hunk of a two-hunk package.json conflict is refused", "deny", rule=BT,
     tool="Edit", file_path="package.json",
     old_string='<<<<<<< HEAD\n    "testEnvironment": "happy-dom"\n=======\n    "testEnvironment": "jsdom"\n>>>>>>> feature',
