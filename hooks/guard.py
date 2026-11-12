@@ -5281,13 +5281,19 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
 def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: str, primary) -> str:
     """The relative target a shell write names that lands outside OWN, the agent's own checkout, else ''.
     A target resolves against the folder its segment runs in (`follow_cd`). An absolute, `~` or variable
-    target is not judged here, and an empty OWN is unknown, so both allow. `mkdir` and `touch` count as
+    target is not judged here, and an empty OWN is unknown, so both allow. A target with no `..` that lands in
+    the system temp or the session's scratchpad, and not in the primary checkout, passes (a write after
+    `cd /tmp`). `mkdir` and `touch` count as
     writes in this clause alone (CREATING_COMMAND). The agent's own red-run folder passes, its root
     included: a delete of that root is other-checkout's to refuse. The clone's common git directory
     passes, as it does there."""
     if not own:
         return ""
     common = _git_common_dir(own)   # file reads only, no git
+    import tempfile   # lazy: only a call that reaches this clause needs it
+    session = session_id_of(payload)
+    # The temp the process reads, and POSIX /tmp, which `cd /tmp` names whatever TMPDIR says.
+    temps = {os.path.realpath(tempfile.gettempdir())} | ({os.path.realpath("/tmp")} if os.name != "nt" else set())
 
     def escapes(word, at):
         if "$" in word or "`" in word or shell_abs(word, None) is not None:
@@ -5298,6 +5304,11 @@ def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: s
             return False
         if common and path_is_inside(target, common) is True:
             return False
+        if (".." not in re.split(r"[\\/]", word)   # a climb is judged by where it lands in the clone, never excused
+                and not (primary and path_is_inside(target, primary) is True)
+                and (any(path_is_inside(target, temp) is True for temp in temps)
+                     or (session and under_session_scratchpad(target, session)))):
+            return False   # a landing place outside the clone: the system temp or the session scratchpad
         return path_is_inside(target, own) is False and not _own_red_run(payload, primary, target)
 
     POWERSHELL_CALL[0] = tool == "PowerShell"
