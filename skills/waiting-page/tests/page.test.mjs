@@ -9636,3 +9636,119 @@ for (const width of [390, 1280]) {
     assert.deepEqual([...bad, ...fineBad], []);
   });
 }
+
+// Health tab. The page draws window.ROADMAP_BUILD.healthMap, which the roadmap build bakes into its block. A case puts
+// a block with the healthMap it needs before the page's first script, so the page reads it on load.
+function withBuild(build) {
+  const block = `<script>window.ROADMAP_BUILD = ${JSON.stringify(build).replace(/</g, "\\u003c")};</script>`;
+  const at = html.indexOf("<script");
+  assert.ok(at >= 0, "page.html has no script tag to put the block before");
+  return html.slice(0, at) + block + html.slice(at);
+}
+// 20 rows, worst first as the build gives them: 3 broken, 4 with issues, 5 not measured, 8 healthy.
+const HM_GRADES = [...Array(3).fill("red"), ...Array(4).fill("amber"), ...Array(5).fill("grey"), ...Array(8).fill("green")];
+const HM_WORDS = [...Array(3).fill("Broken"), ...Array(4).fill("Has issues"), ...Array(5).fill("Not measured"), ...Array(8).fill("Healthy")];
+const HM_ROWS = HM_GRADES.map((grade, i) => ({ n: i + 1, grade, sees: `Sees ${i + 1}`, why: `Why ${i + 1}`, gold: null, quiet: false, mk: ["x.py"] }));
+const HM_COVERAGE = { total: 20, named: 20, left: { hook: [], check: [], skill: [] } };
+// A healthMap as the build writes it. A case overrides the fields it needs.
+const healthMap = (over = {}) => ({ read: "main abc1234, Nov 11", rows: HM_ROWS, counts: { red: 3, amber: 4, grey: 5, green: 8 }, coverage: HM_COVERAGE, why: null, coverageWhy: null, ...over });
+
+test("Health tab: the red count shows on the Health tab from the Questions tab, before Health opens", async (t) => {
+  const errors = [];
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap() }), errors });
+  if (!page) return;
+  assert.equal(await page.locator("#qView").isVisible(), true, "the Questions tab is not the first view");
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  assert.equal(await page.locator("#healthTab").isVisible(), true, "the Health tab is not shown");
+  assert.match(await page.locator("#hCue .sr").textContent(), /3 broken/, "the tab shows no broken count");
+  assert.equal(await page.locator("#hPanel").isHidden(), true, "the Health panel is open before it was clicked");
+  assert.deepEqual(errors, [], "the page threw on load");
+});
+
+test("Health tab: rows are drawn in the order the build gives, worst first", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap() }) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.click("#healthTab");
+  const words = await page.locator("#healthTable tbody tr td.gc .sr").allTextContents();
+  assert.equal(words.length, 20, "the table does not hold the 20 rows");
+  assert.deepEqual(words, HM_WORDS, "the rows are not drawn worst first");
+});
+
+test("Health tab: a map that does not read shows Health: unknown with its reason, one control, no table", async (t) => {
+  const build = { healthMap: healthMap({ read: null, rows: null, counts: null, coverage: null,
+    why: "unknown (health-map.json does not read: no such file)", coverageWhy: "unknown (the map did not read)" }) };
+  const page = await open(t, { pageHtml: withBuild(build) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  assert.match(await page.locator("#healthTab").textContent(), /unknown/, "the tab does not say unknown");
+  await page.click("#healthTab");
+  const panel = await page.locator("#hPanel").textContent();
+  assert.match(panel, /Health: unknown/, "the panel does not say Health: unknown");
+  assert.match(panel, /health-map\.json does not read/, "the panel does not give the reason");
+  assert.equal(await page.locator("#healthTable").count(), 0, "a table was drawn for a map that did not read");
+  assert.equal(await page.locator("#hPanel button").count(), 1, "the unknown state does not have one copy control");
+});
+
+test("Health tab: a parts list that does not read gives Coverage: unknown, not a count", async (t) => {
+  const build = { healthMap: healthMap({ coverage: null, coverageWhy: "unknown (no hooks, checks or skills under the repo)" }) };
+  const page = await open(t, { pageHtml: withBuild(build) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.click("#healthTab");
+  const text = await page.locator("#healthCover").textContent();
+  assert.match(text, /Coverage: unknown/, "the coverage line does not say unknown");
+  assert.doesNotMatch(text, /name\s*\d+\s*of/, "the coverage line gives a count from a parts list that did not read");
+  assert.equal(await page.locator("#healthTable tbody tr").count(), 20, "the rows did not stay on the page");
+});
+
+test("Health tab: parts no row names are counted and listed by kind", async (t) => {
+  const coverage = { total: 90, named: 88, left: { hook: ["hooks/a.py"], check: [], skill: ["skills/zed/"] } };
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage }) }) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.click("#healthTab");
+  const cover = page.locator("#healthCover");
+  assert.equal(await cover.count(), 1, "the coverage line is not drawn");
+  assert.match((await cover.locator(".ln").first().textContent()).replace(/\s+/g, " "),
+    /name 88 of 90 hooks, checks and skills/, "the named and total counts are not drawn");
+  assert.match(await cover.locator("summary").textContent(), /Named by no row: 2/, "the summary count is wrong");
+  const left = await cover.locator(".left").textContent();
+  assert.match(left, /Hooks 1/, "the hook kind has no count");
+  assert.match(left, /a\.py/, "the hook part is not listed");
+  assert.match(left, /Skills 1/, "the skill kind has no count");
+  assert.match(left, /zed/, "the skill part is not listed");
+  assert.doesNotMatch(left, /Checks/, "a kind with no parts is listed");
+});
+
+test("Health tab: a build with no healthMap key draws no Health tab", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({}) });
+  if (!page) return;
+  // Green on the old code by design: it guards that a build with no health map draws no tab.
+  const tab = page.locator("#healthTab");
+  const shown = (await tab.count()) === 1 && (await tab.isVisible());
+  assert.equal(shown, false, "a build with no healthMap drew a Health tab");
+});
+
+test("Health tab: the arrow keys walk Questions, Status, Health and back", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap() }) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.focus("#tabQ");
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await page.getAttribute("#tabStatus", "aria-selected"), "true", "Right from Questions did not reach Status");
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await page.getAttribute("#healthTab", "aria-selected"), "true", "Right from Status did not reach Health");
+  assert.equal(await page.locator("#hPanel").isVisible(), true, "Health is selected but its panel is hidden");
+  await page.keyboard.press("ArrowRight");
+  assert.equal(await page.getAttribute("#tabQ", "aria-selected"), "true", "Right from Health did not wrap to Questions");
+});
+
+test("Health tab: Status still opens and keeps its Records Health card, with no Health panel", async (t) => {
+  // Green on the old code by design: it guards the Status tab against the new tab.
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap() }) });
+  if (!page) return;
+  await page.click("#tabStatus");
+  assert.match(await page.locator("#svRec").textContent(), /Health/, "the Records card lost its Health part");
+  assert.equal(await page.locator("#hPanel").isHidden(), true, "Status opened the Health panel");
+});
