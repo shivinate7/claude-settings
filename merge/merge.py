@@ -4633,7 +4633,9 @@ def commits_outside(root, tips, kept):
     """-> {commit: parents} for each commit that `tips` reach and no commit of `kept` holds, from one git read, so the checks on it cost no more git.
     A shallow clone cuts the history and so this graph: it is deepened first, whatever a pre-read would say."""
     deepen_shallow(root, "the commits of the request and of the open pull requests")
-    c, out = git(root, "rev-list", "--parents", *tips, "--not", *kept)
+    # The revs go on stdin: hundreds of open heads on argv would pass the command-line length limit.
+    revs = "".join(f"{t}\n" for t in tips) + "".join(f"^{k}\n" for k in kept)
+    c, out = git(root, "rev-list", "--parents", "--stdin", input=revs)
     if c:
         raise Stop(f"cannot read the commits of the request and of the open pull requests: {out} {FREEZE_CITE}")
     return {parts[0]: parts[1:] for parts in (line.split() for line in out.splitlines())}
