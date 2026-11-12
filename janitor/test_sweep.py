@@ -4907,7 +4907,7 @@ class _AgentEndFixture(unittest.TestCase):
 
     def finished_tree(self, name, lock=None):
         """NAME's tree: clean, pushed and idle 31 min, locked by LOCK (default: the host pid this test
-        process names). The caller ages the subagent transcript when the case has one."""
+        process names). The caller ages the agent transcript when the case has one."""
         tree = self.add(name)
         self.lock(tree, lock or self.host_lock(name))
         _age_admin_files(tree, 31 * 60)
@@ -5537,7 +5537,7 @@ class AgentEndProcessMarkerTests(_AgentEndFixture):
         control = self.control_tree("markctl")
         tree = self.agent_tree(self.AGENT)
         self.write_stop_row(self.AGENT, tree)
-        self.age_subagent_transcript(self.AGENT, 31)
+        self.age_agent_transcript(self.AGENT, 31)
         shell = subprocess.Popen(["env", "CLAUDE_AGENT_ID=" + self.AGENT, "sleep", "120"], cwd=tree,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
