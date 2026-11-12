@@ -139,6 +139,9 @@ A touched .py or .sh adds one `git cat-file --batch`, which the flag reader and 
 the report below, one `ls-tree`, so it starts 5. A removed or renamed path adds `ls-tree` and that `cat-file --batch`,
 so 5 at most. Each tracked .md is read once, and only when a removed or renamed path, a name that a touched .py no
 longer defines, or a flag that a touched .py or .sh no longer declares, gives the findings something to look for.
+A flag read through a parent parser or a helper (`parent_flags`, for a removed flag of a .py that imports one) first lists
+the whole head tree with one `ls-tree` and keeps it in `rng.tree`, then reads the module's blob through the same `cat-file`.
+That listing is the one the report would have made, so the count stays 5 (CostTests, test a_flag_read_through_an_untouched_helper_starts_no_git_process_beyond_the_five).
 STALE010 reads the added lines the one diff already carries, and for each .py file an added line cites, one blob
 at head through the one `cat-file` the run opens, once per range, plus head's root tree for the top-folder test. That
 `cat-file` is one start, and it opens only when an added line cites a .py file by a path with a folder part; no Markdown
