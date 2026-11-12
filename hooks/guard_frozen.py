@@ -253,10 +253,25 @@ def _script_mutates(script: str) -> bool:
     for segment in split_segments(script):
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
-        if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+        # `_sed_operands` reads the flags, so this and the files it names agree (`-Ei`, `-ni`, `--in-place`).
+        if _mutates_as_command(command, rest):
+            return True
+        read = _sed_operands(_quoted_words(segment, True)) if command == "sed" else None
+        if read and read[2]:
             return True
     return False
+
+
+# The text match for a `sed -i` of the target. A segment `_sed_operands` places never needs it: its files
+# arrive in `written`. It is kept as the fail-closed fallback for a segment that function cannot place (an
+# unquoted `$` or backtick before the script) and for a caller that has only the text. It reads a flag
+# cluster that holds an `i` before any `e`, `f` or `l` (`-Ei`, `-ni`, `-i.bak`) and `--in-place`, as
+# `_sed_operands` does.
+_SED_IN_PLACE_TEXT = r"\bsed\b[^\n;|&]*\s(?:-[^\sefl-]*i|--in-place)[^\n;|&]*"
+
+
+def _sed_in_place_text(cmd: str, target: str) -> bool:
+    return bool(re.search(_SED_IN_PLACE_TEXT + target, cmd))
 
 
 def writes_to(path: str, cmd: str, command=None, words=(), written=()) -> bool:
@@ -280,12 +295,10 @@ def writes_to(path: str, cmd: str, command=None, words=(), written=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return command == "sed" and _sed_in_place_text(cmd, target)
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
-        return True
-    return False
+    return _sed_in_place_text(cmd, target)
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -928,22 +941,127 @@ def _runs_stored_text(segment: str, words, plain: str) -> bool:
 # and the files after it still count. The sed is found past a wrapper (`resolve_command`), and inside a
 # `sh -c` script (`_sed_nested_writes`). An unquoted `$` or backtick up to the script may add or drop a
 # word, so the script cannot be placed: that segment keeps the text match.
-# A script with a `w` or `W` command writes the file it names, the rest of that line, in place or not.
-# That script stays text (it is no stand-in), and the file joins the written words. A script with an `e`
-# command (it runs one) stays text too. The command letter follows a space, `;{}!$`, a digit, `=`
-# (`--expression=`), `,` (an `s` flag after another delimiter), the flags of an `s/` or the `-e` of a
-# glued option (`-e'w f'`); any other character reads as text. `w` needs a space or the end after it, so
-# a path that holds `/w` in an `s` script is not read as a `w` command.
-# ponytail: `wFILE` with no space, `find -exec sed -ni` and a pipe inside a `sh -c` script are missed.
+# A script with a `w` or `W` command writes the file it names, the rest of that line, in place or not
+# (also the `w` flag of an `s`, under any delimiter). That script stays text (it is no stand-in), and the
+# file joins the written words. A script with an `e` command (it runs one) stays text too. `_sed_scan`
+# reads the script as sed does, one command at a time, so a `w` counts only where sed reads a command:
+# never inside an `s` or `y` part, nor after the `a`, `i` or `c` text. A script it cannot place (an
+# unfinished `s`, an unknown letter) keeps the old text match (`_SED_WRITE`, `_SED_RUNS`), which
+# over-reads and so fails closed.
+# ponytail: `find -exec sed -ni` and a pipe inside a `sh -c` script are missed.
 _SED_START = r"(?:^|[\s;{}!$0-9=,]|/[gpiImMe0-9]*|^-[A-Za-z]*[ef])"
 _SED_RUNS = re.compile(_SED_START + r"[wWe](?:\s|$)")
 _SED_WRITE = re.compile(_SED_START + r"[wW][ \t]+([^\n]*)")
+_SED_ONE = frozenset("=dDgGhHnNpPxzF")          # a command with no argument
+_SED_LABEL = frozenset("btT:lLqQv")             # an argument that ends at `;` or a line end
+_SED_LINE = frozenset("rR")                     # an argument that is the rest of the line
+_SED_TEXT = frozenset("aic")                    # text to the end of the line, a `\` continues it
+
+
+def _sed_part(text, at, delimiter):
+    """The index after the part of `text` that starts at `at` and ends at an unescaped `delimiter`, or -1."""
+    while at < len(text):
+        if text[at] == "\\":
+            at += 2
+        elif text[at] == delimiter:
+            return at + 1
+        else:
+            at += 1
+    return -1
+
+
+def _sed_line_end(text, at, continued=False):
+    """The index of the line end after `at`. With `continued`, a backslash before a line break joins the next line."""
+    while at < len(text):
+        if continued and text[at] == "\\":
+            at += 2
+        elif text[at] == "\n":
+            return at
+        else:
+            at += 1
+    return len(text)
+
+
+def _sed_scan(text):
+    """(files the `w` commands of a sed script write, whether it has an `e` command), read command by
+    command, or None when a command cannot be placed."""
+    files, runs, at, end = [], False, 0, len(text)
+    while at < end:
+        letter = text[at]
+        if letter.isspace() or letter in ";{}!$,~+0123456789IM":   # IM: an address's flags
+            at += 1
+        elif letter in "/\\":          # an address: /re/ or \cREc
+            delimiter = text[at + 1] if letter == "\\" and at + 1 < end else letter
+            at = _sed_part(text, at + (2 if letter == "\\" else 1), delimiter)
+            if at < 0:
+                return None
+        elif letter == "#":
+            at = _sed_line_end(text, at)
+        elif letter in _SED_ONE:
+            at += 1
+        elif letter in _SED_LABEL:
+            while at < end and text[at] not in ";\n":
+                at += 1
+        elif letter in _SED_LINE:
+            at = _sed_line_end(text, at)
+        elif letter in _SED_TEXT:
+            at = _sed_line_end(text, at + 1, continued=True)
+        elif letter in "wW":
+            stop = _sed_line_end(text, at)
+            name = text[at + 1:stop].strip()
+            if name:
+                files.append(name)
+            at = stop
+        elif letter == "e":
+            runs, at = True, _sed_line_end(text, at)
+        elif letter in "sy":
+            delimiter = text[at + 1] if at + 1 < end else ""
+            if not delimiter or delimiter in "\\\n":
+                return None
+            at = _sed_part(text, at + 2, delimiter)
+            at = _sed_part(text, at, delimiter) if at >= 0 else -1
+            if at < 0:
+                return None
+            while letter == "s" and at < end and text[at] not in ";}\n#":
+                flag = text[at]
+                if flag == "e":
+                    runs = True
+                elif flag in "wW":   # the `w` flag: the rest of the line is the file
+                    stop = _sed_line_end(text, at)
+                    if text[at + 1:stop].strip():
+                        files.append(text[at + 1:stop].strip())
+                    at = stop
+                    continue
+                at += 1
+        else:
+            return None
+    return files, runs
+
+
 _SED_LONG = ("expression", "file", "in-place", "line-length")
 _SED_REDIRECT = re.compile(r"\d*>>?|<{1,3}")   # an operator word whose target is the next word
 _UNQUOTED_EXPANSION = re.compile(r"""'[^']*'|"[^"]*"|([$`])""")
-# `xargs sed -i` takes its files from the pipe, so what these print is written. Other feeders list what
-# they read (`grep -l`, `cat`), which a write does not follow.
+# `xargs sed -i` takes its files from the pipe, so what these print is written. `grep -l` and `-L` print
+# the files they name, so they feed it too (`_feeds_xargs`). `cat` prints contents, not names, so it
+# does not. `find` names no target (a debt).
 _XARGS_FEEDERS = ("echo", "printf", "find", "ls")
+_GREP_LISTING_FLAG = re.compile(r"-[A-Za-z]*[lL][A-Za-z]*|--files-with(?:out-match|-matches)")
+
+
+_GREP_RECURSIVE_FLAG = re.compile(r"-[A-Za-z]*[rR][A-Za-z]*|--(?:dereference-)?recursive")
+
+
+def _lists_recursively(words):
+    """True for a `grep -rl` segment: it lists the files under each folder it names."""
+    return _feeds_xargs(words) and _segment_command(words)[0] == "grep" and any(
+        _GREP_RECURSIVE_FLAG.fullmatch(word) for word in words)
+
+
+def _feeds_xargs(words):
+    """True when a segment's output is a list of file names an `xargs sed -i` after it edits."""
+    command = _segment_command(words)[0]
+    return command in _XARGS_FEEDERS or (
+        command == "grep" and any(_GREP_LISTING_FLAG.fullmatch(word) for word in words))
 
 
 def _sed_operands(raw):
@@ -951,9 +1069,10 @@ def _sed_operands(raw):
     segment `raw` (shell words), else None. Indexes are into `raw`; the script indexes leave out a script
     that holds a `w` or `e` command."""
     start = resolve_command(tuple(raw))
-    if start is None or _name(raw[start]) != "sed":
+    if start is None or _name(_unquoted(raw[start])) != "sed":
         return None
     scripts, from_file, operands, in_place, given, options = set(), set(), [], False, False, True
+    offset = {}   # script index -> where the script text starts in its word (a glued `-e'w f'` or `--expression=`)
     index = start + 1
     while index < len(raw):
         word = _unquoted(raw[index])
@@ -970,6 +1089,8 @@ def _sed_operands(raw):
             if full in ("expression", "file"):
                 given = True
                 scripts.add(index if equals else index + 1)
+                if equals:
+                    offset[index] = word.index("=") + 1
                 if full == "file":
                     from_file.add(index if equals else index + 1)
             if full in ("expression", "file", "line-length") and not equals:
@@ -984,6 +1105,8 @@ def _sed_operands(raw):
                     if letter != "l":
                         given = True
                         scripts.add(index if glued else index + 1)
+                        if glued:
+                            offset[index] = at
                         if letter == "f":
                             from_file.add(index if glued else index + 1)
                     index += 0 if glued else 1
@@ -996,12 +1119,21 @@ def _sed_operands(raw):
     last = max(scripts, default=start)
     if any(m.group(1) for word in raw[start:last + 1] for m in _UNQUOTED_EXPANSION.finditer(word)):
         return None   # an unquoted expansion may add or drop a word: the script cannot be placed
-    wrote = set()
+    wrote, texts = set(), set()
     for at in scripts - from_file:
-        for m in _SED_WRITE.finditer(_unquoted(raw[at]) if at < len(raw) else ""):
-            wrote.add(m.group(1))
-            wrote.update(m.group(1).split())   # the rest of the line is one name; each word of it counts too
-    scripts = {at for at in scripts if at >= len(raw) or at in from_file or not _SED_RUNS.search(_unquoted(raw[at]))}
+        text = _unquoted(raw[at])[offset.get(at, 0):] if at < len(raw) else ""
+        read = _sed_scan(text)
+        if read is None:   # a script the scan cannot place: the over-reading text match
+            names = [m.group(1) for m in _SED_WRITE.finditer(text)]
+            has_run = bool(_SED_RUNS.search(text))
+        else:
+            names, has_run = read[0], read[1]
+        if has_run or names:   # a script with a `w` or `e` command stays text
+            texts.add(at)
+        for name in names:
+            wrote.add(name)
+            wrote.update(name.split())   # the rest of the line is one name; each word of it counts too
+    scripts -= texts
     piped = in_place and any(_name(word) == "xargs" for word in raw[:start])
     return scripts, set(operands), in_place, wrote, piped
 
@@ -1187,8 +1319,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
-    # A segment with no `sed` in its text runs none, so it is never parsed for one.
-    seds = [None if closed or "sed" not in segment else _sed_operands(raw) for segment, raw in zip(segments, parsed)]
+    # A segment with no `sed` in its text runs none, so it is never parsed for one. A script keeps its quoted
+    # newlines: a line break ends an `a` text, so the command after it is read as one.
+    seds = [None if closed or "sed" not in segment
+            else _sed_operands([_typed(word, segment) for word in _quoted_words(segment, True)])
+            for segment in segments]
     fed = {number - 1 for number, read in enumerate(seds) if number and read and read[4] and ends[number - 1] == "|"}
     inner = []
     for number, raw in enumerate(parsed):
@@ -1238,10 +1373,14 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 shown.extend(pieces)
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
-        if number in fed and _segment_command(words)[0] in _XARGS_FEEDERS:
+        if number in fed and _feeds_xargs(words):
             written = written | set(words)
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        if number in fed and _lists_recursively(words):
+            hit = next((word for word in words if not word.startswith("-") and holds(word, at)), "")
+            if hit:   # `grep -rl` lists every file under a folder it names
+                return hit
         verb = _segment_command(words)[0] if predicate_command else ""
         for nested in _powershell_scripts_of(segments[number]):
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too

@@ -27,7 +27,6 @@
 - builder-path-forms-unread: `Path('tests').joinpath(...)`, string `+` paths, `dd of=`, `sort -o` and `touch` of a test path are not read (hooks/guard_frozen.py _py_paths, _shell_write_hit) Fix: none — rare and harmless. Until: 2026-11-20
 - shell-write-pipe-redirect: `cat x >| F` is not read as a write to F, so the frozen-path guard allows it (hooks/guard_frozen.py _shell_write_hit). Fix: none — Claude rarely writes `>|`, and plain `>` is refused. Until: 2026-11-22
 - shell-write-basetemp: `python3 -m pytest --basetemp=F` writes F and is not read as a write (hooks/guard_frozen.py _shell_write_hit). Fix: none — a review finding with no incident. Until: 2026-11-22
-- frozen-sed-pattern-refused: `sed -n '/rm x/p' F` only reads F, yet it is refused as a write to F (hooks/guard_frozen.py _shell_write_hit). Fix: none — a false alarm only refuses. Until: 2026-11-22
 - frozen-git-rm-cached-refused: `git rm --cached X && cat X` is refused as a write, because the cat segment names X (hooks/guard_frozen.py _shell_write_hit). Fix: none — rare, and the refusal is a minor false alarm. Until: 2026-11-21
 - cap-basename-false-alarm: a heredoc writing a fixture named settings.json with the cap key asks, because is_settings_file tests the basename only (hooks/guard.py)
 - cap-until-field-taught-late: the _agentCapUntil field is taught only in the revoke message after a bad cap write (hooks/config_watch.py, hooks/guard.py)
@@ -2179,3 +2178,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- sed-nested-writes-depth-uncapped: `_sed_nested_writes` (hooks/guard_frozen.py) reads a `sh -c` script inside a `sh -c` script with no depth cap; a command nested 10 deep took 1.5 s to judge. Fix: cap the depth and fail closed past it. Until: 2026-11-26
