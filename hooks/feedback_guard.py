@@ -94,8 +94,9 @@ a turn end in these cases:
     shared_names.SETTINGS_REPO (its send is proved by the repo-item check, not here) or `[note] -> not-page-form`.
     The remedy names the forms of that repo. Risk kind: likely risk. Incident: owner, Nov 10 09:13 CST (every page feedback goes into the
     shared template). Cost: one regex per block plus the transcript read the guard already makes, and one
-    cat-file per step home, inside the Stop process. No process, timer or file. A repo, layout or git read that
-    fails passes the block;
+    cat-file per step home, and (layout.waiting_page, before the writer check) up to two `git show` reads in a
+    checkout with no extras file, all inside the Stop process. No new process kind, timer or file. A repo,
+    layout or git read that fails passes the block;
   - inbox-close-needs-home. A closed note needs a home that is a file some branch tracks,
     `step:<slug>` (roadmap/data/steps/<slug>.json, resolved by ruling_home.value_resolves), `page:<n>`
     or `not-a-grant`. `noted` and `process-only` are not one. An item is closed by `[closed]` as a
@@ -544,7 +545,7 @@ class Homes:
     def page_form_scope(self, url):
         """(root, branch) when `url` is the waiting page of the cwd's repo, else None. `branch` is the record branch
         in the claude-settings repo, and None in any other repo, which reads no branch. The layout or git failing
-        stands the rule down: None."""
+        stands the rule down: None, and so does a repo with no GitHub name (layout.repo_name is None)."""
         try:
             import layout
         except ImportError:
@@ -553,7 +554,10 @@ class Homes:
             root = self._cwd_root()
             if root is None or not layout.is_waiting_page_url(root, url):
                 return None
-            return root, layout.record_branch(root) if layout.repo_name(root) == SETTINGS_REPO.lower() else None
+            name = layout.repo_name(root)
+            if name is None:
+                return None
+            return root, layout.record_branch(root) if name == SETTINGS_REPO.lower() else None
         except (layout.LayoutError, ruling_home._GitFailure):
             return None
 
