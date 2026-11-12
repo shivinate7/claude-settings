@@ -183,7 +183,7 @@ Notes: batch_running (726-753) computes the blockers; area F rows its refusal. T
 |---|---|---|---|---|---|---|
 | `merge-checks` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | `gh pr merge 5` on a red or pending head is denied | rule rewrite: add the decision slug no-merge-during-batch-ci to the guard index line |
 | `merge-checks:batch` | git-no-merge-during-batch-ci | "While a batch's integration PR has a CI run in progress, nothing merges to main" | stricter | exact | `gh pr merge 63` is denied while ready PR #65, which holds #63, runs CI | tool fix: step overlapping-batches; the guard reads the same Host.head_read, so the fix reaches it; add a guard test |
-| `merge-role-proof` | session-tiers | "allows `merge --role T` only when the session's own newest `get_session` result ... lists the tag `cs-build:T`" | exact | exact | a lane runs `merge --role coordinator`: denied | - |
+| `merge-role-proof` | session-tiers | "allows `merge --role T` only when the session's own newest `get_session` result ... lists the tag `cs-build:T`, or the solo hat holds" | exact | exact | a lane runs `merge --role coordinator`: denied | - |
 | `trust-card-in-build` | session-tiers | "allows the calls only when the session's own newest `get_session` record shows no `cs-build:` tag" | exact | exact | a cs-build session opens the trust card: denied | - |
 | `merge:dropped-lane-unread` | silent-undo-check-design | "`merge.py` refuses on unknown, because its merge cannot be taken back." | exact | exact | git log fails; --undo-check-unknown-ok lifts it (1761) | - |
 | `merge:dropped-lane-reverted` | `ci-hygiene` step 8 | "Rebuild the branch from main without them. Never revert." | exact | exact | a batch holds a net-reverted lane (1764) | - |
