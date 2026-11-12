@@ -38,3 +38,10 @@ Relayed by the retrospective.
 
 - 09:49 CST, in the coordinator's session, option a: "close the 436 PRs listed in plans/stale-drafts-2026-11-12.md,
   minus #1755 and #1725"; no close comments, no branch deletes. Record: plans/stale-drafts-2026-11-12.md.
+
+## q_max Past Rates at 1440 px (page item 550)
+
+- 10:27 CST, in the coordinator's chat: option a as a stopgap (Clear Filters and Price Date may fold under the Filters
+  pill at 1440x900 on Past Rates; the EPI2B-3 check is re-pointed for Past Rates only), and a debt too: q_max
+  decision D-649 as a whole is a stale screen-layout lock he does not want. Lane qmax-browser-main-red builds a and
+  files the debt in q_max's debt store.

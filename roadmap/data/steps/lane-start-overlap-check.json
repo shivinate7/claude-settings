@@ -5,7 +5,7 @@
   "order": 0.14,
   "owner": "coordinator",
   "why": "Coordinator, 14:01 CST Nov 7. Incident: lane qmax-main-map-ts (13:59 CST) duplicated lane qmax-map-format-skew (13:45 CST) on q_max's MAP1-MAP10 failures. Triage caught it by hand.",
-  "note": "Triage found no home that does this today (14:02 CST). The nearest home is the guard's lane-one-topic rule in hooks/guard.py, which already reads a lane's cs-step tags from the transcript. Extend that home rather than build a second one (rule building-one-home-per-capability). Done check: a red test where a create_session with a cs-step tag that an open lane already holds is refused. Doing 05:58 CST Nov 10: open PR #1523 on branch lane-start-overlap-check (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane.",
-  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "note": "Triage found no home that does this today (14:02 CST). The nearest home is the guard's lane-one-topic rule in hooks/guard.py, which already reads a lane's cs-step tags from the transcript. Extend that home rather than build a second one (rule building-one-home-per-capability). Done check: a red test where a create_session with a cs-step tag that an open lane already holds is refused. Doing 05:58 CST Nov 10: open PR #1523 on branch lane-start-overlap-check (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane. Debt now, two incidents (coordinator 10:27 CST Nov 12): #2794 and #2735 both carry #1516; with step carry-claims-old-pr. Its old draft #1523 was closed in the stale-draft close; the branch stays.",
+  "updatedAt": "2026-11-12T10:28:00-06:00",
   "lane": ""
 }
