@@ -3015,7 +3015,15 @@ const SIDE_KINDS = ["dismiss", "restore"];
 const PRESS_KINDS = ["dismiss", "restore", "wait"];
 const meets = (a, b) => Math.min(a.r, b.r) - Math.max(a.l, b.l) > 0.5 && Math.min(a.b, b.b) - Math.max(a.t, b.t) > 0.5;
 const spanOf = (b) => `${Math.round(b.l)} to ${Math.round(b.r)} px`;
-const zoomText = (page) => page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+const zoomText = (page, size = "200%") => page.evaluate((size) => { document.documentElement.style.fontSize = size; }, size);
+// Sets the root font size to pct percent and asserts it took, so the claim after it reads the zoomed page.
+async function zoomedTo(page, pct) {
+  const rootPx = () => page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+  const before = await rootPx();
+  await zoomText(page, pct + "%");
+  const after = await rootPx();
+  assert.equal(after, before * pct / 100, `the root font size is ${after} px after the zoom, not ${before * pct / 100} px`);
+}
 // Boxes in the page's own px: the row, its title's column, its press, its text runs, the Ask box's two presses, and the page's scroll width.
 const pressGeo = (page, id) => page.evaluate((id) => {
   const box = (r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom });
@@ -9525,5 +9533,80 @@ for (const width of [390, 1280]) {
     assert.equal(await coarse(fine), false, "the fine page matches pointer: coarse, so the fine control is not tested");
     const fineBad = (await sizes(railChips(fine), "id")).filter(([, h]) => h !== 32).map(([id, h]) => `rail chip ${id} is ${h.toFixed(1)}px tall on a fine pointer, not 32px`);
     assert.deepEqual([...bad, ...fineBad], []);
+  });
+}
+
+// ---------------------------------------------------------------- narrow words: a press label breaks inside a word only when the word fits the press's room
+// The press of an ask not sent yet (Remove, Edit) sets overflow-wrap: anywhere, so a word breaks when its press is narrower than the word.
+// A word counts only when it fits the press's room: the card less the press's own padding and border. A wider word needs a smaller label
+// or a wider card, not a break rule, so a config with such a word is not a case here. A hyphen is a break point: "(permission-denied)"
+// reads as "(permission-" and "denied)", and a break after the hyphen is no break.
+// The words of one element that break across lines though they fit its room. roomSel names the card; the room is the card less the press's padding.
+const wordBreaks = (page, sel, roomSel) => page.evaluate(({ sel, roomSel }) => {
+  const inner = (x) => { const s = getComputedStyle(x); return x.getBoundingClientRect().width - ["padding-left", "padding-right", "border-left-width", "border-right-width"].reduce((a, p) => a + (parseFloat(s.getPropertyValue(p)) || 0), 0); };
+  const room = document.querySelector(roomSel);
+  const roomPx = room ? Math.round(inner(room)) : null;
+  const faults = [];
+  for (const el of document.querySelectorAll(sel)) {
+    const cs = getComputedStyle(el), padX = ["padding-left", "padding-right", "border-left-width", "border-right-width"].reduce((a, p) => a + (parseFloat(cs.getPropertyValue(p)) || 0), 0);
+    const wordRoom = roomPx === null ? null : roomPx - padX;
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (getComputedStyle(n.parentElement).visibility === "hidden") continue;
+      const re = /\S+/g; let m;
+      while ((m = re.exec(n.data))) {
+        const tok = m[0], bounds = [0];
+        for (let i = 0; i < tok.length - 1; i++) if (tok[i] === "-") bounds.push(i + 1);
+        bounds.push(tok.length);
+        for (let k = 0; k + 1 < bounds.length; k++) {
+          const a = bounds[k], b = bounds[k + 1], part = tok.slice(a, b);
+          if (part.length < 3) continue;
+          const g = document.createRange(); g.setStart(n, m.index + a); g.setEnd(n, m.index + b);
+          const rs = [...g.getClientRects()].filter((r) => r.width > 0);
+          if (new Set(rs.map((r) => Math.round(r.top))).size < 2) continue;
+          const natural = Math.round(rs.reduce((x, r) => x + r.width, 0));
+          if (wordRoom !== null && natural <= wordRoom - 1) faults.push(`"${part}" breaks across lines at ${natural} px, though the press has ${Math.round(wordRoom)} px for it in a ${roomPx} px card`);
+        }
+      }
+    }
+  }
+  return { roomPx, faults };
+}, { sel, roomSel });
+// The stacked ask, typed and added but not sent, at one width. Its press is drawn and the root font size took before the claim reads it.
+async function stackPressPage(t, { width, pct, act, name }) {
+  const page = await open(t, { viewport: { width, height: 800 } }); if (!page) return null;
+  await addToList(page, "Is the archive push for lane hooks-batch done?");
+  await mustHave(page, `ol.stack > li button[data-act="${act}"]`, `the ${name} press of an ask not sent yet`);
+  await zoomedTo(page, pct);
+  return page;
+}
+// Each row: the widths and text sizes at which a word breaks and fits the press's room (the 180 to 260 px range, 150% to 300% text). Served font first, then the DejaVu Sans fallback.
+const NARROW_STACK = [
+  { act: "rm", name: "Remove", served: [[220, 150], [260, 200]], fallback: [[220, 150], [260, 200]] },
+  { act: "edit", name: "Edit", served: [[180, 150], [180, 200], [220, 300]], fallback: [[180, 150], [180, 200], [180, 300], [220, 300]] },
+];
+function narrowStackCase({ act, name, width, pct, font }) {
+  const where = `at ${width} px wide, text at ${pct}%`;
+  test(`narrow words: the ${name} press of an ask not sent yet does not break inside a word ${where}, ${font ? font.label + " fallback" : "served font"}`, async (t) => {
+    FONT_RUN.set(t, font);
+    const page = await stackPressPage(t, { width, pct, act, name }); if (!page) return;
+    const r = await wordBreaks(page, `ol.stack > li button[data-act="${act}"]`, "ol.stack > li");
+    assert.deepEqual(r.faults, [], `the ${name} press breaks a word inside itself ${where}: ${r.faults.join("; ")}`);
+  });
+}
+for (const { act, name, served, fallback } of NARROW_STACK) {
+  for (const [width, pct] of served) narrowStackCase({ act, name, width, pct, font: null });
+  for (const [width, pct] of fallback) narrowStackCase({ act, name, width, pct, font: FALLBACK_FONT });
+}
+// Control: both presses at 390 px wide and 150% text do not break, in either font. It shows the scan finds no fault where none is.
+for (const font of [null, FALLBACK_FONT]) {
+  test(`narrow words (control): the Remove and Edit presses of an ask not sent yet do not break inside a word at 390 px wide, text at 150%, ${font ? font.label + " fallback" : "served font"}`, async (t) => {
+    FONT_RUN.set(t, font);
+    const page = await stackPressPage(t, { width: 390, pct: 150, act: "rm", name: "Remove" }); if (!page) return;
+    await mustHave(page, `ol.stack > li button[data-act="edit"]`, "the Edit press of an ask not sent yet");
+    for (const [act, name] of [["rm", "Remove"], ["edit", "Edit"]]) {
+      const r = await wordBreaks(page, `ol.stack > li button[data-act="${act}"]`, "ol.stack > li");
+      assert.deepEqual(r.faults, [], `the ${name} press breaks a word inside itself at 390 px wide, text at 150%: ${r.faults.join("; ")}`);
+    }
   });
 }
