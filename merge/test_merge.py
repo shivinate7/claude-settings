@@ -12606,6 +12606,50 @@ class RedMainBrake(Env):
         self.assertNotIn("breaking merge", out, "a page red to its end names a breaking merge, though no green parent is on the page")
         self.assertNotRegex(out, r"pull request #10[0-6]\d\b", "a page red to its end names a pull request as the breaking one")
 
+    # A red nightly above the breaking push run: each red group is judged on its own, so the push run's blame is not hidden by the nightly's.
+    # A nightly is never blamed on its pull request (it tests the base's head when it runs), so its number is not named either.
+    def test_a_first_red_nightly_on_top_does_not_hide_a_push_red_that_is_red_again(self):
+        nightly = main_run(920, "failure", event="schedule", sha=self.sha_of(920), message="Merge pull request #2660 from o/lane-2660")
+        _, out, _ = self.revert_route_refusal(above=[nightly], below=[main_run(910, "success", event="schedule", sha=self.sha_of(910))])
+        self.assertRegex(out, r"#2650\b", "the refusal does not name pull request #2650, the push merge red again on its re-run, under a first red nightly")
+        self.assertIn("git revert -m 1", out, "the refusal does not name the revert route for the push merge under a first red nightly")
+        self.assertNotIn("#2660", out, "the refusal names the pull request of the nightly, which tests the base's head when it runs")
+
+    def test_a_red_nightly_re_run_on_top_does_not_hide_a_push_red_that_is_red_again(self):
+        nightly = main_run(920, "failure", event="schedule", run_attempt=2, sha=self.sha_of(920), message="Merge pull request #2660 from o/lane-2660")
+        _, out, _ = self.revert_route_refusal(above=[nightly], below=[main_run(910, "success", event="schedule", sha=self.sha_of(910))])
+        self.assertRegex(out, r"#2650\b", "the refusal does not name pull request #2650, the push merge red again on its re-run, under a red nightly re-run")
+        self.assertIn("git revert -m 1", out, "the refusal does not name the revert route for the push merge under a red nightly re-run")
+        self.assertNotIn("#2660", out, "the refusal names the pull request of the nightly, which tests the base's head when it runs")
+
+    def test_a_red_links_schedule_run_on_top_does_not_hide_a_push_red_that_is_red_again(self):
+        # the second red workflow file: links.yml's schedule group is judged apart from checks.yml's push group
+        links = main_run(930, "failure", event="schedule", name="links", path=LINKS_PATH, run_attempt=2, sha=self.sha_of(930), message="Merge pull request #2670 from o/lane-2670")
+        links_green = main_run(925, "success", event="schedule", name="links", path=LINKS_PATH, sha=self.sha_of(925))
+        jobs = {930: [main_job("readme-links", "failure", 20)], 925: [main_job("readme-links", "success", 20)]}
+        _, out, _ = self.revert_route_refusal(above=[links], below=[links_green], jobs=jobs)
+        self.assertRegex(out, r"#2650\b", "the refusal does not name pull request #2650, the push merge red again on its re-run, under a red links.yml schedule run")
+        self.assertIn("git revert -m 1", out, "the refusal does not name the revert route for the push merge under a red links.yml schedule run")
+        self.assertNotIn("#2670", out, "the refusal names the pull request of the links.yml schedule run, which tests the base's head when it runs")
+
+    def test_a_first_red_schedule_run_promises_no_pull_request_that_its_red_re_run_does_not_name(self):
+        # Scope first: the first-attempt detail is run 909's. A schedule run is never blamed on its commit's pull request. If the first-attempt
+        # text promises such a blame on a red re-run, the red re-run must name the pull request; otherwise the promise is a false claim.
+        def runs_at(attempt):
+            return [main_run(909, "failure", event="schedule", run_attempt=attempt, sha=self.sha_of(909), message="Merge pull request #2790 from o/lane-2790"),
+                    main_run(908, "success", event="schedule", sha=self.sha_of(908)), self.merge_run(907, "success", 2789)]
+        runs = runs_at(1)
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        first = out.split("No batch merges onto a red", 1)[0]
+        self.assertIn("run 909", first, "the first-attempt detail does not name run 909")
+        self.assertNotIn("#2790", out, "the first red schedule run is blamed on its pull request before its re-run")
+        if "pull request" in first:  # the first-attempt text promises a pull-request blame on a red re-run
+            runs = runs_at(2)
+            rc, again, before = self.go(runs, self.page_jobs(runs))
+            self.refused(rc, again, before)
+            self.assertIn("#2790", again, "the first-attempt text promises a pull-request blame on a red re-run, and the red re-run names no pull request")
+
     def test_a_revert_run_still_going_over_the_breaking_run_refuses_and_says_so(self):
         # the revert's own run, 906, is pending on main: base_state skips a first-attempt run still going, so breaking run 905 stays the newest red
         runs = [main_run(906, None, status="in_progress", sha=self.sha_of(906), message="Merge pull request #2653 from o/lane-2653"),
@@ -12615,10 +12659,11 @@ class RedMainBrake(Env):
         self.assertIn("#2650", out, "the refusal does not name breaking run 905's pull request while the revert's run is pending")
         self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
 
-    def revert_route_refusal(self):
-        """-> (rc, out, before) of a red main whose breaking run 903 is red again on its re-run: the refusal that names the revert route."""
-        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
-        rc, out, before = self.go(runs, self.page_jobs(runs))
+    def revert_route_refusal(self, above=(), below=(), jobs=None):
+        """-> (rc, out, before) of a red main whose breaking run 903 is red again on its re-run: the refusal that names the revert route.
+        `above` and `below` are runs newest first, put on top of that shape and under its green parent 902. `jobs` overrides the jobs of the runs it names."""
+        runs = [*above, self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649), *below]
+        rc, out, before = self.go(runs, {**self.page_jobs(runs), **(jobs or {})})
         self.refused(rc, out, before)
         return rc, out, before
 
