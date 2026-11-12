@@ -8,7 +8,8 @@ FAMILY = "frozen"
 #
 # Failure classes, one per group: flag-cluster, flag-suffix, flag-long, flag-after-operand,
 # w-command, wrapper, pipe-feed, false-alarm, script-as-target, script-file, scanner-strings,
-# delimiter, quoted-command.
+# delimiter, quoted-command, address, line-address, block, expression, s-end, comment,
+# newline-script, label, nested-newline, find-exec, nested-pipe.
 
 # --- flag-cluster: -i inside a cluster of short flags is a write (class: flag-cluster) ---
 sh("sed-operand flag-cluster: sed -ni onto a frozen hook is refused",
@@ -45,6 +46,10 @@ sh("sed-operand w-command control: sed -n p reads a frozen hook and is allowed",
    "sed -n 'p' " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("sed-operand w-command control: sed with no -i reads a frozen hook and is allowed",
    "sed 's/a/b/' " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("sed-operand w-command control: sed s with an empty w flag and no file is allowed",
+   "sed 's/a/b/w' x", "allow", cwd=NOGIT)
+sh("sed-operand w-command control: sed -n w to another file is allowed",
+   "sed -n 'w out.txt' x", "allow", cwd=NOGIT)
 
 # --- false-alarm: a frozen path in a script's text, where the text starts with w, is no write (class: false-alarm) ---
 sh("sed-operand false-alarm: a frozen hook in an s replacement that starts with w, with no -i, is allowed",
@@ -91,6 +96,8 @@ sh("sed-operand script-as-target: a relative hooks/guard.py in a script, target 
    "sed -i 's#x#hooks/guard.py#' other.txt", "allow", cwd=CFG)
 sh("sed-operand script-as-target: a frozen path after a space in a script, target another file, is allowed",
    "sed -i 's#old# see " + CFG_HOOK + " #' other.txt", "allow", cwd=NOGIT)
+sh("sed-operand script-as-target control: sed -i with no frozen path, target another file, is allowed",
+   "sed -i s/a/b/ other.txt", "allow", cwd=NOGIT)
 
 # --- script-file: sed -f reads a script file, it does not write it (class: script-file) ---
 sh("sed-operand script-file: sed -i -f a frozen hook reads it and is allowed",
@@ -127,3 +134,59 @@ sh("sed-operand delimiter: sed s with a @ delimiter and a w flag to a frozen hoo
 # --- quoted-command: a double-quoted sed name is still sed, so its -ni is a write (class: quoted-command) ---
 sh("sed-operand quoted-command: a double-quoted sed name with -ni onto a frozen hook is refused",
    "\"sed\" -ni 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+
+# --- address: a /re/ address ends at its closing delimiter, so the w after it is a command (class: address) ---
+sh("sed-operand address: sed -n with a /re/ address then w to a frozen hook is refused",
+   "sed -n '/x/w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand address control: sed -n with a /re/ address then p reads a frozen hook and is allowed",
+   "sed -n '/w/p' " + CFG_HOOK, "allow", cwd=NOGIT)
+
+# --- line-address: a line number or $ with ! is an address, and the w after it is a command (class: line-address) ---
+sh("sed-operand line-address: sed -n with a 1,3 range then w to a frozen hook is refused",
+   "sed -n '1,3w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand line-address: sed -n with $! then w to a frozen hook is refused",
+   "sed -n '$!w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+
+# --- block: a w inside { } is a command (class: block) ---
+sh("sed-operand block: sed -n with a w inside braces to a frozen hook is refused",
+   "sed -n '{w " + CFG_HOOK + "}' x", "deny", "frozen-path", cwd=NOGIT)
+
+# --- expression: a glued -e and a --expression= value are scripts, so their w is a command (class: expression) ---
+sh("sed-operand expression: sed -n -e with a glued w to a frozen hook is refused",
+   "sed -n -e'w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand expression: sed -n --expression= with a w to a frozen hook is refused",
+   "sed -n --expression='w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand expression control: sed --expression=p reads a frozen hook and is allowed",
+   "sed --expression=p " + CFG_HOOK, "allow", cwd=NOGIT)
+
+# --- s-end: a # inside an s replacement is text, and the ; after the s ends it, so the w after is a command (class: s-end) ---
+sh("sed-operand s-end: sed -n with a # in an s replacement, then ; and w to a frozen hook is refused",
+   "sed -n 's/a/#/;w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+
+# --- comment: a # starts a comment that runs to the line end, so a w in it is text (class: comment) ---
+sh("sed-operand comment: sed -n with a # comment holding w to a frozen hook is allowed",
+   "sed -n '# w " + CFG_HOOK + "' x", "allow", cwd=NOGIT)
+
+# --- newline-script: a line break ends a sed command, so a w on the next line is a command (class: newline-script) ---
+sh("sed-operand newline-script: sed -n with an a text, a line break, then w to a frozen hook is refused",
+   "sed -n 'a x\nw " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+
+# --- label: a label ends at whitespace as well as ; or a line end, so a w after it is a command (class: label) ---
+sh("sed-operand label: sed -n with a :a label, a space, then w to a frozen hook is refused",
+   "sed -n ':a w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand label: sed -n with a :a label, then a block holding w to a frozen hook is refused",
+   "sed -n ':a {w " + CFG_HOOK + "\n}' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand label control: sed -n a loop with n and ba reads a frozen hook and is allowed",
+   "sed -n ':a;n;ba' " + CFG_HOOK, "allow", cwd=NOGIT)
+
+# --- nested-newline: a line break inside a sh -c script ends a sed command there (class: nested-newline) ---
+sh("sed-operand nested-newline: bash -c with an a text, a line break, then w to a frozen hook is refused",
+   "bash -c \"sed -n 'a x\nw " + CFG_HOOK + "' y\"", "deny", "frozen-path", cwd=NOGIT)
+
+# --- find-exec: a sed behind find -exec is a command word, so its -ni is a write (class: find-exec) ---
+sh("sed-operand find-exec: find -exec sed -ni onto a frozen hook is refused",
+   "find . -exec sed -ni 's/a/b/' " + CFG_HOOK + " \\;", "deny", "frozen-path", cwd=NOGIT)
+
+# --- nested-pipe: a pipe into xargs sed -ni inside a sh -c script is a write (class: nested-pipe) ---
+sh("sed-operand nested-pipe: bash -c with a frozen hook piped to xargs sed -ni is refused",
+   "bash -c \"echo " + CFG_HOOK + " | xargs sed -ni 's/a/b/'\"", "deny", "frozen-path", cwd=NOGIT)
