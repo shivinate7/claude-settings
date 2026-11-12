@@ -709,8 +709,19 @@ class BatchBuildAndDropIsAllowed(unittest.TestCase):
     def test_never_covers_names_each_check_lifting_flag(self):
         clause = never_covers(self.entry())
         self.assertIsNotNone(clause, "need a 'Never covers' sentence")
-        for act in ("--confirm", "--base-red-ok", "--undo-check-unknown-ok", "--lint-unknown-ok"):
+        for act in ("--confirm", "--base-red-ok", "--undo-check-unknown-ok", "--lint-unknown-ok", "--config", "--unlock", "--with"):
             self.assertIn(act, clause, "Never covers does not name %s" % act)
+
+    def test_covers_names_the_three_added_flags_and_the_pick(self):
+        covers = bounds_text(self.entry())
+        for flag in ("--blame", "--run", "--on", "--base"):
+            self.assertIn(flag, covers, "the entry does not name %s" % flag)
+        self.assertIn("2026-11-12 13:40 CST, pick b", covers, "the entry does not cite the owner's pick b")
+
+    def test_a_flag_outside_the_five_is_not_covered(self):
+        covers = bounds_text(self.entry())
+        for flag in ("--config", "--unlock", "--with", "--confirm", "--idle-lanes", "--session"):
+            self.assertNotIn(flag, covers, "Covers names %s, a flag outside the five" % flag)
 
 
 if __name__ == "__main__":
