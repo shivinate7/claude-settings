@@ -42,7 +42,7 @@ Text: inline, in the landed-turn checks.
 
 Text: `MODELS_REASON`, with two detail forms in its brackets.
 
-- A Done item that agents built or reviewed names each one's role and model, like "(builder sonnet, reviewer sonnet)".
+- Under rule `reports-done-names-models` (agent role and model), a Done item for work that agents built or reviewed carries each agent's role and model, like "(builder sonnet, reviewer sonnet)".
 - For "no model named for <role>": name that role's model in the Done item.
 - For "'<role> <model>' matches no <role> spawn, which ran <models>": name a model that the spawn ran on.
 
@@ -50,7 +50,7 @@ Text: `MODELS_REASON`, with two detail forms in its brackets.
 
 Text: `UNSTARTED_REASON`. It applies when the turn ran a builder.
 
-- Next holds an "Unstarted:" line. Name each queued item with every question answered that you left unstarted, with its reason.
+- Next holds an "Unstarted:" line. Under rule `reports-name-unstarted-items`, name each queued item you left unstarted, once all its questions are answered, with its reason.
 - If none, write "Unstarted: none".
 
 ### Answered guard (any reply)
@@ -75,7 +75,7 @@ Text: two inline facts in `recovered_problem`. The two line forms below live her
 
 Text: the miss from `departs_hit` in `hooks/question_form.py`, in the owner line. `DEPARTS_REASON` is not shown here; it stays for the waiting page and the question box. Rule `question-departs` (a pick says how it departs from main).
 
-- Write one line: "Departs from: <what on main> — <what changes>". Fill both sides. The change must differ from main.
+- Under rule `style-question-form` (the question form), write one line of the form "Departs from: <what on main> — <what changes>". Fill both sides. The change must differ from main.
 - If the change is new, write "Departs from: main — adds <X>".
 - If the change only restates what main does, do not ask. Act on main's behaviour.
 - The refusal names the miss. It may be: no Departs from line; no separator (an em dash, " - " or " -- ") between the two sides; an empty side; a placeholder side; or a change side that says no change. It names the word that says so.
@@ -84,7 +84,7 @@ Text: the miss from `departs_hit` in `hooks/question_form.py`, in the owner line
 
 Text: `MISTAKE_REASON`. Rule `building-mistake-names-its-guard` (a mistake names the guard that would have stopped it).
 
-- A mistake is a strong sign that a guard or check is missing. Name that guard in Deviations, in one of three ways:
+- Under rule `building-mistake-names-its-guard` (a mistake is strong evidence of a missing guard or check), name that guard in Deviations, in one of three ways:
   - `step:<slug>`, a roadmap step that will build it;
   - the word "debt" in Deviations;
   - a guard, check or hook, with a PR or commit reference, in the same sentence.
@@ -94,7 +94,7 @@ Text: `MISTAKE_REASON`. Rule `building-mistake-names-its-guard` (a mistake names
 
 Text: `OWNER_REFUSAL`. Owner ruling, 2026-11-01 23:31 CST.
 
-- Send the question to the page writer in the same turn it is asked.
+- Under rule `questions-go-to-owner` (the waiting page), send the question to the page writer on the turn it is asked.
 - The route: `send_message` to the page writer by its session id. The refusal names the writer's id when it is known. If the writer is unknown, the refusal names the waiting page: read it with `ArtifactData` get, then `send_message` the question to its writer.
 - In a repo with no waiting page, this check does not refuse. The question box counts instead.
 
