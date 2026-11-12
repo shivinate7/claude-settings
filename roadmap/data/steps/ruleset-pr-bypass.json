@@ -1,12 +1,13 @@
 {
   "id": "ruleset-pr-bypass",
   "title": "Main is protected by one shared GitHub ruleset with a PR-only admin bypass",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
   "blockedBy": [],
   "why": "Batch 81's run broke on GitHub's side (startup_failure, stuck 2 h 15 min), and classic protection left the owner no clean way to merge it.",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "source": "Owner 16:42 CST Nov 11 (interest, not a grant); coordinator 16:43 CST; page item 517",
-  "note": "Owner 16:42 CST Nov 11: \"id be pretty open to adding a ruleset\" (interest, not a grant). Shared form: PR required; only all-jobs-passed required; 0 approvals; not strict; no linear history; no signed commits; bypass list = repository admin role in \"pull requests only\" mode, so the owner can merge a PR whose run GitHub broke while direct pushes stay blocked. Shared across repos, so it is a claude-settings decision (the shared-form record) plus the cloud-refused act the Oct 30 standing grant covers for branch protection; a grant that names rulesets is still owed. Page item 517 (one-check-ruleset, retrospective 16:42 CST) asks whether to move every repo to a ruleset in the child-repo sweep or reset the drifted repo now. Held for the fan-out (owner 13:51); the owner question at the fan-out: adopt yes/no. Owner 16:43 CST \"r\": rulesets everywhere, in the child-repo sweep. The PR-only admin bypass is not in that grant; it still needs the owner's yes at the fan-out.",
-  "updatedAt": "2026-11-11T16:47:00-06:00"
+  "note": "Owner 16:42 CST Nov 11: \"id be pretty open to adding a ruleset\" (interest, not a grant). Shared form: PR required; only all-jobs-passed required; 0 approvals; not strict; no linear history; no signed commits; bypass list = repository admin role in \"pull requests only\" mode, so the owner can merge a PR whose run GitHub broke while direct pushes stay blocked. Shared across repos, so it is a claude-settings decision (the shared-form record) plus the cloud-refused act the Oct 30 standing grant covers for branch protection; a grant that names rulesets is still owed. Page item 517 (one-check-ruleset, retrospective 16:42 CST) asks whether to move every repo to a ruleset in the child-repo sweep or reset the drifted repo now. Held for the fan-out (owner 13:51); the owner question at the fan-out: adopt yes/no. Owner 16:43 CST \"r\": rulesets everywhere, in the child-repo sweep. The PR-only admin bypass is not in that grant; it still needs the owner's yes at the fan-out. Lane prose-unmapped-5 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "lane": "session_013NEJL3y5kzHLeSuCU1GriT"
 }

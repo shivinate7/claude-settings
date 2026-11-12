@@ -1,14 +1,14 @@
 {
  "id": "spend-log-per-batch",
  "title": "The batch runner logs each session's spend at each batch merge",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL3FP12ztogsV6d7q6J",
  "why": "Owner 11:55 CST Nov 11: \"spend should also be logged if literally free to do so since it gives us more data about how we do things\".",
- "note": "Plan 3.15 (0d3a757): at each batch merge the batch runner reads get_session cost for each session and writes one line per session to the record branch. Readers: R33's evaluation (step model-table-one-home) and R34's spend row (step owner-health-tab). Cost: one get_session read per session per batch merge, no new process; state it in the record.",
+ "note": "Plan 3.15 (0d3a757): at each batch merge the batch runner reads get_session cost for each session and writes one line per session to the record branch. Readers: R33's evaluation (step model-table-one-home) and R34's spend row (step owner-health-tab). Cost: one get_session read per session per batch merge, no new process; state it in the record. Lane prose-unmapped-6 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
  "source": "owner 2026-11-11 11:55 CST, relayed by the retrospective session",
  "owner": "triage",
- "updatedAt": "2026-11-11T11:58:00-06:00",
+ "updatedAt": "2026-11-12T07:29:00-06:00",
  "blockedBy": []
 }

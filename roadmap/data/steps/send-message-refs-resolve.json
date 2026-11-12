@@ -1,11 +1,11 @@
 {
   "title": "A message to another session that names a commit, record or PR that does not exist is caught",
   "why": "Lane notes-fix-large-1 sent runner 8 a record link it typed before the post returned, so the link pointed at nothing; it corrected it with a second message (coordinator, 02:12 CST Nov 8). Step agent-report-shas-resolve covers an agent's hand-back only, not send_message (that lane, 02:15 CST).",
-  "note": "Fix: the commit-hash part may reuse agent-report-shas-resolve's function as a second caller on mcp__claude-code-remote__send_message, with a rule for which repo a hash resolves against (lanes often send hashes from another repo, so the sender's cwd alone gives false alarms). A record link or PR number needs a GitHub read in a PreToolUse hook, a network call on every send: state that cost, or check only the commit-hash part. Red case first: a message with a made-up hash. Built as a follow-up from #1842's head, stacked with Merge after: #1842, together with Fix lines for the four report-sha-* notes, in lane session_013NEJL1333yS5ziKFeWsjHC (coordinator, 02:30 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Slug from lane agent-report-shas-resolve (session_013NEJL1333yS5ziKFeWsjHC). Filed 02:16 CST Nov 8. Ready as #1864 (264ee5c9f), with runner 8, Merge after: #1842 (lane, 03:47 CST Nov 8). Round 3 PASS, net value positive. Of the four report-sha notes, three are fixed; report-sha-quoted-forms-pass carries Fix: none until 2026-11-21. New notes in the PR: report-sha-url-word-slow and report-sha-link-text-pass.",
+  "note": "Fix: the commit-hash part may reuse agent-report-shas-resolve's function as a second caller on mcp__claude-code-remote__send_message, with a rule for which repo a hash resolves against (lanes often send hashes from another repo, so the sender's cwd alone gives false alarms). A record link or PR number needs a GitHub read in a PreToolUse hook, a network call on every send: state that cost, or check only the commit-hash part. Red case first: a message with a made-up hash. Built as a follow-up from #1842's head, stacked with Merge after: #1842, together with Fix lines for the four report-sha-* notes, in lane session_013NEJL1333yS5ziKFeWsjHC (coordinator, 02:30 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Slug from lane agent-report-shas-resolve (session_013NEJL1333yS5ziKFeWsjHC). Filed 02:16 CST Nov 8. Ready as #1864 (264ee5c9f), with runner 8, Merge after: #1842 (lane, 03:47 CST Nov 8). Round 3 PASS, net value positive. Of the four report-sha notes, three are fixed; report-sha-quoted-forms-pass carries Fix: none until 2026-11-21. New notes in the PR: report-sha-url-word-slow and report-sha-link-text-pass. Lane prose-unmapped-5 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 567,
   "owner": "triage",
-  "lane": "session_013NEJL1333yS5ziKFeWsjHC",
-  "updatedAt": "2026-11-08T03:48:00-06:00"
+  "lane": "session_013NEJL3y5kzHLeSuCU1GriT",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

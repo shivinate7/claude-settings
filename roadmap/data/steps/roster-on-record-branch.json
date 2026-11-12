@@ -1,8 +1,11 @@
 {
   "id": "roster-on-record-branch",
   "title": "The roster lives on the record branch, and no item stores a session id",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
   "why": "R22, owner 19:19 CST Nov 10: \"its moreso that a session ended coordinwtor and all and a new coordinator and sessions respawned and somehow no one rewrote the session ids to now be the new ones\". Cause read on main: skill project-ops keeps the roster in the claude.ai project instructions (\"so keep no second copy in the repo\"), which no session can write, so ids were copied into page items and rotted. Form: (1) the roster moves to the record branch, and triage writes it; (2) whoever starts a standing session or lane sends triage the new id in the same turn; (3) items, briefs and handoffs name a lane slug or role, never a session id (git-slug-then-claim-number); the wake path reads the id from the roster when it sends, and a guard refuses a page write that stores a session id; (4) fits R18 point 2. Homes: skill project-ops, skill waiting-page.",
-  "source": "retrospective session relay 19:21 CST Nov 10 (R22); plan stage 4, commit b6d80c4"
+  "source": "retrospective session relay 19:21 CST Nov 10 (R22); plan stage 4, commit b6d80c4",
+  "lane": "session_013NEJL3y5kzHLeSuCU1GriT",
+  "note": " Lane prose-unmapped-5 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

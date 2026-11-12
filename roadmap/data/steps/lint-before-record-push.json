@@ -1,11 +1,11 @@
 {
   "title": "A push of Markdown that fails the STE lint is refused",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 269.2,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL2HQGCzNZ1CFKb15Lr",
   "why": "Lane replay-profile-parts pushed four notes over the STE sentence limit to #1653 (coordinator, 17:33 CST Nov 7). The gap showed only in CI.",
-  "note": "Related: step lane-lint-runs-local-tools (#1461). Done check: a red test where a push of failing Markdown is refused, and a push with no Markdown change starts nothing. Owner pick a on page item 377 (ste-lint-at-push), 19:03 CST Nov 7: allow the push-time lint. Second incident (Degen, via the owner's ask ask-mw79tt4bwr, 21:26 CST Nov 7): a 32-word sentence in debt archiver-start-no-join reached Degen batch 14, and the batch runner had to split it. The owner's text names the check `make lint-ste` on changed *.md records; this step's lint covers it. #1898 failed round 3 with negative net value (F3: after a heredoc commit message the guard reads the push folder as empty). Held on page item 413 (held-1898-push-target), coordinator 06:08 CST Nov 8. Owner item 413 a (06:11 CST Nov 8): this lane starts a fix lane for F3 at round 1, try 1, red first on a push after a heredoc commit message (push_target finds the segment in the caller's split_segments). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzXyKNARtJsbz3Q1R2.md on archive/session-handoffs-2026-11-10).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "note": "Related: step lane-lint-runs-local-tools (#1461). Done check: a red test where a push of failing Markdown is refused, and a push with no Markdown change starts nothing. Owner pick a on page item 377 (ste-lint-at-push), 19:03 CST Nov 7: allow the push-time lint. Second incident (Degen, via the owner's ask ask-mw79tt4bwr, 21:26 CST Nov 7): a 32-word sentence in debt archiver-start-no-join reached Degen batch 14, and the batch runner had to split it. The owner's text names the check `make lint-ste` on changed *.md records; this step's lint covers it. #1898 failed round 3 with negative net value (F3: after a heredoc commit message the guard reads the push folder as empty). Held on page item 413 (held-1898-push-target), coordinator 06:08 CST Nov 8. Owner item 413 a (06:11 CST Nov 8): this lane starts a fix lane for F3 at round 1, try 1, red first on a push after a heredoc commit message (push_target finds the segment in the caller's split_segments). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzXyKNARtJsbz3Q1R2.md on archive/session-handoffs-2026-11-10). Lane code-handoffs-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

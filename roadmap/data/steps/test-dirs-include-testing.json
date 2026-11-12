@@ -1,11 +1,11 @@
 {
   "title": "The test-author scope guard lets a test-author edit files under testing/",
   "why": "Guard test-author-scope's TEST_DIRS lacks testing/, so it refused a test-author edit to a test-only fixture, testing/shallow_clone.py (lane lane-lint-unshallow, PR #1831, head 715490c38, with runner 8; coordinator, 01:58 CST Nov 8).",
-  "note": "Fix: point TEST_DIRS at the constant the code uses for test folders, not a copy (rule building-allow-list-is-the-constant), so testing/ is covered. Red case first: a test-author Write to testing/shallow_clone.py is refused on today's guard; control: a test-author Write to product code stays refused. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:59 CST Nov 8. Lane session_013NEJKyqF79t9UigCgm3qjb started it (coordinator, 02:00 CST Nov 8). Ready as #1858 (0fce53ade), with runner 8 (lane, 03:22 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1858 on branch test-dirs-include-testing (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKyqF79t9UigCgm3qjb).",
+  "note": "Fix: point TEST_DIRS at the constant the code uses for test folders, not a copy (rule building-allow-list-is-the-constant), so testing/ is covered. Red case first: a test-author Write to testing/shallow_clone.py is refused on today's guard; control: a test-author Write to product code stays refused. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:59 CST Nov 8. Lane session_013NEJKyqF79t9UigCgm3qjb started it (coordinator, 02:00 CST Nov 8). Ready as #1858 (0fce53ade), with runner 8 (lane, 03:22 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1858 on branch test-dirs-include-testing (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKyqF79t9UigCgm3qjb). Lane code-shallow-clone started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 564,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "lane": "session_013NEJL3uSio3fK4jkC5LHyx",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

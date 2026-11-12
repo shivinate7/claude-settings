@@ -1,11 +1,11 @@
 {
   "title": "The export secret scan closes two named limits: a value whose first digit sits past 256 characters, and a secret-named key whose first value is a 'none' decoy",
   "why": "Two pasted secret forms pass the export scan today, and a found gap gets a fix (owner, 13:20 CST Nov 7).",
-  "note": "From #2139's review record 6737386649 (reviewer sonnet), via lane notes-fix-page, 04:09 CST Nov 9. (1) skills/waiting-page/export_page.py:105-107: a random value whose first digit sits past 256 characters passes. (2) export_page.py:~118-135: a secret-named key set to 'none' and then to a real word passes; it is documented as a limit. The same file is under change in #2372 (step export-scan-key-false-alarms, parked on page item 456), so build on the branch the owner's answer leaves. Lane notes-fix-page, session_013NEJKzjkypcToggneCjJN8. Fold (12:21 CST Nov 10, outbox sweep, owner pick 493 a): degen main docs/debts/waiting-scan-kept-rule-gaps.md (404f7ee): the key-name print in plain_key (export_page.py:391) is a third named limit. Banchi main docs/debts/114-waiting-scan-misses.md (78398f4): secret-name and no-digit shapes; lower-case '123 main street' passes on purpose (export_page.py:190), so that part needs an owner ruling before any change.",
+  "note": "From #2139's review record 6737386649 (reviewer sonnet), via lane notes-fix-page, 04:09 CST Nov 9. (1) skills/waiting-page/export_page.py:105-107: a random value whose first digit sits past 256 characters passes. (2) export_page.py:~118-135: a secret-named key set to 'none' and then to a real word passes; it is documented as a limit. The same file is under change in #2372 (step export-scan-key-false-alarms, parked on page item 456), so build on the branch the owner's answer leaves. Lane notes-fix-page, session_013NEJKzjkypcToggneCjJN8. Fold (12:21 CST Nov 10, outbox sweep, owner pick 493 a): degen main docs/debts/waiting-scan-kept-rule-gaps.md (404f7ee): the key-name print in plain_key (export_page.py:391) is a third named limit. Banchi main docs/debts/114-waiting-scan-misses.md (78398f4): secret-name and no-digit shapes; lower-case '123 main street' passes on purpose (export_page.py:190), so that part needs an owner ruling before any change. Lane prose-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived, handoff at handoffs/session_013NEJKzjkypcToggneCjJN8.md on archive/session-handoffs-2026-11-10",
-  "status": "todo",
+  "lane": "session_013NEJL1s4J4rQVVz1kBBJfh",
+  "status": "doing",
   "order": 894,
-  "updatedAt": "2026-11-10T12:21:00-06:00"
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

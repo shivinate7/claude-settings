@@ -1,11 +1,11 @@
 {
   "title": "A page task's route cite must name a route row that covers its act",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 265.3,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL3VvsFr2K1WX9t5ch3",
   "why": "Coordinator pick, 15:12 CST; ruling home decision claims-carry-backing.",
-  "note": "Stacks on lane task-names-check-line-not-truth (rule task-why-cited). Topic report-guard. Red test first. Kept doing on: #1573 open draft (why-cite-matches-act-final) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL27ELEZB4SAw7gHmkq).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "note": "Stacks on lane task-names-check-line-not-truth (rule task-why-cited). Topic report-guard. Red test first. Kept doing on: #1573 open draft (why-cite-matches-act-final) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL27ELEZB4SAw7gHmkq). Lane code-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

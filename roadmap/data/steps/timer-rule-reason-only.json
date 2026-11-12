@@ -1,15 +1,15 @@
 {
   "id": "timer-rule-reason-only",
   "title": "Rule outcomes-mechanize-rules allows a timer whose record shows it pays",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
-  "lane": null,
+  "lane": "session_013NEJKytqADrBxakyssFEPg",
   "blockedBy": [],
   "why": "An owner ruling in the restart plan has no step, so its prose change would be lost at the archive.",
   "owner": "triage",
   "phase": "next",
   "source": "Keep-warm part 1, owner 13:22 CST Nov 11, \"A on keeping sessions warm too\"; plan restart-plan 2c8af8f; retrospective 20:43 CST Nov 11",
-  "note": "Rule outcomes-mechanize-rules keeps its reason and drops the blanket \"never on a timer\"; a timer is allowed when its record shows it costs less than it saves. Prose wave (owner 20:24 CST Nov 11, item 521): prose, first wave.",
+  "note": "Rule outcomes-mechanize-rules keeps its reason and drops the blanket \"never on a timer\"; a timer is allowed when its record shows it costs less than it saves. Prose wave (owner 20:24 CST Nov 11, item 521): prose, first wave. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "order": 0.123,
-  "updatedAt": "2026-11-11T22:50:00-06:00"
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

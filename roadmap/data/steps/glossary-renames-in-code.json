@@ -1,12 +1,12 @@
 {
   "title": "Rename the glossary terms in code, guards, tests and tools (fix verifier, review log, feedback log, the Round N marker, the tier tags, the merge path for a lone lane)",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 1020,
   "owner": "triage",
   "why": "Owner glossary rulings, 2026-11-10: one name per thing, local and cloud alike.",
-  "note": "Glossary ruling G4 (owner 14:29-14:33 CST Nov 10) renames fix check, review record and inbox; the records in #2566 mark the renames in code not built. Pinned today: check_agent_models.py keys on the 'lane session' row; test_scaffold pins '## Session tiers' and 'before any lane session'; cs-build:<tier> tags; hook text; roadmap build.py text. After #2566 merges. Retirement candidate: \"orchestrator\" enters the spawner row's Not cell only once the anchor rename question has an answer (anchor parallelism-own-lane-orchestrator; coordinator pick b, 15:28 CST Nov 10).",
-  "updatedAt": "2026-11-10T15:30:00-06:00",
-  "lane": "",
+  "note": "Glossary ruling G4 (owner 14:29-14:33 CST Nov 10) renames fix check, review record and inbox; the records in #2566 mark the renames in code not built. Pinned today: check_agent_models.py keys on the 'lane session' row; test_scaffold pins '## Session tiers' and 'before any lane session'; cs-build:<tier> tags; hook text; roadmap build.py text. After #2566 merges. Retirement candidate: \"orchestrator\" enters the spawner row's Not cell only once the anchor rename question has an answer (anchor parallelism-own-lane-orchestrator; coordinator pick b, 15:28 CST Nov 10). Lane code-glossary started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "lane": "session_013NEJL13wd99euUZKoCfuAV",
   "blockedBy": []
 }

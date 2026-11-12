@@ -1,13 +1,13 @@
 {
   "id": "brief-write-needs-writer",
   "title": "A brief that asks a read-only agent to write a file is refused",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
-  "lane": null,
+  "lane": "session_013NEJL1SnHytvPFQsRypupi",
   "blockedBy": [],
   "why": "An Explore agent briefed to write a file has no Write tool, so it wrote a scratch file by shell redirect instead.",
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "source": "Retrospective 20:41 CST Nov 11 (its own mistake in the prose-wave audit)",
-  "note": "Ask: agent_brief.py refuses a brief that asks a read-only agent type (Explore, Plan, refuter, reviewer, design-reviewer) to write or save a file. A test goes red on today's code with an Explore brief that says to write a file. Waits for the fan-out (owner 13:51).",
-  "updatedAt": "2026-11-11T20:43:00-06:00"
+  "note": "Ask: agent_brief.py refuses a brief that asks a read-only agent type (Explore, Plan, refuter, reviewer, design-reviewer) to write or save a file. A test goes red on today's code with an Explore brief that says to write a file. Waits for the fan-out (owner 13:51). Lane code-agents started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

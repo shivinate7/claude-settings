@@ -1,10 +1,11 @@
 {
   "title": "The guard and sim-lease read machine load from one shared definition",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 103.394,
   "why": "Owner page answer.",
-  "note": "Owner picked a on item 304 (15:24 CST Nov 6), against the recommended b: one shared load definition. Plan align-watchers Q6. The guard reads memory and disk; sim-lease reads vm.loadavg.",
+  "note": "Owner picked a on item 304 (15:24 CST Nov 6), against the recommended b: one shared load definition. Plan align-watchers Q6. The guard reads memory and disk; sim-lease reads vm.loadavg. Lane code-guard-3 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "owner": "coordinator",
-  "updatedAt": "2026-11-06T21:31:00Z"
+  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "lane": "session_013NEJL2m6PvqQJRsGM69scD"
 }

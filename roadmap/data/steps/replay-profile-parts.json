@@ -2,10 +2,10 @@
   "title": "Each one-install replay profile has parts, so a failed install claims only its own defects",
   "order": 270.2,
   "why": "Lane notes-fix-large-1, 15:22 CST (coordinator ask): under decision mutation-ci-report-and-replay, a failed install of a one-install replay profile claims every defect, not only its own. Closes debt known-defects-install-exposed, which lands with PR #1453.",
-  "note": "Give each profile (joyous, q_max, mailaudit, degen) parts with code and tests regexes. Unowned until the coordinator starts it. Pick taken in lane replay-profile-parts (coordinator, 15:54 CST): on a failed install, every defect runs. A load-attempt hook (a Python meta-path finder and a Node resolve hook) turns a defect UNKNOWN when its catcher tried to load a missing package. This replaces the static parts for each repo. The hook is built first. Built as the load hook (pick A); the static regex parts are gone. #1654 passed review and is with runner 8 (lane, 17:30 CST). #1799 replaces #1453; #1453 closes when #1799 merges (coordinator, 00:29 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1654 on branch replay-profile-parts (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKza5KBoiFbNuiDDxQn.md on archive/session-handoffs-2026-11-10).",
+  "note": "Give each profile (joyous, q_max, mailaudit, degen) parts with code and tests regexes. Unowned until the coordinator starts it. Pick taken in lane replay-profile-parts (coordinator, 15:54 CST): on a failed install, every defect runs. A load-attempt hook (a Python meta-path finder and a Node resolve hook) turns a defect UNKNOWN when its catcher tried to load a missing package. This replaces the static parts for each repo. The hook is built first. Built as the load hook (pick A); the static regex parts are gone. #1654 passed review and is with runner 8 (lane, 17:30 CST). #1799 replaces #1453; #1453 closes when #1799 merges (coordinator, 00:29 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1654 on branch replay-profile-parts (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKza5KBoiFbNuiDDxQn.md on archive/session-handoffs-2026-11-10). Lane code-handoffs-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "owner": "coordinator",
   "phase": "now",
-  "status": "ready",
-  "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "status": "doing",
+  "lane": "session_013NEJL2HQGCzNZ1CFKb15Lr",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

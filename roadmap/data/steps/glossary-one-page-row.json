@@ -1,12 +1,12 @@
 {
   "title": "One glossary row for the repo's one page: the waiting items and the Status tab (the roadmap)",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 1030,
   "owner": "triage",
   "why": "Owner 15:52 CST Nov 10 (G14, relayed by the retrospective session): \"when i say triage artifact i meant both given that they've merged into one (and if you thought otherwise that's a prose fault that needs correcting)\".",
-  "note": "skills/roadmap/SKILL.md:6 already says a repo has one page, the waiting page, whose Status tab shows the plan; GLOSSARY.md rows triage and page writer say only \"waiting page\", and the roadmap skill's trigger words still say \"roadmap page\". Fix: one glossary row, page (also \"triage artifact\"); retire \"roadmap page\" as a term; reword the roadmap skill's trigger words to \"Status tab\". Home: GLOSSARY.md and decision questions-go-to-owner. Docs-only. Not folded into #2566, which passed its last round; starts after #2566 lands (same file).",
-  "updatedAt": "2026-11-10T15:53:00-06:00",
-  "lane": "",
+  "note": "skills/roadmap/SKILL.md:6 already says a repo has one page, the waiting page, whose Status tab shows the plan; GLOSSARY.md rows triage and page writer say only \"waiting page\", and the roadmap skill's trigger words still say \"roadmap page\". Fix: one glossary row, page (also \"triage artifact\"); retire \"roadmap page\" as a term; reword the roadmap skill's trigger words to \"Status tab\". Home: GLOSSARY.md and decision questions-go-to-owner. Docs-only. Not folded into #2566, which passed its last round; starts after #2566 lands (same file). Lane prose-claude-1 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "lane": "session_013NEJKyjpRKEfQatYAcyFVU",
   "blockedBy": []
 }

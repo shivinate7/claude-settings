@@ -1,10 +1,11 @@
 {
   "title": "The model table lists local_time's model call",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 103.384,
   "why": "Watchers plan align-watchers: one rule for watches, wakes, sweeps, reaps and logs.",
-  "note": "Coordinator 14:56 CST, from lane watchers-one-rule (PR #1349), plan docs/plans/align-watchers.md on that branch. local_time and decision_watch.run call a model, and item 248 does not cover them. Add a local_time row to the model table, so the hook catalog shows its model call. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes.",
+  "note": "Coordinator 14:56 CST, from lane watchers-one-rule (PR #1349), plan docs/plans/align-watchers.md on that branch. local_time and decision_watch.run call a model, and item 248 does not cover them. Add a local_time row to the model table, so the hook catalog shows its model call. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes. Lane prose-debts started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "owner": "coordinator",
-  "updatedAt": "2026-11-11T20:42:00-06:00"
+  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "lane": "session_013NEJL2sLSUxXeyk4U7PB2x"
 }

@@ -1,11 +1,11 @@
 {
   "title": "A coordinator's handoff lists every item in its session that waits on the owner, and a check refuses a handoff without that list",
   "why": "Owner ask ask-mw864dcumn, 12:30 CST Nov 8: \"coordinators should be required to keep in their handoff memory all the items that are waiting on me on the specific session like always allows or allow once etc\". Answered by the coordinator in thread 56da503a, 12:31 CST. A permission prompt or a typed-grant wait lives only in that session, so a compaction or rotation can drop it.",
-  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL1h7mKMtSVohetjaW1.md on archive/session-handoffs-2026-11-10).",
+  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL1h7mKMtSVohetjaW1.md on archive/session-handoffs-2026-11-10). Lane code-handoffs-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "ready",
+  "lane": "session_013NEJL2HQGCzNZ1CFKb15Lr",
+  "status": "doing",
   "order": 786,
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

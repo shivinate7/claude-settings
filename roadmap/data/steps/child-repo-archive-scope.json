@@ -1,11 +1,11 @@
 {
   "title": "An archive refused because the lane's repo is out of this session's scope names the cause and routes the archive",
   "why": "Runner 8 tried to archive q_max lane qmax-ready-checks (session_013NEJL1ChDQeJzQB5aNH3hn). Guard lane-closes-after-records refused, verbatim: \"the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its records have landed. Retry once gh answers.\" Likely cause, unmeasured: q_max is not in runner 8's GitHub scope. Failing closed is right, but a retry can never pass (runner 8, 02:00 CST; coordinator, 02:00 CST Nov 8).",
-  "note": "Fix: when the repo is outside this session's scope, the refusal names that cause and routes the act to the runner that holds the repo, with no retry. Red case first: a fixture where the read is out of scope, and today's remedy says retry. Control: a transient read failure in scope still says retry. Meanwhile runner 9 archives that lane (coordinator). Renamed from qmax-ready-checks, which misread the refusal as a ready-check one. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 02:22 CST, renamed 02:25 CST Nov 8. Lane session_013NEJKzJF4Kh97883YXFunk started it; it may stack on #1744, which touches the same archive guard (coordinator, 02:01 CST Nov 8). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzJF4Kh97883YXFunk).",
+  "note": "Fix: when the repo is outside this session's scope, the refusal names that cause and routes the act to the runner that holds the repo, with no retry. Red case first: a fixture where the read is out of scope, and today's remedy says retry. Control: a transient read failure in scope still says retry. Meanwhile runner 9 archives that lane (coordinator). Renamed from qmax-ready-checks, which misread the refusal as a ready-check one. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 02:22 CST, renamed 02:25 CST Nov 8. Lane session_013NEJKzJF4Kh97883YXFunk started it; it may stack on #1744, which touches the same archive guard (coordinator, 02:01 CST Nov 8). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzJF4Kh97883YXFunk). Lane code-guard-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 570,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "lane": "session_013NEJL3e9j8esdUiNqEEpGG",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

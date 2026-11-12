@@ -1,14 +1,14 @@
 {
   "id": "decision-watch-finds-transcript",
   "title": "Decision watch finds the transcript by session id when the given path fails",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
-  "lane": "",
+  "lane": "session_013NEJKytqADrBxakyssFEPg",
   "why": "A wrong transcript path makes decision watch read nothing, with no sign.",
-  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 1). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. Decision watch finds the transcript by session id when the given path fails, names the path in its UNKNOWN once per session, and shows the silent no-transcript case once. Red cases: Windows backslash, drive letter, ~, Git Bash /c/, a second config dir, a long folder name.",
+  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 1). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. Decision watch finds the transcript by session id when the given path fails, names the path in its UNKNOWN once per session, and shows the silent no-transcript case once. Red cases: Windows backslash, drive letter, ~, Git Bash /c/, a second config dir, a long folder name. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-11T13:39:00-06:00",
+  "updatedAt": "2026-11-12T07:29:00-06:00",
   "blockedBy": []
 }

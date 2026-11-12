@@ -4,14 +4,14 @@
   "status": "doing",
   "order": 103.3625,
   "why": "Owner ask ask-mw5ax2zb2j: improve the page as it grew.",
-  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): M. Generate it from itemFields and the guard rules. The 8-second Undo is stated 3 times, and \"the guard cannot see the stored field\" 5 times. Built in #1441 (head 3dc4ed5c4), with runner 8 to merge (coordinator, 14:10 CST Nov 7). Doing 05:58 CST Nov 10: open PR #1441 on branch skill-text-once (triage live build). Lane report (coordinator 23:11 CST Nov 11): its work is PR #1441 (code), which re-points onto #2619 after the guard test split. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Not closed by #2619 (triage, read origin/main 07:22 CST Nov 12): skills/waiting-page/SKILL.md still states \"the guard cannot see the stored field(s)\" 5 times (lines 100, 104, 124, 305, 309) and the 8-second Undo 3 times (183, 207, 347), and no generated field and guard table exists. Still open; #1441 is its PR.",
-  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): M. Generate it from itemFields and the guard rules. The 8-second Undo is stated 3 times, and \"the guard cannot see the stored field\" 5 times. Built in #1441 (head 3dc4ed5c4), with runner 8 to merge (coordinator, 14:10 CST Nov 7). Doing 05:58 CST Nov 10: open PR #1441 on branch skill-text-once (triage live build). Lane report (coordinator 23:11 CST Nov 11): its work is PR #1441 (code), which re-points onto #2619 after the guard test split. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Not closed by #2619 (triage, read origin/main 07:22 CST Nov 12): skills/waiting-page/SKILL.md still states \"the guard cannot see the stored field(s)\" 5 times (lines 100, 104, 124, 305, 309) and the 8-second Undo 3 times (183, 207, 347), and no generated field and guard table exists. Still open; #1441 is its PR. New lane started 07:29 CST Nov 12 (coordinator).",
+  "updatedAt": "2026-11-12T07:29:00-06:00",
   "paused": {
     "why": "Waits on step page-reply-uncollapse to merge.",
     "decides": "coordinator",
     "at": "2026-11-06T14:39:00-06:00",
     "by": "triage"
   },
-  "lane": "session_013NEJKzJG4GXQ3nzaHE94Ks",
+  "lane": "session_013NEJL2cbvRxLrmWTS8u1gF",
   "blockedBy": []
 }

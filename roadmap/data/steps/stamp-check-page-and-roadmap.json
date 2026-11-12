@@ -1,11 +1,11 @@
 {
   "title": "The time-stamp check also covers page item and roadmap step writes",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 0.17,
   "owner": "coordinator",
   "why": "Triage 6 stamped page item 364 at 14:16 CST while the clock read 14:14 CST. #1447 checks send_message bodies only.",
-  "note": "Stacked on #1447. Coordinator pick, 14:48 CST (#1447): the stamp guard refuses only a stamp more than 1 minute AHEAD of the clock, not one 3 min off either way. Every incident today ran ahead (2, 8-25 min); a kept old value is always behind, and the symmetric rule both missed the 2-min incident and refused kept old values. Measured by lane pr-state-is-on-the-pr from queue times (coordinator, 15:10 CST): the coordinator's message labels ran 16-23 min ahead of the clock before about 14:30 CST. Roadmap and page text that cites a coordinator time before 14:30 CST may be that far ahead; the delivery time is the true one. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was message-time-matches-clock).",
-  "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "note": "Stacked on #1447. Coordinator pick, 14:48 CST (#1447): the stamp guard refuses only a stamp more than 1 minute AHEAD of the clock, not one 3 min off either way. Every incident today ran ahead (2, 8-25 min); a kept old value is always behind, and the symmetric rule both missed the 2-min incident and refused kept old values. Measured by lane pr-state-is-on-the-pr from queue times (coordinator, 15:10 CST): the coordinator's message labels ran 16-23 min ahead of the clock before about 14:30 CST. Roadmap and page text that cites a coordinator time before 14:30 CST may be that far ahead; the delivery time is the true one. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was message-time-matches-clock). Lane code-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "lane": "session_013NEJL3preQpR1zdQ3z1WR8",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

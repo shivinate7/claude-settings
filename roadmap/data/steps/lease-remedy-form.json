@@ -1,11 +1,11 @@
 {
   "title": "The force-push guard's remedy names the lease form that passes: `--force-with-lease=<ref>:<sha>`",
   "why": "The force-push guard refused `git push --force-with-lease origin other-checkout-cp-own`; its remedy named `--force-with-lease --force-if-includes`, and Claude Code's auto-mode classifier then denied that form (\"[Git Destructive]\"), so the lane fell back to a new branch name (lane other-checkout-cp-own, 03:16 CST; coordinator, 03:15 CST Nov 8). Runner 9's `--force-with-lease=<branch>:<sha>` passed with no ask at 01:16 CST, the form decision stale-safe-force-push allows alone.",
-  "note": "Fix: the remedy names `--force-with-lease=<ref>:<sha>` with the sha read from the remote-tracking ref, and decision stale-safe-force-push's remedy sentence says the same. Prove the named form passes the guard (red: today's remedy text; green: the new one, and the named command allowed). The classifier part is the owner's settings and is not asked here; step lease-push-c-and-d (#1429, auto mode lets a lease push to a lane's own branch) holds that and is not the home of this remedy text. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:20 CST Nov 8. Lane session_013NEJL43pWHtXmcY4uquu7S started it (coordinator, 03:16 CST Nov 8). Not done (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10): open PR #1872 carries it; its lane session has ended. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1872).",
+  "note": "Fix: the remedy names `--force-with-lease=<ref>:<sha>` with the sha read from the remote-tracking ref, and decision stale-safe-force-push's remedy sentence says the same. Prove the named form passes the guard (red: today's remedy text; green: the new one, and the named command allowed). The classifier part is the owner's settings and is not asked here; step lease-push-c-and-d (#1429, auto mode lets a lease push to a lane's own branch) holds that and is not the home of this remedy text. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:20 CST Nov 8. Lane session_013NEJL43pWHtXmcY4uquu7S started it (coordinator, 03:16 CST Nov 8). Not done (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10): open PR #1872 carries it; its lane session has ended. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1872). Lane code-guard-3 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 579,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "lane": "session_013NEJL2m6PvqQJRsGM69scD",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

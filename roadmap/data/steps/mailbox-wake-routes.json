@@ -1,12 +1,12 @@
 {
   "title": "Measure how a mailbox update wakes an idle session",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 987,
   "owner": "claude-settings",
-  "lane": "",
+  "lane": "session_013NEJL3KVZKNS952nwDExqY",
   "blockedBy": [],
   "why": "The mailbox is read only at turn start, so an idle session never sees a new message unless something wakes it.",
-  "note": "Owner ask, 09:33 CST Nov 10 (relayed by the session-messaging topic session, 09:35 CST): \"can't we figure out a system to trigger a wake with an update in the mailbox though?\" Three routes, none measured: (a) doorbell: mail send also sends a short send_message \"check your mail\" (works cloud to cloud; cloud to Mac was refused, elevated_session_untrusted_device); (b) each session has a long-lived PR in shivinate7/session-mailbox, each message is also a comment, and the receiver subscribes with subscribe_pr_activity; (c) a GitHub webhook to a session's watch_url (likely blocked: the signing secret is sealed to the artifact service). No wake route is known for the owner's local computer. Done check: one measured wake per route, or \"unmeasured\" with the reason. A measurement, not a build, so the freeze does not hold it; it needs a second session to comment, so ask the owner before starting one.",
-  "updatedAt": "2026-11-10T09:35:00-06:00"
+  "note": "Owner ask, 09:33 CST Nov 10 (relayed by the session-messaging topic session, 09:35 CST): \"can't we figure out a system to trigger a wake with an update in the mailbox though?\" Three routes, none measured: (a) doorbell: mail send also sends a short send_message \"check your mail\" (works cloud to cloud; cloud to Mac was refused, elevated_session_untrusted_device); (b) each session has a long-lived PR in shivinate7/session-mailbox, each message is also a comment, and the receiver subscribes with subscribe_pr_activity; (c) a GitHub webhook to a session's watch_url (likely blocked: the signing secret is sealed to the artifact service). No wake route is known for the owner's local computer. Done check: one measured wake per route, or \"unmeasured\" with the reason. A measurement, not a build, so the freeze does not hold it; it needs a second session to comment, so ask the owner before starting one. Lane prose-unmapped-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

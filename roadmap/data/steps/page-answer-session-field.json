@@ -1,11 +1,11 @@
 {
   "title": "Page answers carry a session field, and a session reads only its own",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 264.4,
   "owner": "coordinator",
   "why": "Owner, item 367, 15:01 CST: a. Lane notes-keep-reverify found at 14:48 CST that nothing guards which session reads a page answer: the waiting-page skill says only the owning session reads its items (near line 433), but no hook enforces it, and hooks/local_time.py page_note has no session filter.",
-  "note": "Add a session field to answers and filter on it. A page and skill change; step answers-write-guard (refuse a session's write to answers) is a different act. Red test first. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL3gbJkES3NR7ybj7YZ).",
-  "updatedAt": "2026-11-12T07:22:00-06:00",
-  "lane": ""
+  "note": "Add a session field to answers and filter on it. A page and skill change; step answers-write-guard (refuse a session's write to answers) is a different act. Red test first. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL3gbJkES3NR7ybj7YZ). Lane prose-guard-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "lane": "session_013NEJL2oJcHtLuXDdhHA7E8"
 }

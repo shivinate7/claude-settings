@@ -1,11 +1,11 @@
 {
   "title": "Lane lints in parallel finish under the 1200 s cap",
   "why": "More than about 3 lane lints at once hit the 1200 s cap (lane batch63-lint-b, coordinator 00:29 CST Nov 8). Steps merge-builds-batches and runner-repos-in-parallel do not cover it: they build batches and run repos in parallel, and set no lint concurrency.",
-  "note": "Fix: lane lint takes a slot from a small shared limit and waits for one, so a run's cap counts its own work, not the queue; red case first with four parallel lints. The count of about 3 is unmeasured. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 00:31 CST Nov 8. Lane session_013NEJKzstsLQzGsUXajpze5 started (coordinator, 00:31 CST Nov 8). The lane measures first and picks no guessed number. Built as PR #1843, head 5199ab5d2, with runner 8 and its review record. Measured on 4 CPUs (about 400 CPU-s per lint): 1, 2 or 4 lints at once take about 520-545 s each; 8 take 1034 s each and 3 of 8 FAIL falsely (hooks/test_install_src.sh caseF4/F6). The coordinator's \"about 3\" did not reproduce on a quiet container; the incident's extra load is unmeasured. Fix: one slot per CPU (lane, 02:35 CST Nov 8). Five review findings moved to step lint-slot-review-fixes. Doing 05:58 CST Nov 10: open PR #1843 on branch lane-lint-parallel-cap (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzstsLQzGsUXajpze5).",
+  "note": "Fix: lane lint takes a slot from a small shared limit and waits for one, so a run's cap counts its own work, not the queue; red case first with four parallel lints. The count of about 3 is unmeasured. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 00:31 CST Nov 8. Lane session_013NEJKzstsLQzGsUXajpze5 started (coordinator, 00:31 CST Nov 8). The lane measures first and picks no guessed number. Built as PR #1843, head 5199ab5d2, with runner 8 and its review record. Measured on 4 CPUs (about 400 CPU-s per lint): 1, 2 or 4 lints at once take about 520-545 s each; 8 take 1034 s each and 3 of 8 FAIL falsely (hooks/test_install_src.sh caseF4/F6). The coordinator's \"about 3\" did not reproduce on a quiet container; the incident's extra load is unmeasured. Fix: one slot per CPU (lane, 02:35 CST Nov 8). Five review findings moved to step lint-slot-review-fixes. Doing 05:58 CST Nov 10: open PR #1843 on branch lane-lint-parallel-cap (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzstsLQzGsUXajpze5). Lane code-guard-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 551,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "lane": "session_013NEJL3e9j8esdUiNqEEpGG",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

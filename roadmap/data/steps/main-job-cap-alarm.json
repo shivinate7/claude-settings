@@ -1,14 +1,14 @@
 {
  "id": "main-job-cap-alarm",
  "title": "A main CI job that ends at its time cap raises an alarm the same day",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL11UY3p6jnSXrTspmu",
  "why": "Main's push runs ended cancelled at checks-windows-guard's 20-minute cap 11 times from Nov 9 to Nov 11 and nothing said so; the owner had already asked to raise the limits (owner 11:53 CST Nov 11: \"i'd already told triage/coordinator to just raise the test limits ... pretty frusdtrating\").",
- "note": "Missing guard under R16 (plan f8b11c2, 3.2). The stopgap raise itself is lane windows-guard-cap-stopgap. A cancelled-at-cap job on main counts as red, never as passed or skipped; the alarm names the job, its cap and the run. Red case first: a fixture run with a job cancelled at its timeout-minutes must alarm. Cost to state in its record. Related: health map red 2 (step owner-health-tab), the blind spot \"timed-out job counted not red\".",
+ "note": "Missing guard under R16 (plan f8b11c2, 3.2). The stopgap raise itself is lane windows-guard-cap-stopgap. A cancelled-at-cap job on main counts as red, never as passed or skipped; the alarm names the job, its cap and the run. Red case first: a fixture run with a job cancelled at its timeout-minutes must alarm. Cost to state in its record. Related: health map red 2 (step owner-health-tab), the blind spot \"timed-out job counted not red\". Lane code-workflows started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
  "source": "owner 2026-11-11 11:53 CST, relayed by the retrospective session",
  "owner": "triage",
- "updatedAt": "2026-11-11T11:55:00-06:00",
+ "updatedAt": "2026-11-12T07:29:00-06:00",
  "blockedBy": []
 }

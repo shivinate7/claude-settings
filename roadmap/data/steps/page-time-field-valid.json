@@ -1,8 +1,11 @@
 {
   "id": "page-time-field-valid",
   "title": "Refuse a page or step write with a blank or non-ISO time",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
   "why": "On 2026-11-10 triage read the wrong columns from the clock tool and wrote about 190 blank times, then repaired them from commits. skills/waiting-page/SKILL.md:30 says read ISO times from now-central --iso, but nothing checks it. A guard refuses an ArtifactData write or a roadmap step write whose time field (added, replied, ruled, read, filed, answered, updatedAt) is blank or does not parse as ISO, with now-central --iso as the remedy. Extend it to send_message headers (retrospective session, 2026-11-10 18:51 CST, reversible pick): that session wrote a guessed time into a coordinator message twice (3 and 8 minutes ahead), and guard message-time-matches-clock refused both. The send path stamps the header from the clock, so a session never types a time.",
-  "source": "retrospective session 17:03 CST Nov 10 (R16, mistake names its guard); not an owner ruling"
+  "source": "retrospective session 17:03 CST Nov 10 (R16, mistake names its guard); not an owner ruling",
+  "lane": "session_013NEJL3preQpR1zdQ3z1WR8",
+  "note": " Lane code-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

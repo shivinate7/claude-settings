@@ -1,12 +1,12 @@
 {
   "title": "Count each of the six model-call hooks' fires over one week, then delete each that never fired",
   "phase": "build",
-  "status": "ready",
+  "status": "doing",
   "order": 968,
   "owner": null,
   "why": "Owner's answer b on page item 248 (Nov 6, 12:19 CST): measure how often each hook fires for a week, then delete the ones that never fire. What was built followed a misrouted note (option a): docs/plans/builtin-hook-survey.md (86da64a52) has an unmeasured \"Cost now\" column and no fire count.",
-  "note": "Read the counts on demand from logs that already exist (guard.log), with no new logging. guard.log lives on the owner's machines, so this needs a session on his computer. The six hooks: call_judge, prose_judge, reply_judge, feedback_guard, report_guard, sendmessage_state. Ruling (owner chat 11:26 CST Nov 10, relayed by the coordinator 11:31 CST): \"sessions like triage are not being archived right? so it can be doing work via agents in its session/lane -- i just said no new spawns at this time\". The freeze bars new sessions only; triage builds this step with agents in its own session (page item 492 closed). This note is the ruling's home until a decision holds it. Not built in triage: the counts come from guard.log on the owner's computers, which no cloud session reaches (list_computer_folders empty, 11:24 CST).",
-  "lane": null,
+  "note": "Read the counts on demand from logs that already exist (guard.log), with no new logging. guard.log lives on the owner's machines, so this needs a session on his computer. The six hooks: call_judge, prose_judge, reply_judge, feedback_guard, report_guard, sendmessage_state. Ruling (owner chat 11:26 CST Nov 10, relayed by the coordinator 11:31 CST): \"sessions like triage are not being archived right? so it can be doing work via agents in its session/lane -- i just said no new spawns at this time\". The freeze bars new sessions only; triage builds this step with agents in its own session (page item 492 closed). This note is the ruling's home until a decision holds it. Not built in triage: the counts come from guard.log on the owner's computers, which no cloud session reaches (list_computer_folders empty, 11:24 CST). Lane code-test-ci-standard started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "lane": "session_013NEJL1R8aeLu7cQycvnTQH",
   "blockedBy": [],
-  "updatedAt": "2026-11-10T11:28:00-06:00"
+  "updatedAt": "2026-11-12T07:29:00-06:00"
 }

@@ -1,12 +1,12 @@
 {
  "title": "A session's reply to a comment thread on the waiting page is refused, and the session rewrites the item instead",
- "status": "todo",
+ "status": "doing",
  "order": 984,
  "blockedBy": [],
  "why": "A rebuilt page drops its threads, so a thread reply is lost, and thread replies escape every reply-length and question-form check.",
- "note": "Incident: the coordinator's 09:10 CST Nov 10 reply in the page's answer thread 56da503a ran 11 lines. Ruling c164 (owner, Oct 28 02:44 CDT; decision questions-go-to-owner, 'Answer on the page, not in a comment thread') already bans a thread reply on the waiting page; step c164 is done and says the reply judge flags one, so that flag missed this reply or does not read ArtifactComments replies. Check that first. Filed in place of the coordinator's reply-size-hook and its page question (a 3-line cap on thread replies): the past-ruling guard refused that question as a re-ask of c164 ( CST). A guard's verdict changes, so a build lane. Folded into step page-wakes-and-relays point 4 (owner R18).",
- "updatedAt": "2026-11-10T17:04:00-06:00",
+ "note": "Incident: the coordinator's 09:10 CST Nov 10 reply in the page's answer thread 56da503a ran 11 lines. Ruling c164 (owner, Oct 28 02:44 CDT; decision questions-go-to-owner, 'Answer on the page, not in a comment thread') already bans a thread reply on the waiting page; step c164 is done and says the reply judge flags one, so that flag missed this reply or does not read ArtifactComments replies. Check that first. Filed in place of the coordinator's reply-size-hook and its page question (a 3-line cap on thread replies): the past-ruling guard refused that question as a re-ask of c164 ( CST). A guard's verdict changes, so a build lane. Folded into step page-wakes-and-relays point 4 (owner R18). Lane code-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+ "updatedAt": "2026-11-12T07:29:00-06:00",
  "owner": "claude-settings",
  "phase": "now",
- "lane": ""
+ "lane": "session_013NEJL3preQpR1zdQ3z1WR8"
 }
