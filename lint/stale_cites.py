@@ -551,6 +551,7 @@ def names_in(source):
 CLAUDE_HOME = "~/.claude/"
 FLAG_SPAN = re.compile(r"`([^`\n]+)`")
 LONG_FLAG = re.compile(r"--[A-Za-z][\w-]*")
+COMMAND_SEPARATORS = ("&&", "||", ";", "|", "&")
 SHELL_FLAG = re.compile(r"(?<![\w-])--[A-Za-z][\w-]*")
 SHELL_SCRIPT = re.compile(r"\.sh\Z")
 
@@ -1467,19 +1468,27 @@ class FlagReader:
             return []
         messages = []
         for span in FLAG_SPAN.finditer(text):
-            tokens = span.group(1).split()
-            for token in tokens:
-                script = state.script(token)
-                for flag_token in tokens if script else ():
-                    flag = LONG_FLAG.match(flag_token)
-                    if flag and flag.group(0) in state.removed.get(script, ()):
-                        message = "%s no longer takes %s at head; fix the cite" % (script, flag.group(0))
-                    elif flag and flag.group(0) in state.unread.get(script, ()):
-                        message = UnknownText("%s names %s at head in a form this check does not read" % (script, flag.group(0)))
-                    else:
-                        continue
-                    if message not in messages:
-                        messages.append(message)
+            script = None  # the nearest script token before the current one, up to a separator
+            for token in span.group(1).split():
+                if token in COMMAND_SEPARATORS:
+                    script = None
+                    continue
+                ends = token.endswith(";")
+                token = token.rstrip(";")
+                script = state.script(token) or script
+                flag = LONG_FLAG.match(token)
+                if ends:
+                    script = None
+                if not (script and flag):
+                    continue
+                if flag.group(0) in state.removed.get(script, ()):
+                    message = "%s no longer takes %s at head; fix the cite" % (script, flag.group(0))
+                elif flag.group(0) in state.unread.get(script, ()):
+                    message = UnknownText("%s names %s at head in a form this check does not read" % (script, flag.group(0)))
+                else:
+                    continue
+                if message not in messages:
+                    messages.append(message)
         return messages
 
 
