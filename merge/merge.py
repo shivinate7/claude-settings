@@ -4496,17 +4496,24 @@ def freeze_rewrite(body, block, lines):
     old = body.split("\n")
     return "\n".join(old[:block["at"][0]] + lines + old[block["at"][1] + 1:])
 
+def deepen_shallow(root, what):
+    """Fetch the history of a shallow clone in full, once, and say so. -> True when it did, False when the clone is not shallow. A failed fetch is a Stop
+    naming `what` it could not read. The one home of the deepen: `holds` and `commits_outside` call it."""
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    if git_reads.is_shallow(root) is not True:
+        return False
+    # Host.holds_head would read this without changing the clone, but the test host has no such read, so the clone is deepened and the run says so.
+    say("merge: the clone is shallow; its history is fetched in full once (git fetch --unshallow), so the clone is no longer shallow.")
+    c, out = git(root, "fetch", "-q", "--unshallow", "origin")
+    if c:
+        raise Stop(f"cannot read {what}: the clone is shallow and `git fetch --unshallow` failed: {out} {FREEZE_CITE}")
+    return True
+
 def holds(root, head, ref):
     """True when `ref` holds commit `head`. A shallow clone cuts the history, so its plain non-ancestor reads unknown: the history is fetched in full once
     and the read repeated, and only a complete clone says False. Any other unreadable answer is a Stop: it is never read as a lane missing."""
-    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
     got = ancestor(root, head, ref)
-    if got is None and git_reads.is_shallow(root) is True:
-        # Host.holds_head would read this without changing the clone, but the test host has no such read, so the clone is deepened and the run says so.
-        say("merge: the clone is shallow; its history is fetched in full once (git fetch --unshallow), so the clone is no longer shallow.")
-        c, out = git(root, "fetch", "-q", "--unshallow", "origin")
-        if c:
-            raise Stop(f"cannot read whether {ref} holds {head[:9]}: the clone is shallow and `git fetch --unshallow` failed: {out} {FREEZE_CITE}")
+    if got is None and deepen_shallow(root, f"whether {ref} holds {head[:9]}"):
         got = ancestor(root, head, ref)
     if got is None:
         raise Stop(f"cannot read whether {ref} holds {head[:9]} (a missing object). {FREEZE_CITE}")
@@ -4623,8 +4630,9 @@ def fetch_heads(root, shas):
     return [s for s in dict.fromkeys(shas) if missing(s)]
 
 def commits_outside(root, tips, kept):
-    """-> {commit: parents} for each commit that `tips` reach and no commit of `kept` holds, from one git read, so the checks on it cost no more git."""
-    holds(root, tips[0], kept[0])  # a shallow clone cuts the history and so this graph: that read fetches it in full first
+    """-> {commit: parents} for each commit that `tips` reach and no commit of `kept` holds, from one git read, so the checks on it cost no more git.
+    A shallow clone cuts the history and so this graph: it is deepened first, whatever a pre-read would say."""
+    deepen_shallow(root, "the commits of the request and of the open pull requests")
     c, out = git(root, "rev-list", "--parents", *tips, "--not", *kept)
     if c:
         raise Stop(f"cannot read the commits of the request and of the open pull requests: {out} {FREEZE_CITE}")
