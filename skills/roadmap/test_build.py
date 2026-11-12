@@ -4298,6 +4298,152 @@ class IdleLanes(UpkeepFixture):
                          "the merge tool's read lists the same lanes")
 
 
+class OutboxRulings(Fixture):
+    """The outbox check (step outbox-ruling-home-check). Each owner-ruling line in roadmap/outbox/<session>.md on the
+    record branch gets one output line with a verdict, held, not held or unknown, judged against its home on main:
+    `- <step> [ruling] -> <home>: "<exact words>" (owner, <time>)`. The words match after whitespace folding. A home
+    that no ref holds is unknown; a home on a branch but not on main is not held. No ruling line, no output. The
+    check starts at most three git processes, writes no file and leaves no process running. A ruling's output line
+    is found by its step and its home, both on that one line, since the brief fixes no print format."""
+
+    WORDS = "The outbox is the place for rulings"
+    HELD = "decisions/outbox-place.md"  # on main; the words break across lines there
+    REWORDED = "decisions/outbox-reworded.md"  # on main; "spot" where the ruling says "place"
+    BRANCH_ONLY = "decisions/outbox-branch-only.md"  # on the record branch only
+    GONE = "decisions/outbox-gone.md"  # on no ref
+    HELD_TEXT = "# Outbox place\n\nThe outbox is\nthe place   for rulings\nuntil triage says otherwise.\n"
+    REWORDED_TEXT = "# Outbox place\n\nThe outbox is the spot for rulings until triage says otherwise.\n"
+    BRANCH_TEXT = "# Outbox place\n\nThe outbox is the place for rulings until triage says otherwise.\n"
+    VERDICT = re.compile(r"\bnot held\b|\bheld\b|\bunknown\b")
+
+    def setUp(self):
+        super().setUp()
+        self.commit_on("main", {self.HELD: self.HELD_TEXT, self.REWORDED: self.REWORDED_TEXT})
+        self.commit_on("roadmap", {self.BRANCH_ONLY: self.BRANCH_TEXT})
+
+    def commit_on(self, branch, files):
+        """Commits {path: text} on `branch`. The case leaves `branch` checked out; build_output checks main out itself."""
+        git(self.repo, "checkout", "-q", branch)
+        for rel, text in files.items():
+            path = self.repo / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "outbox fixture on " + branch)
+
+    def ruling(self, step, home):
+        return '- %s [ruling] -> %s: "%s" (owner, 2026-11-10 15:22 CST)' % (step, home, self.WORDS)
+
+    @staticmethod
+    def outbox_text(lines):
+        return "# Outbox\n\n" + "".join(line + "\n" for line in lines)
+
+    def record_rulings(self, session, lines, steps=()):
+        """Commits one outbox file of `lines` on the record branch, with the named steps beside it."""
+        files = {"roadmap/data/steps/%s.json" % sid: json.dumps(STEP) for sid in steps}
+        files["roadmap/outbox/%s.md" % session] = self.outbox_text(lines)
+        self.commit_on("roadmap", files)
+
+    def build_output(self):
+        """The output of one build from main, which reads the record branch's outbox and main's homes."""
+        self.on_main()
+        _, out = run_build("--repo", str(self.repo), "--out", str(self.out))
+        return out
+
+    def verdict_lines(self, out, step, home):
+        """For each output line that names the ruling's step and home, the verdict words on it. [] when none does."""
+        return [self.VERDICT.findall(line) for line in out.splitlines() if step in line and home in line]
+
+    def files(self):
+        """{path: (size, mtime_ns)} of every file under the case's folder, the repo included."""
+        found = {}
+        for dirpath, _dirs, names in os.walk(self.tmp.name):
+            for name in names:
+                path = os.path.join(dirpath, name)
+                st = os.stat(path)
+                found[path] = (st.st_size, st.st_mtime_ns)
+        return found
+
+    def counted_build(self):
+        """One build from main with every process start counted: the git starts, the files written apart from --out,
+        and the processes still running when it returns."""
+        self.on_main()
+        before = self.files()
+        starts, procs = [], []
+
+        class Counting(subprocess.Popen):
+            def __init__(self, args, *rest, **kwargs):
+                argv = args.split() if isinstance(args, str) else [str(a) for a in args]
+                starts.append(argv)
+                super().__init__(args, *rest, **kwargs)
+                procs.append(self)
+
+        with mock.patch.object(subprocess, "Popen", Counting):
+            _, out = run_build("--repo", str(self.repo), "--out", str(self.out))
+        after = self.files()
+        return {
+            "out": out,
+            "git": [a for a in starts if os.path.basename(a[0]).lower() in ("git", "git.exe")],
+            "written": sorted(p for p in after if after[p] != before.get(p) and p != str(self.out)),
+            "running": [p.args for p in procs if p.poll() is None],
+        }
+
+    def test_held_when_the_words_break_across_lines_on_main(self):
+        self.record_rulings("session-a", [self.ruling("held-step", self.HELD)], steps=["held-step"])
+        out = self.build_output()
+        self.assertEqual(self.verdict_lines(out, "held-step", self.HELD), [["held"]],
+                         "the words are on main once whitespace folds, so the one line must say held:\n" + out)
+
+    def test_not_held_when_the_home_words_are_reworded(self):
+        self.record_rulings("session-a", [self.ruling("reworded-step", self.REWORDED)], steps=["reworded-step"])
+        out = self.build_output()
+        self.assertEqual(self.verdict_lines(out, "reworded-step", self.REWORDED), [["not held"]],
+                         "main says 'spot' where the ruling says 'place', so the one line must say not held:\n" + out)
+
+    def test_unknown_when_the_home_is_missing(self):
+        self.record_rulings("session-a", [self.ruling("gone-step", self.GONE)], steps=["gone-step"])
+        out = self.build_output()
+        self.assertEqual(self.verdict_lines(out, "gone-step", self.GONE), [["unknown"]],
+                         "no ref holds the home, so the one line must say unknown, never held:\n" + out)
+
+    def test_not_held_when_the_home_is_on_the_branch_but_not_on_main(self):
+        self.record_rulings("session-a", [self.ruling("branch-step", self.BRANCH_ONLY)], steps=["branch-step"])
+        out = self.build_output()
+        self.assertEqual(self.verdict_lines(out, "branch-step", self.BRANCH_ONLY), [["not held"]],
+                         "the record branch holds the home and main does not, so the one line must say not held:\n" + out)
+
+    def test_no_rulings_prints_nothing(self):
+        # Control, green on the old code: a note with no [ruling] tag prints nothing, so the output matches a build
+        # with no outbox at all.
+        before = self.build_output()
+        self.commit_on("roadmap", {"roadmap/outbox/session-a.md": self.outbox_text(
+            ["- note-step note: triage, the place for rulings is decisions/outbox-place.md"])})
+        after = self.build_output()
+        self.assertEqual(after, before, "a line with no [ruling] tag printed output")
+
+    def test_check_costs_at_most_three_git_starts_no_file_and_no_process(self):
+        cases = [("held", self.HELD, "held", 4), ("reworded", self.REWORDED, "not held", 2),
+                 ("branch", self.BRANCH_ONLY, "not held", 2), ("gone", self.GONE, "unknown", 2)]
+        steps, lines, want = [], [], []
+        for tag, home, verdict, count in cases:
+            for n in range(1, count + 1):
+                sid = "%s-%02d" % (tag, n)
+                steps.append(sid)
+                lines.append(self.ruling(sid, home))
+                want.append((sid, home, [[verdict]]))
+        self.commit_on("roadmap", {"roadmap/data/steps/%s.json" % sid: json.dumps(STEP) for sid in steps})
+        before = self.counted_build()  # no outbox file yet
+        self.commit_on("roadmap", {"roadmap/outbox/session-a.md": self.outbox_text(lines[:5]),
+                                   "roadmap/outbox/session-b.md": self.outbox_text(lines[5:])})
+        after = self.counted_build()
+        got = [(sid, home, self.verdict_lines(after["out"], sid, home)) for sid, home, _ in want]
+        self.assertEqual(got, want, "a ruling got no output line, or a wrong verdict, across the two outbox files")
+        extra = len(after["git"]) - len(before["git"])
+        self.assertLessEqual(extra, 3, "the check started %d git processes, past the three it may start" % extra)
+        self.assertEqual(after["written"], before["written"], "the check wrote files besides --out")
+        self.assertEqual(after["running"], [], "processes still running after the build")
+
+
 class SharedTagNames(unittest.TestCase):
     """The roadmap's tag names have one home, hooks/shared_names.py. build reads the very objects, so a
     copied literal cannot drift from the guard's check. Identity, not equality: an equal copy fails."""
