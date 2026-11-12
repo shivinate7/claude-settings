@@ -504,7 +504,7 @@ class SessionStartMergeRoleTests(unittest.TestCase):
     # A lane the owner started has no cs-repo tag until it sets one, and get_session reads only the tags it holds. The tier line tells it to
     # tag itself on its own id, then re-read its record, in one sentence that names no condition of the lane (the parent, tagged_after, the
     # cs-build tag): those stay out of the refusals, and the tier line says the same.
-    def test_the_tier_line_tells_a_lane_to_tag_itself_with_its_cs_repo_tag(self):
+    def test_the_session_start_line_tells_a_lane_to_tag_itself_with_its_cs_repo_tag(self):
         self.lane_tag_sentence()
 
     def test_the_lane_tag_sentence_is_followed_by_a_re_read_of_the_record(self):
