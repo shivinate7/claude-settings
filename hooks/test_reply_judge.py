@@ -1961,11 +1961,88 @@ def case_prompt_never_flags_a_reply_that_refutes_a_search_total():
           has_pin(sentences, ("never flag",), ("refut", "not used"), ("search",), ("total",)), sentences)
 
 
-def case_prompt_flag_sentence_never_flags_a_candidate_search():
-    run = run_hook(SEARCH_COUNT_REPLY, answer=OK_ANSWER)
-    sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
-    check("prompt: the flag sentence says a search that only finds candidates is never flagged",
-          has_pin(sentences, (SEARCH_RULE,), ("flag",), ("candidate",), ("never", "not")), sentences)
+UNCONFIRMED_SEARCH_REPLY = "Done: gh search prs found 6 open PRs."  # a search, and no REST read that confirms it
+
+
+def case_prompt_flag_sentence_exempts_only_a_search_rest_confirms():
+    run = run_hook(UNCONFIRMED_SEARCH_REPLY, answer=OK_ANSWER)
+    flag = [s for s in rule_sentences(run, UNCONFIRMED_SEARCH_REPLY) if SEARCH_RULE + ":" in s]
+    check("prompt: one sentence starts the counts rule and flags it", len(flag) == 1 and "flag" in flag[0], flag)
+    # The exemption is one clause of the flag sentence, split at each semicolon. It must name REST and confirm in
+    # its own clause, so a search with no REST read is not taken for candidates. The fix clause also holds REST and
+    # confirm, but it has no "never", so it cannot satisfy the exemption.
+    clauses = [c for s in flag for c in s.split(";")]
+    check("prompt: the candidates exemption names REST and confirm in its own clause",
+          has_pin(clauses, ("never", "not"), ("candidate",), ("rest",), ("confirm",)), clauses)
+
+
+# Red on a165a7c88. SEARCH_WORD needs a word boundary, and "_" is a word character, so a search word joined to
+# other words by "_" (mcp__github__search_issues, search_pull_requests) is not seen. The control is a whole-word
+# search with a digit before it, which already triggers.
+UNDERSCORE_ISSUES_REPLY = "Done: mcp__github__search_issues found 4 open issues."
+UNDERSCORE_PRS_REPLY = "Done: search_pull_requests returned 5 open PRs."
+TOTAL_CONTROL_REPLY = "Done: GraphQL totalCount 6 open PRs from the search."
+
+
+def case_search_joined_by_underscore_is_judged_off_sample():
+    legs = (("mcp__github__search_issues, the digit 4 after it", UNDERSCORE_ISSUES_REPLY),
+            ("search_pull_requests, the digit 5 after it", UNDERSCORE_PRS_REPLY),
+            ("totalCount, a whole-word search after the digit 6 (control)", TOTAL_CONTROL_REPLY))
+    for n, (name, text) in enumerate(legs):
+        run, _ = second_stop(text, label="counts-e-%02d" % n, session="counts-e-%02d" % n)
+        check("search trigger, %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+# Mutation-proof pins: green on a165a7c88. Each one names the alternative it proves. A scratch mutant that drops
+# that alternative turns its own case red and no other case in this block.
+NO_COUNT_WORD_REPLY = "Done: the search found no open PRs."  # the count word no, and no digit anywhere
+SEARCHES_REPLY = "Done: the rule searches returned 4 open PRs."  # the search word with es, the digit 4 after it
+SEARCHING_REPLY = "Done: searching the rule returned 4 open PRs."  # the search word with ing, the digit 4 after it
+
+
+def case_search_with_count_word_no_is_judged_off_sample():
+    run, _ = second_stop(NO_COUNT_WORD_REPLY, label="counts-f-no", session="counts-f-no")
+    check("search with the count word no: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_searches_with_a_digit_is_judged_off_sample():
+    run, _ = second_stop(SEARCHES_REPLY, label="counts-f-es", session="counts-f-es")
+    check("search word 'searches', with the digit 4 after it: Stop 2 calls the model once", len(run.calls) == 1,
+          run.calls)
+
+
+def case_searching_with_a_digit_is_judged_off_sample():
+    run, _ = second_stop(SEARCHING_REPLY, label="counts-f-ing", session="counts-f-ing")
+    check("search word 'searching', with the digit 4 after it: Stop 2 calls the model once", len(run.calls) == 1,
+          run.calls)
+
+
+# The counts rule as CLAUDE.md states it. The rule's words sit between the anchor before it and its own anchor.
+# They must name the GitHub REST API as the count source, and say a search is not one. Red on a165a7c88: the
+# line there says bare "REST" and never "not a search". No other test reads rule-line text, so this one lives here.
+COUNTS_ANCHOR = "<!-- rule:verification-counts-from-rest -->"
+CLAUDE_MD = os.path.join(REPO_ROOT, "CLAUDE.md")
+
+
+def counts_rule_text(text):
+    """The counts rule's words in CLAUDE.md, or "" when its anchor is absent."""
+    at = text.find(COUNTS_ANCHOR)
+    if at < 0:
+        return ""
+    before = text[:at]
+    prev = before.rfind("-->")  # the anchor of the rule before this one, if any
+    return before[prev + 3:] if prev >= 0 else before
+
+
+def case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search():
+    with open(CLAUDE_MD, encoding="utf-8") as f:
+        text = f.read()
+    anchors = text.count(COUNTS_ANCHOR)
+    check("claude.md: the counts rule has one anchor", anchors == 1, anchors)
+    rule = counts_rule_text(text)
+    check("claude.md: the counts rule names the GitHub REST API as its count source",
+          "GitHub REST API" in rule, rule[-300:])
+    check("claude.md: the counts rule says a search is not a count source", "not a search" in rule, rule[-300:])
 
 
 CASES = (
@@ -2057,7 +2134,12 @@ CASES = (
     case_count_words_without_a_search_word_are_not_judged_off_sample,
     case_search_word_far_from_a_count_word_is_not_judged_off_sample,
     case_prompt_never_flags_a_reply_that_refutes_a_search_total,
-    case_prompt_flag_sentence_never_flags_a_candidate_search,
+    case_search_joined_by_underscore_is_judged_off_sample,
+    case_search_with_count_word_no_is_judged_off_sample,
+    case_searches_with_a_digit_is_judged_off_sample,
+    case_searching_with_a_digit_is_judged_off_sample,
+    case_prompt_flag_sentence_exempts_only_a_search_rest_confirms,
+    case_claude_md_counts_rule_names_the_github_rest_api_and_not_a_search,
 )
 
 
