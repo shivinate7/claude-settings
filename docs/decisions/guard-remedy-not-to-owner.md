@@ -80,6 +80,14 @@ Text: the miss from `departs_hit` in `hooks/question_form.py`, in the owner line
 - If the change only restates what main does, do not ask. Act on main's behaviour.
 - The refusal names the miss. It may be: no Departs from line; no separator (an em dash, " - " or " -- ") between the two sides; an empty side; a placeholder side; or a change side that says no change. It names the word that says so.
 
+### Step-cite guard (landed turns with a valid report)
+
+Text: `STEP_REASON`. Rule `building-mistake-names-its-guard` (a mistake names the guard that would have stopped it).
+
+- A report that says a step is queued names it as `step:<slug>`, and that step is a file on `origin/roadmap`.
+- The refusal quotes the sentence with no slug, or names the slug with no file. A step only on a lane branch is not queued: ask triage to file it, then cite it.
+- A read that could not run prints `unknown` and refuses nothing.
+
 ### Mistake guard (landed turns with a valid report)
 
 Text: `MISTAKE_REASON`. Rule `building-mistake-names-its-guard` (a mistake names the guard that would have stopped it).

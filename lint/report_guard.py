@@ -1117,7 +1117,7 @@ def departs_problem(text):
 # admits only when a first-person word comes before its fault word, so "The test was wrong so I re-pointed it"
 # passes. A negator clears it only when at most MISTAKE_NEGATOR_GAP words sit between it and the fault word,
 # so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
-# `step:<slug>` is checked for form only.
+# `step:<slug>` is read from git by step_cite_problem below.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
 # "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
 # parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
@@ -1173,6 +1173,65 @@ def mistake_problem(text):
             or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
         return ""
     return MISTAKE_REASON % repr(clause[:80])
+
+
+# A `step:<slug>` a report cites, or a "queued"/"filed"/"has a step" claim about a step, is read from git
+# (rule building-mistake-names-its-guard; decision mistake-means-missing-guard). A report once called a guard queued
+# as a step no one had filed. A queued step is a blob on origin/roadmap, so a step on a lane branch only is not queued. Cost: one `git fetch origin roadmap` and one tree read per report that cites a
+# step; a report that cites none starts nothing. A failed read prints "unknown" and refuses nothing.
+STEP_REF = "refs/remotes/origin/roadmap"
+STEP_CLAIM_RE = re.compile(r"\b(?:queued|filed|(?:has|have|had) a step)\b", re.I)
+STEP_WORD_RE = re.compile(r"\bsteps?\b(?!:)", re.I)
+# "queued" in another sense: a CI run, a job, a merge queue, a runner. Such a sentence makes no step claim.
+STEP_OTHER_SENSE_RE = re.compile(
+    r"\bCI\b|\b(?:runs?|jobs?|workflows?|checks?|merge[- ]queue|runners?|pipelines?|builds?|actions?)\b", re.I)
+STEP_FETCH_TIMEOUT = 20
+STEP_REASON = owner_line(
+    "Step-cite guard (rule building-mistake-names-its-guard)",
+    "the report says a step is queued, but %s")
+
+
+def _step_cites(text):
+    """(slugs, unbacked sentence): the `step:<slug>` names in a report sentence that claims a step is queued
+    or sits in Deviations, and the first claim sentence that names none. Inline code stays readable for the
+    slug but is no claim; fences, URLs and quoted text are no claim."""
+    slugs, unbacked = [], ""
+    for label in ("Done", "Deviations", "Input Needed", "Next"):
+        section = report_section(text, label)
+        plain = MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", section))
+        for sentence in _sentences(plain):
+            found = MISTAKE_STEP_RE.findall(sentence)
+            claim = STEP_CLAIM_RE.search(QUOTED_RE.sub(" ", sentence))
+            if claim and not STEP_OTHER_SENSE_RE.search(sentence):
+                if found:
+                    slugs += found
+                elif STEP_WORD_RE.search(QUOTED_RE.sub(" ", sentence)):
+                    unbacked = unbacked or sentence.strip()
+            elif label == "Deviations":
+                slugs += found
+    return list(dict.fromkeys(s[len("step:"):] for s in slugs)), unbacked
+
+
+def step_cite_problem(text, cwd):
+    """The refusal text for a report whose step claim git does not back (see above), else ''."""
+    slugs, unbacked = _step_cites(text)
+    if unbacked:
+        return STEP_REASON % ("the sentence %r names no `step:<slug>`" % unbacked[:80])
+    if not slugs:
+        return ""
+    _hooks_on_path()
+    import ruling_home
+    try:
+        fetch = ruling_home._run_git(cwd, ["fetch", "-q", "origin", "roadmap"])
+        if fetch.returncode != 0:
+            raise ruling_home._GitFailure("fetch exited %s: %s" % (fetch.returncode, (fetch.stderr or "")[:120]))
+        missing = [s for s in slugs if not ruling_home.step_filed(s, cwd, STEP_REF)]
+    except (ruling_home._GitFailure, OSError) as exc:
+        print("step cite unknown: %s" % exc, file=sys.stderr)
+        return ""
+    if missing:
+        return STEP_REASON % ("origin/roadmap holds no step file for `step:%s`" % missing[0])
+    return ""
 
 
 def _own_lane_read(path, own_id):
@@ -3278,6 +3337,12 @@ def main():
                 reasons.append(mistake)
         except Exception as exc:
             print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        try:
+            cited = step_cite_problem(text, hook.get("cwd"))
+            if cited:
+                reasons.append(cited)
+        except Exception as exc:
+            print("step cite check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     reasons += [r for r in relay if r]
     if hand_off:
         reasons.append(hand_off)

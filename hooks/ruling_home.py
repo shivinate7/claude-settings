@@ -421,9 +421,25 @@ def value_resolves(value, cwd):
         return False  # leaves the repository tree
     if not cwd or not os.path.isdir(cwd) or not is_git_work_tree(cwd):
         return False
-    git_path = normalized.replace(os.sep, "/")
-    refs = _list_refs(cwd)  # a repo git cannot read raises _GitFailure: see _list_refs
-    return _resolve_value(cwd, refs, git_path)
+    return blob_held(normalized.replace(os.sep, "/"), cwd)
+
+
+def blob_held(rel, cwd, ref=None):
+    """True when a blob sits at the repo-relative `rel` in a branch's tree: any local or remote branch with
+    `ref` None, else only `ref` (a full ref name). False when `cwd` is no git work tree. A repo git cannot
+    read raises _GitFailure. The one read behind every home: and `step:<slug>` check."""
+    if not cwd or not os.path.isdir(cwd) or not is_git_work_tree(cwd):
+        return False
+    refs = _list_refs(cwd) if ref is None else [ref]
+    return _resolve_value(cwd, refs, rel)
+
+
+def step_filed(slug, cwd, ref=None):
+    """True when the roadmap step `slug` is a blob in `ref`'s tree (None: on some branch). A step that is
+    queued is on `refs/remotes/origin/roadmap`, so a report passes that ref. Raises _GitFailure as blob_held does.
+    The one resolver for a `step:<slug>` cite; a feedback task's step home and a report's cite both call it."""
+    import override  # hooks/override.py holds STEP_DIR, the one home of where a step file lives
+    return blob_held(override.STEP_DIR + slug + ".json", cwd, ref)
 
 
 # ------------------------------------------------------------------ per-file check
