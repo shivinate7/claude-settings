@@ -81,14 +81,24 @@ passes. A required job that never starts, because of a path filter on the whole 
 the merge. Require a matrix through one fan-in job with `if: always()`. Its check name stays fixed
 when the matrix changes.
 
-Rename a required check in the protection rule. `merge.requiredChecks` in `.github/stamp.json` says
-`"protection"` and needs no edit. A repo that pins a list there edits it too. A PUT needs an admin
-login. Push rights are not enough. A PUT replaces the whole rule, so send every field from the read
-above, with the new names:
+Rename a required check by moving the rule to `all-jobs-passed`. `protect.py`, the one script that
+writes branch protection, accepts only that name for `--check`. It refuses any other name. Preview
+first. The preview changes nothing. It prints any check names it would drop.
 
 ```sh
-gh api -X PUT repos/<owner>/<repo>/branches/<branch>/protection --input <json>
+# Preview: changes nothing
+python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<repo> --check all-jobs-passed --branch <branch>
+
+# Set it: the same command with --confirm
+python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<repo> --check all-jobs-passed --branch <branch> --confirm
 ```
+
+On a branch with a check rule, the script sets only the check list, with a PATCH. `strict` and every
+other rule stay. `merge.requiredChecks` in `.github/stamp.json` says `"protection"` and needs no
+edit. A repo that pins a list there edits it too. The write needs an admin login. Push rights are
+not enough. A branch with protection but no check rule is refused. `protect.py` names the
+protection's keys and sets nothing. Do not add the check with `gh api` by hand: a PUT replaces the
+other rules. Ask the owner.
 
 ## 4. Cancel superseded runs
 
@@ -171,7 +181,7 @@ Same-repo action: `uses: $/path` (GitHub changelog 2026-07-30). This repo's `che
 unknown; read zizmor's docs for self-repository.
 
 Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools. Check drift with
-the tool that reads the pins. It exits 3 when a pin lags:
+the tool that reads the pins. A direct run exits 3 when a pin lags:
 
 ```sh
 bin/ste-changed origin/main

@@ -14,12 +14,12 @@ Every republish of a waiting page is main's `skills/waiting-page/page.html` with
 - `hooks/session_start.sh` runs `stale_pages.py --session-line <toplevel>` in a repo whose extras file names a waiting page. It prints one line naming the page as behind when the stamp differs from main's blob sha. No stamp, or an unreadable main, prints nothing.
 - Incident class: likely risk (rule `building-guard-needs-incident`). Claude is likely to republish a page from a stale saved copy in normal work, and the page's data and Status tab were lost that way before. Landed 2026-11-01.
 - Cost:
-  - `guard.py` already starts on each call of its matcher. The matcher now also names `Artifact`, so it starts once per `Artifact` call. A read or a list exits before the heavy imports.
-  - Every `Artifact` call also runs the session-home record step that every guard call runs (`session_home_keep`): one path walk and one small file read, and one write only when the record is missing or changed.
-  - Per waiting-page publish: one python import of `stale_pages`, one read-only git process (no fetch, no network), one file read, one stamp file write.
-  - Session start: one python start and one git process, only in a repo with a waiting page. Any other repo pays one grep.
+  - `guard.py` already starts on each call of its matcher (unmeasured: no test counts the starts). The matcher now also names `Artifact`, so it starts once per `Artifact` call (unmeasured). A read or a list exits before the heavy imports.
+  - Every `Artifact` call also runs the session-home record step that every guard call runs (`session_home_keep`): one path walk and one small file read, and one write only when the record is missing or changed (unmeasured).
+  - Per waiting-page publish: one python import of `stale_pages`, one read-only git process (no fetch, no network), one file read, one stamp file write (unmeasured).
+  - Session start: one python start and one git process, only in a repo with a waiting page (unmeasured). Any other repo pays one grep.
   - The writer's wake pass (`stale_pages.py --page ... --items`): 0 gh processes without `--items`; with it, one gh process per open item with `waits`, at most 50, each ended or killed at 30 s before the next. No file written, no timer, no process left running (`test_stale_pages.py` proves the call counts).
-  - No timer, no new long-lived process, no new log beyond the one `noted` line on unknown or on a failed stamp write.
+  - No timer, no new long-lived process, no new log beyond the one `noted` line on unknown or on a failed stamp write (unmeasured).
 - Known limit: that the `/artifact/` and `/code/artifact/` forms with one id name one page is unmeasured.
 - Known limit: a first publish with no `url` passes. So does a republish by the same `file_path` with no `url`: it redeploys to the same url, unjudged.
 - Known limit: the stamp is written at PreToolUse, so a publish that then fails still stamps. A stamp write that fails logs one `noted` line under `page-stale`.

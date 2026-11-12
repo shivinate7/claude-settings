@@ -12,14 +12,15 @@
 # (default 120), so a quiet background run does not trip the stall watch.
 # A pid reused by another process has a new start time, so a changed start time means it ended.
 # Limits: the pid is not this helper's child, so its exit code cannot be recovered. Windows is not covered.
-import errno, os, re, subprocess, sys, time
+import errno, os, re, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import guard_kill  # noqa: E402  the one home of the ownership read (hooks/guard_kill.py)
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-DEFAULT_TIMEOUT = 540.0
+import wait_common  # noqa: E402  the one home of the argument, heartbeat and poll parts both wait helpers share
+PROG = "wait-pid"
 USAGE = "usage: wait-pid PID [--timeout SECS]"
 LINUX = sys.platform.startswith("linux")
-POLL = 0.25 if LINUX else 1.0
+POLL = 0.25 if LINUX else 1.0  # off Linux each poll starts `ps`
 UNKNOWN = "unknown"  # snapshot's answer when the read failed: neither running nor gone
 def snapshot(pid):
     """(state, start time) of the pid; None when it is gone or a zombie; UNKNOWN when the read failed."""
@@ -43,24 +44,12 @@ def snapshot(pid):
     return None if state.startswith(("Z", "X")) else (state, start)
 def unknown(pid):
     print("wait-pid: pid %d: liveness unknown, the read of its state failed; not taken as ended" % pid, flush=True); return 3
-def die(message):
-    print("wait-pid: " + message, file=sys.stderr); sys.exit(2)
-def number(text, name):
-    try: value = float(text)
-    except ValueError: value = -1.0
-    if value < 0 or value != value or value == float("inf"): die("bad %s %r. %s" % (name, text, USAGE))
-    return value
 def parse(argv):
-    pid, timeout = None, DEFAULT_TIMEOUT
-    args = list(argv)
-    while args:
-        arg = args.pop(0)
-        if arg == "--timeout" and args: timeout = number(args.pop(0), "timeout")
-        elif arg.startswith("--timeout="): timeout = number(arg[len("--timeout="):], "timeout")
-        elif pid is None and re.fullmatch(r"-?[0-9]+", arg): pid = int(arg)
-        else: die("bad argument %r. %s" % (arg, USAGE))
-    if pid is None: die(USAGE)
-    if pid in (0, 1, -1): die("pid %d is never waited on. %s" % (pid, USAGE))
+    text, timeout = wait_common.split_args(PROG, USAGE, argv)
+    if text is None or not re.fullmatch(r"-?[0-9]+", text):
+        wait_common.die(PROG, USAGE if text is None else "bad argument %r. %s" % (text, USAGE))
+    pid = int(text)
+    if pid in (0, 1, -1): wait_common.die(PROG, "pid %d is never waited on. %s" % (pid, USAGE))
     return pid, timeout
 def main(argv):
     pid, timeout = parse(argv)
@@ -70,23 +59,14 @@ def main(argv):
         print("wait-pid: pid %d is not running" % pid); return 0
     if not guard_kill.pid_is_session_job(pid, os.environ.get("CLAUDE_CODE_SESSION_ID", "")):
         print("wait-pid: pid %d is not this session's: not this session, so not waited on" % pid); return 2
-    try: beat = float(os.environ.get("WAIT_PID_HEARTBEAT") or 120)
-    except ValueError: beat = 120.0
-    if beat <= 0: beat = 120.0
-    t = time.monotonic()
-    next_beat = t + beat
-    while True:
-        time.sleep(POLL)
-        now = time.monotonic()
+    def step(elapsed):
         current = snapshot(pid)
         if current == UNKNOWN: return unknown(pid)
         if current is None or current[1] != first[1]:
-            print("wait-pid: pid %d ended after %.0fs" % (pid, now - t), flush=True); return 0
-        if timeout and now - t >= timeout:
-            print("wait-pid: pid %d is still running after %.0fs" % (pid, now - t), flush=True); return 124
-        if now >= next_beat:
-            print("wait-pid: still waiting for pid %d, %.0fs" % (pid, now - t), flush=True)
-            next_beat = now + beat
+            print("wait-pid: pid %d ended after %.0fs" % (pid, elapsed), flush=True); return 0
+    return wait_common.wait_loop(PROG, step, timeout, wait_common.heartbeat_seconds("WAIT_PID_HEARTBEAT"),
+                                 lambda s: "still waiting for pid %d, %.0fs" % (pid, s),
+                                 lambda s: "pid %d is still running after %.0fs" % (pid, s), POLL)
 if __name__ == "__main__":
     for s in (sys.stdout, sys.stderr): s.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main(sys.argv[1:]))

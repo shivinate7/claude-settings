@@ -43,7 +43,7 @@ Interface the hook must match:
   The page's url is the `waiting-page` key of .claude/layout-extras.json in the git root of the payload's `cwd`.
 - A re-ask (ruled Nov 1 17:44 CST): a judged items set or update (question_form.judged_item_writes) whose data has
   non-empty `options` and a `lastAnswer` dict with choice `none` (or no choice) whose `note` is a string, non-empty
-  after strip. A picked choice with a note is not a re-ask. The one model prompt
+  after strip. A picked choice with a note is not a re-ask, and neither is a `lastAnswer` that carries `done`. The one model prompt
   holds call_judge.NONE_DIRECTION_RULE exactly once when a write in the call is a re-ask (a batch too), and not at
   all otherwise. The cases read the constant with load_file_module, never a copy of its text. A missing constant
   fails those checks, with no crash.
@@ -62,6 +62,8 @@ Interface the hook must match:
 - The waiting-page lookup from another checkout (question_form.page_item_hit, with the payload's cwd): a call from a repo
   with no page is judged against the pointer checkout's page, and a sibling child's page, as pointer_fixture() builds them.
   run_hook(pointer=) writes the hook's global rules file, the one that names the pointer checkout.
+- A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
+  question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
 """
 import atexit
 import contextlib
@@ -262,6 +264,49 @@ def hermetic_home(bare=False):
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+# The waiting page's repo with a GitHub origin. PAGE_REPO above has no origin, so lint/layout.py repo_name reads it
+# as unknown. The cross-repo rule (question-checked-with-repo) judges a decision's repo against this origin's repo,
+# so its cases judge the write with cwd set here.
+PAGE_ORIGIN_URL = "https://github.com/shivinate7/claude-settings.git"
+
+
+def origin_page_repo():
+    """The waiting-page repo whose origin is PAGE_ORIGIN_URL. make_repo caches it by name, so one repo per run."""
+    repo = make_repo("page-origin", page=PAGE_URL)
+    if not git(repo, "remote").stdout.strip():
+        git(repo, "remote", "add", "origin", PAGE_ORIGIN_URL)
+    return repo
+
+
+# The record-branch checkout: a checkout on the record branch `roadmap` with no extras file, while origin/main holds
+# the page's extras file. lint/layout.py reads the page from origin/main when the checkout has none, so the page checks
+# run from here too. Built from plumbing and one branch switch. origin/main is a ref only (no local main stays), as a
+# fetch leaves it. The one home of this fixture.
+RECORD_CHECKOUT = os.path.join(ROOT, "record-branch-checkout")
+
+
+def record_branch_checkout():
+    """The checkout on `roadmap` whose origin/main holds the extras file of PAGE_URL, in the registry form main holds."""
+    repo = RECORD_CHECKOUT
+    if os.path.isdir(repo):
+        return repo
+    os.makedirs(repo)
+    git(repo, "init", "-q")
+    git(repo, "symbolic-ref", "HEAD", "refs/heads/roadmap")
+    with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as f:
+        f.write("# Record branch\n")
+    git(repo, "add", "README.md")
+    git(repo, "commit", "-q", "-m", "record")
+    git(repo, "checkout", "-q", "-b", "main")
+    os.makedirs(os.path.join(repo, ".claude"))
+    with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
+        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "url": PAGE_URL, "role": "waiting-page", "account": "current"}]}, f)
+    git(repo, "add", ".claude/layout-extras.json")
+    git(repo, "commit", "-q", "-m", "extras")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "roadmap")
+    git(repo, "branch", "-q", "-D", "main")
+    return repo
 
 
 try:
@@ -1025,6 +1070,94 @@ def case_past_ruling_search_reads_the_matched_page_root():
     check("page root: from a non-repo folder, the child's write gets one model call", len(r.calls) == 1, detail(r))
     check("page root: the search reads the child's records, so its decision record is in the prompt",
           len(r.calls) == 1 and CHILD_RULING_MARK in r.calls[0]["prompt"], detail(r))
+# ------------------------------------------------------------------ a relative file_path (ArtifactData)
+#
+# An items write can name its data by a file_path, with no data. question_form._write_data reads that file against the
+# payload's cwd, and item_hit does. judged_item_writes must read it the same way, or the write never reaches the model
+# review, so item 8 (the past-ruling check) never sees it. Each file name below is unique and absent from the cwd the
+# hook runs in (run_hook inherits this test run's cwd), so a read that finds the file can only come from the join to the
+# payload's cwd. The item's text shares words with the APPS ruling, so the past-ruling search lists that record.
+def apps_refusal():
+    """The model's refusal, which cites the APPS record: a listed candidate, so the past-ruling refusal runs."""
+    return json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+
+
+def relative_item_repo():
+    """The repo whose one decision record is the APPS ruling. Its waiting page is PAGE_URL."""
+    return make_repo("relative-file", decisions={APPS_SLUG: APPS_RULING})
+
+
+def apps_item():
+    """A waiting-page decision on the apps question: it passes item_hit, and its text lists the APPS record."""
+    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE))
+    options = [
+        {"key": "a", "label": "Keep the apps", "gain": "Calls into the repo stay straightforward. " + PAGE_MARK,
+         "lose": "An unused app keeps its access."},
+        {"key": "b", "label": "Remove the apps", "gain": "Fewer apps can write to the repo.",
+         "lose": "Each call into the repo needs a manual step."}]
+    return good_page_item(title="Keep the GitHub apps' access?", context=context, options=options)
+
+
+def write_item_file(path, item):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(item, f)
+
+
+def relative_name_precondition(repo, name):
+    """Scope before subject: the file is at the payload cwd, and no file of that name is at the hook's cwd."""
+    check("relative item %s: the file is at the payload cwd" % name, os.path.isfile(os.path.join(repo, name)), repo)
+    check("relative item %s: no file of that name at the hook's cwd, so only a join to the payload cwd finds it" % name,
+          not os.path.exists(name), os.getcwd())
+
+
+def case_page_relative_file_path_reaches_the_review():
+    # A relative file_path must be read against the payload cwd. Read without it, the file is not found and the
+    # write is dropped: the hook exits 0 with no model call, so the APPS ruling is never checked.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo, name = relative_item_repo(), "relative-item-deny.json"
+    write_item_file(os.path.join(repo, name), apps_item())
+    relative_name_precondition(repo, name)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "file_path": name}, repo)
+    check("relative item: the form check reads the file at the payload cwd and passes it", got == ("", ""), got)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=name), answer=apps_refusal())
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("relative item: the write reaches one model review", len(r.calls) == 1, detail(r))
+    check("relative item: the model sees the item read from the file", PAGE_MARK in prompt, prompt[:160])
+    check("relative item: the APPS record and its ruling reach the prompt",
+          APPS_SLUG in prompt and APPS_RULING in prompt, prompt[:160])
+    rule = question_form.PAST_RULING_RULE
+    check("relative item: the past-ruling refusal is denied under rule %s, with one deny line" % rule,
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith(rule + ": ")
+          and r.log.count("\tdeny\t%s\t" % rule) == 1, detail(r))
+
+
+def case_page_relative_file_path_passing_item_passes():
+    # The negative: the same shape, and the model says ok. Only the one-call check tells a pass from a skip,
+    # because a skipped write also exits 0 with no output.
+    repo, name = relative_item_repo(), "relative-item-pass.json"
+    write_item_file(os.path.join(repo, name), apps_item())
+    relative_name_precondition(repo, name)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=name), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("relative item, ok: the write reaches one model review", len(r.calls) == 1 and PAGE_MARK in prompt, detail(r))
+    check("relative item, ok: exit 0, no output, no deny",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_page_absolute_file_path_is_judged():
+    # The control: an absolute file_path is read on main too, so this case is green before and after the fix.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo = relative_item_repo()
+    path = os.path.join(repo, "absolute-item-deny.json")
+    write_item_file(path, apps_item())
+    check("absolute item: the file is at its absolute path", os.path.isabs(path) and os.path.isfile(path), path)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=path), answer=apps_refusal())
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    rule = question_form.PAST_RULING_RULE
+    check("absolute item: the write reaches one model review", len(r.calls) == 1 and PAGE_MARK in prompt, detail(r))
+    check("absolute item: the past-ruling refusal is denied under rule %s" % rule,
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith(rule + ": "),
+          detail(r))
 
 
 # ------------------------------------------------------------------ a re-ask of an answered item (ruled Nov 1 17:44 CST)
@@ -1047,14 +1180,17 @@ def none_direction_rule():
     return value if isinstance(value, str) and value.strip() else ""
 
 
-def last_answer(note, choice="none"):
-    """The lastAnswer the owner's answer leaves on an item (docs/design/last-answer-notes.md)."""
-    return {"choice": choice, "note": note, "at": ANSWERED_AT}
+def last_answer(note, choice="none", done=None):
+    """The lastAnswer the owner's answer leaves on an item (docs/design/last-answer-notes.md). A task's answer carries
+    `done` and no choice, so a `done` value leaves the choice out."""
+    if done is None:
+        return {"choice": choice, "note": note, "at": ANSWERED_AT}
+    return {"done": done, "note": note, "at": ANSWERED_AT}
 
 
-def reask_item(mark, note=REASK_NOTE, choice="none"):
+def reask_item(mark, note=REASK_NOTE, choice="none", done=None):
     """Data for an update of an answered decision: its options and the owner's note, no context."""
-    return {"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice)}
+    return {"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice, done)}
 
 
 def rule_detail(rule, r):
@@ -1145,7 +1281,7 @@ def case_reask_batch_one_call_rule_once():
 
 def case_reask_refusal_denies():
     # Case 7: case 1's write, and the fake refuses it. The deny is question-judge, and the prompt holds the rule
-    # once, so this case is red on main for the rule and not for the deny.
+    # once, so this case pins the rule's count in the prompt, apart from the deny.
     rule = none_direction_rule()
     r = run_hook(page_input("update", reask_item(PAGE_MARK)), answer=REASK_FLAG)
     d = r.deny() or {}
@@ -1184,6 +1320,25 @@ def case_none_choice_with_note_holds_rule_once():
           len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
     check("none choice with a note: the one prompt holds NONE_DIRECTION_RULE exactly once",
           bool(rule) and prompt.count(rule) == 1, rule_detail(rule, r))
+
+
+def case_done_answer_is_not_reask():
+    # A task's answer carries `done` and no choice: "Marked done." or "Not marked done." (docs/design/last-answer-notes.md,
+    # section 4). It gives no "none of these" direction, so the one prompt lacks the rule. The call still makes its one
+    # model call, so an early exit cannot pass this check.
+    import question_form  # the one form check (hooks/question_form.py)
+    rule = none_direction_rule()
+    for done in (False, True):
+        fixture = reask_item(PAGE_MARK, done=done)
+        got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": fixture})
+        check("done=%s fixture: the update passes question_form.item_hit, so a refusal below is the judge's" % done,
+              got == ("", ""), got)
+        r = run_hook(page_input("update", fixture), answer=ALLOW)
+        prompt = r.calls[0]["prompt"] if r.calls else ""
+        check("done=%s answer: one model call, and no deny" % done,
+              len(r.calls) == 1 and r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+        check("done=%s answer: the prompt lacks NONE_DIRECTION_RULE" % done,
+              bool(rule) and prompt.count(rule) == 0, rule_detail(rule, r))
 
 
 # ------------------------------------------------------------------ the widening rule (decision uniform-over-variants)
@@ -1705,6 +1860,7 @@ def main():
                  case_options_without_note_lacks_rule, case_blank_note_lacks_rule,
                  case_context_only_note_lacks_rule, case_reask_batch_one_call_rule_once, case_reask_refusal_denies,
                  case_picked_choice_with_note_lacks_rule, case_none_choice_with_note_holds_rule_once,
+                 case_done_answer_is_not_reask,
                  case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
                  case_widening_absent_without_options, case_widening_refusal_names_the_option,
                  case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
@@ -1718,7 +1874,9 @@ def main():
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_roadmap_cwd_is_judged_against_the_pointer_page,
                  case_page_file_item_from_a_roadmap_cwd_gets_the_model_review,
-                 case_past_ruling_search_reads_the_matched_page_root):
+                 case_past_ruling_search_reads_the_matched_page_root,
+                 case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
+                 case_page_absolute_file_path_is_judged):
         try:
             case()
         except Exception as exc:

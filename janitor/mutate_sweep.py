@@ -1455,7 +1455,8 @@ def mutation_parts(entry):
 
 
 def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_text: str):
-    """Lay out <scaffold>/hooks/guard*.py, <scaffold>/janitor/{sweep.py,test_sweep.py,
+    """Lay out <scaffold>/hooks/guard*.py, <scaffold>/lint/ (every lint module and layout.json),
+    <scaffold>/janitor/{sweep.py,test_sweep.py,
     session_end_sweep.py,test_session_end_sweep.py} and <scaffold>/settings.json so that running
     either suite from <scaffold>/janitor resolves `import guard`, `import sweep` and
     `import session_end_sweep` to the copies placed here (see the module docstring, "WHY A
@@ -1468,9 +1469,13 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     os.makedirs(janitor_dir, exist_ok=True)
     lint_dir = os.path.join(scaffold, "lint")
     os.makedirs(lint_dir, exist_ok=True)
-    shutil.copy(os.path.join(REPO_ROOT, "lint", "_test_git.py"), lint_dir)  # test_sweep.py imports it; never mutated
-    # Every hooks module, so a new hooks module cannot be left out. A lint/ module that hooks import
-    # lazily is not covered. The loop
+    # The scaffold carries every lint module (each lint/*.py but a test_ one) and lint/layout.json,
+    # so a new import of any form needs no edit here. This also covers hooks/guard.py
+    # `_layout_module`'s lazy read of lint/ at run time. Never mutated.
+    for name in sorted(os.listdir(os.path.join(REPO_ROOT, "lint"))):
+        if (name.endswith(".py") and not name.startswith("test_")) or name == "layout.json":
+            shutil.copy(os.path.join(REPO_ROOT, "lint", name), lint_dir)
+    # Every hooks module, so a new hooks module cannot be left out. The loop
     # below replaces the guard family and git_reads.py with the target's text (mutated or real).
     mutate_shared.guard_tree(hooks_dir)
     shutil.copy(os.path.join(HERE, "temp_sweep.py"), janitor_dir)  # sweep.py imports it; never mutated
@@ -1532,7 +1537,7 @@ def run_suite(suite_path: str, config_dir: str, only=None):
     env["CLAUDE_CONFIG_DIR"] = config_dir
     result = _nowindow.run(
         # text=True keeps the default decoding: the child inherits env, so both sides share one encoding.
-        [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=1200,
+        [sys.executable, suite_path] + (["-k", only] if only else []), capture_output=True, text=True, env=env, timeout=3600,  # interim stopgap, owner 12:11 CST Nov 10, decision ci-job-caps, ends with step time-pinned-tests-go
     )
     lines = (result.stdout + result.stderr).splitlines()
     red = [line for line in lines if "FAIL" in line]

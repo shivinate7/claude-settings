@@ -87,7 +87,14 @@ def owner_text(rec, notice_tags=()):
     return text
 
 
+# A resumed session stores `api-request-blob` records: copies of earlier requests, with no timestamp. Their
+# calls and results are not this turn's, so neither reader yields from one.
+BLOB_TYPE = "api-request-blob"
+
+
 def tool_uses(rec):
+    if rec.get("type") == BLOB_TYPE:
+        return
     msg = rec.get("message") or {}
     content = msg.get("content")
     if not isinstance(content, list):
@@ -98,6 +105,8 @@ def tool_uses(rec):
 
 
 def tool_results(rec):
+    if rec.get("type") == BLOB_TYPE:
+        return
     msg = rec.get("message") or {}
     content = msg.get("content")
     if not isinstance(content, list):
@@ -105,6 +114,21 @@ def tool_results(rec):
     for b in content:
         if isinstance(b, dict) and b.get("type") == "tool_result":
             yield b
+
+
+def failed_tool_use_ids(records):
+    """The tool_use ids whose result failed, read two ways. A tool_result block with is_error true: a failed
+    cloud send_message (measured). Or a user record whose toolUseResult is a dict with success false: a failed
+    local SendMessage, which sets no is_error (measured)."""
+    failed = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        tur = r.get("toolUseResult")
+        no_success = isinstance(tur, dict) and tur.get("success") is False
+        failed.update(b["tool_use_id"] for b in tool_results(r)
+                      if isinstance(b.get("tool_use_id"), str) and (b.get("is_error") is True or no_success))
+    return failed
 
 
 def records_after_last_human(records):
@@ -353,6 +377,28 @@ def result_text(block):
     return body if isinstance(body, str) else ""
 
 
+def delivered_tool_use_ids(records):
+    """The tool_use ids of sends that reached their session: a tool_result whose text parses as the cloud
+    send_message success body {"status": "delivered"}, and no failure by `failed_tool_use_ids`. Only that cloud
+    body counts: the local SendMessage success shape is not measured, so it fails closed."""
+    failed = failed_tool_use_ids(records)
+    delivered = set()
+    for r in records:
+        if r.get("type") != "user":
+            continue
+        for b in tool_results(r):
+            use_id = b.get("tool_use_id")
+            if not isinstance(use_id, str) or use_id in failed:
+                continue
+            try:
+                body = json.loads(result_text(b))
+            except ValueError:
+                continue
+            if isinstance(body, dict) and body.get("status") == "delivered":
+                delivered.add(use_id)
+    return delivered
+
+
 def _finds_writer(node):
     if isinstance(node, dict):
         if isinstance(node.get("writer"), str) and node["writer"]:
@@ -369,9 +415,10 @@ def _finds_writer(node):
     return None
 
 
-def page_writer_id(records):
-    """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None."""
-    pending, writer = set(), None
+def _page_reads(records):
+    """(ran, writer): whether the main session ran an ArtifactData get of meta/page, and the `writer` string
+    in the newest such result, else None."""
+    pending, writer, ran = set(), None, False
     for rec in records:
         if rec.get("isSidechain"):
             continue
@@ -382,6 +429,7 @@ def page_writer_id(records):
                     and (inp.get("path") == "meta/page"
                          or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):
                 pending.add(use.get("id"))
+                ran = True
         content = (rec.get("message") or {}).get("content")
         for block in content if isinstance(content, list) else ():
             if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("tool_use_id") in pending:
@@ -393,4 +441,14 @@ def page_writer_id(records):
                     found = m.group(1) if m else None
                 if found:
                     writer = found
-    return writer
+    return ran, writer
+
+
+def page_writer_id(records):
+    """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None."""
+    return _page_reads(records)[1]
+
+
+def page_read_ran(records):
+    """True when the main session ran an ArtifactData get of meta/page, whatever its result named."""
+    return _page_reads(records)[0]

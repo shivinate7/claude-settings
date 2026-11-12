@@ -29,13 +29,36 @@ reason. When only the page conflicts with the base, the tool rebuilds it on the 
 unchanged. Owner ask to stop the double CI run: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST.
 
 A lane never commits a change to `docs/records.md`, not even one made by `lint/hook_catalog.py`. PR CI
-already accepts a stale page (`lint/hook_catalog.py --check` waives it on a PR run). The guard `records-page`
+already accepts a stale page (`lint/hook_catalog.py --check` waives it on a PR run and on a dispatched run of a branch other than main). The guard `records-page`
 refuses a lane commit whose staged `docs/records.md` differs from the page on the lane's base. A merge of
 the base into the lane brings the base's page, so it is allowed. The guard needs no exception for the tool:
 it judges Claude's own Bash commands, and the tool's commit runs inside the tool.
 The guard runs before the generator, so it cannot tell whether a chained `generator && git add && git commit`
 will change the page. It refuses such a chain even when the page ends unchanged. The refusal is exact for what
 it can see.
+
+A merge commit of a past base tip is allowed too. A lane merges the base, takes the page the merge brought,
+and the base then moves on, so that page is no longer the base's. The guard allows the commit when the page it
+would hold has the exact blob id of the page at MERGE_HEAD, and one of two things holds. One: MERGE_HEAD is a
+commit on origin/<base>'s first-parent line (a past base tip). Two: some best merge base of HEAD and MERGE_HEAD (`merge-base --all`) is no
+ancestor of origin/<base>. Two is a stacked lane: it was cut from a branch that main has not merged, and
+MERGE_HEAD is that branch moved on. A lane cut from main has every best merge base on main, so it gets no pass
+from two. Two cannot tell the lane's base from a sibling lane that shares its unmerged history. A sibling's page
+passes the same way, and the merge tool rebuilds the page before ready.
+A commit in the base's history off that line, such as a lane branch already merged into the base, is refused. A
+rebuilt page, a page of a merge of any other commit, a page taken after `merge --quit` are refused. A failed
+MERGE_HEAD page read or first-parent read refuses the commit. A failed merge-base read, or an is-ancestor exit
+other than 0 or 1, gives no pass from two and falls through to one. Every other failed read stays no hit. The guard runs before the chain, so it reads the page as
+it stands at the hook.
+Cost: three more git reads, `rev-parse MERGE_HEAD MERGE_HEAD:docs/records.md`, `merge-base --all HEAD MERGE_HEAD` and
+`rev-list --first-parent origin/<base>`, plus one `merge-base --is-ancestor <merge base> origin/<base>` per best merge base (unmeasured). They run only
+on a commit the guard would otherwise refuse, so an allowed commit and a commit with no records page make the
+reads they made before. The rev-list prints one id per base tip, under the 10 s read limit, and a timeout is a
+refusal. No file, no timer, no new process beyond those git calls. Measure: the `records-page` family has 92
+cases (`hooks/test_guard.py`); how often a real lane hits it is unmeasured. A chain that rewrites the
+page before its commit is judged on the page as it stands at the hook, not the page the chain leaves (debt
+note `records-page-chain-edit-after-read`, the same class as the base-page pass). A chain
+that takes MERGE_HEAD's page into a tree that does not hold it yet is refused; split calls pass.
 
 The heal stops when the generator writes no page for a conflicted page. The merge runs only the records
 mode of the generator (`--records-only`). A broken generator import prints one line. The heal-wait stop

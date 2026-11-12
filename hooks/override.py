@@ -14,8 +14,25 @@ writes, so a session cannot grant itself an override. It is valid only while now
          It reaches agents. The owner picks the length, so there is no cap.
   `override off` ends any override at once. `override`, `override <n>[m|h]` and `override off` mean
   that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
-  nothing (an intended "off" must never become a grant). A later line starting with the word grants
-  nothing.
+  nothing on this route (an intended "off" must never become a grant). On this keyword route, a later line starting
+  with the word grants nothing. The plain ask below reads a later line with the whole word like any prompt, so
+  `thanks` then `override 15m` on the next line grants 15m on a judge yes.
+  A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
+  prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
+  one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
+  passes the gates below; none for any other prompt. The call fails closed. The rules:
+    - The gates are the Opus ask's, one helper (_owner_ask): payload `source`, a notice start, pasted and notice blocks
+      cut, a fired-task block, a promptSource `system` record, a cloud session's seed prompt.
+    - No judge call and no new grant for: no whole word `override` outside code spans (a pasted refusal line from
+      offer() holds it only inside them), a NEGATIONS word or `off` within NEGATION_SPAN words of it, a `?`, two
+      lengths, a decimal or compound length, or the whole word `opus` (the Opus route owns it).
+    - One length sets the time: `15m`, `15 minutes`, or a bare number right after a first word `override` (minutes).
+      None: a one-act override. A judge yes for a first-word `override` with a reason and no length stays main's
+      one-act override.
+    - grant() defers (returns None) only for a first word `override` whose rest is no whole keyword form and holds a
+      length. grant_override_ask then answers every outcome but a judge yes with grant()'s own result (a reason form:
+      a one-act override, with the reason logged; `override 15m please`: nothing). A judge no or error never widens a
+      one-act override to a timed one.
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
 "until": ISO-8601 UTC, "role": null, one role, or a sorted list of 2 or more roles}. It lives beside the override, so the two never
 replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
@@ -75,11 +92,14 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-try:  # stdlib only: the one home of the machine-text tags
-    from shared_names import MACHINE_TAGS, NOTICE_FRAMES
+try:  # stdlib only: the one home of the machine-text tags and the config dir
+    from shared_names import MACHINE_TAGS, NOTICE_FRAMES, config_dir
     NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
 except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
     NOTICE_TAGS = ()
+
+    def config_dir():  # a copy by need: an override file must stay readable while the helper lands late
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
@@ -107,12 +127,18 @@ OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
              "excluding", "exclude", "skip", "ignore", "instead", "rather", "besides", "minus"}
+OVERRIDE_NEGATIONS = NEGATIONS | {"off"}  # the override ask also reads a request to turn an override off as a negation
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
 PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
 ASK_LENGTH = re.compile(r"(?<![\w-])(\d+)(?:([mh])|\s?(%s))(?![\w-])" % SPELLED_UNIT, re.I)
 # A decimal length (`0.5h`, `1.5 hours`) or a compound one (`1h30m`): no clear length.
 UNCLEAR_LENGTH = re.compile(r"[.,]\d+(?:[mh]|\s?(?:{0}))(?![\w-])|\d(?:{0}|[mh])\d".format(SPELLED_UNIT), re.I)
+# The plain override ask (grant_override_ask): the whole word (not `overrides`, `re-override` or `override.py`), a backtick
+# code span (a fenced block, an unclosed fence, or an inline span; a lone backtick is no span), and a bare number.
+OVERRIDE_WORD = re.compile(r"(?<![\w-])override(?![\w-]|\.\w)", re.I)
+CODE_SPANS = re.compile(r"```.*?```|```.*|`[^`\n]+`", re.S)
+BARE_NUMBER = re.compile(r"(\d+)(?![\w.,-])")
 FIRED_TASK = re.compile(r"<system-reminder>\s*This task fired at ")  # a fired scheduled task's block
 COMMAND_RECORDS = ("<local-command-caveat>", "<command-name>", "<command-message>", "<local-command-stdout>")
 SEED_READ_MAX = 1 << 20  # bytes of the transcript the seed check reads, from the top
@@ -169,8 +195,7 @@ def _path(session_id, *folder):
     cannot name a file."""
     if not isinstance(session_id, str) or not SESSION_ID.fullmatch(session_id) or session_id[0] == ".":
         return None
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(base, "state", "override", *folder, session_id + ".json")
+    return os.path.join(config_dir(), "state", "override", *folder, session_id + ".json")
 
 
 def _write(path, data):
@@ -180,6 +205,22 @@ def _write(path, data):
     with open(scratch, "w", encoding="utf-8") as handle:
         json.dump(data, handle)
     os.replace(scratch, path)
+
+
+def _length_end(at, number, unit):
+    """The instant a length of `number` units (`h` hours, anything else minutes) ends, from `at`."""
+    number = int(number)
+    return at + (timedelta(hours=number) if unit and unit.lower() == "h" else timedelta(minutes=number))
+
+
+def _write_override(session_id, path, kind, until):
+    """Write the session's override file whole: the one home of its shape, for the keyword grant and the plain ask.
+    Clears old claim markers first. Returns (kind, until)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    _sweep_claims(os.path.dirname(path))
+    _write(path, {"kind": kind, "until": until.astimezone(timezone.utc).isoformat(),
+                  "id": uuid.uuid4().hex})  # the id gives each override its own claim marker
+    return kind, until
 
 
 def opus_role(word):
@@ -218,7 +259,7 @@ def _write_opus(session_id, path, at, length, role, said=None, log=True):
     `said` is the owner's words, for the log; `log` False writes the file and no log line. Returns ("opus", until,
     role)."""
     number, unit = length
-    until = at + (timedelta(hours=int(number)) if unit.lower() == "h" else timedelta(minutes=int(number)))
+    until = _length_end(at, number, unit)
     stamp = until.astimezone(timezone.utc).isoformat()
     _write(path, {"kind": "opus", "until": stamp, "role": role})
     if not log:
@@ -243,13 +284,31 @@ def _keyword_rest(rest):
     return len(words) > 1 and opus_role(words[0]) is not None and OPUS_LENGTH.match(words[1]) is not None
 
 
+def _ask_lengths(text, bare=None):
+    """The lengths in a plain ask `text` as (number, unit letter) pairs, plus `bare` (a pair) when given, or None when
+    they are unclear: two or more, a decimal or a compound length. The one length check of both plain asks."""
+    found = [(m.group(1), (m.group(2) or m.group(3))[0]) for m in ASK_LENGTH.finditer(text)]
+    if bare:
+        found.append(bare)
+    if len(found) > 1 or UNCLEAR_LENGTH.search(text):
+        return None
+    return found
+
+
+def _near_negation(names, at, negations):
+    """True when a word of `negations` stands within NEGATION_SPAN words before or after the word at names[at]. The one
+    negation check of both plain asks."""
+    near = names[max(0, at - NEGATION_SPAN):at] + names[at + 1:at + 1 + NEGATION_SPAN]
+    return bool(negations & {w.lower() for w in near})
+
+
 def _ask_scope(text):
     """(length, roles) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
     length, a role with a negation within NEGATION_SPAN words before or after it, or two role words joined by
     anything but a plain list (PLAIN_LIST). `roles` is the sorted list of the roles it names, empty when it names
     none."""
-    lengths = ASK_LENGTH.findall(text)
-    if len(lengths) > 1 or UNCLEAR_LENGTH.search(text):
+    lengths = _ask_lengths(text)
+    if lengths is None:
         return None
     matches = list(ROLE_WORDS.finditer(text))
     words = [m.group() for m in matches]
@@ -258,18 +317,13 @@ def _ask_scope(text):
         role = opus_role(word)
         if role not in ASK_ROLES:
             continue
-        near = words[max(0, at - NEGATION_SPAN):at] + words[at + 1:at + 1 + NEGATION_SPAN]
-        if NEGATIONS & {w.lower() for w in near}:
+        if _near_negation(words, at, NEGATIONS):
             return None
         if last_end is not None and not PLAIN_LIST.fullmatch(text, last_end, matches[at].start()):
             return None
         roles.add(role)
         last_end = matches[at].end()
-    length = DEFAULT_ASK_LENGTH
-    if lengths:
-        number, short, spelled = lengths[0]
-        length = (number, (short or spelled)[0])
-    return length, sorted(roles)
+    return (lengths[0] if lengths else DEFAULT_ASK_LENGTH), sorted(roles)
 
 
 def _file_role(roles):
@@ -393,6 +447,30 @@ def _scoped_roles(scope_judge, text, context):
     return sorted({w.strip().lower() for w in named if isinstance(w, str)} & set(ASK_ROLES))
 
 
+def _owner_ask(prompt, source, transcript, wanted):
+    """The gates of the plain asks (grant_opus_ask, grant_override_ask), the one home. Returns (text, found, seed) for a
+    prompt that may go to a judge, else None. `text` is the prompt less its pasted and notice blocks. `found` is the
+    tail read (_tail_prompts). `seed` is a cloud session's seed record offset, else None. `wanted(text)` is the route's
+    own test of the words, run before the transcript is read. None for: a non-string, a `source` outside
+    OPUS_ASK_SOURCES, a missing NOTICE_TAGS, a prompt that starts with a notice, a fired-task block, words the route
+    does not want, a prompt whose own record is last in the transcript with promptSource "system", and in a cloud
+    session (env LANE_ENV set) a prompt with no earlier owner turn (the seed prompt)."""
+    if not isinstance(prompt, str) or source not in OPUS_ASK_SOURCES:
+        return None
+    if not NOTICE_TAGS or prompt.lstrip().startswith(NOTICE_TAGS) or FIRED_TASK.search(prompt):
+        return None  # a stored task, a notice or no tag list: not typed words
+    text = _strip_blocks(prompt)
+    if not wanted(text):
+        return None
+    found = _tail_prompts(transcript)
+    if _system_prompt_last(found, prompt):
+        return None
+    seed = _seed_record(transcript, found, prompt) if os.environ.get(LANE_ENV) else None
+    if os.environ.get(LANE_ENV) and seed is None:
+        return None
+    return text, found, seed
+
+
 def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=None, scope_judge=None):
     """The owner's plain Opus ask (`send opus judges`): an Opus override written when the model says the prompt is the
     owner's own present request to run Opus agents (decision owner-override). `judge` is call_judge.opus_ask and
@@ -409,25 +487,16 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     with no `opus-grant` line.
     The one `opus-grant` line logs the final scope; an interrupt or exit in the call logs the every-role line. The guard.log line `opus-grant` holds the words that were
     judged."""
-    if not isinstance(prompt, str) or source not in OPUS_ASK_SOURCES:
-        return None
     path = _path(session_id, "opus")
-    if path is None or not NOTICE_TAGS or prompt.lstrip().startswith(NOTICE_TAGS):
+    if path is None or not isinstance(prompt, str):
         return None
     first = OPUS_PROMPT.match(prompt)
     if PROMPT.match(prompt) or (first and _keyword_rest(first.group(1))):
         return None
-    text = _strip_blocks(prompt)
-    if FIRED_TASK.search(prompt):  # a stored task, not typed words
+    gated = _owner_ask(prompt, source, transcript, lambda text: OPUS_WORD.search(text) is not None)
+    if gated is None:
         return None
-    if not OPUS_WORD.search(text):
-        return None
-    found = _tail_prompts(transcript)
-    if _system_prompt_last(found, prompt):
-        return None
-    seed = _seed_record(transcript, found, prompt) if os.environ.get(LANE_ENV) else None
-    if os.environ.get(LANE_ENV) and seed is None:
-        return None
+    text, found, seed = gated
     if judge is None:
         from call_judge import opus_ask as judge
     if judge(text) is not True:
@@ -452,10 +521,12 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     return _write_opus(session_id, path, at, length, _file_role(roles), said)
 
 
-def grant(session_id, prompt, at):
+def grant(session_id, prompt, at, defer=True):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
-    else None: the prompt is not a word."""
+    else None: the prompt is not a word. With `defer`, a first word `override` whose rest is no whole keyword form and
+    holds a length returns None too, so the plain ask (grant_override_ask) judges it; grant_override_ask calls again
+    with `defer` False for main's result."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
         return _grant_opus(session_id, opus.group(1), at)
@@ -467,6 +538,8 @@ def grant(session_id, prompt, at):
     word = WORD.fullmatch(reason)
     if not word and WORD.fullmatch(reason.split(" ")[0]):
         return None  # a word after `off` or a length: ambiguous, grants nothing
+    if not word and defer and ASK_LENGTH.search(reason):
+        return None  # a plain ask with a length: grant_override_ask judges it
     off, number, unit = word.groups() if word else (None, None, None)
     if off:
         try:
@@ -477,16 +550,84 @@ def grant(session_id, prompt, at):
     if number is None:
         kind, until = "once", at + ONCE_WINDOW
     else:
-        kind = "timed"
-        until = at + (timedelta(hours=int(number)) if unit and unit.lower() == "h"
-                      else timedelta(minutes=int(number)))
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    _sweep_claims(os.path.dirname(path))
-    _write(path, {"kind": kind, "until": until.astimezone(timezone.utc).isoformat(),
-                  "id": uuid.uuid4().hex})  # the id gives each override its own claim marker
+        kind, until = "timed", _length_end(at, number, unit)
+    _write_override(session_id, path, kind, until)
     if reason and kind == "once":
         _log_reason(session_id, reason, at)
     return kind, until
+
+
+def _outside_code(text):
+    """`text` with each backtick code span (a fenced block, an unclosed fence to the end, or an inline span) replaced by a
+    space: a word inside one is quoted, never the owner's own."""
+    return CODE_SPANS.sub(" ", text)
+
+
+def _override_wanted(text):
+    """True when the plain override ask may go to the judge on its words alone: the whole word `override` outside code
+    spans with no NEGATIONS word or `off` within NEGATION_SPAN words of it, no `?`, and no whole word `opus`."""
+    clean = _outside_code(text)
+    starts = {m.start() for m in OVERRIDE_WORD.finditer(clean)}
+    if not starts or "?" in text or OPUS_WORD.search(text):
+        return False
+    words = list(ROLE_WORDS.finditer(clean))
+    names = [m.group().lower() for m in words]
+    return not any(_near_negation(names, at, OVERRIDE_NEGATIONS)
+                   for at, match in enumerate(words) if match.start() in starts)
+
+
+def _override_length(text):
+    """(number, unit) of the one length in the plain override ask `text`, None for no length, False for words that are
+    unclear (_ask_lengths). A bare number right after the prompt's own first word `override` is minutes: that word is
+    read on `text` as typed, so a code span before it makes no first word. Code spans do not count."""
+    first = PROMPT.match(text)
+    rest = first.group(1) if first else ""
+    bare = BARE_NUMBER.match(rest)
+    lengths = _ask_lengths(_outside_code(text), (bare.group(1), "m") if bare and not ASK_LENGTH.match(rest) else None)
+    return False if lengths is None else lengths[0] if lengths else None
+
+
+def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, source=None):
+    """The owner's plain override ask (`yes override that`, `override that for 15 minutes please`): an override written
+    when the model says the prompt is the owner's own present request to override a refusal (decision owner-override).
+    `judge` is call_judge.override_ask unless a caller passes another. Returns (kind, until) for a new override, else
+    None. A timed override for the one length in the words, else a one-act override with the ONCE_WINDOW. The module
+    docstring holds the rules. Cost: one tail read and one judge call, only for a prompt that holds the whole word
+    `override` outside code spans and passes _override_wanted and the gates (_owner_ask); the judge sees the stripped
+    ask alone.
+    A first word `override` is a keyword form grant() deferred. Every outcome but a judge yes for a timed override
+    (a gate, unclear words, a judge no, an error or an odd answer) returns grant(defer=False): a reason form stays a
+    one-act override with its reason logged, `override 15m please` stays nothing. A judge error never widens it."""
+    path = _path(session_id)
+    if path is None or not isinstance(prompt, str):
+        return None
+    keyword = PROMPT.match(prompt) is not None
+
+    def main():
+        return grant(session_id, prompt, at, defer=False) if keyword else None
+
+    try:  # a gate that raises (a transcript read, an import) leaves main's result standing
+        gated = _owner_ask(prompt, source, transcript, _override_wanted)
+        length = _override_length(gated[0]) if gated else False
+    except Exception as exc:
+        print("override: plain ask grants nothing new: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return main()
+    if gated is None or length is False:
+        return main()
+    try:
+        if judge is None:
+            from call_judge import override_ask as judge
+        said_yes = judge(gated[0]) is True
+    except Exception as exc:
+        print("override: plain ask grants nothing new: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        said_yes = False
+    if not said_yes or (length is None and keyword):
+        return main()
+    if length is None:
+        done = _write_override(session_id, path, "once", at + ONCE_WINDOW)
+        _log_reason(session_id, " ".join(gated[0].split()), at)  # the keyword once logs its reason the same way
+        return done
+    return _write_override(session_id, path, "timed", _length_end(at, *length))
 
 
 def _sweep_claims(folder):

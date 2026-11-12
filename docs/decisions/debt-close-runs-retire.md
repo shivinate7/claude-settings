@@ -16,4 +16,6 @@ Source: coordinator ruling 2026-11-06 13:00 CST (the `Retire-run:` form; a renam
 Kind: process
 Home: lint/check_debt_retire.py
 Home: merge/merge.py
+Home: lint/check_silent_undo.py
+Home: .github/pull_request_template.md
 Check: lint/check_debt_retire.py
