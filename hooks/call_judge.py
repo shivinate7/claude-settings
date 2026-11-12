@@ -136,11 +136,10 @@ PAST_RULING_ITEM = (
     "the question asks the owner to decide what a listed ruling already decides, or when its premise is "
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
-    "a re-ask the ruling allows is fine. A measured challenge passes too (rule outcomes-stale-decision-protocol): "
-    "a question that names the record and quotes its sentence, gives a measure of what the sentence claims or the "
-    "word \"unmeasured\", says what outcome the ruling protected and what protects that outcome now, and proposes a "
-    "fix. A new fact alone is not a pass: a question passes only as a challenge with those four parts. "
-    "Refuse a re-ask that is not such a challenge. "
+    "a re-ask the ruling allows is fine. A challenge that names the record passes on a new fact alone (rule "
+    "outcomes-stale-decision-protocol): a measure of what the ruling claims, or an observed harm the ruling left "
+    "unweighed. The outcome the ruling protected, what protects it now and a proposed fix are optional, never "
+    "required. Refuse a re-ask that brings no new fact. "
     "A challenge only asks; it never grants anything. "
     "This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
@@ -149,9 +148,9 @@ PAST_RULING_ITEM = (
 # challenge. It never tells the session to give the question up: a ruling is an argument the owner may be asked to
 # revisit (R39 in docs/plans/restart-plan.md). The challenge is judged as a question and read by no grant reader.
 CHALLENGE_HOW = (
-    "To challenge the ruling, send the question again as a challenge that names the record and quotes its "
-    "sentence, gives a measure of its claim or the word \"unmeasured\", says what outcome the ruling protected and "
-    "what protects that outcome now, and proposes a fix. A challenge with those parts passes this check."
+    "To challenge the ruling, send the question again as a challenge that names the record and brings a new fact: "
+    "a measure, or an observed harm the ruling left unweighed. The outcome it protected, what protects it now and a "
+    "proposed fix are optional. A challenge with the record and a new fact passes this check."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60

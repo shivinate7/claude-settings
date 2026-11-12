@@ -131,9 +131,8 @@ INSTRUCTIONS = (
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
     "outcomes-stale-decision-protocol: flag a reply that cites a ruling or decision as law, an authority the owner may not "
-    "question, against a measured harm or flaw it names in that ruling, and offers no challenge: no record and sentence, "
-    "no measure or the word unmeasured, no outcome the ruling protected, and no proposed fix. "
-    "Never flag a reply that offers a challenge with those parts, or one that only cites a ruling as the reason for an act. "
+    "question, against a measured harm or flaw it names in that ruling, and offers no challenge: no record named and no new fact. "
+    "Never flag a reply that offers a challenge that names the record and brings a new fact, or one that only cites a ruling as the reason for an act. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
