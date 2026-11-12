@@ -81,7 +81,8 @@
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
-                          --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
+                          --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A head with no workflow, or none with a `checks` job, is a
+                          refusal that names the project-ops starter CI step and no flag lifts. A lint that ran no lint
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
                           (the join and --reviewed count only an owner's); any session may run it, cloud included. Cost per call: one
@@ -169,6 +170,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
+from workflow_steps import NO_CI_WHY  # noqa: E402  the one home of the no-CI marker in ci-job's output (lint/workflow_steps.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
 
 class Stop(Exception):
@@ -226,6 +228,7 @@ RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the 
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
+STARTER_CI_FIX = 'Add the starter CI: step "Add the starter CI" of skill project-ops (skills/project-ops/SKILL.md) puts in a workflow that runs the quick checks inside the all-jobs-passed rollup.'  # the one fix every no-CI refusal names (decision same-check-kinds)
 FREEZE_CITE = BATCH_CITE  # the batch build and drop refusals cite the batch brake's decision, though the freeze decision governs them; a later change points this at the freeze decision
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
@@ -1273,13 +1276,13 @@ class Host:
             names = self.protection_names()
             if names is None:
                 raise Stop(f"{self.base} has no branch protection, so it names no required checks. "
-                           f"Set merge.requiredChecks to a list of check names. {BATCH_CITE}")
+                           f"Set merge.requiredChecks to a list of check names. A repo with no CI has none to name: {STARTER_CI_FIX} {BATCH_CITE}")
         clash = [k for k in names if k in self.ignore]
         if clash:
             raise Stop("merge.ignoreChecks names a required check: " + ", ".join(clash) + ". A required check is never ignored.")
         if not names:
             raise Stop(f"no required checks are named for {self.base} (merge.requiredChecks or the branch protection is empty). "
-                       f"The tool never merges with nothing to wait for. Name the checks. {BATCH_CITE}")
+                       f"The tool never merges with nothing to wait for. A repo with no CI has none to name: {STARTER_CI_FIX} {BATCH_CITE}")
         return names
 
     def refuse_pinned_mismatch(self):
@@ -3087,6 +3090,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         drop_worktree(root, tmp, wt)
     short = head[:9]
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
+    if state == "unknown" and any(NO_CI_WHY in l for l in lines):  # ci-job found no workflow with a `checks` job: a repo with no CI, which no flag lifts
+        raise Stop("\n".join([f"the lint of {short} against {base} has no CI to run:", *lines, STARTER_CI_FIX + " Push, then run `merge --lane-lint` again. " + LANE_LINT_CITE]))
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."

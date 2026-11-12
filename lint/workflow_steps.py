@@ -10,6 +10,8 @@ import sys
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
+# The start of job_workflow's why when no workflow file holds the job: a repo with no CI for it. merge's lane lint reads it in ci-job's output.
+NO_CI_WHY = "no CI: "
 
 
 def job_re(name):
@@ -25,13 +27,13 @@ def job_block(text, name):
 
 def job_workflow(top, job):
     """The one workflow file in `<top>/.github/workflows/` (*.yml, *.yaml) that holds `job`. -> (path, None), or
-    (None, why) when the folder is unreadable or no file, or more than one file, holds it. The file name is the repo's
+    (None, why) when the folder is unreadable or no file, or more than one file, holds it. The first two whys start with NO_CI_WHY. The file name is the repo's
     own (checks.yml, check.yml), so the job is the key."""
     folder = os.path.join(top, ".github", "workflows")
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith((".yml", ".yaml")))
     except OSError as e:
-        return None, "cannot read %s: %s" % (folder, e)
+        return None, "%scannot read %s: %s" % (NO_CI_WHY, folder, e)
     found = []
     for n in names:
         try:
@@ -43,7 +45,7 @@ def job_workflow(top, job):
     if len(found) == 1:
         return os.path.join(folder, found[0]), None
     if not found:
-        return None, "no workflow file in %s has a `%s` job" % (folder, job)
+        return None, "%sno workflow file in %s has a `%s` job" % (NO_CI_WHY, folder, job)
     return None, "more than one workflow file in %s has a `%s` job: %s" % (folder, job, ", ".join(found))
 
 
