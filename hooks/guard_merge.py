@@ -373,6 +373,40 @@ def _gh_api_write(args) -> str:
     return "api with fields" if fields else ""
 
 
+def gh_write_view(raw: str) -> str:
+    """The command text rule gh-write-cloud judges. It is `strip_heredoc_bodies(raw)`, except that a body
+    fed to a python that only reads it is data and drops: `python3 -c CODE <<EOF` when CODE hands no string to
+    a shell (`script_spots`), and `python3 script.py <<EOF`. Every other heredoc header keeps the default
+    reading, so a body that bash, node, perl, ruby, or a python script on stdin runs stays in view."""
+    stripped = strip_heredoc_bodies(raw)
+    if "<<" not in raw or stripped != raw:
+        return stripped   # no heredoc, or the default reading already dropped what it drops
+    from guard_core import _strip_heredoc_bodies_unconditionally, script_language
+    from guard_env import script_spots
+    from guard_frozen import _inline_script_at, _script_file_arg
+    saw_python = False
+    for segment in split_segments(_strip_heredoc_bodies_unconditionally(raw)):
+        if "<<" not in segment:
+            continue
+        lang = script_language(segment)
+        if not lang:
+            continue
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if lang != "py" or index is None:
+            return stripped
+        found = _inline_script_at(tokens)
+        if found:
+            if script_spots(str(tokens[found[1]]), "py"):
+                return stripped   # the code runs its stdin through a shell
+        elif not isinstance(_script_file_arg(tokens, index, "py"), str):
+            return stripped   # no script file: python reads its script from the heredoc
+        saw_python = True
+    if not saw_python:
+        return stripped
+    return strip_heredoc_bodies(raw, shells_only=True, per_body=True)
+
+
 def gh_write_of(segment: str) -> str:
     """The label of a gh write in the segment (or in a `sh -c` script it holds), else "": gh pr create,
     merge, comment, edit, close, review or ready; gh issue create, comment, edit or close; gh api with
