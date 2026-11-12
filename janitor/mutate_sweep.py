@@ -264,9 +264,10 @@ MUTATIONS = [
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
      '        written = entry.get("locked_at_ms")\n'
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written)\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written, entry["path"])\n'
      '        if stale_agent_lock is not True:\n'
-     '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder, written) is True\n'
+     '            own_lock = (own_lock_rule\n'
+     '                        and own_agent_lock_verdict(holder, written, entry["path"]) is True\n'
      '                        and (not fast or batch is not None)\n'
      '                        and _own_lock_ready(where, path, batch, lock_idle))\n'
      '            if not own_lock:\n'
@@ -291,9 +292,10 @@ MUTATIONS = [
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
      '        written = entry.get("locked_at_ms")\n'
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written)\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written, entry["path"])\n'
      '        if stale_agent_lock is not True:\n'
-     '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder, written) is True\n'
+     '            own_lock = (own_lock_rule\n'
+     '                        and own_agent_lock_verdict(holder, written, entry["path"]) is True\n'
      '                        and (not fast or batch is not None)\n'
      '                        and _own_lock_ready(where, path, batch, lock_idle))\n'
      '            if not own_lock:\n'
@@ -313,8 +315,8 @@ MUTATIONS = [
     # and a general sweep reaps the tree with a shell the agent may have left inside.
     ("finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
      "sweep",
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written)\n',
-     '        stale_agent_lock = stale_agent_lock_verdict(holder, written)\n',
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written, entry["path"])\n',
+     '        stale_agent_lock = stale_agent_lock_verdict(holder, written, entry["path"])\n',
      "test_a_dead_host_live_lock_with_no_stop_row_keeps_the_tree"),
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
@@ -1011,11 +1013,10 @@ MUTATIONS = [
      '            return True\n'
      '    actual = git_reads._process_start_ms(pid)',
      "test_unreadable_lock_start_keeps"),
-    ("stale lock: a lock with no start time counts as stale, even when its host runs",
+    ("stale lock: a no-start lock whose live host is on Linux counts as stale, even when its host runs",
      "sweep",
-     '        if locked_at_ms is None:\n',
-     '        return True\n'
-     '        if locked_at_ms is None:\n',
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n',
+     '            return True\n',
      "test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept"),
     # The write-time arm of a no-start lock (`stale_agent_lock_verdict`). Two entries, one per
     # required case: each named case must be the one that kills the mutant (`required` is one name).
@@ -1031,20 +1032,20 @@ MUTATIONS = [
      "test_no_start_lock_whose_holder_started_after_the_write_is_freed"),
     ("stale lock: a no-start lock with an unreadable write time is freed",
      "sweep",
-     '        if locked_at_ms is None:\n            return False\n',
-     '        if locked_at_ms is None:\n            return True\n',
+     '            if locked_at_ms is None:\n                return False\n',
+     '            if locked_at_ms is None:\n                return True\n',
      "test_no_start_lock_with_an_unreadable_write_time_keeps"),
     # The two call sites that pass a lock's write time on (`_lock_unlockable`, `_restore_cut_short`). Each
     # call with the write time dropped keeps a reused pid's lock, and its named case must go red.
     ("stale lock: the unlock re-read drops the write time, so a reused pid's lock is kept",
      "sweep",
-     '            and (stale_agent_lock_verdict(reason, written) is True',
-     '            and (stale_agent_lock_verdict(reason, None) is True',
+     '            and (stale_agent_lock_verdict(reason, written, path) is True',
+     '            and (stale_agent_lock_verdict(reason, None, path) is True',
      "test_unlock_for_removal_passes_the_write_time_to_the_lock_re_read"),
     ("stale lock: the cut-short write-back drops the write time, so a reused pid's lock is kept",
      "sweep",
-     '            entry.get("locked_at_ms")) is not True):',
-     '            None) is not True):',
+     '            entry.get("locked_at_ms"), path) is not True):',
+     '            None, path) is not True):',
      "test_restore_cut_short_passes_the_write_time_of_a_reused_pid_lock"),
     ("stale lock: --confirm removes without unlocking first",
      "sweep",
@@ -1223,9 +1224,11 @@ MUTATIONS = [
     ("stale lock: a lock reason of another form counts as stale",
      "sweep",
      '    if not found:\n'
-     '        return False',
+     '        return False\n'
+     '    pid, start = int(found.group(1)), found.group(2)',
      '    if not found:\n'
-     '        return True',
+     '        return True\n'
+     '    pid, start = int(found.group(1)), found.group(2)',
      "test_other_lock_reason_keeps"),
     ("stale lock: the decision no longer asks for an unlock",
      "sweep",
@@ -1478,23 +1481,71 @@ MUTATIONS = [
      'min(JUDGE_BUDGET_SECONDS, n - DEADLINE_TAIL_SECONDS))',
      'n - DEADLINE_TAIL_SECONDS)',
      "test_a_25_second_deadline_gives_a_12_second_budget"),
-]
 
-# Mutants for the Linux route and the darwin rule (the `worktree` argument of stale_agent_lock_verdict).
-# No anchor can be checked until the built code exists, so these stay PENDING: main() names each and
-# runs none. When the built code is in, give each its anchor and replacement and move it into MUTATIONS.
-# Each row: (label, target, the case that must go red on it).
-PENDING_MUTATIONS = [
+    # ---- the Linux route and the darwin rule (the `worktree` argument of stale_agent_lock_verdict) ----
     ("linux route: the cwd-outside test is flipped, so a holder inside its tree frees",
-     "sweep", "test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap"),
+     "sweep",
+     '        if cwd == tree or cwd.startswith(tree.rstrip(os.sep) + os.sep):\n'
+     '            return False\n',
+     '        if not (cwd == tree or cwd.startswith(tree.rstrip(os.sep) + os.sep)):\n'
+     '            return False\n',
+     "test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap"),
     ("linux route: the cmdline test is dropped, so a holder whose argv names claude or agent frees",
-     "sweep", "test_linux_no_start_lock_whose_holder_names_claude_or_agent_keeps_despite_a_write_time_gap"),
-    ("linux route: fail-closed is flipped, so an unreadable /proc read frees",
-     "sweep", "test_linux_no_start_lock_with_an_unreadable_proc_read_keeps_despite_a_write_time_gap"),
-    ("linux route: Linux reads the write time again, so a write-time gap frees a live holder",
-     "sweep", "test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap"),
+     "sweep",
+     '        return not any("claude" in part or "agent" in part for part in argv)\n',
+     '        return True\n',
+     "test_linux_no_start_lock_whose_holder_names_claude_or_agent_keeps_despite_a_write_time_gap"),
+    ("linux route: the unreadable /proc read is flipped to free, so an unreadable cwd or cmdline frees",
+     "sweep",
+     '        return not any("claude" in part or "agent" in part for part in argv)\n'
+     '    except Exception:\n'
+     '        return False\n',
+     '        return not any("claude" in part or "agent" in part for part in argv)\n'
+     '    except Exception:\n'
+     '        return True\n',
+     "test_linux_no_start_lock_with_an_unreadable_proc_read_keeps_despite_a_write_time_gap"),
+    ("linux route: an empty cmdline is flipped to free, so a holder with no argv to judge frees",
+     "sweep",
+     '        if not argv:\n'
+     '            return False\n',
+     '        if not argv:\n'
+     '            return True\n',
+     "test_linux_no_start_lock_whose_cmdline_reads_empty_keeps_despite_a_write_time_gap"),
+    ("linux route: a missing tree path is flipped to free, so a holder that cannot be placed frees",
+     "sweep",
+     '    if not worktree:\n'
+     '        return False\n',
+     '    if not worktree:\n'
+     '        return True\n',
+     "test_linux_no_start_lock_with_no_tree_path_keeps_despite_a_write_time_gap"),
+    ("linux route: the platform gate is removed, so Linux reads the write time again",
+     "sweep",
+     '        if sys.platform.startswith("win"):\n',
+     '        if True:\n',
+     "test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap"),
+    ("write time: the back-pointer compare is dropped, so another tree's admin dir lends its lock time",
+     "sweep",
+     '        if not back or named != os.path.normcase(os.path.realpath(own_git)):\n'
+     '            return None\n',
+     '        if not back:\n'
+     '            return None\n',
+     "test_lock_write_time_read_through_another_trees_git_file_keeps"),
     ("darwin: a live no-start holder is freed on its write time",
-     "sweep", "test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time"),
+     "sweep",
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
+     '        return False\n',
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
+     '        if locked_at_ms is None:\n'
+     '            return False\n'
+     '        return actual - locked_at_ms > git_reads.SESSION_LIVE_TOLERANCE_MS\n',
+     "test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time"),
+    ("darwin: the no-start fallback is flipped to free, so a live no-start holder frees",
+     "sweep",
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
+     '        return False\n',
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
+     '        return True\n',
+     "test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time"),
 ]
 
 
@@ -1655,13 +1706,6 @@ def main() -> int:
         if not required:
             print("ERROR mutation carries no required case name: %s" % label)
             return 1
-
-    # A pending row has no anchor to check yet, so it runs nothing. Its named case must still exist.
-    for label, _target, required in PENDING_MUTATIONS:
-        if ("def %s(" % required) not in sources["test_sweep"]:
-            print("ERROR pending mutation names no case in test_sweep.py: %s" % label)
-            return 1
-        print("PENDING (no anchor until the built code exists, not run): %s" % label)
 
     # MUTATE_ONLY=<fragment>[,<fragment>...] runs only the mutants whose label holds a fragment.
     # Every anchor is still checked above. Unset, every mutant runs.

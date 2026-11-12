@@ -1145,6 +1145,22 @@ def _unreadable_proc(pid, name):
         yield
 
 
+@contextlib.contextmanager
+def _empty_proc_cmdline(pid):
+    """Every read of /proc/PID/cmdline returns no bytes, as a process that has cleared its argv reads. Every
+    other path reads as usual."""
+    target = "/proc/%d/cmdline" % pid
+    real_open = open
+
+    def emptied(path, *args, **kwargs):
+        if isinstance(path, str) and os.path.normpath(path) == target:
+            return io.BytesIO(b"")
+        return real_open(path, *args, **kwargs)
+
+    with mock.patch("builtins.open", new=emptied):
+        yield
+
+
 def verdict_on(platform):
     """Decorator for one case: `stale_agent_lock_verdict` sees sys.platform as PLATFORM. Only the verdict
     call is patched. A patch over the whole case would send every POSIX process read down its Windows
@@ -1767,6 +1783,38 @@ class StaleAgentLockTests(unittest.TestCase):
                                  "freed on an unreadable /proc/%d/%s: %s" % (holder.pid, name, decision["reason"]))
                 self.assertTrue(decision["reason"].startswith("locked:"),
                                 "kept for another reason: %s" % decision["reason"])
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_with_no_tree_path_keeps_despite_a_write_time_gap(self):
+        # Red on the unchanged code: the write-time gap frees the holder. The route reads the holder's cwd
+        # against the tree's path, so with no path it cannot place the holder, and it keeps. The control
+        # gives the tree's path, and the same holder frees.
+        path, _holder = self.held_tree("nsnopath")
+        entry = self.fresh_entry(path)
+        with self.subTest(arm="control: the tree's path is given, so the reused pid frees"):
+            decision = sweep.decide_worktree(self.root, entry, attended=True)
+            self.assertEqual(decision["action"], "reap", "the control kept: %s" % decision["reason"])
+        with self.subTest(arm="no tree path: the holder is kept"):
+            got = sweep.stale_agent_lock_verdict(entry["locked_reason"], locked_at_ms=entry["locked_at_ms"])
+            self.assertIs(got, False, "freed a holder with no tree path on a write-time gap: verdict %r" % (got,))
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_whose_cmdline_reads_empty_keeps_despite_a_write_time_gap(self):
+        # Red on the unchanged code: the write-time gap frees the tree. An empty cmdline names no argv to judge,
+        # so the route keeps and never falls back to the write time. The control reads the same tree with its
+        # cmdline working, and that frees it.
+        path, holder = self.held_tree("nsempty")
+        entry = self.fresh_entry(path)
+        with self.subTest(arm="control: the cmdline is read, so the reused pid frees"):
+            decision = sweep.decide_worktree(self.root, entry, attended=True)
+            self.assertEqual(decision["action"], "reap", "the control kept: %s" % decision["reason"])
+        with self.subTest(arm="an empty /proc/PID/cmdline keeps"):
+            with _empty_proc_cmdline(holder.pid):
+                decision = sweep.decide_worktree(self.root, entry, attended=True)
+            self.assertEqual(decision["action"], "keep",
+                             "freed on an empty /proc/%d/cmdline: %s" % (holder.pid, decision["reason"]))
+            self.assertTrue(decision["reason"].startswith("locked:"),
+                            "kept for another reason: %s" % decision["reason"])
 
     @verdict_on("darwin")
     def test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time(self):
@@ -5227,29 +5275,70 @@ class _AgentEndFixture(unittest.TestCase):
         start = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(this_process_start_ms() / 1000))
         return "claude agent agent-%s (pid %d start %s)" % (name, os.getpid(), start)
 
+    # The claude host: a real child whose argv names claude, as the harness's host does. The Linux route
+    # reads a no-start holder whose argv names no claude or agent as a reused pid, and this process's own argv
+    # names neither. The host runs one job per stdin line: a child with the job's argv, input and env.
+    _CLAUDE_HOST = (
+        "import json, subprocess, sys\n"
+        "for line in sys.stdin:\n"
+        "    job = json.loads(line)\n"
+        "    done = subprocess.run(job['argv'], input=job['input'], capture_output=True, text=True,\n"
+        "                          env=job['env'], cwd=job['cwd'], timeout=120)\n"
+        "    sys.stdout.write(json.dumps({'rc': done.returncode, 'err': done.stderr}) + '\\n')\n"
+        "    sys.stdout.flush()\n")
+
+    def claude_host(self):
+        """This case's claude host, started on first use and stopped at teardown. Its pid is the one host_lock
+        names, and the hook runs beneath it."""
+        if getattr(self, "_host", None) is None:
+            self._host = subprocess.Popen([sys.executable, "-c", self._CLAUDE_HOST, "claude"], cwd=self.root,
+                                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                          stderr=subprocess.DEVNULL, text=True)
+            self.addCleanup(self.stop_host, self._host)
+        return self._host
+
+    @staticmethod
+    def stop_host(host):
+        host.kill()
+        host.wait(timeout=10)
+        host.stdin.close()
+        host.stdout.close()
+
     def host_lock(self, name):
-        """The lock text `git worktree list --porcelain` shows now on agent trees: `claude agent
-        agent-<id> (pid N)`, N the claude host, with no start time. N is this test process, the
-        host that fire_under_host names."""
-        return "claude agent agent-%s (pid %d)" % (name, os.getpid())
+        """The lock text `git worktree list --porcelain` shows now on agent trees: `claude agent agent-<id>
+        (pid N)`, with no start time. N is this case's claude host (`claude_host`), an ancestor of every hook
+        that fire_under_host runs, and its argv names claude, so the Linux route keeps its lock as a live host."""
+        return "claude agent agent-%s (pid %d)" % (name, self.claude_host().pid)
+
+    def in_process_host_lock(self, name):
+        """The host lock of THIS process, for a case whose hook runs in this process (`run_in_process`), so the
+        process must be the hook's ancestor. On Linux the live form: this process's no-start form reads as a
+        reused pid there, since its argv names no claude. Elsewhere, the no-start form."""
+        return self.live_host_lock(name) or "claude agent agent-%s (pid %d)" % (name, os.getpid())
 
     def fire_under_host(self, agent, path, cwd=None, check=True, extra=None):
-        """Run the SubagentStop hook one process below an intermediate python, itself run by this test
-        process (the host). The measured chain is hook -> shell -> claude.exe, so the host is a
-        grandparent. CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell).
-        CWD (default: the test root) is the working directory of the relay, and so of the hook. CHECK
-        False returns the answer without asserting its exit code. EXTRA adds payload fields, such as
-        a finished agent's transcript_path and background_tasks (see payload_extra)."""
+        """Run the SubagentStop hook beneath this case's claude host (`claude_host`). The measured chain is hook
+        -> shell -> claude.exe, so the host is a grandparent: hook -> relay -> host, the relay run by the host.
+        CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell). CWD (default: the test
+        root) is the working directory of the relay, and so of the hook. CHECK False returns the answer without
+        asserting its exit code. EXTRA adds payload fields, such as a finished agent's transcript_path and
+        background_tasks (see payload_extra)."""
+        host = self.claude_host()
         fields = {"hook_event_name": "SubagentStop", "agent_id": agent,
                   "cwd": path, "session_id": "agent-end-wt-cases"}
         fields.update(extra or {})
         payload = json.dumps(fields)
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CLAUDE_PID=str(os.getpid()))
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CLAUDE_PID=str(host.pid))
         relay = ("import subprocess, sys; sys.exit(subprocess.run([sys.executable, sys.argv[1]], "
                  "input=sys.stdin.read(), text=True).returncode)")
-        answer = subprocess.run([sys.executable, "-c", relay, os.path.join(HERE, "agent_end_reap.py")],
-                                input=payload, capture_output=True, text=True, env=env,
-                                cwd=cwd or self.root, timeout=120)
+        job = {"argv": [sys.executable, "-c", relay, os.path.join(HERE, "agent_end_reap.py")],
+               "input": payload, "env": env, "cwd": cwd or self.root}
+        host.stdin.write(json.dumps(job) + "\n")
+        host.stdin.flush()
+        reply = host.stdout.readline()
+        require(reply != "", "the claude host exited before it ran the hook")
+        done = json.loads(reply)
+        answer = subprocess.CompletedProcess(job["argv"], done["rc"], "", done["err"])
         if check:
             self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
         return answer
@@ -5508,7 +5597,8 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.assert_own_left(own)
 
     def test_own_tree_locked_by_a_different_live_pid_is_kept_and_stays_locked(self):
-        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=self.root,
+        # The other session's host: a live process whose argv names claude, so it is a live holder, not a reused pid.
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "claude"], cwd=self.root,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, other)
@@ -5781,7 +5871,8 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
                         "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
                         "    handle.write(str(child.pid))\n"
                         "time.sleep(120)\n")
-        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, pidfile, tree], cwd=self.root,
+        # The sponsor's argv names claude: a live host that is not this session's, so its lock holds by the route.
+        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, pidfile, tree, "claude"], cwd=self.root,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, sponsor)
@@ -5847,7 +5938,7 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
         ending = name + "end"
         own = self.add(ending)
         control = self.control_tree(name + "ctl")
-        tree = self.finished_tree(name)
+        tree = self.finished_tree(name, lock=self.in_process_host_lock(name))
         self.write_stop_row(name, tree)
         self.age_agent_transcript(name, 31)
         self.age_control(control)
