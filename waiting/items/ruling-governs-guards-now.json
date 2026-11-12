@@ -4,6 +4,11 @@
   "home": "step ruled-store-one-home (one store for rulings not yet on main)",
   "id": "ruling-governs-guards-now",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:05:00Z",
+    "choice": "b",
+    "note": "Owner in the retrospective's chat, 15:05 CST: \"ruling governs the guard right away\" (the guard option, page b). Ruling R59, home decision owner-override."
+  },
   "n": 646,
   "options": [
     {
@@ -24,9 +29,10 @@
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "ref": "owner question 14:28 CST Nov 12, via retrospective 14:31 CST",
+  "reply": "Closed 15:08 CST: you picked the guard option in chat (\"ruling governs the guard right away\"). Filed as R59 in the ruling store; steps ruled-store-one-home and ruled-prose-express carry it.",
   "repo": "shivinate7/claude-settings",
   "short": "Rulings off main: guards too, or text only",
-  "status": "open",
+  "status": "closed",
   "title": "Does a ruling not yet on main also govern the guards?",
   "why": "Today a ruling waits for main before guards and running sessions obey it."
 }

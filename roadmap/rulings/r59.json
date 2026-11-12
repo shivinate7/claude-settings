@@ -1,0 +1,11 @@
+{
+ "id": "r59",
+ "at": "2026-11-12T15:05:00-06:00",
+ "ruling": "- **R59. A ruling governs at once, guards included.** Owner 14:28 CST Nov 12: \"how do we make things that aren't on main still hold as law?\" Read: the timer miss (14:15 CST) and the round-3 miss (14:24 CST) both cited main over a newer plan ruling; rulings sit in two stores (this plan, and plans/owner-rulings on the roadmap branch) that no session, check or guard reads. Owner 15:05 CST picked the guard option: \"ruling governs the guard right away\". 1. Rulings live in one store, one file per ruling on the roadmap branch; triage writes it, from the owner's quoted words with their time (step:ruled-store-one-home). 2. Each entry names the main sentence, test or guard rule it replaces. Sessions read the store at start; the past-ruling check reads it before it cites main. 3. An entry that names a guard rule governs that rule at once: the guard lets the ruled act through and names the ruling, like a lasting override for that one rule. 4. An entry closes when main absorbs it; a check flags an entry left open too long. 5. A ruled prose change skips the batch queue and runs only the checks that read its files (step:ruled-prose-express). Home: decision owner-override.",
+ "quote": "ruling governs the guard right away",
+ "source": "plans/restart-plan.md@restart-plan 9064e3c1, R59; item 646 (ruling-governs-guards-now) closed 15:08 CST",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "main: a guard obeys only main's code; triage fills the guard rules each later entry lifts",
+ "title": "A ruling governs at once, guards included."
+}
