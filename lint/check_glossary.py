@@ -40,8 +40,9 @@ it is read in paths, anchors and slugs, never in identifiers, strings or hook me
 may use the other sense. Any other parenthesised tag on a "not" name fails. Claude Code's own names
 stay (PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
 checked or renamed. An untracked file is read when it is new on the base, in a top-level folder where the base
-holds files. An untracked file that is not valid UTF-8 and holds a NUL in its first 8 KB with no UTF-16
-byte-order mark is binary and skipped; any other untracked file that will not decode as text is UNKNOWN.
+holds files. An untracked file that is not valid UTF-8 is binary and skipped when it starts with a known
+binary magic (BINARY_MAGIC: PDF, PNG, JPEG, GIF, ZIP, gzip), or holds a NUL in its first 8 KB with no UTF-16
+byte-order mark; any other untracked file that will not decode as text is UNKNOWN.
 
     python3 lint/check_glossary.py [file ...]
         # files given: check those paths and read each whole, skip git

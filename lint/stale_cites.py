@@ -74,6 +74,7 @@ With env CI unset a gap prints `stale-cites: unknown, ...` naming fetch-depth 0 
 the check first fetches the base through lint/git_fetch.py (unshallowing a shallow clone, then asking for the
 base's sha when it is still out) and reads once more. It is red, a final `stale-cites: UNKNOWN` line naming the
 cause and the base's sha with exit 1, when the fetch fails or the base still shares no history with the head
+(a shallow clone, or a base with no merge base). A base that does not resolve in a full clone is exit 2 instead
 (owner item 276 a, decisions ci-unknown-is-red and stale-cites-at-merge). A repo that pins the ste-lint action
 and checks out shallow is red at its pin move until it checks out with fetch-depth 0, or its origin can be
 fetched. A first push, whose base is the first parent of a root commit (spelled `HEAD~1`, `HEAD^1`, `@~1` or
