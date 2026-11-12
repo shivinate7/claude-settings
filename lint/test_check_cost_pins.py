@@ -36,6 +36,8 @@ COUNT = "count in a Cost sentence with no reader"
 # sentences pass still shows that the rule ran on its record.
 CONTROL = "- **Cost:** two `simctl list` reads per call.\n"
 CONTROL_NEEDLE = "- **Cost:** two `simctl list`"
+# A test file on disk that holds the `--items` span, the code span the stale-pages counts read.
+HOLDS_ITEMS = "# stale pages cases\n\nthe --items flag is read\n"
 FINDING = re.compile(r"^(?P<path>.+\.md):(?P<line>[0-9]+): (?P<what>.+)$")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -624,6 +626,45 @@ class CostPinTests(unittest.TestCase):
                            "- **Cost:** It reads the list once, unmeasured.\n"
                            "- **Cost:** It reads `state/x.json` once, proof `lint/test_x.py`.\n")
         self.assert_found([count_row("no-span.md", text, "It reads the list once, proof")], counts=True)
+
+    def stale_record(self, name):
+        """The stale-pages shape: a count beside a test file named in its own sentence, with no code span but that
+        name, then the same sentence with a bound. Only the unbounded sentence is flagged."""
+        return self.decide(name,
+                           "- **Cost:** 0 gh processes per call, and `test_stale_pages.py` proves the call counts.\n"
+                           "- **Cost:** 0 gh processes per call, at most 50 in all, and `test_stale_pages.py` proves the "
+                           "call counts.\n")
+
+    def test_test_file_on_disk_pins_no_count_when_its_sentence_has_no_span_but_its_name(self):
+        # The file is on disk and holds `--items`, yet the count's sentence holds no span but the file's own name, so
+        # no span is there for the file to hold. The bound sentence passes on its bound, not on the file.
+        self.put("test_stale_pages.py", HOLDS_ITEMS)
+        self.assert_exists("test_stale_pages.py")
+        text = self.stale_record("stale-count.md")
+        self.assert_found([count_row("stale-count.md", text, "0 gh processes per call, and `test_stale_pages.py`")],
+                          counts=True)
+
+    def test_test_file_missing_on_disk_flags_the_same_count_and_the_bound_still_passes(self):
+        # The control beside the case above: with the file absent, nothing it names can pin, and the verdict is the same.
+        text = self.stale_record("stale-missing.md")
+        self.assertFalse(os.path.exists(os.path.join(self.tree, "test_stale_pages.py")))
+        self.assert_found([count_row("stale-missing.md", text, "0 gh processes per call, and `test_stale_pages.py`")],
+                          counts=True)
+
+    def test_a_test_named_in_the_next_sentence_pins_no_count_and_the_same_sentence_does(self):
+        # The stale-pages shape: sentence one counts through `--items`. A test named in sentence two is no candidate for
+        # sentence one, so that count is flagged. The same count with the test named in its own sentence passes, since
+        # the test holds `--items`. The bounded count passes on its bound.
+        self.put("test_stale_pages.py", HOLDS_ITEMS)
+        self.assert_exists("test_stale_pages.py")
+        text = self.decide("next-sentence.md",
+                           "- **Cost:** 0 gh processes without `--items`; one gh process per open item, at most 50. "
+                           "No file is written (`test_stale_pages.py` proves the call counts).\n"
+                           "- **Cost:** 0 gh processes without `--items`; one gh process per open item. "
+                           "No file is written (`test_stale_pages.py` proves the call counts).\n"
+                           "- **Cost:** 0 gh processes without `--items`, and `test_stale_pages.py` proves the call "
+                           "counts.\n")
+        self.assert_found([count_row("next-sentence.md", text, "one gh process per open item. No file")], counts=True)
 
     def test_a_single_before_a_cost_noun_is_a_count(self):
         text = self.decide("single.md",
