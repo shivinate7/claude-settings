@@ -80,6 +80,7 @@ TOUCH = (
     ([".github/judge-replay/corpus/reply_judge.json"], ["reply_judge"]),
     (["hooks/shared_names.py"], "all"),
     (["hooks/guard.py"], "all"),
+    (["hooks/_nowindow.py"], "all"),  # every judge's model call starts in it (decision_watch.run calls _nowindow.run)
 )
 NO_AUTH = (None, "no auth")
 # lint/test_ci_scope.py pins the CI scope's judge_replay flag, so it names the runner by that flag. It wires nothing.
@@ -663,13 +664,92 @@ def case_each_judge_answer_reads_as_its_own_verdict():
             check(exit_label, code == 1, "exit %r" % (code,))
 
 
+MAJORITY_FIXTURES = (
+    ("one run, allow", ["allow"], 1, "allow"),
+    ("one run, model error", ["unknown"], 1, "unknown"),
+    ("2 runs, one allow and one deny", ["allow", "deny"], 2, "unknown"),
+    ("3 of 3 allow", ["allow", "allow", "allow"], 3, "allow"),
+    ("2 of 3 allow", ["allow", "deny", "allow"], 3, "allow"),
+    ("2 of 3 deny", ["deny", "allow", "deny"], 3, "deny"),
+    ("2 allow and a model error", ["allow", "unknown", "allow"], 3, "allow"),
+    ("1 allow, 1 deny and a model error", ["allow", "deny", "unknown"], 3, "unknown"),
+    ("1 allow and 2 model errors", ["allow", "unknown", "unknown"], 3, "unknown"),
+    ("3 model errors", ["unknown", "unknown", "unknown"], 3, "unknown"),
+)
+
+
+def case_majority_takes_the_verdict_of_the_runs():
+    """A case's verdict is the answer that a strict majority of its runs give: 3 of 3 and 2 of 3 agree, and a split with no
+    majority is unknown. A model error is no answer for its run, so it is never counted as agreeing with an answer or with
+    another error. The agreement string counts answered runs only."""
+    label = "majority of runs"
+    if need_runner(label) is None:
+        return
+    settle = getattr(judge_replay, "settle", None)
+    if not callable(settle):
+        check(label, False, "hooks/judge_replay.py has no settle(answers, runs)")
+        return
+    for name, answers, runs, want in MAJORITY_FIXTURES:
+        got, agreement = settle(list(answers), runs)
+        check("%s: %s" % (label, name), got == want, "got %r, want %r" % (got, want))
+        # Named failure: the agreement string counts model-error runs as agreeing with each other.
+        answered = max(answers.count("allow"), answers.count("deny"))
+        counted = int(agreement.split("/")[0])
+        check("%s: agreement counts answered runs only, %s" % (label, name), counted <= answered,
+              "agreement %r reads %d runs agreeing with %d answered" % (agreement, counted, answered))
+
+
+def scripted_judge(outcomes):
+    """An adapter whose runs read `outcomes` in order. Each run makes one model call, which fails on "error"."""
+    queue = list(outcomes)
+
+    def adapter(case_input, calls):
+        outcome = queue.pop(0)
+        decision_watch.invoke_model("fixture prompt", fail=outcome == "error")
+        return "deny" if outcome == "deny" else "allow"
+    return adapter
+
+
+def failing_on_request(*args, fail=False, **kwargs):
+    """decision_watch.invoke_model's fake for scripted_judge: the no-auth pair on a failed call, else an answer."""
+    return NO_AUTH if fail else ({"ok": True}, None)
+
+
+def case_replay_model_error_is_no_answer_for_its_run():
+    """replay() of one case over three runs: a run whose model call fails answers nothing. Two allows and an error read as
+    allow. One allow and two errors read as unknown."""
+    label = "replay: a model error in one run"
+    if need_runner(label) is None:
+        return
+    case = {"id": "fixture-case", "expect": "allow", "source": "fixture", "input": {}}
+    saved_load = judge_replay.load_corpus
+    judge_replay.load_corpus = lambda name: [case]
+    try:
+        for outcomes, want_got, want_verdict in (
+            (["allow", "allow", "error"], "allow", "PASS"),
+            (["allow", "error", "error"], "unknown", "UNKNOWN"),
+        ):
+            with adapter_swapped("prose_judge", scripted_judge(outcomes)), faked_calls(failing_on_request):
+                rows = judge_replay.replay("prose_judge", runs=3)
+            check("%s %s: one row" % (label, outcomes), len(rows) == 1, "%d rows" % len(rows))
+            if rows:
+                row = rows[0]
+                check("%s %s: got %s" % (label, outcomes, want_got), row["got"] == want_got,
+                      "got %r, want %r" % (row["got"], want_got))
+                check("%s %s: verdict %s" % (label, outcomes, want_verdict), row["verdict"] == want_verdict,
+                      "verdict %r, want %r" % (row["verdict"], want_verdict))
+    finally:
+        judge_replay.load_corpus = saved_load
+
+
 CASES = (case_seam_control, case_corpora, case_corpus_not_under_hooks, case_scopes, case_touched, case_no_auth_rows,
          case_cli_exit_follows_ci, case_cli_changed_head, case_runner_named_nowhere_else,
          case_feedback_bad_entry_reads_unknown, case_feedback_clean_answer_reads_no_unknown,
          case_sendmessage_errored_call_reads_unknown, case_sendmessage_one_seam_call_per_case_whatever_the_wording,
          case_wording_prompt_text_is_not_copied, case_pin_change_checks_yml_names_every_judge,
          case_pin_change_package_names_every_judge, case_probe_names_the_secret_and_the_item,
-         case_each_judge_answer_reads_as_its_own_verdict)
+         case_each_judge_answer_reads_as_its_own_verdict, case_majority_takes_the_verdict_of_the_runs,
+         case_replay_model_error_is_no_answer_for_its_run)
 
 
 def main():
