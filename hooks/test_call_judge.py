@@ -52,8 +52,9 @@ Interface the hook must match:
   set or update whose data has non-empty `options`, and never otherwise, never on AskUserQuestion or Agent. question_form.WIDENS_KEY
   is the one home of the mark's key, "widens", and WIDENING_RULE contains it. The cases read both with load_file_module, never a
   copy, and a missing name fails its checks with a named cause, never a crash.
-- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
-  above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
+- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` and the three pick sends (send_message,
+  create_session, SendMessage) runs call_judge.py with a timeout above the longest model call (60 s). No `prompt` or
+  `agent` hook is left on any of the three tools.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
   records and the `roadmap` step rulings that question_form.past_rulings finds, and an eighth item that refuses a
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
@@ -61,12 +62,13 @@ Interface the hook must match:
   line, `past-ruling search unknown:`, and never says clear.
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
-- A coordinator's pick (send_message, the section "a coordinator's pick"): a send_message whose sender's own record carries
-  cs-build:coordinator (the add and remove lists of the set_session_tags calls after that record are applied in order), and
-  whose text states a pick or hold (pick, picks,
+- A coordinator's pick (the section "a coordinator's pick"): a call of send_message, create_session or SendMessage whose
+  sender's own record carries cs-build:coordinator (the add and remove lists of the set_session_tags calls after that
+  record are applied in order), and whose text states a pick or hold (pick, picks,
   picked, hold, holds, held; not `on hold`, `hold on`, `pick up` or a hyphen id), must cite a ruling or say `no ruling
-  found:`. A cite gets one judge call whose prompt carries the pick text and the candidate rulings. Any other message passes
-  with no model call.
+  found:`. The text is the `message` of send_message and SendMessage (SendMessage's `to` names its agent, and a call
+  that carries only a `summary` is not judged) and the `prompt` of create_session. A cite gets one judge call whose
+  prompt carries the pick text and the candidate rulings. Any other message passes with no model call.
 - The pick's sources on two refs (the section "a coordinator's pick: plans and page answers on refs"): a plan R-number
   reads from origin/restart-plan (plans/*.md), a `page item N` reads its answer and question from origin/roadmap
   (waiting/answers and waiting/items, matched by n). Read by git, no checkout; a missing ref or file reads as not searched.
@@ -1396,8 +1398,10 @@ def case_settings_row():
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the coordinator's send_message",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData", PICK_TOOL}, entry.get("matcher"))
+    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the coordinator's send_message, "
+          "create_session and SendMessage",
+          matcher == {"Agent", "AskUserQuestion", "ArtifactData", PICK_TOOL, PICK_CREATE_TOOL, PICK_SENDMSG_TOOL},
+          entry.get("matcher"))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
@@ -1706,6 +1710,9 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 # with no model call. The cases run the hook as a child, as the cases above do: the stub answers `claude -p`, and each call
 # is read from its record.
 PICK_TOOL = "mcp__claude-code-remote__send_message"
+PICK_CREATE_TOOL = "mcp__claude-code-remote__create_session"  # the harness's spelling; its text is the `prompt` field
+PICK_SENDMSG_TOOL = "SendMessage"  # its text is the `message` field, and `to` names the agent it goes to
+PICK_AGENT = "pick-agent"  # the agent name a SendMessage names in `to`
 PICK_OWN = "session_coord01"  # the coordinator's own record id
 PICK_LANE_ENV = "cse_coord01"  # the same id as the cloud sets it in the env (override.LANE_ENV, prefix cse_)
 PICK_TARGET = "session_lane01"
@@ -1807,20 +1814,34 @@ def own_scope(tags, after=()):
     return own_session.own_session_read(path, PICK_OWN)[0], own_session.own_tag_calls_after(path, PICK_OWN)
 
 
-def pick_input(message, transcript, cwd):
-    return json.dumps({"session_id": SID_A, "tool_name": PICK_TOOL, "cwd": cwd, "transcript_path": transcript,
-                       "tool_input": {"session_id": PICK_TARGET, "message": message}})
+def pick_tool_input(tool, message):
+    """The tool_input of a call of `tool` whose text is `message`, in the shape the harness sends it."""
+    if tool == PICK_CREATE_TOOL:
+        return {"prompt": message}
+    if tool == PICK_SENDMSG_TOOL:
+        return {"to": PICK_AGENT, "message": message}
+    return {"session_id": PICK_TARGET, "message": message}
 
 
-def pick_run(message, tags=(PICK_TAG,), coordinator=True, cwd=PICK_REPO, answer=ALLOW, model_fail=False, after=()):
-    """One run of the hook on a send_message. `coordinator` False leaves the session's own record id unset. `after` is the
-    list coordinator_transcript takes: the own session's later set_session_tags inputs and newer reads of its record."""
+def pick_input(tool, tool_input, transcript, cwd):
+    return json.dumps({"session_id": SID_A, "tool_name": tool, "cwd": cwd, "transcript_path": transcript,
+                       "tool_input": tool_input})
+
+
+def pick_run(message, tags=(PICK_TAG,), coordinator=True, cwd=PICK_REPO, answer=ALLOW, model_fail=False, after=(),
+             tool=PICK_TOOL, tool_input=None):
+    """One run of the hook on a call of `tool` (send_message by default) whose text is `message`. `tool_input`, when given,
+    is the whole input of the call instead: a create_session with no `prompt`, or a SendMessage with only a `summary`.
+    `coordinator` False leaves the session's own record id unset. `after` is the list coordinator_transcript takes: the own
+    session's later set_session_tags inputs and newer reads of its record."""
     transcript = coordinator_transcript(tags, after)
+    if tool_input is None:
+        tool_input = pick_tool_input(tool, message)
     saved = os.environ.pop(override.LANE_ENV, None)
     try:
         if coordinator:
             os.environ[override.LANE_ENV] = PICK_LANE_ENV
-        return run_hook(pick_input(message, transcript, cwd), answer=answer, model_fail=model_fail)
+        return run_hook(pick_input(tool, tool_input, transcript, cwd), answer=answer, model_fail=model_fail)
     finally:
         os.environ.pop(override.LANE_ENV, None)
         if saved is not None:
@@ -2091,6 +2112,88 @@ def case_pick_long_plan_section_reaches_the_prompt():
     r = pick_run("coordinator pick: hold the mailbox default, per plan R61.")
     check("pick, long plan section: one judge call", len(r.calls) == 1, detail(r))
     check("pick, long plan section: the prompt carries the section's last word", R61_MARK in pick_prompt(r), detail(r))
+
+
+# ------------------------------------------------------------------ a coordinator's pick through create_session and SendMessage
+#
+# The same check runs on the two other sends a coordinator makes: create_session, whose text is `prompt` (the brief that
+# starts a lane), and SendMessage, whose text is `message` (`to` names the agent). Each tool gets the same four claims: an
+# uncited pick is refused in code with the remedy and no model call; a cited pick gets one judge call, and the judge's
+# refusal denies it; a call with no pick statement, or one that a session with no coordinator tag makes, passes with no
+# model call. Each pass-through claim sits beside a control: the same tool, sent by the coordinator with an uncited pick,
+# is refused. So a pass-through claim cannot pass on a tool the check does not judge without that control failing too.
+
+
+def pick_tool_claims(tool, label):
+    """The four claims of the check on one tool. `label` names the tool in each check's message."""
+    r = pick_run(PICK_UNCITED, tool=tool)
+    check("pick via %s, uncited: refused in code, with no model call" % label,
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.calls == [], detail(r))
+    check("pick via %s, uncited: the remedy says no ruling found" % label,
+          "no ruling found:" in r.reason(), r.reason()[-200:])
+
+    _, message, mark, reason = PICK_INCIDENTS[0]
+    r = pick_run(message, tool=tool, answer=pick_refusal(reason))
+    prompt = pick_prompt(r)
+    check("pick via %s, cited: one judge call" % label, len(r.calls) == 1, detail(r))
+    check("pick via %s, cited: the prompt carries the pick text" % label, message in prompt, detail(r))
+    check("pick via %s, cited: the prompt carries the cited ruling's text" % label, mark in prompt, detail(r))
+    check("pick via %s, cited: the judge's refusal denies the pick with its reason" % label,
+          (r.deny() or {}).get("permissionDecision") == "deny" and reason in r.reason(), detail(r))
+
+    r = pick_run("coordinator hold: keep the lane parked until the run ends. "
+                 "no ruling found: searched the decisions and the roadmap steps of this repo.", tool=tool, cwd=BARE_REPO)
+    check("pick via %s, no ruling found: one judge call" % label, len(r.calls) == 1, detail(r))
+    check("pick via %s, no ruling found: an ok verdict gives no output" % label, r.code == 0 and r.out == "", detail(r))
+
+    control = pick_run("coordinator hold: keep the lane parked until the run ends.", tool=tool)
+    check("pick via %s, chatter control: a coordinator's uncited hold is refused" % label,
+          (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
+    for text_label, message in (
+        ("Hold on", "Hold on, lane 3 is still building."),
+        ("Pick up", "Pick up the thread when CI ends."),
+        ("on hold", "the PR is on hold until CI ends"),
+    ):
+        r = pick_run(message, tool=tool)
+        check("pick via %s, chatter %s: passes untouched, with no model call" % (label, text_label),
+              r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+    control = pick_run(PICK_UNCITED, tool=tool)
+    check("pick via %s, non-coordinator control: a coordinator's uncited pick is refused" % label,
+          (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
+    r = pick_run(PICK_UNCITED, tool=tool, coordinator=False)
+    check("pick via %s, a session that is no coordinator: passes untouched, with no model call" % label,
+          r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+
+def case_create_session_pick_is_judged():
+    pick_tool_claims(PICK_CREATE_TOOL, "create_session")
+
+
+def case_send_message_pick_is_judged():
+    pick_tool_claims(PICK_SENDMSG_TOOL, "SendMessage")
+
+
+def case_create_session_without_prompt_passes():
+    # The control first: the coordinator's uncited pick in `prompt` is refused, so the check reads that field. The call here
+    # carries the pick in `title` and no `prompt`: only `prompt` is judged, so it passes with no model call.
+    control = pick_run(PICK_UNCITED, tool=PICK_CREATE_TOOL)
+    check("pick via create_session, prompt control: a coordinator's uncited pick in `prompt` is refused",
+          (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
+    r = pick_run(None, tool=PICK_CREATE_TOOL, tool_input={"title": PICK_UNCITED})
+    check("pick via create_session, no `prompt`: a pick in another field passes untouched, with no model call",
+          r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+
+def case_send_message_summary_only_passes():
+    # The control first: the coordinator's uncited pick in `message` is refused. The call here carries the pick in `summary`
+    # and no `message`: a summary is not judged, so it passes with no model call.
+    control = pick_run(PICK_UNCITED, tool=PICK_SENDMSG_TOOL)
+    check("pick via SendMessage, message control: a coordinator's uncited pick in `message` is refused",
+          (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
+    r = pick_run(None, tool=PICK_SENDMSG_TOOL, tool_input={"to": PICK_AGENT, "summary": PICK_UNCITED})
+    check("pick via SendMessage, `summary` only: passes untouched, with no model call",
+          r.code == 0 and r.out == "" and r.calls == [], detail(r))
 
 
 # ------------------------------------------------------------------ a coordinator's pick: plans and page answers on refs
@@ -2556,6 +2659,8 @@ def main():
                  case_pick_held_cited_reaches_the_judge, case_pick_chatter_passes_untouched,
                  case_pick_markdown_no_ruling_is_not_refused, case_pick_bare_item_is_no_cite,
                  case_pick_long_plan_section_reaches_the_prompt,
+                 case_create_session_pick_is_judged, case_send_message_pick_is_judged,
+                 case_create_session_without_prompt_passes, case_send_message_summary_only_passes,
                  case_pick_ref_only_ruling_reaches_the_judge, case_pick_missing_ref_is_not_searched,
                  case_pick_plan_read_costs_at_most_two_git_processes, case_pick_long_ref_section_reaches_the_prompt_whole,
                  case_pick_later_ruling_wins_and_is_labelled, case_pick_judge_refusal_says_a_past_ruling_to_weigh,
