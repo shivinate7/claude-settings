@@ -1817,11 +1817,13 @@ def case_prompt_flags_a_search_total_read_as_a_count():
     sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
     check("prompt: names %s with a colon before the reply" % SEARCH_RULE,
           any(SEARCH_RULE + ":" in s for s in sentences), run.prompt()[:300])
+    # Each pin holds the rule id, so it reads the flag sentence and no other. SEARCH_TOTAL_PHRASES takes the old
+    # wording (total_count, result count) and the new one (search total, result total) alike.
     check("prompt: a sentence flags a search total read as a count",
-          has_pin(sentences, (SEARCH_RULE,), ("flag",), ("search",), ("total_count", "total count", "result count"),
-                  ("count",)), sentences)
+          has_pin(sentences, (SEARCH_RULE,), ("flag",), ("search",), SEARCH_TOTAL_PHRASES, ("count",)), sentences)
     check("prompt: a sentence flags a search total read as a state (open, closed, merged, CI status)",
-          has_pin(sentences, ("flag",), ("search",), ("state", "status"), ("open", "closed", "merged")), sentences)
+          has_pin(sentences, (SEARCH_RULE,), ("flag",), ("search",), SEARCH_TOTAL_PHRASES, ("state", "status"),
+                  ("open", "closed", "merged")), sentences)
 
 
 def case_prompt_never_flags_a_count_read_from_rest():
@@ -1888,6 +1890,82 @@ def case_search_total_stop_starts_only_the_judge_call():
     check("cost, search Stop 2: the model is called", called, (out, called))
     check("cost, search Stop 2: the trigger starts no process of its own, the only start is the claude call",
           [os.path.basename(s["argv"][0]) for s in starts] == ["claude"], starts)
+
+
+# --------------------------------------------------------------------------- counts-from-rest: trigger words
+# The off-sample trigger also takes a search word in any form (search, searched, --search), a search/<word>
+# endpoint, and a count word (a digit, zero, none) within 60 characters of a search word. Each form is its own
+# check, so a regex that drops one form fails that check alone. A count word with no search word is no trigger.
+
+SEARCHED_LEG = "Done: I searched the repo and found 4 open issues."
+ZERO_LEG = "Done: the search returned zero open PRs."
+NONE_FLAG_LEG = "Done: gh pr list --search 'is:open' returned none."
+LABELS_ENDPOINT_LEG = "Done: gh api search/labels listed the rows."  # no digit, no count word: the endpoint alone
+LABELS_ENDPOINT_NONE_LEG = "Done: gh api search/labels returned none."
+GH_SEARCH_DIGIT_LEG = "Done: gh search prs shows 6 open"  # a control: the digit 6 already triggers it
+REST_COUNT_WORDS_REPLY = "Done: checked the PR list with REST: none open and zero closed."  # count words, no search
+FAR_FROM_COUNT_WORD = ("Done: the search of the docs took a long time, because it read every page of the handbook "
+                       "for the rule text and then the rule text again, and the final count of pages was zero.")
+REFUTE_REPLY = ("Done: checked the PR list. REST says 4 open PRs; the search total_count of 6 includes closed ones, "
+                "so it was not used.")
+SEARCH_TOTAL_PHRASES = ("total_count", "total count", "search total", "result total", "result count")  # old and new
+
+
+def case_searched_word_with_a_digit_is_judged_off_sample():
+    run, _ = second_stop(SEARCHED_LEG, label="counts-d-searched", session="counts-d-searched")
+    check("search word 'searched', with the digit 4 after it: Stop 2 calls the model once", len(run.calls) == 1,
+          run.calls)
+
+
+def case_search_with_a_count_word_is_judged_off_sample():
+    legs = (("the count word zero", ZERO_LEG), ("the count word none, after --search", NONE_FLAG_LEG))
+    for n, (name, text) in enumerate(legs):
+        run, _ = second_stop(text, label="counts-d-word-%02d" % n, session="counts-d-word-%02d" % n)
+        check("search with %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+def case_any_search_endpoint_is_judged_off_sample():
+    legs = (("search/labels with no count word", LABELS_ENDPOINT_LEG),
+            ("search/labels returned none", LABELS_ENDPOINT_NONE_LEG))
+    for n, (name, text) in enumerate(legs):
+        run, _ = second_stop(text, label="counts-d-endpoint-%02d" % n, session="counts-d-endpoint-%02d" % n)
+        check("search endpoint, %s: Stop 2 calls the model once" % name, len(run.calls) == 1, run.calls)
+
+
+def case_gh_search_with_a_digit_is_judged_off_sample():
+    # A control: the old code already judges this one, by the digit 6 after the word search.
+    run, _ = second_stop(GH_SEARCH_DIGIT_LEG, label="counts-d-gh", session="counts-d-gh")
+    check("gh search with the digit 6: Stop 2 calls the model once", len(run.calls) == 1, run.calls)
+
+
+def case_count_words_without_a_search_word_are_not_judged_off_sample():
+    # A control: a REST count in count words, and no search word anywhere in the reply.
+    run, _ = second_stop(REST_COUNT_WORDS_REPLY, label="counts-d-rest", session="counts-d-rest")
+    check("REST count words, no search word: Stop 2 exit 0 and silent", run.code == 0 and run.out == "",
+          (run.code, run.out))
+    check("REST count words, no search word: Stop 2 never calls the model", not run.calls, run.calls)
+
+
+def case_search_word_far_from_a_count_word_is_not_judged_off_sample():
+    # Scope first: the search word and the count word are more than 60 characters apart in the reply.
+    gap = FAR_FROM_COUNT_WORD.index("zero") - (FAR_FROM_COUNT_WORD.index("search") + len("search"))
+    check("far count word: the count word sits more than 60 characters past the search word", gap > 60, gap)
+    run, _ = second_stop(FAR_FROM_COUNT_WORD, label="counts-d-far", session="counts-d-far")
+    check("far count word, %d characters away: Stop 2 never calls the model" % gap, not run.calls, run.calls)
+
+
+def case_prompt_never_flags_a_reply_that_refutes_a_search_total():
+    run = run_hook(REFUTE_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, REFUTE_REPLY)
+    check("prompt: a sentence says never flag a reply that refutes a search total",
+          has_pin(sentences, ("never flag",), ("refut", "not used"), ("search",), ("total",)), sentences)
+
+
+def case_prompt_flag_sentence_never_flags_a_candidate_search():
+    run = run_hook(SEARCH_COUNT_REPLY, answer=OK_ANSWER)
+    sentences = rule_sentences(run, SEARCH_COUNT_REPLY)
+    check("prompt: the flag sentence says a search that only finds candidates is never flagged",
+          has_pin(sentences, (SEARCH_RULE,), ("flag",), ("candidate",), ("never", "not")), sentences)
 
 
 CASES = (
@@ -1972,6 +2050,14 @@ CASES = (
     case_prompt_says_nine_rules_with_the_counts_rule,
     case_rest_count_stop_starts_no_process_and_writes_no_file,
     case_search_total_stop_starts_only_the_judge_call,
+    case_searched_word_with_a_digit_is_judged_off_sample,
+    case_search_with_a_count_word_is_judged_off_sample,
+    case_any_search_endpoint_is_judged_off_sample,
+    case_gh_search_with_a_digit_is_judged_off_sample,
+    case_count_words_without_a_search_word_are_not_judged_off_sample,
+    case_search_word_far_from_a_count_word_is_not_judged_off_sample,
+    case_prompt_never_flags_a_reply_that_refutes_a_search_total,
+    case_prompt_flag_sentence_never_flags_a_candidate_search,
 )
 
 
