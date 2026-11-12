@@ -16,25 +16,29 @@
 # and its run is woken, wherever it sits:
 #   - in any cancelled run of the window, newest of its group or not, and in each earlier attempt of it;
 #   - in any earlier attempt of a succeeded re-run;
-#   - in a failed run, in its newest attempt or an earlier one, whether a newer green run clears the run or not.
+#   - in any failed run of the window, newest of its group or not, in its newest attempt or an earlier one, whether a newer green run
+#     clears the run or not.
 # The clear drops a run's red jobs, never its cap end. The merge gate (merge.py base_state) leaves a run with no red job and a job timed
 # out at a job-level cap it finds in its checkout out of red and out of unknown; a cancelled run reads UNKNOWN there for a job with no
 # job-level cap or a cap it does not find, and a failure run reads red. The alarm is the signal, since a cap end is not a red job.
 # A job cancelled under its cap (a person, or an earlier failure) stays quiet. A cancelled job with no started_at, a non-integer cap
 # (an expression), no single job of that name in the file, a cancelled run or an earlier attempt of it with no jobs, or a failed read
 # is unknown, never red and never clear.
-# Verdict: "red" when a failure run with a red job, not cleared, is named. That run opens the issue "CI red on BRANCH" through issue.sh,
-# and every cap end is named in its body. Else "alarm" (a cap end and no red run), which opens no issue (owner R53, 13:07 CST Nov 12).
-# Each run with a cap end, in either verdict, is woken through wake.sh (coordinator pick, 13:12 CST): SHA is the run's head commit, KEY
-# is `cap:<run id>`, and TEXT opens with "CI job hit its time cap on BRANCH: JOB", the first cap job of that run, then names the run's
-# cap ends. wake.sh posts on the merged pull request into main that holds the commit, once per KEY (its hidden marker is the memory), so
-# a cap end already reported is not reported again (coordinator ruling, 12:58 CST). A run whose commit has no such pull request cannot
-# be woken: wake.sh exits non-zero, and after every run was handled this script prints its verdict and exits 1, naming the run id.
-# A failed read or write is unknown, never red.
-# Cost: one runs read and the workflows-list read. One jobs read per judged run: each cancelled run of the window, and the newest run of
-# a group that failed. One jobs read per earlier attempt of a cancelled, failed or succeeded re-run. One workflow-file read per run
-# with a cancelled job, once. A clear candidate N adds one jobs read, and one contents read of N's workflow file at N's head (headSha)
-# unless N leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most. Each woken run adds one pulls read, one
+# Verdict: "red" when a newest failure run with a red job, not cleared, is named. That run opens the issue "CI red on BRANCH" through
+# issue.sh. The issue names the red runs and no cap end: a cap end wakes and never appears in an issue. Else "alarm" (a cap end and no
+# red run), which opens no issue (owner R53, 13:07 CST Nov 12).
+# Each attempt with a cap end, in either verdict, is woken through wake.sh (coordinator pick, 13:12 CST): SHA is the run's head commit,
+# KEY is `cap:<run id>:<attempt>`, and TEXT opens with "CI job hit its time cap on BRANCH: JOB", the first cap job of that attempt, then
+# names the cap ends of that attempt. wake.sh posts on the merged pull request into main that holds the commit, once per KEY (its hidden
+# marker is the memory), so a cap end already reported is not reported again (coordinator ruling, 12:58 CST), while a cap end in a later
+# attempt of the same run still wakes. A run whose commit has no such pull request cannot be woken: wake.sh exits non-zero, and after
+# every attempt was handled this script prints its verdict and exits 1, naming the run id and attempt.
+# A failed read or write is unknown, never red. A failed jobs read of a newest red run drops its cap end with no warning, and a failed read of
+# a cancelled run is a soft unknown that a red verdict hides (debt note cap-jobs-read-drops-silent).
+# Cost per alarm: two fixed reads (runs, workflows list), one jobs read for each failed and each cancelled run of the 100-run window (at
+# most 100), one per earlier attempt of a failed, cancelled or succeeded re-run, one contents read of a run's workflow file when a job of
+# it was cancelled. A clear candidate N adds one jobs read, and one contents read of N's workflow file at N's head (headSha) unless N
+# leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most. Each woken attempt adds one pulls read, one
 # comments read of its pull request and at most one comment write (wake.sh). No long-lived process starts: short jq, awk, gh and python3
 # processes run, and the only files written are temp cache files in a folder this script removes on exit.
 # Needs python3 (stdlib only) and clear_rule.py beside this file; no checkout.
@@ -155,15 +159,20 @@ cap_lines() {
   jq -Rr --argjson r "$1" --arg prefix "$2" --arg suffix "${3:-}" \
     'split("\t") | "\($prefix)job \(.[0]) ran \(.[2]) min, cap \(.[1]) min, run \($r.databaseId)\($suffix)"' <<<"${ends%$'\n'}"
 }
-# add_ends <run id> <run JSON> <jobs JSON> [suffix]: the cap ends of one attempt of a run, added to $capl (the lines of the run being
-# judged) and $runfirst (the first cap job of that run); an attempt that cannot be judged sets $capunk.
+# add_ends <run id> <run JSON> <jobs JSON> <attempt> [suffix]: judge one attempt of a run. An attempt with a cap end queues its own
+# wake, KEY `cap:<run id>:<attempt>`, under the line $header. Its text names that attempt's cap jobs only, so a later attempt of a run
+# whose earlier attempt was reported still wakes. An attempt that cannot be judged sets $capunk. The wakes run after every run was
+# judged.
+wake_keys=(); wake_shas=(); wake_texts=()
 add_ends() {
   cap_ends "$1" "$3"
   [ -z "$endunk" ] || capunk="$endunk"
   [ -n "$ends" ] || return 0
-  [ -n "$runfirst" ] || runfirst="${ends%%$'\t'*}"
-  capl+="$(cap_lines "$2" "  cap end: " "${4:-}")"$'\n'
+  wake_keys+=("cap:$1:$4"); wake_shas+=("$(jq -r '.headSha // empty' <<<"$2")")
+  wake_texts+=("$(printf 'CI job hit its time cap on %s: %s\n\n%s\n%s' "$branch" "${ends%%$'\t'*}" "$header" "$(cap_lines "$2" "  cap end: " "${5:-}")")")
 }
+# add_newest <run id> <run JSON> <jobs JSON>: add_ends for the run's newest attempt.
+add_newest() { add_ends "$1" "$2" "$3" "$(jq -r '.attempt // 1' <<<"$2")"; }
 # earlier_attempts <run id> <run JSON> [strict]: add_ends for each attempt before the run's newest. The jobs of an attempt come from
 # the attempts endpoint, each read once. An attempt that cannot be read is unknown; with strict, an attempt with no jobs is too.
 earlier_attempts() {
@@ -171,33 +180,35 @@ earlier_attempts() {
   for att in $(seq 1 $(($(jq -r '.attempt // 1' <<<"$2") - 1))); do
     ajobs="$(jobs_of "$1" "$att")" || { capunk="gh api attempt jobs failed for run $1 attempt $att"; continue; }
     if [ -n "${3:-}" ] && jq -e 'length == 0' >/dev/null <<<"$ajobs"; then capunk="attempt $att of cancelled run $1 has no jobs"; continue; fi
-    add_ends "$1" "$2" "$ajobs" ", attempt $att"
+    add_ends "$1" "$2" "$ajobs" "$att" ", attempt $att"
   done
 }
-# wake_add <run id> <run JSON> <header line>: queue the wake of a run whose attempts held a cap end, from its $capl and $runfirst; a
-# run with none queues nothing. The wakes run after every run was judged.
-wake_ids=(); wake_shas=(); wake_texts=()
-wake_add() {
-  [ -n "$capl" ] || return 0
-  wake_ids+=("$1"); wake_shas+=("$(jq -r '.headSha // empty' <<<"$2")")
-  wake_texts+=("$(printf 'CI job hit its time cap on %s: %s\n\n%s\n%s' "$branch" "$runfirst" "$3" "${capl%$'\n'}")")
-}
-# A group whose newest run is a re-run still going is unknown: never green, never judged by an older run. Like every unknown it waits
-# until the end, so an alarm found elsewhere still wakes its run.
+# A group whose newest run is a re-run still going is unknown: never green, never judged by an older run. This soft unknown
+# ($capunk) waits until the end, so a cap end or a red run found elsewhere still acts. A hard `unknown` (a failed read in the failed
+# loop, below) exits at once, before any queued wake posts; the next cycle reads again.
 capunk=""
 flight="$(jq -r '[.[] | select(.status != "completed") | "\(.workflowName) run \(.databaseId) (attempt \(.attempt), \(.status))"] | join("; ")' <<<"$newest")" \
   || unknown "could not read the runs"
 [ -z "$flight" ] || capunk="re-run in flight: $flight"
-# Red = failure, timed_out or startup_failure, unless a clearing run N exists (see the header). A job of it cancelled at its cap is named.
+# Every failed run of the window is judged for a cap end, one jobs read each (see the header). Only the newest run of a group can be
+# red, and not when a clearing run N exists.
 red=""
 redrun=""
-failed="$(jq -c '.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")' <<<"$newest")" \
+failed="$(jq -c '.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")' <<<"$judged")" \
   || unknown "could not read the runs"
+newest_ids="$(jq -c 'map(.databaseId)' <<<"$newest")" || unknown "could not read the runs"
 while IFS= read -r r; do
   [ -n "$r" ] || continue
+  rid="$(jq -r .databaseId <<<"$r")"
+  if ! jq -e --argjson ids "$newest_ids" '.databaseId as $i | $ids | index($i)' >/dev/null <<<"$r"; then
+    # A newer run of its group supersedes it: never red, but a cap end in any attempt still wakes.
+    header="$(jq -r '"- \(.workflowName) (\(.conclusion), superseded by a newer run of its group): \(.url)"' <<<"$r")"
+    if rjobs="$(jobs_of "$rid")"; then add_newest "$rid" "$r" "$rjobs"; else capunk="gh api jobs failed for run $rid"; fi
+    earlier_attempts "$rid" "$r"
+    continue
+  fi
   cands="$(jq -r --argjson r "$r" '.[] | select(.workflowDatabaseId == $r.workflowDatabaseId and .group != $r.group
     and .createdAt > $r.createdAt and .conclusion == "success") | .databaseId' <<<"$newest")" || unknown "could not read the runs"
-  rid="$(jq -r .databaseId <<<"$r")"
   cleared=""
   if [ -n "$cands" ]; then
     rjobs="$(jobs_of "$rid")" || unknown "gh api jobs failed"
@@ -214,59 +225,48 @@ while IFS= read -r r; do
       done <<<"$cands"
     fi
   fi
-  capl=""; runfirst=""
   if [ -n "$cleared" ]; then
-    # Not red: its red jobs are cleared. Its cap end, in any attempt, still alarms, so the run is named only when it has one.
-    add_ends "$rid" "$r" "$rjobs"
-    earlier_attempts "$rid" "$r"
+    # Not red: its red jobs are cleared. Its cap end, in any attempt, still wakes.
     header="$(jq -r '"- \(.workflowName) (\(.conclusion), its red jobs cleared by a newer green run): \(.url)"' <<<"$r")"
-    [ -z "$capl" ] || red+="$header"$'\n'"${capl%$'\n'}"$'\n'
-    wake_add "$rid" "$r" "$header"
+    add_newest "$rid" "$r" "$rjobs"
+    earlier_attempts "$rid" "$r"
     continue
   fi
   header="$(jq -r '"- \(.workflowName) (\(.conclusion)): \(.url)"' <<<"$r")"
   red+="$header"$'\n'
   redrun=1
-  # The run is red by its conclusion whatever its jobs say: a job cancelled at its cap, in any attempt, is named under it, and an
-  # unreadable read names nothing.
-  if rjobs="$(jobs_of "$rid")"; then add_ends "$rid" "$r" "$rjobs"; fi
+  # The run is red by its conclusion whatever its jobs say: a cap end in any attempt wakes, and an unreadable read drops it.
+  if rjobs="$(jobs_of "$rid")"; then add_newest "$rid" "$r" "$rjobs"; fi
   earlier_attempts "$rid" "$r"
-  red+="$capl"
-  wake_add "$rid" "$r" "$header"
 done <<<"$failed"
-# Cancelled runs: the alarm is raised when a job of the run was cancelled at its cap (see the header). Every cancelled run in the
-# window is judged, not only the newest of its group. An unknown waits until the end, so an alarm found here or above still opens
-# its issue.
+# Cancelled runs: a job of the run cancelled at its cap wakes its run (see the header). Every cancelled run in the window is judged,
+# not only the newest of its group. An unknown waits until the end, so a red run or a cap end found elsewhere still acts.
 cancelled="$(jq -c '.[] | select(.conclusion == "cancelled")' <<<"$judged")" || unknown "could not read the runs"
 while IFS= read -r r; do
   [ -n "$r" ] || continue
   rid="$(jq -r .databaseId <<<"$r")"
   rjobs="$(jobs_of "$rid")" || { capunk="gh api jobs failed for run $rid"; continue; }
   if jq -e 'length == 0' >/dev/null <<<"$rjobs"; then capunk="cancelled run $rid has no jobs"; continue; fi
-  capl=""; runfirst=""
-  add_ends "$rid" "$r" "$rjobs"
-  earlier_attempts "$rid" "$r" strict
   header="$(jq -r '"- \(.workflowName) (cancelled): \(.url)"' <<<"$r")"
-  [ -z "$capl" ] || red+="$header"$'\n'"${capl%$'\n'}"$'\n'
-  wake_add "$rid" "$r" "$header"
+  add_newest "$rid" "$r" "$rjobs"
+  earlier_attempts "$rid" "$r" strict
 done <<<"$cancelled"
-# A succeeded run that was re-run: a cap end in an earlier attempt alarms like any other cap end on the branch. A failed read is unknown.
+# A succeeded run that was re-run: a cap end in an earlier attempt wakes like any other cap end on the branch. A failed read is unknown.
 reruns="$(jq -c '.[] | select(.conclusion == "success" and (.attempt // 1) > 1)' <<<"$judged")" || unknown "could not read the runs"
 while IFS= read -r r; do
   [ -n "$r" ] || continue
   rid="$(jq -r .databaseId <<<"$r")"
-  capl=""; runfirst=""
-  earlier_attempts "$rid" "$r"
   header="$(jq -r '"- \(.workflowName) (succeeded on a later attempt): \(.url)"' <<<"$r")"
-  [ -z "$capl" ] || red+="$header"$'\n'"${capl%$'\n'}"$'\n'
-  wake_add "$rid" "$r" "$header"
+  earlier_attempts "$rid" "$r"
 done <<<"$reruns"
 red="${red%$'\n'}"
-if [ -z "$red" ] && [ -n "$capunk" ]; then unknown "$capunk"; fi
-if [ -z "$red" ]; then echo green; exit 0; fi
-# A red run opens the issue through issue.sh, which prints nothing on success and `unknown` plus a warning when the write fails. A cap
-# end with no red run opens none. Each cap-end run is then woken whatever the verdict. wake.sh's stdout would break the verdict
-# line, so it goes to stderr.
+if [ -z "$redrun" ] && [ "${#wake_keys[@]}" = 0 ]; then
+  [ -z "$capunk" ] || unknown "$capunk"
+  echo green; exit 0
+fi
+# A red run opens the issue through issue.sh, which prints nothing on success and `unknown` plus a warning when the write fails. The
+# issue names the red runs and no cap end. A cap end with no red run opens none. Each cap-end attempt is then woken whatever the
+# verdict. wake.sh's stdout would break the verdict line, so it goes to stderr.
 verdict=alarm
 if [ -n "$redrun" ]; then
   verdict=red
@@ -274,9 +274,9 @@ if [ -n "$redrun" ]; then
   if grep -qx unknown <<<"$res"; then verdict="$res"; fi
 fi
 unwoken=""
-for i in "${!wake_ids[@]}"; do
-  REPO="$GITHUB_REPOSITORY" SHA="${wake_shas[$i]}" KEY="cap:${wake_ids[$i]}" TEXT="${wake_texts[$i]}" bash "$here/wake.sh" >&2 \
-    || unwoken+="${unwoken:+, }${wake_ids[$i]}"
+for i in "${!wake_keys[@]}"; do
+  REPO="$GITHUB_REPOSITORY" SHA="${wake_shas[$i]}" KEY="${wake_keys[$i]}" TEXT="${wake_texts[$i]}" bash "$here/wake.sh" >&2 \
+    || unwoken+="${unwoken:+, }${wake_keys[$i]#cap:}"
 done
 echo "$verdict"
-[ -z "$unwoken" ] || { echo "::error::ci-alarm: the cap end of run $unwoken could not be woken" >&2; exit 1; }
+[ -z "$unwoken" ] || { echo "::error::ci-alarm: the cap end of run:attempt $unwoken could not be woken" >&2; exit 1; }

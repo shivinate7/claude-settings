@@ -242,7 +242,7 @@ The seven opt-in templates of that decision:
   last 100 that holds a job cancelled at its time cap, and opens no issue for it. Groups: `actions/ci-alarm/events.json`. Runs of
   other events, such as a Pages build, a `workflow_run` or a `repository_dispatch`, and runs of a
   deleted workflow, are not judged. A failed `gh` read prints `unknown` with a warning, never a red
-  job. The caller is a scheduled workflow with `permissions: {actions: read, contents: read, issues: write}`. It
+  job. The caller is a scheduled workflow with `permissions: {actions: read, contents: read, issues: write, pull-requests: write}`. It
   needs no checkout. Not enabled in this repo.
 - `readme-links`: checks the external https links in a markdown file (default `README.md`). Run it
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
