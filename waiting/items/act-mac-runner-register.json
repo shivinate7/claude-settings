@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-12T21:11:26Z",
+  "command": {
+    "mac": "cd ~\ngh auth switch -u shivinate7\ngh secret set MAC_RUNNER_READ_TOKEN -R shivinate7/claude-settings",
+    "powershell": "cd ~\ngh auth switch -u shivinate7\ngh secret set MAC_RUNNER_READ_TOKEN -R shivinate7/claude-settings"
+  },
+  "context": "Goal: batch macOS jobs run on your MacBook, as you ruled at 14:19 CST today (R58), so batches stop waiting for GitHub's macOS machines.\nProblem (rule): the code is built (PR #2970, with the batch runner as an express merge), but it needs two things only you can add: the runner registered on your MacBook, and a repo secret that lets CI read the repo's runner list. Until both exist, every batch keeps using GitHub's macOS machines.\nBased on (read): lane ci-batch-mac-runner reported both acts open at 15:10 CST; the PR body names the secret MAC_RUNNER_READ_TOKEN.\nDeparts from: main runs batch macOS jobs on GitHub's machines only \u2014 they run on your MacBook (label claude-settings-mac) when it is online.\nWhy yours: the runner installs on your MacBook, and the repo secret needs your GitHub login; this cloud session cannot reach the repo's secrets (measured 2026-11-12, gh api actions/secrets/public-key returned HTTP 403 from the proxy).",
+  "home": "step ci-batch-mac-runner (ruling R58)",
+  "id": "act-mac-runner-register",
+  "kind": "task",
+  "n": 649,
+  "options": [
+    {
+      "gain": "Batch macOS jobs run on your MacBook as soon as PR #2970 merges.",
+      "how": "1. On your MacBook, open the new-runner page below, pick macOS and ARM64, and run its commands; when config.sh asks for labels, add claude-settings-mac. Run ./svc.sh install then ./svc.sh start so it survives a restart. 2. Make a fine-grained token for shivinate7/claude-settings with Administration: Read only (the token page below). 3. Paste the command below in Terminal and paste the token when asked.",
+      "key": "a",
+      "label": "Register the runner and add the secret",
+      "links": [
+        {
+          "label": "New self-hosted runner",
+          "url": "https://github.com/shivinate7/claude-settings/settings/actions/runners/new?arch=arm64&os=osx"
+        },
+        {
+          "label": "New fine-grained token",
+          "url": "https://github.com/settings/personal-access-tokens/new"
+        }
+      ],
+      "lose": "Some minutes of setup; one runner runs the three macOS jobs one after another (unmeasured)."
+    },
+    {
+      "gain": "No setup; nothing changes.",
+      "how": "Batches keep using GitHub's macOS machines; PR #2970 still merges and switches over whenever you register later.",
+      "key": "b",
+      "label": "Later",
+      "lose": "Batches keep queueing for GitHub's macOS machines, as batch 103 did for 26 minutes."
+    }
+  ],
+  "owner": "lane ci-batch-mac-runner (session_013NEJL1Pg1yXejPVGo7aocY)",
+  "ref": "lane ci-batch-mac-runner 15:10 CST Nov 12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Register the Mac runner and add its secret",
+  "status": "open",
+  "title": "Register your MacBook as the batch macOS runner and add its read secret",
+  "why": "Batch macOS jobs move to your MacBook only after these two acts."
+}
