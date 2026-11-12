@@ -11,6 +11,10 @@ from typing import Any, Optional
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 
+# The one home of the model family words. The guard's trailer check (hooks/guard_trailer.py) maps a model id and a
+# Co-Authored-By trailer through it; the report guard (lint/report_guard.py) reads a model name in a report through it.
+MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
+
 # The one home of the claude-code-remote server name (rule agent-no-remote-tools). The guard imports it by name;
 # lint/check_agent_models.py reads it from the guard.
 REMOTE_SERVER = "mcp__claude-code-remote"
