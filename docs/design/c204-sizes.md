@@ -38,7 +38,7 @@ Mockup: `c204-scroll.html`. It puts only its changes in `#newcss`, with today's 
    - A passive scroll listener on the wrap toggles `.scrolled` and `.at-end`. Call it once after each fit too.
    - The gutter: `.dfitwrap.scroll` has `scrollbar-width: thin` and `scrollbar-gutter: stable`. Headless Chromium draws a default scrollbar as an overlay (0px, measured). With `thin`, it draws a 10px classic gutter, so the measurements cover the classic case.
    - Acceptance check for a picture that fits (decision `page-pic-fills-card`): at the build head, with the same designs, its width is floor(column) wide, or 2 × its width when that is less.
-   - `SKILL.md` states the rule now, in the `drawn` step and the `focus` bullet. The `focus` bullet keeps "shows that element" (1A). Grant: the owner's item 55 note.
+   - `reference/designs.md` (skill `waiting-page`) states the rule, in the `drawn` step and the `focus` bullet. The `focus` bullet keeps "shows that element" (1A). Grant: the owner's item 55 note.
 8. Fixed sizes kept: 32px chips and the 44px View bar. The page has no sideways scroll. The 480 cap and the 120 floor no longer hold for a picture that fits. It now draws at the card's width, and only a picture taller than a phone scrolls in the 480 box (decision `page-pic-fills-card`, docs/decisions/page-pic-fills-card.md).
 9. Also in this lane: a task card's `ol.steps` takes `min-width: 0; overflow-wrap: anywhere;`, so an unbroken URL in a step stays inside the card at 360, 390 and 430 wide. The coordinator added it on Oct 29 at 14:45 CDT, after the tests for it went red.
 10. Measured verdicts. Each state was measured at each size, light and dark: `long`, `long-end`, `focus-in`, `focus-whole`, `fits`, `keys` and `wide`.

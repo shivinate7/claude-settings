@@ -90,7 +90,7 @@ Owner grant: yes. Not drawn, and outside this lane. Filling the card does little
 - `MIN_PIC` stays as a number (check_designs.mjs and the write guard read it); fitFrame stops using it as a width floor. `PHONE_H` stays, in F. The 5B width cap min(221.8, …) goes.
 - In both branches, the measured one and the declared-size one, set the width and height from the column, so the first paint already has the size.
 - The c204 acceptance check ("a picture that fits looks as today") turns false by design. Re-point it: a picture that fits is floor(column) wide, or 2 × its width when that is less.
-- `SKILL.md` lines 740–741 ("Add a design" step 1, "The page scales it to the card") and 755 (step 4, the `focus` bullet, "Either way the picture is scaled to fit the card") turn false; the builder rewrites them. Line 741: "The page scales it to the card's width. A picture taller than a phone picture at that width scrolls in a 480px box." Line 755: "Either way the picture is scaled to the card's width, at most 2x. It draws whole while it is no taller than a 390 × 844 phone picture at that width, plus 1px. A taller one stays 480px high and scrolls in its box, at the card's width less the gutter. If the gutter alone makes it fit, it draws whole at that narrower width. It opens at the top of what the card shows."
+- The sizing rule's home is `reference/designs.md` (skill `waiting-page`), section "Add a design": step 1, and the `focus` bullet of step 4."
 
 ## 9. Card pictures for the waiting page
 
