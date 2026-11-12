@@ -1326,12 +1326,13 @@ for _name, _command in (
 # A listing that drops the tests folder names product files only: the pathspec `:!tests`, and the -not -path
 # that drops tests/, leave xargs no test to feed sed -i. The same listing with no exclusion is refused.
 # DOTROOT holds hooks/ and merge/ tests, which these two listings would name. They read WALKROOT instead,
-# whose one test is tests/test_a.py, so each listing leaves product files only.
+# whose one test is tests/test_a.py, so each listing leaves product files only. Its doc in tests/ is
+# tests/README.md, at depth 2: the -maxdepth cases below read past it or stop short of it.
 WALKROOT = os.path.join(ROOT, "walkroot")
 
 
 def _build_walkroot():
-    make_repo(WALKROOT, {"tests/test_a.py": "def test_a():\n    assert True\n",
+    make_repo(WALKROOT, {"tests/test_a.py": "def test_a():\n    assert True\n", "tests/README.md": "doc\n",
                          "src/app.py": "x = 1\n", "README.md": "base\n"})
 
 
@@ -1346,5 +1347,22 @@ sh("builder-test: shell write, find . for *.py with no exclusion, piped to xargs
 # sed -n only prints. The pattern names --in-place, which is no flag of this sed run, so nothing is written.
 sh("builder-test: shell read, sed -n over a pattern that names --in-place, is allowed",
    "sed -n '/use --in-place/p' hooks/test_guard.py", "allow", **DR)
+# A -maxdepth 1 walk reads the root's own files only. WALKROOT's root holds no test, and its test and its doc
+# sit at depth 2, so a walk of depth 1 finds no file a test would be written to: both listings are allowed.
+sh("builder-test: shell write, find . -maxdepth 1 -name *.py, piped to xargs, sed -i, is allowed",
+   "find . -maxdepth 1 -name '*.py' | xargs sed -i s/a/b/", "allow", **WR)
+sh("builder-test: shell write, find . -maxdepth 1 -name *.md, piped to xargs, sed -i, is allowed",
+   "find . -maxdepth 1 -name '*.md' | xargs sed -i s/a/b/", "allow", **WR)
+# With no -maxdepth the same walks reach tests/ at depth 2, and -maxdepth 2 reaches it too: all three are refused.
+sh("builder-test: shell write, find . -name *.py, piped to xargs, sed -i, with no -maxdepth, is refused",
+   "find . -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **WR)
+sh("builder-test: shell write, find . -name *.md, piped to xargs, sed -i, with no -maxdepth, is refused",
+   "find . -name '*.md' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **WR)
+sh("builder-test: shell write, find . -maxdepth 2 -name *.py, piped to xargs, sed -i, is refused",
+   "find . -maxdepth 2 -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **WR)
+# A test AT depth 1 is one a -maxdepth 1 walk reads, so that walk is refused. DOTROOT's hooks/ holds one.
+sh("builder-test: shell write, find hooks -maxdepth 1 -name *.py, piped to xargs, sed -i, is refused",
+   "find hooks -maxdepth 1 -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",),
+   **DR)
 
 # ---- the diff, judged at commit, push and SubagentStop
