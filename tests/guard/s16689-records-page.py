@@ -185,6 +185,27 @@ REC_UNREL_LANE = os.path.join(RECMORE, "unrelated-lane")
 # page is MERGE_HEAD's.
 REC_NOORIGIN = os.path.join(RECMORE, "noorigin")
 REC_NOORIGIN_LANE = os.path.join(RECMORE, "noorigin-lane")
+# A rows page: a full-size page of 30 rows, so that two edits in different regions merge cleanly. The lane commits a
+# row after row 01; origin/main appends a row after row 30. Rows 02 to 30 stay unchanged between the two edits, so git
+# does not call them adjacent. The clean merge is neither HEAD's, the base's nor MERGE_HEAD's page: it is the one page
+# these two edits can give.
+REC_ROWS = os.path.join(RECMORE, "rows")
+REC_ROWS_LANES = {name: os.path.join(RECMORE, "rows-" + name) for name in ("merge", "hand", "quit", "solo")}
+REC_ROW_LINES = ["row %02d: decision %d" % (i, i) for i in range(1, 31)]
+
+
+def _rec_rows_page(*rows):
+    return "# Records index\n" + "".join(row + "\n" for row in rows)
+
+
+REC_ROWS_CUT = _rec_rows_page(*REC_ROW_LINES)
+REC_ROWS_LANE = _rec_rows_page(REC_ROW_LINES[0], "row 01a: the lane's own row", *REC_ROW_LINES[1:])
+REC_ROWS_MAIN = _rec_rows_page(*REC_ROW_LINES, "row 31: main's own row")
+REC_ROWS_MERGED = _rec_rows_page(REC_ROW_LINES[0], "row 01a: the lane's own row", *REC_ROW_LINES[1:],
+                                 "row 31: main's own row")
+# The clean merge, then a row rewritten by hand in a region the merge did not touch.
+REC_ROWS_HAND = _rec_rows_page(REC_ROW_LINES[0], "row 01a: the lane's own row", *REC_ROW_LINES[1:14],
+                               "row 15: rewritten by hand", *REC_ROW_LINES[15:], "row 31: main's own row")
 
 
 def _build_records_more():
@@ -516,10 +537,54 @@ def _build_records_more():
     need(run_vcs(REC_NOORIGIN, "rev-list", "--first-parent", "origin/main").returncode != 0,
          "the noorigin fixture: rev-list --first-parent origin/main does not fail")
 
+    # The rows repository: each lane is cut from the stale local main. The merge lane holds the clean merge. The
+    # hand, quit and solo lanes hold a rewritten row, a merge after `merge --quit`, and a row staged with no merge.
+    make_repo(REC_ROWS, {"docs/records.md": REC_ROWS_CUT, "src/app.py": "x = 1\n"})
+    advance(REC_ROWS, {"docs/records.md": REC_ROWS_MAIN}, "refs/remotes/origin/main")
+    need(run(REC_ROWS, "show", "origin/main:docs/records.md") == REC_ROWS_MAIN.strip()
+         and run(REC_ROWS, "show", "main:docs/records.md") == REC_ROWS_CUT.strip(),
+         "the rows repository is not 'local main at the cut, origin/main with main's row'")
+    for name, where in REC_ROWS_LANES.items():
+        run(REC_ROWS, "worktree", "add", "-q", "-b", "lane-rows-" + name, where, "main")
+    for name in ("merge", "hand", "quit"):
+        lane = REC_ROWS_LANES[name]
+        write(page(lane), REC_ROWS_LANE)                  # the lane's own row, committed
+        run(lane, "add", "docs/records.md")
+        run(lane, "commit", "-q", "-m", "lane row")
+        run(lane, "merge", "-q", "--no-commit", "--no-ff", "origin/main")   # git merges both rows, no conflict
+    run(REC_ROWS_LANES["quit"], "merge", "--quit")       # MERGE_HEAD removed; the index keeps the clean merge
+    write(page(REC_ROWS_LANES["hand"]), REC_ROWS_HAND)   # a row rewritten after the merge, staged
+    run(REC_ROWS_LANES["hand"], "add", "docs/records.md")
+    write(page(REC_ROWS_LANES["solo"]), REC_ROWS_LANE)   # the lane's row staged, cut from the base, no merge
+    run(REC_ROWS_LANES["solo"], "add", "docs/records.md")
 
-lazy_fixture([REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN, *REC_DANGLE_LANES.values(), REC_NEW_LANE,
-              REC_ADOPT_LANE, *REC_PLAIN_LANES.values(), REC_MOVED, *REC_MOVED_LANES.values(),
-              REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values(),
+    def staged_blob(lane):
+        return run(lane, "ls-files", "-s", "--", "docs/records.md").split()[1]
+
+    merged = REC_ROWS_LANES["merge"]
+    need(run(merged, "rev-parse", "MERGE_HEAD") == run(REC_ROWS, "rev-parse", "origin/main")
+         and run(merged, "diff", "--name-only", "--diff-filter=U") == "",
+         "the rows merge lane: MERGE_HEAD is not origin/main's tip, or the merge left a conflict")
+    need(run(merged, "show", ":docs/records.md") == REC_ROWS_MERGED.strip(),
+         "the rows merge lane: the staged page is not the clean merge of the two rows")
+    need(staged_blob(merged) not in {run(merged, "rev-parse", rev) for rev in (
+        "HEAD:docs/records.md", "origin/main:docs/records.md", "MERGE_HEAD:docs/records.md")},
+         "the rows merge lane: the staged page is the blob of HEAD, origin/main or MERGE_HEAD, not a new merge")
+    need(run(REC_ROWS_LANES["hand"], "show", ":docs/records.md") == REC_ROWS_HAND.strip()
+         and run_vcs(REC_ROWS_LANES["hand"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0,
+         "the rows hand lane: a merge is not in progress, or the staged page is not the hand-written one")
+    need(run_vcs(REC_ROWS_LANES["quit"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0
+         and run(REC_ROWS_LANES["quit"], "show", ":docs/records.md") == REC_ROWS_MERGED.strip(),
+         "the rows quit lane: a merge is still in progress, or the staged page is not the clean merge")
+    need(run_vcs(REC_ROWS_LANES["solo"], "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode != 0
+         and run(REC_ROWS_LANES["solo"], "show", "HEAD:docs/records.md") == REC_ROWS_CUT.strip()
+         and run(REC_ROWS_LANES["solo"], "show", ":docs/records.md") == REC_ROWS_LANE.strip(),
+         "the rows solo lane: a merge is in progress, or HEAD is not the cut, or the staged page is not the row")
+
+
+lazy_fixture([REC_ROWS, *REC_ROWS_LANES.values(), REC_DANGLE, REC_NEW, REC_ADOPT, REC_PLAIN,
+              *REC_DANGLE_LANES.values(), REC_NEW_LANE, REC_ADOPT_LANE, *REC_PLAIN_LANES.values(),
+              REC_MOVED, *REC_MOVED_LANES.values(), REC_ANC, REC_ANC_LANE, REC_STACK, *REC_STACK_LANES.values(),
               REC_CRISS, *REC_CRISS_LANES.values(), REC_UNREL, REC_UNREL_LANE,
               REC_NOORIGIN, REC_NOORIGIN_LANE], _build_records_more)
 
@@ -790,6 +855,28 @@ records_refuse("a lane's merge of an unrelated unmerged branch, whose merge base
 # read that answered.
 records_refuse("a lane's merge of a feature page, with no origin/main, so the is-ancestor read fails",
                VCS + " commit -m x", REC_NOORIGIN_LANE)
+
+# The clean merge. The lane committed its row, origin/main added another in a region the lane did not touch, and git
+# auto-merged both rows into the index. The page the merge commit holds is the clean merge of HEAD's and MERGE_HEAD's
+# pages, so it is allowed: the merge brings nothing that the two parents do not carry. Judged from the index, and from
+# the working tree a `commit -am` reads.
+records_allow("a merge commit of the clean merge of two rows, auto-merged by git", VCS + " commit -m x",
+              REC_ROWS_LANES["merge"])
+records_allow("a merge commit of the clean merge of two rows, auto-merged by git, under PowerShell",
+              VCS + " commit -m x", REC_ROWS_LANES["merge"], tool="PowerShell")
+records_allow("a merge commit -am of the clean merge of two rows, auto-merged by git", VCS + " commit -am x",
+              REC_ROWS_LANES["merge"])
+# Refused: the clean merge, then a row rewritten by hand and staged. The page is neither the clean merge nor any
+# parent's page, so the commit is the lane's own page change.
+records_refuse("a merge commit of the clean merge with a row rewritten by hand and staged", VCS + " commit -m x",
+               REC_ROWS_LANES["hand"])
+# Refused: a row staged with no merge in progress. A commit that is no merge carries no page the rule accepts.
+records_refuse("a commit of a staged row change with no merge in progress", VCS + " commit -m x",
+               REC_ROWS_LANES["solo"])
+# Refused: the clean merge, held in the index after `merge --quit`. No merge is in progress, so no MERGE_HEAD says
+# the page is a merge's. A rule that takes the clean merge of HEAD and origin/main would allow it.
+records_refuse("a commit of the clean merge after merge --quit, no merge in progress", VCS + " commit -m x",
+               REC_ROWS_LANES["quit"])
 
 # =========================================================================== 5d. conflict markers
 #
