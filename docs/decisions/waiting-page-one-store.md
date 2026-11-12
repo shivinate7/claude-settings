@@ -52,7 +52,7 @@ Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the rev
   and the Worker's own writes never do. None is built, so SKILL.md "Read the answers" says "this sentence is the only guard". Picked below.
 - Who can write answers is a gate. A Worker open to anyone with the URL would let anyone write answers, which is wider than today's grant.
   An access gate (Cloudflare Access, or a login the Worker checks) is part of the route, not an extra.
-- The token is scoped to this repo. A fine-grained token cannot be limited to one branch, so only a ruleset on main keeps it off main. Decision `main-branch-protection`, ruling r, rules a ruleset that blocks deletion and force-push of main and requires `all-jobs-passed`; that ruleset is ruled, not yet built. A pull request requirement is planned, not ruled. The probe measures the token's reach.
+- The token is scoped to this repo. A fine-grained token cannot be limited to one branch, so only branch protection or a ruleset on main keeps it off main. Decision `main-branch-protection`, ruling r, rules a ruleset that blocks deletion and force-push of main and requires `all-jobs-passed`; that ruleset is ruled, not yet built. A pull request requirement is planned, not ruled. The probe measures the token's reach.
 
 ## Picks
 
@@ -80,8 +80,8 @@ Each act that cannot be undone or costs money needs one owner yes, asked by the 
 ## Mechanism (build steps, handed to the coordinator as step text)
 
 1. `waiting-site-probe` (blockedBy none): on a scratch branch, never the record branch, measure a test Worker. Measure one commit of several files, a conditional read and the click-to-commit delay. Measure a wake by webhook to a session, the Access login on a phone, the free plan's limits and the token's reach. Owner acts: a Cloudflare account, a token, a test deploy and the access gate.
-2. `page-one-store-answers` (blockedBy 1): the owner's word to re-point the `settings.json` "Relayed Grant" entry (line 54), which reads answers fetched with ArtifactData.
-3. `waiting-item-check` (blockedBy 2): one validator over `waiting/**.json` for the item rules now keyed on ArtifactData (`guard.py`, `question_form.py`, `call_judge.py`, `local_time.py --page-note`). It runs as a PreToolUse on a commit or push touching `waiting/`. It also runs in record-branch CI, which does not exist today (`checks.yml` 3-7 runs on main and PRs). Red first on the old commit. The Worker checks only the shape of what it writes (answers, asks); the item rules stay here.
+2. `page-one-store-answers` (blockedBy 1): the owner's grant to re-point the `settings.json` "Relayed Grant" entry (line 54), which reads answers fetched with ArtifactData.
+3. `waiting-item-check` (blockedBy 2): one validator over `waiting/**.json` for the item rules now keyed on ArtifactData (`guard.py`, `question_form.py`, `call_judge.py`, `local_time.py --page-note`). It runs as a PreToolUse on a commit or push touching `waiting/`. It also runs in record-branch CI, which does not exist today (`checks.yml` 3-7 runs on main and PRs). Red first on the old commit. The Worker checks only the shape of what it writes (answers, asks, the read mark and the receipt delete); the item rules stay here.
 4. `waiting-site-build` (blockedBy 1, 3): the Worker, its API and the access gate, kept in this repo. `page.html` moves its collections from db to the API, with one commit per Send, Undo or Ask batch and a poll with a change check. Designs and Status read from git. Owner acts: the token mint, the deploy, the gate (one yes each).
 5. `site-wakes-writer` (blockedBy 4): the Worker wakes the writer on a save, by the route step 1 measured; the turn-start read stays as the fallback.
 6. `writer-writes-git` (blockedBy 2, 3, 4): the writer and tools read and write the record branch; new loader in `stale_pages.py`; the SKILL.md database section is rewritten in place.
