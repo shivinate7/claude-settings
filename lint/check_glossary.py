@@ -55,6 +55,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 sys.path.insert(0, HERE)
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the rule marker list
+import diff_moves  # noqa: E402  the one home of a moved line (lint/diff_moves.py)
 
 ROOT = os.path.dirname(HERE)
 GLOSSARY = "GLOSSARY.md"
@@ -613,12 +614,12 @@ def git_diff(end=None):
 
     Fixed prefixes and no external diff, so diff.noprefix, diff.mnemonicPrefix or a diff tool in the user's
     config cannot change the `+++ b/<path>` headers that added_lines reads. T (a type change, such as a symlink
-    replaced by a file) is read as an edit."""
+    replaced by a file) is read as an edit. D rows are kept so patch_lines sees the text a move takes out."""
     def make():
         if end and tips()[0] == merge_base():
             return ""
         return git("diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", "--no-abbrev",
-                   "-U0", "-M", "--diff-filter=AMRT", "--patch-with-raw", merge_base(), *([end] if end else []))
+                   "-U0", "-M", "--diff-filter=AMRTD", "--patch-with-raw", merge_base(), *([end] if end else []))
     return once(("diff", end), make)
 
 
@@ -639,14 +640,7 @@ def untracked():
     return once("untracked", find)
 
 
-def unquote(name):
-    """A path as git printed it, unquoted when git quoted it; None when it cannot be read."""
-    if name.startswith('"'):
-        try:
-            return ast.literal_eval(name).encode("latin-1").decode("utf-8")
-        except (SyntaxError, ValueError, UnicodeError):
-            return None
-    return name
+unquote = diff_moves.unquote  # the one home of a git-quoted path (lint/diff_moves.py)
 
 
 def diff_path(header):
@@ -683,10 +677,14 @@ def added():
 def patch_lines(diff):
     """({path: set of added line numbers}, unknowns) for each file `diff` adds or edits, renames followed.
 
+    A line the same diff deletes, with the same text, is a move and not added (diff_moves). A move into an
+    untracked file has no diff, so it is no move: added_lines reads that file whole.
+
     A `+++ ` header that yields no path is an unknown, never a skip. `+++ /dev/null` is no unknown: it heads a
     delete, which git prints before the create of a type change. A `+++ ` row is a header only between
     `diff --git` and the first `@@`: past that, it is an added line that starts with `++`."""
-    out, unknown, path, header = {}, [], None, False
+    left = diff_moves.deleted_texts(diff, lambda old: not old.startswith(SKIP_CODE))
+    out, unknown, path, header, line = {}, [], None, False, 0
     for row in diff.split("\n"):
         if row.startswith("diff --git "):
             path, header = None, True
@@ -699,9 +697,13 @@ def patch_lines(diff):
         elif row.startswith("@@"):
             header = False
             m = re.match(r"@@ -\S+ \+(\d+)(?:,(\d+))? @@", row)
-            if m and path:
-                start, count = int(m.group(1)), int(m.group(2) or 1)
-                out[path].update(range(start, start + count))
+            if m:
+                line = int(m.group(1))
+        elif not header and row.startswith("+"):
+            moved = diff_moves.take_move(left, row[1:])
+            if path and not moved:
+                out[path].add(line)
+            line += 1
     return out, unknown
 
 
