@@ -107,6 +107,7 @@ FAMILIES = {
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
+    "push-batch-held": "a non-forced push to a lane's branch while a ready integration pull request holds that branch's remote tip: refused; allowed and logged when the open list or a compare cannot be read; the gh calls it makes",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
@@ -650,7 +651,7 @@ LOG_RULE_FAMILY = (
     ("worktree-home: a builder write to a path in no repository from a /c/ cwd", "worktree-home"),
     ("cite-by-id: a -F file that cannot be read", "cite"),
     ("env: heredoc-allow-strip", "env"),
-    ("roadmap-one-writer: a push starts one rev-parse", "push-delete"),
+    ("roadmap-one-writer: a non-main push starts three rev-parse calls", "push-delete"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]

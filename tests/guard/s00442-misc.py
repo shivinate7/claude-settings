@@ -942,11 +942,13 @@ else:
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
                  count_file=None, compares=None, repos=None, refs=(), tips=None, head_sha=None, head_ref=None,
-                 draft=False):
+                 draft=False, pr=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `pr`, when given, is a dict merged over the fake's own pull request (for a draft flag, or a base).
 
     `repos`, when given, maps each repo name ("owner/name") to that repo's own answers, for a case whose
     lane spans repos: `compares` (its containment reads; "missing" is a 404, "network" a refused
@@ -1024,6 +1026,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     if head_sha:  # the pull request's own head, when a case names a real commit (records-page-ready); its draft flag too
         state["pr"]["head"] = {"ref": head_ref or "feat", "sha": head_sha}
         state["pr"]["draft"] = draft
+    state["pr"].update(pr or {})  # a case's own pull request fields, last, so they win over the defaults above
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
     fake_py = os.path.join(folder, "ghfake.py")
