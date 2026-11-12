@@ -14,6 +14,11 @@ given. The silent no-transcript case belongs to the mod `mods/decision-watch`
 Owner, 2026-11-11 13:36 CST: "r41 yes on all". That covers all seven R41 items. This record files
 item 1 only (restart plan R41).
 
+Coordinator pick, 2026-11-12 09:30 CST. This is not an owner ruling. The once-per-session
+UNKNOWN above, from the owner ruling of 2026-11-11 13:36 CST, applies to the background judge
+only. An explicit `/dw` that the owner asks for shows the UNKNOWN on every miss. The rule
+`verification-report-unknown-reads` (an unread is never reported as clear) governs that read.
+
 Red cases first. Each case below gets a test:
 
 - a path with Windows backslashes;
