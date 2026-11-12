@@ -3917,13 +3917,11 @@ def review_guard_marked(brief) -> bool:
 
 
 def reviewer_round_models(rounds, prompt):
-    """The model words of the round rows a reviewer brief invokes: the row of each `Round N of 3` marker, the `1 guard` row when
-    the brief carries the guard marker (on any round), and the fix check row on a fix check brief. Rows the table lacks give
-    no word. The rows the brief's own markers select, so a brief with none selects none."""
-    guard = review_guard_marked(prompt)
-    words = [role_round_model(rounds, "reviewer", n, kind) for kind, n in brief_markers(prompt) if kind.lower() == "round"
-             for kind in (("guard", "other") if guard else ("other",))]
-    if guard:
+    """The model words of the round rows a reviewer brief invokes: the `other` row of each `Round N of 3` marker, the `1 guard` row
+    when the brief carries the guard marker (on any round), and the fix verifier row on a fix check brief. A row the table lacks
+    gives no word, so a brief with no marker gives none."""
+    words = [role_round_model(rounds, "reviewer", n) for kind, n in brief_markers(prompt) if kind.lower() == "round"]
+    if review_guard_marked(prompt):
         words.append(role_round_model(rounds, "reviewer", "1", "guard"))
     if ("fixcheck", None) in marker_hits(prompt):
         words.append(role_round_model(rounds, "reviewer", ROLE_ROUND_FIX))
@@ -3968,8 +3966,8 @@ def role_model_one(tool_input):
             return "", "", False
         if role == EXPLORE_ROLE and named < top and ("audit", None) in marker_hits(tool_input.get("prompt")):
             return "", "", False
-        if role == "reviewer" and named < top and any(
-                role_model_rank(word) >= named for word in reviewer_round_models(rounds, tool_input.get("prompt"))):
+        if role == "reviewer" and any(role_model_rank(word) >= named
+                                      for word in reviewer_round_models(rounds, tool_input.get("prompt"))):
             return "", "", False
         if named > ROLE_MODEL_RANK.index(row):
             extra = ""
