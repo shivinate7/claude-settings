@@ -216,8 +216,7 @@ MUTATE_JOB = "checks-mutate-guard"  # checks.yml's job: the lane lint reads its 
 MUTATE_STEP = "Guard mutation test"  # the step of that job whose run: line is the mutate command
 WORKFLOW_REL = ".github/workflows/checks.yml"
 MUTATE_LOG = "mutate-calls.jsonl"  # one line per start of a mutate stub, in this case's folder
-TWO_DOT_LINE = re.compile(r"(?i)two[- ]dot|merge base")  # the line a lint prints when its three-dot diff has no merge base to read
-MUTATE_STUB = '''import json, os, subprocess, sys
+MUTATE_STUB ='''import json, os, subprocess, sys
 LOG, OUT, ERR, RC = __LOG__, __OUT__, __ERR__, __RC__
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
@@ -235,13 +234,6 @@ def mutate_script(log, out="", err="", rc=0):
     return MUTATE_STUB.replace("__LOG__", repr(log)).replace("__OUT__", repr(out)).replace("__ERR__", repr(err)).replace("__RC__", repr(rc))
 
 
-def unknown_max():
-    """merge.MUTATE_UNKNOWN_MAX, the unknown bound of a mutation test run. A merge.py without it fails the case by name, not with an AttributeError."""
-    if not hasattr(merge, "MUTATE_UNKNOWN_MAX"):
-        raise AssertionError("merge.py has no MUTATE_UNKNOWN_MAX: the mutation test run's unknown bound is not built")
-    return merge.MUTATE_UNKNOWN_MAX
-
-
 def mutate_report(made, killed, crashed, survived):
     """The per-file table a mutation test run prints, from hooks/mutate_shared.py's format_report (the one home of that format). Its crashed
     column counts the mutants a run could not read (a crash or a timeout); the lint calls those unknown."""
@@ -250,12 +242,33 @@ def mutate_report(made, killed, crashed, survived):
     return mutate_shared.format_report([row]) + "\n"
 
 
-def tally_out(killed, survived, wrong, skipped=0):
-    """The lines a mutation test run prints without a table, as mutate_shared.run_mutants prints them: a preamble, then the tally
-    `K of N mutations killed (S survived, W wrong cause, X skipped)`, where N counts the mutants run (the skipped ones are not in it)."""
-    ran = killed + survived + wrong
-    return "%d mutations, 8 at a time\n\n%d of %d mutations killed (%d survived, %d wrong cause, %d skipped)\n" % (
-        ran + skipped, killed, ran, survived, wrong, skipped)
+def real_tally(killed, survived=0, wrong=0, unknown=0):
+    """The output a mutation test run prints, from mutate_shared.run_mutants itself (the one home of the tally's format): one stub mutant per
+    verdict, so the tally line and the verdict lines are the job's own. `unknown` mutants read UNKNOWN, as a crashed or timed-out mutant does."""
+    entries = (["kill-%d" % i for i in range(killed)] + ["survive-%d" % i for i in range(survived)]
+               + ["wrong-%d" % i for i in range(wrong)] + ["unknown-%d" % i for i in range(unknown)])
+
+    def run_one(entry):
+        if entry.startswith("unknown-"):
+            return (entry, 0, [], "", None, [], "stub: the mutant could not be read")
+        if entry.startswith("survive-"):
+            return (entry, 0, [], "", None)
+        if entry.startswith("wrong-"):
+            return (entry, 1, ["FAIL: another case"], "the named case", None)
+        return (entry, 1, ["FAIL: the named case"], "the named case", None)
+
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        mutate_shared.run_mutants(entries, run_one)
+    return out.getvalue()
+
+
+def tally_of(output):
+    """The one line of a mutation test run's output that carries its tally, as the job prints it."""
+    lines = [ln for ln in output.splitlines() if " mutations killed (" in ln]
+    if len(lines) != 1:
+        raise AssertionError("the mutation test output carries %d tally lines, want one: %r" % (len(lines), output[:200]))
+    return lines[0]
 
 
 def mutation_test_run(args):
@@ -315,11 +328,6 @@ def counts_missing(text, counts):
         if not any(re.search(form, ln, re.I) for ln in lines for form in beside):
             return label, number
     return None
-
-
-def fallback_lines(text):
-    """The lines of a lint's output that say it fell back to a two-dot diff, as TWO_DOT_LINE matches them. [] when none."""
-    return [ln for ln in text.splitlines() if TWO_DOT_LINE.search(ln)]
 
 
 class WallClock:
@@ -1007,7 +1015,7 @@ class LaneLint(LaneFixture):
 
     def push_orphan_lane(self, files):
         """One commit on feat with no common ancestor with origin/main: main's whole tree, with `files` (path -> text) written over it. So the
-        three-dot diff has no merge base to read, and the two-dot diff lists only `files`. -> the pushed head."""
+        lane's history is unrelated to main's, and merge-tree cannot read the pair. -> the pushed head."""
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
         tm.sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -1060,12 +1068,26 @@ class LaneLint(LaneFixture):
     def test_mutation_test_touched_file_reads_670_unknown_fails_and_names_the_counts_and_time(self):
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
-        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 24, 670, 0)), WORKFLOW_REL: workflow_of(body)})
+        report = real_tally(24, unknown=670)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=report), WORKFLOW_REL: workflow_of(body)})
         rc, text = self.timed_lint(1100, "--lane-lint", "7")
         self.assertEqual(rc, 1, "the lint passed a touched mutation test file whose mutation test run read 670 of 694 mutants unknown: " + text)
         self.assertEqual(counts_missing(text, {"killed": 24, "survived": 0, "unknown": 670}), None,
                          "the FAIL output does not name the killed, survived and unknown counts: " + text)
+        self.assertIn(tally_of(report), text, "the FAIL output does not show the mutation test run's own tally line: " + text)
         self.assertTrue(wall_time_shown(text, 1100), "the FAIL output does not name the wall time of the mutation test run: " + text)
+        self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_tally_one_unknown_fails_and_names_it_and_the_report_line(self):  # any unknown fails, as CI fails it
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        report = real_tally(693, unknown=1)
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=report), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(437, "--lane-lint", "7")
+        self.assertEqual(rc, 1, "the lint passed a tally with 1 unknown mutant, where CI fails any unknown: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a tally with 1 unknown mutant: " + text)
+        self.assertEqual(counts_missing(text, {"unknown": 1}), None, "the FAIL output does not name unknown 1: " + text)
+        self.assertIn(tally_of(report), text, "the FAIL output does not show the mutation test run's own tally line: " + text)
         self.assert_one_mutation_test_run(head)
 
     def test_mutation_test_touched_file_clean_run_passes_and_shows_the_wall_time_and_counts(self):
@@ -1165,32 +1187,26 @@ class LaneLint(LaneFixture):
         rc, text = self.timed_lint(437, "--lane-lint", "7")
         return rc, text, head
 
-    def test_mutation_test_table_unknown_at_the_max_passes(self):
-        n = unknown_max()
-        rc, text, head = self.lint_with_report(mutate_report(694, 694 - n, n, 0))
-        self.assertEqual(rc, 0, "the lint refused a report with %d unknown, at MUTATE_UNKNOWN_MAX: %s" % (n, text))
-        self.assertEqual(len(pass_lines(text)), 1, text)
-        self.assert_one_mutation_test_run(head)
+    def test_mutation_test_table_unknown_fails_at_each_count_from_one_to_six(self):  # zero tolerance: any unknown fails, as CI fails it
+        for n in range(1, 7):
+            with self.subTest(unknown=n):
+                rc, text, head = self.lint_with_report(mutate_report(694, 694 - n, n, 0))
+                self.assertEqual(rc, 1, "the lint passed a table with %d unknown: %s" % (n, text))
+                self.assertEqual(counts_missing(text, {"unknown": n}), None, "the FAIL output does not name unknown %d: %s" % (n, text))
+                self.assert_one_mutation_test_run(head)
 
-    def test_mutation_test_table_unknown_past_the_max_fails_and_names_the_count(self):
-        n = unknown_max() + 1
-        rc, text, head = self.lint_with_report(mutate_report(694, 694 - n, n, 0))
-        self.assertEqual(rc, 1, "the lint passed a report with %d unknown, one past MUTATE_UNKNOWN_MAX: %s" % (n, text))
-        self.assertEqual(counts_missing(text, {"unknown": n}), None, "the FAIL output does not name unknown %d: %s" % (n, text))
-        self.assert_one_mutation_test_run(head)
-
-    def test_mutation_test_tally_wrong_cause_fails_at_each_count_from_one_to_one_past_the_max(self):
-        """The tally form is the command's own verdict: any wrong cause fails, and the FAIL names it. The table form keeps the bound."""
-        for n in range(1, unknown_max() + 2):
+    def test_mutation_test_tally_wrong_cause_fails_at_each_count_from_one_to_six(self):
+        """The tally form is the command's own verdict: any wrong cause fails, and the FAIL names it."""
+        for n in range(1, 7):
             with self.subTest(wrong_cause=n):
-                rc, text, head = self.lint_with_report(tally_out(694 - n, 0, n))
+                rc, text, head = self.lint_with_report(real_tally(694 - n, wrong=n))
                 self.assertEqual(rc, 1, "the lint passed a tally with %d wrong cause: %s" % (n, text))
                 self.assertEqual(counts_missing(text, {"wrong cause": n}), None,
                                  "the FAIL output does not name wrong cause %d: %s" % (n, text))
                 self.assert_one_mutation_test_run(head)
 
     def test_mutation_test_tally_one_survivor_fails_and_names_it(self):
-        rc, text, head = self.lint_with_report(tally_out(689, 1, 4))
+        rc, text, head = self.lint_with_report(real_tally(689, survived=1, wrong=4))
         self.assertEqual(rc, 1, "the lint passed a tally with 1 survivor: " + text)
         self.assertEqual(counts_missing(text, {"survived": 1}), None, "the FAIL output does not name survived 1: " + text)
         self.assert_one_mutation_test_run(head)
@@ -1198,45 +1214,66 @@ class LaneLint(LaneFixture):
     # A table is judged by its counts at any exit code. A tally is CI's own verdict, so a nonzero exit on a tally fails.
 
     def test_mutation_test_tally_wrong_cause_at_exit_1_fails_and_names_the_count(self):
-        rc, text, head = self.lint_with_report(tally_out(690, 0, 4), rc=1)
+        rc, text, head = self.lint_with_report(real_tally(690, wrong=4), rc=1)
         self.assertEqual(rc, 1, "the lint passed a tally with 4 wrong cause at exit 1: " + text)
         self.assertEqual(counts_missing(text, {"wrong cause": 4}), None, "the FAIL output does not name wrong cause 4: " + text)
         self.assert_one_mutation_test_run(head)
 
-    def test_mutation_test_tally_clean_run_passes_and_names_its_counts(self):  # the control: no wrong cause and no survivor passes
-        rc, text, head = self.lint_with_report(tally_out(694, 0, 0))
+    def test_mutation_test_tally_zero_unknown_and_zero_survived_passes_with_time_and_unknown_0(self):  # the control: a clean tally passes
+        rc, text, head = self.lint_with_report(real_tally(694))
         self.assertEqual(rc, 0, "the lint refused a clean tally of 694 of 694 killed: " + text)
         lines = pass_lines(text)
         self.assertEqual(len(lines), 1, text)
+        self.assertTrue(wall_time_shown(lines[0], 437), "the PASS line shows no wall time of the mutation test run: " + text)
+        self.assertIn("unknown 0", lines[0], "the PASS line does not show unknown 0: " + text)
         self.assertEqual(counts_missing(lines[0], {"killed": 694, "survived": 0, "unknown": 0}), None,
                          "the PASS line does not name the tally's counts: " + text)
         self.assert_one_mutation_test_run(head)
 
     def test_mutation_test_clean_tally_at_exit_1_fails_the_lint(self):  # the bypass: a clean tally that exits 1 leaves CI red, so it is no pass
-        rc, text, head = self.lint_with_report(tally_out(694, 0, 0), rc=1)
+        rc, text, head = self.lint_with_report(real_tally(694), rc=1)
         self.assertEqual(rc, 1, "the lint passed a clean tally of 694 of 694 killed while the command exited 1, so CI is red: " + text)
         self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a clean tally at exit 1: " + text)
         self.assert_one_mutation_test_run(head)
 
-    def test_mutation_test_table_within_the_bound_passes_at_exit_1(self):
-        n = unknown_max()
-        rc, text, head = self.lint_with_report(mutate_report(694, 694 - n, n, 0), rc=1)
-        self.assertEqual(rc, 0, "the lint refused a report with %d unknown, within MUTATE_UNKNOWN_MAX, because the command exited 1: %s" % (n, text))
-        self.assertEqual(len(pass_lines(text)), 1, text)
-        self.assert_one_mutation_test_run(head)
+    def test_mutation_test_table_unknown_fails_at_exit_1_whatever_the_count(self):  # zero tolerance at any exit code
+        for n in (1, 5):
+            with self.subTest(unknown=n):
+                rc, text, head = self.lint_with_report(mutate_report(694, 694 - n, n, 0), rc=1)
+                self.assertEqual(rc, 1, "the lint passed a table with %d unknown at exit 1: %s" % (n, text))
+                self.assertEqual(counts_missing(text, {"unknown": n}), None, "the FAIL output does not name unknown %d: %s" % (n, text))
+                self.assert_one_mutation_test_run(head)
 
     def test_mutation_test_tally_one_survivor_fails_at_exit_1_and_names_it(self):  # the control: a survivor fails whatever the exit code
-        rc, text, head = self.lint_with_report(tally_out(689, 1, 4), rc=1)
+        rc, text, head = self.lint_with_report(real_tally(689, survived=1, wrong=4), rc=1)
         self.assertEqual(rc, 1, "the lint passed a tally with 1 survivor at exit 1: " + text)
         self.assertEqual(counts_missing(text, {"survived": 1}), None, "the FAIL output does not name survived 1: " + text)
         self.assert_one_mutation_test_run(head)
 
-    def test_mutation_test_table_unknown_past_the_max_fails_at_exit_1_and_names_the_count(self):  # the control: unknown past the bound fails whatever the exit code
-        n = unknown_max() + 1
-        rc, text, head = self.lint_with_report(mutate_report(694, 694 - n, n, 0), rc=1)
-        self.assertEqual(rc, 1, "the lint passed a report with %d unknown, one past MUTATE_UNKNOWN_MAX, at exit 1: %s" % (n, text))
-        self.assertEqual(counts_missing(text, {"unknown": n}), None, "the FAIL output does not name unknown %d: %s" % (n, text))
+
+    def test_mutation_test_lint_unknown_ok_does_not_lift_a_red_mutation_run(self):  # the mutation FAIL stops before the unknown lift
+        body, script = real_mutate_job()
+        self.use_ci_job(UNKNOWN, 2)  # the lint reads unknown: liftable, so the mutation test run still starts
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=real_tally(693, survived=1)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(437, "--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a red mutation test run beside an unknown lint: " + text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line beside a red mutation test run: " + text)
+        self.assertEqual(counts_missing(text, {"survived": 1}), None, "the FAIL output does not name survived 1: " + text)
         self.assert_one_mutation_test_run(head)
+
+    def test_mutation_test_command_that_cannot_start_is_a_fail_line_not_a_traceback(self):  # a missing program: a FAIL line, never a crash or a PASS
+        body, script = real_mutate_job()
+        self.use_ci_job(PASSING, 0)
+        missing = with_edit(body, r"run: python3 hooks/mutate_guard\.py", "run: no-such-python-missing hooks/mutate_guard.py")
+        self.push_lane({script: mutate_script(self.mutate_log, out=real_tally(694)), WORKFLOW_REL: workflow_of(missing)})
+        try:
+            rc, text = self.timed_lint(437, "--lane-lint", "7")
+        except Exception as error:  # the start error escaped the lint, which must print a FAIL line instead
+            self.fail("the lint raised %s when the mutation test command could not start, where it must print a FAIL line: %s" % (type(error).__name__, error))
+        self.assertNotIn("Traceback", text, "the lint printed a traceback when the mutation test command could not start: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line when the mutation test command could not start: " + text)
+        self.assertRegex(text, r"FAIL", "the lint printed no FAIL line when the mutation test command could not start: " + text)
+        self.assertEqual(rc, 1, "the lint passed a lane whose mutation test command could not start: " + text)
 
     def test_mutation_test_renamed_file_starts_the_run(self):  # git's rename detection lists only the new path of a moved file
         body, script = real_mutate_job()
@@ -1332,15 +1369,13 @@ class LaneLint(LaneFixture):
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once on the lane: " + text)
         self.assertEqual(self.mutation_test_calls(), [], "the mutation test run started on a lane whose own diff holds no mutation test file: " + text)
-        self.assertEqual(fallback_lines(text), [], "the lint printed a fallback line on a normal clone, where the three-dot diff reads: " + text)
 
-    def test_mutation_test_touched_lane_on_a_normal_clone_prints_no_fallback_line(self):
+    def test_mutation_test_touched_lane_on_a_normal_clone_starts_one_run(self):
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
         head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
         rc, text = self.timed_lint(437, "--lane-lint", "7")
         self.assertEqual(rc, 0, text)
-        self.assertEqual(fallback_lines(text), [], "the lint printed a fallback line on a normal clone, where the three-dot diff reads: " + text)
         self.assert_one_mutation_test_run(head)
 
 
