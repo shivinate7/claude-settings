@@ -3133,10 +3133,11 @@ class DefaultBase(unittest.TestCase):
         r.sh("push", "-q", "-u", "origin", "selfb")
         return r
 
-    def pushed_as_other_name(self, local, remote):
+    def pushed_as_other_name(self, local, remote, publish=True):
         """main adds Q. The branch `local` is cut at Q, gets one commit, and is pushed as `remote` with -u, so it tracks its
         own old copy under that name (the same name when local == remote). Then main reverts Q. The branch merges main keeping
-        its own side, which puts Q back, and pushes that merge. Landing the pushed copy on main undoes the revert."""
+        its own side, which puts Q back. That merge is pushed, unless publish is False: then it is a new local commit, ahead
+        of the branch's own copy. Landing the head on main undoes the revert."""
         r = Repo()
         r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
         r.push()
@@ -3151,7 +3152,8 @@ class DefaultBase(unittest.TestCase):
         r.push()
         r.sh("checkout", "-q", local)
         r.sh("merge", "-q", "-s", "ours", "--no-ff", "--no-edit", "origin/main", date=self.T4)
-        r.sh("push", "-q", "origin", spec)
+        if publish:
+            r.sh("push", "-q", "origin", spec)
         return r
 
     def gone_upstream(self):
@@ -3255,6 +3257,21 @@ class DefaultBase(unittest.TestCase):
                         "no --upstream: the printed base line does not say the upstream is gone. Output: %r" % text)
         self.assertTrue(self.undoes_main_revert(text),
                         "no --upstream: a gone upstream was not judged against origin/main. Output: %r" % text)
+
+    def test_a_same_name_branch_ahead_of_its_own_copy_is_judged_against_main(self):
+        r = self.pushed_as_other_name("foo", "foo", publish=False)
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/foo",
+                         "premise: foo does not track its own copy origin/foo")
+        self.assertNotEqual(r.sh("rev-parse", "HEAD"), r.sh("rev-parse", "origin/foo"),
+                            "premise: foo's tip is not its own copy's tip, so the local merge is ahead of the copy")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertTrue(self.undoes_main_revert(text),
+                        "premise: against origin/main, the local merge undoes main's revert of Q. Output: %r" % text)
+        _, text = self.run_main(["--repo", r.dir])
+        self.assertTrue(self.named_base(text),
+                        "no --upstream: the base is not origin/main, so the own copy was taken as the base. Output: %r" % text)
+        self.assertTrue(self.undoes_main_revert(text),
+                        "no --upstream: the revert of Q, undone by the local merge, was not caught. Output: %r" % text)
 
 
 if __name__ == "__main__":
