@@ -5705,5 +5705,183 @@ class MistakeNamesGuardTests(unittest.TestCase):
         self.assert_blocked(mg_report("I forgot the check when the lane was open."))
 
 
+class PassClaimCitesVerdictTests(unittest.TestCase):
+    """The pass-claim check, in report_guard.py's Stop hook (step pass-claim-cites-verdict). Incident: a session
+    read its own `echo $?` as "lane lint passes". A "passed", "green", "clean" or "passes" claim, tied to a check
+    noun (lint, CI, tests, checks, suite, ci-job, build), inside the report blockquote, must cite a verdict line
+    from this transcript: the verbatim `PASS <cmd> (<secs>s)` line in the result of a non-sidechain Bash call whose
+    program is verdict. Each control has a red sibling that differs only in the probed feature, so a control
+    passes for that feature and not for the lack of a rule."""
+
+    RULE = "pass-claim-cites-verdict"
+    CMD = "verdict python3 lint/test_x.py"
+    PASS_LINE = "PASS python3 lint/test_x.py (1.2s)"
+    SKIP_LINE = "SKIP python3 lint/test_x.py, 3 skipped (1.2s)"
+    FAIL_LINE = "FAIL python3 lint/test_x.py rc=1 (1.2s) log=/tmp/verdict-x.log"
+
+    def call(self, command, result, tool_id, tool="Bash", sidechain=False):
+        """One tool call and its result, as the transcript stores them."""
+        records = [tool_use_msg(tool, {"command": command}, id_=tool_id),
+                   tool_result_msg(tool_use_id=tool_id, content=result)]
+        if sidechain:
+            for rec in records:
+                rec["isSidechain"] = True
+        return records
+
+    def report(self, item):
+        """A report blockquote, a Done item of kind OTHER that holds `item`, then Next."""
+        return "> **Done**\n> - OTHER: " + item + "\n> **Next** none"
+
+    def landed_report(self, item):
+        """A report blockquote for a landed turn: a Done item of kind BUILT with a commit, then Next."""
+        return "> **Done**\n> - BUILT 3193a06: " + item + "\n> **Next** none"
+
+    def run_stop(self, reply, calls=(), landed=False, env=None, refuse_process=False):
+        records = [human("run the check")]
+        for call in calls:
+            records += call
+        if landed:
+            records += self.call("git commit -m x", "ok", "tu_commit")
+        records.append(assistant_text(reply))
+        path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        return run_guard(REPORT_GUARD, hook, env=env, refuse_process=refuse_process)
+
+    def outcome(self, reply, **kw):
+        run = self.run_stop(reply, **kw)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_blocked(self, reply, **kw):
+        out = self.outcome(reply, **kw)
+        self.assertIsNotNone(out, "not refused: %r" % reply)
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertIn(self.RULE, out["reason"])
+        self.assertIn("(decision guard-remedy-not-to-owner)", out["reason"])
+        return out
+
+    def assert_passes(self, reply, **kw):
+        # No block of any check: the fixture reaches the Stop clean, so the id is absent for the reason it names.
+        out = self.outcome(reply, **kw)
+        self.assertFalse(out and out.get("decision") == "block", "refused: %s" % (out and out.get("reason")))
+
+    # Red: a claim with no cite is refused, on each check noun and each claim word.
+
+    def test_red_claim_with_no_cite_is_refused_for_each_noun_and_word(self):
+        rows = ["Lint passed.", "CI is green.", "Tests are clean.", "The build passed.", "The suite is green.",
+                "ci-job passed.", "Checks passed.", "LINT PASSED.", "The lane lint passes.",
+                "Today's lane lint passes.", "Lint is clean."]
+        for item in rows:
+            with self.subTest(item=item):
+                self.assert_blocked(self.report(item))
+
+    def test_red_claim_on_a_landed_turn_with_no_cite_is_refused(self):
+        self.assert_blocked(self.landed_report("lint passed."), landed=True)
+
+    def test_red_pass_line_only_in_prose_is_refused(self):
+        # The PASS line is in the reply's own words. A verdict line from a tool result is the only cite.
+        self.assert_blocked(self.report("lint passed: " + self.PASS_LINE))
+
+    def test_red_pass_line_in_an_agent_result_is_refused(self):
+        calls = [self.call("run the lint", self.PASS_LINE, "tu_a", tool="Agent")]
+        self.assert_blocked(self.report("lint passed."), calls=calls)
+
+    def test_red_pass_line_in_a_sidechain_is_refused(self):
+        calls = [self.call(self.CMD, self.PASS_LINE, "tu_s", sidechain=True)]
+        self.assert_blocked(self.report("lint passed."), calls=calls)
+
+    def test_red_skip_line_alone_is_refused(self):
+        # A skipped run is no pass: the SKIP line can hold a claim of "passed" only with a PASS line.
+        calls = [self.call(self.CMD, self.SKIP_LINE, "tu_k")]
+        self.assert_blocked(self.report("lint passed."), calls=calls)
+
+    def test_red_fail_of_the_same_command_after_the_pass_is_refused(self):
+        calls = [self.call(self.CMD, self.PASS_LINE, "tu_1"), self.call(self.CMD, self.FAIL_LINE, "tu_2")]
+        self.assert_blocked(self.report("lint passed."), calls=calls)
+
+    def test_red_pass_text_from_a_bare_run_is_refused(self):
+        # A bare run prints the text, but no verdict program printed it, so it is no cite.
+        calls = [self.call("python3 lint/test_x.py", self.PASS_LINE, "tu_b")]
+        self.assert_blocked(self.report("lint passed."), calls=calls)
+
+    def test_red_pass_line_for_another_command_is_refused(self):
+        # The cite is verbatim: the name in the PASS line must be the command verdict ran.
+        calls = [self.call(self.CMD, "PASS python3 lint/test_y.py (1.2s)", "tu_o")]
+        self.assert_blocked(self.report("lint passed."), calls=calls)
+
+    # Controls: each false-alarm form passes, and its red sibling below it is refused.
+
+    def test_control_quoted_claim_passes_and_its_bare_sibling_is_refused(self):
+        self.assert_passes(self.report("`lint passed`."))
+        self.assert_blocked(self.report("lint passed."))
+
+    def test_control_claim_in_a_fence_passes_and_its_unfenced_sibling_is_refused(self):
+        fenced = "> **Done**\n> ```\n> - OTHER: lint passed.\n> ```\n> **Next** none"
+        self.assert_passes(fenced)
+        self.assert_blocked(self.report("lint passed."))
+
+    def test_control_negation_passes_and_its_positive_sibling_is_refused(self):
+        for negated, positive in (("Lint is not green.", "Lint is green."),
+                                  ("CI hasn't passed.", "CI has passed."),
+                                  ("Tests never passed.", "Tests passed.")):
+            with self.subTest(negated=negated):
+                self.assert_passes(self.report(negated))
+                self.assert_blocked(self.report(positive))
+
+    def test_control_attributed_claim_passes_and_its_bare_sibling_is_refused(self):
+        for attributed, bare in (("Reviewer: lint passed.", "Lint passed."),
+                                 ("The builder reports lint green.", "Lint green.")):
+            with self.subTest(attributed=attributed):
+                self.assert_passes(self.report(attributed))
+                self.assert_blocked(self.report(bare))
+
+    def test_control_statistics_pass_and_their_count_free_sibling_is_refused(self):
+        for stat, plain in (("Tests: 12 passed, 2 failed.", "Tests passed, 2 failed."),
+                            ("3/5 tests passed.", "Tests passed.")):
+            with self.subTest(stat=stat):
+                self.assert_passes(self.report(stat))
+                self.assert_blocked(self.report(plain))
+
+    def test_control_clean_without_a_check_noun_passes_and_its_noun_sibling_is_refused(self):
+        for clean, with_noun in (("The merge is clean.", "The build is clean."),
+                                 ("Clean-merge read: ok.", "Clean-build read: ok."),
+                                 ("Working tree clean.", "Working tree and CI clean."),
+                                 ("Clean up the branch.", "Clean up the lint.")):
+            with self.subTest(clean=clean):
+                self.assert_passes(self.report(clean))
+                self.assert_blocked(self.report(with_noun))
+
+    def test_control_passed_the_brief_passes_and_its_check_sibling_is_refused(self):
+        self.assert_passes(self.report("I passed the brief to the builder."))
+        self.assert_blocked(self.report("I passed the brief, and lint passed."))
+
+    def test_control_claim_outside_the_blockquote_passes_and_its_in_blockquote_sibling_is_refused(self):
+        self.assert_passes("Lint passed earlier, before the rebase.\n\n" + self.report("the list is in the record."))
+        self.assert_blocked(self.report("lint passed."))
+
+    def test_control_cited_claim_passes_with_the_cite_in_the_transcript(self):
+        calls = [self.call(self.CMD, self.PASS_LINE, "tu_v")]
+        self.assert_passes(self.report("lint passed."), calls=calls)
+
+    def test_control_cited_claim_with_the_verbatim_line_on_the_same_line_passes(self):
+        calls = [self.call(self.CMD, self.PASS_LINE, "tu_v")]
+        self.assert_passes(self.report("lint passed (" + self.PASS_LINE + ")."), calls=calls)
+
+    def test_control_cited_claim_on_a_landed_turn_passes(self):
+        calls = [self.call(self.CMD, self.PASS_LINE, "tu_v")]
+        self.assert_passes(self.landed_report("lint passed."), calls=calls, landed=True)
+
+    # Cost: the refusal is one stdout line, with no process started and no file written (decision
+    # guard-remedy-not-to-owner, "Cost"). A fresh config folder must stay empty after the refused run.
+
+    def test_cost_refused_claim_starts_no_process_and_writes_no_file(self):
+        cfg = tempfile.mkdtemp(dir=RUN_FOLDER)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg)
+        out = self.outcome(self.report("lint passed."), env=env, refuse_process=True)
+        self.assertIsNotNone(out, "not refused")
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertEqual(os.listdir(cfg), [], "the refused run wrote a file")
+
+
 if __name__ == "__main__":
     unittest.main()
