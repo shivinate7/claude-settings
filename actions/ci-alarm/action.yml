@@ -12,7 +12,7 @@ description: >
   clears, and in the newest cancelled run of a group, every attempt of it included. The job ran at least the cap, read from the
   workflow file at the run's head; a job with no job-level cap has GitHub's default, 360 minutes. The issue line names the job,
   the cap, the minutes and the run id, and reads "cap end", not "red". A failure run that the merge tool calls clear opens no
-  issue, a cap end in it included. A job cancelled under its cap stays quiet. An unreadable cap, a null `started_at`, or a
+  issue, a cap end in it included. A cap end in a cancelled run alarms even when the merge tool calls that run clear. A job cancelled under its cap stays quiet. An unreadable cap, a null `started_at`, or a
   cancelled run or one of its earlier attempts with no jobs is "unknown". The merge gate leaves a run with no red job and a job
   timed out at a job-level cap it finds out of red and out of unknown; the alarm is the signal. A group whose newest run is a
   re-run still going (attempt above 1) is "unknown" and opens no issue; a first attempt still going is skipped. A cap end in an
