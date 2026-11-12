@@ -1729,8 +1729,8 @@ def sentences_of(text):
     return [s for s in re.split(r"[.\n]", text.lower()) if s.strip()]
 
 
-# Re-pointed by the owner's ruling of 14:25 CST Nov 12: an old rule or decision is an argument, not law. A route-two
-# challenge brings no new fact, so "no new fact" wrongly refused it; a bare re-ask is one that takes neither route.
+# A route-two challenge brings no new fact, so a "no new fact" refusal would wrongly refuse it; a bare re-ask is one
+# that takes neither route (decision question-form).
 def refuses_a_bare_re_ask(text):
     """True when a sentence of `text` refuses a re-ask that takes neither route. A negation in that sentence, such as
     "do not refuse", is no refusal."""
