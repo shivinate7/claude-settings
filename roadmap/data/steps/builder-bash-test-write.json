@@ -1,0 +1,14 @@
+{
+ "id": "builder-bash-test-write",
+ "title": "Find why a builder's Bash-script write of 64 test-path files passed",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A builder that writes tests defeats the review; decision builders-cannot-edit-tests.",
+ "source": "lane guard-tables-per-section via coordinator 11:03 CST Nov 12",
+ "note": "Incident: a builder in lane guard-tables-per-section wrote 64 test-path files through a Bash script, and no guard stopped it. The lane suspects the guard sees Write and Edit only. Triage read main (hooks/guard.py header, 11:04 CST Nov 12): the builder-test-edit guard judges Write and Edit; the builder-diff guard judges a builder's Bash commit or push by its diff, and SubagentStop refuses its first stop. So the gap is one of: the builder never committed and the spawner did; the second stop passed; or is_builder_test_rel missed those paths. First act: get the commit and the 64 paths from the lane, then judge which. Ready, no lane.",
+ "updatedAt": "2026-11-12T11:03:42-06:00"
+}
