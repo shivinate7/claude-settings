@@ -113,7 +113,7 @@ Awaiting mode, run by the writer at a comment wake (SKILL.md, "Read the answers"
 <dir> holds threads.txt, the output of `ArtifactComments read` (every page, in order, the first page first), and
 report.md (the writer's report), read only when it is there.
 - First page: the first non-blank line reads `<N> comment thread(s)` or `No comment threads`. Else the file is a later
-  page alone: `unknown`, exit 2. A later page carries no header and needs none.
+  page alone: `unknown`, exit 2. A later page needs no header.
 - A thread starts at a `Thread <uuid>` line; its next line begins `open` or `resolved`. A comment row is a line at
   exactly two spaces, `  [<who> - <ISO time>]` (with the tool's em dash). A text line carries a six-space `<token>| `
   prefix and never counts. A `  [location] <label>` row is the label. `[anchored at]`, `[region of]` and `[on text]`
