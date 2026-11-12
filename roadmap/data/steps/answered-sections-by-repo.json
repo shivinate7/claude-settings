@@ -1,9 +1,10 @@
 {
  "title": "Waiting page: one sub-group per repo inside each tier, this repo first",
  "phase": "now",
- "status": "ready",
+ "status": "doing",
  "order": -300,
  "why": "Lane page-answered-sink took 'By repo' (page item 212, closed as taken under questions-go-to-owner; mockup docs/design/answered-sink.html, state sections-repo).",
  "note": "Waits on: PR #1137 merges. Adds a new writer field `repo` on items. Named by the coordinator Nov 3 18:16 CST. Dead wait found 11:21 CST Nov 12: PR #1137 merged 2026-11-04 03:23Z, so this step sat 8 days on a wait already met. Ready now; placed at the top of now (triage re-weigh, owner ask 11:19 CST Nov 12).",
- "updatedAt": "2026-11-12T11:21:35-06:00"
+ "updatedAt": "2026-11-12T11:32:11-06:00",
+ "lane": "waiting-page-sorting"
 }
