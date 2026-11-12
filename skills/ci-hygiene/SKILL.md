@@ -59,13 +59,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
-   `~/.claude/bin/merge --lane-lint <pr>` once, before it hands off. The batch runner runs no lint: the join reads that
-   hand-off PASS comment at the live head, and a red lane does not join. The batch's CI run starts with a `lint` job
-   that runs beside the other jobs and, when it goes red, posts the red comment at once; the run is not cancelled, so
-   `--blame` still reads a failed run (owner ruling R4, 14:56 CST Nov 10; decision `lanes-run-no-full-ci-job`). The red files name the lane to drop, and the next run is the one that merges.
-   The lint counts a clash between two heads only when both
-   merge clean with their base. A hand list of checks never stands in for that run: `bin/ci-job`
-   reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
+   `~/.claude/bin/merge --lane-lint <pr>` once, before it hands off. The batch runner runs no lint.
+   The join reads that hand-off PASS comment at the live head. A red lane does not join.
+   The batch's CI run has a `lint` job that runs beside the other jobs. When it goes red, it posts the
+   red comment at once. The run is not cancelled, so `--blame` still reads a failed run
+   (decision `lanes-run-no-full-ci-job`). The red files name the lane to drop. The next run is the one that merges.
+   The lint counts a clash between two heads only when both merge clean with their base.
+   A hand list of checks never stands in for that run: `bin/ci-job` reads its steps from the
+   workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
    freezes at its build). A release or a drop that arrives after that goes to the next batch. It never

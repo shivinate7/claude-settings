@@ -18260,7 +18260,7 @@ class BatchFreeze(CloudSession):
     the pull request as a draft. `--batch-build NAME --ready` runs the ready checks on the batch head and asks the host to mark it ready.
     Host.ready sends nothing, so a real run stops there and names the route. A drop asks the host to return a ready batch to draft;
     Host.to_draft sends nothing either. A build and a drop run no lane lint and no ready check, and --ready runs no lane lint either
-    (owner ruling R4, 14:56 CST Nov 10: batch CI lints first). Each case's first assert names the behaviour it claims, so its red names the cause."""
+    (batch CI lints first). Each case's first assert names the behaviour it claims, so its red names the cause."""
 
     def setUp(self):
         super().setUp()
@@ -18420,8 +18420,8 @@ class BatchFreeze(CloudSession):
     def no_lint_or_ready_check(self, ready_state=None, checks_state=None):
         """The ready checks, patched to fail the run if called: draft_step always, and run_ready_checks unless `checks_state` is given. With no
         `ready_state`, the lane lint too: a build or a drop runs none. With `ready_state` ("pass", "fail" or "unknown", or a ci_job_run answer
-        as a tuple), the run is a --batch-build --ready: lane_lint is spied, and a --ready run makes no call to it (owner ruling R4, 14:56 CST
-        Nov 10). ci-job's answer to a run without --pinned is `ready_state`, so a lint that ran anyway would get it. The temp tree lives in
+        as a tuple), the run is a --batch-build --ready: lane_lint is spied, and a --ready run makes no call to it (batch CI
+        lints first). ci-job's answer to a run without --pinned is `ready_state`, so a lint that ran anyway would get it. The temp tree lives in
         this run's folder. With `checks_state` too (the same answer forms), run_ready_checks runs for real, and its ci-job run ("--pinned")
         answers `checks_state`. Yields {name: mock}: read after the run."""
         if checks_state is not None and ready_state is None:
@@ -18680,7 +18680,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(len(self.host.created), 1, "the build on a draft opened a second pull request: %s" % out)
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
 
-    def test_ready_refused_by_the_host_prints_its_reason_exits_1_and_leaves_the_draft(self):  # owner ruling R4, 14:56 CST Nov 10: no lane lint, so the host's refusal is reached
+    def test_ready_refused_by_the_host_prints_its_reason_exits_1_and_leaves_the_draft(self):  # no lane lint, so the host's refusal is reached
         for n in (101, 102):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102], draft=True)
@@ -18694,7 +18694,7 @@ class BatchFreeze(CloudSession):
         self.assertTrue(self.host.batch_pulls[pr]["draft"], "the batch PR went ready though the host refused it")
 
     # --ready: the ready checks of the batch head, then the mark ready. A refused or failed check never reaches Host.ready. --ready lints
-    # nothing (owner ruling R4, 14:56 CST Nov 10: batch CI lints first).
+    # nothing (batch CI lints first).
 
     def test_ready_runs_its_checks_then_marks_the_draft_ready_and_pushes_nothing(self):
         self.ready_checks_on_main()
@@ -18726,7 +18726,7 @@ class BatchFreeze(CloudSession):
         self.assertIn("FAIL: lint-marker", out, "the FAIL of the ready check is not printed: %s" % out)
         self.assertEqual(rc, 1, "a FAILing ready check exited %s, not 1: %s" % (rc, out))
 
-    def test_ready_check_that_is_unknown_is_refused_without_the_flag_and_stays_a_draft(self):  # owner ruling R4, 14:56 CST Nov 10: the checks decide the mark
+    def test_ready_check_that_is_unknown_is_refused_without_the_flag_and_stays_a_draft(self):  # the checks decide the mark
         self.ready_checks_on_main()
         for n in (101, 102):
             self.lane(n)
@@ -18740,7 +18740,7 @@ class BatchFreeze(CloudSession):
         self.assertIn("are unknown, not a pass", out, "the unknown ready check is not refused by name: %s" % out)
         self.assertEqual(rc, 1, "an unknown ready check exited %s, not 1: %s" % (rc, out))
 
-    def test_ready_check_that_is_unknown_is_refused_and_stays_a_draft(self):  # owner ruling R4, 14:56 CST Nov 10: the ready checks accept no lift (decision lanes-run-no-full-ci-job)
+    def test_ready_check_that_is_unknown_is_refused_and_stays_a_draft(self):  # the ready checks accept no lift (decision lanes-run-no-full-ci-job)
         self.ready_checks_on_main()
         for n in (101, 102):
             self.lane(n)
@@ -18756,7 +18756,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(rc, 1, "--lint-unknown-ok lifted an unknown ready check: exited %s, not 1: %s" % (rc, out))
 
     # The ready checks: a draft goes ready only when merge.readyChecks pass (decision lanes-run-no-full-ci-job). No lane lint runs at --ready
-    # (owner ruling R4, 14:56 CST Nov 10), so only the checks decide the ready mark.
+    # (batch CI lints first), so only the checks decide the ready mark.
 
     def test_ready_refuses_the_ready_mark_when_a_ready_check_fails(self):
         self.ready_checks_on_main()
@@ -18782,16 +18782,16 @@ class BatchFreeze(CloudSession):
         self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready with its checks passing: %s" % out)
         self.assertEqual(rc, 0, "--ready with its checks passing exited %s: %s" % (rc, out))
 
-    def test_ready_with_lint_unknown_ok_is_refused_because_no_lint_runs(self):  # owner ruling R4, 14:56 CST Nov 10
+    def test_ready_with_lint_unknown_ok_is_refused_because_no_lint_runs(self):
         for n in (101, 102):
             self.lane(n)
-        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.frozen_batch("nightly", [101, 102], draft=True)
         rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", "reason")
         self.assertEqual(rc, 1, "--ready with --lint-unknown-ok exited %s: %s" % (rc, out))
         self.assertIn("nothing to lift", out)
         self.assertEqual(self.host.readies, [], "a refused --ready marked the PR ready: %s" % out)
 
-    def test_ready_runs_no_lane_lint_on_the_batch_head_and_still_runs_the_ready_checks(self):  # owner ruling R4, 14:56 CST Nov 10: batch CI lints first
+    def test_ready_runs_no_lane_lint_on_the_batch_head_and_still_runs_the_ready_checks(self):  # batch CI lints first
         self.ready_checks_on_main()
         for n in (101, 102):
             self.lane(n)
@@ -18803,7 +18803,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [pr], "--ready did not mark the batch PR ready once: %s" % out)
         self.assertEqual(rc, 0, "--ready exited %s: %s" % (rc, out))
 
-    def test_ready_on_a_batch_whose_checks_already_read_its_head_says_already_ready_and_runs_none(self):  # owner ruling R4, 14:56 CST Nov 10
+    def test_ready_on_a_batch_whose_checks_already_read_its_head_says_already_ready_and_runs_none(self):
         self.ready_checks_on_main()
         for n in (101, 102):
             self.lane(n)
@@ -18821,7 +18821,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, readies, "--ready on a ready batch called Host.ready: %s" % out)
         self.assertEqual(rc, 0, "--ready on a ready batch exited %s: %s" % (rc, out))
 
-    def test_ready_on_a_ready_batch_whose_head_moved_runs_its_checks_again(self):  # owner ruling R4, 14:56 CST Nov 10: the checks read the moved head
+    def test_ready_on_a_ready_batch_whose_head_moved_runs_its_checks_again(self):  # the checks read the moved head
         self.ready_checks_on_main()
         for n in (101, 102):
             self.lane(n)
@@ -18890,7 +18890,7 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [pr], "--ready with the frozen set listed did not mark the batch PR ready once: %s" % out)
         self.assertEqual(rc, 0, "--ready with the frozen set listed exited %s: %s" % (rc, out))
 
-    def test_ready_on_a_batch_whose_on_batch_has_merged_is_not_refused_and_runs_its_checks_then_readies(self):  # owner ruling R4, 14:56 CST Nov 10
+    def test_ready_on_a_batch_whose_on_batch_has_merged_is_not_refused_and_runs_its_checks_then_readies(self):
         self.ready_checks_on_main()
         for n in (101, 102, 104):
             self.lane(n)
@@ -19480,7 +19480,7 @@ class BatchFreeze(CloudSession):
 
     def test_a_drop_that_restacks_a_ready_batch_with_no_return_to_draft_then_ready_runs_its_checks_on_its_head(self):
         # batch-x is a draft holding 101 and 102. Ready batch-nightly stacks on it. A red run blames #102, the drop takes it off x, and the
-        # host refuses the return to draft that the restack asks for. Nothing then checks batch-nightly's new head. (Owner ruling R4, 14:56 CST Nov 10.)
+        # host refuses the return to draft that the restack asks for. Nothing then checks batch-nightly's new head. (No lane lint runs at --ready: batch CI lints first.)
         self.ready_checks_on_main()
         for n in (101, 102, 104):
             self.lane(n)
