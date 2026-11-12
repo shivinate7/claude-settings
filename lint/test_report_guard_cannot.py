@@ -281,6 +281,13 @@ class CannotClaimTests(unittest.TestCase):
                          trg.assistant_text("```\nconst t = `\nprint('x')\n`;\n```\n" + line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
+    def test_cc_pin_a_stray_fence_leaves_the_claim_after_it_judged(self):
+        # Pin: a ``` with no closing partner opens no fence, so the claim after it is judged. Catches: an open fence
+        # that hides the claim, so a claim with no try passes after a stray fence.
+        line = "I cannot open the PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text("```\n" + line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
     def test_cc_red_only_the_unbacked_line_is_listed(self):
         # Catches: a reply with one backed claim and one unbacked claim listed as a whole, or the backed line listed.
         backed = "I can't open the PR: `mcp__github__create_pull_request` returned 422."
