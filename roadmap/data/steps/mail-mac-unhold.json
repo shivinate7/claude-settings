@@ -1,0 +1,16 @@
+{
+ "id": "mail-mac-unhold",
+ "title": "Remove \"darwin\" from the held platforms in the mail hook once the Mac round trip passes",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "session-mailbox-followups"
+ ],
+ "why": "Owner item 556 a (Nov 12 11:59 CST): the mailbox goes on for cloud and Windows now, the Mac after its check; stands item 590.",
+ "source": "coordinator 12:50 CST Nov 12",
+ "note": "Remove \"darwin\" from HELD_PLATFORMS in hooks/mail.py once the owner's Mac mail round trip passes.",
+ "updatedAt": "2026-11-12T12:41:07-06:00"
+}

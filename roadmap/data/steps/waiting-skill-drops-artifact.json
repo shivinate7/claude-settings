@@ -11,6 +11,6 @@
  ],
  "why": "Owner ruling R28 (one store for page data, git first) and owner 12:10 CST: \"Custom connectors are not allowed -- so we can do route B\".",
  "source": "coordinator 12:28 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store rewritten to route B on #2829, owner 12:10 CST)",
- "note": "The page moves off claude.ai (measured 12:35 CST Nov 12: a claude.ai page cannot call outside hosts).",
- "updatedAt": "2026-11-12T12:38:49-06:00"
+ "note": "The page moves off claude.ai (measured 12:35 CST Nov 12: a claude.ai page cannot call outside hosts). Only if the owner picks b on page item 593 (route B) (coordinator 12:50 CST Nov 12).",
+ "updatedAt": "2026-11-12T12:41:07-06:00"
 }
