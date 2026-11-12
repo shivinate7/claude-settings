@@ -61,6 +61,10 @@ Interface the hook must match:
   line, `past-ruling search unknown:`, and never says clear.
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
+- A coordinator's pick (send_message, the section "a coordinator's pick"): a send_message whose sender's own get_session
+  record carries cs-build:coordinator, and whose text has the whole word `pick` or `hold`, must cite a ruling or say
+  `no ruling found:`. A cite gets one judge call whose prompt carries the pick text and the candidate rulings. Any other
+  message passes with no model call.
 """
 import atexit
 import json
@@ -1387,8 +1391,8 @@ def case_settings_row():
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
+    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the coordinator's send_message",
+          matcher == {"Agent", "AskUserQuestion", "ArtifactData", PICK_TOOL}, entry.get("matcher"))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
@@ -1687,6 +1691,172 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ a coordinator's pick (send_message)
+#
+# A send_message from a coordinator (its own get_session record carries cs-build:coordinator) whose text has the whole word
+# `pick` or `hold` must cite a ruling, or say `no ruling found:` with what it searched. A cite gets one judge call, whose
+# prompt carries the pick text and the candidate rulings. Any other sender or text passes with no model call. The cases run
+# the hook as a child, as the cases above do: the stub answers `claude -p`, and each call is read from its record.
+PICK_TOOL = "mcp__claude-code-remote__send_message"
+PICK_OWN = "session_coord01"  # the coordinator's own record id
+PICK_LANE_ENV = "cse_coord01"  # the same id as the cloud sets it in the env (override.LANE_ENV, prefix cse_)
+PICK_TARGET = "session_lane01"
+PICK_TAG = "cs-build:coordinator"
+MBX_SLUG, MBX_MARK = "mailbox-default-held", "mbx-2d77"
+MBX_RULING = "Owner, 2026-11-10: a mailbox default stays held until the owner names it. Marker %s." % MBX_MARK
+PTC_STEP, PTC_MARK = "prose-tending-contract", "ptc-6a3f"
+PTC_SENTENCE = ("Ruling (owner, Nov 11): prose tending is a contract, so no lane routes around a check to tend prose. "
+                "Marker %s." % PTC_MARK)
+R22_3_MARK, R49_MARK = "r22-3-5e0a", "r49-9c1e"
+# The plan file of the pick repo. Plan R-numbers are not candidate sources today (question_form.past_rulings reads decision
+# and debt records and step notes), so the cases below hold the builder to the text reaching the judge's prompt.
+PLAN_TEXT = (
+    "# Restart plan (fixture)\n\n"
+    "- **R22. A respawn rewrites every session id at once.** Outcome: fixture text.\n"
+    "  3. A page item, brief or handoff names a lane slug or role, never a session id. A guard refuses a page write "
+    "that stores a session id. Marker %s.\n"
+    "- **R49. A mailbox default is never held.** The owner names each mailbox. Marker %s.\n"
+) % (R22_3_MARK, R49_MARK)
+PICK_REPO = make_repo("pick", decisions={MBX_SLUG: MBX_RULING}, steps={PTC_STEP: PTC_SENTENCE})
+PICK_FULL_REPO = make_repo("pick-full", decisions=dict(
+    [(MBX_SLUG, MBX_RULING)] + [("filler-%02d" % n, "Owner, 2026-10-10: filler ruling %d on build timing." % n)
+                                for n in range(1, 41)]))
+os.makedirs(os.path.join(PICK_REPO, "docs", "plans"), exist_ok=True)
+with open(os.path.join(PICK_REPO, "docs", "plans", "restart-plan.md"), "w", encoding="utf-8") as _f:
+    _f.write(PLAN_TEXT)
+PICK_PASS_MESSAGE = "coordinator pick: hold the mailbox default, per decision %s." % MBX_SLUG
+# (label, the pick, the cited ruling's marker, the judge's refusal) for the three incidents of Nov 12.
+PICK_INCIDENTS = (
+    ("(a) hold a mailbox default, citing page item 556 a and plan R49",
+     "coordinator pick: hold a mailbox default, per page item 556 a and plan R49.",
+     R49_MARK, "R49 says the opposite: a mailbox default is never held."),
+    ("(b) a session id on a page item, citing plan R22 point 3",
+     "coordinator pick: write the lane session id into the page item, per plan R22 point 3.",
+     R22_3_MARK, "R22 point 3 says a page item names a lane slug or role, never a session id."),
+    ("(c) a route against step prose-tending-contract",
+     "coordinator pick: offer route B to the prose tending lane, against step prose-tending-contract.",
+     PTC_MARK, "step prose-tending-contract forbids a route around a check to tend prose."),
+)
+
+
+def coordinator_transcript(tags):
+    """A transcript whose newest get_session result is the own record (ccr.id PICK_OWN) with `tags`: what own_session reads."""
+    name = "pick-transcript-%s.jsonl" % (re.sub(r"[^A-Za-z0-9]+", "-", "-".join(tags)) or "untagged")
+    use = "toolu_own_record"
+    ccr = {"id": PICK_OWN, "tags": list(tags)}
+    records = [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": use, "name": "mcp__claude-code-remote__get_session", "input": {}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": use, "content": json.dumps({"ccr": ccr})}]}},
+    ]
+    path = os.path.join(ROOT, name)
+    with open(path, "w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\n")
+    return path
+
+
+def pick_input(message, transcript, cwd):
+    return json.dumps({"session_id": SID_A, "tool_name": PICK_TOOL, "cwd": cwd, "transcript_path": transcript,
+                       "tool_input": {"session_id": PICK_TARGET, "message": message}})
+
+
+def pick_run(message, tags=(PICK_TAG,), coordinator=True, cwd=PICK_REPO, answer=ALLOW, model_fail=False):
+    """One run of the hook on a send_message. `coordinator` False leaves the session's own record id unset."""
+    transcript = coordinator_transcript(tags)
+    saved = os.environ.pop(override.LANE_ENV, None)
+    try:
+        if coordinator:
+            os.environ[override.LANE_ENV] = PICK_LANE_ENV
+        return run_hook(pick_input(message, transcript, cwd), answer=answer, model_fail=model_fail)
+    finally:
+        os.environ.pop(override.LANE_ENV, None)
+        if saved is not None:
+            os.environ[override.LANE_ENV] = saved
+
+
+def pick_prompt(r):
+    """The one judge prompt of a run, or "" when the run made no single call."""
+    return r.calls[0]["prompt"] if len(r.calls) == 1 else ""
+
+
+def pick_refusal(reason):
+    return json.dumps({"ok": False, "reason": reason})
+
+
+def case_pick_fixture_is_a_coordinator_record():
+    # The scope first: the fixture's own record reads as a coordinator's, so the gate cases test the subject.
+    import own_session  # the one reader of the own record (hooks/own_session.py)
+    tags = own_session.own_session_read(coordinator_transcript((PICK_TAG,)), PICK_OWN)[0]
+    check("pick fixture: the own record reads as cs-build:coordinator", tags == [PICK_TAG], tags)
+
+
+def case_pick_gate_passes_untouched():
+    # The cry-wolf guard: a sender that is no coordinator, or a text with no whole word pick or hold, passes with no model call.
+    cases = (
+        ("a session that is no coordinator", PICK_PASS_MESSAGE, {"coordinator": False}),
+        ("a coordinator whose record carries another tag", PICK_PASS_MESSAGE, {"tags": ("cs-build:lane",)}),
+        ("a text with no whole word pick or hold", "coordinator picker reads the holding note, per decision %s." % MBX_SLUG, {}),
+    )
+    for label, message, kw in cases:
+        r = pick_run(message, **kw)
+        check("pick gate: %s passes untouched, with no model call" % label,
+              r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+
+def case_pick_without_a_cite_is_refused():
+    for label, message in (
+        ("a pick", "coordinator pick: go with the second option, no more detail needed."),
+        ("a hold", "coordinator hold: keep the lane parked until the run ends."),
+    ):
+        r = pick_run(message)
+        check("pick, no cite: %s is refused in code, with no model call" % label,
+              (r.deny() or {}).get("permissionDecision") == "deny" and r.calls == [], detail(r))
+        check("pick, no cite: %s prints the remedy, no ruling found" % label,
+              "no ruling found:" in r.reason(), r.reason()[-200:])
+
+
+def case_pick_no_ruling_statement_is_not_refused():
+    # The empty state: no record in the repo, and the pick says what it searched and found nothing. Code does not refuse it.
+    r = pick_run("coordinator hold: keep the lane parked until the run ends. "
+                 "no ruling found: searched the decisions and the roadmap steps of this repo.", cwd=BARE_REPO)
+    check("pick, no ruling found: passes the cite check with an ok verdict", r.code == 0 and r.out == "", detail(r))
+
+
+def case_pick_matching_ruling_passes():
+    r = pick_run(PICK_PASS_MESSAGE, answer=ALLOW)
+    check("pick pass: a matching ruling with an ok verdict gets no output", r.code == 0 and r.out == "", detail(r))
+    prompt = pick_prompt(r)
+    check("pick pass: one judge call carries the pick text and the cited decision's text",
+          len(r.calls) == 1 and PICK_PASS_MESSAGE in prompt and MBX_MARK in prompt, detail(r))
+
+
+def case_pick_incidents_are_refused_on_the_text():
+    for label, message, mark, reason in PICK_INCIDENTS:
+        r = pick_run(message, answer=pick_refusal(reason))
+        prompt = pick_prompt(r)
+        check("pick incident %s: one judge call" % label, len(r.calls) == 1, detail(r))
+        check("pick incident %s: the prompt carries the pick text" % label, message in prompt, detail(r))
+        check("pick incident %s: the prompt carries the cited ruling's text" % label, mark in prompt, detail(r))
+        check("pick incident %s: the judge's refusal denies the pick with its reason" % label,
+              (r.deny() or {}).get("permissionDecision") == "deny" and reason in r.reason(), detail(r))
+
+
+def case_pick_model_failure_fails_open():
+    # A pick is no question to the owner, so a model failure follows the non-question convention: allow, one stderr line.
+    r = pick_run(PICK_PASS_MESSAGE, model_fail=True)
+    errs = failed_open_lines(r)
+    check("pick: a model failure allows the pick, with one stderr line", r.code == 0 and r.out == "" and len(errs) == 1, detail(r))
+
+
+def case_pick_full_ruling_set():
+    # The full-size state: 41 decision records, and the cited one still reaches the prompt.
+    r = pick_run(PICK_PASS_MESSAGE, cwd=PICK_FULL_REPO)
+    check("pick, 41 records: one judge call carries the cited decision's text",
+          len(r.calls) == 1 and MBX_MARK in pick_prompt(r), detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1712,7 +1882,11 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged,
+                 case_pick_fixture_is_a_coordinator_record, case_pick_gate_passes_untouched,
+                 case_pick_without_a_cite_is_refused, case_pick_no_ruling_statement_is_not_refused,
+                 case_pick_matching_ruling_passes, case_pick_incidents_are_refused_on_the_text,
+                 case_pick_model_failure_fails_open, case_pick_full_ruling_set):
         try:
             case()
         except Exception as exc:
