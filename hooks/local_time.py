@@ -354,8 +354,8 @@ def grant_override(raw, at):
     prompt that holds the whole word `override` outside code spans and passes its gates, none otherwise. It also gives
     the result of a first-word `override` prompt that grant() deferred because its rest holds a length. At most two
     judge calls per prompt (an Opus no, then the override ask, for a prompt with both words). Those calls are why the
-    settings.json row has "timeout": 30. A prompt no route granted ends a pending one-act override
-    (override.end_once; owner, item 601). Any failure is one stderr line, no override."""
+    settings.json row has "timeout": 30. A prompt no route granted, and a typed `opus off`, ends a pending one-act
+    override (override.end_once; owner, item 601). Any failure is one stderr line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
@@ -369,7 +369,7 @@ def grant_override(raw, at):
             result = override.grant_override_ask(hook.get("session_id"), hook.get("prompt"), at,
                                                  transcript=hook.get("transcript_path"),
                                                  source=hook.get("source"))
-        if result is None:  # the owner's next typed prompt that grants nothing ends a pending one-act override
+        if result is None or result[0] == "opus-off":  # a typed prompt that grants nothing, `opus off` too, ends a pending one-act override
             override.end_once(hook.get("session_id"), hook.get("prompt"), at,
                               transcript=hook.get("transcript_path"), source=hook.get("source"))
         if result:

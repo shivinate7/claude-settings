@@ -37,8 +37,11 @@ writes, so a session cannot grant itself an override. It is valid only while now
   length (`1.5h`, `1h30m`) grants nothing. `override off <word>` grants nothing. A grant needs the owner's typed words
   (_keyword_typed): payload `source` absent or the owner's, and the prompt's own transcript record no harness turn
   and no peer or task-notification origin. Each grant prints one receipt line (local_time.override_line).
-  A one-act override also ends at the owner's next typed prompt that grants nothing (end_once). A harness prompt, a
-  timed override and an Opus override do not end it, and a typed Opus grant does not either.
+  A one-act override also ends at the owner's next typed prompt that grants nothing (end_once), and at a typed `opus off`.
+  A prompt counts as typed through _keyword_typed: a payload `source` that is absent or the owner's, and no transcript
+  record of that prompt with a harness or peer origin. A prompt with an absent source and no matching record in the
+  transcript tail counts as typed, so the one-act ends (it fails closed). A timed override and an Opus override do not
+  end it, and a typed Opus grant does not either.
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
 "until": ISO-8601 UTC, or null for no end (the session's end or `opus off`), "role": null, one role, or a sorted
 list of 2 or more roles}. It lives beside the override, so the two never
@@ -70,8 +73,8 @@ rule's settings-write ask, and it reaches agents.
       scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
       less a cloud session's seed brief (_seed_record, the seed check's one home),
-      and scope_judge says which roles they name. Context only narrows the grant: the yes/no call sees the ask alone,
-      and it never turns a no into a grant. No earlier prompt, or a scope read that fails, errs or names no role in
+      and scope_judge says which roles they name. Context only narrows the grant, except that a failed scope read widens
+      it to every role (the ruled fallback): the yes/no call sees the ask alone, and context never turns a no into a grant. No earlier prompt, or a scope read that fails, errs or names no role in
       ASK_ROLES: every role for the length, and it never asks. The every-role file is written before the scope read
       and narrowed after it, so a process killed in the read (the hook's timeout) leaves every role, with no
       `opus-grant` line.
@@ -623,9 +626,11 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
 
 def end_once(session_id, prompt, at, transcript=None, source=None):
     """Remove the session's pending one-act override for an owner prompt that granted nothing: a one-act override ends
-    when spent, on `override off`, or here (owner, item 601). The caller runs it only for a prompt no grant route took.
-    Not removed: a timed override, an Opus override, an override past its end, and any override when the prompt is a
-    harness turn (_keyword_typed: payload `source`, a queued or peer origin). Cost: one open of the override file, and
+    when spent, on `override off`, or here (owner, item 601). The caller runs it for a prompt no grant route took and
+    for a typed `opus off`. Not removed: a timed override, an Opus override, an override past its end, and any override
+    when the prompt is not typed (_keyword_typed: a payload `source` the owner's turns lack, or a transcript record with
+    a queued or peer origin). A prompt with an absent source and no matching transcript record counts as typed, so the
+    override ends (fails closed). Cost: one open of the override file, and
     one tail read only when a one-act override is pending; no timer, no process. Returns True when it removed one."""
     path = _path(session_id)
     if path is None or not isinstance(prompt, str):
