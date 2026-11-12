@@ -235,6 +235,8 @@ def _mutates_as_command(command: str, words) -> bool:
     if command in _RUNS_ITS_ARGUMENTS:
         return True
     if command == "git":
+        # git's own options (`-C DIR`, `-c K=V`, `--git-dir D`) come before its subcommand.
+        words = _git_from_subcommand(words)
         rest = [word for word in words if not word.startswith("-")]
         # `git rm --cached` drops the index entry and leaves the file on disk, so it writes no file.
         flags = words[:words.index("--")] if "--" in words else words
@@ -242,6 +244,11 @@ def _mutates_as_command(command: str, words) -> bool:
             return False
         return any(word in ("mv", "rm") for word in rest[:2])
     return bool(re.fullmatch(MUTATING_COMMAND, command))
+
+
+def _git_from_subcommand(words):
+    """The words of a git call from its subcommand on, past git's own options (`_git_subcommand_index`)."""
+    return list(words[guard_core._git_subcommand_index(["git", *words], 0) - 1:])
 
 
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
@@ -1065,6 +1072,46 @@ _READS_ITS_ARGUMENTS = frozenset((
     "ls", "stat", "file", "git", "python", "python3", "pytest", "test", "["))
 # A substitution or backtick that the shell runs inside a word that is not single-quoted.
 _RUNS_A_SUBSTITUTION = re.compile(r"\$[({]|`|[<>]\(")
+# A sed `e` command or flag, or a `w`/`W` command or flag: at a script's start, or after an address or a
+# separator (`1e cmd`, `$e`, `/x/e`, `s/a/b/e`, `;w f`).
+_SED_RUNS_OR_WRITES = re.compile(r"(?:^|[\d$/;{}!,\s])\s*[ewW](?:\s|;|}|$)")
+
+
+def _runs_a_substitution(word: str) -> bool:
+    """True when the shell runs a `$( )`, `${ }`, backtick or `<( )` in `word`: one not inside single quotes,
+    read by the one quote walk (`walk_quotes`), so `'a'$(x)'b'` runs its `$(`. A spot the walk steps over
+    (an escaped pair) counts as run."""
+    quotes = {at: quote for at, _char, quote in guard_core.walk_quotes(word)}
+    return any(quotes.get(found.start(), "") not in ("'", "$'") for found in _RUNS_A_SUBSTITUTION.finditer(word))
+
+
+def _runs_its_text(command: str, rest) -> bool:
+    """True when a reader's arguments hold text it runs as a command: a git alias that starts with `!`,
+    `git rebase -x`, `git submodule foreach`, `git bisect run`, a sed `e` or `w` command, `rg --pre`, or a
+    python script handed a `mv` or `rm` word, which it may run."""
+    words = [_unquoted(word) for word in rest]
+    if command == "git":
+        values = [value for flag, value in zip(words, words[1:]) if flag == "-c"]
+        if any(re.match(r"alias\.[^=]*=\s*!", value) for value in values):
+            return True
+        call = _git_from_subcommand(words)
+        subcommand, after = (call[0], call[1:]) if call else ("", [])
+        plain = [word for word in after if not word.startswith("-")]
+        return ((subcommand == "rebase" and any(re.match(r"--ex(?:e(?:c)?)?(?:=|$)|-[A-Za-z]*x", word)
+                                                 for word in after))
+                or (subcommand == "submodule" and "foreach" in plain)
+                or (subcommand == "bisect" and plain[:1] == ["run"]))
+    if command == "sed":
+        scripts = [value for flag, value in zip(words, words[1:]) if flag in ("-e", "--expression")]
+        scripts += [word for word in words if word.startswith("--expression=")]
+        if not scripts:
+            scripts = [word for word in words if not word.startswith("-")][:1]
+        return any(_SED_RUNS_OR_WRITES.search(script) for script in scripts)
+    if command in ("python", "python3"):
+        return any(word in ("mv", "rm") for word in words)
+    if command == "rg":
+        return any(word == "--pre" or word.startswith("--pre=") for word in words)
+    return False
 
 
 def _reads_by_position(command_and_rest, raw_words) -> bool:
@@ -1076,8 +1123,7 @@ def _reads_by_position(command_and_rest, raw_words) -> bool:
     command, rest = command_and_rest
     if not command:
         return False
-    if any(_RUNS_A_SUBSTITUTION.search(word) for word in raw_words
-           if not (len(word) > 1 and word[0] == word[-1] == "'")):
+    if any(_runs_a_substitution(word) for word in raw_words) or _runs_its_text(command, rest):
         return False
     if command in _READS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS or _mutates_as_command(command, rest):
         return True
