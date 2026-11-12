@@ -153,11 +153,12 @@ class FakeHost:
         self.pulls, self.pull_list_reads = None, 0  # pulls: {number: REST row} of the other PRs a case scripts (None: the own PR only); pull_list_reads: each open_pulls call
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
+        self.files_by_pr = {}  # number -> the triples pr_files reports for that pull request; a number not here reads changed, as before
 
     def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
             raise merge.Stop(self.files_error)
-        return list(self.changed)
+        return list(self.files_by_pr.get(n, self.changed))
 
     def pr(self, n):
         self.pr_calls.append(n)
@@ -232,7 +233,8 @@ class FakeHost:
     def pr_info(self, n):  # the same fields as pr(), read from the entry add_pr or create_pr made
         p = self.batch_pulls[n]
         return {"head": merge.origin_head(self.root, p["branch"]), "branch": p["branch"], "base": p["base"], "state": p["state"],
-                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"]}
+                "mergeable": "MERGEABLE", "merge_state": "CLEAN", "draft": p["draft"], "body": p["body"],
+                "changed_files": len(self.files_by_pr.get(n, self.changed))}  # the count pr() reads, as the real Host gives it
 
     def batch_pr(self, branch):  # the open pull request whose head is `branch`, as (n, info), or None
         self.batch_pr_calls.append(branch)
@@ -18299,6 +18301,23 @@ class BatchFreeze(CloudSession):
         self.heads[n] = self.head(f"lane-{n}")
         return self.heads[n]
 
+    def lane_touching(self, n, *paths):
+        """Lane PR #n, as lane() makes it, with one commit for each of `paths`, so its diff against main holds them. The host reports those
+        paths for #n after its own lanes/N.txt, so guard_hits reads #n as it reads a real diff. -> its head."""
+        self.lane(n)
+        for path in paths:
+            self.lane_commit(n, path, "changed\n", f"lane {n} changes {path}")
+        self.host.files_by_pr[n] = [(f"lanes/{n}.txt", "added", 1), *((path, "modified", 1) for path in paths)]
+        return self.heads[n]
+
+    def guard_paths_of(self, n):
+        """The paths guard_hits reads from lane #n's scripted diff. A case checks this before it asserts a refusal: the scope comes first."""
+        return merge.guard_hits([path for path, _, _ in self.host.files_by_pr[n]])
+
+    def remedy_lanes(self, out, name):
+        """The lane numbers of each `merge --batch-build NAME ...` command the run printed, one sorted list per command."""
+        return [sorted(int(x) for x in found.split()) for found in re.findall(rf"merge --batch-build {re.escape(name)}((?: \d+)+)", out)]
+
     def bump(self, branch):
         """One commit of its own on origin's `branch`, as a claim or a heal leaves it: the head moves. -> the new head."""
         o = self.other
@@ -18604,6 +18623,55 @@ class BatchFreeze(CloudSession):
                          "the frozen block of twelve lanes is not one Lane line each, sorted by PR number: %s" % out)
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
 
+    # Guard change: a lane that changes a guard or check builds alone. guard_hits (one home) classifies each lane's diff.
+
+    def test_a_request_mixing_a_guard_change_lane_with_another_lane_is_refused_before_any_push(self):
+        self.lane_touching(101, "docs/notes.md")
+        self.lane_touching(102, "hooks/guard.py")
+        self.assertEqual(self.guard_paths_of(102), ["hooks/guard.py"], "setup: lane #102 does not change a guard path")
+        self.assertEqual(self.guard_paths_of(101), [], "setup: lane #101 changes a guard path")
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "a request with a guard change lane and another lane was not refused with exit 1: %s" % out)
+        self.assertIn("#102", out, "the refusal does not name the guard change lane #102: %s" % out)
+        remedies = self.remedy_lanes(out, "nightly")
+        self.assertIn([102], remedies, "the refusal prints no `merge --batch-build nightly <guard pr>` remedy for lane #102: %s" % out)
+        self.assertTrue(all(lanes == [102] for lanes in remedies), "a remedy the refusal prints names more than the guard lane #102: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused request opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch-nightly"), "", "the refused request pushed batch-nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused request pushed: %s" % out)
+
+    def test_a_guard_change_lane_alone_builds(self):
+        self.lane_touching(102, "hooks/guard.py")
+        self.assertEqual(self.guard_paths_of(102), ["hooks/guard.py"], "setup: lane #102 does not change a guard path")
+        rc, out = self.run_batch("--batch-build", "nightly", "102")
+        self.assertTrue(self.head("batch-nightly"), "a guard change lane alone did not build batch-nightly: %s" % out)
+        self.assertEqual(self.second_parents("batch-nightly"), {self.heads[102]}, "batch-nightly does not hold lane #102 alone: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "a guard change lane alone did not open exactly one pull request: %s" % out)
+        self.assertEqual(rc, 0, "a guard change lane alone exited %s: %s" % (rc, out))
+
+    def test_a_batch_of_lanes_with_no_guard_change_builds_as_before(self):
+        self.lane_touching(101, "docs/notes.md")
+        self.lane_touching(102, "docs/more.md")
+        self.assertEqual([path for n in (101, 102) for path in self.guard_paths_of(n)], [], "setup: a lane of this batch changes a guard path")
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertTrue(self.head("batch-nightly"), "a batch with no guard change did not build batch-nightly: %s" % out)
+        self.assertEqual(self.second_parents("batch-nightly"), {self.heads[101], self.heads[102]},
+                         "batch-nightly does not hold each lane of a batch with no guard change: %s" % out)
+        self.assertEqual(rc, 0, "a batch with no guard change exited %s: %s" % (rc, out))
+
+    def test_a_test_path_only_lane_is_no_guard_change(self):
+        self.lane_touching(101, "hooks/test_guard.py")
+        self.lane_touching(102, "docs/notes.md")
+        self.assertTrue(any(path.startswith("hooks/") for path, _, _ in self.host.files_by_pr[101]),
+                        "setup: lane #101 changes no hooks/ path, so it is no test path under a guard folder")
+        self.assertEqual(self.guard_paths_of(101), [], "setup: guard_hits counts the test path of lane #101")
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertTrue(self.head("batch-nightly"), "a test-path-only lane refused the batch: %s" % out)
+        self.assertEqual(self.second_parents("batch-nightly"), {self.heads[101], self.heads[102]},
+                         "batch-nightly does not hold the test-path-only lane #101 and lane #102: %s" % out)
+        self.assertEqual(rc, 0, "a test-path-only lane with another lane exited %s: %s" % (rc, out))
+
     # Build on a batch that exists: a set that differs is refused, the same set is allowed.
 
     def test_a_late_pr_is_refused_and_the_frozen_batch_does_not_move(self):
@@ -18850,6 +18918,25 @@ class BatchFreeze(CloudSession):
         self.assertEqual(len(self.lint_calls(mocks)), 1, "--ready with the frozen set listed did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [pr], "--ready with the frozen set listed did not mark the batch PR ready once: %s" % out)
         self.assertEqual(rc, 0, "--ready with the frozen set listed exited %s: %s" % (rc, out))
+
+    def test_a_frozen_batch_holding_a_guard_change_lane_still_reruns_and_readies(self):  # the check runs on a first build only, so a rerun and --ready pass
+        self.lane_touching(101, "docs/notes.md")
+        self.lane_touching(102, "hooks/guard.py")
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        self.assertEqual(self.guard_paths_of(102), ["hooks/guard.py"], "setup: lane #102 of the frozen set does not change a guard path")
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the same set again, holding a guard change lane, was refused: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the same set again opened a second pull request: %s" % out)
+        self.assert_untouched(pr, snap, out)
+        with self.no_lint_or_ready_check(ready_state="pass") as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(rc, 0, "--ready on a frozen set holding a guard change lane was refused: %s" % out)
+        self.assertEqual(self.lint_calls(mocks), [("batch-nightly", "main", "")], "--ready did not lint the batch head once: %s" % out)
+        self.assertEqual(self.host.readies, [pr], "--ready did not mark the batch PR ready once: %s" % out)
+        self.assertEqual(self.pushes(), [], "--ready pushed: it lints and marks ready, and pushes nothing: %s" % out)
 
     def test_ready_on_a_batch_whose_on_batch_has_merged_is_not_refused_and_lints_once_then_readies(self):
         for n in (101, 102, 104):
