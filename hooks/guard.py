@@ -3562,7 +3562,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 def step_up_reason(prompt: str, role, model, rounds=None) -> str:
     """The step-up refusal for a brief whose marker and model disagree, or "". The model each marker needs is its round row
     (role_round_model; `rounds` is role_round_table's read, read here when not given). The second round must name its row's model exactly.
-    A later round or a fix check must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
+    A later round or a fix verifier must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
     model = str(model or "").strip().lower()
     role = role_key(role)
     if rounds is None:
@@ -3599,8 +3599,8 @@ ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
 ROLE_DEFAULT = "general-purpose"
 # A reviewer brief whose round has a round row above the reviewer's row (a `Round N of 3` marker, a guard marker line, a
-# fix check) may run on that row's model: role_round_table reads the rows, and ROLE_ROUND_FALLBACK stands in for any row the
-# record does not hold. A reviewer whose brief's first non-blank line starts with FIX_CHECK_MARKER (a fix check) runs its fix check row.
+# fix verifier brief) may run on that row's model: role_round_table reads the rows, and ROLE_ROUND_FALLBACK stands in for any row the
+# record does not hold. A reviewer whose brief's first non-blank line starts with FIX_CHECK_MARKER (a fix verifier) runs its fix verifier row.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
@@ -3677,7 +3677,7 @@ def role_model_table(pointer_root):
 # model of each round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
 # first-round brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
 # reads it through the guard's helpers. A row the record lacks, or one whose model has no rank, falls back to
-# ROLE_ROUND_FALLBACK, the models the guard enforced before the rows existed. Cost: one more read of the record per spawn.
+# ROLE_ROUND_FALLBACK (sonnet for a reviewer's `1 guard`, later rounds and fix verifier, opus for the builder's third try; no `1 other` entry). Cost: one more read of the record per spawn.
 ROLE_ROUND_HEADER = ["role", "round", "model", "effort"]
 ROLE_ROUND_CELL = re.compile(r"(\d+|fix verifier)(?:\s+(guard|other))?$")
 ROLE_ROUND_FIX = "fix verifier"
@@ -3918,7 +3918,7 @@ def review_guard_marked(brief) -> bool:
 
 def reviewer_round_models(rounds, prompt):
     """The model words of the round rows a reviewer brief invokes: the `other` row of each `Round N of 3` marker, the `1 guard` row
-    when the brief carries the guard marker (on any round), and the fix verifier row on a fix check brief. A row the table lacks
+    when the brief carries the guard marker (on any round), and the fix verifier row on a fix verifier brief. A row the table lacks
     gives no word, so a brief with no marker gives none."""
     words = [role_round_model(rounds, "reviewer", n) for kind, n in brief_markers(prompt) if kind.lower() == "round"]
     if review_guard_marked(prompt):

@@ -261,6 +261,8 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
 GUARD_FILES = ("settings.json",)
+# The model record is a guard path too: its round rows set the model each reviewer runs on, so a docs-only edit of them is a guard change
+# (decision agent-model-cap). guard_hits builds its path from the layout's decisions folder and the guard's file name.
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 REPO_CITE = "(decision merge-confirm-repo, -C names the checkout a merge acts in, so a -C that names no folder stops the merge)"
@@ -3930,8 +3932,8 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
-REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
-REVIEW_FIX_ROW = "fix verifier"  # the round cell of a fix check's row in the model record's round rows (decision agent-model-cap)
+REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix verifier is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
+REVIEW_FIX_ROW = "fix verifier"  # the round cell of a fix verifier's row in the model record's round rows (decision agent-model-cap)
 
 def review_round_model(n):
     """-> the model word a reviewer's round `n` (a number, or REVIEW_FIX_ROW) runs: the model record's round row, read through the guard's
@@ -3942,7 +3944,7 @@ def review_round_model(n):
     return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n)
 
 def __getattr__(name):
-    """REVIEW_FIX_GUARD_MODEL, the model every fix check runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
+    """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
     guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row."""
     if name == "REVIEW_FIX_GUARD_MODEL":
         import guard as hook_guard
@@ -5152,10 +5154,13 @@ def write_merge_role(tier):
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
 def guard_hits(paths):
-    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each test path: a test file alone is no
-    guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
+    """-> the sorted paths that start with a GUARD_PATHS entry, or equal a GUARD_FILES entry or the model record, less each test path: a test
+    file alone is no guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
-    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
+    import layout  # lint/layout.py: where the decisions folder is
+    folder = layout.path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "decisions")
+    whole = GUARD_FILES + ("/".join((folder, hook_guard.ROLE_TABLE_FILE)),)
+    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in whole) and not hook_guard.is_test_rel(p))
 
 def is_doc(path):
     """A doc is a .md under docs/, or the root README.md. Case is ignored and the path is not stripped, so a stray space makes it a non-doc.
