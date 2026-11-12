@@ -1438,10 +1438,34 @@ def agent_long_call():
     return [assistant_text("checking the build"), call("toolu_long", "sleep 900")]
 
 
-def stop_in_process(transcript_path):
+class CountedFile:
+    """An agent transcript as stop_in_process opens it. Its reads go through here, and each read's byte count is
+    appended to reads as (path, bytes). The check uses only read, seek and the with statement."""
+
+    def __init__(self, f, path, reads):
+        self.f, self.path, self.reads = f, path, reads
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.f.close()
+        return False
+
+    def seek(self, *args):
+        return self.f.seek(*args)
+
+    def read(self, *args):
+        data = self.f.read(*args)
+        self.reads.append((self.path, len(data)))
+        return data
+
+
+def stop_in_process(transcript_path, reads=None):
     """Run the Stop check in this process at NOW, with the default quiet age and no output base. Return
     (rc, stdout, the paths os.stat was called with, the paths open was called with). The wrappers count
-    every path the check stats or opens, so a case counts the calls that name one agent."""
+    every path the check stats or opens, so a case counts the calls that name one agent. reads, when given,
+    is a list that gets (path, bytes) for each read of an agent transcript."""
     spec = importlib.util.spec_from_file_location("stall_watch_in_process", MODULE)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -1454,7 +1478,10 @@ def stop_in_process(transcript_path):
 
     def counted_open(file, *args, **kwargs):
         opens.append(str(file))
-        return real_open(file, *args, **kwargs)
+        f = real_open(file, *args, **kwargs)
+        if reads is not None and "subagents" in str(file):
+            return CountedFile(f, str(file), reads)
+        return f
 
     def counted_os_open(path, *args, **kwargs):
         opens.append(str(path))
@@ -1732,6 +1759,60 @@ def A10_full_size_each_quiet_agent_is_listed_once():
     return problems
 
 
+@case
+def A11_agent_listed_before_is_not_relisted_and_costs_one_stat_and_one_bounded_read():
+    """A11. at a Stop after one that listed a quiet agent: the agent listed there is not listed again. Scope first:
+    a quiet agent launched after that Stop is listed, so the check ran. Cost: each quiet agent is stat'ed once
+    and read once, with at most TAIL_BYTES read, and the listed agent's transcript is over TAIL_BYTES, so its read
+    is a tail; a fresh agent is stat'ed once and not read"""
+    folder = new_dir()
+    big = []
+    for i in range(400):
+        big += agent_step("q%d" % i)
+    lo, old = background_agent(folder, agent_id(40), big, 1600)  # quiet since 1600 s before NOW
+    lf, fresh = background_agent(folder, agent_id(41), agent_step("f1"), 10)  # written 10 s before NOW
+    lc, ctl = background_agent(folder, agent_id(42), agent_step("c1"), 600)  # quiet since 600 s before NOW
+    earlier = [at(prompt("start"), 1800)] + stamped(lo, 1700) + [at(assistant_text("working"), 1300)]
+    rc1, out1, err1 = run_stop(transcript(earlier, agents=[old], folder=folder), now=NOW - 1200)
+    problems = expect(rc1 == 0, f"earlier Stop exit {rc1}, want 0: {err1.strip()[:200]}")
+    msg1 = system_message(out1, problems)
+    problems += listed_once(msg1, agent_id(40), by_line=True)  # the premise: the old agent is listed there
+    if problems:
+        return problems
+    turn = ([stop_summary(1200), at(prompt("next"), 1000)] + stamped(lf + lc, 900)
+            + [at(assistant_text("ok"), 800)])
+    path = transcript(earlier + turn, agents=[old, fresh, ctl], folder=folder)
+    tail = module_value("TAIL_BYTES", RULED_TAIL_BYTES)
+    size = os.path.getsize(agent_path(folder, agent_id(40)))  # read outside the wrappers, so no stat counts it
+    problems += expect(size > tail, f"the listed agent's transcript is {size} bytes, not over TAIL_BYTES {tail}")
+    if problems:
+        return problems
+    reads = []
+    rc, out, stats, opens = stop_in_process(path, reads=reads)
+    problems += expect(rc == 0, f"exit {rc}, want 0")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(42), by_line=True)  # scope: the agent launched after that Stop is listed
+    if problems:
+        return problems
+    problems += expect(agent_id(40) not in msg,
+                       f"agent {agent_id(40)} listed at the earlier Stop is listed again: {msg!r}")
+    for aid, quiet, what in ((agent_id(40), True, "quiet, listed at the earlier Stop"),
+                             (agent_id(42), True, "quiet, launched after it"),
+                             (agent_id(41), False, "fresh")):
+        n_stat = sum(aid in p for p in stats)
+        n_open = sum(aid in p for p in opens)
+        n_bytes = sum(n for p, n in reads if aid in p)
+        problems += expect(n_stat == 1, f"{what} agent {aid} stat count {n_stat}, want 1: {stats}")
+        problems += expect(n_open == (1 if quiet else 0),
+                           f"{what} agent {aid} open count {n_open}, want {1 if quiet else 0}: {opens}")
+        if quiet:
+            problems += expect(0 < n_bytes <= tail,
+                               f"{what} agent {aid} read {n_bytes} bytes, want 1 to {tail}: {reads}")
+        else:
+            problems += expect(n_bytes == 0, f"{what} agent {aid} read {n_bytes} bytes, want 0: {reads}")
+    return problems
+
+
 # Open tool calls. An agent is stuck when its oldest readable Bash or PowerShell call with no tool_result is
 # older than OPEN_CAP; its row names that call's tool. Background calls set no age. A newer call of another
 # tool, or an untimed call, does not hide it. Agent, Task and mcp__ calls stay busy. The transcript's last
@@ -1741,15 +1822,23 @@ def A10_full_size_each_quiet_agent_is_listed_once():
 RULED_OPEN_CAP = 900  # Bash's 600 s maximum plus a margin
 
 
-def module_open_cap():
-    """The module's OPEN_CALL_CAP, or the ruled value when the module does not define it yet."""
+RULED_TAIL_BYTES = 64 * 1024  # the first tail read of an agent transcript, until the module names its own
+
+
+def module_value(name, default):
+    """The module's value of name, or default when the module does not define it or does not load."""
     try:
-        spec = importlib.util.spec_from_file_location("stall_watch_cap", MODULE)
+        spec = importlib.util.spec_from_file_location("stall_watch_value", MODULE)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return getattr(mod, "OPEN_CALL_CAP", RULED_OPEN_CAP)
+        return getattr(mod, name, default)
     except Exception:  # a module that does not load fails each case below by its own run
-        return RULED_OPEN_CAP
+        return default
+
+
+def module_open_cap():
+    """The module's OPEN_CALL_CAP, or the ruled value when the module does not define it yet."""
+    return module_value("OPEN_CALL_CAP", RULED_OPEN_CAP)
 
 
 OPEN_CAP = module_open_cap()
@@ -2014,6 +2103,32 @@ def O9_stuck_row_listed_when_the_quiet_crossing_is_after_the_previous_stop():
     line = line_of(msg, agent_id(290))
     problems += expect("stuck in one tool call" in line and "Bash" in line,
                        f"agent {agent_id(290)} is not listed as stuck on its Bash call: {line!r}")
+    return problems
+
+
+@case
+def O10_open_call_at_exactly_the_cap_is_stuck_and_one_second_less_is_not():
+    """O10. the cap is inclusive: a foreground Bash call exactly OPEN_CALL_CAP (900 s) old, in a quiet agent, is listed
+    as stuck for 900s. Its neighbour, one second younger, in another quiet agent, is not listed. Control: a call
+    1000 s old, in the same transcript, is listed, so the check ran"""
+    folder = new_dir()
+    lz, ctl = background_agent(folder, agent_id(250), [open_tool_call("toolu_o12", OPEN_CAP + 100)], OPEN_CAP + 100)
+    lx, at_cap = background_agent(folder, agent_id(251), [open_tool_call("toolu_o13", OPEN_CAP)], OPEN_CAP)
+    ly, under = background_agent(folder, agent_id(252), [open_tool_call("toolu_o14", OPEN_CAP - 1)], OPEN_CAP - 1)
+    path = transcript(stamped(lz + lx + ly, OPEN_CAP + 200), agents=[ctl, at_cap, under], folder=folder)
+    rc, out, err = run_stop(path)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, agent_id(250), by_line=True)  # scope: the control shows the check ran
+    problems += listed_once(msg, agent_id(251), by_line=True)
+    if problems:
+        return problems
+    line = line_of(msg, agent_id(251))
+    problems += expect("stuck in one tool call" in line and "(Bash)" in line and f"for {OPEN_CAP}s" in line,
+                       f"agent {agent_id(251)} at exactly {OPEN_CAP} s is not listed as stuck for {OPEN_CAP}s on "
+                       f"Bash: {line!r}")
+    problems += expect(agent_id(252) not in msg,
+                       f"agent {agent_id(252)} with an open call {OPEN_CAP - 1} s old is listed: {msg!r}")
     return problems
 
 
