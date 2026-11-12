@@ -466,6 +466,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `align-watchers` | Plan: one direction for watches, wakes, sweeps, reaps and logs | [`docs/plans/align-watchers.md`](../docs/plans/align-watchers.md) |
 | `builtin-hook-survey` | Plan: which model-call hooks can move to the built-in prompt hook | [`docs/plans/builtin-hook-survey.md`](../docs/plans/builtin-hook-survey.md) |
 | `child-guard-promotion` | Plan: child guards go up or out | [`docs/plans/child-guard-promotion.md`](../docs/plans/child-guard-promotion.md) |
+| `claude-md-scope-audit` | Plan: Global CLAUDE.md scope audit | [`docs/plans/claude-md-scope-audit.md`](../docs/plans/claude-md-scope-audit.md) |
 | `debate-model-tiers` | Plan: which refuters run Opus | [`docs/plans/debate-model-tiers.md`](../docs/plans/debate-model-tiers.md) |
 | `grant-reaches-lanes` | Plan: an owner grant typed in one session reaches the session it names | [`docs/plans/grant-reaches-lanes.md`](../docs/plans/grant-reaches-lanes.md) |
 | `local-session-reach` | Plan: reach between local and cloud sessions | [`docs/plans/local-session-reach.md`](../docs/plans/local-session-reach.md) |
