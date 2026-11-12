@@ -1901,7 +1901,7 @@ def lane_number_named(segment: str, raw: str, where: str, before: int) -> str:
     """Return the first session-number lane name (`N20`) in a commit message, PR body or title, or
     `gh pr merge` subject or body, else ''. Fenced blocks and backtick spans are quoted text and
     skipped. Same text extraction as cite-by-id. An unread message file returns UNREAD_MARK + its
-    name: cite-by-id refuses an unread create or edit file first, so this covers merge.
+    name, so a message that cannot be read is never passed as clean.
     """
     read = message_texts(segment, raw, where, before, titles=True)
     if read is None:
