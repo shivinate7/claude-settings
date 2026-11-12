@@ -94,7 +94,7 @@ QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed 
 # THE TIME BUDGET. A judged item write makes two calls, in order, so the longest path is the dedicated past-ruling
 # call (PAST_RULING_TIMEOUT, 60 s) plus the question call's 60 s plus start-up (the git read, the import of
 # lint/report_guard.py). Every other path makes one call. The settings.json PreToolUse entry for this hook carries
-# "timeout": 90.
+# "timeout": 130: 60 + 60 s plus start-up. A hook timeout lets the write through unvetted.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
 QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60  # both at the model's default effort
 
@@ -160,6 +160,7 @@ PAST_RULING_ITEM = (
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
+# A judged write adds this 60 s to the form call's 60 s, so the settings.json hook timeout is 130 s, not 90.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
 # The seven items a question to the owner is judged on, for the chat box and the page. The eighth is the chat box's
 # alone: the page and a send get it as a dedicated call (past_ruling_check).
