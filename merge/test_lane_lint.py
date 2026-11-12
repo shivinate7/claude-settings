@@ -2077,6 +2077,13 @@ class LintSetsBatchLabel(LintPostsPassComment):
         self.assertEqual(self.lint_calls(), [], "the refusal came after the ci-job ran, not before the lint:\n" + out)
         self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the refusal still ran the lint and posted its comment:\n" + out)  # the real host posts through the shim, not self.posts
 
+    def test_a_lane_branch_that_holds_batch_after_a_prefix_is_not_an_integration_pull_request(self):
+        self.as_batch_pr(head_ref="lane/batch-x")  # a real lane branch: `batch-` sits after `lane/`, so only a prefix match refuses it
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.labeled(), [], "a lane PR whose branch holds `batch-` got the batch label:\n" + out)
+
     def test_an_integration_fail_adds_no_label(self):
         self.as_batch_pr()
         self.use_ci_job(FAILING, 1)
