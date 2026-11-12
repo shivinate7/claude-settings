@@ -14,7 +14,8 @@ The runner, as the builder writes it. This file is its interface.
   "agreement": str such as "3/3"}. Ids are unique in a file, and a corpus holds an allow case and a deny case. Each case
   carries its recorded verdict: its expect, and its agreement from a recorded run.
 - The page judge has no corpus file while step judge-replay-page-cases is pending. Its row runs zero cases and reads
-  "no cases yet", and a judge with no corpus file reads the same way.
+  "no cases yet" with the pending step. Only a judge that PENDING_STEPS names may run zero cases. Any other judge whose
+  corpus file is missing, or holds [], exits 1, and a detail line names the judge and its file.
 - touched(paths): the sorted names whose scope holds a path, whose corpus is a path, or, for hooks/judge_replay.py, all.
 - replay(name, runs=1): one row per case, {"id", "expect", "got", "verdict"}. got is allow, deny or unknown. Each model
   call goes through decision_watch.invoke_model, looked up at call time, so this file replaces it. Every judge makes one
@@ -38,6 +39,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -896,9 +898,10 @@ def case_corpus_counts_while_page_pending():
     check_pending_block("--all", text)
 
 
-def case_judge_without_corpus_reads_no_cases():
-    """A judge whose corpus file is missing runs zero cases: the runner does not raise, its row reads NO_CASES, the scope
-    check still names it, and it makes no model call."""
+def case_judge_without_corpus_fails_the_run():
+    """Rewritten under the coordinator's ruling (08:35 CST Nov 12): a judge whose corpus file is missing, and that the pending
+    table does not name, fails the run. The runner does not raise, exits 1, names the judge and its file on one detail
+    line, and makes no model call. The scope check still names it."""
     label = "a judge with no corpus file"
     judges = judges_or_fail(label)
     if judges is None:
@@ -907,14 +910,160 @@ def case_judge_without_corpus_reads_no_cases():
     check("%s: the probe's corpus file is absent (fixture)" % label, not corpus_present(PROBE_JUDGE),
           "%s exists" % row["corpus"])
     with judge_row_added(PROBE_JUDGE, row):
-        _, text, calls, error = runner_output(["--judge", PROBE_JUDGE])
+        code, text, calls, error = runner_output(["--judge", PROBE_JUDGE])
         scoped = judge_replay.touched([SEAM])
     check("%s: the scope check names it" % label, PROBE_JUDGE in scoped, "touched gave %s" % ", ".join(scoped))
-    check("%s: the runner does not raise" % label, error is None, error or "")
-    block = judge_block(text, PROBE_JUDGE)
-    check("%s: its row reads %r" % (label, NO_CASES), any(NO_CASES in line for line in block),
-          "\n".join(block) or text[-200:])
-    check("%s: it makes no model call" % label, not calls, "%d model calls" % len(calls))
+    check_judges_without_corpus(label, {PROBE_JUDGE: (code, text, calls, error)})
+
+
+CONTROL_CASE = {"id": "control-allow", "expect": "allow", "source": "fixture", "input": {}}
+OK_ANSWER = ({"ok": True}, None)  # the answer of a model call that succeeded, for the cases whose adapter makes one
+FIXTURE_PENDING = "pending step fixture-table-row"
+CAUSES = ("raises", "exit is not 1", "no detail line names the judge and its corpus file", "prints pending text",
+          "makes a model call")
+
+
+def page_case(expect):
+    return {"id": "page-fixture-%s" % expect, "expect": expect, "source": "fixture", "input": {}}
+
+
+@contextlib.contextmanager
+def runner_repo(corpora):
+    """judge_replay.REPO set to a folder under RUN whose corpus files hold `corpora`, {judge name: file text}. A judge not in
+    `corpora` has no file there. The runner reads its corpora from REPO, so the real loader reads these files."""
+    root = tempfile.mkdtemp(dir=RUN)
+    for name, text in corpora.items():
+        write_text(root, corpus_rel(name), text)
+    saved = judge_replay.REPO
+    judge_replay.REPO = root
+    try:
+        yield root
+    finally:
+        judge_replay.REPO = saved
+
+
+def check_judges_without_corpus(label, runs):
+    """`runs` maps each judge with no usable corpus file to its (code, text, calls, error). One check per cause in CAUSES,
+    each listing the judges that miss it, so each failure names one cause."""
+    missed = {cause: [] for cause in CAUSES}
+    for name, (code, text, calls, error) in runs.items():
+        block = judge_block(text, name)
+        if error is not None:
+            missed["raises"].append(name)
+        if code != 1:
+            missed["exit is not 1"].append(name)
+        if not any(name in line and corpus_rel(name) in line for line in block[1:]):
+            missed["no detail line names the judge and its corpus file"].append(name)
+        if PENDING_TEXT in "\n".join(block):
+            missed["prints pending text"].append(name)
+        if calls:
+            missed["makes a model call"].append(name)
+    for cause in CAUSES:
+        check("%s: %s" % (label, cause), not missed[cause], ", ".join(missed[cause]))
+
+
+def case_judge_other_than_page_without_corpus_file_fails_the_run():
+    """A judge other than the page judge with no corpus file exits 1, and a detail line names the judge and its file. The
+    control runs first: a one-case file in a temp folder is read and run there, so the zero-case runs after it are about
+    absence and not about a swap that did not reach the runner."""
+    label = "a judge other than the page judge, no corpus file"
+    if need_runner(label) is None:
+        return
+    with runner_repo({"prose_judge": json.dumps([CONTROL_CASE])}), \
+            adapter_swapped("prose_judge", scripted_judge(["allow"])):
+        code, text, _, _ = runner_output(["--judge", "prose_judge"], answer=OK_ANSWER)
+    head = judge_block(text, "prose_judge")[:1]
+    check("%s: control: the runner reads the one case in its file" % label,
+          bool(head) and head[0].startswith("prose_judge (1 cases,"), head[0] if head else text[-200:])
+    check("%s: control: the run exits 0" % label, code == 0, "exit %r" % (code,))
+    others = [name for name in NAMES if name != PENDING_JUDGE]
+    with runner_repo({}):
+        runs = {name: runner_output(["--judge", name]) for name in others}
+    check_judges_without_corpus(label, runs)
+
+
+def case_judge_other_than_page_with_empty_corpus_fails_the_run():
+    """A judge other than the page judge whose corpus file holds [] exits 1, and a detail line names the judge and its file.
+    The same rule as a missing file: an empty corpus is no cases, and only the pending table exempts a judge from that."""
+    label = "a judge other than the page judge, corpus []"
+    if need_runner(label) is None:
+        return
+    others = [name for name in NAMES if name != PENDING_JUDGE]
+    with runner_repo({name: "[]\n" for name in others}):
+        runs = {name: runner_output(["--judge", name]) for name in others}
+    check_judges_without_corpus(label, runs)
+
+
+def case_pending_judge_missing_or_empty_corpus_reads_no_cases():
+    """The page judge may have no cases yet: with no file, or with a file that holds [], its row runs zero cases, reads
+    NO_CASES and names the pending step, makes no model call, and exits 0."""
+    label = "--judge %s" % PENDING_JUDGE
+    if need_runner(label) is None:
+        return
+    for tag, corpora in (("no file", {}), ("file holds []", {PENDING_JUDGE: "[]\n"})):
+        with runner_repo(corpora):
+            code, text, calls, error = runner_output(["--judge", PENDING_JUDGE])
+        check("%s, %s: does not raise" % (label, tag), error is None, error or "")
+        check_pending_block("%s, %s" % (label, tag), text)
+        check("%s, %s: makes no model call" % (label, tag), not calls, "%d model calls" % len(calls))
+        check("%s, %s: exits 0" % (label, tag), code == 0, "exit %r" % (code,))
+
+
+def run_page_with_cases(cases, outcomes):
+    """(code, text, error) of --judge on the page judge, its file holding `cases` and its adapter scripted to `outcomes`."""
+    with runner_repo({PENDING_JUDGE: json.dumps(cases)}), adapter_swapped(PENDING_JUDGE, scripted_judge(outcomes)):
+        code, text, _, error = runner_output(["--judge", PENDING_JUDGE], answer=OK_ANSWER)
+    return code, text, error
+
+
+def case_pending_judge_with_cases_runs_its_rows():
+    """The pending exemption keys on the pending table, not on a missing file. With cases in its file the page judge's rows
+    run as any judge's do: no NO_CASES line, no pending text, and the exit follows the rows. A MISS exits 1."""
+    label = "--judge %s with cases in its file" % PENDING_JUDGE
+    if need_runner(label) is None:
+        return
+    for cases, outcomes, want_rows, want_code in (
+        ([page_case("allow"), page_case("deny")], ["allow", "allow"], ["MISS", "PASS"], 1),
+        ([page_case("allow")], ["allow"], ["PASS"], 0),
+    ):
+        tag = "%d case%s" % (len(cases), "" if len(cases) == 1 else "s")
+        code, text, error = run_page_with_cases(cases, outcomes)
+        check("%s, %s: does not raise" % (label, tag), error is None, error or "")
+        block = judge_block(text, PENDING_JUDGE)
+        joined = "\n".join(block)
+        check("%s, %s: the header counts its cases" % (label, tag),
+              bool(block) and block[0].startswith("%s (%d cases," % (PENDING_JUDGE, len(cases))),
+              joined or text[-200:])
+        check("%s, %s: no %s line" % (label, tag, NO_CASES), NO_CASES not in joined, joined)
+        check("%s, %s: no pending text" % (label, tag), PENDING_TEXT not in joined, joined)
+        rows = sorted(ROW.match(line).group(1) for line in block if ROW.match(line))
+        check("%s, %s: its rows read %s" % (label, tag, " and ".join(want_rows)), rows == sorted(want_rows),
+              "rows read %s" % (", ".join(rows) or "none"))
+        check("%s, %s: exits %d" % (label, tag, want_code), code == want_code, "exit %r" % (code,))
+
+
+def case_pending_exemption_follows_the_pending_table():
+    """The exemption keys on a judge named in PENDING_STEPS: with prose_judge named there and no corpus file, its row reads
+    NO_CASES and the table's text, and it exits 0. A judge the table does not name fails (the cases above)."""
+    label = "pending exemption follows PENDING_STEPS"
+    if need_runner(label) is None:
+        return
+    table = getattr(judge_replay, "PENDING_STEPS", None)
+    if not isinstance(table, dict):
+        check(label, False, "hooks/judge_replay.py has no PENDING_STEPS dict")
+        return
+    judge_replay.PENDING_STEPS = dict(table, prose_judge=FIXTURE_PENDING)
+    try:
+        with runner_repo({}):
+            code, text, _, error = runner_output(["--judge", "prose_judge"])
+    finally:
+        judge_replay.PENDING_STEPS = table
+    check("%s: does not raise" % label, error is None, error or "")
+    block = judge_block(text, "prose_judge")
+    joined = "\n".join(block)
+    check("%s: prose_judge's row reads %r" % (label, NO_CASES), NO_CASES in joined, joined or text[-200:])
+    check("%s: prose_judge's row names the table's text" % label, FIXTURE_PENDING in joined, joined or text[-200:])
+    check("%s: exits 0" % label, code == 0, "exit %r" % (code,))
 
 
 def case_changed_page_judge_file_runs_no_page_cases():
@@ -945,7 +1094,11 @@ CASES = (case_seam_control, case_corpora, case_corpus_not_under_hooks, case_scop
          case_pin_change_package_names_every_judge, case_probe_names_the_secret_and_the_item,
          case_each_judge_answer_reads_as_its_own_verdict, case_majority_takes_the_verdict_of_the_runs,
          case_replay_model_error_is_no_answer_for_its_run, case_pending_judge_reads_no_cases,
-         case_corpus_counts_while_page_pending, case_judge_without_corpus_reads_no_cases,
+         case_corpus_counts_while_page_pending, case_judge_without_corpus_fails_the_run,
+         case_judge_other_than_page_without_corpus_file_fails_the_run,
+         case_judge_other_than_page_with_empty_corpus_fails_the_run,
+         case_pending_judge_missing_or_empty_corpus_reads_no_cases,
+         case_pending_judge_with_cases_runs_its_rows, case_pending_exemption_follows_the_pending_table,
          case_changed_page_judge_file_runs_no_page_cases)
 
 
