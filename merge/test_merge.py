@@ -1000,10 +1000,10 @@ class ClaudeMdFlag(Env):
     - The match is case-insensitive on the whole rule-file path; the line prints the path as git names it."""
 
     def line(self, path):
-        return f"merge: #7 changes {path}, a rule file every session loads."
+        return f"merge: #7 changes {path}, a rule file."
 
     def flags(self, out):
-        return [l for l in out.splitlines() if "a rule file every session loads" in l]
+        return [l for l in out.splitlines() if "a rule file" in l]
 
     def on_main(self, path, text):
         """Main gains a commit, pushed from the other clone, that the PR branch does not hold."""
@@ -1031,7 +1031,7 @@ class ClaudeMdFlag(Env):
         lines = out.splitlines()
         merged_at = [i for i, l in enumerate(lines) if l.startswith("merge: #7 merged as ")]
         self.assertEqual(len(merged_at), 1, out)
-        self.assertTrue(all(i > merged_at[0] for i, l in enumerate(lines) if "a rule file every session loads" in l), out)
+        self.assertTrue(all(i > merged_at[0] for i, l in enumerate(lines) if "a rule file" in l), out)
 
     def test_a_merged_pr_that_adds_claude_md_is_flagged_after_the_merged_as_line(self):
         self.pr_writes({"CLAUDE.md": "new rules\n"})
