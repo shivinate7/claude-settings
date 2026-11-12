@@ -67,7 +67,8 @@ class Launch(unittest.TestCase):
     def release(self, tag):
         # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.
         put(os.path.join(self.work, "merge", "merge.py"), "import os, sys\nprint('RAN %s')\n"
-            "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag)
+            "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n"
+            "e = os.environ.get('ENV_FILE')\nif e: open(e, 'w').write(os.environ.get('CLAUDE_MERGE_SHIM_PID', '<unset>'))\n" % tag)
         sh(self.work, "git", "add", "-A", env=self.env)
         sh(self.work, "git", "commit", "-q", "-m", tag, env=self.env)
         if tag != "v1":
@@ -223,6 +224,20 @@ class Launch(unittest.TestCase):
         rc, out, err = self.merge("--dev", "7", "--confirm", ARGS_FILE=rec)
         self.assertEqual(rc, 0, err)
         self.assertEqual(open(rec).read(), repr(["7", "--confirm"]))
+
+    def test_shim_exports_its_pid_and_launch_passes_it_to_merge_unchanged(self):
+        # The stub merge.py records the CLAUDE_MERGE_SHIM_PID it received. The shim is the process Popen starts, so its pid is p.pid.
+        for i, extra in enumerate(([], ["--dev"])):
+            label = " ".join(extra) or "fresh-code run"
+            rec = os.path.join(self.t, "shim-env-%d.txt" % i)
+            e = {k: v for k, v in self.env.items() if k != "CLAUDE_MERGE_SHIM_PID"}  # a test run started inside a shim must not pass its pid on
+            e.update(CLAUDE_SETTINGS_DIR=self.co, ENV_FILE=rec)
+            p = subprocess.Popen([sys.executable, os.path.join(ROOT, "bin", "merge"), *extra], env=e,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            out, err = p.communicate(timeout=120)
+            self.assertEqual(out.strip(), "RAN v1", "%s: merge.py did not run: %s" % (label, err))  # scope: the run reached merge.py
+            got = Path(rec).read_text()
+            self.assertEqual(got, str(p.pid), "%s: merge.py got CLAUDE_MERGE_SHIM_PID %r, not the shim's pid %d" % (label, got, p.pid))
 
     def test_checkout_that_cannot_fast_forward_is_left_as_is_and_still_runs_fresh(self):
         self.release("v2")
