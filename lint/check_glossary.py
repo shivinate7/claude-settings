@@ -40,8 +40,9 @@ it is read in paths, anchors and slugs, never in identifiers, strings or hook me
 may use the other sense. Any other parenthesised tag on a "not" name fails. Claude Code's own names
 stay (PLATFORM_NAMES, PLATFORM_PREFIXES). A path or a line that already exists on the base is not
 checked or renamed. An untracked file is read when it is new on the base, in a top-level folder where the base
-holds files. An untracked file that is not valid UTF-8 and holds a NUL in its first 8 KB with no UTF-16
-byte-order mark is binary and skipped; any other untracked file that will not decode as text is UNKNOWN.
+holds files. An untracked file that is not valid UTF-8 is binary and skipped when it starts with a known
+binary magic (BINARY_MAGIC: PDF, PNG, JPEG, GIF, ZIP, gzip), or holds a NUL in its first 8 KB with no UTF-16
+byte-order mark; any other untracked file that will not decode as text is UNKNOWN.
 
     python3 lint/check_glossary.py [file ...]
         # files given: check those paths and read each whole, skip git
@@ -111,14 +112,20 @@ def read(rel):
         return None
 
 
+BINARY_MAGIC = (b"%PDF-", b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"PK\x03\x04", b"\x1f\x8b")
+
+
 def binary(rel):
-    """True when the file's first bytes hold a NUL and no UTF-16 byte-order mark: an image or bytecode, not text
-    in another encoding. UTF-16 text holds NULs too, so its mark tells it apart."""
+    """True when the file is an image, archive, PDF or bytecode, not text: its first bytes hold a NUL and no UTF-16
+    byte-order mark (UTF-16 text holds NULs too, so its mark tells it apart), or they start with a known binary
+    magic (BINARY_MAGIC), because a PDF header can run 8 KB with no NUL."""
     try:
         with open(os.path.join(ROOT, *rel.split("/")), "rb") as f:
             head = f.read(8192)
     except OSError:
         return False
+    if head.startswith(BINARY_MAGIC):
+        return True
     return b"\0" in head and not head.startswith((b"\xff\xfe", b"\xfe\xff"))
 
 
@@ -770,14 +777,16 @@ def main(args):
     # Given files are read whole; a change is read on the lines it adds.
     scope, unknown = ({p: None for p in args}, []) if args else added_lines()
     for rel, lines in sorted(scope.items()):
-        text = read(rel)
         if rel.startswith(SKIP_CODE):
             continue
+        if os.path.isdir(os.path.join(ROOT, *rel.split("/"))):  # a submodule pointer is no file to read
+            continue
+        text = read(rel)
         if text is None:
-            # A committed file that does not decode is left alone. An untracked one is new work that no
-            # read can judge, so it is unknown, never clean.
-            if not args and rel in untracked() and not binary(rel):
-                unknown.append("%s is untracked and cannot be read as text" % rel)
+            # A binary file (an image, bytecode) is not text to judge. Any other file that cannot be read is
+            # unknown, never clean: red in CI.
+            if not binary(rel):
+                unknown.append("%s cannot be read as text" % rel)
             continue
         try:
             bad += code_problems(rel, text, table, lines)

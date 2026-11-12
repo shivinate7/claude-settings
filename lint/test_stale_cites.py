@@ -121,11 +121,14 @@ def parse(out):
 
 
 def direct_step_env(rng, fail):
-    """The env bin/ste-changed sets for the step, with FAIL given. run.sh runs from here, so FAIL can differ."""
-    return dict(os.environ, TMPDIR=rng.case, GITHUB_STEP_SUMMARY=os.path.join(rng.case, "summary.md"),
-                EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main", REF_NAME="topic",
-                SCOPE="changed", FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="", CHANGED_PATHS_GLOB="*.md",
-                DECISIONS_DIR="")
+    """The env bin/ste-changed sets for the step, with FAIL given. run.sh runs from here, so FAIL can differ. CI is
+    popped, as run_check pops it: a case that states the local rule reads it unset, and a CI case sets CI on top."""
+    env = dict(os.environ, TMPDIR=rng.case, GITHUB_STEP_SUMMARY=os.path.join(rng.case, "summary.md"),
+               EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main", REF_NAME="topic",
+               SCOPE="changed", FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="", CHANGED_PATHS_GLOB="*.md",
+               DECISIONS_DIR="")
+    env.pop("CI", None)  # CI turns an unknown read red (decision ci-unknown-is-red)
+    return env
 
 
 def git_commands(trace_path):
@@ -279,7 +282,9 @@ class StaleCase(unittest.TestCase):
     def run_check(self, rng, base=None, extra_env=None, spec=None):
         """(exit code, output) of `--range`. `spec` gives the range text when a case needs another shape."""
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/stale_cites.py")
-        env = dict(os.environ, TMPDIR=rng.case, **(extra_env or {}))
+        env = dict(os.environ)
+        env.pop("CI", None)  # CI turns an unknown read red; these cases state the local rule, CI cases pass CI=1
+        env.update(TMPDIR=rng.case, **(extra_env or {}))
         if spec is None:
             spec = "%s...%s" % (rng.base if base is None else base, rng.head)
         done = subprocess.run([sys.executable, MODULE, "--range", spec],
@@ -362,6 +367,13 @@ class StaleCase(unittest.TestCase):
         self.assertTrue(shallow_clone.facts(clone, rng.head)["shallow"], "scope: the clone is shallow")
         self.assertFalse(has_object(clone, rng.base), "scope: the base is cut from the clone")
         return clone
+
+    def root_repo(self):
+        """A full clone whose one commit is the root. Its base, HEAD~1, names nothing."""
+        rng = self.tree("# Notes\n")._replace(base="HEAD~1")
+        self.assertFalse(has_object(rng.repo, "HEAD~1"), "scope: the root commit has no parent")
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
+        return rng
 
     def run_copy_of_script(self, rng, args):
         """Run a copy of the script's folders with `args` in the repo. Returns (exit code, output, the files before,
@@ -861,12 +873,25 @@ class UnknownTests(StaleCase):
         self.assertEqual(done.returncode, 0, out)
         self.assertIn("stale-cites: unknown", out)
 
-    def root_repo(self):
-        """A full clone whose one commit is the root. Its base, HEAD~1, names nothing."""
-        rng = self.tree("# Notes\n")._replace(base="HEAD~1")
-        self.assertFalse(has_object(rng.repo, "HEAD~1"), "scope: the root commit has no parent")
-        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
-        return rng
+    def test_step_with_an_unresolvable_base_under_ci_is_red_and_names_the_base_sha(self):
+        """The CI twin of the case above: the same base with no shared history is red under CI, and the stale-cites
+        line is UNKNOWN and names the base's sha (decision ci-unknown-is-red)."""
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        orphan = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "unrelated")
+        git(rng.repo, "update-ref", "refs/remotes/origin/main", orphan)
+        self.assertNotEqual(subprocess.run(["git", "merge-base", "origin/main", "HEAD"], cwd=rng.repo,
+                                           capture_output=True).returncode, 0,
+                            "scope: the base shares history with the head, so there is no unresolvable base")
+        env = dict(direct_step_env(rng, "true"), CI="1")
+        done = subprocess.run([sys.executable, STEP, "main"], cwd=rng.repo, env=env, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+        out = done.stdout + done.stderr
+        self.assertNotEqual(done.returncode, 0, "an unresolvable base under CI exited 0, not red\n" + out)
+        self.assertRegex(out, r"(?m)^stale-cites: UNKNOWN, .*" + re.escape(orphan),
+                         "under CI the stale-cites line is not UNKNOWN naming the base sha\n" + out)
 
     def assert_root_range_exits_zero(self, rng, spec):
         rc, out = self.run_check(rng, spec=spec)
@@ -1030,6 +1055,129 @@ class UnknownTests(StaleCase):
                          "(rev-list starts: %d)\n%s" % (len(starts), out))
         self.assertNotIn("stale-cites: PASS", out, "a rev-list that failed printed PASS\n" + out)
         self.assertRegex(out, "(?i)unknown", out)
+
+
+class CiHistoryTests(StaleCase):
+    """Under env CI, a base the clone cannot read is fetched first, through lint/git_fetch.py, the one home code_check
+    also uses. The check is red only when the fetch fails too, or when no fetch can supply the base (decision
+    ci-unknown-is-red). With CI unset the local rule holds: unknown and exit 0. That control sits last."""
+
+    NOTES_CITE = "# Notes\n\n(hooks/guard.py _process_start_ms)\n"
+
+    def removed_name_range(self):
+        """A range that removes `_process_start_ms` from hooks/guard.py, so the cite on line 3 of the note is STALE002."""
+        def change(repo):
+            write(repo, "hooks/guard.py", "def keep():\n    return 1\n")
+            commit(repo)
+        return self.make_range(base_files(self.NOTES_CITE), change)
+
+    def test_a_depth_one_clone_under_ci_fetches_the_base_and_reports_the_finding(self):
+        rng = self.removed_name_range()
+        clone = self.depth_one_clone(rng)
+        self.assertEqual(git(clone, "remote", "get-url", "origin"), rng.repo,
+                         "scope: the clone's origin is not the source repo, so the fetch has nothing to reach")
+        rc, out = self.run_check(rng._replace(repo=clone), extra_env={"CI": "1"})
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), [(NOTES, 3, "STALE002")],
+                         "a depth-1 clone under CI did not fetch the base and report its STALE002 finding\n" + out)
+        self.assertEqual(rc, 1, "a depth-1 clone under CI printed the finding but exited %d, not 1\n%s" % (rc, out))
+
+    def test_a_depth_one_clone_of_real_history_under_ci_fetches_for_the_root_form_range(self):
+        """`HEAD~1..HEAD` in a depth-1 clone of real history. The clone's head looks like a root until it is unshallowed,
+        so the first-push guard must wait for the fetch: the fetch runs and the removed name is reported."""
+        rng = self.removed_name_range()
+        clone = self.depth_one_clone(rng)
+        self.assertEqual(git(rng.repo, "rev-parse", "HEAD~1"), rng.base,
+                         "scope: HEAD~1 of the origin is not the base, so the range is not the root form")
+        self.assertEqual(git(clone, "remote", "get-url", "origin"), rng.repo,
+                         "scope: the clone's origin is not the source repo, so the fetch has nothing to reach")
+        rc, out = self.run_check(rng._replace(repo=clone), spec="HEAD~1..HEAD", extra_env={"CI": "1"})
+        self.assertNotIn("no base", out,
+                         "a depth-1 clone of real history under CI took its head for a first push, without a fetch\n" + out)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), [(NOTES, 3, "STALE002")],
+                         "the root-form range in a depth-1 clone did not fetch the base and report its STALE002 finding\n"
+                         + out)
+        self.assertEqual(rc, 1, "the root-form range in a depth-1 clone printed the finding but exited %d, not 1\n%s"
+                         % (rc, out))
+
+    def test_a_shallow_origin_that_leaves_the_clone_shallow_is_red_under_ci_not_a_first_push(self):
+        """A shallow origin cannot unshallow its clone, so the head still looks like a root and the base is still absent.
+        The first-push guard after the fetch waits for a full clone, so this is no first push. Red under CI, UNKNOWN and
+        exit 1 (decision stale-cites-at-merge: red when the base still shares no history with the head)."""
+        rng = self.removed_name_range()
+        origin = self.depth_one_clone(rng)
+        clone = os.path.join(rng.case, "shallow-of-shallow")
+        self.assertEqual(shallow_clone.make(origin, clone, rng.head), "",
+                         "scope: the clone of the shallow origin was not made")
+        self.assertTrue(shallow_clone.facts(clone, rng.head)["shallow"], "scope: the clone of the shallow origin is not shallow")
+        self.assertFalse(has_object(clone, rng.base), "scope: the base is cut from the clone of the shallow origin")
+        rc, out = self.run_check(rng._replace(repo=clone), spec="HEAD~1..HEAD", extra_env={"CI": "1"})
+        self.assertEqual(git(clone, "rev-parse", "--is-shallow-repository"), "true",
+                         "scope: the fetch unshallowed the clone, so the run did not reach the post-fetch first-push guard\n"
+                         + out)
+        self.assertEqual(rc, 1, "a shallow clone whose fetch left it shallow exited %d under CI, not 1\n%s" % (rc, out))
+        self.assertIn("stale-cites: UNKNOWN", out, "a shallow clone whose fetch left it shallow printed no UNKNOWN line\n" + out)
+        self.assertNotIn("no base", out, "a shallow clone whose fetch left it shallow printed the first-push no-base line\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "a shallow clone whose fetch left it shallow printed PASS\n" + out)
+
+    def test_a_full_clone_whose_base_shares_no_history_with_head_is_red_under_ci(self):
+        rng = self.removed_name_range()
+        tree = git(rng.repo, "rev-parse", rng.base + "^{tree}")
+        orphan = git(rng.repo, "commit-tree", tree, "-m", "unrelated base")
+        git(rng.repo, "remote", "add", "origin", rng.repo)  # a reachable origin: the fetch runs and finds nothing new
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false",
+                         "scope: the repo is not a full clone")
+        no_base = subprocess.run(["git", "merge-base", orphan, rng.head], cwd=rng.repo, capture_output=True)
+        self.assertNotEqual(no_base.returncode, 0, "scope: the base still shares history with the head")
+        rc, out = self.run_check(rng, spec="%s...%s" % (orphan, rng.head), extra_env={"CI": "1"})
+        self.assertNotEqual(rc, 0, "a base that shares no history with the head exited 0 under CI, not red\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "a base that shares no history with the head printed PASS\n" + out)
+        self.assertIn(orphan[:7], out, "the red output does not name the base that shares no history with the head\n" + out)
+
+    def test_a_depth_one_clone_whose_origin_is_unreachable_is_red_under_ci(self):
+        rng = self.removed_name_range()
+        clone = self.depth_one_clone(rng)
+        gone = os.path.join(rng.case, "no-such-origin")
+        git(clone, "remote", "set-url", "origin", gone)
+        self.assertFalse(os.path.exists(gone), "scope: the origin path exists, so the fetch would not fail")
+        rc, out = self.run_check(rng._replace(repo=clone), extra_env={"CI": "1"})
+        self.assertIn("stale-cites: UNKNOWN", out, "an unreachable origin under CI printed no final UNKNOWN line\n" + out)
+        self.assertNotEqual(rc, 0, "an unreachable origin under CI exited 0, not red\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "an unreachable origin under CI printed PASS\n" + out)
+
+    def assert_first_push_exits_zero_under_ci(self, rng):
+        """A first push, spelled HEAD~1..HEAD as run.sh passes it, under CI: exit 0 and a plain line that says there is
+        no base. Not UNKNOWN, and not PASS, since nothing was read (decision ci-unknown-is-red)."""
+        rc, out = self.run_check(rng, spec="HEAD~1..HEAD", extra_env={"CI": "1"})
+        self.assertEqual(rc, 0, "a first push (HEAD~1..HEAD) under CI exited %d, not 0\n%s" % (rc, out))
+        self.assertNotIn("UNKNOWN", out, "a first push under CI printed UNKNOWN for a base that cannot exist\n" + out)
+        self.assertNotIn("stale-cites: unknown", out, "a first push under CI printed the local unknown line\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "a first push under CI printed PASS over a range nothing read\n" + out)
+        self.assertRegex(out, r"(?m)^stale-cites: .*no base",
+                         "a first push under CI printed no plain line that says there is no base\n" + out)
+
+    def test_a_first_push_in_a_full_clone_under_ci_exits_zero_with_a_no_base_line(self):
+        """The root commit has no parent, so the range is empty by construction and no fetch can supply a base. A
+        reachable origin is set first, so a red here is not the failed fetch."""
+        rng = self.root_repo()
+        git(rng.repo, "remote", "add", "origin", rng.repo)
+        self.assertEqual(git(rng.repo, "remote", "get-url", "origin"), rng.repo,
+                         "scope: the origin is not the source repo, so the fetch has nothing to reach")
+        self.assert_first_push_exits_zero_under_ci(rng)
+
+    def test_a_first_push_in_a_depth_one_clone_under_ci_exits_zero_with_a_no_base_line(self):
+        """The shape CI checks out by default: a depth-1 clone of a first push, with its origin reachable."""
+        rng = self.root_repo()
+        clone = self.depth_one_clone(rng)
+        self.assertEqual(git(clone, "remote", "get-url", "origin"), rng.repo,
+                         "scope: the clone's origin is not the source repo, so the fetch has nothing to reach")
+        self.assert_first_push_exits_zero_under_ci(rng._replace(repo=clone))
+
+    def test_with_ci_unset_the_same_clone_keeps_the_local_unknown_and_exit_zero(self):
+        rng = self.removed_name_range()
+        clone = self.depth_one_clone(rng)
+        rc, out = self.run_check(rng._replace(repo=clone))
+        self.assertTrue(unknown_lines(out), "a depth-1 clone with CI unset printed no unknown line\n" + out)
+        self.assertEqual(rc, 0, "a depth-1 clone with CI unset did not keep the local exit 0\n" + out)
 
 
 class ResolveTests(StaleCase):
@@ -1294,14 +1442,22 @@ class ForeignFileTests(StaleCase):
             commit(repo)
         return self.make_range(base_files(notes), change)
 
+    NOTE = ("stale-cites: unknown, docs/debts/notes.md:3: hooks/lib.mjs refusals: "
+            "JavaScript and shell names are not checked")
+
     def test_a_touched_mjs_cited_beside_another_removal_prints_one_unknown_line(self):
         rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
         rc, out = self.run_check(rng)
         self.assertEqual(rc, 0, out)
-        self.assertEqual(unknown_lines(out), [
-            "stale-cites: unknown, docs/debts/notes.md:3: hooks/lib.mjs refusals: "
-            "JavaScript and shell names are not checked",
-        ], out)
+        self.assertEqual(unknown_lines(out), [self.NOTE], out)
+
+    def test_a_touched_mjs_cite_under_ci_is_a_limit_and_stays_exit_zero(self):
+        """A name the tool does not build is a limit, not an unread input, so CI keeps exit 0.
+        Decision `stale-cites-at-merge` lists the unknowns that are limits of the check."""
+        rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
+        rc, out = self.run_check(rng, extra_env={"CI": "1"})
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(unknown_lines(out), [self.NOTE], out)
 
     def test_a_line_marked_ste_disable_line_stale002_prints_no_unknown_line(self):
         rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals` <!-- ste-disable-line STALE002 -->\n")
@@ -1365,6 +1521,19 @@ class UnknownFileTests(StaleCase):
                 self.assertEqual(rc, 0, out)
                 self.assertTrue(unknown, out)
                 self.assertIn("hooks/guard.py", unknown[0], out)
+
+    def test_a_touched_py_that_does_not_parse_under_ci_is_red(self):
+        """The same unread file, with env CI set: the unknown line names it, and the exit is non-zero (decision
+        ci-unknown-is-red). The local exit 0 is the test above, which runs with CI unset."""
+        def change(repo):
+            write(repo, "hooks/guard.py", "def keep(:\n    return 1\n")
+            commit(repo)
+        rng = self.make_range(base_files(extra={"hooks/guard.py": GUARD}), change)
+        rc, out = self.run_check(rng, extra_env={"CI": "1"})
+        unknown = [line for line in out.splitlines() if line.startswith("stale-cites: unknown")]
+        self.assertTrue(unknown, out)
+        self.assertIn("hooks/guard.py", unknown[0], out)
+        self.assertNotEqual(rc, 0, out)
 
 
 class ExcludeFolderTests(StaleCase):

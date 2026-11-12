@@ -55,6 +55,18 @@ class Fixture(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
+    def put_bytes(self, rel, data):
+        path = os.path.join(self.tree, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def changed(self):
+        """The paths the change names, from git, so a case proves its file is in the diff before it reads the verdict."""
+        done = subprocess.run(["git", "diff", "--name-only", "refs/remotes/origin/main"], cwd=self.tree,
+                              capture_output=True, encoding="utf-8", check=True)
+        return done.stdout.split()
+
     def run_check(self, *args, ci=False):
         env = {k: v for k, v in os.environ.items() if k != "CI"}
         if ci:
@@ -229,6 +241,52 @@ class GlossaryTests(Fixture):
     def test_unknown_option_fails(self):
         code, out = self.run_check("--files")
         self.assertEqual(code, 1, out)
+
+
+class UnknownReadTests(Fixture):
+    """A changed file the check cannot read prints UNKNOWN. Locally it exits 0. With env CI set it exits non-zero."""
+
+    SUBMODULE_COMMIT = "89abcdef0123456789abcdef0123456789abcdef"  # a commit name the test repo never stores
+
+    def test_a_non_utf8_changed_file_prints_unknown_locally(self):
+        self.base_repo()
+        self.put_bytes("hooks/bad.py", b"x = '\xff'\n")
+        self.commit()
+        self.assertIn("hooks/bad.py", self.changed(), "scope: the non-UTF-8 file is not in the change")
+        code, out = self.run_check()
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNKNOWN", out, "a changed file that cannot be read was skipped with no UNKNOWN line:\n" + out)
+
+    def test_a_non_utf8_changed_file_is_red_in_ci(self):
+        self.base_repo()
+        self.put_bytes("hooks/bad.py", b"x = '\xff'\n")
+        self.commit()
+        self.assertIn("hooks/bad.py", self.changed(), "scope: the non-UTF-8 file is not in the change")
+        code, out = self.run_check(ci=True)
+        self.assertNotEqual(code, 0, "a changed file that cannot be read passed in CI:\n" + out)
+
+    def test_a_gitlink_in_the_change_is_not_unknown_in_ci(self):
+        # A submodule pointer names a commit, not a file. Its checked-out folder is a directory, which no file read opens.
+        self.base_repo()
+        self.git("update-index", "--add", "--cacheinfo", "160000,%s,vendor/sub" % self.SUBMODULE_COMMIT)
+        os.makedirs(os.path.join(self.tree, "vendor", "sub"))
+        self.commit()
+        self.assertIn("vendor/sub", self.changed(), "scope: the submodule pointer is not in the change")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("UNKNOWN", out, "a submodule pointer was read as a file that cannot be read:\n" + out)
+        self.assertEqual(code, 0, out)
+
+    def test_a_readable_changed_file_is_green_in_ci_with_no_unknown(self):
+        # Green control: the same change with a readable file passes in CI and prints no UNKNOWN.
+        self.base_repo()
+        self.put("hooks/ok.py", "x = 1\n")
+        self.commit()
+        self.assertIn("hooks/ok.py", self.changed(), "scope: the readable file is not in the change")
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("UNKNOWN", out)
 
 
 class CodeNameTests(Fixture):
@@ -838,6 +896,7 @@ class UncommittedTests(Fixture):
     so a green case cannot pass because its file was never written."""
 
     IGNORE = "__pycache__/\n"  # the check imports its modules, so each run writes bytecode into lint/ and hooks/
+    PDF_BYTES = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + bytes(range(1, 256)) * 40  # a PDF header, then bytes with no NUL
 
     def setUp(self):
         super().setUp()
@@ -1094,6 +1153,36 @@ class UncommittedTests(Fixture):
         code, out = self.run_check()
         self.assertEqual(code, 1, "a UTF-8 untracked file with a NUL passed unread\n" + out)
         self.assertIn("docs/debts/nul.md:1", out, "the NUL file's line was not read\n" + out)
+
+    def assert_pdf_scope(self, data):
+        """The bytes hold no NUL in their first 8 KB and do not decode as UTF-8, so binary() decides the file."""
+        self.assertNotIn(b"\0", data[:8192], "scope: the first 8 KB hold a NUL, so the NUL test alone would decide")
+        with self.assertRaises(UnicodeDecodeError, msg="scope: the bytes decode as UTF-8, so binary() is never reached"):
+            data.decode("utf-8")
+
+    def test_untracked_pdf_with_no_nul_in_its_first_bytes_is_skipped_quietly_in_ci(self):
+        """binary(): a PDF header makes the file binary though no NUL is in its first 8 KB, so it is skipped, not UNKNOWN."""
+        self.base_repo()
+        self.assert_pdf_scope(self.PDF_BYTES)
+        self.put_bytes("docs/debts/paper.pdf", self.PDF_BYTES)
+        self.assertState("?? docs/debts/paper.pdf")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("UNKNOWN", out, "an untracked PDF with no NUL printed UNKNOWN: its header was not read as binary\n" + out)
+        self.assertEqual(code, 0, "an untracked PDF with no NUL failed the check in CI\n" + out)
+
+    def test_untracked_file_with_the_pdf_bytes_and_a_broken_header_is_unknown_and_red_in_ci(self):
+        """The near-miss control: the same bytes with one letter of the magic changed. Only the header makes a file
+        binary, so this file cannot be read: UNKNOWN locally, red in CI."""
+        self.base_repo()
+        broken = self.PDF_BYTES.replace(b"%PDF-", b"%PDX-", 1)
+        self.assertNotIn(b"%PDF-", broken[:8192], "scope: the control still carries the PDF header")
+        self.assert_pdf_scope(broken)
+        self.put_bytes("docs/debts/paper.pdf", broken)
+        self.assertState("?? docs/debts/paper.pdf")
+        code, out = self.run_check()
+        self.assertIn("UNKNOWN", out, "an untracked file with a broken header and invalid UTF-8 passed silently\n" + out)
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 1, "an untracked file with a broken header and invalid UTF-8 is not red in CI\n" + out)
 
 
 def load_check():

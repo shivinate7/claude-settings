@@ -14,14 +14,25 @@
 //       A command that compares `import.meta.url` with the typed `process.argv[1]` prints nothing there, and exits 0.
 //   A.  An import of the module from a stdin script (`node -`) never crashes, and it runs no command.
 //   B1. The ids that the command prints equal the keys of `mapChecks`: one list.
+//   C1, C2. A `modelSeam` with no model-call reader bound: the seam read is UNKNOWN. Locally the exit is 0. With env CI set it is non-zero.
+//   C3. The control: no `modelSeam`, env CI set, no UNKNOWN, exit 0.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SKILL, dropMapLine, expected, junction, needFile, run, scratchRepo, verdicts } from './helpers.mjs';
 
 const CLI = join(SKILL, 'scripts', 'map-check.mjs');
 const REL = 'scripts/map-check.mjs';
+
+// The fixture with a `modelSeam` that names a tracked file. The command binds no reader, so the seam check cannot read its sites.
+const seamRepo = () => {
+  const dir = scratchRepo();
+  const cfg = JSON.parse(readFileSync(join(dir, 'map.config.json'), 'utf8'));
+  writeFileSync(join(dir, 'map.config.json'), JSON.stringify({ ...cfg, modelSeam: { file: 'src/home.ts' } }, null, 2));
+  return dir;
+};
 
 test('1a. on a clean fixture the command prints 11 lines, one for each of MAP1 to MAP11, and exits 0', () => {
   needFile(REL);
@@ -84,4 +95,34 @@ test('B1. the ids the command prints equal the keys of mapChecks', async () => {
   const printed = [...r.out.matchAll(/^\[(?:PASS|FAIL|SKIP)\]\s+(\S+)/gm)].map((m) => m[1]).sort();
   assert.ok(printed.length > 0, `the command printed no verdict line\n${r.out.slice(0, 1500)}`);
   assert.deepEqual(printed, keys, `the command must run every check that mapChecks holds, from one list\n${r.out.slice(0, 1500)}`);
+});
+
+// Lane ruling R3: with no model-call reader bound, the seam check is a declared limit, not an unread input. It prints its
+// note and exits 0, CI set or not. It prints no UNKNOWN line. The checks run first, so the verdicts must be the clean ones.
+const SEAM_NOTE = /^\[NOTE\] no model-call reader is bound/m;
+
+test('C1. a modelSeam with no model-call reader bound prints its note, no UNKNOWN, and exits 0 locally', () => {
+  needFile(REL);
+  const r = run([CLI], seamRepo(), undefined, {}, ['CI']);
+  assert.equal(verdicts(r.out), expected(), `the checks must run before the seam note is judged\n${r.out.slice(0, 1500)}`);
+  assert.match(r.out, SEAM_NOTE, `the declared limit printed no note line\n${r.out.slice(0, 1500)}`);
+  assert.doesNotMatch(r.out, /UNKNOWN/, `a declared limit must not print UNKNOWN\n${r.out.slice(0, 1500)}`);
+  assert.equal(r.status, 0, `locally the seam note exits 0\n${r.out.slice(0, 1500)}`);
+});
+
+test('C2. the same declared limit with env CI set prints its note, no UNKNOWN, and exits 0', () => {
+  needFile(REL);
+  const r = run([CLI], seamRepo(), undefined, { CI: '1' });
+  assert.equal(verdicts(r.out), expected(), `the checks must run before the seam note is judged\n${r.out.slice(0, 1500)}`);
+  assert.match(r.out, SEAM_NOTE, `the declared limit printed no note line in CI\n${r.out.slice(0, 1500)}`);
+  assert.doesNotMatch(r.out, /UNKNOWN/, `a declared limit must not print UNKNOWN in CI\n${r.out.slice(0, 1500)}`);
+  assert.equal(r.status, 0, `a declared limit exits 0 in CI\n${r.out.slice(0, 1500)}`);
+});
+
+test('C3. control: with no modelSeam, env CI set, the command prints no UNKNOWN and exits 0', () => {
+  needFile(REL);
+  const r = run([CLI], scratchRepo(), undefined, { CI: '1' });
+  assert.equal(verdicts(r.out), expected(), `each check must print one line\n${r.out.slice(0, 1500)}`);
+  assert.doesNotMatch(r.out, /UNKNOWN/, `a clean config must print no UNKNOWN line\n${r.out.slice(0, 1500)}`);
+  assert.equal(r.status, 0, `a clean config must exit 0 in CI\n${r.out.slice(0, 1500)}`);
 });

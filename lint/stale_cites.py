@@ -69,12 +69,25 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run (a base that names nothing in a full clone, an unreadable .ste-lint-exclude), except
-a gap in the history (a shallow clone, a base with no merge base with the head, or the first parent of a root commit, spelled `HEAD~1`, `HEAD^1`, `@~1` or `<head sha>~01`): that prints
-`stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
-checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
-the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
+a gap in the history (a shallow clone, or a base with no merge base with the head) and the first push.
+With env CI unset a gap prints `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0. With env CI set
+the check first fetches the base through lint/git_fetch.py (unshallowing a shallow clone, then asking for the
+base's sha when it is still out) and reads once more. It is red, a final `stale-cites: UNKNOWN` line naming the
+cause and the base's sha with exit 1, when the fetch fails or the base still shares no history with the head
+(a shallow clone, or a base with no merge base). A base that does not resolve in a full clone is exit 2 instead
+(owner item 276 a, decisions ci-unknown-is-red and stale-cites-at-merge). A repo that pins the ste-lint action
+and checks out shallow is red at its pin move until it checks out with fetch-depth 0, or its origin can be
+fetched. A first push, whose base is the first parent of a root commit (spelled `HEAD~1`, `HEAD^1`, `@~1` or
+`<head sha>~01`), has no base and no fetch can make one: under CI it prints `stale-cites: no base, ...` and
+exits 0 (decision stale-cites-at-merge); with CI unset it is the gap above.
+Other unknown lines print `stale-cites: unknown, ...` and exit 0, or
+1 with a final `stale-cites: UNKNOWN` line when env CI is set and nothing else failed (decision ci-unknown-is-red).
+Those lines are: a touched .py that does not parse at base or head, a malformed rule_mechanisms.json, and a report
+read that failed. A cited JavaScript or shell name is a limit of the check, not an unread input: its unknown line never
+changes the exit.
 
-The report prints after the findings and never changes the exit code (decision claude-md-change-is-flagged). Each
+The report's findings never change the exit code (decision claude-md-change-is-flagged); a report read that failed is
+one of the unknown lines above. Each
 line starts `stale-cites: report, `. It has two halves, and STALE005 lines first.
   Anchors   for each `<!-- rule:id -->` anchor whose sentence changed in a RULE_FILES file (a real anchor; one in a
             code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test), then the files this range
@@ -136,6 +149,7 @@ import route_match  # noqa: E402  the one home of the route rows file's path (ho
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
+FETCH_SECONDS = 120  # the longest the CI fetch of a missing base may run (the same bound code_check uses)
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
 NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
@@ -170,8 +184,18 @@ class UnknownText(str):
     finding."""
 
 
+class UnreadText(UnknownText):
+    """An UnknownText for an input the check could not read, such as a .py that does not parse. Unlike a limit of the
+    check, it is red when env CI is set (decision ci-unknown-is-red)."""
+
+
 class BaseUnknown(Unknown):
     """The base of the range does not resolve, as in a shallow clone. Not a finding."""
+
+
+class NoBase(Unknown):
+    """The base is the first parent of a root commit (a first push): the range is empty by construction, so there is
+    nothing to check and no fetch can supply a base. Not red under CI (decision stale-cites-at-merge)."""
 
 
 def resolves(rev):
@@ -185,21 +209,17 @@ def resolves(rev):
 FIRST_PARENT_SUFFIX = re.compile(r"\A(.+?)[~^](?:0*1)?\Z")
 
 
-def cut_base(base, head):
-    """True when a base that does not resolve is a gap in the history, not a name that points at nothing: the clone is
-    shallow (its base sha is cut away), or `base` is the first parent of `head` and `head` is a root commit, which a
-    first push to the default branch reads by design. `base` is the first parent of `head` when it is a stem plus a
-    first-parent suffix (`~`, `^`, `~1`, `^1`, `~01`) and the stem names the head's own commit: `HEAD~1`, `@~1` and
-    `<sha>^` count, `<another root>^1` does not. A rev-list or rev-parse that exits non-zero is no root: the range
-    is unknown. Run only after a read failed.
-    The extra git starts are an upper bound: `a...b` four (head, base twice, shallow), `a..b` three. A base with a
-    first-parent suffix adds a `rev-list`: `a...b` five, `a..b` four. The root form `HEAD~1..HEAD` five (those three
-    plus `rev-list` and a `rev-parse` of the stem); its three-dot form six."""
-    if resolves(base):
-        return False
-    shallow = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
-    if shallow.stdout.strip() == b"true":
-        return True
+def is_shallow():
+    done = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
+    return done.stdout.strip() == b"true"
+
+
+def root_first_parent(base, head):
+    """True when `base` is the first parent of `head` and `head` is a root commit, which a first push to the default
+    branch reads by design. `base` is the first parent of `head` when it is a stem plus a first-parent suffix (`~`,
+    `^`, `~1`, `^1`, `~01`) and the stem names the head's own commit: `HEAD~1`, `@~1` and `<sha>^` count,
+    `<another root>^1` does not. A rev-list or rev-parse that exits non-zero is no root: the range is unknown. In a
+    shallow clone a cut-away parent also looks like a root, so callers ask only after `is_shallow` is false."""
     suffixed = FIRST_PARENT_SUFFIX.match(base)
     if not suffixed:
         return False
@@ -210,6 +230,48 @@ def cut_base(base, head):
     stem = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", suffixed.group(1) + "^{commit}"],
                          capture_output=True)
     return stem.returncode == 0 and stem.stdout.split() == shas  # the stem must be the head's own commit
+
+
+def cut_base(base, head):
+    """True when a base that does not resolve is a gap in the history, not a name that points at nothing: the clone is
+    shallow (its base sha is cut away), or `base` is the first parent of `head` and `head` is a root commit
+    (`root_first_parent`). Run only after a read failed.
+    The extra git starts are an upper bound: `a...b` four (head, base twice, shallow), `a..b` three. A base with a
+    first-parent suffix adds a `rev-list`: `a...b` five, `a..b` four. The root form `HEAD~1..HEAD` five (those three
+    plus `rev-list` and a `rev-parse` of the stem); its three-dot form six."""
+    if resolves(base):
+        return False
+    return is_shallow() or root_first_parent(base, head)
+
+
+def fetch_history(base, failure, head=None):
+    """Under env CI only: one fetch that completes a shallow history (lint/git_fetch.py, the one home code_check also
+    uses; decision ci-unknown-is-red). Returns None when the fetch ran and the read should be tried once more, else the
+    Unknown to raise: `failure` unchanged with CI unset (the local rule: unknown, exit 0), or `failure` with the
+    fetch's own failure and the base's sha appended. A base the first fetch left out is asked for by its sha. A base
+    that is the first parent of a root `head` (a first push) in a full clone is no gap a fetch can close: it returns
+    NoBase with no fetch. A shallow clone fetches first, since its head only looks like a root until it is unshallowed."""
+    if not os.environ.get("CI"):
+        return failure
+    if head and not resolves(base) and not is_shallow() and root_first_parent(base, head):
+        return NoBase("the base %s is the first parent of the root commit %s" % (base, head))
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import git_fetch
+    except ImportError:
+        return Unknown("%s; lint/git_fetch.py is not in this copy of the check, so the base %s was not fetched"
+                       % (failure, base))
+    top = os.getcwd()
+    ok, message = git_fetch.fetch(top, unshallow=git_fetch.is_shallow(top), timeout=FETCH_SECONDS)
+    if ok and not resolves(base) and re.fullmatch(r"[0-9a-f]{40}", base):
+        ok, message = git_fetch.fetch(top, [base], timeout=FETCH_SECONDS)
+    if ok:
+        if head and not resolves(base) and not is_shallow() and root_first_parent(base, head):
+            return NoBase("the base %s is the first parent of the root commit %s" % (base, head))
+        return None
+    sha = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", base + "^{commit}"], capture_output=True)
+    named = sha.stdout.decode().strip() or base
+    return Unknown("%s; the fetch of the base %s failed: %s" % (failure, named, message))
 
 
 def history_gap(base, head):
@@ -295,13 +357,22 @@ def parse_range(text):
     """(diff arguments, base spec, head spec). A three-dot range reads base blobs at the merge base."""
     if "..." in text:
         left, right = text.split("...", 1)
-        try:
-            base = git("merge-base", left, right).decode().strip()
-        except Unknown as exc:
-            if resolves(right) and history_gap(left, right):
-                raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone or an orphan base
-            raise
-        return [text], base, right
+        failure = None
+        for attempt in (0, 1):
+            try:
+                return [text], git("merge-base", left, right).decode().strip(), right
+            except Unknown as exc:
+                failure = exc
+            if attempt == 0:
+                failure = fetch_history(left, failure, right)
+                if failure is None:
+                    continue
+            break
+        if isinstance(failure, NoBase):
+            raise failure
+        if resolves(right) and history_gap(left, right):
+            raise BaseUnknown(str(failure))  # the head is there and the history is not: a shallow clone or an orphan base
+        raise failure
     if ".." in text:
         left, right = text.split("..", 1)
         return [text], left, right
@@ -345,13 +416,23 @@ def read_diff(diff_args, head=None, base=None):
     """(removed, renamed, modified, added, lines) from one `git diff -M --raw -p -z -U0`: removed paths, {old: new},
     paths changed in place, added paths, and `added_markdown_lines`. The raw records come first, then one empty
     record, then the patch text. One start serves both, so the added lines cost no start of their own."""
-    try:
-        out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
-                  *diff_args).decode("utf-8", "replace")
-    except Unknown as exc:
+    failure = None
+    for attempt in (0, 1):
+        try:
+            out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
+                      *diff_args).decode("utf-8", "replace")
+            break
+        except Unknown as exc:
+            failure = exc
+        if attempt == 0:
+            failure = fetch_history(base or (diff_args[0] if diff_args else ""), failure, head)
+            if failure is None:
+                continue
+        if isinstance(failure, NoBase):
+            raise failure
         if head is None or (resolves(head) and (base is None or cut_base(base, head))):
-            raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone
-        raise
+            raise BaseUnknown(str(failure))  # the head is there and the history is not: a shallow clone
+        raise failure
     head, _, patch = out.partition("\0\0")
     tokens = head.split("\0")
     removed, renamed, modified, added = [], {}, [], []
@@ -574,6 +655,11 @@ def path_cites(line, gone, exotic):
     return hits
 
 
+class Limit(str):
+    """An unknown line that states what the check is built not to read (a cited JavaScript or shell name), not a read
+    that failed. It never turns a CI run red."""
+
+
 class Range:
     """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
 
@@ -791,12 +877,13 @@ class ValueReader:
         whole = state.rng.tree is not None  # every tracked page is read: an untouched line is read too
         messages = []
 
-        def cannot_read(why, finding):
-            """A cite this reader cannot judge: a finding on an added line, unknown on any line of a whole read."""
+        def cannot_read(why, finding, unread=False):
+            """A cite this reader cannot judge: a finding on an added line, unknown on any line of a whole read. An
+            `unread` one is a file that did not parse, red under env CI; the rest are limits of the check."""
             if added and finding:
                 messages.append(why)
             elif added or whole:
-                messages.append(UnknownText(why))
+                messages.append((UnreadText if unread else UnknownText)(why))
 
         for path, symbol, literal in value_cites(text):
             if not path.endswith(".py"):
@@ -815,7 +902,10 @@ class ValueReader:
                 continue
             head = self.value(state, "head", path, symbol)
             if head is None:  # the file does not parse, or the name holds no literal: neither can be compared
-                cannot_read("%s %s holds no literal at head, so the cite is not checked" % (path, symbol), False)
+                if tree is None:
+                    cannot_read("%s does not parse at head, so the cite of %s is not checked" % (path, symbol), False, True)
+                else:
+                    cannot_read("%s %s holds no literal at head, so the cite is not checked" % (path, symbol), False)
                 continue
             base = self.value(state, "base", path, symbol) if path in state.rng.py_files else head
             quotes_base = base not in (None, GONE) and same_value(lit, base[0])
@@ -1311,7 +1401,11 @@ def find_stale(rng):
                 if reader.code not in off:
                     for message in reader.line(state, line, claimed):
                         if getattr(reader, "unknown", False) or isinstance(message, UnknownText):
+                            # A reader that is built not to read a file (JavaScript, shell) or a value that is no literal
+                            # states a Limit; an UnreadText is a file that could not be read, red when env CI is set.
+                            unread = isinstance(message, UnreadText)
                             entry = "%s:%d: %s" % (md, number, message)
+                            entry = entry if unread else Limit(entry)
                             if entry not in rng.unknowns:  # two readers may say the same unknown
                                 rng.unknowns.append(entry)
                         else:
@@ -1575,7 +1669,16 @@ def main(argv):
         root = git("rev-parse", "--show-toplevel").decode().strip()
         os.chdir(root)
         found, unknowns, lines = scan(args.range) if args.range else (*scan_tree(args.tree), [])
+    except NoBase as exc:  # only under CI (fetch_history): a first push has no base to check, and that is clear
+        print("stale-cites: no base, %s; a first push has no earlier commit, so the range is empty. Nothing to check."
+              % exc)
+        return 0
     except BaseUnknown as exc:
+        if os.environ.get("CI"):  # the fetch in fetch_history ran or failed: a base still unread is red (decision ci-unknown-is-red)
+            print("stale-cites: UNKNOWN, the base of %s does not resolve after a fetch (%s). Check out with "
+                  "fetch-depth 0 (actions/checkout) so the range has history. Nothing was checked; red because CI "
+                  "is set." % (args.range, exc))
+            return 1
         print("stale-cites: unknown, the base of %s does not resolve (%s). Check out with fetch-depth 0 "
               "(actions/checkout) so the range has history. Nothing was checked." % (args.range, exc))
         return 0
@@ -1588,8 +1691,15 @@ def main(argv):
         print("stale-cites: unknown, %s" % text)
     for line in lines:
         print(line)
-    print("stale-cites: %s" % ("FAIL, %d finding(s)" % len(found) if found else "PASS"))
-    return 1 if found else 0
+    if found:
+        print("stale-cites: FAIL, %d finding(s)" % len(found))
+        return 1
+    unread = [text for text in unknowns if not isinstance(text, Limit)]
+    if unread and os.environ.get("CI"):  # CI exit code is a verdict: an unread file is red there
+        print("stale-cites: UNKNOWN, %d read(s) could not be made; red because CI is set" % len(unread))
+        return 1
+    print("stale-cites: PASS")
+    return 0
 
 
 if __name__ == "__main__":
