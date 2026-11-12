@@ -1155,8 +1155,9 @@ add("brief-destructive-git: a prohibition with a comma aside and a span, Never, 
     "allow", tool="Agent", prompt="Never, ever, run `git reset --hard`.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a prohibition with a comma aside and no span, Never, ever, run git reset --hard, is allowed",
     "allow", tool="Agent", prompt="Never, ever, run git reset --hard", subagent_type="builder", model="sonnet")
-# An order after a colon starts a new clause, so the prohibition before the colon does not cover it. The colon crossing is
-# the accepted limit recorded as debt brief-discard-colon-window, so this case stays red until that debt is fixed.
+# An order after a colon starts a new clause, so the prohibition before the colon does not cover it. This case pins that
+# an order after "Do not, at any time, skip it:" is denied. Debt brief-discard-colon-window (a window that crosses a
+# colon) covers the form without an aside, where "Do not skip it: run ..." passes.
 add("brief-destructive-git: colon ends a prohibition: builder brief, do not, at any time, skip it: run a reset, is denied",
     "deny", BRIEF_DESTRUCTIVE, tool="Agent", prompt="Do not, at any time, skip it: run `git reset --hard`",
     subagent_type="builder", model="sonnet")
