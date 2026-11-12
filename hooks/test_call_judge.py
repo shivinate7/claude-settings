@@ -52,8 +52,11 @@ Interface the hook must match:
   set or update whose data has non-empty `options`, and never otherwise, never on AskUserQuestion or Agent. question_form.WIDENS_KEY
   is the one home of the mark's key, "widens", and WIDENING_RULE contains it. The cases read both with load_file_module, never a
   copy, and a missing name fails its checks with a named cause, never a crash.
-- settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
-  above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
+- settings.json: one command hook on `Agent|AskUserQuestion` and every ArtifactData family name (shared_names
+  ARTIFACT_DATA_TOOLS, the Mac db tools included) runs call_judge.py with a timeout above the longest model call
+  (60 s). No `prompt` or `agent` hook is left on any of those tools.
+- A Mac claude-artifacts db call (ARTIFACT_DATA_TOOLS, not `ArtifactData`) is judged as the ArtifactData batch of the
+  same write: one model call, the same prompt, the same refusal. A Mac db_get makes no call.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
   records and the `roadmap` step rulings that question_form.past_rulings finds, and an eighth item that refuses a
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
@@ -75,6 +78,8 @@ REPO = os.path.dirname(HERE)
 HOOK = os.environ.get("CALL_JUDGE_UNDER_TEST") or os.path.join(HERE, "call_judge.py")
 GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings.json")
+# The artifact family names come from shared_names, read at test time. SHARED_NAMES_UNDER_TEST points at a stand-in list.
+SHARED_NAMES = os.environ.get("SHARED_NAMES_UNDER_TEST") or os.path.join(HERE, "shared_names.py")
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
@@ -1387,8 +1392,11 @@ def case_settings_row():
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
+    # The waiting-page tools are the ArtifactData family: the cloud name and each Mac db tool, read from shared_names.
+    data = tuple(getattr(load_file_module(SHARED_NAMES, "shared_names_under_test"), "ARTIFACT_DATA_TOOLS", ()) or ())
+    check("settings: its matcher is Agent, AskUserQuestion and every ArtifactData family name",
+          bool(data) and matcher == {"Agent", "AskUserQuestion"} | set(data),
+          "matcher %r, family %r" % (entry.get("matcher"), data))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
@@ -1687,6 +1695,46 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ the Mac page tools (claude-artifacts)
+#
+# A Mac db call names its tool, not ArtifactData, and carries its waiting-page url in tool_input, as ArtifactData does. Its
+# write is judged as the ArtifactData batch of the same write is: canonical_artifact_call maps it (hooks/shared_names.py).
+MAC_WRITE = "mcp__claude-artifacts__db_write"
+MAC_GET = "mcp__claude-artifacts__db_get"
+
+
+def mac_input(tool, tool_input, session=SID_A, cwd=PAGE_REPO):
+    """One Mac claude-artifacts call, as the harness sends it: its own tool name, and the payload's cwd set to the fixture repo."""
+    return json.dumps({"session_id": session, "tool_name": tool, "tool_input": tool_input, "cwd": cwd})
+
+
+def case_mac_db_get_is_not_judged():
+    r = run_hook(mac_input(MAC_GET, {"url": PAGE_URL, "path": "items/p1"}))
+    check("mac db_get: a read is not a judged write: no model call, no output, exit 0",
+          r.code == 0 and r.calls == [] and r.out == "", detail(r))
+
+
+def case_mac_db_write_item_reaches_the_review_as_artifactdata_does():
+    item = good_page_item()
+    mac = run_hook(mac_input(MAC_WRITE, {"url": PAGE_URL, "ops": [{"op": "set", "path": "items/p1", "data": item}]}))
+    twin = run_hook(page_batch_input([{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": item}]))
+    check("mac db_write set: one model call on claude-opus, as the ArtifactData batch of the same write makes",
+          len(mac.calls) == 1 and len(twin.calls) == 1 and model_of(mac.calls[0]["argv"]) == QUESTION_MODEL, detail(mac))
+    check("mac db_write set: the review prompt is the ArtifactData prompt for the same write",
+          len(mac.calls) == 1 and len(twin.calls) == 1 and mac.calls[0]["prompt"] == twin.calls[0]["prompt"], detail(mac))
+
+
+def case_mac_db_write_refusal_matches_artifactdata():
+    item = good_page_item()
+    mac = run_hook(mac_input(MAC_WRITE, {"url": PAGE_URL, "ops": [{"op": "set", "path": "items/p1", "data": item}]}),
+                   answer=PAGE_FLAG)
+    twin = run_hook(page_batch_input([{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": item}]),
+                    answer=PAGE_FLAG)
+    check("mac db_write set: a review refusal is denied with the reason the ArtifactData write gets",
+          twin.deny() is not None and mac.deny() is not None and mac.reason() == twin.reason(),
+          (detail(mac), detail(twin)))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1712,7 +1760,9 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged,
+                 case_mac_db_get_is_not_judged, case_mac_db_write_item_reaches_the_review_as_artifactdata_does,
+                 case_mac_db_write_refusal_matches_artifactdata):
         try:
             case()
         except Exception as exc:
