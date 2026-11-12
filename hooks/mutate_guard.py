@@ -1233,7 +1233,7 @@ MUTATIONS = [
      '            refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)', "guard", 'cap: the config settings stay denied, never asked'),
     ("cap: the shell route runs ahead of the frozen-path deny, so a heredoc onto the config "
      "settings asks instead",
-     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)\n'
+     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen, read_forms=True)\n'
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)',
      '    matched = shell_write_hit(raw, cwd, is_settings_file)\n'
@@ -1242,7 +1242,7 @@ MUTATIONS = [
      '        if change:\n'
      '            refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, matched),\n'
      '                   matched + " " + change)\n'
-     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)\n'
+     '    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen, read_forms=True)\n'
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
     ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
