@@ -1,11 +1,11 @@
 {
   "title": "ios-ship's export-only build takes --method debugging|release-testing",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 943,
   "owner": "coordinator",
   "why": "Degen gap 5. Owner 20:25 CST Nov 9: queue each of Degen's eight claude-settings gaps as a step or debt, with its incident (via the coordinator 20:30 CST). ios-ship `testflight --export-only` hard-codes the export method `app-store-connect` (bin/ios-ship lines 213-218), so Degen cannot build a development .ipa for its cloud phone install.",
-  "note": "Owner ruling: Degen item 179 a, 2026-11-09 19:50 CST (cloud push install). Fix: add `--method debugging|release-testing`, default unchanged. Related: c47, ios-ship-install-second-home. Filed 20:27 CST Nov 9. Lane [ended:lane:-ios-ship-export-method], shared with ios-ship-install-second-home (coordinator 20:36-20:41 CST Nov 9). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-ios-ship-export-method]). Lane code-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-code-unmapped\") is idle and completed with no branch for this step.",
-  "updatedAt": "2026-11-12T13:38:03-06:00",
+  "note": "Owner ruling: Degen item 179 a, 2026-11-09 19:50 CST (cloud push install). Fix: add `--method debugging|release-testing`, default unchanged. Related: c47, ios-ship-install-second-home. Filed 20:27 CST Nov 9. Lane [ended:lane:-ios-ship-export-method], shared with ios-ship-install-second-home (coordinator 20:36-20:41 CST Nov 9). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-ios-ship-export-method]). Lane code-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-code-unmapped\") is idle and completed with no branch for this step. Closed 13:47 CST Nov 12: already on origin/main via 6581fafdb (PR #2493 merged into batch 72); bin/ios-ship takes --method debugging|release-testing. Found by triage's sizing read, checked by triage.",
+  "updatedAt": "2026-11-12T13:47:51-06:00",
   "lane": ""
 }

@@ -1,11 +1,11 @@
 {
   "title": "A relayed merge yes binds to the PR head at relay time",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 0.98,
   "owner": "coordinator",
   "why": "Coordinator, 13:55 CST Nov 7. Follows #1433.",
-  "note": "Starts after #1433 merges. Idle-lane audit (triage, 03:26 CST Nov 8): lane [ended:lane:-relayed-yes-allow] is idle; #1433 is still an open draft (head 314ac287a, round 3 PASS). Sent to the coordinator. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzw6Mmu5eviHC3vobt.md on archive/session-handoffs-2026-11-10).",
+  "note": "Starts after #1433 merges. Idle-lane audit (triage, 03:26 CST Nov 8): lane [ended:lane:-relayed-yes-allow] is idle; #1433 is still an open draft (head 314ac287a, round 3 PASS). Sent to the coordinator. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzw6Mmu5eviHC3vobt.md on archive/session-handoffs-2026-11-10). Closed 13:47 CST Nov 12: already on origin/main via 6581fafdb (PR #2493 merged into batch 72); merge/merge.py relayed_head_holds and HEAD_MOVED bind a relayed yes to the head. Found by triage's sizing read, checked by triage.",
   "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-12T13:47:51-06:00"
 }
