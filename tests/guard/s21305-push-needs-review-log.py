@@ -197,6 +197,11 @@ PFR_NEXT_PUSH = VCS + " push origin HEAD:" + PFR_NEXT_BRANCH
 PFR_FIX_PASS_RECORD = pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "PASS"), n=PFR_FIX_PR)
 PFR_FIX_FAIL_RECORD = pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"), n=PFR_FIX_PR)
 PFR_ROUND_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PASS")], n=PFR_FIX_PR)
+# A system line that names an Agent, with a message that holds no content: the key missing, null, or a plain string.
+PFR_STRAY_NO_CONTENT = json.dumps({"type": "system", "tool": "Agent", "message": {"role": "system"}})
+PFR_STRAY_NULL = json.dumps({"type": "system", "tool": "Agent", "message": None})
+PFR_STRAY_STRING = json.dumps({"type": "system", "tool": "Agent", "message": "Agent note"})
+
 
 def pfr_fix_after_round1(report_head):
     """A first-review FAIL, reviewed and recorded at head A. Then a fix check PASS whose report names `report_head`, and the fix
@@ -418,6 +423,14 @@ PFR_LINES = {
     "fix-pass-then-round2-fail": pfr_pr_open("toolu_pr1", PFR_FIX_PR, PFR_FIX_BRANCH)
                                  + pfr_post("toolu_c1", PFR_FIX_PASS_RECORD, n=PFR_FIX_PR)
                                  + pfr_call("toolu_rev2", pfr_report(pfr_verdict("FAIL", 2), PFR_FINDING)),
+    # A round 1 FAIL, then a stray line with no message content. The reader must step over it and keep the FAIL.
+    "stray-no-content": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + [PFR_STRAY_NO_CONTENT],
+    "stray-null": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + [PFR_STRAY_NULL],
+    "stray-string": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + [PFR_STRAY_STRING],
+    # The control: the same stray line, then the record posted at the reviewed head, head A.
+    "stray-no-content-record-head-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+        pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING)) + [PFR_STRAY_NO_CONTENT]
+        + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=PFR_HEAD_A)),
     "empty": [],
 }
 # An agent's own file, `<session>/subagents/agent-<id>.jsonl`, keyed by the session name it sits under.
@@ -819,5 +832,14 @@ pfr_ask("a fix check FAIL unrecorded, then a fix check PASS with its record post
            pfr_path("fix-fail-then-fix-pass"))
 pfr_allow("a fix check FAIL recorded, then a fix check PASS recorded, then a push to another branch", PFR_NEXT_PUSH,
           pfr_path("fix-fail-record-then-fix-pass"))
+
+# A stray line with no message content, after the round 1 FAIL: the reader steps over it, so the FAIL stays unrecorded.
+pfr_ask("a round 1 FAIL, then a system line whose message has no content key, then the push", PFR_PUSH,
+        pfr_path("stray-no-content"))
+pfr_ask("a round 1 FAIL, then a system line whose message is null, then the push", PFR_PUSH, pfr_path("stray-null"))
+pfr_ask("a round 1 FAIL, then a system line whose message is a plain string, then the push", PFR_PUSH,
+        pfr_path("stray-string"))
+pfr_allow("a round 1 FAIL at head A, then a system line with no message content, then the FAIL record at head A, "
+          "then the push", PFR_PUSH, pfr_path("stray-no-content-record-head-a"))
 
 LOG_CHECKS_EXTRA.append((PFR_COST_LABEL, pfr_held_cost_case))
