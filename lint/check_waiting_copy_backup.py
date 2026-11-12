@@ -12,8 +12,8 @@ account moves, so a tool that reads its content as a source treats a stale backu
           values and helper parameters, export_page.py's reading functions imported included. A read of
           lint/layout.json is no read of the copy. In export_page.py every function that reads a path, itself
           or through a helper, is a reader unless it is a function of the recovery, merge or export modes
-          (EXPORT_MODES). JavaScript and shell are read by one scanner, line by line: a read word (cat, head, jq,
-          readFileSync, git show, ...) on a line that names the copy, or a variable assigned from it.
+          (EXPORT_MODES). JavaScript and shell are read by one scanner, statement by statement: a read word (cat,
+          head, jq, readFileSync, git show, ...) in a statement that names the copy, or a variable assigned from it.
   prose   the copy's three prose homes each say, in one sentence, that the copy is a backup.
 
     python3 lint/check_waiting_copy_backup.py [--root DIR]
@@ -73,8 +73,12 @@ EXPORT_MODES = {
     "merge": ("live_docs", "merged_design", "merge"),
 }
 EXPORT_FUNCTIONS = frozenset(name for names in EXPORT_MODES.values() for name in names)
-# export_page.py's command line front: it hands argv to the mode functions above, so only those calls are not reads.
-EXPORT_FRONT = frozenset(("<module>", "main"))
+# export_page.py's command line front, and the calls each part may make that are not reads: it hands argv to the
+# entry function of a mode, and that function reads.
+EXPORT_FRONT = {
+    "<module>": ("main",),
+    "main": ("check_only", "export_all", "export", "merge", "rebuild"),
+}
 
 NAME_AFTER_SLASH = re.compile(r"(?<![\w-])%s(?![\w-])" % re.escape(COPY_KIND))
 NAME_IN_PATH = re.compile(r"(?<![\w.-])(?:%s|%s)/|:(?:%s|%s)(?![\w-])"
@@ -344,7 +348,7 @@ class Analysis:
     def any_reads(self, unit):
         """The lines of `unit` that read any path, itself or through a helper. The command line front's calls of the
         mode functions are not reads."""
-        skip = EXPORT_FUNCTIONS | EXPORT_FRONT if unit.name in EXPORT_FRONT else frozenset()
+        skip = EXPORT_FRONT.get(unit.qual, ())
         return {c.lineno for c in unit.calls
                 if is_path_read(c) or (call_name(c) not in skip and self.opened_positions(c))}
 
@@ -411,18 +415,31 @@ def blank_code(text, shell):
 ASSIGN = re.compile(r"(?<![\w$.])([A-Za-z_$][\w$]*)\s*=(?![=>])")  # `name=` in shell, `name =` in JavaScript
 
 
+def statements(code, shell):
+    """[(first line, [lines])]: the code lines grouped into statements. A shell line that ends in `\\` and a
+    JavaScript line inside open ( or [ go on to the next, so a wrapped call is one statement."""
+    groups, depth = [], 0
+    for number, c in enumerate(code, 1):
+        if groups and (depth > 0 or (shell and code[number - 2].rstrip().endswith("\\"))):
+            groups[-1][1].append(number)
+        else:
+            groups.append((number, [number]))
+        if not shell:
+            depth = max(0, depth + c.count("(") + c.count("[") - c.count(")") - c.count("]"))
+    return groups
+
+
 def line_readers(text, shell):
-    """[line] of the first read in a JavaScript or shell file of the copy: a read word on a line that names the copy,
-    or names a variable assigned from it."""
+    """[line] of the first read in a JavaScript or shell file of the copy: a read word in a statement that names the
+    copy, or names a variable assigned from it."""
     code, strings = blank_code(text, shell)
-    texts = {}
-    for number, body in strings:
-        texts.setdefault(number, []).append(body)
+    groups = [(first, " ".join(code[n - 1] for n in lines), set(lines)) for first, lines in statements(code, shell)]
+    texts = {first: [s for n, s in strings if n in lines] for first, _, lines in groups}
     layout_lines = {n for n, s in strings if s.endswith(LAYOUT_FILE)}
     tainted = set()
 
-    def names(number):
-        c, bodies = code[number - 1], texts.get(number, ())
+    def names(first, c):
+        bodies = texts[first]
         if NAME_AFTER_SLASH.search(c) or NAME_IN_PATH.search(c) or any(names_copy(s) for s in bodies):
             return True
         return any(re.search(r"(?<![\w.$])%s(?![\w$])" % re.escape(v), c)
@@ -430,9 +447,9 @@ def line_readers(text, shell):
 
     while True:
         before = len(tainted)
-        for number in range(1, len(code) + 1):
-            if names(number):
-                tainted |= set(ASSIGN.findall(code[number - 1]))
+        for first, c, _ in groups:
+            if names(first, c):
+                tainted |= set(ASSIGN.findall(c))
         if len(tainted) == before:
             break
     collection = any(COLLECTION_IN_PATH.search(s) or s in COLLECTIONS for _, s in strings) or any(
@@ -440,12 +457,12 @@ def line_readers(text, shell):
     words = SHELL_READS | GIT_READS | (JS_READS - JS_PRESENCE)
     word = re.compile(r"(?<![\w-])(?:%s)(?![\w-])" % "|".join(sorted(map(re.escape, words))))
     presence = re.compile(r"\b(?:%s)\b" % "|".join(sorted(JS_PRESENCE)))
-    for number, c in enumerate(code, 1):
-        if number in layout_lines or not names(number):
+    for first, c, lines in groups:
+        if lines & layout_lines or not names(first, c):
             continue
-        git = any(s in GIT_READS or GIT_IN_STRING.search(s) for s in texts.get(number, ()))
+        git = any(s in GIT_READS or GIT_IN_STRING.search(s) for s in texts[first])
         if word.search(c) or git or (collection and presence.search(c)):
-            return [number]
+            return [first]
     return []
 
 

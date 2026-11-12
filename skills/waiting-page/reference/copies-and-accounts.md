@@ -9,7 +9,7 @@ A page that is lost or moved to another org takes its items with it. So the writ
 store (decision `waiting-page-one-store`). The filing check is the one exception that reads the copy (debt
 `filing-check-reads-copy`). Outside `export_page.py`'s recovery, merge and export modes,
 `lint/check_waiting_copy_backup.py` fails a tool under skills/, hooks/, lint/ or bin/ whose code reads the copy:
-Python it follows through names, `self` attributes, closures and helpers; JavaScript and shell line by line. A
+Python it follows through names, `self` attributes, closures and helpers; JavaScript and shell statement by statement. A
 read it cannot trace, such as a path built at run time, still passes. The copy lives on the repo's record branch, never on main. Main moves only by pull
 request. The record branch (`roadmap` by default, `~/.claude/lint/layout.py` `record_branch()`) takes a direct push.
 
