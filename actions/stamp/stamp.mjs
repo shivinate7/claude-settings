@@ -21,7 +21,9 @@
 //             (a deleted record keeps its number), and in each RETIRED list. A shallow clone or an
 //             unreadable history refuses. Then runs the config's `regenerate` command. Prints a last line `Record-claim: <ids>`,
 //             the trailer for the claim commit. Writes the tree.
-//   --check   refuse a malformed record, a duplicate id, or a cite that points at no record. On
+//   --check   refuse a malformed record, a duplicate id, or a cite that points at no record. Also (and --claim too, before it
+//             writes) refuse a cite of a pending record in a tracked text file that cite.scanGlobs does not read or
+//             cite.excludeGlobs covers, with its file, line and the entry to change. On
 //             the default branch, also refuse any pending record. Off it, refuse a
 //             record numbered on the branch and a renamed numbered record, against the base
 //             branch's tree. A removed record is allowed. A number that a `Record-claim:` commit
@@ -31,16 +33,23 @@
 // All take --config <path> (required) and --root <path> (default: cwd). --check also takes
 // --base <ref> (default: origin/$GITHUB_BASE_REF, else origin/<defaultBranch>).
 
-import { realpathSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { realpathSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, lstatSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join, resolve, posix, dirname } from "node:path";
+import { join, resolve, relative, posix, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as headingFormat from "./formats/heading.mjs";
 
 // ---------------------------------------------------------------- config
 
 export function loadConfig(path) {
+  const config = parseConfig(path);
+  // Where the repo keeps this file, so a refusal can say which file to edit. Not a config field.
+  Object.defineProperty(config, "configPath", { value: path, enumerable: false, configurable: true });
+  return config;
+}
+
+function parseConfig(path) {
   const config = JSON.parse(readFileSync(path, "utf8"));
   if (!Array.isArray(config.kinds)) {  // [] is allowed: a repo with no records
     throw new Error("config.kinds must be an array");
@@ -497,6 +506,85 @@ function nearMissCites(rel, text, config, pattern, prefixBySlug) {
   return out;
 }
 
+// ---------------------------------------------------------------- a pending cite nothing rewrites
+// --claim rewrites a pending slug's cites only in a file that cite.scanGlobs reads and
+// cite.excludeGlobs does not cover. A cite of a pending slug in any other tracked text file stays
+// `[[slug]]` after the claim, and a check elsewhere in the repo then goes red with no line that says
+// why. So --claim and --check refuse here, before anything is written, and name the file, the line
+// and the config entry to change. A cite inside a code span or a fence is an example of the syntax,
+// not a cite (the same reading as the dangling-cite check), so a file that only teaches the syntax
+// stays silent. A file git does not track, a symlink, a binary file (a NUL byte) and a file over
+// UNREAD_MAX_BYTES are not read. Without git, no file is tracked and nothing is checked.
+const UNREAD_MAX_BYTES = 4 * 1024 * 1024;
+const UNREAD_LINES_SHOWN = 5;
+
+// A glob for the file's own directory and suffix, such as plugins/_shared/*.block. A file with no
+// suffix gets its exact path.
+function scanGlobFor(rel) {
+  const ext = extname(rel);
+  return ext ? `${posix.dirname(rel) === "." ? "" : posix.dirname(rel) + "/"}*${ext}` : rel;
+}
+
+function trackedFiles(root) {
+  try {
+    return gitOut(root, ["ls-files", "-z"]).toString("utf8").split("\0").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function unreadPendingCites(root, config, pattern, pendingSlugs, prefixBySlug) {
+  if (!pendingSlugs.size) return [];
+  const scanGlobs = config.cite.scanGlobs ?? ["**/*.md"];
+  const excludeGlobs = config.cite.excludeGlobs ?? [];
+  const scan = makeMatcher(scanGlobs);
+  const exclude = makeMatcher(excludeGlobs);
+  let cfgPath = config.configPath ?? ".github/stamp.json";
+  if (config.configPath) {
+    const inside = relative(root, resolve(config.configPath));
+    if (inside && !inside.startsWith("..") && !inside.includes(":")) cfgPath = inside.split("\\").join("/");
+  }
+  const out = [];
+  for (const rel of trackedFiles(root)) {
+    const scanned = scan(rel);
+    const excluded = exclude(rel);
+    if (scanned && !excluded) continue; // read by the rewrite and by the dangling-cite check
+    const abs = join(root, rel);
+    let buf;
+    try {
+      const st = lstatSync(abs);
+      if (!st.isFile() || st.size > UNREAD_MAX_BYTES) continue;
+      buf = readFileSync(abs);
+    } catch { continue; }
+    if (buf.includes(0)) continue;
+    const text = buf.toString("utf8").replace(/\r\n/g, "\n");
+    const guarded = protectedRanges(text);
+    const hits = [];
+    for (const m of text.matchAll(pattern)) {
+      if (inSpans(guarded, m.index)) continue;
+      const slug = m[config.cite.slugGroup ?? 1];
+      if (!pendingSlugs.has(slug)) continue;
+      if (config.cite.prefixGroup && m[config.cite.prefixGroup] !== prefixBySlug.get(slug)) continue;
+      hits.push({ slug, line: text.slice(0, m.index).split("\n").length });
+    }
+    if (!hits.length) continue;
+    const first = hits[0];
+    const more = hits.slice(1, UNREAD_LINES_SHOWN).map((h) => h.line);
+    const rest = hits.length - 1 > more.length ? `, and ${hits.length - 1 - more.length} more` : "";
+    const also = hits.length > 1 ? ` Also at line ${more.join(", ")}${rest}.` : "";
+    const where = `${rel}:${first.line} cites pending record "${first.slug}".${also}`;
+    const syntaxOnly = "If the text only teaches the cite syntax, put each example in a code span or a fence, which this check skips.";
+    if (excluded) {
+      const entry = excludeGlobs.find((g) => globToRegExp(g).test(rel));
+      const scanToo = scanned ? "" : ` The file is also outside cite.scanGlobs: add "${scanGlobFor(rel)}" to it.`;
+      out.push(`${where} cite.excludeGlobs entry "${entry}" covers this file, so --claim would leave the cite unrewritten. Narrow or drop that entry in ${cfgPath}, and the claim passes.${scanToo} ${syntaxOnly}`);
+    } else {
+      out.push(`${where} cite.scanGlobs does not read this file, so --claim would leave the cite unrewritten. Fix: add "${scanGlobFor(rel)}" to cite.scanGlobs in ${cfgPath}. ${syntaxOnly}`);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- structural validation, shared
 // by stamp() (which refuses to write on top of it) and --check (which adds the branch question,
 // below, to it). One implementation of "is this record file sound" for both, so they cannot
@@ -505,6 +593,7 @@ function validate(root, config) {
   const problems = [];
   const bySlug = new Map();
   const prefixBySlug = new Map();
+  const pendingSlugs = new Set();
   const byKind = new Map();
 
   for (const kind of config.kinds) {
@@ -527,6 +616,7 @@ function validate(root, config) {
         problems.push(`${rel} has an id this tool does not recognise as pending or numbered — malformed record`);
       }
       if (rec.pending) {
+        pendingSlugs.add(rec.slug);
         for (const field of kind.requireFieldsOnPending) {
           if (!rec[field]) problems.push(`${rel} has no \`${field}\`; it cannot be claimed in order`);
         }
@@ -559,6 +649,7 @@ function validate(root, config) {
       }
       problems.push(...nearMissCites(rel, text, config, pattern, prefixBySlug));
     }
+    problems.push(...unreadPendingCites(root, config, pattern, pendingSlugs, prefixBySlug));
   }
 
   return { problems, bySlug, byKind };

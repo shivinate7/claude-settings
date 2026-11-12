@@ -205,13 +205,21 @@ tree. A default applies when a field is not set.
 | `template` | required | The numbered form. It uses `{id}`, `{gloss}`, and `{title}`. |
 | `form` | not set | The cite form as a literal, with `{slug}` and `{prefix}` filled in, such as `{prefix}‹{slug}›` or `[[{slug}]]`. The near-miss check names it in its remedy. Without it, the remedy points at `pattern`. |
 | `scanGlobs` | `["**/*.md"]` | The files the rewrite and the dangling-cite check read. |
-| `excludeGlobs` | `[]` | Files that neither reads. |
+| `excludeGlobs` | `[]` | Files that neither reads. An entry wins over `scanGlobs`. |
 
 The near-miss check flags a record's prefix letter and known slug in a wrapper that is not the cite form, such as ``D`slug` ``. It skips ``` and ~~~ fences only.
 Both checks use one CommonMark fence rule. A fence has 0-3 columns of indent past the content column of its blockquote or list item, such as column 4 under `10.`. A tab counts to the next multiple of 4. A top-level line with 4 columns of indent, or a tab, is an indented code block, not a fence.
 The dangling-cite check skips frontmatter, fenced blocks, code spans, and link targets. A
 file that teaches the cite syntax in plain text needs an `excludeGlobs` entry. Find each
 entry from a refusal of `--check` on your own tree. Do not guess the list.
+
+The rewrite reads only a file that `scanGlobs` names and `excludeGlobs` does not cover. A cite of a
+pending record in any other tracked text file would survive the claim as dead text. So `--claim`
+and `--check` refuse it first, before `--claim` writes anything. The refusal names `<file>:<line>`
+and the entry to change: add the file's glob to `cite.scanGlobs`, or narrow or drop the
+`cite.excludeGlobs` entry that covers it. An example of the syntax in a code span or a fence is not a cite, so
+a file that only teaches the syntax stays silent. A file git does not track, a symlink, a binary file (a NUL byte) and a file over 4 MiB are not read. This check
+reads shapes 1 and 2 only.
 
 ### Kind fields, shape 3
 
@@ -310,7 +318,8 @@ Do each step in your own repo, from your own tree.
    tool's result on a second copy. Each difference is a field to fix, or a question for
    the owner.
 5. Run `--check` on your tree. Read each refusal. Add an `excludeGlobs` entry only for a
-   file that teaches the cite syntax.
+   file that teaches the cite syntax, and only when it cannot put each example in a code span or a fence. A refusal of
+   a pending cite in an unscanned file names the `scanGlobs` entry to add.
 6. Retire each step that claims a number on a branch, such as a claim in a merge script.
    Mode `check` refuses each number that a branch writes.
 7. Add the check job to your workflow. Pin the SHA. Run it on every pull request and on every
