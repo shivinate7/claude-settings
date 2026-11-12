@@ -23,6 +23,8 @@ Reads prose only and runs none of the skill's code. Each case pins one claim:
   15. The sentence that asks for `wakes` to be fixed names the item's `owner`.
   16. "Read the answers" reads answers by `owner` or `wakes`.
   17. The wakes field documents `null` as absent, `[]` and other shapes as unknown.
+  18. The roadmap no longer says `owner` is the session that reads the answer.
+  19. The roadmap's items bullet names `wakes`.
 """
 import os
 import re
@@ -318,6 +320,9 @@ STALE_OWNER_READS = (
 WRITER_BULLET = "Every other session sends its question to the writer"
 WATCH_BULLET = "A session watches the page first"  # the bullet whose inherit step rewrites or clears `wakes`
 FIX_WAKES = "fix `wakes`"
+ROADMAP = os.path.join(REPO, "skills", "roadmap", "SKILL.md")
+ROADMAP_ITEMS = "`items`: `ArtifactData list items`"  # the roadmap's items bullet: it copies each waiting-page row's owner
+ROADMAP_OWNER_READS = "`owner` is the session that reads the answer"  # the sentence that bullet said before `wakes`
 
 
 class WakesProse(unittest.TestCase):
@@ -385,6 +390,18 @@ class WakesProse(unittest.TestCase):
                              ("unknown", "does not say that other shapes are unknown")):
             with self.subTest(token=token):
                 self.assertIn(token, clause, "the wakes field %s" % cause)
+
+    def test_18_the_roadmap_no_longer_says_owner_is_the_session_that_reads_the_answer(self):
+        roadmap = read(ROADMAP)
+        # Scope first: the items bullet must exist, so a moved bullet is never read as a cleared sentence.
+        self.assertTrue(block_with(roadmap, ROADMAP_ITEMS), "skills/roadmap/SKILL.md has no items bullet to scan for the stale sentence")
+        self.assertFalse(flat(ROADMAP_OWNER_READS) in flat(roadmap),
+                         "skills/roadmap/SKILL.md still says `owner` is the session that reads the answer")
+
+    def test_19_the_roadmap_items_bullet_names_wakes(self):
+        bullet = block_with(read(ROADMAP), ROADMAP_ITEMS)
+        self.assertTrue(bullet, "skills/roadmap/SKILL.md has no items bullet to scan")
+        self.assertIn("`wakes`", bullet, "the roadmap items bullet does not name `wakes`")
 
 
 if __name__ == "__main__":
