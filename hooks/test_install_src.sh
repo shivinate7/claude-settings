@@ -2148,7 +2148,8 @@ cloud_startup5() {
     printf '#!/bin/sh\ncat "%s"\n' "$co/install.sh" > "$stub/curl"; chmod +x "$stub/curl"
     hk_so=$(mktemp "$work/hk-out.XXXXXX")
     ( cd "$co" && printf '%s' '{"source":"resume"}' | env -i PATH="$stub:$PATH" HOME="$h" \
-        CLAUDE_CONFIG_DIR="$h/.claude-cfg" CLAUDE_CODE_REMOTE=true sh -c "$refresh" > "$hk_so" 2>&1 ); hook_rc=$?
+        CLAUDE_CONFIG_DIR="$h/.claude-cfg" CLAUDE_CODE_REMOTE=true CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
+        sh -c "$refresh" > "$hk_so" 2>&1 ); hook_rc=$?
     hook_out=$(cat "$hk_so")
     if ! contains "$hook_out" FRESH_A; then
       bad "$name" "the refresh hook ran with source resume, and the startup|resume entry did not run (rc $hook_rc)"
@@ -4571,12 +4572,14 @@ new_home() { d=$(mktemp -d "$work/home.XXXXXX"); d=$(realpwd "$d"); default_home
 home_entries() { find "$1" -mindepth 1 ! -path "$1/.gitconfig" 2>/dev/null; }
 # One cloud install, piped as the setup script runs it: HOME $1, a cwd $2 that is no checkout, the curl
 # stub folder $3, and the ref $4 (empty means main). Arguments past the fourth are VAR=VALUE pairs for this
-# run; they come last, so they win over the defaults. Sets rc and out.
+# run; they come last, so they win over the defaults. The temp-folder skip is off (the fixtures sit under
+# $work, under /tmp) unless a VAR=VALUE argument sets it. Sets rc and out.
 cloud_install() {
   ci_home="$1"; ci_cwd="$2"; ci_bin="$3"; ci_ref="${4:-}"
   [ $# -gt 4 ] && shift 4 || shift $#
   out=$(cd "$ci_cwd" && env -i PATH="$ci_bin:$PATH" HOME="$ci_home" CLAUDE_CONFIG_DIR="$ci_home/.claude-cfg" \
         CLAUDE_SETTINGS_REF="$ci_ref" GIT_CEILING_DIRECTORIES="$ci_cwd" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         "$@" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
