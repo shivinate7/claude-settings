@@ -105,6 +105,13 @@ PR_MARK_HEAD = dict(PR_SYNTHETIC, number=2811, title="Constructed heading", body
                     headRefName="feat2811")
 PR_MARK_SEE = dict(PR_SYNTHETIC, number=2812, title="Constructed prose",
                    body="**See** " + SLUG_OUTBOX + " for the older attempt.", headRefName="feat2812")
+# Underscore emphasis: the italic wrap of a marker, the slug inside the emphasis, and italic prose.
+PR_MARK_ITALIC = dict(PR_SYNTHETIC, number=2813, title="Constructed italic marker",
+                      body="_Step: " + SLUG_OUTBOX + "_", headRefName="feat2813")
+PR_MARK_INNER = dict(PR_SYNTHETIC, number=2814, title="Constructed inner marker",
+                     body="Step: _" + SLUG_OUTBOX + "_", headRefName="feat2814")
+PR_MARK_ITALIC_SEE = dict(PR_SYNTHETIC, number=2815, title="Constructed italic prose",
+                          body="_See_ " + SLUG_OUTBOX + " for the older attempt.", headRefName="feat2815")
 
 CITE_NUM = LANE_PROMPT + "\nThe brief cites PR #2767 and holds this start."
 CITE_URL = LANE_PROMPT + "\nThe brief cites https://github.com/shivinate7/claude-settings/pull/2767."
@@ -355,6 +362,12 @@ lop_case("lane-start-open-pr: a heading `## Step <slug>` is a marker, so an unci
          lop_input(), lop_gh([PR_MARK_HEAD]), reasons=("#2811",))
 lop_case("lane-start-open-pr: `**See** <slug>` is prose, not a marker, so the start is allowed",
          lop_input(), lop_gh([PR_MARK_SEE]), want_decision="allow")
+lop_case("lane-start-open-pr: an italic marker `_Step: <slug>_` is a marker, so an uncited start is refused",
+         lop_input(), lop_gh([PR_MARK_ITALIC]), reasons=("#2813",))
+lop_case("lane-start-open-pr: a marker with the slug in underscores `Step: _<slug>_` is a marker, so it is refused",
+         lop_input(), lop_gh([PR_MARK_INNER]), reasons=("#2814",))
+lop_case("lane-start-open-pr: `_See_ <slug>` is italic prose, not a marker, so the start is allowed",
+         lop_input(), lop_gh([PR_MARK_ITALIC_SEE]), want_decision="allow")
 
 
 def lop_git_check():
