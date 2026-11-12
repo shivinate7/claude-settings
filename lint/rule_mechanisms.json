@@ -339,9 +339,8 @@
     },
     "verification-counts-from-rest": {
       "mechanism": {
-        "kind": "check",
-        "ref": "hooks/test_reply_judge.py",
-        "test": "hooks/test_reply_judge.py::case_search_total_reply_is_judged_off_sample"
+        "kind": "judgment",
+        "reason": "Model-judged by hooks/reply_judge.py, which flags a search total quoted as a count and never refuses (per reply-judge-samples-never-refuses)."
       }
     },
     "verification-report-unknown-reads": {

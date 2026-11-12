@@ -26,11 +26,14 @@ Tables: a reply that holds a Markdown table (a separator row such as |---|---|) 
 Stop too, so the model can check that a comparison table carries a gold-standard or target
 column. Code finds the table; the model decides whether it compares.
 
-Search totals: a reply that holds `total_count`, a `search/<endpoint>` path (issues, code, commits,
-repositories, users) or the word "search" within 60 characters of a digit is judged on every Stop too,
-so the model can check that a count or a state (open, closed, merged, CI status) comes from REST and
-not from a search total (rule verification-counts-from-rest). Code finds the words in the whole reply,
-before the clip; the model decides. Cost: no new process start, no new file; the match is one regex
+Search totals: a reply that holds `total_count`, any `search/<endpoint>` path, or a search word
+(search, searched, searches, searching, as in --search) within 60 characters of a count word (a digit,
+none, zero, no), in either order, is judged on every Stop too, so the model can check that a count or
+a state (open, closed, merged, CI status) comes from REST and not from a search total (rule
+verification-counts-from-rest). Code finds the words in the whole reply, before the clip; the model
+decides. The trigger is a code match: it cannot see a count worded with no digit or count word, and a
+quote past the 12000-character clip may be dropped from the prompt. The prompt tells the model not to
+flag a count read from REST. Cost: no new process start, no new file; the match is one regex
 over the reply and runs before the model module loads, and only a Stop that holds the trigger words
 reaches the model beyond the one-in-five sample.
 
@@ -75,8 +78,11 @@ TAIL = re.compile(r"^\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*")
 EMPTY_ITEM = re.compile(r"^[\W_]*(none|n/a|nothing)?[\W_]*$", re.I)
 TABLE_SEPARATOR = re.compile(r"^[\s>]*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", re.M)
 BLOCKED_ON = re.compile(r"\bblocked\s+on\b", re.I)
-SEARCH_TOTAL = re.compile(r"total_count|search/(?:issues|code|commits|repositories|users)\b"
-                          r"|\bsearch\b.{0,60}\d|\d.{0,60}\bsearch\b", re.I | re.S)
+SEARCH_WORD = r"\bsearch(?:ed|es|ing)?\b"
+COUNT_WORD = r"(?:\d|\b(?:none|zero|no)\b)"  # a digit, or a word that says there is no count
+SEARCH_TOTAL = re.compile(r"total_count|\bsearch/\w"
+                          r"|" + SEARCH_WORD + r".{0,60}" + COUNT_WORD
+                          + r"|" + COUNT_WORD + r".{0,60}" + SEARCH_WORD, re.I | re.S)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
@@ -141,12 +147,14 @@ INSTRUCTIONS = (
     + WIDENS_LABEL_SENTENCE +
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
-    "verification-counts-from-rest: flag a reply that quotes a GitHub search total, such as total_count or a search result count, "
-    "as a count; "
+    "verification-counts-from-rest: flag a reply that names a search's total, such as total_count or a search result total, "
+    "quoted as a count; "
     "also flag a search total quoted as a state, open, closed, merged or CI status; "
+    "never flag a search that only finds candidates; "
     "the fix is to read the count or state from REST and confirm each candidate with REST. "
     "Never flag a count read from REST. "
     "Never flag a search used only to find candidates that REST then confirms. "
+    "Never flag a reply that says a search total was not used or is wrong, and gives the REST count. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
