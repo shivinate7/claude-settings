@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The batch 101 prose judge (39e378f15) flagged docs/debts/guard-split-f821-lint-gap.md:5, docs/debts/mcp-merge-no-repo-tag.md:9, and docs/debts/notes.md lines 225, 1797, 1926, 1985, 2178, 2180, 2185 and 2186 as unbacked.",
  "source": "coordinator 07:16 CST Nov 12",
- "note": "For lane notes-keep-reverify, to start after the current prose batch merges (coordinator). Batch 102 merged (2a7521db9, 08:04 CST Nov 12): starts now on lane notes-keep-reverify (coordinator).",
- "updatedAt": "2026-11-12T08:04:00-06:00"
+ "note": "For lane notes-keep-reverify, to start after the current prose batch merges (coordinator). Batch 102 merged (2a7521db9, 08:04 CST Nov 12): starts now on lane notes-keep-reverify (coordinator). PR #2743 (notes-dedup) backs or cuts these lines; handed to batch runner 10 (08:42 CST Nov 12). Close when it merges.",
+ "updatedAt": "$T"
 }
