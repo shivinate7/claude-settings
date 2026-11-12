@@ -51,6 +51,8 @@ its own record (`git-one-record-per-question`).
 The ste-lint CI step refuses a pull request that leaves stale prose (`lint/stale_cites.py`).
 STALE001 fires on a tracked Markdown line that names a file the same pull request deleted or renamed.
 STALE002 fires on a line that cites a Python file and a name the pull request removed from that file.
+STALE007 fires on a code span that cites a script and a `--flag` the pull request removed from that script.
+
 ## Proof
 
 Proof (`verification-trust-guard-after-red`): break the target on a scratch copy, watch the
