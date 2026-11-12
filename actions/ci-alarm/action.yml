@@ -8,16 +8,19 @@ description: >
   top-level `&&` conjunct `github.event_name == 'X'` for another event than the green run's (`all-jobs-passed` and `ci-done` run on
   pull_request only), so a newer green push run clears a red nightly. Cost: per clear candidate one read of the workflow file at the green
   run's head (contents API, once), besides the jobs reads; the step needs python3 and runs `clear_rule.py` from the action path.
-  A job cancelled at its own job-level `timeout-minutes` raises the alarm, in a cancelled run and in a failure run (the job ran at
-  least the cap, the cap read from the workflow file at the run's head; a job with no job-level cap has GitHub's default, 360
-  minutes). The issue line names the job, the cap, the minutes and the run id and reads "cap end", not "red". The merge gate leaves a
-  run with no red job and a job timed out at a job-level cap it finds in its checkout out of red and out of unknown, and reads UNKNOWN
-  for a cancelled job with no job-level cap or a cap it does not find; the alarm is the signal. A job cancelled under its cap stays quiet; an unreadable cap, a null `started_at` or a
-  cancelled run with no jobs is "unknown". A cap end in an earlier attempt of a run whose newest attempt succeeded is named in the
-  log ("cap end named", with job, cap, minutes and run id) and opens no issue. Cost of that check: one jobs read per judged run
-  (failed or cancelled), the workflow read only when a job was cancelled, plus the workflows-list read, and one jobs read per
-  earlier attempt of a succeeded re-run; no long-lived process starts (short jq, awk and gh processes run), and the only files
-  written are temp cache files that the step removes before it ends.
+  A job cancelled at its own job-level `timeout-minutes` (a cap end) raises the alarm in a failure run that no newer green run
+  clears, and in the newest cancelled run of a group, every attempt of it included. The job ran at least the cap, read from the
+  workflow file at the run's head; a job with no job-level cap has GitHub's default, 360 minutes. The issue line names the job,
+  the cap, the minutes and the run id, and reads "cap end", not "red". A failure run that the merge tool calls clear opens no
+  issue, a cap end in it included. A job cancelled under its cap stays quiet. An unreadable cap, a null `started_at`, or a
+  cancelled run or one of its earlier attempts with no jobs is "unknown". The merge gate leaves a run with no red job and a job
+  timed out at a job-level cap it finds out of red and out of unknown; the alarm is the signal. A group whose newest run is a
+  re-run still going (attempt above 1) is "unknown" and opens no issue; a first attempt still going is skipped. A cap end in an
+  earlier attempt of a run whose newest attempt succeeded is named in the log ("cap end named") and opens no issue.
+  Cost: one runs read and the workflows-list read. Per judged run (failed or cancelled, the newest of its group) one jobs read,
+  and one contents read of its workflow file when a job of it was cancelled. A cancelled or succeeded re-run adds one jobs read
+  per earlier attempt. No long-lived process starts (short jq, awk and gh processes run), and the only files written are
+  temp cache files that the step removes before it ends.
   Runs of other events, and of deleted workflows, are not judged. A failed read or write is "unknown", never red. Call it from a scheduled
   workflow with `permissions: {actions: read, contents: read, issues: write}` (contents: the clear reads the workflow file); it needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
 
