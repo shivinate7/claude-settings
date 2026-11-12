@@ -419,23 +419,34 @@ OV_GRANTS = [
      timedelta(hours=72)),
     ("`OVERRIDE 2H`: keyword and unit ignore case", "OVERRIDE 2H", "timed", timedelta(hours=2)),
     ("`override 2h` is a 2-hour override", "override 2h", "timed", timedelta(hours=2)),
-    # The last non-blank line, alone on its line, is the override. A block of other text above it is not the owner's
-    # words, and its shape does not matter.
+    # The last non-blank line, alone on its line, is the override. A machine block of other text above it is not the
+    # owner's words, and its shape does not matter: each block here is one the app writes (MACHINE_TAGS).
     ("a status block, a blank line, then `override 12h` on the last line",
-     "Linked sessions now\n- a: idle\n- b: working\n\noverride 12h", "timed", timedelta(hours=12)),
-    ("a tag-shaped block, a blank line, then `override 12h` on the last line",
-     "<linked-sessions>\nx\n</linked-sessions>\n\noverride 12h", "timed", timedelta(hours=12)),
+     "<system-reminder>\nLinked sessions now\n- a: idle\n- b: working\n</system-reminder>\n\noverride 12h",
+     "timed", timedelta(hours=12)),
+    ("a task-notification block, a blank line, then `override 12h` on the last line",
+     "<task-notification>\nagent done\n</task-notification>\n\noverride 12h", "timed", timedelta(hours=12)),
     ("the app's real shape: a system-reminder block of linked sessions, then `override 12h` on the last line",
      "<system-reminder>\nLinked sessions now\n- session a: idle\n- session b: working\n</system-reminder>\n\n"
      "override 12h", "timed", timedelta(hours=12)),
     ("trailing blank lines and spaces after the `override 12h` line",
      "Linked sessions now\n- a: idle\n\noverride 12h\n\n   \n", "timed", timedelta(hours=12)),
-    ("a block, a blank line, then `override 15m` on the last line",
-     "Linked sessions now\n- a: idle\n\noverride 15m", "timed", timedelta(minutes=15)),
-    ("a block, a blank line, then bare `override` on the last line",
-     "Linked sessions now\n- a: idle\n\noverride", "once", timedelta(minutes=10)),
+    ("a status block, a blank line, then `override 15m` on the last line",
+     "<system-reminder>\nLinked sessions now\n- a: idle\n</system-reminder>\n\noverride 15m",
+     "timed", timedelta(minutes=15)),
+    ("a status block, a blank line, then bare `override` on the last line",
+     "<system-reminder>\nLinked sessions now\n- a: idle\n</system-reminder>\n\noverride", "once",
+     timedelta(minutes=10)),
     ("a pasted block, a blank line, then `override 12h` on the last line",
      "<pasted_content>\nreport\n</pasted_content>\n\noverride 12h", "timed", timedelta(hours=12)),
+    # An unclosed machine block runs to the end of the prompt, and the form on its last line still grants.
+    ("an unclosed system-reminder of linked sessions, then `override 12h` on the last line",
+     "<system-reminder>\nLinked sessions now\n- session a: idle\n\noverride 12h", "timed", timedelta(hours=12)),
+    ("an unclosed task-notification, then `override 15m` on the last line",
+     "<task-notification>\nagent done\n\noverride 15m", "timed", timedelta(minutes=15)),
+    # A closed code fence is no span around the form: the form outside it grants.
+    ("a closed code fence, a blank line, then `override 15m` on the last line",
+     "```\nx = 1\n```\n\noverride 15m", "timed", timedelta(minutes=15)),
 ]
 
 
@@ -608,6 +619,7 @@ OV_LAST_LINE_NO_GRANT = [
     ("a closed block, then a trailing period after the length", LAST_LINE_BLOCK + "override 12h."),
     ("a closed block, then the Opus word and a length with a trailing word", LAST_LINE_BLOCK + "override opus 2h please"),
     ("a closed block, then the word with a line of other text after it", LAST_LINE_BLOCK + "override\nthen do X"),
+    ("an unclosed code fence before the form on the last line", "Notes for the lane:\n```\nx = 1\n\noverride 15m"),
 ]
 
 
@@ -630,14 +642,65 @@ def case_override_off_on_the_last_line():
           "before %r, after %r, files %r" % (before, ov_pass(cfg), ov_pass_files(cfg)))
 
 
-def case_override_last_line_opus_judge_approved_writes_nothing():
-    # The judge approves the prompt, so only the last-line rule can keep an Opus override from being written.
+def case_override_last_line_opus_after_a_notice_asks_no_judge_and_writes_nothing():
+    # A prompt that starts with a notice block is refused before the Opus judge (the notice-start gate). The judge
+    # would answer yes, but it is never asked, so the `opus 2h` on the last line writes no Opus override.
     cfg, calls, _, _ = opus_type(LAST_LINE_BLOCK + "opus 2h", answer={"ok": True})
-    got = opus_override(cfg)
     took = take_spawn(cfg, "reviewer")
-    check("override: a closed block, then `opus 2h` on the last line writes no Opus override, judge approved",
-          got is None and not lifted(took) and not ov_pass_files(cfg),
-          "judge calls %d; got %r; files %r; reviewer spawn %r" % (len(calls), got, ov_files(cfg), took))
+    refusal_checks("a closed block, then `opus 2h` on the last line", calls, cfg)
+    check("override: a closed block, then `opus 2h` on the last line lifts no reviewer spawn",
+          not lifted(took), "reviewer spawn %r" % (took,))
+
+
+def last_line_refused(name, prompt, **kwargs):
+    """The form `override 15m` on the last line of `prompt` grants nothing, and no model is asked. The override judge
+    answers yes, so a gate that fails writes a file. The judge is checked first: the gate refuses before any model call,
+    and the file is the effect."""
+    cfg, judge, _, _, err = ask_type(prompt, answer=True, **kwargs)
+    check("override: %s: the judge is never asked" % name, len(judge.texts) == 0,
+          "judge calls %d; stderr %r" % (len(judge.texts), err.strip()[-120:]))
+    check("override: %s: grants nothing" % name, not ov_pass_files(cfg), "files %r" % ov_files(cfg))
+
+
+def case_override_last_line_refuses_a_fired_seed_or_foreign_body():
+    # The last-line route obeys the plain ask's gates: a fired task's body, a cloud session's seed brief (no earlier
+    # owner turn) and a payload source outside OPUS_ASK_SOURCES grant nothing, even with the form alone on the last line.
+    last_line_refused("a fired task's stored body, its form on the last line",
+                      fired_reminder_prompt("Check the nightly build and report.") + "\n\noverride 15m")
+    seed = "Brief for the lane: fix the parser.\n\noverride 15m"
+    short = transcript_file([owner_turn(seed)])
+    fixture_checks("a cloud seed brief in a short transcript", short, 1, False)
+    last_line_refused("a cloud session's seed brief in a short transcript, its form on the last line", seed,
+                      transcript=short, remote=CLOUD_SESSION)
+    full = full_size_transcript(assistant_turn("reading the brief"), owner_turn(seed))
+    fixture_checks("a cloud seed brief in a full-size transcript", full, FULL_SIZE_FILLER + 2, True)
+    last_line_refused("a cloud session's seed brief in a full-size transcript, its form on the last line", seed,
+                      transcript=full, remote=CLOUD_SESSION)
+    for source in SOURCE_REFUSED + ("mystery",):
+        last_line_refused("payload source %r, its form on the last line" % source,
+                          "Brief for the lane: fix the parser.\n\noverride 15m", extra={"source": source})
+
+
+def last_line_grants(name, prompt, **kwargs):
+    """The form `override 15m` on the last line of `prompt` grants a 15-minute override by the last-line route alone. The
+    override judge answers no and must never be asked, so a grant that the plain ask gave would fail the first check."""
+    cfg, judge, _, _, err = ask_type(prompt, answer=False, **kwargs)
+    check("override: %s: the judge is never asked" % name, len(judge.texts) == 0,
+          "judge calls %d; stderr %r" % (len(judge.texts), err.strip()[-120:]))
+    check("override: %s: the form on the last line grants a 15-minute override" % name,
+          ends_after(ov_pass(cfg), "timed", timedelta(minutes=15)),
+          "got %r; files %r" % (ov_pass(cfg), ov_pass_files(cfg)))
+
+
+def case_override_last_line_still_grants_once_the_gates_allow_it():
+    # The control beside the refusals: the same form on the last line grants when the gates allow it. A cloud session
+    # with one earlier owner turn, and payload source "user", the owner's own prompt.
+    seed = "Brief for the lane: fix the parser.\n\noverride 15m"
+    path = transcript_file([owner_turn("set up the lane"), owner_turn(seed)])
+    fixture_checks("a cloud session with one earlier owner turn", path, 2, False)
+    last_line_grants("a cloud session with one earlier owner turn", seed, transcript=path, remote=CLOUD_SESSION)
+    last_line_grants("payload source 'user'", "Brief for the lane: fix the parser.\n\noverride 15m",
+                     extra={"source": "user"})
 
 
 def case_override_reason_goes_through_the_log_writer():
@@ -2671,7 +2734,9 @@ def main():
         case_override_not_the_first_word()
         case_override_last_line_no_grant()
         case_override_off_on_the_last_line()
-        case_override_last_line_opus_judge_approved_writes_nothing()
+        case_override_last_line_opus_after_a_notice_asks_no_judge_and_writes_nothing()
+        case_override_last_line_refuses_a_fired_seed_or_foreign_body()
+        case_override_last_line_still_grants_once_the_gates_allow_it()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
