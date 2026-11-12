@@ -2032,8 +2032,9 @@ const closedAt = (it) => { const t = typeof it.closed === "string" ? Date.parse(
 // A closed item stays on the page as one line while it carries a `closed` time and has not been marked read. One with no `closed` time was closed before lines shipped, and counts as read.
 const isClosedLine = (it) => it.status === "closed" && !isRuling(it) && closedAt(it) !== null;
 const readAt = (it) => { const t = typeof it.dismissed === "string" ? Date.parse(it.dismissed) : NaN; return isNaN(t) ? null : t; };
-// Read: the owner marked it, and the writer has not replied since. A later reply brings the line back.
-const isRead = (it) => { const d = readAt(it); return d !== null && !(Date.parse(it.replied) > d); };
+// Read: the owner marked it, and nothing has come since: no later `replied`, no reply of his that waits, and no answer to a reply of his later than the mark. A later word brings the line back.
+const itemWaits = (it) => itemReps(it).some((r) => !askReply(r));
+const isRead = (it) => { const d = readAt(it); return d !== null && !(Date.parse(it.replied) > d) && !itemReps(it).some((r) => !askReply(r) || Date.parse(r.answered) > d); };
 // An open answered item is routed once it is filed. One that waits on a run or a PR, sits on a lane, or has no filing yet keeps its card.
 const routedOpen = (it) => !isRuling(it) && isSunk(it) && isSaved(it) && !waitsOf(it) && !laneOf(it) && !!rcOf(it).filed;
 const isLine = (it) => (it.status === "closed" ? isClosedLine(it) : routedOpen(it));
@@ -2042,12 +2043,23 @@ const itemAway = (it) => isLine(it) && !!state.hidItems && state.hidItems.has(it
 // Out of the Answered count and the rail: a line drawn as "Marked read." A read item drawn as a card (taken to Change, on a lane, or with waits) counts where it is drawn.
 const itemDropped = (it) => isLine(it) && markView(state.mark[it.id], isRead(it), false).dropped;
 const itemName = (it) => "No. " + it.n + ", " + shortOf(it);
-const markItem = (it, to) => writeRead("items", it.id, to, state.mark, { read: (x) => "idis-" + x, undo: (x) => "ires-" + x, row: () => "line-" + it.n }, () => {}, render);
+const markItem = (it, to) => (to && itemWaits(it)) ? undefined : writeRead("items", it.id, to, state.mark, { read: (x) => "idis-" + x, undo: (x) => "ires-" + x, row: () => "line-" + it.n }, () => {}, render);
 const itemPress = (it, undo, quiet) => {
   const g = state.mark[it.id], busy = !!g && g.state === "busy" && g.kind === (undo ? "restore" : "dismiss");
   return undo ? markPress(quiet ? "quiet restore" : "alt restore", "ires-" + it.id, itemName(it), "Mark unread", busy, "Unmarking…", () => markItem(it, null))
     : markPress("quiet dismiss", "idis-" + it.id, itemName(it), "Mark read", busy, "Marking…", () => markItem(it, new Date().toISOString()));
 };
+// The line's Mark read, or Mark unread in the read list. While a reply of his waits, Mark read is off with its reason beside it: a read line would hide the waiting reply.
+// folded: the folded row has no Mark read then, only the waiting reply under the row (itemFolded).
+function lineSide(it, dl, folded) {
+  if (dl && isRead(it)) return [itemPress(it, true, true)];
+  const b = itemPress(it, false);
+  if (!itemWaits(it)) return [b];
+  if (folded) return [];
+  const k = itemKey(it);
+  b.setAttribute("aria-disabled", "true"); b.setAttribute("aria-describedby", "dw-" + k);
+  return [b, h("span", { class: "dwhy", id: "dw-" + k }, ASK_DIS_OFF)];
+}
 // The words of the line's second row: the short reply, else where it went.
 function lineReply(it) {
   const rp = replyOf(it), rc = it.status === "closed" ? {} : rcOf(it);
@@ -2067,21 +2079,26 @@ function lineEl(it, dl) {
   const k = it.id, n = it.n, g = state.mark[k], mv = markView(g, isRead(it), dl);
   if (mv.dropped) return h("article", { class: "askc dropped", id: "line-" + n, tabindex: "-1" },
     h("p", { class: "sline", role: "status" }, glyph("done"), h("span", {}, h("b", {}, "Marked read."), " ", h("span", { class: "dt" }, itemName(it))), itemPress(it, true)), markRowLine(g));
-  const open = state.lineOpen[k] === true, side = dl && isRead(it) ? itemPress(it, true, true) : itemPress(it, false), mark = newReply(it) ? h("span", { class: "newmark" }, "New reply") : null;
+  const open = state.lineOpen[k] === true, mark = newReply(it) ? h("span", { class: "newmark" }, "New reply") : null;
   const toggle = () => { state.lineOpen[k] = !open; render(); const f = $("lrow-" + k) || $("lfold-" + k); if (f) f.focus({ preventScroll: true }); };
   if (!open) return h("article", { class: "askc folded withd rline", id: "line-" + n, "aria-labelledby": "lt-" + n },
     h("button", { class: "frow", type: "button", id: "lrow-" + k, "aria-expanded": "false", onclick: toggle }, glyph("done"),
       h("span", { class: "fhead" }, h("span", { class: "fno" }, "No. " + n), h("span", { class: "ftext", id: "lt-" + n }, shortOf(it)), mark, homeTag(it.home)),
       h("span", { class: "freply" }, lineReply(it)), h("span", { class: "fgo" }, "Show answer", h("span", { class: "sr" }, " for No. " + n))),
-    side, markRowLine(g));
+    ...lineSide(it, dl, true), ...itemFolded(it, { show: "Show answer" }), markRowLine(g));
   // Opened in place, as an open ask: the answer, the reply and where it went. An open item keeps Change on its answer line.
   const rp = replyOf(it), answer = it.status === "closed" ? (lastOf(it) ? lastAnswerEl(it) : null) : receipt(it, false);
   return h("article", { class: "askc rline ropen", id: "line-" + n, "aria-labelledby": "lt-" + n },
     h("div", { class: "ahead" }, glyph("done"), h("span", { class: "fno" }, "No. " + n), homeTag(it.home), mark,
       h("button", { class: "morebtn", type: "button", id: "lfold-" + k, "aria-expanded": "true", onclick: toggle }, "Fold")),
     h("h3", { class: "rtitle", id: "lt-" + n }, it.title),
-    h("div", { class: "thread" }, answer, rp ? h("p", { class: "lhead" }, "Reply from " + it.owner) : null, rp ? h("p", { class: "reply" }, rp) : null, h("p", { class: "filed" }, lineWhere(it))),
-    h("div", { class: "replyend" }, h("div", { class: "endrow" }, side)), markRowLine(g));
+    h("div", { class: "thread" }, answer, rp ? h("p", { class: "lhead" }, "Reply from " + it.owner) : null, rp ? h("p", { class: "reply" }, rp) : null, ...itemReps(it).flatMap((r) => askMine(r, "Reply from ")), h("p", { class: "filed" }, lineWhere(it))),
+    lineEnd(it, dl), markRowLine(g));
+}
+// The end of an opened line's thread: Reply, then Mark read, or the reply box (itemReplyEnd, askReplyEnd). Only a line with a reply has Reply.
+function lineEnd(it, dl) {
+  const k = itemKey(it), canReply = !!replyOf(it);
+  return h("div", { class: "replyend", "data-end": k }, canReply && repOf(k).open ? replyForm(k) : h("div", { class: "endrow" }, canReply ? replyBtn(k, "No. " + it.n) : null, ...lineSide(it, dl, false)));
 }
 // An open answered item draws as its line when routed, else as its card. A closed line draws as its line.
 const entryFor = (it) => (isLine(it) ? lineEl(it, false) : cardFor(it));
@@ -2473,7 +2490,7 @@ const askRaw = () => Object.entries(askState.map || {}).filter(([, a]) => a && t
   .sort((a, b) => askTime(b) - askTime(a) || (a.id < b.id ? 1 : -1));
 // An item's reply record (`item`, never `re`) shows in its item's thread while the item is on the page, and nowhere in the Asks list or its count. Before the items load, it counts as on the page.
 // Once the item is gone it is an Asks row of its own, so a reply never goes unseen.
-const itemHere = (id) => !state.loaded || state.items.some((i) => i.id === id);
+const itemHere = (id) => !state.loaded || state.items.some((i) => i.id === id) || state.lines.some((i) => i.id === id);
 const askAll = () => askRaw().filter((a) => !(typeof a.item === "string" && itemHere(a.item)));
 const itemKey = (it) => "item." + it.id;
 function itemReps(it) { return askRaw().filter((a) => a.item === it.id).reverse(); }
@@ -2567,7 +2584,7 @@ const repOf = (k) => {
 const saveReplyDraft = (k) => { try { const v = repOf(k).text; if (v) localStorage.setItem(replyDraftKey(k), v); else localStorage.removeItem(replyDraftKey(k)); } catch (e) {} };
 const threadOf = (k) => askThreads().find((t) => t.id === k) || null;
 // An item's reply box is keyed "item.<id>": its ids, its draft and its line derive from the key as an ask's do. An ask id starts "ask-", and an item id holds no dot.
-const itemOfKey = (k) => (k.startsWith("item.") ? byId(k.slice(5)) || null : null);
+const itemOfKey = (k) => (k.startsWith("item.") ? byId(k.slice(5)) || state.lines.find((i) => i.id === k.slice(5)) || null : null);
 // A box on an item card repaints the cards; a box on an ask repaints the Asks list.
 const redrawReply = (k) => (k.startsWith("item.") ? render() : renderAskList());
 const replyBtn = (k, what) => h("button", { class: "btn alt replybtn", type: "button", id: "reply-" + k, "aria-expanded": "false", "aria-controls": "rf-" + k, "data-ask": k, onclick: () => openReply(k) }, "Reply", what ? h("span", { class: "sr" }, " on " + what) : null);
@@ -2584,7 +2601,7 @@ function syncReplyForm(form) {
     const it = itemOfKey(k);
     // On an item the session that asked is its owner, not the one that answered. An owed item stays open: only its answer closes it.
     kids = words((typed ? "" : "Send reply turns on once you type. ") + "Your reply goes to " + askWriter() + ", which passes it to the session that " + (it ? "asked No. " + it.n : "answered") + ", or answers here."
-      + (it && !isAnswered(it) ? " No. " + it.n + " stays open: " + (it.kind === "task" ? "Mark done" : "Your pick") + " below answers it." : ""));
+      + (it && it.status !== "closed" && !isAnswered(it) ? " No. " + it.n + " stays open: " + (it.kind === "task" ? "Mark done" : "Your pick") + " below answers it." : ""));
   }
   const sig = cls + "|" + kids.map((x) => (x && x.nodeType ? x.textContent : x)).join("");
   if (hint.dataset.sig !== sig) { hint.dataset.sig = sig; hint.className = cls; hint.replaceChildren(...kids); }
