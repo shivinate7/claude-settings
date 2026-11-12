@@ -21045,7 +21045,7 @@ class HandedLaneCheck(RecordsEnv):
     def test_handed_lane_no_lanes_release_head_merging_main_is_not_a_lane(self):
         self.release_base()
         head_takes_base(self)  # the head merges origin/main's new tip, as a lane does before its run
-        self.fixture("", handed=[], base="release", draft=False)  # the draft step runs handed_local only on the default base or with ready checks
+        self.fixture("", handed=[], base="release", draft=False)  # draft=False: only the ready confirm merges. main's tip, merged into a release head, is no lane
         self.assert_head_merges_main_tip_off_release()
         rc, out = self.run_merge("7", "--confirm")
         self.assertNotIn("merges lanes", out, f"the no-Lanes check read main's merge into a release head as a lane:\n{out}")
