@@ -9826,6 +9826,54 @@ for (const width of [800, 1280]) {
   });
 }
 
+// The tab bar at a phone width: one row, no sideways scroll, each tab 44 px tall. Designs shown is the four tabs; hidden is three.
+for (const width of [320, 360, 375, 414, 430, 500]) for (const designs of [true, false]) {
+  test(`Health tab: at ${width} wide with Designs ${designs ? "shown" : "hidden"}, the tabs stay on one row with no sideways scroll, each 44 px tall`, async (t) => {
+    const extra = designs ? { items: [mk("tb-design", 1, { designs: [{ slug: "s1", label: "Option a" }] })], designData: { s1: "<p>one</p>" } } : {};
+    const page = await open(t, { ...extra, pageHtml: withBuild({ healthMap: healthMap() }), viewport: { width, height: 800 } });
+    if (!page) return;
+    assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+    assert.equal(await page.locator("#tabD").isVisible(), designs, designs ? "the Designs tab is not shown" : "the Designs tab is shown with no designs");
+    const ids = designs ? ["tabQ", "tabStatus", "healthTab", "tabD"] : ["tabQ", "tabStatus", "healthTab"];
+    const boxes = await page.evaluate((ids) => ids.map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return { top: Math.round(r.top), h: Math.round(r.height) }; }), ids);
+    const rows = new Set(boxes.map((b) => b.top)).size;
+    assert.equal(rows, 1, `the tabs wrap onto ${rows} rows at ${width} wide`);
+    const scroll = await page.evaluate(() => document.documentElement.scrollWidth);
+    assert.ok(scroll <= width, `the page scrolls sideways at ${width} wide: scrollWidth ${scroll}`);
+    assert.ok(boxes.every((b) => b.h >= 44), `a tab is under 44 px tall at ${width} wide: ${boxes.map((b) => b.h).join(", ")}`);
+  });
+}
+
+test("Health tab: the coverage-unknown line names the same kinds as the known line", async (t) => {
+  const kinds = "hooks, checks, skills, janitor scripts and merge scripts";
+  const known = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage: JM_COVERAGE }) }) });
+  if (!known) return;
+  await known.click("#healthTab");
+  const knownLine = (await known.locator("#healthCover .ln").first().innerText()).replace(/\s+/g, " ");
+  assert.ok(knownLine.includes(kinds), "control: the known coverage line does not name the kinds");
+  const unknown = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage: null, coverageWhy: "unknown (no hooks, checks or skills under the repo)" }) }) });
+  if (!unknown) return;
+  await unknown.click("#healthTab");
+  const unknownLine = (await unknown.locator("#healthCover .ln").first().innerText()).replace(/\s+/g, " ");
+  assert.match(unknownLine, /Coverage: unknown/, "the line does not say Coverage: unknown");
+  assert.ok(unknownLine.includes(kinds), "the coverage-unknown line names fewer kinds than the known line");
+});
+
+test("Health tab: a bad-map copied ask keeps 'is not valid json' in its cause", async (t) => {
+  const INVALID_MAP = healthMap({ read: null, rows: null, counts: null, coverage: null,
+    why: "unknown (docs/health-map.json is not valid json: Expecting value: line 1 column 1 (char 0))", coverageWhy: "unknown (the map did not read)" });
+  const page = await open(t, { pageHtml: withBuild({ healthMap: INVALID_MAP }) });
+  if (!page) return;
+  await page.evaluate(() => {
+    if (navigator.clipboard) Object.defineProperty(navigator.clipboard, "writeText", { configurable: true, value: async (s) => { window.__ask = s; } });
+  });
+  await page.click("#healthTab");
+  await page.click("#hAsk");
+  await page.waitForFunction(() => window.__ask !== undefined || !document.getElementById("hAskText").hidden);
+  const ask = await page.evaluate(() => (window.__ask !== undefined ? window.__ask : document.getElementById("hAskText").value));
+  assert.match(ask, /is not valid json/, "the copied ask drops the cause: it no longer says is not valid json");
+});
+
 test("Health tab: a build with no healthMap key draws no Health tab", async (t) => {
   const page = await open(t, { pageHtml: withBuild({}) });
   if (!page) return;
