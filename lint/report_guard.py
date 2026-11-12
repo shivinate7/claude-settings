@@ -2746,12 +2746,12 @@ def refusal_reason(tools, hold=""):
         "An MCP tool counts by its full name, with or without backticks" % names)
 
 
-# One deadline for the whole Stop run (the settings.json Stop timeout for this hook is 35 s): the past-ruling model
+# One deadline for the whole Stop run (the settings.json Stop timeout for this hook is 80 s): the past-ruling model
 # call, the ruling-skip refuter and the git reads each take what is left, never their own full limit, so the run
 # ends with room to print. A model call is also charged its whole grant against the budget, whether or not it uses
 # it, so the grants of one run never add up past STOP_BUDGET. A call with under MIN_CALL s left does not start, and
 # its check refuses.
-STOP_BUDGET = 30
+STOP_BUDGET = 75
 MIN_CALL = 3
 _granted = 0.0  # seconds granted to model calls so far in this run
 
