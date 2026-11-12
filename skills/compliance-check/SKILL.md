@@ -92,7 +92,7 @@ gap. Do not build a UI linter.
 
 Rank the findings. First, a finding that can lose work or ship a wrong result to the person the repo
 serves. Next, a finding that hides defects. Last, cost and tidiness. Give each finding one lane the
-orchestrator can brief:
+coordinator can brief:
 
 ```
 <n>. <verb-first title> - rules: <id>, <id>
