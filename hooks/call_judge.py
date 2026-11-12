@@ -140,7 +140,7 @@ PAST_RULING_ITEM = (
     "a question that names the record and quotes its sentence, gives a measure of what the sentence claims or the "
     "word \"unmeasured\", says what outcome the ruling protected and what protects that outcome now, and proposes a "
     "fix. A new fact alone is not a pass: a question passes only as a challenge with those four parts. "
-    "Refuse a re-ask that brings no new measure or fact and offers no such challenge. "
+    "Refuse a re-ask that is not such a challenge. "
     "A challenge only asks; it never grants anything. "
     "This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
@@ -165,8 +165,9 @@ JUDGE_ITEMS = (
     "6. Nothing points outside the box, such as an earlier message or an item number.\n"
     "7. One option is recommended.\n"
     "8. " + PAST_RULING_ITEM + "\n"
-    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
-    "one line>\"}."
+    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"Item N: <the item that misses, and the fix, "
+    "one line>\"}. The reason opens with `Item N:`, where N is the number of the item that misses (1 to 8); for "
+    "several items, such as `Items 3 and 5:`."
 )
 QUESTION_PROMPT = (
     "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
@@ -352,21 +353,21 @@ def how_to_challenge(rule):
     return " " + CHALLENGE_HOW if rule == question_form.PAST_RULING_RULE else ""
 
 
-GIVE_UP = re.compile(r"withdraw|drop the question|take the question back|\b(?:do not|don't|never|not)\s+(?:re-?ask|ask|send)\b",
-                     re.I)
-FORM_ITEM = re.compile(r"^\W*item\s*[1-7]\b", re.I)  # a reason that opens on a form item, never item 8
+# The `Item N:` or `Items 3 and 5:` opener the reply line of JUDGE_ITEMS asks a refusal for; group 1 holds the numbers.
+ITEM_OPENER = re.compile(r"^\W*items?\s+([1-8](?:\s*(?:,|and|&)?\s*[1-8])*)\s*:", re.I)
 
 
-def without_give_up(reason):
-    """The reason minus any sentence that tells the session to withdraw or not re-ask: CHALLENGE_HOW is the remedy."""
-    return " ".join(s for s in re.split(r"(?<=[.!?])\s+", reason) if not GIVE_UP.search(s))
+def opener_items(reason):
+    """(the item numbers a refusal reason opens with, the reason after that opener); ((), reason) with no opener."""
+    opener = ITEM_OPENER.match(reason)
+    if not opener:
+        return (), reason
+    return tuple(int(n) for n in re.findall(r"[1-8]", opener.group(1))), reason[opener.end():]
 
 
 def refuse(payload, tool, args, rule, reason):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
     reason = reason.strip()
-    if how_to_challenge(rule):
-        reason = without_give_up(reason)
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
@@ -469,8 +470,12 @@ def main():
     if verdict.get("ok") is False:
         reason = verdict.get("reason")
         reason = reason if isinstance(reason, str) and reason.strip() else fallback
-        cite = question_form.ruling_cite(reason, ids) if units else ""
-        if cite == "cited" and FORM_ITEM.match(reason):  # a form item naming a shown record keeps its own rule id
+        items, after = opener_items(reason) if units else ((), reason)
+        if not items:  # no readable opener: the record the reason opens with or names decides
+            cite = question_form.ruling_cite(reason, ids) if units else ""
+        elif 8 in items:  # item 8, the past-ruling item; a record after the opener that was not shown is bogus
+            cite = question_form.ruling_cite(after, ids) or "item 8"
+        else:  # a form item keeps the question-judge rule id, whatever record it names
             cite = ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
