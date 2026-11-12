@@ -697,7 +697,7 @@ def last_line_grants(name, prompt, **kwargs):
           "got %r; files %r" % (ov_pass(cfg), ov_pass_files(cfg)))
 
 
-def case_override_last_line_still_grants_once_the_gates_allow_it():
+def case_override_last_line_still_grants_once_the_guard_allows_it():
     # The control beside the refusals: the same form on the last line grants when the gates allow it. A cloud session
     # with one earlier owner turn, and payload source "user", the owner's own prompt.
     seed = "Brief for the lane: fix the parser.\n\noverride 15m"
@@ -2746,7 +2746,7 @@ def main():
         case_override_off_on_the_last_line()
         case_override_last_line_opus_after_a_notice_asks_no_judge_and_writes_nothing()
         case_override_last_line_refuses_a_fired_seed_or_foreign_body()
-        case_override_last_line_still_grants_once_the_gates_allow_it()
+        case_override_last_line_still_grants_once_the_guard_allows_it()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
