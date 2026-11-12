@@ -110,7 +110,7 @@ pl("an update that carries a press step with a wrong link is denied", "deny",
 pl("an items set to another artifact is allowed", "allow", pl_item(), url="https://claude.ai/artifact/other")
 add("press link: a batch with the press item among the sets is denied", "deny", "press-link",
     tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="batch",
-    writes=[{"op": "set", "collection": "answers", "doc_id": "a", "data": {"note": "x"}},
+    writes=[{"op": "set", "collection": "receipts", "doc_id": "a", "data": {"note": "x"}},
             {"op": "set", "collection": "items", "doc_id": WP_DOC, "data": pl_item()}])
 add("press link: a batch of linked sets is allowed", "allow", tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="batch",

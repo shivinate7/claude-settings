@@ -28,10 +28,8 @@ os.makedirs(os.path.join(AA_BARE, ".git"), exist_ok=True)
 # The one home of the answers folder name is lint/layout.py, read through layout.path, never a literal.
 import layout  # noqa: E402  the one layout module (lint/layout.py)
 ANSWERS_FOLDER = layout.path(AA_REPO, "waiting-data")  # the layout's waiting folder, as the tools read it
-# The collection's name. lint/layout.py holds no WAITING_ANSWERS yet (the builder adds it next to
-# WAITING_COLLECTIONS). Until it does, the cases use this one literal; the log check below reads the
-# constant as soon as it exists, and the cases then take it.
-AA_COLLECTION = getattr(layout, "WAITING_ANSWERS", None) or "answers"
+# The collection's name, one home: lint/layout.py WAITING_ANSWERS. The log check below reads the same constant.
+AA_COLLECTION = layout.WAITING_ANSWERS
 AA_DOC = "a1"
 AA_NOTE = {"note": "A reply, written by a session"}
 

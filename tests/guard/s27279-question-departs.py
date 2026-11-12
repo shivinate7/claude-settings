@@ -74,7 +74,7 @@ qd("an update that carries kind decision and a context with the line is allowed"
    {"kind": "decision", "context": oj_ctx()}, action="update")
 qd("an items set to another artifact is allowed", "allow", qd_item(context=oj_ctx(departs=None)),
    url="https://claude.ai/artifact/other")
-qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="answers")
+qd("a set to another collection is allowed", "allow", qd_item(context=oj_ctx(departs=None)), collection="receipts")
 add("question departs: a repo with no waiting page allows a decision with no line", "allow", tool="ArtifactData",
     cwd=NOGIT, url=PQ_URL, action="set", collection="items", doc_id=QD_DOC,
     data=qd_item(context=oj_ctx(departs=None)))

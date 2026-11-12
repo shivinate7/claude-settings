@@ -120,7 +120,7 @@ ifr_batch("a batch with a str_replace on an unlisted field is denied", "deny",
 ifr_batch("a batch of listed fields and a delete of an unlisted one is allowed", "allow",
           [ifr_write(if_item(reply="x")), ifr_write({IF_BOGUS: {"__delete__": True}, "lane": "x"}, "update")])
 ifr_batch("a batch with an unlisted field in another collection is allowed", "allow",
-          [ifr_write({IF_BOGUS: "x"}, collection="answers"), ifr_write(if_item())])
+          [ifr_write({IF_BOGUS: "x"}, collection="receipts"), ifr_write(if_item())])
 
 # file_path data is read as the data of the write.
 IF_FILE_BAD = os.path.join(ROOT, "ifr", "bad.json")
@@ -134,7 +134,7 @@ ifr("file_path data of listed fields is allowed", "allow", None, file_path=IF_FI
 ifr("an unreadable file_path is not judged", "allow", None, file_path=os.path.join(ROOT, "ifr", "missing.json"))
 
 # Only a write of an item to this repo's waiting page is judged.
-ifr("a set to another collection is not judged", "allow", if_item(**{IF_BOGUS: "x"}), collection="answers")
+ifr("a set to another collection is not judged", "allow", if_item(**{IF_BOGUS: "x"}), collection="receipts")
 ifr("a set to another artifact is not judged", "allow", if_item(**{IF_BOGUS: "x"}),
     url="https://claude.ai/artifact/other")
 add("item field: a repo with no waiting page is not judged", "allow", tool="ArtifactData", cwd=NOGIT, url=PQ_URL,
