@@ -12,6 +12,8 @@ Rule `agent-git-reset` in `hooks/guard.py` (step 1a) refuses an agent's Bash `gi
 - Route in the refusal: `git restore --staged <path>` or `git reset -- <path>` to unstage; `git revert <commit>` to undo a commit.
 - False alarms: the one normal-work form refused is `git reset <path>` with no `--`. The route above covers it. Measured: 0 other normal forms refused across the 11 cases in the shared-tree family.
 - Cost: no process starts; the call is read as text.
+- Read inside `sh -c`, `bash -c`, `eval` and nested scripts (`nested_script`, up to 8 texts). The same gap stays open for the shared-tree discard rule (`sh -c 'git reset --hard HEAD~1'` allows); a debt note, not this step.
+- Left open, noted: `reset --soft HEAD~1 --keep` (a later mode flag hides the first; main allows it too); `--pathspec-f <file> HEAD~1` refuses though it moves nothing (rare); `agent_type` alone also counts as an agent (safe direction).
 - `--hard`, `--merge` and `--keep` keep their shared-tree verdicts (`agent-worktree-discard-is-noted`).
 
 Tests that expected `git reset --soft` to pass for an agent were claims. None existed for an agent; the cases that allow it have no `agent_id` and stand for the orchestrator.

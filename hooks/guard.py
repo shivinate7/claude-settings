@@ -4333,10 +4333,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 1a. An agent's `git reset` that names a commit moves a branch (step agent-git-reset-refused).
     if agent:
-        for segment in (part for text in texts for part in split_segments(text)):
-            for subcommand, args in git_calls(segment):
-                if subcommand == "reset" and agent_reset_moves_branch(args):
-                    refuse(tool, "deny", "agent-git-reset", AGENT_RESET_REASON, "git reset " + " ".join(args))
+        pending, seen = list(texts), 0
+        while pending and seen < 8:   # a script handed to another shell is one more command; the cap stops a loop
+            seen += 1
+            for segment in split_segments(pending.pop(0)):
+                for subcommand, args in git_calls(segment):
+                    if subcommand == "reset" and agent_reset_moves_branch(args):
+                        refuse(tool, "deny", "agent-git-reset", AGENT_RESET_REASON, "git reset " + " ".join(args))
+                words = segment_tokens(segment)
+                inner = nested_script(words) if words else ""
+                if inner:
+                    pending.append(str(inner))
 
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
