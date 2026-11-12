@@ -315,8 +315,9 @@ const deferred = () => {
   const promise = new Promise(r => (resolve = r))
   return { promise, resolve }
 }
-const slow = async () => {
-  await new Promise(r => setTimeout(r, 30))
+// The answer lands on the next macrotask, after every microtask of both overlapping runs: each reaches the limiter first.
+const answerNextTurn = async () => {
+  await new Promise(r => setImmediate(r))
   return { isAnswered: true, text: 'A note.' }
 }
 
@@ -401,25 +402,25 @@ await test('F5 register: many short lines over the cap still get one model call'
 // F7 shared cap: register
 const eight = Array.from({ length: 8 }, (_, i) => fileDiff(`lim/f${i}.txt`, `v${i}`)).join('')
 await test('F7 register: one run over 8 files makes at most 5 calls', async () => {
-  const t = host({ diff: eight, model: slow })
+  const t = host({ diff: eight, model: answerNextTurn })
   await t.run()
   assert.ok(t.calls.length <= 5, `calls: ${t.calls.length}`)
 })
 await test('F7 register: two overlapping runs over the same 8 files make at most 5 calls, one per file', async () => {
-  const t = host({ diff: eight, model: slow })
+  const t = host({ diff: eight, model: answerNextTurn })
   await Promise.all([t.run(), t.run()])
   assert.ok(t.calls.length <= 5, `calls: ${t.calls.length}`)
   const paths = t.calls.map(c => c.prompt.match(/File: (.*)/)[1])
   assert.equal(new Set(paths).size, paths.length, `repeat calls: ${paths.join(',')}`)
 })
 await test('F7 register: the same single file in two overlapping runs makes one call', async () => {
-  const t = host({ diff: fileDiff('lim/solo.txt', 'solo'), model: slow })
+  const t = host({ diff: fileDiff('lim/solo.txt', 'solo'), model: answerNextTurn })
   await Promise.all([t.run(), t.run()])
   assert.equal(t.calls.length, 1)
 })
 await test('F7 register: after overlapping runs settle, a later run still makes calls (not a lifetime cap)', async () => {
   const three = Array.from({ length: 3 }, (_, i) => fileDiff(`lim/late${i}.txt`, `late${i}`)).join('')
-  const t = host({ diff: three, model: slow })
+  const t = host({ diff: three, model: answerNextTurn })
   await t.run()
   assert.equal(t.calls.length, 3)
 })

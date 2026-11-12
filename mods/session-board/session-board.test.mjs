@@ -498,7 +498,8 @@ const lines = async h => (await boardText(h)).split('\n')
 const pyOk = (handoff = HANDOFF, prompt = PROMPT) => argv => ({ exitCode: 0, stdout: JSON.stringify({ handoff, prompt }) + '\n', stderr: '' })
 const safe = (h, args) => fire(h, 'command.run', { command: 'safe-stop', args })
 const NEW_ID = 'dddddddd-1111-2222-3333-444444444444'
-const settle = () => new Promise(r => setTimeout(r, 5))
+// One macrotask turn. The stubbed host does its work in promises, and the real timers of a non-fake host are 100 ms or more.
+const settle = () => new Promise(r => setImmediate(r))
 const tickBeat = async h => { for (const b of h.beats.filter(x => x.live)) b.fn(); await settle() } // one heartbeat, then let its async work finish
 // Fake clock, for a host started with `fake: true`: each due beat or timer fires at its own time, in order, and its async work settles first.
 async function advance(h, ms) {
