@@ -1,0 +1,16 @@
+{
+ "id": "spawn-rules-skill",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "test-guard-split-per-rule"
+ ],
+ "updatedAt": "2026-11-11T23:39:00-06:00",
+ "title": "A spawn-time skill holds the Roles and Parallelism rules that stop acts, so they leave the global CLAUDE.md",
+ "why": "About 930 words of Roles and Parallelism rules load in every repo, though they act only when a session spawns agents or lanes; no skill loads at spawn today.",
+ "source": "coordinator 23:38 CST Nov 11, from lane global-claude-md-scope-audit (plan docs/plans/claude-md-scope-audit.md, draft PR #2616)",
+ "note": "Paused until the owner signs it off (his 12:38 and 12:40 CST Nov 11 words: moving sections \"would need my sign off\"). No page item asks it yet: the audit keeps this section global, so the sign-off item is posted when this step is next."
+}
