@@ -4711,7 +4711,7 @@ VERDICT_HEADER = re.compile(r"^=== verdict run \d{4}-\d\d-\d\d \d\d:\d\d:\d\d: (
 FAIL_COMMAND = re.compile(r"FAIL (\S.*?) rc=-?\d+(?: .*?)? \([\d.]+s\)(?: log=|$)")  # bin/verdict's FAIL line: a note (killed by signal, no tests ran, ...) may sit after rc
 
 def failed_step_text(fail):
-    """-> the text bin/verdict kept for each step that FAILed in a lane lint, or None when it cannot be read. ci-job keeps one log for all its steps, each
+    """-> the text bin/verdict kept for each step that FAILed in a ready check, or None when it cannot be read. ci-job keeps one log for all its steps, each
     section headed by `=== verdict run <time>: <command>`, and the FAIL line carries the same command. The passing steps' sections are left out, so a
     path a passing step printed blames no lane. The FAIL line has no section time, so a command that heads more sections than it has FAIL lines is two steps
     of one name, and which of them failed is not known: None, because a lane is never named from a section that may have passed."""
@@ -4737,7 +4737,7 @@ def failed_step_text(fail):
     return "\n".join(kept) if kept else None
 
 def blamed_lanes(root, fail, lanes, base):
-    """-> {PR: [path]} of each frozen lane whose diff against `base` touches a path the FAILed lane-lint step names, or None when that cannot be read.
+    """-> {PR: [path]} of each frozen lane whose diff against `base` touches a path the FAILed ready-check step names, or None when that cannot be read.
     A lane is matched by its paths, not by a path grammar: a path counts when it is a whole token of the step's output, bare, after `./`, or after an absolute prefix."""
     text = failed_step_text(fail)
     if text is None:

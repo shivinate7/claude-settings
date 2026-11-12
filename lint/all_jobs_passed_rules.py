@@ -23,7 +23,7 @@ ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
 ALL_JOBS_PASSED_RUNS_ON = "ubuntu-latest"
 TO_JSON = "${{ toJSON(needs) }}"
-ALWAYS_IF = "${{ always() }}"  # a job-level if that never skips the job: cancel-on-red-lint needs it to run after a red lint
+ALWAYS_IF = "${{ always() && !github.event.pull_request.draft }}"  # the one job-level if a needed job may keep: cancel-on-red-lint runs after a red lint, never on a draft
 FAN_IN = "ci-done"  # comments on a red run; it needs all-jobs-passed, and all-jobs-passed never needs it
 CHECKOUT_PIN = re.compile(r"actions/checkout@[0-9a-f]{40}")
 STEP_KEYS_BARRED = ("if", "continue-on-error")  # either one lets a failed needed job leave the action step green

@@ -111,8 +111,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    that pin to claude-settings main in a lane of its own, with no question. That lane's reviewer
    checks only that it changes pin lines alone, to a main commit that descends from the old pin.
    Put the fix on the lane branch, never on the integration branch. Run CI again, once, and merge the
-   rest. A drop restarts CI at once and re-lints no lane that stays: each lane was linted at hand-off and
-   once at the join, before the build, and the batch head once, before ready (decision
+   rest. A drop restarts CI at once and re-lints no lane that stays: each lane was linted once, at hand-off (decision
    `batch-freeze-lane-set`). Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
    (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
    gets no fix lane until the owner decides.

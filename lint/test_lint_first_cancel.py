@@ -3,7 +3,7 @@
 
 Batch CI runs a `lint` job beside the heavy jobs, never before them (no added wait on a green run). A red lint ends the run through the
 `cancel-on-red-lint` job: it posts the red comment first (a cancelled run's ci-done job is skipped, so no other job wakes the session),
-then cancels the run. Only that job holds `actions: write`. Both jobs sit in the needs of all-jobs-passed and ci-done; the cancel job has no job-level if, its steps carry the red-lint condition.
+then cancels the run. Only that job holds `actions: write`. Both jobs sit in the needs of all-jobs-passed and ci-done; the cancel job runs after a red lint (`always()` and not a draft) and its steps carry the red-lint condition.
 
 Stdlib only. CHECKS_YML overrides the path. Run with:  python3 lint/test_lint_first_cancel.py -v
 """
@@ -44,7 +44,7 @@ class LintFirst(unittest.TestCase):
         _, lint, cancel = blocks()
         self.assertIsNotNone(cancel, "no cancel-on-red-lint job in checks.yml")
         self.assertEqual(needs_of(cancel), [LINT])
-        self.assertEqual(job_key(cancel, "if"), "${{ always() }}", "without always() GitHub skips the cancel job when lint fails (actions/all-jobs-passed/action.yml): no comment, no cancel")
+        self.assertEqual(job_key(cancel, "if"), "${{ always() && !github.event.pull_request.draft }}", "without always() GitHub skips the cancel job when lint fails (actions/all-jobs-passed/action.yml): no comment, no cancel; without the draft guard it runs a runner on every draft push")
         steps = re.split(r"^      - ", cancel.split("    steps:", 1)[1], flags=re.M)[1:]
         self.assertTrue(steps)
         for step in steps:
@@ -67,7 +67,8 @@ class LintFirst(unittest.TestCase):
         _, _, cancel = blocks()
         self.assertIsNotNone(cancel)
         self.assertRegex(cancel, r"id: comment\b", "the comment step has no id for the cancel step to read")
-        self.assertRegex(cancel, r"CI_DONE_STRICT|strict:\s*['\"]?true", "the comment step is not strict: a failed post would not fail the step")
+        comment_step = cancel[cancel.index("name: Comment that lint ended red"):cancel.index("name: Cancel the run")]
+        self.assertRegex(comment_step, r"strict:\s*['\"]?true", "the comment step is not strict: a failed post would not fail the step")
         cancel_step = cancel[cancel.index("name: Cancel the run"):]
         self.assertIn("steps.comment.outcome == 'success'", cancel_step, "the cancel step does not wait for the comment step's success")
 
