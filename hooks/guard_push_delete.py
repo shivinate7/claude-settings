@@ -1120,6 +1120,12 @@ def _home_literal(target: str) -> bool:
     path = target[:-2] if target.endswith("/*") else target
     if not path or _GLOB_CHAR.search(path) or not (path.startswith("/") or re.match(r"[A-Za-z]:/", path)):
         return False
+    # A drive-letter home is a name, not a path this platform can resolve (off Windows `C:/x` is a folder
+    # under the working folder), so it is compared as text: slashes and case folded, trailing slash dropped.
+    if re.match(r"[A-Za-z]:/", path):
+        home = os.path.expanduser("~").replace("\\", "/")
+        if re.match(r"[A-Za-z]:/", home) and path.rstrip("/").lower() == home.rstrip("/").lower():
+            return True
     return _rm_target_bad(path, "/")
 
 
