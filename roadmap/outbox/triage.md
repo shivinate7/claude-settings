@@ -742,3 +742,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Note classifier-refuses-merge-reviewed (coordinator 23:01 CST Nov 11, second sighting): the auto-mode classifier refused batch64-prose-judge-docs' review-record post; batch runner 10 posted it instead.
 - Note option-letter-ruling-id (triage 23:04 CST Nov 11): guard option-letter-keys refused a page item whose context named a ruling as "R44 A" (a ruling id with its picked letter), reading the "A" as an option key. Possible false alarm; triage reworded it.
 - Note project-ops-step7-template (coordinator 23:19 CST Nov 11, lane pr-template-merge-lines): skills/project-ops/SKILL.md step 7 tests only the exact PR template path, and does not say who merges the PR it opens.
+- Note required-check-skip-reads-green (coordinator 23:33 CST Nov 11): a required check other than all-jobs-passed that only skipped reads green by design (docs-only PRs need it); no repo names one today.
