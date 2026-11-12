@@ -536,7 +536,7 @@ while True:
         from guard_core import (
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, bare_segment_dirs, basename, cap_safe,
+            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, bare_segment_dirs, basename, own_c_segment_dirs, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
@@ -560,7 +560,7 @@ while True:
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
+            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_in, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -4266,6 +4266,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     bare_dirs = {}
     for text_segment, folder in bare_segment_dirs(stripped, cwd):
         bare_dirs.setdefault(text_segment, []).append(folder)
+    own_dirs = {}   # a segment's own `git -C`, read against the folder the shell stands in when it runs
+    for text_segment, folder in own_c_segment_dirs(stripped, cwd):
+        own_dirs.setdefault(text_segment, []).append(folder)
+    pointer_dirs = {text_segment: list(folders) for dirs in (bare_dirs, own_dirs) for text_segment, folders in dirs.items()}
     for text_number, segment in ((number, part) for number, text in enumerate(texts) for part in split_segments(text)):
         if not segment.strip():
             continue
@@ -4273,7 +4277,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         own_c = _segment_git_c_target(words) if words else None
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
-            root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+            root = own_dirs[segment].pop(0) if text_number == 0 and own_dirs.get(segment) else _absolute(own_c, cwd)
+            work_tree = GIT_WORK_TREE_RE.search(segment)
+            if work_tree:
+                root = _absolute(work_tree.group(2), root)
         elif text_number == 0 and bare_dirs.get(segment):
             root = bare_dirs[segment].pop(0)
             work_tree = GIT_WORK_TREE_RE.search(segment)
@@ -4343,11 +4350,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
     # the shared-tree clause keeps governing those calls unchanged.
+    # A git segment moves the HEAD of the folder it runs in (its own `-C`, else where the shell stands when it
+    # runs); a line the walk does not know takes the whole call's folder.
     head_where = head_root(stripped, cwd)
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
-        matched = pointer_head_hit(segment, head_where)
+        folders = pointer_dirs.get(segment)
+        matched = pointer_head_hit(segment, head_in(stripped, folders.pop(0)) if folders else head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 

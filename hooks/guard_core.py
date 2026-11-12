@@ -1606,8 +1606,8 @@ def _segment_git_c_parts(tokens):
     or None when the segment's command word is not `git` or a `-C` has no value. The env folder is the one
     an `env -C <dir>` or `env --chdir <dir>` in front of the `git` moves it into (`_wrapper_chdir`). The
     git -C folder is every `-C` after the `git`, chained. The two stay apart because `_run_dir` reads them
-    differently: an env folder moves only the segment's own program, and a git -C folder reads first-wins.
-    `_segment_git_c_target` joins them for every other caller.
+    differently: an env folder moves only the segment's own program, and a git -C folder is the segment's
+    own folder. `_segment_git_c_target` joins them for every other caller.
 
     ONLY THE SPACED FORM, `-C <path>`, IS READ. MEASURED against the real binary: `git
     -C/some/path status` and `git -C=/some/path status` both fail with `unknown option:
@@ -1685,15 +1685,17 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
 
 
 def _read_git_segments(cmd: str, shell_cwd: str):
-    """Read the cd walk of a command once, for `_run_dir` and `bare_segment_dirs`.
+    """Read the cd walk of a command once, for `_run_dir`, `bare_segment_dirs` and `own_c_segment_dirs`.
 
-    Returns `(first_c, env_moved, bare, moved, final)`. `first_c` is the folder of the first `git -C` (or
-    None). `env_moved` is the env folder of the last git segment that carries one. `bare` lists, per git
-    segment with no env folder, `(segment text, folder)`: the folder the shell stands in when THAT segment
-    runs, with the last `cd` before it standing in when the walk cannot tell (a `cd` to a folder that is
-    not there, an unread variable). `moved` is the folder the last `cd` left and `final` the folder the
-    shell ends in. Heredoc bodies are dropped first, unconditionally, so the segment texts are the shell's
-    own lines.
+    Returns `(last_c, env_moved, bare, owned, moved, final)`. `last_c` is the folder of the last git
+    segment when that segment carries a `git -C`, else None. `env_moved` is the env folder of the last git
+    segment that carries one. `bare` lists, per git segment with no env folder and no `-C`,
+    `(segment text, folder)`: the folder the shell stands in when THAT segment runs, with the last `cd`
+    before it standing in when the walk cannot tell (a `cd` to a folder that is not there, an unread
+    variable). `owned` lists, per git segment with a `-C`, `(segment text, folder)`: that `-C` (after its
+    env folder) read against the folder the shell stands in when that segment runs. `moved` is the folder
+    the last `cd` left and `final` the folder the shell ends in. Heredoc bodies are dropped first,
+    unconditionally, so the segment texts are the shell's own lines.
 
     A command with no `cd` keeps the shell where it started, so the walk is skipped: `_run_dir` runs once
     per segment for some callers, and a walk each time would grow as the square of the segments."""
@@ -1705,10 +1707,11 @@ def _read_git_segments(cmd: str, shell_cwd: str):
     walk = None
     if any(tokens is not None and _segment_cd_move(tokens) is not None for tokens in read):
         walk = _walk_dirs(segments, shell_cwd, ends)
-    first_c = None
+    last_c = None
     moved = None
     env_moved = None
     bare = []
+    owned = []
     for segment, tokens in zip(segments, read):
         folder = next(walk) if walk else start
         if tokens is None:
@@ -1716,24 +1719,27 @@ def _read_git_segments(cmd: str, shell_cwd: str):
         parts = _segment_git_c_parts(tokens)
         if parts is not None:
             env_dir, git_c = parts
-            if env_dir and moved:
-                env_dir = shell_abs(env_dir, moved) or env_dir
             if git_c is not None:
-                if first_c is None:
-                    first_c = _chain_chdir(env_dir, git_c)
-            elif env_dir:
-                env_moved = env_dir
+                base = folder or moved
+                last_c = _absolute(_chain_chdir(env_dir, git_c), _absolute(base, shell_cwd) if base else shell_cwd)
+                owned.append((segment, last_c))
             else:
-                bare.append((segment, folder or moved))
+                last_c = None
+                if env_dir and moved:
+                    env_dir = shell_abs(env_dir, moved) or env_dir
+                if env_dir:
+                    env_moved = env_dir
+                else:
+                    bare.append((segment, folder or moved))
         cd = _segment_cd_target(tokens)
         if cd is not None:
             moved = cd
-    return first_c, env_moved, bare, moved, (next(walk) if walk else start)
+    return last_c, env_moved, bare, owned, moved, (next(walk) if walk else start)
 
 
 def _run_dir(cmd: str, shell_cwd: str) -> str:
-    """Return the directory the command RUNS in, as one answer for the whole call: a `git -C`, else the
-    env folder when every git segment has one, else where the last bare git segment runs, else the last
+    """Return the directory the command RUNS in, as one answer for the whole call: the last git
+    segment's `git -C`, else the env folder when every git segment has one, else where the last bare git segment runs, else the last
     `cd`, else the cwd. A caller that judges each git segment on its own asks `bare_segment_dirs`.
 
     This is the part both roots share. Neither `--work-tree` nor `--git-dir` is read here,
@@ -1743,12 +1749,12 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     inside a quoted argument or a `#` comment is text, not a command, and only a segment that
     tokenizes to `cd`/`git` as its OWN command word (via `resolve_command`, which already steps
     over wrappers and loop keywords) counts. A segment that fails to tokenize (an unmatched
-    quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. The FIRST
-    segment with a `git -C` wins over every `cd` and over an env folder (only an env folder in its
-    own segment is kept, as its base), and its relative folder reads against the shell cwd, not
-    against the folder an earlier `cd` left. Without a `git -C`, an env folder is used only when
-    every git segment carries one (below); otherwise where the last bare git segment runs. That
-    first-wins reading of `git -C` is kept as the owner ruled.
+    quote) is skipped, the same fail-open stance `segment_tokens` documents elsewhere. Each git
+    segment runs in the folder it names, so the owner ruled `git -C` per segment (item 621, 14:13 CST
+    Nov 12): a `-C` binds its own segment only, and a relative one reads against the folder the shell
+    stands in when that segment runs. The one answer for the whole call is the last git segment's: its
+    `git -C` when it has one. Otherwise an env folder is used only when every git segment carries one
+    (below), else where the last bare git segment runs.
 
     AN `env -C` FOLDER MOVES ONLY ITS OWN PROGRAM, NOT THE SHELL: a later bare `git` in the command
     still runs in the shell's folder. So the env folder is read only when EVERY git segment carries
@@ -1762,8 +1768,8 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
     OUTER shell, which is the tree this function answers about.
     """
-    first_c, env_moved, bare, moved, final = _read_git_segments(cmd, shell_cwd)
-    where = first_c
+    last_c, env_moved, bare, _, moved, final = _read_git_segments(cmd, shell_cwd)
+    where = last_c
     if where is None:
         if env_moved and not bare:
             where = env_moved
@@ -1779,10 +1785,16 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
 def bare_segment_dirs(cmd: str, shell_cwd: str):
     """Return `(segment text, folder)` for each git segment that carries no `env -C` and no `git -C`
     of its own, in command order: the folder THAT segment runs in, so a discard is judged where it runs
-    and not where a later segment stands. A `git -C` anywhere in the command still wins for them all,
-    first-wins, as `_run_dir` reads it."""
-    first_c, _, bare, _, _ = _read_git_segments(cmd, shell_cwd)
-    return [(segment, _absolute(first_c or folder or shell_cwd or "", shell_cwd)) for segment, folder in bare]
+    and not where another segment stands or names."""
+    _, _, bare, _, _, _ = _read_git_segments(cmd, shell_cwd)
+    return [(segment, _absolute(folder or shell_cwd or "", shell_cwd)) for segment, folder in bare]
+
+
+def own_c_segment_dirs(cmd: str, shell_cwd: str):
+    """Return `(segment text, folder)` for each git segment that carries a `git -C`, in command order:
+    that `-C` (after its env folder) read against the folder the shell stands in when THAT segment runs.
+    A `-C` names its own segment's folder and no other's."""
+    return _read_git_segments(cmd, shell_cwd)[3]
 
 
 def command_root(cmd: str, shell_cwd: str) -> str:
