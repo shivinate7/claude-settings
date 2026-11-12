@@ -2,7 +2,7 @@
  "id": "ow-15-q-max-past-rates-a",
  "at": "2026-11-12T12:54:00-06:00",
  "ruling": "12:54 CST, page save: 602 a (cap-lift end time asks, any length); 586 a (cut run counts as a sample; step time-limits-end-hangs-only); 601 a (override ends on use, `override off` or next typed message; Opus ask until session end or `opus off`; step owner-override-one-route); 597 a (rule-bearing files keep the merge flag; decision claude-md-change-is-flagged rewritten); 579 b, \"isn't all four parts overkill\" (a new fact alone passes a ruling challenge; step ruling-challenge-passes). 595 none of these: \"you're taking my ruling no hard fixed numbers too broadly and seriously...\" R37 is read narrower: it aims at limits that cut work off; the 14-day missing-hook window stays.",
- "owner_words": "isn't all four parts overkill; you're taking my ruling no hard fixed numbers too broadly and seriously...",
+ "quote": "isn't all four parts overkill; you're taking my ruling no hard fixed numbers too broadly and seriously...",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 15",
  "status": "open",
  "supersedes": [],

@@ -2,7 +2,7 @@
  "id": "ow-24-q-max-past-rates-a",
  "at": "2026-11-12T13:49:00-06:00",
  "ruling": "13:49 CST, page save: 618 b (widen the \"Merge Tool Read Checks\" allow text to name the batch label write); 617 a (accepted pick, lane audit).",
- "owner_words": "Merge Tool Read Checks",
+ "quote": "Merge Tool Read Checks",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 24",
  "status": "open",
  "supersedes": [],

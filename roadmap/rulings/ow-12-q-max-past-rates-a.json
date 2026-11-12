@@ -2,7 +2,7 @@
  "id": "ow-12-q-max-past-rates-a",
  "at": "2026-11-12T12:11:00-06:00",
  "ruling": "12:08 to 12:11 CST, relayed by the coordinator: he cannot see coordinator picks to overrule them, \"this needs to be mechanized\", and \"you also need to literally mechanize the verification that something was queued\". Steps pick-reaches-page and msg-claims-vs-git; picks posted as stands items 560-583.",
- "owner_words": "this needs to be mechanized; you also need to literally mechanize the verification that something was queued",
+ "quote": "this needs to be mechanized; you also need to literally mechanize the verification that something was queued",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 12",
  "status": "open",
  "supersedes": [],

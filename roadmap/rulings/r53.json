@@ -2,7 +2,7 @@
  "id": "r53",
  "at": "2026-11-12T12:58:00-06:00",
  "ruling": "- **R53. A CI or merge alarm goes to the batch runner.** Owner 12:58 CST Nov 12, on the cap alarm: \"id say open an issue too but who reads issues?\" Read 12:58 CST: the repo has 0 GitHub issues ever, and no session code reads them; ruling p' says no GitHub Issues. Owner 13:07 CST: \"i think any ci / merge relaterd thing should be just an alert for batch runner to either then address or bring to coordinator right\". 1. Each CI or merge alarm (a red run on main, a job at its time cap, a dropped check run) wakes the batch runner, and opens no GitHub issue. 2. The batch runner fixes it, or sends it to the coordinator. 3. The coordinator brings the owner only what needs his word. 4. A cap end in an earlier attempt alarms too (item 588 pick a, owner 12:58 CST). Steps: step:main-job-cap-alarm, step:red-job-wakes-runner.",
- "owner_words": "id say open an issue too but who reads issues?; i think any ci / merge relaterd thing should be just an alert for batch runner to either then address or bring to coordinator right",
+ "quote": "id say open an issue too but who reads issues?; i think any ci / merge relaterd thing should be just an alert for batch runner to either then address or bring to coordinator right",
  "source": "plans/restart-plan.md@restart-plan, R53",
  "status": "open",
  "supersedes": [],

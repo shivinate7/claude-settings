@@ -2,7 +2,7 @@
  "id": "ow-23-q-max-past-rates-a",
  "at": "2026-11-12T13:45:00-06:00",
  "ruling": "13:45 CST, via retrospective: the auto-build half of merge-batch-split-and-pipeline (batch N+1 built on a running batch N) \"needs to join the express list\". Home: plan R55 (restart-plan a853c38).",
- "owner_words": "needs to join the express list",
+ "quote": "needs to join the express list",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 23",
  "status": "open",
  "supersedes": [],

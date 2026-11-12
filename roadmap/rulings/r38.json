@@ -2,7 +2,7 @@
  "id": "r38",
  "at": "2026-11-11T13:00:00-06:00",
  "ruling": "- **R38. The repeat judge skips its own thread and marks without blocking.** Read 13:00 CST Nov 11: decision owner-feedback-inbox, Repeats (owner 2026-11-01 17:57 CST, \"a model's meaning match, no glossary\") made 8 marks today, 0 true. Two causes: one candidate is given to every item in a Stop, and a session's follow-up items match its own earlier items on the same owner message. Owner 13:03 CST: \"yes on the fix !\". 1. The judge skips a candidate on the item's own home or the same owner message. 2. Each item gets its own candidates. 3. A mark prints one line and never blocks the turn. The meaning match stays, so a repeat in other words (the carousel and wheel incident) is still caught. Home: decision owner-feedback-inbox, Repeats, rewritten in place.",
- "owner_words": "a model's meaning match, no glossary; yes on the fix !",
+ "quote": "a model's meaning match, no glossary; yes on the fix !",
  "source": "plans/restart-plan.md@restart-plan, R38",
  "status": "open",
  "supersedes": [],

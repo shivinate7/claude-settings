@@ -2,7 +2,7 @@
  "id": "ow-22-q-max-past-rates-a",
  "at": "2026-11-12T13:40:00-06:00",
  "ruling": "13:40 CST, coordinator chat: item 619 b, \"b: also allow --blame --run, --on and --base. This widens past your pick.\" Supersedes items 457 a and 458 a for those three flags only. The settings edit waits on his typed yes in lane batch-freeze-lane-set-enforce (item 620).",
- "owner_words": "b: also allow --blame --run, --on and --base. This widens past your pick.",
+ "quote": "b: also allow --blame --run, --on and --base. This widens past your pick.",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 22",
  "status": "open",
  "supersedes": [],

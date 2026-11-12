@@ -2,7 +2,7 @@
  "id": "r47",
  "at": "2026-11-12T11:11:00-06:00",
  "ruling": "- **R47. The queue re-ranks itself.** Owner 11:11 CST Nov 12: \"is triage even thinking though or is it just appending only?\" Read at roadmap 3b1a04109: since Nov 9, 279 new steps, but 51 phase moves and 62 order changes on existing steps; the upkeep list keys on status \"active\", which 0 of 1,520 steps hold. Step c55 (owner, Oct 26) already ruled that triage re-weighs the whole order. Owner 11:17 CST: \"we basically need to further mechanize my ruling\". Owner 11:24 CST: \"this is good approved: (d) Score plus agent\". 1. The roadmap build scores each step from facts it holds: it cites an owner ruling, how long it has been ready, how many steps wait on it, and whether the owner flagged it. 2. At each batch merge, a triage agent checks the top of that order and may move a step, with a one-line reason. 3. The score reads live statuses (step upkeep-keys-live-status). The page pass (open threads, republish on a template change, re-sort) rides the same trigger. Home: step c55.",
- "owner_words": "is triage even thinking though or is it just appending only?; active; we basically need to further mechanize my ruling; this is good approved: (d) Score plus agent",
+ "quote": "is triage even thinking though or is it just appending only?; active; we basically need to further mechanize my ruling; this is good approved: (d) Score plus agent",
  "source": "plans/restart-plan.md@restart-plan, R47",
  "status": "open",
  "supersedes": [],

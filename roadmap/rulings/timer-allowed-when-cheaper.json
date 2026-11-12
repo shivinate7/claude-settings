@@ -2,7 +2,7 @@
  "id": "timer-allowed-when-cheaper",
  "at": "2026-11-11T13:22:00-06:00",
  "ruling": "Rule outcomes-mechanize-rules keeps its reason and drops the blanket \"never on a timer\": a timer is allowed when its record shows it costs less than it saves. Owner 13:20 CST Nov 11: \"i banned stuff that seemed buggy from anthropic and that it was never supposed to be a llarger permanent hard ban\"; 13:22 CST: \"A on keeping sessions warm too\". Plan section 3.15.",
- "owner_words": "i banned stuff that seemed buggy from anthropic and that it was never supposed to be a llarger permanent hard ban; A on keeping sessions warm too",
+ "quote": "i banned stuff that seemed buggy from anthropic and that it was never supposed to be a llarger permanent hard ban; A on keeping sessions warm too",
  "source": "plans/restart-plan.md@restart-plan, section 3.15 (timer ruling)",
  "status": "open",
  "supersedes": [

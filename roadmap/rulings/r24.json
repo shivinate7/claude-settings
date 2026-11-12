@@ -2,7 +2,7 @@
  "id": "r24",
  "at": "2026-11-11T09:16:00-06:00",
  "ruling": "- **R24. Every refusal names a way out that works.** Owner 09:16 CST Nov 11, in the coordinator's chat: \"yes file it for stage 3\". Every guard refusal and ask names an allowed way out, and a test proves each named way out passes the guard. Step refusal-names-way-out. Runs beside the cull.",
- "owner_words": "yes file it for stage 3",
+ "quote": "yes file it for stage 3",
  "source": "plans/restart-plan.md@restart-plan, R24",
  "status": "open",
  "supersedes": [],

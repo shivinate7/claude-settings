@@ -2,7 +2,7 @@
  "id": "ow-18-q-max-past-rates-a",
  "at": "2026-11-12T13:20:00-06:00",
  "ruling": "13:20 CST, chat (relayed by the retrospective 13:21 CST): R54 pick a, \"this is good, it can be an active nudger / checker against coordinator too right\" (step coordinator-session-board rewritten; plan aa190fd). 13:19 and 13:21 CST: R55 pick d, \"Express lane, and cancel a running batch for it too\" (merge-flow lanes go to main first; plan 4fefc9f; home decision no-merge-during-batch-ci, which skill ci-hygiene step 8 points to (plan b152ca6); seven steps cite it).",
- "owner_words": "this is good, it can be an active nudger / checker against coordinator too right; Express lane, and cancel a running batch for it too",
+ "quote": "this is good, it can be an active nudger / checker against coordinator too right; Express lane, and cancel a running batch for it too",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 18",
  "status": "open",
  "supersedes": [],

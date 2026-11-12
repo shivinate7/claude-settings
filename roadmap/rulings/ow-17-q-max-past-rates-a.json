@@ -2,7 +2,7 @@
  "id": "ow-17-q-max-past-rates-a",
  "at": "2026-11-12T13:12:00-06:00",
  "ruling": "13:12 CST, page save: 608 a, 609 a, 610 a (accepted picks). 606 none: \"dont those hooks go to any and all repos that call claude-settings? have we reviewed what the claude-settings install actually does to a repo as i feel liike this is a mistype\"; item reopened with the install facts.",
- "owner_words": "dont those hooks go to any and all repos that call claude-settings? have we reviewed what the claude-settings install actually does to a repo as i feel liike this is a mistype",
+ "quote": "dont those hooks go to any and all repos that call claude-settings? have we reviewed what the claude-settings install actually does to a repo as i feel liike this is a mistype",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 17",
  "status": "open",
  "supersedes": [],

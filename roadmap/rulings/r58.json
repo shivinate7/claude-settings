@@ -2,7 +2,7 @@
  "id": "r58",
  "at": "2026-11-12T14:19:00-06:00",
  "ruling": "- **R58. Batch macOS jobs get their own machine.** Read: batch 103 waited 26.4 min for macOS while 50 draft runs held the 5 free macOS slots. Owner 14:19 CST Nov 12 picked e: \"agreed on e, my mac isn't available all the time but imjust saying it shd be available rn and it can help\". 1. Batch macOS jobs run on his MacBook, labelled claude-settings-mac, and fall back to GitHub macOS when it is offline. 2. No fork PR runs on it. 3. A draft's macOS job skips while a batch's CI run is in progress (pick a). Home: decision no-merge-during-batch-ci.",
- "owner_words": "agreed on e, my mac isn't available all the time but imjust saying it shd be available rn and it can help",
+ "quote": "agreed on e, my mac isn't available all the time but imjust saying it shd be available rn and it can help",
  "source": "plans/restart-plan.md@restart-plan, R58",
  "status": "open",
  "supersedes": [],

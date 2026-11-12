@@ -2,7 +2,7 @@
  "id": "ow-20-q-max-past-rates-a",
  "at": "2026-11-12T13:31:00-06:00",
  "ruling": "13:31 CST, coordinator chat (relayed 13:32): item 615 a: lane guard-false-alarm-cull restarts held family 8b in one fix lane at review round 1, makes the code safe on Python 3.9 and adds a 3.9 test case.",
- "owner_words": "",
+ "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 20",
  "status": "open",
  "supersedes": [],

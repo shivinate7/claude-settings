@@ -2,7 +2,7 @@
  "id": "ow-16-q-max-past-rates-a",
  "at": "2026-11-12T13:07:00-06:00",
  "ruling": "13:07 CST, chat (relayed by the retrospective 13:08 CST): R52, batch runners on Sonnet 5.5 at medium effort; it becomes the default if no issues arise (home decision agent-model-cap; step model-table-one-home). R53, CI and merge alarms wake the batch runner and open no GitHub issue (steps main-job-cap-alarm, red-job-wakes-runner). Both in plans/restart-plan.md, branch restart-plan 4c91998.",
- "owner_words": "",
+ "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 16",
  "status": "open",
  "supersedes": [],

@@ -2,7 +2,7 @@
  "id": "r48",
  "at": "2026-11-12T11:29:00-06:00",
  "ruling": "- **R48. Every part of a ruling has a step.** Owner 11:29 CST Nov 12: \"how did my rulings never get marked anywhere or get a step?\" Read: 47 plan rulings, each with at least one step, yet R28's one-store part had none until step page-data-one-store (11:30 CST). Owner 11:31 CST: \"probably both is fine -- and note that the id's probably need good tagging right slugs or whatever or that won't matter here?\" 1. Each numbered part of a plan ruling names its step by slug (step:<slug>); an opaque id such as c55 carries a short gloss. 2. A check on the plan flags a part with no step, or a step that no longer exists. 3. At each batch merge, the queue-score-plus-agent agent reads the plan's rulings against the steps and files what is missing. Home: decision session-tiers.",
- "owner_words": "how did my rulings never get marked anywhere or get a step?; probably both is fine -- and note that the id's probably need good tagging right slugs or whatever or that won't matter here?",
+ "quote": "how did my rulings never get marked anywhere or get a step?; probably both is fine -- and note that the id's probably need good tagging right slugs or whatever or that won't matter here?",
  "source": "plans/restart-plan.md@restart-plan, R48",
  "status": "open",
  "supersedes": [],

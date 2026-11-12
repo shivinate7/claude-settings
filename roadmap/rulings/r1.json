@@ -2,7 +2,7 @@
  "id": "r1",
  "at": "2026-11-10T14:07:00-06:00",
  "ruling": "- **R1.** Owner 14:07 CST Nov 10: \"i agree on letting it survive a clean merge where batch ci sees the problem rather than asecond review\". And: \"i agree it shd be mechanical tooo\". A log stays valid when the new head differs from the reviewed head only by a clean merge of main, with the lane's own diff unchanged. The merge tool proves it (for example with git range-diff). Any difference keeps today's rule. Batch CI catches clashes with main. Home: decision pr-review-record, rewritten in place. Folds in steps fix-check-after-main-merge and fix-check-chain.",
- "owner_words": "i agree on letting it survive a clean merge where batch ci sees the problem rather than asecond review; i agree it shd be mechanical tooo",
+ "quote": "i agree on letting it survive a clean merge where batch ci sees the problem rather than asecond review; i agree it shd be mechanical tooo",
  "source": "plans/restart-plan.md@restart-plan, R1",
  "status": "open",
  "supersedes": [],

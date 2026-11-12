@@ -2,7 +2,7 @@
  "id": "r43",
  "at": "2026-11-11T13:48:00-06:00",
  "ruling": "- **R43. A usage brake on accounts with a rate limit.** Owner 13:48 CST Nov 11: \"it might just be somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was basically just that after usage hits 90% everything looks to gently wind down and 94% is a hard brake\". Read 13:49 CST: no record, hook or page item holds it; page item 169 cites his Nov 1 17:56 CST ruling \"no usage limit; a standing session runs until autocompact\", which is about session length. Reading, for him to correct: at 90% of an account's 5-hour or weekly limit, no new lane or agent starts and running work finishes and writes its handoff; at 94%, every session stops new work. An account with no limit never brakes. First a lane measures whether a hook can read the percentages. Home: a new decision record, usage-brake.",
- "owner_words": "it might just be somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was basically just that after usage hits 90% everything looks to gently wind down and 94% is a hard brake; no usage limit; a standing session runs until autocompact",
+ "quote": "it might just be somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was basically just that after usage hits 90% everything looks to gently wind down and 94% is a hard brake; no usage limit; a standing session runs until autocompact",
  "source": "plans/restart-plan.md@restart-plan, R43",
  "status": "open",
  "supersedes": [],
