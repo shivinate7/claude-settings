@@ -19,7 +19,7 @@
 # list that fails exits 1 with no boot.
 # Lock: one Mac lock, held only while a run picks and boots its device, and the slot's lease after that: the folder
 # ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in a file named pid. One atomic mkdir
-# takes it before any simctl call (owner ruling: two Duos together; decision sim-lease-tool). It is freed once the
+# takes it before any simctl call (so two Duos can run together; decision sim-lease-tool). It is freed once the
 # device is up and the lease is held, the reuse path and a hold too, and the lease then guards the slot until the shutdown
 # and the give. It is also removed on every exit, INT and TERM too, if this run still holds it, but only while its pid file
 # names this run. A live holder: one stderr line names its pid, the lock is
