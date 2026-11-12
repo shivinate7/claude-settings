@@ -43,4 +43,4 @@ Incidents:
 - Date not recorded. The waiting page moved to another org, and Claude Code lost read access to it. 80 items were rebuilt from old transcripts. No repo held a copy of the page's database.
 
 Kind: process
-Home: skills/waiting-page/SKILL.md
+Home: skills/waiting-page/reference/copies-and-accounts.md
