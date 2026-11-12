@@ -366,6 +366,47 @@ sh("frozen read form: control, a redirect onto a frozen settings file after a te
 sh("frozen read form: control, xargs rm with a frozen settings file as its operand stays denied",
    "xargs rm " + CFG_SETTINGS + " < /dev/null", "deny", "frozen-path", cwd=NOGIT)
 
+# --------------------------------------------------------------------------- frozen form: a write inside a command word
+#
+# A write to a frozen file stays refused when the shell runs it from inside a command word: a $( ) or backtick
+# substitution, a <( ) process substitution, a subshell, a function body, a case arm or a coproc. Such a word holds
+# `$`, a backtick, `(` or `{`, so it is read as the shell reads it, and the write inside it is still a write. A git
+# rm --cached never hides a rm inside its own substitution. Each case below is a REFUSE that names the frozen file.
+# Run only this block: MUTATE_ONLY="frozen form:" python3 hooks/test_guard.py (the name filter).
+sh("frozen form: rm inside a $( ) command substitution is refused",
+   "echo $(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm inside backticks is refused",
+   "echo `rm " + CFG_SETTINGS + "`", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm inside a $( ) assignment is refused",
+   "x=$(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm inside a <( ) process substitution given to cat is refused",
+   "cat <(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm inside a <( ) process substitution given to diff is refused",
+   "diff <(rm " + CFG_SETTINGS + ") x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm in a subshell after && is refused",
+   "true && (rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm in a bare subshell is refused",
+   "(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm in a function body that is then called is refused",
+   "cleanup() { rm " + CFG_SETTINGS + "; }; cleanup", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rm in a case arm is refused",
+   "case x in x) rm " + CFG_SETTINGS + ";; esac", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: coproc running rm is refused",
+   "coproc rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git rm --cached with a $( ) rm inside it is refused",
+   VCS + " rm --cached $(rm " + CFG_SETTINGS + ")", "deny", "frozen-path", cwd=NOGIT)
+# THE RUNNERS THE LIST DOES NOT NAME. Each one runs its operand as a command, so the rm it carries writes the frozen file.
+sh("frozen form: stdbuf running rm is refused", "stdbuf -o0 rm " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen form: flock running rm is refused", "flock /tmp/l rm " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen form: busybox running rm is refused", "busybox rm " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen form: parallel running rm is refused", "parallel rm ::: " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen form: su -c running rm is refused", "su -c 'rm " + CFG_SETTINGS + "'", "deny", "frozen-path",
+   cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
