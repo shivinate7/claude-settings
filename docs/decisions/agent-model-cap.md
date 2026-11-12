@@ -189,7 +189,8 @@ the run's `modelUsage` and the agent's own report of its model id. Background ca
 | builder, no pin | unset | haiku | haiku |
 
 So a pin in `agents/*.md` beats the variable in both directions. A reviewer spawn that names no model
-runs Haiku even where the variable is `sonnet`; rounds 2 and 3 must set the model per spawn.
+runs Haiku even where the variable is `sonnet`; rounds 2 and 3 and a fix check must set the model per spawn
+(owner, item 444 a, 2026-11-08 15:04 CST).
 A running cloud thread does not load `~/.claude/agents` files written mid-session: its Agent tool
 refused `reviewer`, `designer` and `builder` as unknown types. A process started after the write
 loaded all of them. Unknown: whether the cloud thread harness itself, as against a headless run in
