@@ -141,7 +141,7 @@
                           the same build, stacked by the tool on the ready batch whose CI is running (a head `batch-*`, a frozen block, not a draft),
                           or on the tip of a chain of them. With none running it builds on the base and says so. Two running batches that stack on
                           nothing in common stop the run: nothing is pushed, and --on names the one. Goes with no --on and no --ready. Cost: one
-                          pull list, and one CI read per ready batch pull request.
+                          pull list, one protection read, and one CI read per ready batch pull request, on top of the build's own reads.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -1221,9 +1221,12 @@ class Host:
         running = self.judge_runs([r for r in self.runs(d["head"]["sha"]) if r["name"] not in ignore])[1]
         return (["required check " + "; ".join(hits)] if hits else []) + [w + " is not completed" for w in running]
 
-    def head_busy(self, n, sha):
-        """True when the head `sha` of open pull request `n` has CI running (busy_parts, the one home of that read). A failed read raises Stop."""
-        return bool(self.busy_parts({"number": n, "head": {"sha": sha}}, self.required_names(), self.ignore))
+    def heads_busy(self, pairs):
+        """-> the numbers of `pairs` ((pull request number, head sha)) whose head has CI running (busy_parts, the one home of that read). The required names
+        are read once for all of them, for the base this Host reads. A failed read raises Stop."""
+        pairs = list(pairs)
+        names = self.required_names() if pairs else None
+        return {n for n, sha in pairs if self.busy_parts({"number": n, "head": {"sha": sha}}, names, self.ignore)}
 
     def ready_busy(self, pulls, base):
         """-> the numbers of the ready (not draft) pull requests of `pulls` on `base` whose head has CI running (busy_parts). `pulls` is the open
@@ -4910,17 +4913,21 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
     say(f"merge: batch {name} built: PR #{pr} {'draft' if info['draft'] else 'ready'}, lanes {lane_list(heads)}")
     return rc
 
-def running_batch(h, base):
+def running_batch(h, base, skip=None):
     """-> the branch of the batch a new batch stacks on, or None: the ready batch pull requests on `base` (a head `batch-*`, a frozen block, not a draft)
-    whose head has CI running, less any that another of them names in its On line, so a chain of running batches gives its tip. More than one left is a
-    Stop that names them: the tool never picks between batches that stack on nothing in common."""
-    found = {}
+    whose head has CI running, less the branch `skip` (the batch being built) and any that another of them names in its On line, so a chain of running
+    batches gives its tip. More than one left is a Stop that names them: the tool never picks between batches that stack on nothing in common.
+    The host reads `base`'s required checks: its base is set here."""
+    h.base = base
+    cands = {}
     for n, info in h.open_prs():
-        if info["base"] != base or info["draft"] or not info["branch"].startswith(BATCH_PREFIX):
+        if info["base"] != base or info["draft"] or not info["branch"].startswith(BATCH_PREFIX) or info["branch"] == skip:
             continue
         block = parse_freeze(info["body"])
-        if block and info["branch"] == integration_branch(block["name"]) and h.head_busy(n, info["head"]):
-            found[info["branch"]] = block
+        if block and info["branch"] == integration_branch(block["name"]):
+            cands[n] = (info["branch"], info["head"], block)
+    busy = h.heads_busy([(n, head) for n, (_b, head, _k) in cands.items()])
+    found = {branch: block for n, (branch, _h, block) in cands.items() if n in busy}
     stacked = {b["on"][0] for b in found.values() if b["on"]}
     tips = sorted(set(found) - stacked)
     if len(tips) > 1:
@@ -5163,8 +5170,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--blame goes with --batch-build NAME")
         if a.run is None:
             p.error("--blame needs --run <Actions run URL>: the failed run of the batch's current head that blames the lane")
-        if len(a.batch_build) > 1 or a.ready or a.on is not None or a.base or a.lint_unknown_ok:
-            p.error("--batch-build NAME --blame PR --run URL takes no PR list, --ready, --on, --base or --lint-unknown-ok")
+        if len(a.batch_build) > 1 or a.ready or a.on is not None or a.on_running or a.base or a.lint_unknown_ok:
+            p.error("--batch-build NAME --blame PR --run URL takes no PR list, --ready, --on, --on-running, --base or --lint-unknown-ok")
     if any(not v.strip() for v in [*a.case, *a.file, *([a.run] if a.run is not None else [])]):
         p.error("--run, --case and --file take a value that is not empty")
     if (a.case or a.file) and not a.touches:
@@ -5321,7 +5328,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 return batch_blame(root, h, name, a.blame, a.run)
             on = a.on
             if a.on_running:
-                on = running_batch(h, a.base or "main")
+                on = running_batch(h, a.base or "main", integration_branch(name))
                 say(f"merge: batch {name} is built on the running batch {on}." if on else f"merge: no batch is running on {a.base or 'main'}; batch {name} is built on it.")
             return batch_build(root, h, name, sorted(map(int, numbers)), on, a.base, a.ready, a.lint_unknown_ok, a.config)
         lock = lock or default_lock(root)
