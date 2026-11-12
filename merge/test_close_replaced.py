@@ -457,11 +457,12 @@ class CarrySkipsFrozen(CloseEnv):
     A lane that open batches list at two heads is held at each of them, whatever the open list order. An unreadable block in an open batch
     makes only the carried line unknown: the batch line still prints."""
 
-    def wake_run(self, pulls, done, compares, closed=()):
-        """-> (rc, output, err) of a wake over `pulls`. The numbers in `done` are done drafts: a record and a lane lint at their head, CI green."""
+    def wake_run(self, pulls, done, compares, closed=(), **kw):
+        """-> (rc, output, err) of a wake over `pulls`. The numbers in `done` are done drafts: a record and a lane lint at their head, CI green.
+        `kw` reaches closed_host, for a failing read such as compare_error."""
         comments = [c for n in done for c in (record_of(n, head_of(n)), lint_of(n, head_of(n)))]
         checks = {head_of(n): green() for n in done}
-        host = closed_host("o/alpha", pulls=pulls, comments=comments, closed=closed, check_rows=checks, compares=compares)
+        host = closed_host("o/alpha", pulls=pulls, comments=comments, closed=closed, check_rows=checks, compares=compares, **kw)
         return self.run_args("--reviewed", "--root", self.alpha, hosts={self.alpha: host})
 
     def wake(self, pulls, done, compares, closed=()):
@@ -623,6 +624,61 @@ class CarrySkipsFrozen(CloseEnv):
         self.assertEqual(rc, 1, "a malformed block in open batch #9 does not exit 1:\n" + text)
         self.assertEqual(kind_lines(block, CARRIED), [], "a close line printed while the block of open batch #9 is unknown:\n" + text)
 
+    def carried_compare_pulls(self):
+        """Done draft #5 is held by open #9. Open #7 names open draft #6 with `Replaces #6`, so #6 closes as replaced by #7."""
+        return [named_pull(5, head_of(5), draft=True), named_pull(9, head_of(9)), named_pull(6, head_of(6), draft=True),
+                named_pull(7, head_of(7), body="Replaces #6")]
+
+    def test_a_failed_carried_compare_does_not_hide_an_unrelated_replaced_close(self):
+        # The compare of #5 with holder #9 fails: `close as carried unknown` and exit 1. Only a freeze-read Stop suppresses a replaced line, so the
+        # compare failure must not hide #6 by #7. The carried line stays off: its compare is unknown.
+        rc, out, err = self.wake_run(self.carried_compare_pulls(), [5], {(head_of(5), head_of(9)): "ahead"}, compare_error=(1, "gh: HTTP 502 (test)"))
+        block = block_of(self, out, "o/alpha")
+        self.assertEqual(len(kind_lines(block, CARRIED_UNKNOWN)), 1, "no `close as carried unknown` line for the failed compare:\n" + "\n".join(block))
+        self.assertEqual(rc, 1, "a failed carried compare does not exit 1:\n" + out + err)
+        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #6 by #7"],
+                         "a failed carried compare hid the replaced close of #6 by #7:\n" + "\n".join(block))
+        self.assertEqual(kind_lines(block, CARRIED), [], "a close line printed although its compare is unknown:\n" + "\n".join(block))
+
+    def test_a_readable_carried_compare_prints_the_replaced_and_carried_closes(self):
+        # Control for the test above: the same pulls with the compare readable exit 0 and print both close lines.
+        rc, out, err = self.wake_run(self.carried_compare_pulls(), [5], {(head_of(5), head_of(9)): "ahead"})
+        self.assertEqual(rc, 0, "control: a readable compare exits 1:\n" + out + err)
+        block = block_of(self, out, "o/alpha")
+        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #6 by #7"], "control: no replaced close:\n" + "\n".join(block))
+        self.assertEqual(kind_lines(block, CARRIED), ["close as carried: o/alpha #5 by #9"], "control: no carried close:\n" + "\n".join(block))
+
+    def test_a_malformed_open_batch_with_no_done_pull_request_and_no_claim_exits_zero(self):
+        # With no done pull request and no `Replaces` claim, nothing reads the frozen block of open batch #9, so its unreadable block neither exits 1
+        # nor prints a close line. Control: the same unreadable block with done draft #5 is read: exit 1 and the carried-unknown line.
+        malformed = named_pull(9, head_of(9), body=BATCH_BEGIN + "\n", draft=True, head_ref=BATCH_HEAD)
+        rc, out, err = self.wake_run([named_pull(5, head_of(5), draft=True), malformed], [5], {})
+        self.assertEqual(len(kind_lines(block_of(self, out, "o/alpha"), CARRIED_UNKNOWN)), 1,
+                         "control: no carried-unknown line for the unreadable block with done draft #5:\n" + out + err)
+        self.assertEqual(rc, 1, "control: the unreadable block with done draft #5 does not exit 1:\n" + out + err)
+
+        rc, out, err = self.wake_run([malformed], [], {})
+        block = block_of(self, out, "o/alpha")
+        self.assertEqual(kind_lines(block, CARRIED_UNKNOWN), [], "the freeze of open batch #9 was read with no done pull request and no claim:\n" + "\n".join(block))
+        self.assertEqual(rc, 0, "an unreadable open batch with no done pull request and no claim exits 1:\n" + out + err)
+
+    def test_a_freeze_stop_prints_no_replaced_close_either(self):
+        # Open #7 names open #6 with `Replaces #6`, and open batch #9's block is unreadable: the freeze read stops, so both close kinds are unknown.
+        # No `close as replaced` line prints, the run exits 1, and the unknown line names the block. Control: a readable block prints #6 by #7.
+        pulls = [named_pull(6, head_of(6), draft=True), named_pull(7, head_of(7), body="Replaces #6")]
+        readable = named_pull(9, head_of(9), body=freeze_body(freeze_inner("nightly", [(8, head_of(8))])), draft=True, head_ref=BATCH_HEAD)
+        rc, out, err = self.wake_run([*pulls, readable], [], {})
+        self.assertEqual(rc, 0, "control: a readable block in open batch #9 exits 1:\n" + out + err)
+        self.assertEqual(kind_lines(block_of(self, out, "o/alpha"), REPLACED), ["close as replaced: o/alpha #6 by #7"],
+                         "control: no close as replaced for #6 by #7 with a readable block:\n" + out)
+
+        malformed = named_pull(9, head_of(9), body=BATCH_BEGIN + "\n", draft=True, head_ref=BATCH_HEAD)
+        rc, out, err = self.wake_run([*pulls, malformed], [], {})
+        block = block_of(self, out, "o/alpha")
+        self.assertEqual(len(kind_lines(block, CARRIED_UNKNOWN)), 1, "no carried-unknown line for the unreadable block in open batch #9:\n" + "\n".join(block))
+        self.assertEqual(rc, 1, "a freeze Stop does not exit 1:\n" + out + err)
+        self.assertEqual(kind_lines(block, REPLACED), [], "a freeze Stop printed a close as replaced:\n" + "\n".join(block))
+
 
 class CloseThenBuild(CloseEnv, tm.CloudSession):
     """The batch leg of the frozen-lane skip. A wake over alpha prints its close lines. The batch runner closes each pull request a line names,
@@ -765,6 +821,29 @@ class ReopenClosed(CloseEnv):
                               extra_comments=[review_comment(90, 4, "Replaced by #7"), review_comment(91, 6, "Replaced by #8")])
         self.assertIn("reopen: o/alpha #6 (replacer #8 no longer names it)", lines, "control: #6 has no reopen line:\n" + "\n".join(lines))
         self.assertFalse([l for l in lines if l.startswith("reopen: o/alpha #4 ")], "#4 reopened while its replacer still names it")
+
+    def test_a_frozen_lane_that_its_open_batch_names_reopens(self):
+        # #4 was closed as replaced by #9. Open batch #9 freezes #4 at its current head and names it. The close was wrong: replaced_closes skips a lane
+        # frozen at its current head, so a reopened #4 is not closed again, and the reopen line prints though the batch names #4.
+        body = freeze_body(freeze_inner("nightly", [(4, head_of(4))])) + "Replaces #4\n"
+        lines = self.reopened(closed=[closed_pull(4, head_of(4))], extra_pulls=[named_pull(9, head_of(9), body=body, draft=True, head_ref=BATCH_HEAD)],
+                              extra_comments=[review_comment(90, 4, "Replaced by #9")])
+        self.assertEqual(len(lines), 1, "no reopen line for #4, which open batch #9 freezes at its current head:\n" + "\n".join(lines))
+        self.assertRegex(lines[0], r"^reopen: o/alpha #4 \(.+\)$", "the reopen line does not name #4 with a reason:\n" + lines[0])
+
+    def test_a_link_named_by_a_pull_request_that_is_not_a_batch_keeps_its_pr_closed(self):
+        # Control: open #7 is not a batch, names #4 with `Replaces #4`, and freezes nothing. #4 stays closed.
+        lines = self.reopened(closed=[closed_pull(4, head_of(4))], extra_pulls=[named_pull(7, head_of(7), body="Replaces #4")],
+                              extra_comments=[review_comment(90, 4, "Replaced by #7")])
+        self.assertEqual(lines, [], "#4 reopened while a pull request that is not a batch still names it:\n" + "\n".join(lines))
+
+    def test_a_link_that_a_batch_froze_at_an_older_head_keeps_its_pr_closed(self):
+        # Control: open batch #9 names #4 and freezes it at head_of(14), not at #4's head. The batch does not hold #4 at its head, so a reopened
+        # #4 would close again: no reopen line.
+        body = freeze_body(freeze_inner("nightly", [(4, head_of(14))])) + "Replaces #4\n"
+        lines = self.reopened(closed=[closed_pull(4, head_of(4))], extra_pulls=[named_pull(9, head_of(9), body=body, draft=True, head_ref=BATCH_HEAD)],
+                              extra_comments=[review_comment(90, 4, "Replaced by #9")])
+        self.assertEqual(lines, [], "#4 reopened although open batch #9 froze it at an older head:\n" + "\n".join(lines))
 
     def test_an_indented_closing_note_reopens(self):
         # A closing note counts at a line start after optional whitespace. #4's note is indented, and #7 is closed.
@@ -926,6 +1005,15 @@ class ReplacesCycles(CloseEnv):
                  named_pull(3, head_of(3), body="Replaces #2"), named_pull(4, head_of(4), body="Replaces #1")]
         block = self.block_for_alpha(pulls=pulls)
         self.assertEqual(kind_lines(block, REPLACED), [], "a PR that leads into a cycle closed a member of it:\n" + "\n".join(block))
+
+    def test_a_frozen_lane_in_a_two_cycle_closes_none_because_the_cycle_is_tested_first(self):
+        # #5 and #6 name each other, and open batch #9 freezes #5 at its current head. The cycle test runs before the frozen skip, so the pair closes
+        # none. Green on the old code; a skip moved before the cycle test would drop the claim on #5 and close #6 as replaced by #5.
+        frozen = freeze_body(freeze_inner("nightly", [(5, head_of(5))]))
+        pulls = [named_pull(5, head_of(5), body="Replaces #6", draft=True), named_pull(6, head_of(6), body="Replaces #5", draft=True),
+                 named_pull(9, head_of(9), body=frozen, draft=True, head_ref=BATCH_HEAD)]
+        block = self.block_for_alpha(pulls=pulls)
+        self.assertEqual(kind_lines(block, REPLACED), [], "a two-cycle with frozen #5 closed a member as replaced:\n" + "\n".join(block))
 
 
 class ReplacesFences(CloseEnv):
