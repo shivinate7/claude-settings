@@ -24,15 +24,15 @@ The rest of the page's rules live in sibling files under `reference/`. Read a fi
 | Keep the page on main's code | `reference/republish.md` | Before the page is republished, at each writer wake. |
 | Rebuild a page from the repo | `reference/republish.md` | The page is gone, or moved to an org this account cannot read. |
 | Merge a copy into a live page | `reference/republish.md` | Two accounts each wrote a page for one repo. |
-| Keep a copy in the repo | `reference/copies-and-accounts.md` | At each writer wake, before any republish. |
+| Keep a copy in the repo | `reference/copies-and-accounts.md` | At each writer wake, before any republish, and in a rebuild or a merge. |
 | Register and cite an artifact | `reference/copies-and-accounts.md` | A repo registers an artifact, or a decision or debt cites one. |
 | Before you switch Claude accounts | `reference/copies-and-accounts.md` | Before the account, the org or the machine changes. |
 | Rotate the writer | `reference/routing-and-sessions.md` | The writer role moves to a new session. |
 | Route an ask | `reference/routing-and-sessions.md` | An ask arrives in `asks/`. |
 | Message another session | `reference/routing-and-sessions.md` | A session sends or reads a message to or from another session. |
-| Make a repo's page | `reference/repo-pages.md` | `layout.py waiting-page` prints `unknown` for a repo. |
+| Make a repo's page | `reference/repo-pages.md` | `layout.py waiting-page` prints `unknown` for a repo, a fork makes its own page, or a page is rebuilt. |
 | Update the roadmap block | `reference/repo-pages.md` | The roadmap block is rebuilt. |
-| Update a repo's pages | `reference/repo-pages.md` | A batch changes `page.html`. |
+| Update a repo's pages | `reference/repo-pages.md` | A batch changes `page.html`. Also before a write that sets a ruling, `reply`, `replied`, `lastAnswer`, `lane`, `waits`, `multi` or `ranked`, and when a design is republished. |
 | Add a design | `reference/designs.md` | An option needs a mockup picture. |
 
 ## Find the page
