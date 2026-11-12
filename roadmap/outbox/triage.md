@@ -910,3 +910,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - subagent-handback-skipped 14:23 CST Nov 12: Owner 14:21 CST Nov 12 (coordinator chat): the tile-windows parent ran in bypassPermissions, "it was on bypass permissions mode tho which is stornger no". Defect: SubagentHandback is gated on auto mode exactly, so bypass (a wider mode) blocks it.
 - cloud-branch-delete 14:23 CST Nov 12: Records lane grant-scope-fixcheck-carry started 14:20 CST Nov 12 on the owner's typed yes (item 638).
 - Lint FAILs 14:18 CST Nov 12 (coordinator): #2882 closed, replaced by #2909 (Red-run trailer); #2847 FAIL at 1cf006c2d, 5 checks, its lane has the list.
+- subagent-handback-skipped 14:24 CST Nov 12: First lane start refused 14:22 CST Nov 12 by the auto-mode check; owner typed 14:23 CST "yes: start the lane to let SubagentHandback through in bypassPermissions"; lane subagent-handback-bypass started.
+- Notes cleanup 14:23 CST Nov 12 (lane stop-checks-one-message via coordinator): docs/debts/notes.md has duplicate blocks window-env-forms-unread and last-nudge-gap-no-summary.
+- Owner item 643 (14:24 CST Nov 12): PR #2929 (lane widening-question-not-asked) refuses a question that revisits uniform-over-variants; archive/widening-question-not-asked at 17c6ceb5c, old branch delete waits on a local session.
+- guard-run-slow-long-command handed to runner 10 at a2e1b152e (coordinator 14:22 CST Nov 12).
