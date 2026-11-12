@@ -1680,11 +1680,18 @@ test("pending cite: --check refuses a pending cite that an excludeGlobs entry co
 
 // The cite scanner reads text, so the cases that break a naive scanner go in: a comment opener
 // inside a string, a multi-line template literal, and a lone quote in prose. Each cite sits outside
-// scanGlobs and must still refuse at its own line.
+// scanGlobs and must still refuse at its own line. The refusal reads a cite as the rewrite does, so
+// a code span, a fence, frontmatter or a link target does not hide one either.
 const SCANNER_SHAPES = [
   ["a comment opener inside a string", "plugins/_shared/label.mjs", 1, 'export const label = "// not a comment"; export const cite = "[[p]]";\n'],
   ["the second line of a multi-line template literal", "plugins/_shared/doc.mjs", 2, "export const doc = `first line\n[[p]] on line two`;\n"],
   ["a lone quote in prose", "plugins/_shared/prose.txt", 1, "Don't drop [[p]] here.\n"],
+  ["a backtick pair around the cite", "notes/bt.txt", 1, "Run the `flag then [[p]] and `x`.\n"],
+  ["a backtick pair that spans a JSON value", "data/cfg.json", 1, '{"a": "`", "b": "See [[p]].", "c": "`"}\n'],
+  ["a one-line template literal", "src/tpl.mjs", 1, "export const tpl = `See [[p]] here.`;\n"],
+  ["a link target", "src/pick.mjs", 1, 'handlers["x"]("[[p]]")\n'],
+  ["a fence that never closes", "notes/fence.txt", 3, "Intro\n```\nSee [[p]] here.\n"],
+  ["a frontmatter-like rule at the top", "notes/front.txt", 2, "---\nSee [[p]] here.\n---\n\nBody.\n"],
 ];
 for (const [shape, rel, line, text] of SCANNER_SHAPES) {
   test(`pending cite: --check refuses a pending cite after ${shape}, at ${rel}:${line}`, () =>
