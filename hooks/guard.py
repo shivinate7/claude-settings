@@ -4526,15 +4526,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 3b. A trap ported from banchi's `scripts/guard-shell.py`: `ln -s` onto a directory that is
     # already there. It reads the segment's own command word, never a substring, and reads the
-    # filesystem rather than the text.
+    # filesystem rather than the text. Each ln is read in the folder it runs in on the cd walk, since
+    # `_run_dir` answers for the call's git segments, not for an ln in another folder. When the walk
+    # cannot tell that folder, the whole-call answer stands in.
     run_in = _run_dir(stripped, cwd)
     ends = []
     nm_segments = split_segments(stripped, ends)
     for number, segment in enumerate(nm_segments):
-        matched = ln_descends_hit(segment, run_in)
+        folder = dir_before_segment(nm_segments, number, cwd, ends)
+        matched = ln_descends_hit(segment, folder or run_in)
         if matched:
             refuse(tool, "deny", "ln-over-directory", LN_DESCENDS_REASON, matched)
-        folder = dir_before_segment(nm_segments, number, cwd, ends)
         matched = folder and linked_nm_hit(segment, folder)
         if matched:
             refuse(tool, "deny", "linked-node-modules", LINKED_NM_REASON, matched)
