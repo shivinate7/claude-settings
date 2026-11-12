@@ -1,0 +1,14 @@
+{
+ "id": "model-cap-probe-false-alarm",
+ "title": "Find why the model-cap guard asked about a probe.py command that writes nothing",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 15:53 CST Nov 12 (retrospective): a prompt asked him to let hooks/probe.py write CLAUDE_CODE_SUBAGENT_MODEL (Opus, until 2027-01-14) into .claude/settings.local.json, from lane fixed-number-limits-census; probe.py never runs its command.",
+ "source": "retrospective 15:54 CST Nov 12; step agent-model-cap-string-false-alarm (closed 16:10 CST)",
+ "note": "First check whether that lane ran a stale install (fix already on main). If main still asks on a probe.py quoted command, red test first, then fix. Page item 656 closed.",
+ "updatedAt": "2026-11-12T16:10:05-06:00"
+}
