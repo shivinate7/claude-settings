@@ -9,7 +9,7 @@ FAMILY = "frozen"
 # Failure classes, one per group: flag-cluster, flag-suffix, flag-long, flag-after-operand,
 # w-command, wrapper, pipe-feed, false-alarm, script-as-target, script-file, scanner-strings,
 # delimiter, quoted-command, address, line-address, block, expression, s-end, comment,
-# newline-script, label, nested-newline, find-exec, nested-pipe.
+# newline-script, label, nested-newline, find-exec, nested-pipe, scan-fail-placed.
 
 # --- flag-cluster: -i inside a cluster of short flags is a write (class: flag-cluster) ---
 sh("sed-operand flag-cluster: sed -ni onto a frozen hook is refused",
@@ -190,3 +190,9 @@ sh("sed-operand find-exec: find -exec sed -ni onto a frozen hook is refused",
 # --- nested-pipe: a pipe into xargs sed -ni inside a sh -c script is a write (class: nested-pipe) ---
 sh("sed-operand nested-pipe: bash -c with a frozen hook piped to xargs sed -ni is refused",
    "bash -c \"echo " + CFG_HOOK + " | xargs sed -ni 's/a/b/'\"", "deny", "frozen-path", cwd=NOGIT)
+
+# --- scan-fail-placed: sed opens a w file as it reads the script, so a parse error after the w still empties it (class: scan-fail-placed) ---
+sh("sed-operand scan-fail-placed: sed -n with a W to a frozen hook, then an unknown command on the next line, is refused",
+   "sed -n '\\%x%W " + CFG_HOOK + "\n4.2' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand scan-fail-placed control: sed -n with a p, then an unknown command on the next line, reads a frozen hook and is allowed",
+   "sed -n '\\%x%p\n4.2' " + CFG_HOOK, "allow", cwd=NOGIT)
