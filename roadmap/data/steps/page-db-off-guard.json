@@ -1,0 +1,17 @@
+{
+ "id": "page-db-off-guard",
+ "title": "Refuse a page-database write or a db-declaring publish for a waiting page",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "page-reads-writes-git",
+  "writer-writes-git"
+ ],
+ "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
+ "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
+ "note": "Refuses an ArtifactData write naming a waiting-page URL and a waiting-page publish that declares db; a lint fails if page.html calls use(\"db\"). Red first.",
+ "updatedAt": "2026-11-12T11:55:51-06:00"
+}

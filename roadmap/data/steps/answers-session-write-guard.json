@@ -1,0 +1,14 @@
+{
+ "id": "answers-session-write-guard",
+ "title": "Refuse a session write to waiting/answers/**",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "session_013NEJL2bk5JjA6fXmQ5SooN",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
+ "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
+ "note": "On the page database and on every git write tool. Red first. Lane started 11:54 CST Nov 12 (coordinator).",
+ "updatedAt": "2026-11-12T11:55:51-06:00"
+}

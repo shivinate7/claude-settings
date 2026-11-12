@@ -1,0 +1,17 @@
+{
+ "id": "page-reads-writes-git",
+ "title": "page.html moves its collections from the database to the git connector",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "page-git-connector-probe",
+  "waiting-item-check"
+ ],
+ "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
+ "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
+ "note": "One commit per Send, Undo or Ask batch; boot order changes; polls about every 30 s and refreshes on load and focus (coordinator pick 11:43 CST).",
+ "updatedAt": "2026-11-12T11:55:51-06:00"
+}

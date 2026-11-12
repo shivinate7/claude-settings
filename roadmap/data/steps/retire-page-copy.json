@@ -1,0 +1,16 @@
+{
+ "id": "retire-page-copy",
+ "title": "Delete the page copy step once git is the only store",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "page-db-off-guard"
+ ],
+ "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
+ "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
+ "note": "Delete export mode of export_page.py and export_check in hooks/feedback_guard.py; keep --all; close step waiting-export-miss-cloud as superseded; rewrite decision waiting-data-in-repo in place.",
+ "updatedAt": "2026-11-12T11:55:51-06:00"
+}
