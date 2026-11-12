@@ -2186,5 +2186,4 @@
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
 - ruling-cite-pick-letter-unpinned: no case puts a letterless `item N` inside a claim form, so making the pick letter required again stays green (lint/test_check_red_run.py, pick-letter case). Decision: none.
 - ruling-cite-amend-remedy: when only the ruling rule fails, the remedy's `--amend -m <subject> -m "Ruling: ..."` drops the body and any `Red-run:` trailer, and the next run goes red (lint/check_red_run.py remedy lines). Decision: none.
-- ruling-cite-test-docstring: the test file's docstring still lists a bare `owner ruling` as a claim phrase (lint/test_check_red_run.py line 16). Decision: none.
 - ruling-cite-decision-path: a decision home in path form, `decision docs/decisions/<slug>.md`, is not checked against a file on disk, though the slug form is (lint/check_red_run.py). Decision: none.
