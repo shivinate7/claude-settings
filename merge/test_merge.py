@@ -13134,12 +13134,14 @@ class MergeRoleCheck(CloudSession):
                 self.assert_refused(CLAUDE_CODE_REMOTE_SESSION_ID=session)
 
     def test_the_refusal_goes_to_stderr_and_hands_the_pr_to_the_batch_runner(self):
-        # The review record lives on the PR, and the batch runner finds PRs itself. So the refusal
-        # names the review record and says the batch runner finds the PR. It does not hand over the number and the head.
+        # The review log lives on the PR, and the batch runner finds PRs itself. So the refusal
+        # names the review log and says the batch runner finds the PR. It does not hand over the number and the head.
         rc, out, err = self.run_main("7", "--confirm")
         self.assertEqual(rc, 1, out + err)
         # Ruling 113 a, pr-review-record: the handoff text (the pull request number and its head) is retired. The lint step is not.
-        self.assertRegex(err, r"(?i)review record")
+        # The glossary term is review log; review record is the retired name (GLOSSARY.md, term review log).
+        self.assertRegex(err, r"(?i)review log")
+        self.assertNotRegex(err, r"(?i)review record")
         self.assertRegex(err, r"(?i)batch[ -]runner finds")
         self.assertNotRegex(out, r"(?i)batch[ -]runner")  # stdout carries no part of the refusal
         # git-remedy-never-names-target: the text never names the command it refused
@@ -13247,6 +13249,20 @@ class MergeRoleCheck(CloudSession):
     def test_the_role_refusal_names_the_lane_lint_step(self):
         err = self.assert_writer_refused("--role", "lane")
         self.assertIn("merge --lane-lint", err, "the --role refusal does not name merge --lane-lint")
+
+    def test_the_confirm_refusal_names_no_retired_tier_word(self):
+        # The refusal's cite (ROLE_CITE) says a session's tier. The glossary term is session role; tier is retired.
+        rc, out, err = self.run_main("7", "--confirm")
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotRegex(err, r"\btier\b", "the --confirm refusal says tier, a retired word: the term is session role")
+
+    def test_the_role_refusal_names_the_session_role_and_the_review_log(self):
+        # The writer's refusal names the session role and the review log, and neither retired term: tier, review record.
+        err = self.assert_writer_refused("--role", "lane")
+        self.assertIn("session role", err, "the --role refusal does not name the session role")
+        self.assertRegex(err, r"(?i)review log", "the --role refusal does not name the review log")
+        self.assertNotRegex(err, r"(?i)review record", "the --role refusal says review record, a retired term")
+        self.assertNotRegex(err, r"\btier\b", "the --role refusal says tier, a retired word: the term is session role")
 
     def test_the_role_refusal_names_the_owner_started_lane_and_the_batch_runner_ask(self):
         # G2 and G10 (owner 2026-11-10 14:23 and 14:33 CST): the remedy for a tier the writer refuses names the lane the owner started.
