@@ -160,6 +160,7 @@ FAMILIES = {
     "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
     "sections": "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
+    "commit-trailer-model": "an agent's git push is refused when a pushed commit's Co-Authored-By names a model that differs from the agent's own model, read from its transcript; a trailer naming no model, a missing or unreadable transcript, an unmapped model, an orchestrator's push and a push with nothing new all pass",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
