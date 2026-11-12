@@ -2180,3 +2180,6 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- silent-undo-pair-loop-gaps: Retiring N and adding N notes is still quadratic in the pair loop (1000 each takes 21 s); slug-less notes get only the 0.85 likeness test, so a `Fix:` append growing a short slug-less note by over 18 percent passes, and an indented slug note (`  - slug: new`) passes. Decision: silent-undo-check-design.
+- silent-undo-read-twice-comment: The test comments in `lint/test_check_silent_undo.py` around lines 3345-3356 say the base file is "read twice" though the code reads it once, and no test uses a `+` bullet (mutant `[-*]` survives). Decision: silent-undo-check-design.
+- silent-undo-two-path-untested: The two-candidate-path cost (7 git spawns, a repo not rolled out) has no test. Decision: silent-undo-check-design.

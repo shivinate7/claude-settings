@@ -97,8 +97,8 @@ f9d09b9bf. Harm: another lane's notes change unseen by their owner.
 
 **Measured.**
 
-- The 0.85 threshold on the notes on main now (reviewer's measure, round 1): 4 of 2171 adjacent pairs read at or
-  above it, and 0 of 74,528 random pairs under different slugs.
+- The 0.85 threshold on main's notes, measured 2026-11-12 on `docs/debts/notes.md`: 4 of 2179 adjacent pairs at or
+  above 0.85, and 0 of 74,528 random different-slug pairs.
 - A replay over 118 merged PRs that touched the notes file: 196 flags in 29 PRs, none false.
 - Named limit: a rename with a reword that changes more than about 15 percent of the text passes. Three or
   four real events seen.
