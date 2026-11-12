@@ -24,11 +24,13 @@
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "b",
   "rank": 2,
   "ref": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "reply": "Answered in the coordinator's chat at 20:08 CST: \"add artifactdata to the allowlist please\". You also asked that every name the page tool goes by be allowed. A builder adds them on branch artifactdata-allow (#2608). Home: step cloud-artifactdata-allow.",
   "repo": "shivinate7/claude-settings",
   "short": "cloud page tool allow",
-  "status": "open",
+  "status": "closed",
   "title": "Add the cloud page tool to the settings allow list, as a test?",
   "why": "Only your typed words change the shared settings file (measured 2026-11-11, the coordinator's allow-list read at 20:06 CST)."
 }

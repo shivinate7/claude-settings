@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-12T02:15:00Z",
+  "context": "Goal: the fastest outcome without losing accuracy.\nProblem (goal): prose-only steps could all land first as one wave, or run beside code. Today one batch merges at a time, so a prose batch waits behind a running code batch.\nBased on (read): a prose PR already gets one short two-check review round. A lone batch CI run takes 33-38 minutes (5 runs, plan 3.4).\nBased on (measured): tonight the plan copy, one prose file, failed that short round twice on real errors: a misquote of you, a false claim about the project-ops script, and your pick c described as fitting your shared-tool ruling (2026-11-11).\nDeparts from: plan 3.13, where an express pass skips the review when the quotes match the log \u2014 adds prose batches that go next in the merge order.\nMeanwhile: the retrospective waits on this item only.",
+  "holds": "When prose-only steps merge relative to code, and whether prose keeps its one short review round.",
+  "home": "plan restart-plan, 3.13 (R7) and R42 part 2",
+  "id": "prose-batch-order",
+  "kind": "decision",
+  "n": 521,
+  "options": [
+    {
+      "gain": "Prose waits at most one running batch, and the wait ends for everything once lanes merge on their own green.",
+      "how": "Until lanes merge on their own green (R42 part 2), a ready prose batch goes next in the merge order, ahead of a ready code batch. Prose keeps the one short round; the skip applies only to a PR of verbatim quotes and their times. R42 part 2's planning starts in the first hour of the fan-out.",
+      "key": "a",
+      "label": "Prose goes next in line (Recommended)",
+      "lose": "A ready code batch can wait one prose run."
+    },
+    {
+      "gain": "Code lanes cite settled text.",
+      "how": "Every prose step lands first, and code waits for the prose wave.",
+      "key": "b",
+      "label": "All prose first",
+      "lose": "Code lanes sit idle for the prose wave."
+    },
+    {
+      "gain": "The fastest prose.",
+      "how": "Plan 3.13 as written: prose skips the review round when its quotes match the log.",
+      "key": "c",
+      "label": "Skip review when quotes match",
+      "lose": "Tonight's three errors would have merged, since none was in a quote."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "rank": 1,
+  "ref": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "repo": "shivinate7/claude-settings",
+  "short": "prose merge order",
+  "status": "open",
+  "title": "Should prose-only steps jump ahead of code?",
+  "why": "You asked at 20:10 and 20:13 CST whether prose should go first as an express round (measured 2026-11-11, #2605 failed its prose round twice tonight)."
+}
