@@ -7,11 +7,10 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [
-  "waiting-site-probe",
-  "waiting-item-check"
+  "page-data-one-store"
  ],
  "why": "Owner ruling R28 (one store for page data, git first) and owner 12:10 CST: \"Custom connectors are not allowed -- so we can do route B\".",
  "source": "coordinator 12:28 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store rewritten to route B on #2829, owner 12:10 CST)",
- "note": "Owner-yes acts: token mint, deploy, access gate. Measured 12:35 CST Nov 12 (owner opened the probe page): a claude.ai page cannot call any outside host, so the site serves the page itself from the owner's Cloudflare, same address. Owner page item 592 (how the site knows it is him; a = Cloudflare Access login, recommended) blocks the build. Only if the owner picks b on page item 593 (route B) (coordinator 12:50 CST Nov 12).",
- "updatedAt": "2026-11-12T12:41:07-06:00"
+ "note": "Owner-yes acts: token mint, deploy, access gate. Measured 12:35 CST Nov 12 (owner opened the probe page): a claude.ai page cannot call any outside host, so the site serves the page itself from the owner's Cloudflare, same address. Owner page item 592 (how the site knows it is him; a = Cloudflare Access login, recommended) blocks the build. Only if the owner picks b on page item 593 (route B) (coordinator 12:50 CST Nov 12). Parked 12:42 CST Nov 12: fallback only if same-account lag is measured (owner item 593 a, coordinator 12:52 CST).",
+ "updatedAt": "2026-11-12T12:43:41-06:00"
 }
