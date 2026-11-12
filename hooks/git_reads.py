@@ -410,14 +410,15 @@ def branch_is_empty(where: str, base: str, branch: str):
 #     its absence for a deletion) in ONE candidate commit, and that commit is on a remote-tracking
 #     ref. Candidates: HEAD, HEAD's merge-base with the default branch, HEAD's reflog (capped).
 #     A blob found only in a local-only commit never counts.
-# No `--find-object` and no history walk: the candidate set is bounded.
+# No `--find-object` and no history walk: the candidate set is bounded. The count of dirty paths is
+# not a limit (owner R37, page item 595, 2026-11-12 12:54 CST): a large tree is judged by the same
+# proof. A read that cannot run, such as a timeout or a command line too long, answers None.
 #
 # COST, per call, and only on `git worktree remove` with a dirty tree: at most 14 fixed git process
 # starts, then one `ls-tree` per candidate tried (stops once every path matched; at most
 # 2 + BASE_COPY_REFLOG_CAP) and one `for-each-ref --contains` per candidate a match uses. Files
 # written: none. No timer, no log, no long-lived process.
 BASE_COPY_REFLOG_CAP = 20
-BASE_COPY_PATH_CAP = 200  # one command line carries the paths; more than this is not judged
 
 
 def _z_names(answer):
@@ -501,7 +502,7 @@ def dirty_paths_are_pushed_copies(where: str, lines):
         return None
     paths = sorted(set(staged) | set(edited))
     # A name git printed that this decode altered cannot be looked up again, so it proves nothing.
-    if not paths or len(paths) > BASE_COPY_PATH_CAP or any("�" in path for path in paths):
+    if not paths or any("�" in path for path in paths):
         return False
     index = _index_entries(where, paths)
     if index is None:
