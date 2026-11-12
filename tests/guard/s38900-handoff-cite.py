@@ -139,3 +139,15 @@ hc_add("handoff-cite: an Edit with replace_all that strips the name from a bare 
 hc_add("handoff-cite: an Edit of a handoff with an unreadable byte is allowed, since the check cannot read it", "allow",
        HC_BADBYTE, "Edit", {"file_path": hc_handoff(HC_BADBYTE), "old_string": "Check the page.",
                             "new_string": "Check item 46 after the build."}, silent=True)
+
+# The handoff reads a cite as the reply does, with no scope: a bare item in a bullet is refused, a date before a bare
+# item does not name it, and a bold cite with its name after the marks passes. These prove the wiring of that reader.
+hc_add("handoff-cite: a Write of the handoff with a bare item 46 in a bullet under a line is refused", "deny", HC_CLEAN,
+       "Write", {"file_path": hc_handoff(HC_CLEAN),
+                 "content": hc_full("- Recheck the build\n- item 46 blocks the merge.\n")}, carries="46")
+hc_add("handoff-cite: a Write of the handoff with a bare item 183 after a date is refused", "deny", HC_CLEAN, "Write",
+       {"file_path": hc_handoff(HC_CLEAN), "content": hc_full("Owner ruling 2026-11-06, item 183 is open.\n")},
+       carries="183")
+hc_add("handoff-cite: a Write of the handoff with a bold item 46 and its name after the marks is allowed", "allow",
+       HC_CLEAN, "Write", {"file_path": hc_handoff(HC_CLEAN), "content": hc_full("**Item 46** (search pill clear).\n")},
+       silent=True)
