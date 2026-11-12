@@ -20120,6 +20120,7 @@ class BatchBuildStop(CloudSession):
     on_origin = BatchFreeze.on_origin
     lanes_on_branch_and_listed = BatchFreeze.lanes_on_branch_and_listed
     frozen_lanes = BatchFreeze.frozen_lanes
+    no_lint_or_ready_check = BatchFreeze.no_lint_or_ready_check
 
     def setUp(self):
         super().setUp()
@@ -20136,20 +20137,24 @@ class BatchBuildStop(CloudSession):
             proc.kill()
         proc.wait()
 
+    def kill_once(self, proc, state):
+        """SIGKILL, then reap, the stand-in, on the first call only. `state` gets "alive" (its state before the kill) and counts "kills".
+        Reaped: a zombie would still answer os.kill(pid, 0), so pid_alive would read it alive."""
+        if state["kills"] == 0:
+            state["alive"] = merge.pid_alive(proc.pid)
+            proc.kill()  # SIGKILL on POSIX
+            proc.wait()
+            state["kills"] += 1
+
     @contextlib.contextmanager
     def killed_at_first_read(self, proc):
         """The runner's kill, timed to the run's first read of a batch pull request. Every batch run makes that read after merge.main starts
-        and before build_integration_branch runs. SIGKILL, then reap: a zombie would still answer os.kill(pid, 0). Yields {"alive", "kills"}:
-        the stand-in's state at that read, and how many kills fired."""
+        and before build_integration_branch runs. Yields {"alive", "kills"}: the stand-in's state at that read, and how many kills fired."""
         real = self.host.batch_pr
         state = {"alive": None, "kills": 0}
 
         def read_then_kill(branch):
-            if state["kills"] == 0:
-                state["alive"] = merge.pid_alive(proc.pid)
-                proc.kill()  # SIGKILL on POSIX
-                proc.wait()
-                state["kills"] += 1
+            self.kill_once(proc, state)
             return real(branch)
         self.host.batch_pr = read_then_kill
         try:
@@ -20157,12 +20162,15 @@ class BatchBuildStop(CloudSession):
         finally:
             del self.host.batch_pr
 
-    def spy_set_body(self):
-        """Records each set_body the run makes. -> the list the case reads after the run: the pull request number of each write."""
+    def spy_set_body(self, before=None):
+        """Records each set_body the run makes. `before(n)`, when given, runs inside the write, before the real write. -> the list the case
+        reads after the run: the pull request number of each write."""
         real, calls = self.host.set_body, []
 
         def set_body(n, body):
             calls.append(n)
+            if before is not None:
+                before(n)
             real(n, body)
         self.host.set_body = set_body
         return calls
@@ -20180,10 +20188,10 @@ class BatchBuildStop(CloudSession):
         self.assertIn(str(pid), out, "the stop does not name the pid %s that is gone: %s" % (pid, out))
         self.assertIn("Nothing was pushed.", out, "the stop does not say nothing was pushed: %s" % out)
 
-    def assert_kill_fired(self, state, out):
-        """Setup: the kill fired once, at a read the stand-in was alive for, so the run met a shim that died while it ran."""
-        self.assertEqual(state["kills"], 1, "setup: the kill never fired, so the run read no batch pull request: %s" % out)
-        self.assertTrue(state["alive"], "setup: the stand-in was already gone at the run's first read: %s" % out)
+    def assert_kill_fired(self, state, out, seam="the run's first read of a batch pull request"):
+        """Setup: the kill fired once, at `seam`, while the stand-in was alive, so the run met a shim that died while it ran."""
+        self.assertEqual(state["kills"], 1, "setup: the kill never fired at %s, so the run never reached it: %s" % (seam, out))
+        self.assertTrue(state["alive"], "setup: the stand-in was already gone at %s: %s" % (seam, out))
 
     @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
     def test_a_new_build_whose_shim_is_killed_mid_run_pushes_nothing(self):
@@ -20284,6 +20292,58 @@ class BatchBuildStop(CloudSession):
         self.assertEqual(self.head("batch-nightly"), before, "a drop whose shim was killed moved batch-nightly: %s" % out)
         self.assertEqual(self.pushes(), [], "a drop whose shim was killed pushed: %s" % out)
         self.assert_stopped(rc, out, proc.pid)
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_kill_inside_the_body_write_stops_before_the_push_and_origin_keeps_its_head(self):
+        # The kill lands after the check before the body write, inside the write, so the check right before the push must stop it.
+        # A kill during git's own push, after that check, still pushes: a check cannot close that window.
+        pr = self.frozen_drop_batch()
+        before = self.head("batch-nightly")
+        proc = self.stand_in()
+        self.record_pushes()
+        state = {"alive": None, "kills": 0}
+        self.spy_set_body(before=lambda n: self.kill_once(proc, state))
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}):
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assert_kill_fired(state, out, "the body write of the drop")
+        self.assertEqual(self.head("batch-nightly"), before, "a drop whose shim was killed inside its body write moved batch-nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "a drop whose shim was killed inside its body write pushed: %s" % out)
+        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
+        self.assertEqual(held, listed, "after a stopped drop batch-nightly holds %s and its body lists %s: %s" % (sorted(held), sorted(listed), out))
+        self.assert_stopped(rc, out, proc.pid)
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_ready_run_whose_shim_is_killed_in_the_lint_records_no_linted_stamp_and_is_not_marked_ready(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        proc = self.stand_in()
+        self.record_pushes()
+        state = {"alive": None, "kills": 0}
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}), self.no_lint_or_ready_check(ready_state="pass") as mocks:
+            answer = mocks["ci_job_run"].side_effect
+
+            def kill_then_answer(*args, **kw):
+                self.kill_once(proc, state)  # the first ci-job call of a --ready run is the lint of the batch head
+                return answer(*args, **kw)
+            mocks["ci_job_run"].side_effect = kill_then_answer
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assert_kill_fired(state, out, "the lint of the batch head")
+        self.assertNotIn("Linted:", self.body(pr), "a --ready run whose shim was killed in its lint recorded a Linted stamp: %s" % out)
+        self.assertEqual(self.host.readies, [], "a --ready run whose shim was killed in its lint marked the batch PR ready: %s" % out)
+        self.assert_stopped(rc, out, proc.pid)
+
+    def test_control_a_ready_run_whose_shim_is_alive_records_the_linted_stamp(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        proc = self.stand_in()
+        self.record_pushes()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}), self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertTrue(merge.pid_alive(proc.pid), "setup: the live shim died during the run, so the run proves nothing about a live shim: %s" % out)
+        self.assertEqual(rc, 0, "a --ready run whose shim is alive exited %s: %s" % (rc, out))
+        self.assertIn("Linted: %s" % self.head("batch-nightly"), self.body(pr), "a --ready run whose shim is alive did not record its Linted stamp: %s" % out)
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
