@@ -257,13 +257,11 @@ record_refuse("roadmap-one-writer handoff: --force-if-includes on the own handof
               VCS + " push --force-with-lease --force-if-includes origin HEAD:roadmap", LANE,
               cwd=HANDOFF_REPO["modify-own"])
 
-# A single-branch clone has no origin/roadmap to read. The refusal tells the lane how to get the tip and retry. It
-# names no push of the record branch: the fetch is the read the lane needs, and the push stays out of the text.
-sh("roadmap-one-writer handoff: a lane's own handoff push with no origin/roadmap is refused, and the refusal names "
-   "the fetch and the retry",
-   HANDOFF_PUSH, "deny", rule=RECORD_RULE, carries=("git fetch origin roadmap", "retry the handoff push"),
-   lacks=("HEAD:roadmap", "push origin roadmap"), transcript=LANE, env=ROLE_ENV,
-   cwd=HANDOFF_REPO["no-tip"])
+# A single-branch clone has no origin/roadmap to read. The refusal tells the lane to fetch and retry. A refusal never
+# names the record branch in a command (the remedy rule), so the text is held to RECORD_LACKS like the others above.
+record_refuse("roadmap-one-writer handoff: a lane's own handoff push with no origin/roadmap is refused, and the "
+              "refusal names the fetch and the retry",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["no-tip"], carries=("fetch", "retry the handoff push"))
 
 
 # The path read costs one git spawn per push that reaches the record branch from a lane. Each push is judged with
