@@ -954,9 +954,9 @@ for _role_prefix in ("", "cd somewhere && "):
         # decision session-tiers: the coordinator never merges, in any form, even on its own record
         _coord_cmd = _role_prefix + _role_form + " --role coordinator"
         role_refuse(_coord_cmd + " is refused on its own coordinator record", _coord_cmd, role_path("coordinator"))
-# roles are hats (decision session-tiers, owner 2026-11-10 14:33 CST): a solo session, with no parent_session_id and no cs-build
-# tag, records the batch-runner role for its own merge. Red on main, where merge-role-proof still asks for the batch-runner tag
-# (the ruling's "Not built" line).
+# roles are hats (decision session-tiers): a solo session, with no parent_session_id and no cs-build tag, records the
+# batch-runner role for its own merge. The cases cover no parent_session_id with no tag, a null parent_session_id, and an
+# empty tag list.
 role_allow("a solo session with no parent_session_id and no cs-build tag records batch-runner", MERGE_SHIM + " --role batch-runner",
            role_path("solo"))
 role_allow("a solo session whose parent_session_id is null records batch-runner", MERGE_SHIM + " --role batch-runner",
