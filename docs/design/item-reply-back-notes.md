@@ -195,3 +195,8 @@ His reply then shows nowhere, and the line has no Reply. That is item 278's own 
     - Fold words with four parts wrap to two lines at 390.
     - The widened home `.thread .reply + .myreply` spaces siblings with a margin, against ux-gap-on-parent (guidance). It is main's rule, kept as is.
     - The owed card holds two text boxes (item 1).
+- impeccable critique, Nov 12 (single-context again: no agent tool). The detector found nothing in the static markup.
+  - Open, outside this folder: main's opened line heads the item's reply "Reply from <owner>" with no time (`lineEl`), while a
+    reply record's answer carries one. With option "On its line" the two sit together, so the first reads as missing its time.
+  - Open, outside this folder: the Asks row of option "In the Asks list" heads his item reply "You asked". A further reason for the pick.
+  - Kept: a folded line with a waiting reply shows no Mark read and no reason, as a folded ask does (`askItem`). The reason shows once opened.
