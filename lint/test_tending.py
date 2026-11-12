@@ -517,7 +517,7 @@ class CostTests(unittest.TestCase):
                         "a stale fixable item was not written: the no-write case proves nothing")
 
 
-# ---- Round 1 rulings A-E. Each case below is red on the runner at lint/tending.py as it stands, except the
+# ---- Rules A-E. Each case below asserts its rule on the runner at lint/tending.py, except the
 # ---- controls, which pass on it and hold a rule's positive side. -----------------------------------------------
 
 def probe_tree(close="mark", runs_from=("merge-check",), still_true="home-held"):
@@ -672,8 +672,8 @@ class ResolverAgreementTests(unittest.TestCase):
         self.assertEqual(got, {"H2": "true"}, "a bare path the resolver holds read as %r" % got)
 
 
-# ---- Round 2: the import route per line, skipped stores, and a byte-order mark. Each case is red on build2 as it
-# ---- stands, except the controls, which hold a rule's positive side.
+# ---- The import route per line, skipped stores, and a byte-order mark. Each case asserts its rule, except
+# ---- the controls, which hold a rule's positive side.
 
 REPEATED_D1 = "- D1 until 2020-01-01\n- D1 until 2099-01-01\n"
 REPEATED_D1_ONE_CLOSED = "- D1 until 2020-01-01 [closed]\n- D1 until 2099-01-01\n"
