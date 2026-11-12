@@ -5,7 +5,8 @@ FAMILY = "answers-session-write"
 # An answer on the waiting page is the owner's word. A session that writes one forges it, and Claude has
 # written an answer by mistake in normal work, so the guard refuses a session's write into the answers:
 #   1. an ArtifactData write whose collection is answers, or whose doc_id or collection names an answers/
-#      path, on any page URL (a session has no right to forge an answer on any waiting page);
+#      path, on any page URL (a session has no right to forge an answer on any waiting page). A delete
+#      removes a grant and forges none, so a delete of answers passes;
 #   2. a Write or Edit whose file_path lies under the answers folder of the waiting data;
 #   3. a Bash call that writes there by a redirect, tee, cp, mv, rm or sed -i, or by a git add or commit
 #      that names the path. The path may follow a leading cd, and an interpreter (python -c, a python
@@ -68,7 +69,11 @@ aa_art("an ArtifactData update on answers is refused", "deny", "update", collect
        data=AA_NOTE)
 aa_art("an ArtifactData str_replace on answers is refused", "deny", "str_replace", collection=AA_COLLECTION,
        doc_id=AA_DOC, field="note", old_str="reply", new_str="answer")
-aa_art("an ArtifactData delete on answers is refused", "deny", "delete", collection=AA_COLLECTION, doc_id=AA_DOC)
+# A delete removes a grant and forges none, and skills/waiting-page/SKILL.md "Route and close" orders it.
+aa_art("an ArtifactData delete on answers is allowed: a delete removes a grant and forges none", "allow", "delete",
+       collection=AA_COLLECTION, doc_id=AA_DOC)
+aa_art("an ArtifactData delete on answers pinned to a version is allowed", "allow", "delete",
+       collection=AA_COLLECTION, doc_id=AA_DOC, if_version=2)
 aa_art("an ArtifactData set on answers of a page that is not the waiting page is refused", "deny", "set",
        url=AA_OTHER_URL, collection=AA_COLLECTION, doc_id=AA_DOC, data=AA_NOTE)
 aa_art("an ArtifactData set on answers in a repo with no waiting page is refused", "deny", "set",
@@ -79,8 +84,13 @@ aa_art("an ArtifactData set whose doc_id has an answers/ prefix is refused", "de
        collection="groups", doc_id=AA_COLLECTION + "/" + AA_DOC, data=AA_NOTE)
 aa_batch("an ArtifactData batch whose only write is an answers set is refused", "deny",
          [aa_write_op(AA_COLLECTION, data=AA_NOTE)])
-aa_batch("an ArtifactData batch whose second write is an answers delete is refused", "deny",
+aa_batch("an ArtifactData batch of an answers delete and an answers set is refused", "deny",
+         [aa_write_op(AA_COLLECTION, op="delete"), aa_write_op(AA_COLLECTION, data=AA_NOTE)])
+aa_batch("an ArtifactData batch whose second write is an answers delete is allowed: a delete forges none", "allow",
          [aa_write_op("groups", "g1", data={"title": "A group"}), aa_write_op(AA_COLLECTION, op="delete")])
+aa_batch("an ArtifactData batch of 50 writes whose last is an answers delete is allowed", "allow",
+         [aa_write_op("groups", "g%d" % i, data={"title": "A group"}) for i in range(49)]
+         + [aa_write_op(AA_COLLECTION, op="delete")])
 aa_batch("an ArtifactData batch whose second write is an answers update is refused", "deny",
          [aa_write_op("groups", "g1", data={"title": "A group"}),
           aa_write_op(AA_COLLECTION, op="update", data=AA_NOTE)])
@@ -150,6 +160,16 @@ aa_bash("a git commit that names an answer file is refused", "git commit -m 'rec
         "deny")
 aa_bash("a chained write into waiting/answers after && is refused", "true && echo x > waiting/answers/a1.json",
         "deny")
+# A commit message is text, not a path: an answers path inside its quoted -m value passes. A path after the message
+# is a real path, and it is refused whichever short option carries the message.
+aa_bash("a git commit -am whose message names an answers path is allowed", 'git commit -am "waiting/answers/a1.json x"',
+        "allow")
+aa_bash("a git commit -sm whose message names an answers path is allowed", 'git commit -sm "waiting/answers/a1.json x"',
+        "allow")
+aa_bash("a git commit -am that names an answers file as a path is refused", "git commit -am x waiting/answers/a1.json",
+        "deny")
+aa_bash("a git commit -sm that names an answers file as a path is refused", "git commit -sm x waiting/answers/a1.json",
+        "deny")
 # The scanner reads a string, a comment opener inside a string, and a lone quote in text as text, and still
 # finds the real redirect after them.
 aa_bash("a redirect after a hash inside a quoted string is refused", 'echo "#" > waiting/answers/a1.json', "deny")
@@ -198,6 +218,18 @@ aa_bash("a relative redirect after a cd into waiting, to items/, is allowed",
         "cd waiting && echo x > items/i1.json", "allow")
 aa_bash("a cat of an answer file after a cd into waiting/answers is allowed",
         "cd waiting/%s && cat a1.json" % AA_COLLECTION, "allow")
+# A copy out of the answers folder reads an answer and writes outside it, so it passes. A copy into it is refused.
+aa_bash("a cp of an answer file out to /tmp after a cd into waiting/answers is allowed",
+        "cd waiting/%s && cp a1.json /tmp/b.json" % AA_COLLECTION, "allow")
+aa_bash("a cp of a file in from /tmp after a cd into waiting/answers is refused",
+        "cd waiting/%s && cp /tmp/b.json a1.json" % AA_COLLECTION, "deny")
+# A git add that names an answers path, reached through a cd or a -C, is a write to that path. A plain name in a
+# folder the cd did not enter is no answers path.
+aa_bash("a git add of an answer file after a cd into waiting/answers is refused",
+        "cd waiting/%s && git add a1.json" % AA_COLLECTION, "deny")
+aa_bash("a git add of answers/ after a cd into waiting is refused",
+        "cd waiting && git add %s/a1.json" % AA_COLLECTION, "deny")
+aa_bash("a git -C waiting add of answers/ is refused", "git -C waiting add %s/a1.json" % AA_COLLECTION, "deny")
 
 
 # ---- 5. Interpreters: a python -c, a python heredoc or a node -e that writes an answer file is refused, since the
