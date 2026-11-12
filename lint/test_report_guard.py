@@ -2128,11 +2128,11 @@ class PickGuardTests(unittest.TestCase):
                     self.assertRegex(out["reason"], r"(?i)departs from")
 
     def test_dp_red_bad_line_blocks(self):
-        # Catches: an empty line, a side left empty, no separator, and a line that restates main.
+        # Catches: an empty line, a side left empty (one word, with no separator), and a line that restates main.
         rows = ("> Departs from:",
                 "> Departs from: lint/report_guard.py pick check —",
                 "> Departs from: — the check reads the box",
-                "> Departs from: lint/report_guard.py pick check",
+                "> Departs from: lint/report_guard.py",
                 "> Departs from: agent-model-cap — Opus above the row stays the existing ask")
         for line in rows:
             for landed in (False, True):
