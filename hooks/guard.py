@@ -538,7 +538,7 @@ while True:
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
-            inner_commands, nested_script, norm,
+            inner_commands, interpreter_bodies, nested_script, norm, python_runs_body,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
@@ -587,7 +587,7 @@ while True:
         _loading = "guard_env"
         from guard_env import (
             ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
-            substitution_commands,
+            script_spots, substitution_commands,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -4622,9 +4622,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
     # 6b. A pull request opened without --draft.
-    for text, _in_message in _substitutions(stripped)[0]:
-        if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
-            refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+    for run_text in shell_run_texts(raw):
+        for text, _in_message in _substitutions(run_text)[0]:
+            if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
+                refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
@@ -5022,27 +5023,125 @@ def impeccable_shell_hit(segment: str) -> str:
 
 # A PowerShell here-string: `@'` ... `'@` is text, `@"` ... `"@` runs its `$(...)`.
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
+# What runs a here-string, by the command word around it. Before it, three forms run it. `iex` or
+# `Invoke-Expression` takes it as its argument, and a `(` may open it. `[scriptblock]::Create(` builds a block
+# from it. A pwsh or powershell launch ends in `-Command` or `-c`. After it, the closing parens of such a call,
+# then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin, through any `Out-String` stages. A closing
+# paren on the last word of a stage is dropped (`$(@"…"@ | iex)`, `(@"…"@ | Out-String) | iex`). A
+# here-string given to Set-Content matches neither. Nor does one held in a variable that no word on its own
+# line runs. A later line that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
+# The before side keeps its own word list for the PowerShell forms. `nested_script` (guard_core.py) answers a
+# different question. It returns the text that follows a word. Here the text is the here-string cut out of the
+# command, so it cannot say whether the word is there. After a pipe it has no argument to return either.
+# A POSIX shell given the here-string as its `-c` script is read through `inline_script` (guard_core.py), which
+# holds the shell list and steps over `sudo` and `timeout N`.
+_HERE_RUN_BEFORE = re.compile(r"(?:(?:^|[\s;&|(){}])(?:iex|Invoke-Expression)[ \t]+(?:-Command[ \t]+)?\(?"
+                              r"|\[scriptblock\]::Create\("
+                              r"|(?:^|[\s;&|(){}])(?:pwsh|powershell)(?:\.exe)?(?=[ \t])[^\n;&|]*?[ \t]-c(?:ommand)?[ \t]+)"
+                              r"[ \t(]*\Z", re.I).search
+_HERE_PIPE_AFTER = re.compile(r"[ \t)]*\|([^\n]*)").match
+# A pwsh switch that takes the next word as its value, by the name without its dash. `-ExecutionPolicy` may be
+# cut to any prefix of two letters or more.
+_PWSH_VALUE_SWITCHES = {"ep", "workingdirectory", "wd", "configurationname", "config", "inputformat",
+                        "outputformat", "version", "windowstyle", "w", "custompipename", "settingsfile"}
 
 
-def impeccable_command_hit(raw: str) -> str:
-    """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
-    and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
-    backticks it runs. The limits: a Python, Node, Perl or Ruby
-    body is not read, and a here-string body is allowed."""
+def _pwsh_reads_stdin(tokens) -> bool:
+    """True when the pwsh or powershell launch TOKENS reads its commands from stdin: a lone `-`, `-Command -`,
+    or no command at all. A positional word, `-Command x`, `-File x` and `-EncodedCommand x` run something else."""
+    args = iter(tokens[1:])
+    for token in args:
+        name, colon, glued = token.lstrip("-").lower().partition(":")   # `-ExecutionPolicy:Bypass` holds its value
+        if token == "-":
+            return True
+        if not token.startswith("-"):
+            return False
+        if name in _PWSH_VALUE_SWITCHES or (len(name) > 1 and "executionpolicy".startswith(name)):
+            if not colon:
+                next(args, None)
+        elif re.fullmatch(r"c(?:ommand)?", name):
+            return (glued if colon else next(args, None)) == "-"
+        elif re.match(r"[fe]", name):   # -File, -EncodedCommand and their short forms
+            return False
+    return True
+
+
+def _here_string_is_run(found) -> bool:
+    """True when the command word around the here-string FOUND runs its body, whatever the body holds."""
+    before = found.string[:found.start()]
+    if _HERE_RUN_BEFORE(before):
+        return True
+    last = split_segments(before)[-1:]   # a stand-in word sits where the here-string is: it must be the script
+    # An unclosed quote leaves no tokens (None): the before side then says nothing, and the pipe after it still decides.
+    ahead = segment_tokens(last[0]) if last else None
+    if ahead is not None and inline_script(ahead + ["x"]) == "x":
+        return True
+    piped = _HERE_PIPE_AFTER(found.string, found.end())
+    for stage in piped.group(1).split("|") if piped else []:
+        parts = split_segments(stage)
+        tokens = (segment_tokens(parts[0]) if parts else None) or []
+        if tokens:
+            tokens = list(tokens[:-1]) + [tokens[-1].rstrip(")")]   # the parens that close `(` or `$(` ahead of the here-string
+            tokens = [token for token in tokens if token]
+        at = resolve_command(tokens)   # steps over the `&` call operator and a wrapper word
+        tokens = tokens[at:] if at is not None else []
+        word = re.sub(r"\.exe$", "", basename(tokens[0]).lower()) if tokens else ""
+        if word == "out-string" and len(parts) == 1:   # the text passes on to the next stage
+            continue
+        return word in ("iex", "invoke-expression") or (word in ("pwsh", "powershell") and _pwsh_reads_stdin(tokens))
+    return False
+
+
+def shell_run_texts(raw: str) -> list:
+    """The texts a shell reads from a whole command, for a rule that judges shell lines. A body a shell
+    reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
+    backticks it runs. A quoted body that only an interpreter keeps in view, and that holds a backtick, joins
+    as its pieces split at every backtick, since perl, ruby and node run a backtick span as a shell. A body
+    that python alone runs adds no pieces. A quoted python or node body adds the text of each of its shell
+    calls (`script_spots`), where a double-quoted `$(` or backtick span runs. The limits: a body with no
+    backtick is read only at those calls, and a body with one is read anywhere, unless python alone runs it.
+    A here-string that iex, Invoke-Expression, pwsh, a scriptblock or a POSIX shell's `-c` runs
+    (`_here_string_is_run`) joins as its lines. One held in a variable is not read. A later line that runs the
+    variable does not change that."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
+            if _here_string_is_run(found):
+                texts.extend(found.group(2).split("\n"))   # a shell runs it: each line is a shell line
             if found.group(1) == '"':
                 texts.extend(t for t, _ in _substitutions(found.group(2), powershell=True,
                                                           heredoc=True)[0][:-1])
             return "x"
         raw = _HERE_STRING.sub(cut, raw)
-    texts.append(strip_heredoc_bodies(raw, shells_only=True))
+    shells = strip_heredoc_bodies(raw, shells_only=True)
+    texts.append(shells)
     if "<<" in raw:
-        for quote, body, _ in _split_heredocs(raw)[1]:
+        earlier = {}   # heredocs already seen on each header text, so a body knows which `<<` is its own
+        for quote, body, header in _split_heredocs(raw)[1]:
+            nth = earlier[header] = earlier.get(header, -1) + 1
             if not quote:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
-    for text in texts:
+            elif ("`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw)
+                  and not python_runs_body(raw, header, nth)):
+                # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
+                # backtick span as a shell. Quote rules differ by language, so no pairing of backticks is
+                # trusted: a lone backtick in a string would hide the real span. Each piece between
+                # backticks is read as its own text, with its `$(` and `<(` live.
+                for piece in body.split("`"):
+                    texts.append(piece)
+                    texts.extend(t for t, _ in _substitutions(piece, heredoc=True)[0][:-1])
+        for lang, body, quote in interpreter_bodies(raw):
+            if quote and lang in ("py", "js"):
+                # A python or node script hands a string to a shell only at a shell call (`os.system`,
+                # `subprocess` with a shell, `execSync`), and a double-quoted `$(` or backtick span in that
+                # string runs there. Every other string of the script is data.
+                texts.extend(script_spots(body, lang))
+    return texts
+
+
+def impeccable_command_hit(raw: str) -> str:
+    """Judge a whole command for impeccable, by the texts a shell reads."""
+    for text in shell_run_texts(raw):
         for segment in split_segments(text):
             matched = impeccable_shell_hit(segment)
             if matched:

@@ -1002,20 +1002,33 @@ _SHELL_RUNNER = re.compile(r"(?:" + _SHELLS + "|" + _WRAPPERS + r")(?:\.exe|\.cm
 _SCRIPT_RUNNER = re.compile(r"(?:python[\d.]*|perl|ruby|node|nodejs|bun|deno)(?:\.exe|\.cmd)?").fullmatch
 
 
+# The runners a body of python, or of anything else, can have: python alone, and the rest.
+_PYTHON_RUNNER = re.compile(r"python[\d.]*(?:\.exe|\.cmd)?").fullmatch
+# ash is no member of _SHELLS (a file only ash runs is read as on main), so it joins here by name: a file python runs
+# and ash then runs is not python's alone.
+_ASH = "ash"
+_OTHER_INTERPRETERS = "|".join(
+    [word for word in _INTERPRETERS.split("|") if not word.startswith("python")] + [_ASH])
+_ASH_RUNNER = re.compile(_ASH + r"(?:\.exe|\.cmd)?").fullmatch
+_OTHER_INTERPRETER = re.compile(r"(?:" + _OTHER_INTERPRETERS + r")(?:\.exe|\.cmd)?").fullmatch
+_OTHER_RUNNER =re.compile(r"(?:" + _OTHER_INTERPRETERS + "|" + _WRAPPERS + r")(?:\.exe|\.cmd)?").fullmatch
+
+
 def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers, runner=_RUNNER) -> str:
+def _runs_written_file(text: str, headers, runner=_RUNNER, files_run_nothing=False) -> str:
     """The word that runs a file a heredoc writes, else '': the first `runner` word of its pipeline (by default a
     shell, an interpreter or a wrapper: `sh < f`, `cat f | sh`, `timeout 5 sh f`), or the file itself when it is
     the command (`./f`). A read such as `wc -c f` runs nothing. The word is compared as written, so `$HOME/f`
-    matches only itself."""
+    matches only itself. `files_run_nothing` stops a written file's own name from counting as a runner word
+    (`cat > python3 <<EOF`)."""
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
         runs = next((word.rsplit("/", 1)[-1] for words in stages for word in words
-                     if runner(word.rsplit("/", 1)[-1])), "")
+                     if runner(word.rsplit("/", 1)[-1]) and not (files_run_nothing and word in written)), "")
         for words in stages:
             for at, word in enumerate(words):
                 if word in written and (runs or at == 0):
@@ -1046,6 +1059,45 @@ def _feeds_data(header: str, scripts: bool) -> bool:
     return fed
 
 
+_BACKGROUND_AMP = re.compile(r"(?<![>&])&(?![&>])")
+
+
+def _own_stage(header: str, nth: int) -> str:
+    """The stage of a header line that holds its `nth` heredoc (0-based), or "" when the line holds fewer.
+    A stage is a segment cut by split_segments, then on a lone `&`: `python3 -V && cat > f.pl <<'EOF'` has the
+    stage `cat > f.pl <<'EOF'`, and a second heredoc on the line has a stage of its own."""
+    seen = 0
+    for segment in split_segments(header):
+        for stage in _BACKGROUND_AMP.split(segment):
+            seen += len(heredoc_heads(stage)[0])
+            if seen > nth:
+                return stage
+    return ""
+
+
+def python_runs_body(raw: str, header: str, nth: int = 0) -> bool:
+    """True when python, and no other interpreter, runs the heredoc body that `header` opens as its `nth`
+    heredoc (0-based among those on the line, modulo their count: two lines may share one text). Only the
+    body's own stage of the header line is judged: it is fed to python (`python3 - <<'EOF'`), or it is written
+    to a file that only a bare python word runs. Words decide, never a path: `python/t.pl` holds no python
+    word, and a written file's own name is no runner. A python word in another stage of the line, or beside a
+    second heredoc, makes nothing python. A runner word the guard does not know stands apart: `stdbuf -o0
+    python3 f.py` is python's. A body fed to python stays python's behind
+    a known wrapper (`env python3 -`). A written file run through one (`env python3 f`), `./f`, or a shell, ash or
+    other interpreter word is not python, so the body stays in view."""
+    header = _without_message_values(header)
+    heads = len(heredoc_heads(header)[0])
+    stage = _own_stage(header, nth % heads) if heads else ""
+    if not stage:
+        return False   # the body's stage is unknown: keep it in view
+    words = [word.rsplit("/", 1)[-1] for word in _plain_words(_WORDS(_WRITE_TARGET.sub(" ", stage)))]
+    if any(_PYTHON_RUNNER(word) for word in words):
+        return not any(_OTHER_INTERPRETER(word) for word in words)
+    text = _without_message_values(_drop_heredoc_bodies(raw))
+    return (_runs_written_file(text, [stage], runner=_PYTHON_RUNNER, files_run_nothing=True)
+            and not _runs_written_file(text, [stage], runner=_OTHER_RUNNER))
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
     only when a shell reads it, for a rule that judges shell lines. One body that runs keeps every body in
@@ -1065,8 +1117,11 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = F
     headers = [_without_message_values(header) for _, _, header in bodies]
     keep = []
     # The per-body reading starts from main's whole-command test, which both its callers read before.
-    if (SHELL_HEREDOC if shells_only and not per_body else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, headers):
+    whole = shells_only and not per_body   # a bare python, perl, ruby or node run of a written file is no shell
+    if (SHELL_HEREDOC if whole else INTERPRETER_HEREDOC)(text) or _runs_written_file(
+            text, headers, _SHELL_RUNNER if whole else _RUNNER) or (
+            whole and any(_runs_written_file(text, [header], _PYTHON_RUNNER)
+                          and _runs_written_file(text, [header], _ASH_RUNNER) for header in headers)):
         # The body may be executed, so keep it under inspection. With the two walks reading these headers
         # differently, no body can be told apart from another; a heredoc that eval or source runs may open
         # on a line before its header.
