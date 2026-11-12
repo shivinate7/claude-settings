@@ -240,6 +240,10 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
+# The in-place flag of perl and ruby: `-i`, a cluster ending in i (`-pi`, `-ni`), and either with a backup
+# suffix (`-i.bak`). A cluster that merely holds an i (`-rtime`) is a library, not an edit in place.
+_INPLACE_FLAG = r"-[A-Za-z]*i(?:\.\S*)?"
+
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
 # or a backslash (an escaped quote or separator the split would read wrongly).
 _SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
@@ -252,11 +256,18 @@ def _script_mutates(script: str) -> bool:
         return True
     for segment in split_segments(script):
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
-        # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
+        # `sed -i` and `perl`/`ruby -i` are no mutating word: `writes_to` reads them by their own patterns,
+        # so they must get that far.
         if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)) or (
+                command in ("perl", "ruby") and any(re.fullmatch(_INPLACE_FLAG, word) for word in rest)):
             return True
     return False
+
+
+def _perl_ruby_inplace(target: str, cmd: str) -> bool:
+    """True when `cmd` runs perl or ruby with its in-place flag and then names `target` (a regex)."""
+    return bool(re.search(r"\b(?:perl|ruby)\b[^\n;|&]*\s" + _INPLACE_FLAG + r"\s[^\n;|&]*" + target, cmd))
 
 
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
@@ -276,12 +287,13 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return (command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))) or (
+            command in ("perl", "ruby") and _perl_ruby_inplace(target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
-    return False
+    return _perl_ruby_inplace(target, cmd)
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
