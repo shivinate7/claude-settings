@@ -14,6 +14,8 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
+  merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
+                          line naming an entry in origin/roadmap's rulings; any other case refuses before a push. The batch brake still holds.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -3342,6 +3344,63 @@ def batch_refusal(host, n, base, head):
     return (f"#{n} does not merge to {base} while another ready PR's CI runs and that PR's head does not contain this head: " + "; ".join(blockers) + ".\n"
             f"Wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the session that watches that PR. Then run again. {BATCH_CITE}")
 
+RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file per owner ruling; --express reads one
+RULING_LINE = re.compile(r"^Ruling:[ \t]*(.*?)[ \t\r]*$", re.M)  # only the first such line counts, so a later valid one cannot rescue an invalid first
+RULING_ID = re.compile(r"[a-z0-9-]+")
+EXPRESS_PATHS_SHOWN = 8
+
+def express_refusal(root, wt, base_ref, info):
+    """--express: -> why this PR may not take the express path, else None. It needs a `Ruling: <id>` line in the body whose entry is on
+    origin/roadmap, and a diff that main's own ci-scope.sh turns no job or suite on for. The script is main's copy, read with `git show`,
+    so a PR cannot rewrite its own classifier. A read that cannot run refuses as unknown (unknown is red). Cost: one fetch, about four git
+    starts, one script run, two temp files."""
+    found = RULING_LINE.search(info.get("body") or "")
+    rid = found.group(1) if found else ""
+    if not RULING_ID.fullmatch(rid):
+        return (f"--express needs a `Ruling: <id>` line in the PR body with an id of lower-case letters, digits and hyphens; the first Ruling line "
+                f"reads {rid!r}" if found else "--express needs a `Ruling: <id>` line in the PR body, and it has none")
+    path = RULED_STORE_PATH.format(id=rid)
+    try:
+        tip = fetch_branch(root, "roadmap")
+    except Stop as e:
+        return f"unknown: the ruling store cannot be read, so ruling {rid} is unproven ({e})"
+    if git(root, "cat-file", "-e", f"{tip}:{path}")[0]:
+        return f"ruling {rid} has no entry at origin/roadmap:{path}"
+    c, script = git(wt, "show", f"{base_ref}:{CI_SCOPE}")
+    c2, base_tip = git(wt, "rev-parse", base_ref)
+    jobs = re.search(r'^JOBS="([^"]*)"', script, re.M)
+    every = re.search(r'^ALL="([^"]*)"', script, re.M)
+    if c or c2 or not jobs or not every:
+        return f"unknown: {base_ref}'s {CI_SCOPE} cannot be read, so whether the diff is prose-only is unproven"
+    names = every.group(1).replace("$JOBS", jobs.group(1)).split()
+    fd, copy = tempfile.mkstemp(prefix="merge-express-", suffix=".sh")
+    os.close(fd)
+    fd, out_file = tempfile.mkstemp(prefix="merge-express-scope-")
+    os.close(fd)
+    try:
+        with open(copy, "w", encoding="utf-8", newline="\n") as f:
+            f.write(script + "\n")
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")},
+               "EVENT": "pull_request", "BASE_SHA": base_tip, "HEAD_REF": info["branch"], "GITHUB_OUTPUT": out_file}
+        c, _ = sh(["bash", copy], cwd=wt, env=env, timeout=120)
+        with open(out_file, encoding="utf-8") as f:
+            flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+    except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+        return f"unknown: {CI_SCOPE} could not run ({type(e).__name__}), so whether the diff is prose-only is unproven"
+    finally:
+        for p in (copy, out_file):
+            with contextlib.suppress(OSError):
+                os.remove(p)
+    missing = [n for n in names if n not in flags]
+    if c or missing:
+        return f"unknown: {CI_SCOPE} " + (f"failed (exit {c})" if c else "wrote no flag for " + ", ".join(missing)) + ", so whether the diff is prose-only is unproven"
+    on = sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+    if on:
+        paths = git(wt, "diff", "--name-only", "--no-renames", f"{base_tip}...HEAD")[1].splitlines()
+        shown = ", ".join(paths[:EXPRESS_PATHS_SHOWN]) + (f" and {len(paths) - EXPRESS_PATHS_SHOWN} more" if len(paths) > EXPRESS_PATHS_SHOWN else "")
+        return f"the diff is not prose-only: {base_ref}'s {CI_SCOPE} turns on {', '.join(on)} for {shown}"
+    return None
+
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
     refuse_bad_pr(info)  # a draft is previewed, so its silent undos show before it is marked ready
@@ -3523,7 +3582,7 @@ HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that 
 
 BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, the batch runner merges the head its CI ran on). Nothing was claimed or pushed."
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -3550,11 +3609,17 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
+        if express:  # the worktree opens early: the classifier reads the head's diff
+            tmp, wt = open_worktree(root, info, base)
+            no_express = express_refusal(root, wt, base_ref, info)
+            if no_express:
+                raise Stop(no_express + ". Nothing was claimed or pushed.")
         busy = batch_refusal(host, n, base, info["head"])
         if busy:
-            raise Stop(busy + " Nothing was claimed or pushed.")
+            raise Stop(busy + (" With --express the batch runner cancels the running batch run first (ruling r55, decision no-merge-during-batch-ci)." if express else "") + " Nothing was claimed or pushed.")
         branch = info["branch"]
-        tmp, wt = open_worktree(root, info, base)
+        if wt is None:
+            tmp, wt = open_worktree(root, info, base)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
@@ -5083,6 +5148,7 @@ def build_parser():
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
+    p.add_argument("--express", action="store_true", help="with --confirm: merge a prose-only PR whose body names a ruling in origin/roadmap's store; any other PR refuses")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
@@ -5372,7 +5438,7 @@ def main(argv, host=None, lock=None, hosts=None):
             checked = info["head"]
         if a.confirm:
             with release_on_signals():
-                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked) or 0
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked, a.express) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
