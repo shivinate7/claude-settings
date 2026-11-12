@@ -2997,8 +2997,8 @@ def question_keys_problem(after, text):
     return KEYS_REASON % clash if clash else ""
 
 
-# The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner, owner item 284 b, 2026-11-06
-# 13:08 CST): a Done item that claims a pick under a ruling (a pick word and a ruling cue) cites that ruling as
+# The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner, owner item 284 b):
+# a Done item that claims a pick under a ruling (a pick word and a ruling cue) cites that ruling as
 # `under ruling <ref> (<stamp>)`.
 # <ref> is `item <N> <key>` (a waiting-page answer, read from the roadmap branch) or a decision id (a record in
 # docs/decisions). A claim with no ref or stamp, or a ref that does not resolve, refuses with no model call: an
@@ -3125,7 +3125,7 @@ def _ruling_of_decision(slug, stamp, cwd):
     except Exception:
         pass
     for root in roots:
-        path = os.path.join(root, "docs", "decisions", slug + ".md")
+        path = os.path.join(root, *layout.path(root, "decisions").split("/"), slug + ".md")
         if os.path.isfile(path):
             try:
                 with open(path, encoding="utf-8") as handle:
