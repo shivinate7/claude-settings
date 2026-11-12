@@ -2,9 +2,11 @@
 
 Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` holds roadmap/data/.
 """
+import ast
 import contextlib
 import datetime
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -2125,6 +2127,82 @@ class UntouchedInLivePhase(UpkeepFixture):
                 count, detail = self.row(out, self.ROW)
                 self.assertEqual((count, self.entries(detail)), (1, ["bad-b"]),
                                  "the unreadable step is listed, and the fresh active step is not")
+
+
+class LiveStatusPhase(UpkeepFixture):
+    """A phase is live when it holds an open step whose status is in build.LIVE_STATUS, which holds doing. The live
+    data holds no active step, so a phase with a doing step is live. Each open step in a live phase is read for two
+    rows: `untouched 5 days in a live phase` (updatedAt STALE_DAYS old or more) and `no note in a live phase` (an empty
+    note). A phase holding only blocked or queued steps is not live, so its steps are read for neither row."""
+
+    STALE = "untouched 5 days in a live phase"
+    EMPTY = "no note in a live phase"
+
+    def ten_days_ago(self):
+        return iso_ago(10 * 24 * 60)
+
+    def stale_and_empty(self):
+        """((count, sorted entries) of the stale row, the same of the empty row), from one build of main with no --live file."""
+        _, out = self.build_from_main()
+        stale_count, stale = self.row(out, self.STALE)
+        empty_count, empty = self.row(out, self.EMPTY)
+        return (stale_count, self.entries(stale)), (empty_count, self.entries(empty))
+
+    def test_a_phase_holding_a_doing_step_is_live(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=iso_ago(5), order=3)
+        self.commit_step("later-todo", status="todo", phase="later", note="", updatedAt=self.ten_days_ago(), order=4)
+        stale, empty = self.stale_and_empty()
+        self.assertEqual(stale, (1, ["build-ready"]),
+                         "build holds a doing step, so it is live and its ready step, untouched 10 days, is listed")
+        self.assertEqual(empty, (1, ["build-todo"]),
+                         "build is live, so its empty todo step is listed; later is not live, so later-todo is in neither row")
+
+    def test_a_phase_holding_only_blocked_or_queued_steps_is_not_live(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("stuck-blocked", status="blocked", phase="stuck", note="", updatedAt=self.ten_days_ago(), order=3)
+        self.commit_step("waiting-queued", status="queued", phase="waiting", note="", updatedAt=self.ten_days_ago(), order=4)
+        (_, stale), (_, empty) = self.stale_and_empty()
+        self.assertIn("build-ready", stale, "scope first: build holds a doing step, so its ready step is listed")
+        self.assertNotIn("stuck-blocked", stale + empty, "stuck holds only a blocked step, so it is not live")
+        self.assertNotIn("waiting-queued", stale + empty, "waiting holds only a queued step, so it is not live")
+
+    def test_a_legacy_active_step_still_makes_its_phase_live(self):
+        # Control, green on main: the legacy status keeps its phase live, as the existing cases rely on.
+        self.commit_step("legacy-active", status="active", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
+                         updatedAt=self.ten_days_ago(), order=2)
+        self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=iso_ago(5), order=3)
+        stale, empty = self.stale_and_empty()
+        self.assertEqual(stale, (1, ["build-ready"]), "an active step makes build live, so its ready step is listed")
+        self.assertEqual(empty, (1, ["build-todo"]), "an active step makes build live, so its empty todo step is listed")
+
+    def test_live_status_is_defined_and_holds_doing_and_known_entries_only(self):
+        self.assertTrue(hasattr(build, "LIVE_STATUS"),
+                        "build has no LIVE_STATUS, so upkeep spells its live statuses out")
+        self.assertIn("doing", build.LIVE_STATUS, "doing is the status the live data holds, so it is a live status")
+        unknown = [s for s in build.LIVE_STATUS if s not in build.KNOWN_STATUS]
+        self.assertEqual(unknown, [], "each LIVE_STATUS entry is in KNOWN_STATUS")
+
+    def test_upkeep_spells_no_status_literal_of_its_own(self):
+        tree = ast.parse(inspect.getsource(build.upkeep))
+        literal = sorted(n.lineno for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "active")
+        self.assertEqual(literal, [], "upkeep spells the status \"active\" itself, at these lines of its source; "
+                                      "it must read build.LIVE_STATUS")
+
+    def test_thirty_stale_steps_in_a_live_phase_are_all_listed(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
+        ids = sorted("ready-%02d" % i for i in range(30))
+        for n, sid in enumerate(ids, start=2):
+            self.commit_step(sid, status="ready", phase="build", note="Parked for a lane.",
+                             updatedAt=self.ten_days_ago(), order=n)
+        (count, stale), _ = self.stale_and_empty()
+        self.assertEqual(count, 30, "all 30 stale ready steps in build are counted")
+        self.assertEqual(stale, ids, "the row lists all 30, with no cut-off for a long list")
 
 
 class PageRulings(UpkeepFixture):
