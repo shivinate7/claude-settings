@@ -688,6 +688,31 @@ def case_n12c_bare_session_id_writer_blocks_with_a_cloud_env_set():
     expect_block("N12c", p, (SCRIPT,))
 
 
+def case_n12d_label_around_the_hook_session_id_blocks():
+    """The writer is "Triage (<this hook's session id>)": the bare id inside a label, with the env naming another
+    cloud id (cse_9f). The id inside the label is this session, so its stale write blocks. A match that reads only
+    the remote id passes it."""
+    writer = "Triage (%s)" % SESSION
+    records = [owner(at(18, 50))] + page_write(at(19))
+    check("N12d scope: the writer reads back as the label around the session id",
+          page_writer_of(with_writer(records, writer)) == writer, page_writer_of(with_writer(records, writer)))
+    p = run_stop("n12d", base_repo("n12d"), records, writer=writer, extra_env={REMOTE_ENV: "cse_9f"})
+    expect_block("N12d", p, (SCRIPT,))
+
+
+def case_n12e_dotted_id_near_the_remote_id_passes_with_no_note():
+    """The writer is "Triage (session_9f.x)": a dotted id with the env's remote id (cse_9f, so session_9f) as its
+    prefix. An export run before the write would make an unknown writer this session, so a pass here shows the id
+    was read whole and not matched. A token that stops at the dot reads session_9f and blocks."""
+    writer = "Triage (session_9f.x)"
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
+    check("N12e scope: the writer reads back as the dotted label", page_writer_of(with_writer(records, writer)) == writer,
+          page_writer_of(with_writer(records, writer)))
+    p = run_stop("n12e", base_repo("n12e"), records, writer=writer, extra_env={REMOTE_ENV: "cse_9f"})
+    obj = expect_pass("N12e", p)
+    check("N12e: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
 def case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script():
     """The page names another writer. Earlier shell runs that only mention export_page.py do not make this
     session the writer: the grep is no export run, and the test file's name ends in export_page.py."""
@@ -813,6 +838,8 @@ CASES.extend((
     case_n12a_cloud_writer_named_in_parentheses_blocks,
     case_n12b_other_cloud_id_in_parentheses_passes_with_no_note,
     case_n12c_bare_session_id_writer_blocks_with_a_cloud_env_set,
+    case_n12d_label_around_the_hook_session_id_blocks,
+    case_n12e_dotted_id_near_the_remote_id_passes_with_no_note,
     case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
     case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
     case_n15_writer_set_of_receipts_passes,
