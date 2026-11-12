@@ -263,6 +263,37 @@ push_case("interpreter control: python3 subprocess.run shell string ls, allows",
 push_case("interpreter control: python3 subprocess.run list git status, allows", "", "allow",
           form=r'''python3 -c "import subprocess; subprocess.run(['git','status'])"''')
 
+# A MODULE IMPORTED UNDER AN ALIAS. `import subprocess as sp` starts the same processes as the plain import, so
+# `sp.run([...])` and `o.system(...)` get the plain push's verdict. A bare name bound by `from subprocess import
+# run as r` already reads, because the reader keys on the name the call uses. The forms that run a push split the
+# word with `+`, so no reader but the python one can find the text. The controls run git status and ls through
+# the same alias, which allow.
+push_case("interpreter: python3 subprocess imported as sp, a list run of a forced push to main, asks", "", "ask",
+          form=r'''python3 -c "import subprocess as sp; sp.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 os imported as o, os.system of a folded string forces main, asks", "", "ask",
+          form=r'''python3 -c "import os as o; o.system('git pu' + 'sh --force origin main')"''')
+push_case("interpreter: python3 run imported as r from subprocess, a list of a forced push to main, asks", "",
+          "ask", form=r'''python3 -c "from subprocess import run as r; r(['git','push','--force','origin','main'])"''')
+push_case("interpreter control: python3 subprocess imported as sp, git status, allows", "", "allow",
+          form=r'''python3 -c "import subprocess as sp; sp.run(['git','status'])"''')
+push_case("interpreter control: python3 subprocess imported as sp, ls, allows", "", "allow",
+          form=r'''python3 -c "import subprocess as sp; sp.run(['ls'])"''')
+
+# A RUN THAT TAKES A STRING WITHOUT shell=True. On Windows the string is the command line that CreateProcess runs,
+# so `subprocess.run("git ...")` starts git and asks like the list form. The push text is split with `+`, since a
+# whole-text match in the raw command already asks without the python reader. The controls start ls, echo or print,
+# which run no push, so they allow.
+push_case("interpreter: python3 subprocess.run string with no shell=True forces main, asks", "", "ask",
+          form="python3 -c 'import subprocess; subprocess.run(\"git \" + \"push --force origin main\")'")
+push_case("interpreter control: python3 subprocess.run echo list of a forced push text, allows", "", "allow",
+          form=r'''python3 -c "import subprocess; subprocess.run(['echo','git push --force origin main'])"''')
+push_case("interpreter control: python3 print of a forced push to main as text, allows", "", "allow",
+          form=r'''python3 -c "print('git push --force origin main')"''')
+push_case("interpreter control: python3 subprocess.run list of ls, allows", "", "allow",
+          form=r'''python3 -c "import subprocess; subprocess.run(['ls','-l'])"''')
+push_case("interpreter control: python3 os.system of echo, allows", "", "allow",
+          form=r'''python3 -c "import os; os.system('echo hi')"''')
+
 # A GIT WORD FOLDED FROM ABOUT 1200 `+` OPERANDS, chained with `rm -rf /`. The reader folds operands
 # recursively, and such a body must not reach RecursionError, where the guard fails open. The chained call
 # must deny, and the `rm -rf /` part must deny alone. The body is built here, not written as a literal.
@@ -272,6 +303,26 @@ FOLDED_PUSH_BODY = ("import subprocess; subprocess.run([" + "+".join(FOLD_GIT_OP
 sh("interpreter: a 1200-operand folded git word forces main, chained with rm -rf /, denies",
    'python3 -c "' + FOLDED_PUSH_BODY + '" && rm -rf /', "deny", "destructive-delete", cwd=PUSHFEAT)
 sh("interpreter control: rm -rf / alone, denies", "rm -rf /", "deny", "destructive-delete", cwd=PUSHFEAT)
+# THE SAME FOLDED BODY ALONE. The chained row above denies on `rm -rf /`, so it cannot show whether the git
+# part is read. This row has no other command: a fold that fails open lets the body through, and it asks.
+push_case("interpreter: a 1200-operand folded git word forces main, alone, asks", "", "ask",
+          form='python3 -c "' + FOLDED_PUSH_BODY + '"')
+
+# A POWERSHELL CALL OPERATOR NEXT TO A BLOCK COMMENT, A HERE-STRING OR A COMMENT. A block comment or a here-string
+# holds call text that runs nothing, so it allows. A call after a closed block comment, or a comment line with a
+# lone apostrophe, still runs. A call on the line after a closed here-string is a second command, so it is a
+# chained ask and denies alone. No quote row sits before a call on one line: the detached-launch reader denies
+# any `&` after a command word first, so such a row would not reach the fold.
+push_case("interpreter: PowerShell block comment holding the call, allows", "", "allow", tool="PowerShell",
+          form="<# & ('git') push --force origin main #>")
+push_case("interpreter: PowerShell call after a closed block comment, forces main, asks", "", "ask",
+          tool="PowerShell", form="<# a note #> & ('git') push --force origin main")
+push_case("interpreter: PowerShell here-string holding the call, allows", "", "allow", tool="PowerShell",
+          form="Write-Output @'\n& ('git') push --force origin main\n'@")
+chained_ask("interpreter: PowerShell call after a closed here-string, on the next line, denies alone",
+            "Write-Output @'\na note\n'@\n& ('git') push --force origin main", tool="PowerShell")
+push_case("interpreter: PowerShell call after a comment line with a lone apostrophe, forces main, asks", "",
+          "ask", tool="PowerShell", form="# don't rerun\n& ('git') push --force origin main")
 
 # FALSE ALARMS: a guard that cries wolf is spent.
 # Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
