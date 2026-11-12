@@ -1446,10 +1446,20 @@ CROSS_REPO_RULE = "question-checked-with-repo"
 CHECKED_WITH_ROLES = ("coordinator", "triage", "owner's-computer")  # the three R22 names
 LANE_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")  # a lane's branch slug (rule git-slug-then-claim-number)
 LANE_SLUG_MAX = 32
+# Words that fit the slug shape and name no lane. Whole-slug match: yes-tab-bar is a slug, yes is not. A slug is not
+# read against real lane branches (one branch read per write), so a made-up slug still passes.
+PLACEHOLDER_SLUGS = ("none", "pending", "unknown", "not-checked", "tbd", "yes", "done", "n-a")
+SLUG_SHAPE = ("lowercase letters, digits and single hyphens, %d characters at most, and not a placeholder such as "
+              "none or tbd" % LANE_SLUG_MAX)
+
+
+def lane_slug(value):
+    """True when value has a lane slug's shape and is no placeholder word."""
+    return len(value) <= LANE_SLUG_MAX and bool(LANE_SLUG.fullmatch(value)) and value not in PLACEHOLDER_SLUGS
 CROSS_REPO_REASON = ("An open decision or task on the waiting page names its `repo` (owner/name). A repo other than "
                      "the page's own needs `checked_with`: a role (coordinator, triage, owner's-computer) or a lane "
-                     "slug of that repo's session that said the owner has not ruled. `checked_with` never holds a "
-                     "session id, which no page item stores. "
+                     "slug (" + SLUG_SHAPE + ") of that repo's session that said the owner has not ruled. "
+                     "`checked_with` never holds a session id, which no page item stores. "
                      "(decision cross-repo-question-checked, a question on another repo is checked with that repo)")
 _WAITING_PAGE_DIR = os.path.join(HERE, "..", "skills", "waiting-page")
 
@@ -1490,17 +1500,17 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
         return "`repo` is missing. " + own
     if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and not repo.lower().endswith(".git")):
         return "`repo` is not owner/name. " + own
+    checked = data.get("checked_with")
+    if isinstance(checked, str) and SESSION_ID.fullmatch(checked):  # above the own-repo return: any repo refuses an id
+        return ("`checked_with` holds a session id, which no page item stores. Write a role (coordinator, triage, "
+                "owner's-computer) or a lane slug (%s)." % SLUG_SHAPE)
     if not page_repo or repo.lower() == page_repo.lower():
         return None
-    checked = data.get("checked_with")
-    if isinstance(checked, str) and SESSION_ID.fullmatch(checked):
-        return ("`checked_with` holds a session id, which no page item stores. Write a role (coordinator, triage, "
-                "owner's-computer) or a lane slug.")
-    if not (isinstance(checked, str) and (checked in CHECKED_WITH_ROLES
-                                          or (len(checked) <= LANE_SLUG_MAX and LANE_SLUG.fullmatch(checked)))):
+    if not (isinstance(checked, str) and (checked in CHECKED_WITH_ROLES or lane_slug(checked))):
         return ("`repo` %s is not this page's repo, and `checked_with` is missing or is neither a role nor a lane "
-                "slug. Ask that repo's triage, coordinator or owner's-computer whether the owner has ruled, then "
-                "write that role, or the lane slug of the lane that checked, in `checked_with`." % repo)
+                "slug (%s). Ask that repo's triage, coordinator or owner's-computer whether the owner has ruled, "
+                "then write that role, or the lane slug of the lane that checked, in `checked_with`."
+                % (repo, SLUG_SHAPE))
     return None
 
 
