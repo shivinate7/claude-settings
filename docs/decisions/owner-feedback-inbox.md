@@ -26,9 +26,12 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   start per `ArtifactData` call. Files are written only when a read of `answers` returns a new note:
   the inbox and the key file. A failed save tells the session to jot the note by hand.
 - **Question box.** A PostToolUse hook on `AskUserQuestion` (`local_time.py`, told apart by its payload) saves the
-  owner's answers, cut from the tool's result with the question text left out, as one block like a typed message
-  (owner R27, 2026-11-11). An empty answer and any other tool save nothing; a result that holds no
-  `"<question>"="<answer>"` pair is not saved, and the session is told. Cost: no process start. A relay of the owner's words from another session is
+  owner's answers, cut from the tool's result on the exact question strings of `tool_input.questions` with the
+  question text left out, as one block like a typed message (owner R27, 2026-11-11). A dict result
+  `{"answers": {<question>: <answer>}}` is read too, and a trailing `user notes:` stays with its answer. An empty
+  answer and any other tool save nothing; a result that holds no `"<question>"="<answer>"` pair is not saved, and
+  the session is told. Cost: one `local_time.py` process start per `AskUserQuestion` call, from its PostToolUse
+  entry; the capture starts no further process. A relay of the owner's words from another session is
   not saved: it comes in the `<cross-session-message` frame that a peer's own send uses, and no marker tells them apart.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Hand-backs and the
@@ -172,22 +175,22 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   the open work. A question, standing, page, repo or note item is left as it is, and so is a home only a lane branch
   holds. The proof is kept per item line, from the home check's own reads, so a grant in one block never settles a
   plain ruling to the same path in another. Cost: the close adds no read of its own. The home check it rides on starts
-  two git processes (`for-each-ref` and `cat-file`) per open or closed ruling or task item it checks, and one
-  `rev-parse` per repo, inside the Stop process that already runs; a line judged earlier in the same Stop costs nothing
+  one `cat-file` per open or closed ruling or task item it checks, and one `rev-parse` and one `for-each-ref` per
+  repo, inside the Stop process that already runs; a line judged earlier in the same Stop costs nothing
   more. The inbox is read twice and written once, only when a line changed; the close re-reads it right before the
   write, so a message captured during the reads is kept. A refusal for a standing id missing from the handoff names `[closed]` as a way out. A closed note
   needs a home: a file some branch tracks, `step:<slug>` (the file `roadmap/data/steps/<slug>.json` on
   some branch, read by `ruling_home.value_resolves`), `page:<n>`, or `not-a-grant`. `noted` and
   `process-only` are no home for a closed note. A closed question homed to `answered` is never checked. Risk kind: likely risk. F88
   (a closed item with no step, record or answer behind it) is the related incident, not a measured one.
-  Landed 2026-11-02. Cost: for each closed note homed to a file or a step, `git rev-parse`, `git for-each-ref` and
-  `git cat-file`, inside the Stop process. No file written. When the folder is in no repo, the check
+  Landed 2026-11-02. Cost: for each closed note homed to a file or a step, one `git cat-file`, with the one
+  `git rev-parse` and `git for-each-ref` per repo that the Stop shares, inside the Stop process. No file written. When the folder is in no repo, the check
   passes and a systemMessage names the closed note homes.
 - **No silent loss.** A malformed item line is a block reason, never a crash. If capture cannot write a
   message, the hook tells the session, so it jots the message by hand.
 - **Compaction.** The compact hook lists the open item ids that still need work. A `ruling` or `task` line whose
-  file home main holds is left out, by line, so another line of the same id stays. It writes no file. Cost: the same two
-  git processes per open ruling or task item, started in the reorient process.
+  file home main holds is left out, by line, so another line of the same id stays. It writes no file. Cost: one `git cat-file`
+  per open ruling or task item, and one `rev-parse` and one `for-each-ref` per repo, started in the reorient process.
 
 Kind: process
 Home: hooks/local_time.py

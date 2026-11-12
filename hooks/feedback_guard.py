@@ -22,9 +22,9 @@ a turn end in these cases:
     reported as "<path> is not a tracked <kind> home", with the homes listed (kind_homes). A task item,
     open or closed, may instead name `step:<slug>`: it passes when roadmap/data/steps/<slug>.json is a blob
     on some ref, resolved as a closed note's step home is (Homes._held). A ruling never names a step. Cost:
-    the rev-parse, for-each-ref and cat-file reads a closed note runs, inside the Stop process, once per
-    task item homed to a step. When the cwd is in no git repo, or the layout cannot be read, these homes
-    pass unchecked and a systemMessage says so;
+    one cat-file per task item homed to a step, one rev-parse per repo (and per absolute home), and one
+    for-each-ref per repo per Stop (Homes.ref_lists), inside the Stop process. When the cwd is in no git
+    repo, or the layout cannot be read, these homes pass unchecked and a systemMessage says so;
   - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
     `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message
@@ -100,9 +100,9 @@ a turn end in these cases:
     whole token after the home, with trailing text allowed (CLOSED_TOKEN), or by `[closed]` at the
     line end. A closed `[question] -> answered` is never checked. Risk kind: likely risk. F88 (a
     closed note with no step, record or answer behind it) is the related incident, not a measured
-    one. Cost: git rev-parse, for-each-ref and cat-file, inside the Stop process, per closed note
-    homed to a file or a step. When the cwd is in no git repo, the check passes and a systemMessage
-    says so;
+    one. Cost: one git cat-file per closed note homed to a file or a step, one rev-parse per repo (and
+    per absolute home), and one for-each-ref per repo per Stop, inside the Stop process. When the cwd is
+    in no git repo, the check passes and a systemMessage says so;
   - an open standing item has an id that is not a whole token in the handoff;
   - the inbox cannot be read. The block names the file: a Stop hook's stderr never reaches the owner,
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
@@ -243,7 +243,7 @@ def is_burst(texts):
     lines or two or more bullet lines."""
     if len(texts) != 1:
         return len(texts) > 1
-    lines = [ln for ln in (texts[0] or "").split("\n") if ln.strip()]
+    lines = [ln for ln in norm(texts[0]).split("\n") if ln.strip()]  # a lone CR ends a line, as problems() reads it
     return len(lines) >= 3 or sum(1 for ln in lines if BULLET.match(ln)) >= 2
 
 
@@ -331,7 +331,7 @@ def example_item(stamp):
 
 def no_items_problem(block, inbox, homes_line=""):
     """The reason for a burst message with no items: where the items go, what one looks like, and each kind's home."""
-    first = (block["text"] or "").split("\n")[0][:40]
+    first = norm(block["text"]).split("\n")[0][:40]
     where = "add items under the line `%s%s` (line %d of %s)" % (HEADING_PREFIX, block["stamp"], block["line"], inbox)
     example = example_item(block["stamp"])
     return "the message at %s (%s) has no items: %s%s%s" % (
@@ -403,6 +403,7 @@ class Homes:
         self._templated = {}  # (branch, slug) -> whether the step file holds TEMPLATE_DIR, read once per Stop
         self.on_main = {}  # (line index, kind, home path) -> whether main holds the home this line's check passed: the close's proof
         self.tried = set()  # the keys problem() has run for
+        self.ref_lists = {}  # repo top -> its branch refs, listed once per run (ruling_home.value_refs)
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
@@ -447,7 +448,7 @@ class Homes:
         held, read, failed = not places, not places, None
         for root, rel in places:  # a repo git cannot read is skipped; a readable one still decides
             try:
-                held = ruling_home.value_resolves(rel, root) or held
+                held = ruling_home.value_resolves(rel, root, self.ref_lists) or held
                 read = True
             except ruling_home._GitFailure as e:
                 failed = failed or e
@@ -502,7 +503,7 @@ class Homes:
                 return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home%s"
                         % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes),
                            ". A task may instead name `step:<slug>`" if kind == "task" else ""))
-        refs = ruling_home.value_refs(rel, root)
+        refs = ruling_home.value_refs(rel, root, self.ref_lists)
         if not refs:
             return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
         self.on_main[key] = self.on_main.get(key, False) or any(ref in ruling_home.MAIN_REFS for ref in refs)
@@ -1490,9 +1491,8 @@ def inbox_stop(hook):
         inbox, turns = paths
         inbox = os.path.abspath(inbox)  # CLAUDE_CONFIG_DIR may be relative; the reason promises an absolute path
         out = {}
-        try:
-            with open(inbox, encoding="utf-8") as f:
-                blocks = parse(f.read())
+        try:  # read_inbox, as the close and the repeat mark read it, so a lone CR numbers lines alike in each
+            blocks = parse(read_inbox(inbox))
         except FileNotFoundError:
             return {}
         except (OSError, UnicodeDecodeError):

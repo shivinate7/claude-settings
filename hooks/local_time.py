@@ -29,11 +29,13 @@ repo (a `.git` found by walking up; no process starts): the real path of the cwd
 it to find other sessions' inboxes of the same repo (decision owner-feedback-inbox, "Repeats"). Cost:
 one small file per session.
 A PostToolUse payload on stdin (hook_event_name PostToolUse, no flag) is the question box: for an AskUserQuestion
-call the owner's answers, cut from the tool's result with the question text left out, are saved as one block like
-a typed message (the same fence, stamp and repo sidecar), with no time line. An empty result and any other tool
-save nothing; a result that does not hold each question's answer is not saved and the session is told. A relay of the
+call the owner's answers, cut from the tool's result on the exact question strings of tool_input.questions with the
+question text left out, are saved as one block like a typed message (the same fence, stamp and repo sidecar), with
+no time line. A trailing `user notes:` is kept with its answer. An empty result and any other tool save nothing; a
+result that does not hold each question's answer is not saved and the session is told. A relay of the
 owner's words from another session is not saved: it arrives in the `<cross-session-message` frame a peer's own
-send uses, and no marker tells the two apart. Cost: no process start.
+send uses, and no marker tells the two apart. Cost: one process start per AskUserQuestion call (this file, from
+its PostToolUse entry in settings.json); the capture itself starts no further process.
 `--agent` never reads stdin and never saves. The Stop guard that reads the inbox, and decides which
 messages need items, is feedback_guard.py. LOCAL_TIME_NOW (ISO-8601 with an offset) replaces the
 clock; tests set it.
@@ -344,21 +346,95 @@ def page_note(raw):
             "additionalContext": not_saved("page note", "; ".join(failures))}}))
 
 
-def answers_of(hook):
-    """The owner's answers in an AskUserQuestion result, one per question, or None when the result holds none in the
-    form `"<question>"="<answer>"`. The result is cut at each `"="`: what follows it up to `", "` (the next question's
-    opening) is an answer, and the last answer ends at the result's last quote mark, which the tool's closing sentence
-    never holds. The question text is the session's words, so it is never kept."""
-    for text in _strings(hook.get("tool_response")):
-        parts = text.split('"="')
-        if len(parts) < 2:
-            continue
-        answers = []
-        for n, part in enumerate(parts[1:], 1):
-            cut = part.rfind('", "') if n < len(parts) - 1 else part.rfind('"')
+NOTES_WORD = "user notes:"  # the words that open the owner's own notes after an answer in the box's result
+
+
+def _questions(hook):
+    """The question texts of an AskUserQuestion call, in order, from its tool_input.questions."""
+    inp = hook.get("tool_input")
+    found = inp.get("questions") if isinstance(inp, dict) else None
+    return [q["question"] for q in found if isinstance(q, dict) and isinstance(q.get("question"), str)
+            and q["question"]] if isinstance(found, list) else []
+
+
+def _answer_in(span):
+    """The answer in one question's span of the result, the text after its `"<question>"="`: the span runs to the
+    answer's closing quote, then the tool's own words (`", ` or a closing sentence). Those are dropped, except the
+    owner's notes, from NOTES_WORD on. None when the span holds no closing quote."""
+    cut = span.rfind('"')
+    if cut < 0:
+        return None
+    answer, tail = span[:cut], span[cut + 1:]
+    notes = tail.find(NOTES_WORD)
+    return answer + "\n" + tail[notes:].rstrip(" ,") if notes >= 0 else answer
+
+
+def _cut_on_questions(text, questions):
+    """The answers in `text`, cut on the exact `"<question>"="` string of each question in order, so an answer or a
+    question that holds `", "` or `"="` is never cut inside. None when a question's string is not in the text."""
+    marks, at = [], 0
+    for q in questions:
+        mark = '"%s"="' % q
+        start = text.find(mark, at)
+        if start < 0:
+            return None
+        at = start + len(mark)
+        marks.append((start, at))
+    answers = []
+    for n, (_, begin) in enumerate(marks):
+        answer = _answer_in(text[begin:marks[n + 1][0] if n + 1 < len(marks) else len(text)])
+        if answer is None:
+            return None
+        answers.append(answer)
+    return answers
+
+
+def _cut_on_marks(text):
+    """The answers in `text` cut at each `"="` alone, for a result that holds none of the payload's question strings.
+    A bandaid: a question or answer that holds `", "` or `"="` is cut wrong here. None when the text holds no `"="`."""
+    parts = text.split('"="')
+    if len(parts) < 2:
+        return None
+    answers = []
+    for n, part in enumerate(parts[1:], 1):
+        if n < len(parts) - 1:
+            cut = part.rfind('", "')
             if cut >= 0:
                 answers.append(part[:cut])
-        return [a for a in answers if a.strip()]
+        else:
+            answer = _answer_in(part)
+            if answer is not None:
+                answers.append(answer)
+    return answers
+
+
+def _answer_value(value):
+    """One answer of the dict form as text: a string, or a list of strings (a multi-select) joined by `, `."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)) and all(isinstance(v, str) for v in value):
+        return ", ".join(value)
+    return None
+
+
+def answers_of(hook):
+    """The owner's answers in an AskUserQuestion result, one per question, or None when the result holds none. The
+    result is a dict `{"answers": {<question>: <answer>}}`, or text that holds `"<question>"="<answer>"` per question.
+    Text is cut on the exact question strings of tool_input.questions (_cut_on_questions); a trailing `user notes:`
+    is the owner's own words and is kept with its answer. The question text is the session's words, never kept."""
+    response, questions = hook.get("tool_response"), _questions(hook)
+    if isinstance(response, dict) and isinstance(response.get("answers"), dict):
+        given = response["answers"]
+        keys = [q for q in questions if q in given] or list(given)
+        answers = [_answer_value(given[k]) for k in keys]
+        return [a for a in answers if a is not None and a.strip()]
+    texts = list(_strings(response))
+    cuts = ([lambda t: _cut_on_questions(t, questions)] if questions else []) + [_cut_on_marks]
+    for cut in cuts:
+        for text in texts:
+            answers = cut(text)
+            if answers is not None:
+                return [a for a in answers if a.strip()]
     return None
 
 

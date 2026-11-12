@@ -415,10 +415,11 @@ def _resolve_value(cwd, refs, git_path):
     return bool(_holding_refs(cwd, refs, git_path))
 
 
-def value_refs(value, cwd):
+def value_refs(value, cwd, ref_lists=None):
     """The refs whose tree holds the home value as a blob; [] when none does or the value is refused.
     The same two git reads as value_resolves, so a caller that also needs to know which refs hold it
-    (the feedback log's close: "on main") starts no further process."""
+    (the feedback log's close: "on main") starts no further process. `ref_lists` is a dict the caller
+    keeps for one run, {cwd: refs}: the refs are listed once per repo, not once per value."""
     if os.path.isabs(value):
         return []  # every absolute path is refused, briefs included
     normalized = os.path.normpath(value)
@@ -427,13 +428,17 @@ def value_refs(value, cwd):
     if not cwd or not os.path.isdir(cwd) or not is_git_work_tree(cwd):
         return []
     git_path = normalized.replace(os.sep, "/")
-    refs = _list_refs(cwd)  # a repo git cannot read raises _GitFailure: see _list_refs
+    refs = None if ref_lists is None else ref_lists.get(cwd)
+    if refs is None:
+        refs = _list_refs(cwd)  # a repo git cannot read raises _GitFailure: see _list_refs
+        if ref_lists is not None:
+            ref_lists[cwd] = refs
     return _holding_refs(cwd, refs, git_path)
 
 
-def value_resolves(value, cwd):
-    """True when a home: value resolves. See the module docstring for what counts."""
-    return value == PROCESS_ONLY or bool(value_refs(value, cwd))
+def value_resolves(value, cwd, ref_lists=None):
+    """True when a home: value resolves. See the module docstring for what counts. `ref_lists`: see value_refs."""
+    return value == PROCESS_ONLY or bool(value_refs(value, cwd, ref_lists))
 
 
 # ------------------------------------------------------------------ per-file check
