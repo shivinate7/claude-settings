@@ -4359,7 +4359,7 @@ def release_check(root, h, numbers, lints, root_why=None):
                     out.append(why)
                 if created is None or updated is None:
                     out.append(unknown_reason("the newest review record gave no timestamps"))
-                elif created != updated:  # inherited rounds come from an older record: it must be unedited too
+                elif created != updated or (rec and rec.get("inherited_from") is not None and rows[rec["inherited_from"]][1] != rows[rec["inherited_from"]][2]):  # inherited rounds come from an older record: it must be unedited too
                     out.append("the newest review record was edited after it was posted" if created != updated else "a review record that gives the rounds was edited after it was posted")
         if lints.get(n) is None:
             out.append("no lint verdict was given")
