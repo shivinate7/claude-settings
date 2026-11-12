@@ -128,6 +128,7 @@ FAMILIES = {
     "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
+    "dead-pr-wait": "step dead-pr-waits, placement: a new or edited roadmap step whose text waits on a bare #N with no blockedBy slug is refused on Write, Edit and MultiEdit; a wait quoted, fenced or in code, a slug wait, an ordinary #N mention and any other path pass",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
     "impeccable": "impeccable is review-only",
     "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
