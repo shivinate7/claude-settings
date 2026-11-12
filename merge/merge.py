@@ -42,7 +42,8 @@
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
                           the base, at most one compare per done PR and other open PR on the base, and at most one compare per done PR against the
                           base. A done PR that is ready with CI running reads no compare, holder or not, as on main. Two PRs with one head read no
-                          compare. The carried close and the batch line share each compare, so no pair is read twice; no new process, file or timer.
+                          compare between them. A done draft that an open PR's frozen block lists (`Lane: #N HEAD`) is never carried; no new read.
+                          The carried close and the batch line share each compare, so no pair is read twice; no new process, file or timer.
                           After the batch line, three kinds of line for the batch runner, which closes and reopens; the tool posts and closes nothing:
                             close as replaced: OWNER/NAME #N by #R   open R holds a `Replaces #N` line, N is another open PR on R's base (lowest R wins;
                                                                      a loop of any length closes none, nor a claim on a PR that
@@ -4181,6 +4182,12 @@ def carried_closes(h, heads, drafts, base, held):
                 break
     return found
 
+def frozen_lanes(pulls):
+    """-> the set of numbers that an open pull request in `pulls` lists as `Lane: #N <head>` in its frozen block (parse_freeze). A closed or merged
+    batch is not in `pulls`, so its lanes are not listed. No read: the bodies come with the pull request list that reviewed_read already holds.
+    A body whose block this tool cannot read is a Stop."""
+    return {n for d in pulls for n in (parse_freeze(d.get("body") or "") or {"lanes": {}})["lanes"]}
+
 def pull_state(h, n):
     """-> open, closed or merged for pull request n, or None when n names no pull request (an issue: HTTP 404). One read, pulls/<n>.
     Any other failed read is a Stop."""
@@ -4286,7 +4293,9 @@ def reviewed_block(h):
     branch protection read and each ready pull request's check runs, statuses and workflow runs, then at most one compare per done pull request
     and other open pull request on the base, and at most one compare per done pull request against the base, all memoized in `held` and shared
     with the carried close (pr_holds), so a pull request whose head the base holds is on neither line. A done pull request that is ready with CI
-    running reads no compare, as on main; two pull requests with one head read none. The close lines read nothing more. The reopen lines
+    running reads no compare, as on main; two pull requests with one head read no compare between them (an equal-head draft pair reads one
+    `<head>...main`). A done draft that an open pull request's frozen block lists as `Lane: #N <head>` is never carried (frozen_lanes), as its
+    batch holds it; it reads no new data, only the bodies already read for the batch line. The close lines read nothing more. The reopen lines
     read pulls/N once for each closed pull request with a closing note, and pulls/R once when its replacer R is not open (reopen_lines)."""
     lines, done, pulls, notes = reviewed_read(h)
     out, ok, tail = [f"repo {h.repo}:", *lines], True, []
@@ -4298,7 +4307,7 @@ def reviewed_block(h):
     if nums:
         heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base and d["number"] not in replaced}
         try:
-            drafts = {d["number"] for d in pulls if d.get("draft")}
+            drafts = {d["number"] for d in pulls if d.get("draft")} - frozen_lanes(pulls)  # a lane an open batch freezes is held by that batch
             carried = carried_closes(h, heads, [n for n in nums if n in drafts], h.base, held)
         except Stop as e:
             why = " ".join(str(e).split())
