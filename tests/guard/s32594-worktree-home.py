@@ -427,11 +427,13 @@ def _gcx_scope_problem(fix):
     return _gcx_listed(fix)
 
 
-def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None, scope=None, rule="other-checkout"):
+def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None, scope=None, rule="other-checkout",
+             any_of=()):
     """One case: the verdict on the command TEMPLATE from the folder named CWD_KEY ("home" or "primary"),
     as the agent GCX_HOME, or as a top-level call when AGENT is None. A deny must name RULE (other-checkout
-    unless a row names another rule that refuses the same call) and no path. An allow must pass. SCOPE is
-    the scope check of a top-level row, run where an agent row runs `_gcx_scope_problem`."""
+    unless a row names another rule that refuses the same call) and no path. ANY_OF names rules, one of which
+    a deny must name, for a call that more than one rule refuses. An allow must pass. SCOPE is the scope check
+    of a top-level row, run where an agent row runs `_gcx_scope_problem`."""
     def check():
         fix = _gcx_fixture()
         if agent:
@@ -451,7 +453,9 @@ def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None, scope=None
             return True, "allowed"
         names = [ROOT, slash(ROOT), GCX_TEMP, slash(GCX_TEMP)]
         names += list(fix.values()) + [slash(path) for path in fix.values()]
-        problems = _other_checkout_problems(command, got, reason, names, rule=rule)
+        # A row with ANY_OF passes when one of its rules names the refusal, so the rule order does not matter.
+        wanted = next((name for name in any_of if name in reason), any_of[0] if any_of else rule)
+        problems = _other_checkout_problems(command, got, reason, names, rule=wanted)
         return (False, "; ".join(problems)) if problems else (True, "refused as %s, no path named" % rule)
     return check
 
@@ -599,11 +603,12 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C read-tree in the pri
                          _gcx_row("deny", "home", "git -C @PRIMARY read-tree HEAD")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C checkout-index in the primary checkout is refused",
                          _gcx_row("deny", "home", "git -C @PRIMARY checkout-index -a")))
-# The cd form of the rm row is still refused. The rule that names the refusal is worktree-home, not
-# other-checkout, so this row expects worktree-home. The git -C rm above is still refused by other-checkout.
+# The cd form of the rm row is still refused. Either rule may name the refusal, so the row pins the deny
+# with any_of: a rule reorder does not re-red it. The git -C rm above is still refused by other-checkout.
 LOG_CHECKS_EXTRA.append(("the cd form of the git -C rm row: an agent's cd into the primary checkout, then git rm, is "
-                         "refused by worktree-home",
-                         _gcx_row("deny", "home", "cd @PRIMARY && git rm f", rule="worktree-home")))
+                         "refused by worktree-home or other-checkout",
+                         _gcx_row("deny", "home", "cd @PRIMARY && git rm f",
+                                  any_of=("worktree-home", "other-checkout"))))
 # Allowed: the reads of the primary checkout, by an absolute path and by a relative one.
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C ls-files of the primary checkout is allowed",
                          _gcx_row("allow", "home", "git -C @PRIMARY ls-files")))
@@ -768,26 +773,33 @@ LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads the last env -C f
 RELESC_AGENT = "wthomew1"                        # an agent with a recorded home (_home_fixture)
 RELESC_FREE = "wthomew2"                         # an agent with no home record
 RELESC_TMP = os.path.join(ROOT, "wthomew_tmp")   # the temp folder the guard runs read, apart from every target
+RELESC_SIB = "wthomew3"                          # a sibling agent, another checkout of the same clone
+RELESC_SESSION = "relesc-session-0001"           # a session id, so its folder under the temp is a scratchpad
 RELESC_CACHE = {}
 
 
 def _relesc_fixture():
     """Built once per run. The recorded home of RELESC_AGENT, with a `sub` folder, a file `t.py` and the
-    agent's red-run folder beside it. A primary checkout of RELESC_FREE, which has no record, with a linked
-    checkout of it. A folder in no checkout. Returns (folders, problems)."""
+    agent's red-run folder beside it, and a sibling agent's checkout of the same clone. The session scratchpad
+    under the temp folder. A primary checkout of RELESC_FREE, which has no record, with a linked checkout of
+    it. A folder in no checkout. Returns (folders, problems)."""
     if "folders" not in RELESC_CACHE:
         primary, home, problems = _home_fixture(RELESC_AGENT)
+        sib = os.path.join(primary, ".claude", "worktrees", "agent-" + RELESC_SIB)
+        scratch = os.path.join(RELESC_TMP, "-home-user-claude-settings", RELESC_SESSION, "scratchpad")
         if not problems:
             os.makedirs(os.path.join(home, "sub"), exist_ok=True)
             write(os.path.join(home, "t.py"), "print(1)\n")
             sh_add_lane(primary, "agent-" + RELESC_AGENT + "-red")
+            sh_add_lane(primary, "agent-" + RELESC_SIB)
+            os.makedirs(scratch, exist_ok=True)
         free = os.path.join(ROOT, "wthomew_free_primary")
         make_repo(free, {"src/app.py": "print(1)\n"})
         free_lane, _branch = sh_add_lane(free, "wthomew_lane")   # a linked checkout the no-record agent stands in
         nogit = os.path.join(ROOT, "wthomew_nogit")
         os.makedirs(nogit, exist_ok=True)
         RELESC_CACHE["folders"] = {
-            "primary": primary, "home": home, "sub": os.path.join(home, "sub"),
+            "primary": primary, "home": home, "sub": os.path.join(home, "sub"), "sib": sib, "scratch": scratch,
             "free": free, "free_src": os.path.join(free, "src"), "nogit": nogit, "free_lane": free_lane,
             "abs_scratch": os.path.join(ROOT, "relesc_scratch"),
             "abs_outside": os.path.join(ROOT, "relesc_outside"),
@@ -906,6 +918,27 @@ _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x 
             "checkout, is allowed", "allow", "mkdir ../x", "nogit", agent=RELESC_FREE)
 _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x from the primary's src, "
             "lands in its own checkout and is allowed", "allow", "mkdir ../x", "free_src", agent=RELESC_FREE)
+# Allow, from the recorded home: a relative write after an absolute cd into a folder an agent works in, the
+# session's scratchpad or /tmp. Each row is one spelling, so a failure names one form.
+_relesc_add("worktree-home relative escape: cd <session scratchpad> && mkdir probe, a relative write after an "
+            "absolute cd into the scratchpad, is allowed", "allow", "cd %(scratch)s && mkdir probe", "home")
+_relesc_add("worktree-home relative escape: cd /tmp && mkdir x, a relative write after an absolute cd into "
+            "/tmp, is allowed", "allow", "cd /tmp && mkdir x", "home")
+_relesc_add("worktree-home relative escape: cd <session scratchpad> && echo x > out.txt, a redirect after an "
+            "absolute cd into the scratchpad, is allowed", "allow", "cd %(scratch)s && echo x > out.txt", "home")
+# Deny, from the recorded home: a relative cd or an absolute cd that lands the relative write in another
+# checkout of the clone or in the primary checkout. Either rule may name the refusal (any_of).
+CD_ESCAPE_RULES = ("worktree-home", "other-checkout")
+_relesc_add("worktree-home relative escape: cd ../agent-" + RELESC_SIB + " && mkdir x, a relative cd into a "
+            "sibling agent's checkout of the clone, is refused", "deny",
+            "cd ../agent-" + RELESC_SIB + " && mkdir x", "home", any_of=CD_ESCAPE_RULES)
+_relesc_add("worktree-home relative escape: cd ../../.. && mkdir x, a relative cd into the primary checkout, is "
+            "refused", "deny", "cd ../../.. && mkdir x", "home", any_of=CD_ESCAPE_RULES)
+_relesc_add("worktree-home relative escape: cd <home> && mkdir ../tmp, a write that lands in the primary's "
+            "folder after an absolute cd home, is refused", "deny", "cd %(home)s && mkdir ../tmp", "home",
+            any_of=CD_ESCAPE_RULES)
+_relesc_add("worktree-home relative escape: cd <primary checkout> && mkdir probe, a relative write into the "
+            "primary checkout, is refused", "deny", "cd %(primary)s && mkdir probe", "home", any_of=CD_ESCAPE_RULES)
 
 
 # The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes
