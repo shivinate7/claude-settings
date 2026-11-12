@@ -818,15 +818,21 @@ def unread_mode(argv):
 
 
 AWAITING_ROW = re.compile(r"  \[(?P<who>.+) — (?P<at>\d{4}-\d\d-\d\dT\S+)\]")  # exactly two spaces: a text line has six
-AWAITING_ELIDED = re.compile(r"  \[\d+ comments elided")
-AWAITING_CUT = re.compile(r"\[\d+ more threads not listed")
-AWAITING_LABELS = ("Done", "Deviations", "Next")  # the bold labels that end the Input Needed section
+AWAITING_ELIDED = re.compile(r"  \[\d+ comments? elided")
+AWAITING_BRACKET = re.compile(r"  \[")  # any two-space bracket row; a shape that is not a comment row or a known header row is unknown
+AWAITING_HEADER_ROW = re.compile(r"  \[(?:location|anchored at|region of)\]")
+AWAITING_CUT = re.compile(r"\[\d+ more threads? not listed")
+AWAITING_FIRST_PAGE = re.compile(r"\d+ comment threads? \(")
+AWAITING_CLAUDE = "Claude (via the user)"  # the tool's one label for Claude's comment; a viewer named Claude Reyes is not it
+AWAITING_END_LABELS = ("Done", "Deviations", "Next")  # the bold labels that end the Input Needed section
+AWAITING_LABEL = re.compile(r"\*\*(?P<name>Input Needed|%s):?\*\*:?" % "|".join(AWAITING_END_LABELS))
+AWAITING_COUNT = re.compile(r"Awaiting reply: (\d+)")
 
 
 def awaiting_threads(text):
     """Parses threads.txt. Returns (threads, unknown): each thread is a dict of id, status, rows (who, at) and location."""
     threads, unknown, cur = [], [], None
-    lines = text.splitlines()
+    lines = [line.rstrip() for line in text.splitlines()]  # a trailing space must not hide a header or a row
     for i, line in enumerate(lines):
         head = re.fullmatch(r"Thread (\S+)", line)
         if head:
@@ -841,27 +847,50 @@ def awaiting_threads(text):
             cur = None
         elif cur is not None:
             row = AWAITING_ROW.fullmatch(line)
-            if AWAITING_ELIDED.match(line):
-                unknown.append("unknown: thread %s has elided comments" % cur["id"][:8])
-            elif line.startswith("  [location] "):
+            if line.startswith("  [location] "):
                 cur["location"] = line[len("  [location] "):].strip()
             elif row:
                 cur["rows"].append((row.group("who"), row.group("at")))
+            elif AWAITING_BRACKET.match(line) and not AWAITING_HEADER_ROW.match(line) and cur["status"] != "resolved":
+                # A resolved thread cannot be awaiting, so a row it hides is no cut. An open thread's elided row may hide the last comment.
+                what = "has elided comments" if AWAITING_ELIDED.match(line) else "has a row of an unknown shape (%s)" % line[:40]
+                unknown.append("unknown: thread %s %s" % (cur["id"][:8], what))
     for t in threads:
         if t["status"] == "open" and not t["rows"] and not any(t["id"][:8] in u for u in unknown):
             unknown.append("unknown: open thread %s has no comment rows" % t["id"][:8])
     return threads, unknown
 
 
+def awaiting_input_needed(lines):
+    """The text after the first bold Input Needed label, up to the next bold Done, Deviations or Next label, else ''.
+    This is a second parser of the report form beside lint/report_guard.py report_section. It stays because that one reads
+    only a blockquoted block (report.md may carry unquoted lines) and its module loads the whole hook layer. It must accept
+    the same label forms: a colon inside or after the bold, a blockquote, and text on the label line."""
+    body, inside = [], False
+    for line in lines:
+        label = AWAITING_LABEL.match(line)
+        if label and label.group("name") in AWAITING_END_LABELS:
+            if inside:
+                break
+        elif label and not inside:
+            inside = True
+            body.append(line[label.end():])
+            continue
+        if inside:
+            body.append(line)
+    return "\n".join(body)
+
+
 def awaiting_report(report, waiting):
     """The report-missing and report-count lines for the awaiting id8s `waiting`: none when the report is right."""
-    section = re.search(r"\*\*Input Needed\*\*(.*?)(?=\*\*(?:%s)\*\*|\Z)" % "|".join(AWAITING_LABELS), report, re.S)
-    body = section.group(1) if section else ""
-    lines = ["report-missing " + t for t in waiting if not re.search(r"(?<![0-9a-f])%s(?![0-9a-f])" % t, body)]
-    count = re.search(r"(?m)^Awaiting reply: (\d+)[ \t]*$", report)
-    if not count or int(count.group(1)) != len(waiting):
-        lines.append("report-count %s expected %d" % (count.group(1) if count else "none", len(waiting)))
-    return lines
+    lines = [re.sub(r"^\s*>[ \t]?", "", line).rstrip() for line in report.splitlines()]  # a blockquote marker and trailing space are no part of a line
+    body = awaiting_input_needed(lines)
+    out = ["report-missing " + t for t in waiting if not re.search(r"(?<![0-9a-f])%s(?![0-9a-f])" % t, body)]
+    counts = [m.group(1) for m in map(AWAITING_COUNT.fullmatch, lines) if m]
+    wrong = [c for c in counts if int(c) != len(waiting)]
+    if not counts or wrong:
+        out.append("report-count %s expected %d" % (wrong[0] if wrong else "none", len(waiting)))
+    return out
 
 
 def awaiting_mode(argv):
@@ -878,8 +907,11 @@ def awaiting_mode(argv):
     if not text.strip():
         print("unknown: threads.txt in %s is empty" % args.awaiting)
         return 2
+    if not AWAITING_FIRST_PAGE.match(text.lstrip()):  # a continuation page alone lists only some of the threads
+        print("unknown: threads.txt does not start with the first page")
+        return 2
     threads, unknown = awaiting_threads(text)
-    waiting = [t for t in threads if t["status"] == "open" and t["rows"] and not t["rows"][-1][0].startswith("Claude")]
+    waiting = [t for t in threads if t["status"] == "open" and t["rows"] and t["rows"][-1][0] != AWAITING_CLAUDE]
     lines = ["thread-awaiting %s (last comment %s, %s)" % (t["id"][:8], t["rows"][-1][1], t["location"] or "no location") for t in waiting]
     if unknown:
         print("\n".join(lines + unknown))
