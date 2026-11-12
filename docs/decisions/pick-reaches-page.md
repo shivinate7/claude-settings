@@ -4,7 +4,9 @@
 
 Owner, 2026-11-12 12:09 CST: "this needs to be mechanized". A coordinator that takes a pick the owner could overrule sends it to the page writer, so it shows on the waiting page as a `stands` item (skill `waiting-page`, "Add an item"). The writer is triage.
 
-The guard rule `pick-reaches-page` refuses a send_message from a coordinator that has a line opening `Coordinator pick`, after markdown lead characters and in any case, outside a fenced block, when the send goes to a session that is not the page writer. The send passes when a send to the writer since the last human message names the same pick: the key is the rest of the line, casefolded, with its markdown and full stop cut. The owner's typed override lifts it (`owner-override`).
+The guard rule `pick-reaches-page` refuses a send_message from a coordinator. The message has a line that opens `Coordinator pick`, after markdown lead characters, in any case, outside a fenced block. The send goes to a session that is not the page writer.
+
+The send passes when a send to the writer since the last human message names the same pick. The key is the rest of the line, casefolded, with its markdown and full stop cut. The owner's typed override lifts the rule (`owner-override`).
 
 ## The mistake
 
