@@ -4574,14 +4574,18 @@ home_entries() { find "$1" -mindepth 1 ! -path "$1/.gitconfig" 2>/dev/null; }
 # stub folder $3, and the ref $4 (empty leaves CLAUDE_SETTINGS_REF unset, so install.sh uses main).
 # Arguments past the fourth are VAR=VALUE pairs for this run; they come last, so they win over the
 # defaults. The temp-folder skip is off (the fixtures sit under $work, under /tmp) unless a VAR=VALUE
-# argument sets it. Sets rc and out.
+# argument sets it. Sets rc and out. CI_INSTALL_FILE, when set, runs that file by path (bash FILE --cloud), so the
+# install's SCRIPT_DIR is the file's own folder; piped, SCRIPT_DIR is empty. The path is a mktemp folder under $work,
+# with no space in it, so $ci_run is left unquoted.
 cloud_install() {
   ci_home="$1"; ci_cwd="$2"; ci_bin="$3"; ci_ref="${4:-}"
   [ $# -gt 4 ] && shift 4 || shift $#
+  ci_run="bash -s -- --cloud"; ci_in="$INSTALL_SH"
+  if [ -n "${CI_INSTALL_FILE:-}" ]; then ci_run="bash $CI_INSTALL_FILE --cloud"; ci_in=/dev/null; fi
   out=$(cd "$ci_cwd" && env -i PATH="$ci_bin:$PATH" HOME="$ci_home" CLAUDE_CONFIG_DIR="$ci_home/.claude-cfg" \
         ${ci_ref:+"CLAUDE_SETTINGS_REF=$ci_ref"} GIT_CEILING_DIRECTORIES="$ci_cwd" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
-        "$@" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+        "$@" $ci_run < "$ci_in" 2>&1)
   rc=$?
 }
 # The WARN, ERROR and fatal lines of the last install: a failure message names the problem, not the whole log.
@@ -5845,6 +5849,113 @@ caseM19() {
   ok "$name"
 }
 
+# ---- cloud_stale: a stale-install reinstall's input, and the source a run-by-path install records ----
+# fixture_clone FX CO: a fixture of the repo (make_github_fixture), and a clone of its bare repo at CO, on main at
+# origin's tip with a clean tree. The clone holds install.sh, CLAUDE.md and settings.json, so it is a SCRIPT_DIR.
+fixture_clone() {
+  make_github_fixture "$1"
+  git clone -q "$1/bare.git" "$2"
+}
+
+# cloud_stale1 (green control): the hook input the reinstall passes names a source that no startup entry fires on.
+# Scope first: with no hook input both startup entries run, so a silent run with the input proves the input is the
+# cause, not a broken fixture.
+cloud_stale1() {
+  name="cloud_stale1 (green control): a cloud install given hook input with source stale-install runs no startup entry, and with none both run"
+  co="$work/cloud_stale1-checkout"
+  hookfix_checkout "$co"
+  h=$(new_home)
+  hookfix_install "$h" "$co"
+  if [ "$rc" -ne 0 ]; then bad "$name" "scope: install.sh exited $rc with no hook input: $err"; rm -rf "$h"; return; fi
+  if ! in_order "$out" FRESH_A FRESH_B; then bad "$name" "scope: with no hook input the startup entries did not run, so a silent run proves nothing"; rm -rf "$h"; return; fi
+  rm -rf "$h"
+  h=$(new_home)
+  hookfix_install "$h" "$co" '{"source":"stale-install"}'
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc with source stale-install: $err"
+  elif contains "$out" FRESH_; then
+    bad "$name" "a startup entry ran for source stale-install: $out"
+  elif contains "$out" COMPACT_KEPT || contains "$out" CLEAR_KEPT; then
+    bad "$name" "a compact or clear|fork entry ran for source stale-install"
+  else
+    ok "$name"
+  fi
+  rm -rf "$h"
+}
+
+# cloud_stale2: a run-by-path install whose folder is a clone under a temp folder records the clone the search makes
+# in HOME, never the scratch clone. The search goes on past SCRIPT_DIR as if it were absent, so the install clones the
+# repo into $HOME/claude-settings (the mirror path) and records that as the source and the installer.
+cloud_stale2() {
+  name="cloud_stale2: a run-by-path install from a clone under a temp folder records the clone it makes in HOME as the source, never the scratch clone"
+  fx="$work/cs2-fx"; tr="$work/cs2-tr"; co="$tr/scratch"; bin="$work/cs2-bin"; cwd="$work/cs2-cwd"; h="$work/cs2-home"
+  mkdir -p "$tr" "$cwd" "$h"
+  h=$(realpwd "$h")
+  write_redirect "$h" "$fx/bare.git"
+  fixture_clone "$fx" "$co"
+  make_curl_stub "$bin" fail-tarball
+  # Scope: the clone is what the old code takes as the source: clean, on main, at origin's tip, under the temp folder.
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$(fixture_sha "$fx")" ] || [ "$(git -C "$co" symbolic-ref --short HEAD)" != main ] \
+     || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    bad "$name" "scope: the clone is not a clean main at origin's tip"; return
+  fi
+  under_root "$co" "$tr" || { bad "$name" "scope: the clone $co is not under the temp folder $tr"; return; }
+  CI_INSTALL_FILE="$co/install.sh"
+  cloud_install "$h" "$cwd" "$bin" "" CLAUDE_SETTINGS_TEMP_ROOTS="$tr"
+  unset CI_INSTALL_FILE
+  rec="$h/.claude-cfg/.claude-settings-install.json"
+  if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ ! -f "$rec" ]; then bad "$name" "no install record was written: $(install_problems)"; return; fi
+  src=$(record_field "$rec" source); inst=$(record_field "$rec" installer)
+  if [ "$src" = "$co" ]; then bad "$name" "the record's source is the scratch clone [$src]"; return; fi
+  if [ "$src" != "$h/claude-settings" ]; then bad "$name" "the record's source is [$src], want the clone in HOME [$h/claude-settings]"; return; fi
+  if [ "$inst" != "$h/claude-settings/install.sh" ]; then bad "$name" "the record's installer is [$inst], not install.sh in HOME's clone"; return; fi
+  ok "$name"
+}
+
+# cloud_stale3 (green control): a TERM that reaches install.sh while it waits on a fetch releases its install lock.
+# The git shim stands in for a fetch that hangs. On its first fetch or clone it notes whether the lock is held, sends
+# TERM to the pid the lock names (install.sh's own $$), and fails. Bash runs its EXIT trap on an untrapped TERM, so
+# finish_install removes the lock. A TERM that did not end the install would give an exit other than 143.
+cloud_stale3() {
+  name="cloud_stale3 (green control): a TERM to install.sh while it waits on a fetch releases its install lock"
+  fx="$work/cs3-fx"; tr="$work/cs3-tr"; co="$tr/scratch"; bin="$work/cs3-bin"; cwd="$work/cs3-cwd"; h="$work/cs3-home"
+  st="$work/cs3-state"
+  mkdir -p "$tr" "$cwd" "$h" "$bin"
+  h=$(realpwd "$h")
+  write_redirect "$h" "$fx/bare.git"
+  fixture_clone "$fx" "$co"
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$(fixture_sha "$fx")" ] || [ "$(git -C "$co" symbolic-ref --short HEAD)" != main ] \
+     || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    bad "$name" "scope: the clone is not a clean main at origin's tip"; return
+  fi
+  real_git=$(command -v git)
+  cat > "$bin/git" <<'SH'
+#!/bin/sh
+case " $* " in
+  *" fetch "*|*" clone "*)
+    [ -e "$CLAUDE_CONFIG_DIR/.claude-settings-install.lock" ] && printf 'held\n' >> "$CS3_STATE"
+    kill -TERM "$(head -n 1 "$CLAUDE_CONFIG_DIR/.claude-settings-install.lock" 2>/dev/null)" 2>/dev/null
+    printf 'termed\n' >> "$CS3_STATE"
+    exit 1 ;;
+esac
+exec "$CS3_REAL_GIT" "$@"
+SH
+  chmod +x "$bin/git"
+  : > "$st"
+  CI_INSTALL_FILE="$co/install.sh"
+  cloud_install "$h" "$cwd" "$bin" "" CS3_STATE="$st" CS3_REAL_GIT="$real_git"
+  unset CI_INSTALL_FILE
+  if [ "$(cat "$st")" != "$(printf 'held\ntermed')" ]; then
+    bad "$name" "scope: the fetch did not see the lock held before it sent TERM: [$(cat "$st")]"; return
+  fi
+  if [ "$rc" -ne 143 ]; then bad "$name" "scope: install.sh was not ended by TERM (exit $rc): $(install_problems)"; return; fi
+  if [ -e "$h/.claude-cfg/.claude-settings-install.lock" ]; then
+    bad "$name" "the install lock stayed after a TERM to install.sh: its EXIT trap did not run"; return
+  fi
+  ok "$name"
+}
+
 # The runner's own HOME is a default home too, so a case that runs git without its own HOME (the
 # session_start.sh cases) gets the same redirect as every other case.
 default_home "$work/runner-home"; HOME="$work/runner-home"; export HOME
@@ -6027,6 +6138,9 @@ run mergepin2
 run mergepin3
 run mergepin4
 run mergepin5
+run cloud_stale1
+run cloud_stale2
+run cloud_stale3
 
 printf '%s passed, %s failed, %s skipped\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
