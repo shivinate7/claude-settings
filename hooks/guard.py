@@ -476,6 +476,7 @@ The model judges (hooks/call_judge.py, hooks/prose_judge.py, hooks/sendmessage_s
 refuse() too, so an override lifts them.
 """
 
+import bisect
 import difflib
 import importlib
 import importlib.machinery
@@ -3421,9 +3422,12 @@ BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNOR
 BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"\x00\s*,\s*(?:(?:and|or|nor)\s+)*(?=\x00|$)", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_ASIDES = (   # the closed list of asides a negator may carry between two commas; any other phrase is an order
     "under any circumstances", "in any case", "in any event", "at any time", "for any reason", "at all", "ever")
+# the aside keeps the window only when the order comes next: a run verb, or the end of the text before the order
+# ("Do not, at any time, skip it: run" and "Never, ever, forget to run" are orders after the aside)
 BRIEF_DESTRUCTIVE_NEGATOR_COMMA = re.compile(
     r"(?<![\w'-])(never|no|don't|(?:do|must|should|can)\s+not|shouldn't|mustn't|can't|cannot)\s*,\s*(?:%s)\s*,"
-    % "|".join(BRIEF_DESTRUCTIVE_ASIDES), re.IGNORECASE)
+    r"(?=\s*(?:(?:%s)(?![\w'-])|$))"
+    % ("|".join(BRIEF_DESTRUCTIVE_ASIDES), "|".join(BRIEF_DESTRUCTIVE_RUN_VERBS)), re.IGNORECASE)
 BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
@@ -3485,12 +3489,11 @@ def _brief_prohibits(before: str) -> bool:
     # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
     # a comma after a span, with only "or"/"and" before the next span, continues the list and drops the earlier spans
     # from the negator's window; a comma before plain words ends the clause, but a negator, a comma, an aside and a
-    # second comma ("Do not, under any circumstances, write") keep the window
+    # second comma ("Do not, under any circumstances, write") keep the window when the order comes next
     # a span becomes a NUL, which no prose word holds, so "fix, `git reset`" is no list; a NUL already in the brief
     # reads as a space first, so it cannot pose as a span
     spans = BRIEF_DESTRUCTIVE_SPAN.sub("\x00", before.replace("\x00", " "))
     listed = BRIEF_DESTRUCTIVE_LIST_COMMA.sub("", spans)
-    # a negator, a comma, an aside and a second comma ("Do not, under any circumstances, write") keep the negator's window
     listed = BRIEF_DESTRUCTIVE_NEGATOR_COMMA.sub(r"\1", listed)
     words = _brief_words(re.split(r"[;.,]", listed)[-1])
     return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:]) \
@@ -3619,8 +3622,12 @@ BRIEF_WRITE_NEGATORS = frozenset(BRIEF_DESTRUCTIVE_NEGATORS + ("not", "nothing",
 BRIEF_WRITE_WORD_PAIRS = frozenset((
     "and/or", "yes/no", "pass/fail", "true/false", "read/write", "input/output", "in/out", "on/off", "either/or", "y/n"))
 BRIEF_WRITE_TEE = re.compile(r"(?<![\w-])tee\s+(?:-\w+\s+)*([^\s|;&<>-][^\s|;&<>]*)")
-BRIEF_WRITE_REDIRECT = re.compile(r"(?<![\w&>=-])\d?>>?\s*(?![&=])([^\s&|;>]+)")
+BRIEF_WRITE_REDIRECT = re.compile(r"(?<![\w&>=-])\d?>>?\s*(?![&=])([^\s&|;<>]+)")   # a `<` ends the word, as in a shell
 BRIEF_WRITE_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+# In prose a quote mark between word characters is text ("Don't", "it's"), as BRIEF_WRITE_MARKS reads it, so two
+# apostrophes do not pair over a redirect. A shell opens a quote after any character, so command text keeps the form above.
+BRIEF_WRITE_PROSE_QUOTED = re.compile(r"(?<!\w)\"[^\"]*\"(?!\w)|(?<!\w)'[^']*'(?!\w)")
+BRIEF_WRITE_DIVIDED = re.compile(r"[\w.]+(?:/\d+(?:\.\d+)?)+")   # `budget/2` after a prose `>`: a sum divided, no file
 BRIEF_WRITE_MARKS = re.compile(r"\*+|(?<!\w)[\"']|[\"'](?!\w)")
 BRIEF_WRITE_REASON = (
     "The brief tells a read-only agent to write a file. That role has no write tool, so it writes by a shell redirect "
@@ -3700,19 +3707,27 @@ def _brief_write_colon(text: str, verb: re.Match, rest: str) -> bool:
     return bool(token) and _brief_write_path(token.group(1))
 
 
+def _brief_write_in_span(starts: list, spans: list, at: int) -> bool:
+    """True when `at` falls inside one of `spans` (sorted, apart, `starts` their first chars). A binary search, so a line
+    with many verbs and many spans costs time in proportion to its length."""
+    found = bisect.bisect_right(starts, at) - 1
+    return found >= 0 and at < spans[found][1]
+
+
 def _brief_write_orders(text: str) -> bool:
     """True when one prose line, marks removed, orders a file write: a write verb in command form with a file
     destination, a passive write inside "make sure", "create a file", a `tee <path>`, or the Write tool. Only the
     BRIEF_WRITE_WINDOW chars before a verb and the BRIEF_WRITE_REACH chars after it are read, so a long line costs
     time in proportion to its length."""
     spans = [span.span() for span in BRIEF_DESTRUCTIVE_SPAN.finditer(text)]   # command text, read by _brief_write_command
+    starts = [start for start, _ in spans]
     for verb in BRIEF_WRITE_VERB.finditer(text):
         name, before = verb.group(1).lower(), text[max(0, verb.start() - BRIEF_WRITE_WINDOW):verb.start()]
         end = BRIEF_WRITE_REST_END.search(text, verb.end(), verb.end() + BRIEF_WRITE_REACH)
         rest = text[verb.end():end.start() if end else verb.end() + BRIEF_WRITE_REACH]
         if name == "make" and BRIEF_WRITE_SURE.match(rest) or not _brief_write_leads(before) or _brief_prohibits(before):
             continue
-        quoted = any(start <= verb.start() < stop for start, stop in spans)   # a phrase quoted in a span is text
+        quoted = _brief_write_in_span(starts, spans, verb.start())   # a phrase quoted in a span is text
         if name in BRIEF_WRITE_WITH_VERBS and not quoted:
             target = BRIEF_WRITE_UPDATE.match(rest)
             if target and _brief_write_path(target.group(1)) and BRIEF_WRITE_OWN.search(rest[target.end():]):
@@ -3736,7 +3751,7 @@ def _brief_write_orders(text: str) -> bool:
             before = text[max(0, match.start() - BRIEF_WRITE_WINDOW):match.start()]
             if pattern is BRIEF_WRITE_PROSE_TEE:
                 ordered = _brief_write_path(match.group(1)) and not _brief_prohibits(before) \
-                    and not any(start <= match.start() < end for start, end in spans)
+                    and not _brief_write_in_span(starts, spans, match.start())
             elif pattern is BRIEF_WRITE_FILE:
                 ordered = _brief_write_leads(before) and not _brief_prohibits(before)
             else:   # a "may not", "will not" or "won't" before the tool is a ban; a bare "may" or "will" is not
@@ -3752,12 +3767,13 @@ def _brief_write_orders(text: str) -> bool:
 
 def _brief_write_prose_redirect(line: str) -> bool:
     """True when a prose line, outside backtick spans and quotes, redirects a command's output into a path ("run cat
-    v > audit.md"). A `>` at the line start is a quote mark, and a comparison names no path."""
+    v > audit.md"). A `>` at the line start is a quote mark, and a comparison names no path: `> budget/2` divides."""
     bare = BRIEF_DESTRUCTIVE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
-    bare = BRIEF_WRITE_QUOTED.sub(lambda quoted: " " * len(quoted.group(0)), bare)
+    bare = BRIEF_WRITE_PROSE_QUOTED.sub(lambda quoted: " " * len(quoted.group(0)), bare)
     for match in BRIEF_WRITE_REDIRECT.finditer(bare):
         before = bare[max(0, match.start() - BRIEF_WRITE_WINDOW):match.start()]
         if before.strip() and re.search(r"[A-Za-z]", match.group(1)) and not _brief_write_target_ok(match.group(1)) \
+                and not BRIEF_WRITE_DIVIDED.fullmatch(match.group(1).rstrip(".,)")) \
                 and not _brief_prohibits(re.sub(r"(?<=\w)\.(?=\w)", "_", before)):   # a dot in a name ends no clause
             return True
     return False
