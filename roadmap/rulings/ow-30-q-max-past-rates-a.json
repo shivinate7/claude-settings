@@ -4,7 +4,7 @@
  "ruling": "R57, 14:17 CST (plan 79eb441): doorbell route a, a background mail-wait; the retrospective builds it (\"q2: ya C\"). Home: decision session-messages; step mail-doorbell-wait.",
  "quote": "q2: ya C",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 30",
- "status": "open",
+ "status": "closed",
  "supersedes": [
   {
    "kind": "main-sentence",
@@ -14,5 +14,6 @@
  "at_estimated": true,
  "see": "r57",
  "step": "mail-doorbell-wait",
- "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: R57 route a, a background mail-wait, same as the second half of store r57. Main still calls the doorbell open. It leans on store entry timer-allowed-when-cheaper (Nov 11 13:22); main CLAUDE.md:11 still reads \"starts no new long-lived process\" without that carve-out."
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: R57 route a, a background mail-wait, same as the second half of store r57. Main still calls the doorbell open. It leans on store entry timer-allowed-when-cheaper (Nov 11 13:22); main CLAUDE.md:11 still reads \"starts no new long-lived process\" without that carve-out.",
+ "closed_reason": "duplicate of r57 (the doorbell ruling's two halves are both held in r57)"
 }

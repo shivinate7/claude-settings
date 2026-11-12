@@ -4,7 +4,7 @@
  "ruling": "14:14 CST (via coordinator, relayed by retrospective): \"b: keep mail only ... the doorbell was supposed to be via a whole other route that's translatable anywhere\"; the trust-card route is rejected; the retrospective designs the doorbell. Home: decision session-messages; step mailbox-doorbell.",
  "quote": "b: keep mail only ... the doorbell was supposed to be via a whole other route that's translatable anywhere",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 28",
- "status": "open",
+ "status": "closed",
  "supersedes": [
   {
    "kind": "main-sentence",
@@ -13,5 +13,6 @@
  ],
  "at_estimated": true,
  "step": "mail-doorbell-wait",
- "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: 14:14 keep mail only, doorbell by a route that works anywhere, trust-card route rejected; same as the first half of store r57. Not superseded: ow-30 (14:17) picks the route this asks for and agrees. Step mailbox-doorbell is folded, so the live step is mail-doorbell-wait."
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: 14:14 keep mail only, doorbell by a route that works anywhere, trust-card route rejected; same as the first half of store r57. Not superseded: ow-30 (14:17) picks the route this asks for and agrees. Step mailbox-doorbell is folded, so the live step is mail-doorbell-wait.",
+ "closed_reason": "duplicate of r57 (the doorbell ruling's two halves are both held in r57)"
 }

@@ -7,7 +7,7 @@
  "status": "open",
  "supersedes": [
   {
-   "kind": "guard-rule",
+   "kind": "main-sentence",
    "ref": "docs/decisions/plain-prose-lint.md:15,25: 'STE001 (one budget of 30 words ...)' / 'STE001 reads one key, `max_words`, set to 30' (lint/ste_lint.py, a CI error)"
   }
  ],

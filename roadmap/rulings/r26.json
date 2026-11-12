@@ -13,5 +13,11 @@
  ],
  "title": "Batches stop wasting CI.",
  "step": "test-guard-split-per-rule",
- "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Decision batch-freeze-lane-set stays as ruled. Parts 1-3: steps lane-lint-windows-guard-slice, two-drop-leaves-queue, busy-file-stacked-batches are all doing. Part 4: step test-guard-split-per-rule says done, but hooks/test_guard.py is still one file on origin/main."
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Decision batch-freeze-lane-set stays as ruled. Parts 1-3: steps lane-lint-windows-guard-slice, two-drop-leaves-queue, busy-file-stacked-batches are all doing. Part 4: step test-guard-split-per-rule says done, but hooks/test_guard.py is still one file on origin/main.",
+ "steps": [
+  "lane-lint-windows-guard-slice",
+  "two-drop-leaves-queue",
+  "busy-file-stacked-batches",
+  "test-guard-split-per-rule"
+ ]
 }

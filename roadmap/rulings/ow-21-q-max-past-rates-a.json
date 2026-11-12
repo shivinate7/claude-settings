@@ -4,10 +4,11 @@
  "ruling": "13:37 CST, via retrospective: step mailbox-wake-routes may start one extra cloud session to post test comments, \"ya yes start it\". Home: decision session-messages.",
  "quote": "ya yes start it",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 21",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "One-off act, already used (step done).",
  "at_estimated": true,
  "step": "mailbox-wake-routes",
- "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: One-off grant: step mailbox-wake-routes may start one extra cloud session to post test comments. The step is status done; main's session-messages.md has no such text."
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: One-off grant: step mailbox-wake-routes may start one extra cloud session to post test comments. The step is status done; main's session-messages.md has no such text.",
+ "closed_reason": "one-off grant already used (step mailbox-wake-routes is done)"
 }

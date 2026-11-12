@@ -7,7 +7,7 @@
  "status": "open",
  "supersedes": [
   {
-   "kind": "guard-rule",
+   "kind": "main-sentence",
    "ref": "settings.json:271,376: hook matchers 'Agent|AskUserQuestion|ArtifactData' and 'ArtifactData' skip mcp__claude-artifacts__db_write"
   }
  ],

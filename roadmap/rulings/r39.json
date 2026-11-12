@@ -8,7 +8,7 @@
  "supersedes": [
   {
    "kind": "guard-rule",
-   "ref": "hooks/call_judge.py:131-138 PAST_RULING_ITEM: refuses a question a listed ruling decides; the only pass is a 'Based on (ruling)' line"
+   "ref": "past-ruling (hooks/call_judge.py:131-138 PAST_RULING_ITEM): refuses a question a listed ruling decides; the only pass is a 'Based on (ruling)' line"
   },
   {
    "kind": "main-sentence",
