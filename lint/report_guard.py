@@ -3201,13 +3201,13 @@ def main():
     except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
         review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
     note = " ".join(filter(None, [note, hand_note, review_note]))
-    relay = []
-    if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
-        relay = relay_reasons(after, text, hook.get("cwd"))
-        try:
-            relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
-        except Exception:
-            pass
+    # A turn with no human message (a lane's, started by a peer) reads the relay over the turn since the last incoming
+    # message, so its first Stop names the same refusals as the retry.
+    relay = relay_reasons(after if last_human_idx is not None else turn, text, hook.get("cwd"))
+    try:
+        relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
+    except Exception:
+        pass
     cannot = ""
     if last_human_idx is not None and cannot_refused is not None:
         try:
