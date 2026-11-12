@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard_frozen.py`, where the temp calls are listed (`_PY_TEMP_CALLS`).
 
-**Decision.** cull-guard-wrong-refusals (the guard cull), which names this limit.
+**Decision.** rule `roles-findings-are-debts-or-notes` (a known gap is a debt only if Claude is likely to hit it in normal work).
 
 **Retire.** A case in `hooks/test_guard.py` that refuses a second test sharing a `mkdtemp()` folder with another test closes this debt.
