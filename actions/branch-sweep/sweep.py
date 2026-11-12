@@ -7,19 +7,23 @@ It reads refs/remotes/origin/*, the refs actions/checkout with fetch-depth 0 lea
 branch: `<delete|keep> <name> <reason>`. origin/HEAD is no branch and gets no line.
 
 A branch is deleted only when its last commit is on the default branch or on an archive/* branch. Never deleted:
-the default branch, main, master, roadmap (the record branch), archive/*, and a branch named by --open-head
-(deleting the head of an open pull request closes the pull request).
+the default branch, main, master, roadmap (the record branch), archive/*, a branch named by --open-head
+(deleting the head of an open pull request closes the pull request), and a branch whose name has a character
+outside [A-Za-z0-9._/-] or starts with "-". The workflow puts the name raw into a DELETE URL, where `#` ends the
+path and could delete another branch, and a leading "-" reads as an option.
 
 A repo it cannot read, or one with no origin/<default>, exits 2 before any line is printed. The sweep then
 deletes nothing, because a verdict made from partial refs could name an unmerged branch as merged.
 """
 import argparse
+import re
 import subprocess
 import sys
 
 REMOTE = "refs/remotes/origin/"
 # Names kept whatever their history. roadmap holds the roadmap record and is never merged into main.
 PROTECTED = ("main", "master", "roadmap")
+SAFE_NAME = re.compile(r"[A-Za-z0-9._/-]+")
 
 
 def git(repo, *args, stdin=None):
@@ -63,6 +67,8 @@ def verdicts(repo, default, open_heads):
             yield "keep", name, "archive branch"
         elif name in open_heads:
             yield "keep", name, "open pull request"
+        elif not SAFE_NAME.fullmatch(name) or name.startswith("-"):
+            yield "keep", name, "name has a character a delete URL cannot carry safely"
         elif sha in on_default:
             yield "delete", name, "last commit is on %s" % default
         elif sha in on_archive:

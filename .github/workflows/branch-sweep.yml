@@ -18,6 +18,8 @@ concurrency:
 
 jobs:
   sweep:
+    # A manual run from another branch would sweep with that branch's copy of sweep.py.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -48,7 +50,7 @@ jobs:
           args=()
           while IFS= read -r head; do
             if [ -n "$head" ]; then
-              args+=(--open-head "$head")
+              args+=(--open-head="$head")
             fi
           done < "$RUNNER_TEMP/open-heads.txt"
           python3 actions/branch-sweep/sweep.py --repo . --default "$DEFAULT_BRANCH" "${args[@]}" > "$RUNNER_TEMP/verdicts.txt"
@@ -56,7 +58,13 @@ jobs:
           failed=0
           while read -r verb name reason; do
             if [ "$verb" = delete ]; then
-              if ! gh api -X DELETE "repos/$REPO/git/refs/heads/$name"; then
+              if ! err=$(gh api -X DELETE "repos/$REPO/git/refs/heads/$name" 2>&1 < /dev/null); then
+                echo "$err" >&2
+                # A refusal for rate or scope repeats on every later delete: stop and fail. The next run finishes.
+                if printf '%s\n' "$err" | grep -Eq 'HTTP (403|429)'; then
+                  echo "::error::GitHub refused a delete (HTTP 403 or 429); stopped at $name"
+                  exit 1
+                fi
                 echo "::warning::could not delete $name"
                 failed=1
               fi

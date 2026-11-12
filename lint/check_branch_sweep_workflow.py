@@ -9,8 +9,13 @@ Rules:
   secrets      no evaluated expression reads the secrets context; the token is github.token
   triggers     only push to main and workflow_dispatch
   pin          each uses: is pinned by a full commit SHA, except a ./ local action
-  checkout     each actions/checkout step sets persist-credentials: false
+  checkout     each actions/checkout step sets persist-credentials: false under its with:
   timeout      each job sets timeout-minutes
+  read         the step that reads open pull requests cannot fail silently: no || true, no continue-on-error
+  injection    no ${{ }} expression inside a run block, comments of the block included
+  concurrency  a concurrency block is set at the top level
+  condition    each job has an if: that limits it to refs/heads/main
+  argv         --open-head takes its value as --open-head=VALUE, so a value that starts with - is no option
 
 The reader is line based, with no YAML library: CI installs none for lint. It needs only the block style this
 repo's workflows use. GitHub evaluates an expression in a quoted value, a plain value, or a run: block, even after a
@@ -25,6 +30,9 @@ KEY = re.compile(r"^(-\s+)?([A-Za-z0-9_.\"'-]+):(?:\s+(.*))?$")
 BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*$")
 EXPR = re.compile(r"\$\{\{(.*?)\}\}")
 SECRETS = re.compile(r"(?<![\w.-])secrets(?![\w-])")
+SILENT_FAIL = re.compile(r"\|\|\s*(true|:|exit\s+0)\b|\bset\s+\+e\b")
+MAIN_ONLY = re.compile(r"^(\$\{\{\s*)?github\.ref\s*==\s*['\"]refs/heads/main['\"](\s*\}\})?$")
+SPLIT_ARG = re.compile(r"--open-head(?!=)")
 SHA_PIN = re.compile(r"@[0-9a-f]{40}$")
 ALLOWED_TRIGGERS = ("push", "workflow_dispatch")
 
@@ -44,13 +52,16 @@ def strip_comment(text):
 
 
 def read_lines(text):
-    """(structure, evaluated). structure: (n, indent, text) of each key or list line outside a block scalar,
-    comments cut. evaluated: (n, text) of every line GitHub evaluates, a block scalar's raw lines included."""
-    structure, evaluated, block = [], [], None
+    """(structure, evaluated, runs). structure: (n, indent, text) of each key or list line outside a block scalar,
+    comments cut. evaluated: (n, text) of every line GitHub evaluates, a block scalar's raw lines included.
+    runs: (n, text) of each line of a run: value, a block's comment lines included."""
+    structure, evaluated, runs, block, in_run = [], [], [], None, False
     for n, raw in enumerate(text.splitlines(), 1):
         indent = len(raw) - len(raw.lstrip(" "))
         if block is not None and (not raw.strip() or indent > block):
             evaluated.append((n, raw))
+            if in_run:
+                runs.append((n, raw))
             continue
         block = None
         line = strip_comment(raw.strip()) if raw.strip() else ""
@@ -59,9 +70,13 @@ def read_lines(text):
         structure.append((n, indent, line))
         evaluated.append((n, line))
         m = KEY.match(line)
+        in_run = False
         if m and m.group(3) and BLOCK_SCALAR.match(m.group(3)):
             block = indent + (len(m.group(1)) if m.group(1) else 0)
-    return structure, evaluated
+            in_run = unquote(m.group(2)) == "run"
+        elif m and m.group(3) and unquote(m.group(2)) == "run":
+            runs.append((n, line))
+    return structure, evaluated, runs
 
 
 def unquote(value):
@@ -170,8 +185,55 @@ def step_bounds(structure, i):
     return range(start, end)
 
 
+def under_with(structure, k):
+    """True when structure[k] sits directly under a with: key."""
+    j = k - 1
+    while j >= 0 and structure[j][1] >= structure[k][1]:
+        j -= 1
+    return j >= 0 and key_of(structure[j][2])[0] == "with"
+
+
+def sets_persist_false(structure, bounds):
+    for k in bounds:
+        ck, cv = key_of(structure[k][2])
+        if ck == "persist-credentials" and cv == "false" and under_with(structure, k):
+            return True
+        if ck == "with" and cv and (inline_pairs(cv) or {}).get("persist-credentials") == "false":
+            return True
+    return False
+
+
+def step_span(structure, i, last):
+    """(first line, last line) of the step holding structure[i], block scalar lines included."""
+    bounds = step_bounds(structure, i)
+    end = structure[bounds[-1] + 1][0] - 1 if bounds[-1] + 1 < len(structure) else last
+    return structure[bounds[0]][0], end
+
+
+def check_read(structure, evaluated, runs, found, last):
+    """The step that runs gh api on the pulls endpoint. A failed read must fail the job: a sweep that cannot see
+    open pull requests could delete a head and close its pull request."""
+    run_lines = {n for n, _ in runs}
+    for i, (n, _, line) in enumerate(structure):
+        if not line.startswith("- "):
+            continue
+        first, end = step_span(structure, i, last)
+        body = [(m, t) for m, t in evaluated if first <= m <= end]
+        if not any("pulls" in t and "gh api" in t for m, t in body):
+            continue
+        for m, t in body:
+            if m in run_lines and not t.strip().startswith("#") and SILENT_FAIL.search(t):
+                found.append((m, "read", t.strip()))
+            key, value = key_of(t.strip())
+            if key == "continue-on-error" and value != "false":
+                found.append((m, "read", t.strip()))
+        return
+    found.append((1, "read", "no step reads the open pull requests with gh api"))
+
+
 def check(text):
-    structure, evaluated = read_lines(text)
+    structure, evaluated, runs = read_lines(text)
+    last = len(text.splitlines())
     found = []
 
     top_permissions = None
@@ -186,6 +248,8 @@ def check(text):
             check_triggers(structure, i, found)
         elif key == "jobs":
             jobs_index = i
+    if "concurrency" not in {key_of(line)[0] for _, indent, line in structure if indent == 0}:
+        found.append((1, "concurrency", "no top-level concurrency block"))
     if top_permissions is None:
         found.append((1, "permissions", "no top-level permissions block"))
     else:
@@ -207,6 +271,9 @@ def check(text):
                     keys.setdefault(key_of(structure[k][2])[0], k)
             if "timeout-minutes" not in keys:
                 found.append((structure[j][0], "timeout", structure[j][2]))
+            condition = unquote(key_of(structure[keys["if"]][2])[1]) if "if" in keys else ""
+            if not MAIN_ONLY.match(condition.strip()):
+                found.append((structure[j][0], "condition", structure[j][2]))
             if "permissions" in keys:
                 check_permissions(structure, keys["permissions"], False, found)
 
@@ -220,12 +287,7 @@ def check(text):
         if not SHA_PIN.search(action):
             found.append((n, "pin", line))
         if action.startswith("actions/checkout@"):
-            pinned = False
-            for k in step_bounds(structure, i):
-                ck, cv = key_of(structure[k][2])
-                if ck == "persist-credentials" and cv == "false":
-                    pinned = True
-            if not pinned:
+            if not sets_persist_false(structure, step_bounds(structure, i)):
                 found.append((n, "checkout", line))
 
     for n, line in evaluated:
@@ -235,6 +297,13 @@ def check(text):
         key, value = key_of(line.strip())
         if key == "if" and value and "${{" not in value and SECRETS.search(value):
             found.append((n, "secrets", line.strip()))
+
+    for n, line in runs:
+        if "${{" in line:
+            found.append((n, "injection", line.strip()))
+        if SPLIT_ARG.search(line) and not line.strip().startswith("#"):
+            found.append((n, "argv", line.strip()))
+    check_read(structure, evaluated, runs, found, last)
 
     return sorted(set(found))
 
