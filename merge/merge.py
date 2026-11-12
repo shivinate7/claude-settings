@@ -108,7 +108,7 @@
                           case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
                           with no session URL has no lane PRs, so only --with finds any. A commit or ref target is measured against its base only, and is not cross-measured.
   merge --idle-lanes --live FILE
-                          one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
+                          lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane that can never be judged; never archive it: no cs-step tag, or a step off the record branch with no Step trailer on main), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge --batch-build NAME PR [PR ...] [--on BRANCH] [--base BRANCH]
@@ -5045,7 +5045,7 @@ def kind_misfits(kind, files):
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
 def idle_lanes(live, repo_dir=None):
-    """merge --idle-lanes: print one line per lane to archive, then the summary line. Exit 1 with no summary when the
+    """merge --idle-lanes: print lane lines (a lane to archive) and `hold (` lines (a lane that can never be judged; never archived: no cs-step tag, or a step off the record branch with no Step trailer on main), then the summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
     `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
@@ -5068,11 +5068,14 @@ def idle_lanes(live, repo_dir=None):
     except (Exception, SystemExit) as e:
         print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
         return 1
-    lanes = [x for x in entries if not x.startswith("unknown (")]
-    # An unknown entry with no lane beside it is the whole list unread: no summary, so it never reads as an empty list.
-    unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
+    holds = [x for x in entries if x.startswith("hold (")]
+    lanes = [x for x in entries if not x.startswith("unknown (") and x not in holds]
+    # An unknown entry with no lane or hold beside it is the whole list unread: no summary, so it never reads as an empty list.
+    unread = bool(entries) and not lanes and not holds  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
-        entries = [*entries, f"merge: {len(lanes)} lanes to archive. Run get_session on each alone, then archive it."]
+        held = f", {len(holds)} held" if holds else ""
+        tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds else "Run get_session on each alone, then archive it."
+        entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
     say(*entries)
     return 1 if unread else 0
 
