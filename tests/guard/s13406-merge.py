@@ -1243,7 +1243,7 @@ def _artcite_case(command, config=None, env_path=None, cwd=ARTREC):
 
 def artcite_noted_case(tag, command, cwd=ARTREC, env_path=None, want="allow"):
     """One triage push whose pushed head the guard cannot read. The rule writes one noted line that says unknown. `want`
-    "allow" needs the decision allow. "not-deny" also takes an ask, which is not a deny. A deny fails either way."""
+    "allow" needs the decision allow. "not-refuse" also takes an ask, which is not a refusal. A refusal fails either way."""
     config = _artcite_config(tag)
     got, reason = decide(_artcite_case(command, config=config, env_path=env_path, cwd=cwd))
     if got == "deny" or (want == "allow" and got != "allow"):
@@ -1330,7 +1330,7 @@ def artcite_push_all_case():
     scope = _artcite_record_ref_scope()
     if scope:
         return False, scope
-    return artcite_noted_case("artcite-push-all", VCS + " push --all origin", want="not-deny")
+    return artcite_noted_case("artcite-push-all", VCS + " push --all origin", want="not-refuse")
 
 
 def artcite_push_mirror_case():
@@ -1339,29 +1339,29 @@ def artcite_push_mirror_case():
     scope = _artcite_record_ref_scope()
     if scope:
         return False, scope
-    return artcite_noted_case("artcite-push-mirror", VCS + " push --mirror origin", want="not-deny")
+    return artcite_noted_case("artcite-push-mirror", VCS + " push --mirror origin", want="not-refuse")
 
 
 def artcite_feat_bare_head_case():
     """Finding 3, the deny: a non-literal source (`$FEAT`) maps to HEAD, so the bare link in HEAD (steps-bare) denies a
     push whose source the guard cannot read. The source is unknown: noted, and never denied."""
-    return artcite_noted_case("artcite-feat-bare", VCS + " push origin $FEAT:roadmap", want="not-deny")
+    return artcite_noted_case("artcite-feat-bare", VCS + " push origin $FEAT:roadmap", want="not-refuse")
 
 
 def artcite_feat_clean_head_case():
     """Finding 3, the silent pass: `$FEAT` maps to HEAD on a clean head (ARTCLEAN), so the push passes with no line. The
     source is unknown: noted, and never denied."""
-    return artcite_noted_case("artcite-feat-clean", VCS + " push origin $FEAT:roadmap", cwd=ARTCLEAN, want="not-deny")
+    return artcite_noted_case("artcite-feat-clean", VCS + " push origin $FEAT:roadmap", cwd=ARTCLEAN, want="not-refuse")
 
 
 def artcite_cmd_clean_head_case():
     """Finding 3, the silent pass: a `$(cmd)` source maps to HEAD on a clean head (ARTCLEAN). Noted, never denied."""
-    return artcite_noted_case("artcite-cmd-clean", VCS + " push origin $(cmd):roadmap", cwd=ARTCLEAN, want="not-deny")
+    return artcite_noted_case("artcite-cmd-clean", VCS + " push origin $(cmd):roadmap", cwd=ARTCLEAN, want="not-refuse")
 
 
 def artcite_glob_clean_head_case():
     """Finding 3, the silent pass: a glob source (`feat*`) maps to HEAD on a clean head (ARTCLEAN). Noted, never denied."""
-    return artcite_noted_case("artcite-glob-clean", VCS + " push origin feat*:roadmap", cwd=ARTCLEAN, want="not-deny")
+    return artcite_noted_case("artcite-glob-clean", VCS + " push origin feat*:roadmap", cwd=ARTCLEAN, want="not-refuse")
 
 
 # A triage push that sends a bare link in a step is refused, whichever form names the pushed head.
