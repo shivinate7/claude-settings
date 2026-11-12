@@ -18,7 +18,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, OWNER_LANE_ASK, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1072,14 +1072,31 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
 ROLE_TAG_PREFIX = BUILD_TAG
+LONE_LANE_REPO = "shivinate7/claude-settings"  # the one repo a lane the owner started may merge in (standing-merge-grant: the grant holds there alone)
 ROLE_REASON = (
-    "merge-role-proof: this session's own record does not prove the merge tier it claims. "
-    "If this session is the batch runner: run get_session (no argument) alone in its own "
-    "turn, then retry. Any other session, the coordinator too: post the review record on the PR for your branch; the batch runner finds it "
+    "merge-role-proof: this session's own record does not prove the merge role it claims. "
+    "If this session is the batch runner, or a lane the owner started (no parent_session_id, no cs-build tag, sources naming this repo): "
+    "run get_session (no argument) alone in its own turn, then retry. " + OWNER_LANE_ASK + ". "
+    "Post the review log on the PR for your branch; the batch runner finds it "
     "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner)."
 )
+
+
+def __getattr__(name):
+    """The merge roles `merge --role` admits are merge.py's MERGE_ROLES itself (rule building-allow-list-is-the-constant), read on
+    first use: the merge tool is large, and most guard runs never name a role. A tool that cannot load leaves the attribute missing."""
+    if name == "ROLE_TIERS":  # glossary-ok: merge/test_merge.py RoleTiersAreTheToolsSet pins this attribute name
+        module = merge_module()
+        if module is not None:
+            return module.MERGE_ROLES
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
+
+def _merge_roles():
+    """The merge roles `merge --role` admits, or () when the merge tool cannot load: no role is then proved, so every role call is refused."""
+    module = merge_module()
+    return module.MERGE_ROLES if module is not None else ()
 
 
 def merge_tool_args(segment: str):
@@ -1133,24 +1150,67 @@ def _own_get_session_tags(transcript: str, session_id: str):
     return _own_session_read(transcript, session_id)[0]
 
 
+def _lone_shape(tags, parent) -> bool:
+    """True when a record's tags and parent are those of a lane the owner started: no parent_session_id and no cs-build:<role> tag.
+    The harness sets the parent when a session creates a child, and a session cannot change its own parent, so a lane a coordinator
+    started has one. A cs-build tag decides first: a lane, triage or coordinator tag with no parent is no lone lane."""
+    return parent is None and not any(str(tag).startswith(ROLE_TAG_PREFIX) for tag in tags)
+
+
+def _source_repos(ccr) -> list:
+    """The github repos (owner/name) that session_context.sources[].git_repository.url of a record name, in first-seen order. Shape
+    drift raises, as _branch_repos does: a sources field that is not a list, and a github.com URL that is no owner/name."""
+    sources = (ccr.get("session_context") or {}).get("sources")
+    if sources is not None and not isinstance(sources, list):
+        raise RuntimeError("sources is not a list")
+    named = []
+    for source in sources or []:
+        repo = source.get("git_repository") if isinstance(source, dict) else None
+        url = repo.get("url") if isinstance(repo, dict) else None
+        match = _SOURCE_REPO.match(url) if isinstance(url, str) else None
+        if not match:
+            continue
+        if not match.group("repo"):
+            raise RuntimeError("a github.com source URL is no owner/name")
+        named.append(match.group("repo"))
+    return named
+
+
+def _lone_scope(ccr) -> bool:
+    """True when the record's sources name LONE_LANE_REPO: the scope of a lane the owner started. A record with no source is out of scope."""
+    return ccr is not None and LONE_LANE_REPO.lower() in (repo.lower() for repo in _source_repos(ccr))
+
+
+def _lone_lane_proved(transcript: str, own_id: str) -> bool:
+    """True when the own newest get_session record is that of a lane the owner started (_lone_shape), no set_session_tags call on the
+    own session follows it, and its sources name LONE_LANE_REPO (_lone_scope). Raises on a shape the readers cannot read: the caller
+    fails closed. The PR's tree is never read: the proof is the transcript's own record."""
+    tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
+    if tags is None or tagged_after or not _lone_shape(tags, parent):
+        return False
+    return _lone_scope(own_session.own_session_ccr(transcript, own_id))
+
+
 def role_proof_hit(stripped: str, transcript: str) -> str:
     """Return the matched call when a segment runs the merge tool with a role the own record does not
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
     allow rule has no classifier behind it and the guard-wide crash path fails open."""
     for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
-        if tier is None:
+        role = role_call_of(segment) if segment.strip() else None
+        if role is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
             from override import remote_session_id
             own_id = remote_session_id()
-            if own_id and transcript:
+            if own_id and transcript and role in _merge_roles():
                 tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                if tags is not None and ROLE_TAG_PREFIX + role in tags:
+                    continue
+                if _lone_lane_proved(transcript, own_id):
                     continue
         except Exception:
             pass
-        return "merge role " + tier
+        return "merge role " + role
     return ""
 
 
@@ -1159,7 +1219,7 @@ REPO_REASON = (
     "merge-confirm-repo: this session's own record does not prove it may merge in the checkout this command acts in. "
     "A merge is allowed only in a repo that a cs-repo tag of the session's own get_session record names. "
     "If that repo is this session's own: run get_session (no argument) alone in its own turn, then retry. "
-    "Otherwise hand the pull request to a batch runner whose cs-repo tags name the repo "
+    + OWNER_LANE_ASK + ". The batch runner is one whose cs-repo tags name the repo "
     "(list_sessions, tag cs-build:batch-runner). "
     "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names)"
 )
@@ -1261,9 +1321,12 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
             from shared_names import repo_tag_names
             own_id = remote_session_id()
             if repo and own_id and transcript:
-                tags, tagged_after = _own_session_read(transcript, own_id)
+                tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
                 if tags is not None and not tagged_after and any(repo_tag_names(tag, repo) for tag in tags):
-                    continue
+                    # A lane the owner started may merge only in LONE_LANE_REPO, which its own sources name: a tag it set itself moves nothing.
+                    if not _lone_shape(tags, parent) or (repo.lower() == LONE_LANE_REPO.lower() and _lone_scope(
+                            own_session.own_session_ccr(transcript, own_id))):
+                        continue
         except Exception:
             pass
         return True
@@ -1493,19 +1556,7 @@ def _branch_repos(ccr, tag_repos):
     order. Shape drift raises: a sources field that is present but not a list, and a github.com URL that does not
     parse as owner/name. A URL on another host is skipped."""
     found = list(tag_repos)
-    sources = (ccr.get("session_context") or {}).get("sources")
-    if sources is not None and not isinstance(sources, list):
-        raise RuntimeError("sources is not a list")
-    named = []
-    for source in sources or []:
-        repo = source.get("git_repository") if isinstance(source, dict) else None
-        url = repo.get("url") if isinstance(repo, dict) else None
-        match = _SOURCE_REPO.match(url) if isinstance(url, str) else None
-        if not match:
-            continue
-        if not match.group("repo"):
-            raise RuntimeError("a github.com source URL is no owner/name")
-        named.append(match.group("repo"))
+    named = _source_repos(ccr)
     meta = ccr.get("external_metadata")
     keys = meta.get("current_branches") if isinstance(meta, dict) else None
     named += [k for k in keys if isinstance(k, str) and _REPO_NAME.fullmatch(k)] if isinstance(keys, dict) else []
