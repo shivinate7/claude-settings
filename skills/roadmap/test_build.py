@@ -5,7 +5,6 @@ Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` 
 import contextlib
 import datetime
 import hashlib
-import inspect
 import io
 import json
 import os
@@ -15,6 +14,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -107,6 +107,25 @@ def iso_ago(minutes):
     """An ISO UTC time this many minutes before now (after it when negative), shaped as readAt."""
     when = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# The clock the silent bound is pinned to. build reads datetime.datetime.now(utc) inside session_board, so a case that
+# judges the bound runs under pinned_clock(), which patches build's datetime name so now() returns PINNED_NOW.
+PINNED_NOW = datetime.datetime(2026, 11, 12, 19, 0, 0, tzinfo=datetime.timezone.utc)
+
+
+class _PinnedDatetime(datetime.datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return PINNED_NOW if tz is None else PINNED_NOW.astimezone(tz)
+
+
+def pinned_clock():
+    """Patch build's datetime name: now() is PINNED_NOW, and every other name is the real datetime module's."""
+    names = {name: getattr(datetime, name) for name in dir(datetime) if not name.startswith("_")}
+    stand_in = types.SimpleNamespace(**names)
+    stand_in.datetime = _PinnedDatetime
+    return mock.patch.object(build, "datetime", stand_in)
 
 
 def session_row(sid, status, *tags, status_bucket=None):
@@ -2968,14 +2987,15 @@ class DoneWithoutCheck(UpkeepFixture):
     NOT_SHOWN = " (not shown green on main)"
     UNREADABLE = " (updatedAt unreadable)"
     HASH_40 = "0123456789abcdef0123456789abcdef01234567"
-    # The fifteen rows before this one, in print order. The control case reads them.
+    # The seventeen rows before this one, in print order, each label as the build prints it.
     OLD_ROWS = ["notes over %d words" % build.NOTE_WORDS, "untouched %d days in a live phase" % build.STALE_DAYS,
                 "no note in a live phase", "new in top %d with no placement line" % build.TOP,
                 "in progress with no live lane or open PR", "ready todo steps",
                 "draft PRs over %d h with no live lane" % build.STALE_DRAFT_HOURS,
                 "dated claims to re-check before a lane starts", "page rulings not on their step",
                 build.IDLE_LANES_LINE, "landed, waiting for a device trial", "landed, waiting for triage to close",
-                "Step trailers naming no step", "live threads naming no open step", "live file entries skipped"]
+                "Step trailers naming no step", "live threads naming no open step", "live file entries skipped",
+                "open step waits on a closed unmerged PR", "flagged sessions"]
     # A build without the constant gets this value, so a case fails on its own assert, not on an AttributeError.
     # test_the_constant_is_an_iso_utc_time names the missing constant.
     SINCE_FALLBACK = "2000-01-01T00:00:00Z"
@@ -3023,11 +3043,11 @@ class DoneWithoutCheck(UpkeepFixture):
         _, out = self.build_from_main()
         self.assertEqual(list(self.summary_counts(out))[-1], self.ROW)
 
-    def test_the_fifteen_rows_before_it_keep_their_order(self):
-        # Control, green on main: the rows before this one print as they did, with or without this row.
+    def test_the_seventeen_rows_before_it_keep_their_order(self):
         self.commit_steps({"bad": self.done_step(note="Shipped.")})
         _, out = self.build_from_main()
-        self.assertEqual(list(self.summary_counts(out))[:len(self.OLD_ROWS)], self.OLD_ROWS)
+        self.assertEqual(list(self.summary_counts(out))[:len(self.OLD_ROWS)], self.OLD_ROWS,
+                         "the rows before this one do not print in OLD_ROWS order, with the flagged sessions row")
 
     def test_the_constant_is_an_iso_utc_time(self):
         self.assertTrue(hasattr(build, "DONE_CHECK_SINCE"), "build has no DONE_CHECK_SINCE")
@@ -4300,7 +4320,7 @@ class IdleLanes(UpkeepFixture):
 
 
 class SessionBoard(UpkeepFixture):
-    """The session board (plan R54, step coordinator-session-board): the upkeep row `session board` and
+    """The flagged sessions (plan R54, step coordinator-session-board): the upkeep row `flagged sessions` and
     build.session_board. A session of this repo that carries a cs-build: tag other than the coordinator's, and is not
     archived, is flagged by its status bucket: `waiting for action` (BLOCKED), `done` (COMPLETED or REVIEW_READY),
     `failed` (FAILED), or `silent` (WORKING, with an updated_at more than SILENT_MINUTES before now). A WORKING session
@@ -4308,9 +4328,14 @@ class SessionBoard(UpkeepFixture):
     steps' head refs, or `no PR`. A read the board cannot make is one `unknown (<why>)` entry. Each negative case lists
     a control beside it, so an empty board cannot pass."""
 
-    ROW = "session board"
+    ROW = "flagged sessions"
     LANE = "cs-build:lane"
     COORDINATOR = "cs-build:coordinator"
+    SILENT_SECONDS = 3600  # SILENT_MINUTES * 60; test_silent_minutes_constant_is_sixty pins the minutes
+
+    def stamp_ago(self, seconds):
+        """An ISO UTC time `seconds` before PINNED_NOW, for the cases that run under pinned_clock()."""
+        return (PINNED_NOW - datetime.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def board_row(self, sid, bucket, *tags, updated_at=None, status="SESSION_STATUS_IDLE"):
         """A sessions row of this repo (its cs-repo tag) with `tags`, its get_session bucket, and updated_at when given."""
@@ -4340,7 +4365,7 @@ class SessionBoard(UpkeepFixture):
         return self.board(work, steps, slug)
 
     def board_out(self):
-        """(count, entries) of the session board row, from a build from main that reads the fixture's live file."""
+        """(count, entries) of the flagged sessions row, from a build from main that reads the fixture's live file."""
         _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
         count, detail = self.row(out, self.ROW)
         return count, self.entries(detail)
@@ -4403,6 +4428,43 @@ class SessionBoard(UpkeepFixture):
         self.assertSameEntries(self.board_entries(), ["session_b (silent; c2; no PR)"],
                                "the silent threshold is not between 45 and 75 minutes")
 
+    def test_working_session_exactly_at_the_silent_bound_is_not_silent(self):
+        # The bound is strict: idle for exactly SILENT_SECONDS is not silent. The 3601 s session is the control, so the
+        # pinned clock and the flag are seen before the bound is judged.
+        with pinned_clock():
+            self.publish(sessions=[self.board_row("session_edge", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                                  updated_at=self.stamp_ago(self.SILENT_SECONDS)),
+                                   self.board_row("session_past", BUCKET_WORKING, self.LANE, "cs-step:c2",
+                                                  updated_at=self.stamp_ago(self.SILENT_SECONDS + 1))],
+                         read_at=self.stamp_ago(0))
+            entries = self.board_entries()
+        self.assertTrue(self.listed(entries, "session_past"),
+                        "control: the working session idle 3601 s is not listed as silent: %r" % (entries,))
+        self.assertFalse(self.listed(entries, "session_edge"),
+                         "a working session idle for exactly SILENT_MINUTES reads as silent: %r" % (entries,))
+
+    def test_working_session_one_second_inside_the_silent_bound_is_not_silent(self):
+        with pinned_clock():
+            self.publish(sessions=[self.board_row("session_inside", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                                  updated_at=self.stamp_ago(self.SILENT_SECONDS - 1)),
+                                   self.board_row("session_past", BUCKET_WORKING, self.LANE, "cs-step:c2",
+                                                  updated_at=self.stamp_ago(self.SILENT_SECONDS + 1))],
+                         read_at=self.stamp_ago(0))
+            entries = self.board_entries()
+        self.assertTrue(self.listed(entries, "session_past"),
+                        "control: the working session idle 3601 s is not listed as silent: %r" % (entries,))
+        self.assertFalse(self.listed(entries, "session_inside"),
+                         "a working session idle 3599 s reads as silent: %r" % (entries,))
+
+    def test_working_session_one_second_past_the_silent_bound_reads_silent(self):
+        with pinned_clock():
+            self.publish(sessions=[self.board_row("session_past", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                                  updated_at=self.stamp_ago(self.SILENT_SECONDS + 1))],
+                         read_at=self.stamp_ago(0))
+            entries = self.board_entries()
+        self.assertSameEntries(entries, ["session_past (silent; c1; no PR)"],
+                               "a working session idle 3601 s does not read as silent")
+
     def test_silent_minutes_constant_is_sixty(self):
         self.assertEqual(getattr(build, "SILENT_MINUTES", None), 60, "build.SILENT_MINUTES is not 60")
 
@@ -4414,6 +4476,18 @@ class SessionBoard(UpkeepFixture):
         self.assertSameEntries(self.board_entries(), ["session_a (waiting for action; c1; PR #51)",
                                                       "session_b (waiting for action; c2; PR #52)"],
                                "a pull on lane/<step> or on <step> is not read as that session's PR")
+
+    def test_session_with_two_open_pulls_on_its_step_shows_the_lowest_number(self):
+        # #40 is on `c1` and #41 on `lane/c1`. Both orders are published, so a line that takes the first or the last pull
+        # fails on one of them.
+        by_number = {40: {"number": 40, "title": "c1 cleanup", "branch": "c1"},
+                     41: {"number": 41, "title": "c1 lane", "branch": "lane/c1"}}
+        for order in ((41, 40), (40, 41)):
+            with self.subTest(order=order):
+                self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")],
+                             pulls=[by_number[n] for n in order])
+                self.assertSameEntries(self.board_entries(), ["session_a (waiting for action; c1; PR #40)"],
+                                       "a session with two open pulls on its step does not show the lowest-numbered one")
 
     def test_session_with_two_steps_names_both_in_id_order(self):
         # Space-joined and sorted, as idle_lanes joins its steps.
@@ -4447,6 +4521,25 @@ class SessionBoard(UpkeepFixture):
         entries = self.board_entries()
         self.assertIn("session_tier (waiting for action; -; no PR)", entries, "control: the tier session is not listed")
         self.assertFalse(self.listed(entries, "session_topic"), "a session with no cs-build: tag is listed")
+
+    def test_padded_cs_build_coordinator_tag_is_never_listed(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_tail", BUCKET_BLOCKED, self.COORDINATOR + " "),
+                               self.board_row("session_head", BUCKET_BLOCKED, " " + self.COORDINATOR)])
+        entries = self.board_entries()
+        self.assertTrue(self.listed(entries, "session_a"), "control: the lane session is not listed: %r" % (entries,))
+        for sid in ("session_tail", "session_head"):
+            self.assertFalse(self.listed(entries, sid),
+                             "a session with a padded cs-build:coordinator tag is listed: %r" % (entries,))
+
+    def test_padded_cs_build_lane_tag_is_listed(self):
+        self.publish(sessions=[self.board_row("session_plain", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_pad", BUCKET_BLOCKED, " " + self.LANE + " ", "cs-step:c2")])
+        entries = self.board_entries()
+        self.assertTrue(self.listed(entries, "session_plain"),
+                        "control: the unpadded lane session is not listed: %r" % (entries,))
+        self.assertTrue(self.listed(entries, "session_pad"),
+                        "a session with a padded cs-build:lane tag is not listed: %r" % (entries,))
 
     def test_session_of_another_repo_is_never_listed(self):
         self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
@@ -4579,26 +4672,26 @@ class SessionBoard(UpkeepFixture):
                                               updated_at=iso_ago(5)),
                                self.board_row("session_d", BUCKET_COMPLETED, self.COORDINATOR)])
         count, entries = self.board_out()
-        self.assertEqual(count, 2, "the session board row counts %d, not its 2 flagged sessions" % count)
+        self.assertEqual(count, 2, "the flagged sessions row counts %d, not its 2 flagged sessions" % count)
         self.assertSameEntries(entries, ["session_a (waiting for action; c1; no PR)", "session_b (silent; c2; no PR)"],
-                               "the session board row does not list the flagged sessions")
+                               "the flagged sessions row does not list the flagged sessions")
 
     def test_upkeep_row_reads_one_unknown_entry_when_there_is_no_live_file(self):
         self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
         self.assertEqual(self.board_out(), (1, ["session_a (waiting for action; c1; no PR)"]),
-                         "control: the session board row does not list the flagged session")
+                         "control: the flagged sessions row does not list the flagged session")
         _, out = self.build_from_main(expect=(0, 1))
         count, detail = self.row(out, self.ROW)
-        self.assertEqual(count, 1, "the session board row with no live file counts %d, not one unknown entry" % count)
-        self.assertTrue(detail.startswith("unknown ("), "the session board row is not an unknown: %r" % (detail,))
+        self.assertEqual(count, 1, "the flagged sessions row with no live file counts %d, not one unknown entry" % count)
+        self.assertTrue(detail.startswith("unknown ("), "the flagged sessions row is not an unknown: %r" % (detail,))
 
     def test_upkeep_row_reads_zero_when_no_session_is_flagged(self):
         self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
         self.assertEqual(self.board_out(), (1, ["session_a (waiting for action; c1; no PR)"]),
-                         "control: the session board row does not list the flagged session")
+                         "control: the flagged sessions row does not list the flagged session")
         self.publish(sessions=[self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1",
                                               updated_at=iso_ago(5))])
-        self.assertEqual(self.board_out(), (0, []), "a recent working session is counted in the session board row")
+        self.assertEqual(self.board_out(), (0, []), "a recent working session is counted in the flagged sessions row")
 
     def test_live_work_copies_each_session_rows_updated_at_as_it_copies_the_bucket(self):
         stamp = iso_ago(90)
@@ -4610,11 +4703,6 @@ class SessionBoard(UpkeepFixture):
                          "control: live_work does not copy the bucket of a session row")
         self.assertEqual(rows["session_a"].get("updated_at"), stamp, "live_work dropped the updated_at of a session row")
         self.assertIsNone(rows["session_b"].get("updated_at"), "live_work gave a row with no updated_at one")
-
-    def test_live_work_keeps_its_parameters_so_the_board_adds_no_session_walk(self):
-        # Green on the old code too: a control for the cost proof, not a red case.
-        self.assertEqual(list(inspect.signature(build.live_work).parameters), ["path", "steps", "slug"],
-                         "live_work's parameters changed, so the board may walk the sessions again")
 
     def test_session_board_makes_no_subprocess_call_and_opens_no_file(self):
         # Cost proof: the board reads only the work it is given. Each spy raises OSError, so a call is seen wherever a
