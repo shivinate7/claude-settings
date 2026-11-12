@@ -3052,6 +3052,11 @@ class DefaultBase(unittest.TestCase):
         """The FAIL lines and their bullet lines: what a run found, without any base line it prints."""
         return [l for l in text.splitlines() if ": FAIL: " in l or l.startswith("      - ")]
 
+    @staticmethod
+    def named_base(text):
+        """The printed lines that name origin/main as the base the run used. The one home of that reading."""
+        return [l for l in text.splitlines() if "origin/main" in l and "base" in l.lower()]
+
     def stacked_revert(self):
         """main adds Q. feat1, cut from main, reverts Q and is pushed. feat2 stacks on feat1 and tracks origin/feat1."""
         r = Repo()
@@ -3107,6 +3112,22 @@ class DefaultBase(unittest.TestCase):
         r.commit("solo work", date=self.T1, other_txt="other v2\n")
         return r
 
+    def own_copy(self):
+        """A branch cut from origin/main and pushed with -u, so it tracks its own pushed copy. Its merge of main keeps its
+        own side and drops main's K1. The merge is pushed, so the branch's own copy holds the drop. main holds K1."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "selfb", "--no-track", "origin/main")
+        r.commit("selfb work", date=self.T1, other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds K1", date=self.T2, app_txt=BODY + "function Card() {}\nK1\n")
+        r.push()
+        r.sh("checkout", "-q", "selfb")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "origin/main", date=self.T3)
+        r.sh("push", "-q", "-u", "origin", "selfb")
+        return r
+
     def test_no_flag_judges_a_stacked_branch_against_its_base_not_main(self):
         r = self.stacked_revert()
         self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
@@ -3153,8 +3174,18 @@ class DefaultBase(unittest.TestCase):
                          "premise: solo tracks no upstream")
         rc, text = self.run_main(["--repo", r.dir])
         self.assertEqual(rc, 0, "no base found: a clean branch exits %d. Output: %r" % (rc, text))
-        named = [l for l in text.splitlines() if "origin/main" in l and "base" in l.lower()]
-        self.assertTrue(named, "no base found: the run did not print the base it used (origin/main). Output: %r" % text)
+        self.assertTrue(self.named_base(text), "no base found: the run did not print the base it used (origin/main). Output: %r" % text)
+
+    def test_a_branch_that_tracks_its_own_pushed_copy_is_judged_against_main(self):
+        r = self.own_copy()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/selfb",
+                         "premise: selfb does not track its own pushed copy origin/selfb")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertIn("- K1", text, "premise: against origin/main, the merge drops K1. Output: %r" % text)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertIn("- K1", text, "no --upstream: the branch's own pushed copy was taken as its base, so K1's drop was not judged. "
+                                    "Output: %r" % text)
+        self.assertTrue(self.named_base(text), "no --upstream: no printed base line names origin/main. Output: %r" % text)
 
 
 if __name__ == "__main__":
