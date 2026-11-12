@@ -1678,6 +1678,36 @@ test("pending cite: --check refuses a pending cite that an excludeGlobs entry co
     assert.equal(fixed.status, 0, `removing the named entry did not let --check pass:\n${outputOf(fixed)}`);
   }));
 
+// A file both excluded and outside scanGlobs needs two steps. The refusal must not say the claim
+// passes after the first one alone.
+test("pending cite: a file both excluded and outside scanGlobs gets both steps, and says the claim passes only after the scanGlobs step", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, { scanGlobs: ["**/*.md"], excludeGlobs: ["plugins/_*/**"] }, { [BLOCK]: BLOCK_TEXT });
+    assert.equal(read(root, BLOCK).split("\n")[2], "See [[p]] here.", "scope: the cite must sit on line 3 of a tracked file");
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with a pending cite in a file both excluded and unscanned:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--claim named no file and line:\n${out}`);
+    assert.equal(out.includes('"plugins/_*/**"'), true, `--claim did not name the exclude entry:\n${out}`);
+    const addAt = out.indexOf('add "');
+    assert.notEqual(addAt, -1, `--claim named no scanGlobs step for a file outside cite.scanGlobs:\n${out}`);
+    const passAt = out.search(/claim[^.\n]*\bpasses\b/);
+    assert.equal(passAt === -1 || passAt > addAt, true, `--claim says the claim passes before the scanGlobs step:\n${out}`);
+  }));
+
+test("pending cite: with both steps applied, --claim passes and rewrites a file both excluded and outside scanGlobs", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, { scanGlobs: ["**/*.md"], excludeGlobs: ["plugins/_*/**"] }, { [BLOCK]: BLOCK_TEXT });
+    assert.equal(read(root, BLOCK).split("\n")[2], "See [[p]] here.", "scope: the cite must sit on line 3 of a tracked file");
+
+    writeStampConfig(root, { scanGlobs: ["**/*.md", BLOCK], excludeGlobs: [] });
+    commit(root, "scan the block and drop the exclude entry, as the refusal says");
+    const fixed = runStamp(root, ".github/stamp.json", "claim");
+    assert.equal(fixed.status, 0, `--claim refused after both steps:\n${outputOf(fixed)}`);
+    assert.equal(read(root, BLOCK).split("\n")[2], "See D-002, p here.", "the scanned block was not rewritten");
+  }));
+
 // The cite scanner reads text, so the cases that break a naive scanner go in: a comment opener
 // inside a string, a multi-line template literal, and a lone quote in prose. Each cite sits outside
 // scanGlobs and must still refuse at its own line. The refusal reads a cite as the rewrite does, so
