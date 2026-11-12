@@ -74,7 +74,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | every other hook and guard | no model; plain code | n/a |
 | local_time (`hooks/local_time.py`, UserPromptSubmit only; a model call only for a plain owner ask with the whole word `override` or `opus` that passes its gates, plus one scope read after a yes, for an opus ask that names no role and has an earlier prompt; a failed plain ask grants nothing; a first-word `override` with a reason still grants a one-act override) | haiku, through `decision_watch.invoke_model` | low |
 
-**The round rows.** The one home of the model and effort of each review round and of the builder's third try. The guard (`role_round_table` in `hooks/guard.py`, beside `role_model_table`) and the merge tool (`--round`, `--fix-check`) read these rows, so a changed row changes their verdicts with no code edit. A `Round` cell is a round number, `1 guard` or `1 other` for round 1, or `fix check`. A round 1 brief that starts a line with `Guard or check: yes` (`REVIEW_GUARD_MARKER` in `hooks/shared_names.py`, the guard marker) takes the `1 guard` row, any other round 1 brief the `1 other` row. A reviewer brief for round 2 or 3 opens its first line with `Round N of 3`; a fix check's first non-blank line starts with `Fix check`. A round with no row, or a row naming a model the guard cannot rank, falls back to the guard's built-in default (the same models as today). `lint/check_agent_models.py` fails a row whose model the guard cannot rank.
+**The round rows.** The one home of the model and effort of each review round and of the builder's third try. The guard (`role_round_table` in `hooks/guard.py`, beside `role_model_table`) and the merge tool (`--round`, `--fix-check`) read these rows, so a changed row changes their verdicts with no code edit. A `Round` cell is a round number, `1 guard` or `1 other` for round 1, or `fix verifier`. A round 1 brief that starts a line with `Guard or check: yes` (`REVIEW_GUARD_MARKER` in `hooks/shared_names.py`, the guard marker) takes the `1 guard` row, any other round 1 brief the `1 other` row. A reviewer brief for round 2 or 3 opens its first line with `Round N of 3`; a fix check's first non-blank line starts with `Fix check`. A round with no row, or a row naming a model the guard cannot rank, falls back to the guard's built-in default (the same models as today). `lint/check_agent_models.py` fails a row whose model the guard cannot rank.
 
 | Role | Round | Model | Effort |
 |---|---|---|---|
@@ -82,7 +82,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | reviewer | 1 other | haiku | xhigh |
 | reviewer | 2 | sonnet | high |
 | reviewer | 3 | sonnet | xhigh |
-| reviewer | fix check | sonnet | xhigh |
+| reviewer | fix verifier | sonnet | xhigh |
 | builder | 3 | opus | high |
 
 Reasons and rulings. Round 1 on a guard or check diff runs Sonnet (owner, item 359 pick a, 2026-11-07 14:41 CST). A fix check runs Sonnet on every PR (owner item 444 a, 2026-11-08 15:04 CST); the merge tool refuses a record that names another model. Round 2 on opus: the step-up refuses it, and no override lifts that. Round 3 on opus: the Opus ceiling refuses it, and the owner's typed override lifts it (2026-11-01 17:25 CST, item 127, pick a). Round 2 effort is set per spawn; the other reviewer rows take the frontmatter's xhigh. The builder's third try runs Opus by the owner's standing grant.

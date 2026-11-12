@@ -192,6 +192,12 @@ def role_list_problems() -> list:
     return list(_guard.role_list_drift(ROOT))
 
 
+def round_row_problems() -> list:
+    """One line per round row of the model record whose model the guard cannot rank (the guard's role_round_drift), named by the record's
+    path. [] when the record cannot be read: role_list_problems reports that as unknown."""
+    return ["%s: %s." % (os.path.join(ROOT, LANE_RECORD), line) for line in _guard.role_round_drift(ROOT)]
+
+
 def main(argv) -> int:
     files = argv or sorted(
         glob.glob(os.path.join(ROOT, "agents", "*.md"))
@@ -223,7 +229,7 @@ def main(argv) -> int:
                 print("%s:%d: %s" % (path, line, problem))
                 bad = 1
     if not argv:  # the role lists belong to the whole repository, so a run on named files leaves them alone
-        for line in role_list_problems():
+        for line in role_list_problems() + round_row_problems():
             print(line)
             bad = 1
     return bad

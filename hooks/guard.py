@@ -3603,7 +3603,8 @@ ROLE_DEFAULT = "general-purpose"
 # record does not hold. A reviewer whose brief's first non-blank line starts with FIX_CHECK_MARKER (a fix check) runs its fix check row.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
-from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER, REVIEW_GUARD_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import REVIEW_GUARD_MARKER  # noqa: E402  the one home of the guard marker, beside the audit marker
 from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")  # the rounds of ROLE_ROUND_FALLBACK's reviewer rows, one home for the default
@@ -3673,13 +3674,13 @@ def role_model_table(pointer_root):
 
 
 # THE ROUND ROWS (decision agent-model-cap, "The round rows"). A table under the header `Role | Round | Model | Effort` names the
-# model of each review round: the key is (role, round, kind), the round a number or "fix check", the kind "guard" for a
+# model of each review round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
 # round 1 brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
 # reads it through the guard's helpers. A row the record lacks, or one whose model has no rank, falls back to
 # ROLE_ROUND_FALLBACK, the models the guard enforced before the rows existed. Cost: one more read of the record per spawn.
 ROLE_ROUND_HEADER = ["role", "round", "model", "effort"]
-ROLE_ROUND_CELL = re.compile(r"(\d+|fix check)(?:\s+(guard|other))?$")
-ROLE_ROUND_FIX = "fix check"
+ROLE_ROUND_CELL = re.compile(r"(\d+|fix verifier)(?:\s+(guard|other))?$")
+ROLE_ROUND_FIX = "fix verifier"
 ROLE_ROUND_EXACT = ("2",)  # round 2 above its row is refused at the step-up, where no override lifts it; a later round above its row falls to the Opus ceiling
 ROLE_ROUND_FALLBACK = dict([(("reviewer", n, "other"), "sonnet") for n in ROLE_REVIEWER_FREE_ROUNDS]
                            + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet"),
@@ -3703,7 +3704,7 @@ def _role_record_text(pointer_root):
 def role_round_rows(pointer_root):
     """[(role, round, kind, model word, row text)] for each row of the record's round table, the model word as written (lowercase,
     ranked or not), or None when the record cannot be read. A row whose Round cell is none of a number, `N guard`, `N other` or
-    `fix check` names no round and is left out. Only the table under the round header is read: other four-cell tables are not."""
+    `fix verifier` names no round and is left out. Only the table under the round header is read: other four-cell tables are not."""
     text = _role_record_text(pointer_root)
     if text is None:
         return None
@@ -3978,7 +3979,7 @@ def role_model_one(tool_input):
                 free = reviewer_free_rounds(rounds, row)
                 extra = ROLE_REVIEWER_ROUND_REMEDY % (" or ".join(free), ", ".join("`Round %s of 3`" % n for n in free),
                                                     REVIEW_GUARD_MARKER)
-                extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(free))
+                extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(free))  # glossary-ok: the line keeps its names; only the rounds came from the rows
             if tool_input.get(BRIEF_UNREAD):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
             if role == "reviewer":
