@@ -25,7 +25,7 @@ Only the fixture cases in `hooks/test_call_judge.py` stand for these three. No c
 
 The harm: a lane builds to the wrong pick, the work is redone, and the owner is asked the same thing twice.
 
-Cost, per pick message: one `call_judge.py` process and one Sonnet call (60 s cap), plus one git process (`question_form.past_rulings`). The matcher starts `call_judge.py` on every `send_message` (37 ms measured); a send with no pick or hold word, or from a session that is no coordinator, starts no process beyond the hook's own start and makes no model call. A pick with no cite makes no model call. Nothing is written but the `guard.log` line of a refusal. `hooks/test_call_judge.py` (section "a coordinator's pick") counts the calls.
+Cost, per pick message: one `call_judge.py` process and one Sonnet call (60 s cap), plus one git process (`question_form.past_rulings`). The matcher starts `call_judge.py` on every `send_message` (37 ms measured). A send with no pick or hold word, or from a session that is no coordinator, starts no process beyond the hook's own start. It makes no model call. A pick with no cite makes no model call. Nothing is written but the `guard.log` line of a refusal. `hooks/test_call_judge.py` (section "a coordinator's pick") counts the calls.
 
 Known limit:
 
