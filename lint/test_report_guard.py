@@ -4832,6 +4832,11 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assert_blocked("```\nkeep the apps\n```\nAnswered: no permission rule can lift it.",
                             "Answered: no permission rule can lift it.")
 
+    def test_an_pin_a_stray_fence_leaves_the_answered_line_judged(self):
+        # Pin: a ``` with no closing partner opens no fence, so the line after it is judged. Catches: an open fence
+        # that hides the line, so "answered" with no source passes after a stray fence.
+        self.assert_blocked("```\nThe owner answered it.", "The owner answered it.")
+
     def test_an_red_landed_turn_blocks_above_a_good_report(self):
         # Catches: the check runs only on unlanded turns, or misses a line above the report.
         reply = "Answered: no permission rule can lift it.\n\n> **Done** BUILT abc123\n> **Next** ship it"
