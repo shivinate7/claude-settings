@@ -17,4 +17,5 @@ Kind: process
 Home: lint/check_debt_retire.py
 Home: merge/merge.py
 Home: lint/check_silent_undo.py
+Home: .github/pull_request_template.md
 Check: lint/check_debt_retire.py
