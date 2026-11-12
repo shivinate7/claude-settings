@@ -2,11 +2,15 @@
 FAMILY = "pick-reaches-page"
 #
 # Rule pick-reaches-page. A coordinator (its own record tags cs-build:coordinator) sends a send_message with a line
-# that opens `Coordinator pick` (after markdown lead chars and spaces, any case). A pick sent to a lane is refused
-# unless the page writer got a send in this turn (after the last human message) that names the same pick key. A pick
-# sent to the page writer passes. The marker counts only at a line's start, outside a fenced block. Only a coordinator's
-# send_message is judged; no own record, no own session id or no transcript fails open. A message with no marker reads
-# no transcript. The page writer is the `writer` in the newest ArtifactData get of meta/page (lint/_transcript.py).
+# that opens `Coordinator pick` or `Coordinator picks` (after markdown lead chars, a list lead such as `- `, `* `, `+ `,
+# `1. ` or `1) `, and spaces; any case). The marker is followed, after optional spaces, by `:`, `.`, `,`, `;`, `-` and a
+# space, or by the line's end: `Coordinator pick summary:` and `Coordinator pick-up:` are no marker. A pick sent to a lane
+# is refused unless the page writer got a send in this turn (after the last human message; the whole transcript when it
+# holds no human record) that names the same pick key. When this session is the page writer, a pick to a lane passes if
+# this session wrote an item this turn that names the key. A pick sent to the page writer passes. The marker counts only
+# at a line's start, outside a closed fenced block: an unclosed fence hides nothing. Only a coordinator's send_message is
+# judged; no own record, no own session id or no transcript fails open. A message with no marker reads no transcript. The
+# page writer is the `writer` in the newest ArtifactData get of meta/page (lint/_transcript.py).
 PK_RULE = "pick-reaches-page"
 PK_SEND = "mcp__claude-code-remote__send_message"
 PK_OWN = "session_PKOWN01"  # the coordinator; override.remote_session_id reads cse_PKOWN01 as this id
@@ -38,9 +42,39 @@ def pk_send(tool_id, target, text):
             role_result(tool_id, '{"status":"delivered"}')]
 
 
+def pk_send_failed(tool_id, target, text):
+    """One paired send_message to `target` whose result is an error: the send did not reach the session."""
+    return [role_use(tool_id, PK_SEND, {"session_id": target, "message": text}),
+            role_result_block(tool_id, is_error=True, content=[{"type": "text", "text": "not delivered"}])]
+
+
+def pk_item_set(tool_id, key, collection="items", verb="set"):
+    """One paired ArtifactData set or update that writes `key` into `collection`, its data naming the pick `key`."""
+    return [role_use(tool_id, "ArtifactData", {"action": verb, "collection": collection, "doc_id": key,
+                                               "data": {"title": "Coordinator pick: " + key, "status": "stands"}}),
+            role_result(tool_id, '{"version":2}')]
+
+
+def pk_item_batch(tool_id, key):
+    """One paired ArtifactData batch whose one write sets the item `key`, its data naming the pick `key`."""
+    return [role_use(tool_id, "ArtifactData", {"action": "batch", "writes": [
+                {"op": "set", "collection": "items", "doc_id": key,
+                 "data": {"title": "Coordinator pick: " + key, "status": "stands"}}]}),
+            role_result(tool_id, '{"applied":1}')]
+
+
+def pk_item_get(tool_id, key):
+    """One paired ArtifactData get of the item `key`: a read, no write."""
+    return [role_use(tool_id, "ArtifactData", {"action": "get", "collection": "items", "doc_id": key}),
+            role_result(tool_id, json.dumps({"id": key, "version": 2}))]
+
+
 # The coordinator's own record, the writer's read and the lane's record: the head every coordinator fixture shares.
 PK_HEAD = (role_call("o1", COORD_TAGS, session=PK_OWN) + pk_page_read("p1", PK_WRITER)
            + role_target_call("l1", LANE_TAGS, target=PK_LANE))
+# The same head when this session is the page writer: the coordinator's own id is the writer the meta/page read names.
+PK_OWN_HEAD = ([role_said(PK_TURN_ONE)] + role_call("o1", COORD_TAGS, session=PK_OWN)
+               + pk_page_read("p1", PK_OWN) + role_target_call("l1", LANE_TAGS, target=PK_LANE))
 PK_LINES = {
     "turn-empty": [role_said(PK_TURN_ONE)] + PK_HEAD,
     "turn-writer-sent": [role_said(PK_TURN_ONE)] + PK_HEAD + pk_send("s1", PK_WRITER, PK_PICK),
@@ -66,6 +100,23 @@ PK_LINES = {
     # The pick key is the whole rest of the line: a writer send naming a longer key names a different pick.
     "turn-writer-longer": [role_said(PK_TURN_ONE)] + PK_HEAD
                           + pk_send("s1", PK_WRITER, "Coordinator pick: icons-a and colors-b"),
+    # This session is the page writer: its own item writes this turn are the writer's send.
+    "own-wrote-set": PK_OWN_HEAD + pk_item_set("w1", "icons-a"),
+    "own-wrote-batch": PK_OWN_HEAD + pk_item_batch("w1", "icons-a"),
+    "own-wrote-update": PK_OWN_HEAD + pk_item_set("w1", "icons-a", verb="update"),
+    "own-read-only": PK_OWN_HEAD + pk_item_get("w1", "icons-a"),
+    "own-wrote-other-key": PK_OWN_HEAD + pk_item_set("w1", "colors-b"),
+    "own-wrote-earlier": PK_OWN_HEAD + pk_item_set("w1", "icons-a") + [role_said(PK_TURN_TWO)],
+    "own-wrote-none": PK_OWN_HEAD,
+    "own-wrote-meta": PK_OWN_HEAD + pk_item_set("w1", "page", collection="meta"),
+    # No human record: the whole transcript is the turn, so a writer send anywhere in it counts.
+    "no-human-writer-sent": PK_HEAD + pk_send("s1", PK_WRITER, PK_PICK),
+    "no-human-writer-sent-first": pk_send("s0", PK_WRITER, PK_PICK) + PK_HEAD,
+    "no-human-none": PK_HEAD,
+    # The writer's send whose result is an error still counts: only the call is read (pinned current behaviour).
+    "undelivered-writer-send": [role_said(PK_TURN_ONE)] + PK_HEAD + pk_send_failed("s1", PK_WRITER, PK_PICK),
+    # A transcript that is not JSON records: no own record can be read, so the send fails open.
+    "unreadable": ["this is not a transcript", "42", "[1, 2]"],
 }
 
 
@@ -121,15 +172,45 @@ pk_refuse("a pick marker after a comment opener in prose, /* in the line before 
 # Refused: a fence ends at its closing line, so a marker after it is a real line.
 pk_refuse("a pick marker after a fence that closes is refused: the fence ends at its closing line",
           "```\nsample\n```\nCoordinator pick: icons-a")
+# Refused: a list lead before the marker makes a pick line, as a bullet or a numbered item does.
+pk_refuse("a pick marker after a dash bullet is a list lead, and to a lane is refused", "- Coordinator pick: icons-a")
+pk_refuse("a pick marker after a star bullet is a list lead, and to a lane is refused", "* Coordinator pick: icons-a")
+pk_refuse("a pick marker after a plus bullet is a list lead, and to a lane is refused", "+ Coordinator pick: icons-a")
+pk_refuse("a pick marker after a numbered dot list lead, 1. , is refused to a lane",
+          "1. Coordinator pick: icons-a")
+pk_refuse("a pick marker after a numbered paren list lead, 1) , is refused to a lane",
+          "1) Coordinator pick: icons-a")
+# Refused: the plural marker, and the record forms (a full stop, a comma, a colon after spaces, a semicolon, a spaced
+# dash, a line end) all open a pick line.
+pk_refuse("a plural marker, Coordinator picks: icons-a, to a lane is refused", "Coordinator picks: icons-a")
+pk_refuse("a record marker with a full stop, - Coordinator pick., to a lane is refused", "- Coordinator pick.")
+pk_refuse("a record marker with a comma, Coordinator pick, icons-a, to a lane is refused", "Coordinator pick, icons-a")
+pk_refuse("a marker with spaces before its colon, Coordinator pick   : icons-a, to a lane is refused",
+          "Coordinator pick   : icons-a")
+pk_refuse("a marker with a semicolon, Coordinator pick; icons-a, to a lane is refused", "Coordinator pick; icons-a")
+pk_refuse("a marker with a spaced dash, Coordinator pick - icons-a, to a lane is refused", "Coordinator pick - icons-a")
+pk_refuse("a marker alone on its line, Coordinator pick, to a lane is refused", "Coordinator pick")
+# Passes: the marker must be followed by a terminator; a word that goes on after `pick` is no marker.
+pk_allow("a pick word followed by summary, Coordinator pick summary:, is no marker and passes",
+         "Coordinator pick summary: icons-a")
+pk_allow("a pick word followed by -up, Coordinator pick-up:, is no marker and passes",
+         "Coordinator pick-up: icons-a")
 
-# Passes: a marker that is not at a line's start, or sits in a fenced block, or is not a pick at all.
+# Passes: a marker that is not at a line's start, sits in a fenced block, or is not a pick at all.
 pk_allow("a pick marker mid-line, not at a line start, passes", "We logged a Coordinator pick: icons-a earlier.")
-pk_allow("a pick marker after a dash bullet is not at a lead-char line start, and passes",
-         "- Coordinator pick: icons-a")
 pk_allow("a pick marker inside a fenced block passes", "Example:\n```\nCoordinator pick: icons-a\n```")
 pk_allow("a shell comment, # Coordinator pick, inside a fenced block passes",
          "```bash\n# Coordinator pick: icons-a\n```")
 pk_allow("a status line about icons-a, with no marker, passes", "Status: icons-a is in review.")
+# Refused: an unclosed fence hides nothing, so a pick after it is judged.
+pk_refuse("a pick after an unclosed backtick fence is judged: an unclosed fence hides nothing",
+          "```\nCoordinator pick: icons-a")
+pk_refuse("a pick after an unclosed tilde fence is judged: an unclosed fence hides nothing",
+          "~~~\nCoordinator pick: icons-a")
+pk_refuse("a pick after a one-line fenced note, ```a``` note, is judged: the note opens no fence",
+          "```a``` note\nCoordinator pick: icons-a")
+pk_refuse("a closed block hides its pick, and a pick after a later unclosed fence is judged",
+          "```\nCoordinator pick: icons-a\n```\n```\nCoordinator pick: colors-b")
 # Passes: a pick sent to the page writer is the route the rule asks for.
 pk_allow("a pick sent to the page writer passes, with no earlier send this turn", PK_PICK, target=PK_WRITER)
 
@@ -153,6 +234,32 @@ pk_refuse("a send to an older page writer does not count when a newer meta/page 
 pk_allow("a send to the newest page writer counts, though an older meta/page read named another writer",
          PK_PICK, transcript="two-page-reads-new")
 
+# This session is the page writer: a pick to a lane passes only after its own item write this turn names the key.
+pk_allow("a pick to a lane passes when this session is the page writer and its set of an item this turn names the key",
+         PK_PICK, transcript="own-wrote-set")
+pk_allow("a pick to a lane passes when this session is the page writer and its batch of an item this turn names the key",
+         PK_PICK, transcript="own-wrote-batch")
+pk_allow("a pick to a lane passes when this session is the page writer and its update of an item this turn names the key",
+         PK_PICK, transcript="own-wrote-update")
+pk_refuse("a page writer's get of an item naming the key is a read, not a write: the pick to a lane is refused",
+          PK_PICK, transcript="own-read-only")
+pk_refuse("a page writer's item write naming a different key does not count: the pick to a lane is refused",
+          PK_PICK, transcript="own-wrote-other-key")
+pk_refuse("a page writer's item write from an earlier turn does not count: the pick to a lane is refused",
+          PK_PICK, transcript="own-wrote-earlier")
+pk_refuse("a page writer that wrote no item this turn: the pick to a lane is refused",
+          PK_PICK, transcript="own-wrote-none")
+pk_refuse("a page writer's write naming the key outside the items collection is no keyed item: the pick to a lane is refused",
+          PK_PICK, transcript="own-wrote-meta")
+
+# No human record: the whole transcript is the turn, so the send counts wherever it sits in the transcript.
+pk_allow("with no human record, a writer send naming the pick passes: the whole transcript is the turn",
+         PK_PICK, transcript="no-human-writer-sent")
+pk_allow("with no human record, a writer send naming the pick before the coordinator's record also passes",
+         PK_PICK, transcript="no-human-writer-sent-first")
+pk_refuse("with no human record and no writer send, the pick to a lane is refused",
+          PK_PICK, transcript="no-human-none")
+
 # Passes: only a coordinator's send is judged. A lane, no own record, no transcript and no own id all fail open.
 pk_allow("a lane's own pick passes: only a coordinator's send is judged", PK_PICK, transcript="lane-own")
 pk_allow("a coordinator send with no own record in the transcript passes: fail open", PK_PICK,
@@ -164,18 +271,35 @@ add("pick-reaches-page: a coordinator send with no transcript path passes: fail 
 sh("pick-reaches-page: a pick written into a Bash echo is not a send and passes", "echo 'Coordinator pick: icons-a'",
    "allow", silent=True, transcript=pk_path("turn-empty"), env=PK_ENV, cwd=NOGIT)
 
+# Controls that pin the scanner and the readers as they stand (green on the current head). Each names what it pins.
+pk_allow("a // prose line with no pick marker passes: a comment opener in prose is no marker", "// see the picks below")
+pk_refuse("a // prose line before a pick marker does not hide the pick", "// see below\nCoordinator pick: icons-a")
+pk_allow("a # prose line with no pick marker passes", "# see the picks below")
+pk_allow("a lone apostrophe in plain text with no pick marker passes", "Owner's note: the page is up to date.")
+pk_allow("a lone apostrophe before a pick sent to the page writer passes: the writer route passes",
+         "Don't stop.\nCoordinator pick: icons-a", target=PK_WRITER)
+pk_allow("a transcript that holds no JSON record passes: fail open", PK_PICK, transcript="unreadable")
+pk_allow("a transcript path that does not exist passes: fail open", PK_PICK, transcript="missing")
+pk_allow("a writer send that was not delivered still counts: pins current behaviour, only the call is read",
+         PK_PICK, transcript="undelivered-writer-send")
+
 
 # Scope before subject (P7): each fixture reads as the guard reads it, before any case asserts on the guard.
 def pk_scope_check():
-    """The page writer and the coordinator's own tags read from each fixture, through the real readers."""
+    """The page writer and the coordinator's own tags read from each fixture, through the real readers. A fixture
+    named own-* is this session's own write: its page writer is the coordinator itself."""
     import _transcript as pk_transcript
     import own_session as pk_own
     problems = []
     for name in ("turn-empty", "turn-writer-sent", "turn-writer-earlier", "turn-writer-other", "turn-writer-casefold",
-                 "turn-writer-no-key", "turn-lane-sent", "turn-writer-longer", "two-page-reads", "two-page-reads-new"):
+                 "turn-writer-no-key", "turn-lane-sent", "turn-writer-longer", "two-page-reads", "two-page-reads-new",
+                 "own-wrote-set", "own-wrote-batch", "own-wrote-update", "own-read-only", "own-wrote-other-key",
+                 "own-wrote-earlier", "own-wrote-none", "own-wrote-meta", "no-human-writer-sent",
+                 "no-human-writer-sent-first", "no-human-none", "undelivered-writer-send"):
         records = pk_transcript.read_transcript(pk_path(name))
-        if pk_transcript.page_writer_id(records) != PK_WRITER:
-            problems.append(name + ": the page writer does not read as " + PK_WRITER)
+        want = PK_OWN if name.startswith("own-") else PK_WRITER
+        if pk_transcript.page_writer_id(records) != want:
+            problems.append(name + ": the page writer does not read as " + want)
         tags = pk_own.own_session_read(pk_path(name), PK_OWN)[0] or []
         if "cs-build:coordinator" not in tags:
             problems.append(name + ": the own record does not hold cs-build:coordinator")
