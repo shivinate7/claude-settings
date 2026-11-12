@@ -667,7 +667,7 @@ def _judge_isolation():
         try:
             shutil.copyfile(creds, os.path.join(config_dir, CREDENTIALS_FILENAME))
         except Exception:
-            pass  # no credential to copy: the call below fails closed, as an auth error
+            pass  # no file copied: a token or key set below still logs in; with neither, the call fails as an auth error
     env = {name: os.environ[name] for name in JUDGE_ENV_ALLOWLIST if name in os.environ}
     env["CLAUDE_CONFIG_DIR"] = config_dir
     if token:
