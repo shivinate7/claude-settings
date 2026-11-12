@@ -148,11 +148,11 @@
   merge --batch-split NAME --run URL
                           split a red batch: drop the one lane the run names, and each lane that stacks on it, from batch-NAME, by the
                           --batch-drop route with no stored blame. URL must be a completed, failed run on the batch pull request's current
-                          head, and batch-NAME's tip must be that head. Each failed job's failing lines map to a lane by its own `+` lines
-                          (a case, as a whole word) or, for a line with no case, its own changed paths; never by a file lanes share. A job
-                          that maps to no lane or to two or more, a job whose log is unread, a line that names no case or file, two or
-                          more lanes across the jobs, or a drop that would leave no lane exits 1 with nothing dropped, and names the
-                          route: --blame, then --batch-drop. Cost: one run read, one jobs read plus one log read per failed job, one
+                          head, and batch-NAME's tip must be that head. Each failing line of a job must map to one lane, by a `def <case>(`
+                          in its own `+` lines or, for a line with no case, its own changed paths; never by a file lanes share. A job
+                          with a line that maps to no lane or to two or more, a job whose log is unread, a line that names no case or
+                          file, a lane with no merge commit on the tip, two or more lanes across the jobs, or a drop that would leave
+                          no lane exits 1 with nothing dropped, and names the route: --blame, then --batch-drop. Cost: one run read, one jobs read plus one log read per failed job, one
                           fetch, one log read and one diff read per lane; no new process and no file. Takes no lock; accepts --base,
                           --lint-unknown-ok and --config. A cloud run needs the batch-runner role.
   merge --batch-build NAME PR [PR ...] --on-running [--base BRANCH]
@@ -5161,16 +5161,17 @@ def batch_drop(root, h, name, number, proven=False):
     needs_ready(name, drafted)
     return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
 
-def word_in(case, texts):
-    """True when `case` is a whole word of one of `texts`: test_it is in `def test_it(self):` and not in `def test_items(self):`."""
-    pattern = re.compile(rf"(?<!\w){re.escape(case)}(?!\w)")
-    return any(pattern.search(t) for t in texts)
+def def_in(case, texts):
+    """True when one of `texts` (a lane's `+` lines) defines `case`: a line that starts, after any indent, with `def <case>(`. test_it is defined by
+    `    def test_it(self):`, not by `def test_items(self):`, and a comment, a string or a note that only mentions test_it defines nothing."""
+    pattern = re.compile(rf"\s*def {re.escape(case)}\(")
+    return any(pattern.match(t) for t in texts)
 
-def lane_changes(root, branch, tip, start, lanes):
+def lane_changes(root, branch, tip, start, lanes, route):
     """-> {lane PR: (the `+` lines of its own change, the paths it changes)} for each frozen lane of `lanes` ({PR: head}): the diff of its no-ff merge
     commit on `branch` against that merge's first parent, so a lane stacked on an earlier lane holds only its own commits. The merge commits are the
     first-parent merges of `tip` down to `start`, each lane found by the second parent that is its head (as stray_heads reads them); a merge of the
-    base is no lane's. A lane with no merge there is a Stop: its change is unread. One log read, one diff read per lane."""
+    base is no lane's. A lane with no merge there is a Stop that names `route`: its change is unread. One log read, one diff read per lane."""
     c, out = git(root, "log", "--first-parent", "--merges", "--format=%H %P", tip, "--not", start)
     if c:
         raise Stop(f"cannot read the merges on {branch}: {out} {FREEZE_CITE}")
@@ -5182,7 +5183,7 @@ def lane_changes(root, branch, tip, start, lanes):
             merges.setdefault(by_head[parts[2]], parts[0])
     missing = [n for n in lanes if n not in merges]
     if missing:
-        raise Stop(f"unknown: {lane_list(missing)} has no merge commit on {branch}'s tip, so its own change is unread. Nothing was dropped. {UNKNOWN_CITE}")
+        raise Stop(f"unknown: {lane_list(missing)} has no merge commit on {branch}'s tip, so its own change is unread. Nothing was dropped: {route}. {UNKNOWN_CITE}")
     changes = {}
     for n in sorted(lanes):
         c, diff = git(root, "-c", "core.quotepath=off", "diff", "-U0", "--no-renames", "--no-color", f"{merges[n]}^1", merges[n])
@@ -5194,9 +5195,10 @@ def lane_changes(root, branch, tip, start, lanes):
     return changes
 
 def job_lanes(lines, changes):
-    """-> (the lanes one failed job's failing `lines` name, why the job is unknown or None). A summary line (UNITTEST_SUMMARY) is skipped. A line with a
-    case names each lane whose own `+` lines hold that case as a whole word, whatever file the line also names; a line with only a file names each lane
-    that changes that path. A line with neither makes the job unknown, with no lane named."""
+    """-> (the lanes one failed job's failing `lines` name, why the job is unknown or unmapped, or None). A summary line (UNITTEST_SUMMARY) is skipped.
+    Every other line must name exactly one lane, and all of them the same lane, or the job is a problem, with no lane named. A line with a case names each lane whose own `+` lines
+    define it (def_in), whatever file the line also names; a line with only a file names each lane that changes that path; a line with neither makes
+    the job unknown. A line that names no lane or two or more makes the job unmapped, and the reason holds the line, even if another line names one."""
     named = set()
     for line in lines:
         if UNITTEST_SUMMARY.fullmatch(LOG_PREFIX.sub("", line, count=1).rstrip()):
@@ -5204,15 +5206,23 @@ def job_lanes(lines, changes):
         file, case = failing_line(line) or (None, None)
         if not (file or case):
             return set(), f"unknown: its failing line {line.strip()!r} names no case or file"
-        named.update(n for n, (added, paths) in changes.items() if (word_in(case, added) if case else posixpath.normpath(file) in paths))
+        mine = {n for n, (added, paths) in changes.items() if (def_in(case, added) if case else posixpath.normpath(file) in paths)}
+        if len(mine) != 1:
+            return set(), (f"unmapped: its failing line {line.strip()!r} names {lane_list(sorted(mine))}, not one lane" if mine
+                           else f"unmapped: no frozen lane's own change holds its failing line {line.strip()!r}")
+        named |= mine
+    if len(named) != 1:
+        return set(), (f"unmapped: its failing lines name {lane_list(sorted(named))}, not one lane" if named
+                       else "unmapped: it has no failing line that names a case or a file")
     return named, None
 
 def batch_split(root, h, name, url):
-    """merge --batch-split NAME --run URL: drop the one lane a red run names, with its dependents, from batch-NAME (decision batch-freeze-lane-set).
+    """merge --batch-split NAME --run URL: drop the one lane a failed run names, with its dependents, from batch-NAME (decision batch-freeze-lane-set).
     Reads only, until the drop. The run must be completed, failed and on the batch pull request's current head, and batch-NAME's tip must be that head.
-    Each failed job (Host.failed_jobs) maps to the lanes whose own change holds its failing cases or files (job_lanes); a job that maps to no lane or to
-    two or more is unmapped, and a job with a line that names neither case nor file, or whose log was not read, is unknown. Any of those, or more than
-    one lane across all jobs, is a Stop that names the cause and writes nothing. Else batch_drop drops the one lane with its stored-blame refusal
+    Each failed job (Host.failed_jobs) maps to a lane only when each of its failing lines names that one lane: by a `def <case>(` in the lane's own `+`
+    lines, or, for a line with no case, by its own changed paths (job_lanes). A job with a line that names no lane or two or more is unmapped, and a job
+    with a line that names neither case nor file, or whose log was not read, is unknown. Any of those, a lane with no merge commit on the tip, or more
+    than one lane across all jobs, is a Stop that names the cause and the route (--blame, then --batch-drop), and writes nothing. Else batch_drop drops the one lane with its stored-blame refusal
     skipped (`proven`): the run's own log lines name the lane, so no Blamed line is written. Cost: one run read, one jobs read and one log read per
     failed job, one fetch, one log read and one diff read per lane; no new process and no file."""
     branch, pr, info, block = read_frozen_batch(h, name, "dropped")
@@ -5226,18 +5236,15 @@ def batch_split(root, h, name, url):
     tip = fetch_branch(root, branch, FREEZE_CITE)
     if tip != sha:
         raise Stop(f"{branch}'s tip on origin is {tip[:9]}, not {sha[:9]}, the head the run ran on, so the run's log is not of this tip. Nothing was dropped. {FREEZE_CITE}")
-    changes = lane_changes(root, branch, tip, batch_start(root, block, info["base"])[0], block["lanes"])
+    route = f"store the blame of the lane the run is caused by with `merge --batch-build {name} --blame <PR> --run {url}`, then run its `merge --batch-drop {name} <PR>`"
+    changes = lane_changes(root, branch, tip, batch_start(root, block, info["base"])[0], block["lanes"], route)
     by_job, problems = {}, []
     for job, lines in jobs.items():
-        named, unknown = job_lanes(lines, changes)
-        if unknown:
-            problems.append(f"job {job} is {unknown}")
-        elif len(named) != 1:
-            problems.append(f"job {job} is unmapped: " + (f"its failing lines name {lane_list(named)}, not one lane" if named
-                                                           else "no frozen lane's own change holds its failing case or file"))
+        named, problem = job_lanes(lines, changes)
+        if problem:
+            problems.append(f"job {job} is {problem}")
         else:
-            by_job[job] = named.pop()
-    route = f"store the blame of the lane the run is caused by with `merge --batch-build {name} --blame <PR> --run {url}`, then run its `merge --batch-drop {name} <PR>`"
+            by_job[job] = next(iter(named))
     if problems:
         raise Stop("\n".join(problems) + f"\nNothing was dropped: a job that is unmapped or unknown names no lane, so {route}. {FREEZE_CITE}")
     lanes = sorted(set(by_job.values()))

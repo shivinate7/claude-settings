@@ -88,9 +88,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
    `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
    to return a ready PR to draft. Any other lane waits for the next batch. `merge --batch-split NAME --run <run URL>` drops the one lane the
-   failed run names, and its dependents, with no stored blame. A failed job's case maps to the lane whose own `+` lines hold it. A line with no
-   case maps to the lane's own changed paths, never to a file lanes share. Six cases exit 1 with nothing dropped. The run is not a failed run of the batch's current head. The batch tip is not that head.
-   A job maps to no lane or to two. A job has an unread log. Two or more lanes are named. The drop leaves no lane. Then use `--blame`, then `--batch-drop`. `--on BRANCH` stacks a batch on a running batch.
+   failed run names, and its dependents, with no stored blame. A failed job's case maps to the lane whose own `+` lines define it with `def <case>(`. A line with no
+   case maps to the lane's own changed paths, never to a file lanes share. Seven cases exit 1 with nothing dropped. The run is not a failed run of the batch's current head. The batch tip is not that head.
+   A failing line of a job maps to no lane or to two. A job has an unread log. A lane has no merge commit on the tip. Two or more lanes are named. The drop leaves no lane. Then use `--blame`, then `--batch-drop`. `--on BRANCH` stacks a batch on a running batch.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
