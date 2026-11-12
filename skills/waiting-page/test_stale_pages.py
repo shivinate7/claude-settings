@@ -2164,7 +2164,7 @@ class DeleteInstructionsWording(unittest.TestCase):
     before a delete, however near, leaves it an instruction. The product's own lines are checked by the cases above."""
 
     APPROVED = ("kept-answer: item 1 (x) is closed and answers/x is kept; the close keeps it on purpose, so never delete it unless "
-                "the item is reopened or reworded (SKILL.md, \"Route and close\")")  # the wording kept_answer_lines prints
+                "the item is reworded (SKILL.md, \"Route and close\")")  # the wording kept_answer_lines prints
 
     def test_the_approved_never_delete_is_no_instruction(self):
         self.assertEqual(delete_instructions(self.APPROVED), [], "the approved wording reads as a delete instruction")
