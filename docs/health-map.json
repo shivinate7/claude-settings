@@ -20,7 +20,7 @@
       "why": "38/3; answer needed a second click; a peer's brief saved as owner words",
       "covers": [
         "hooks/local_time.py",
-        "hooks/feedback_guard.py"
+        "hooks/feedback_*.py"
       ]
     },
     {
@@ -224,7 +224,6 @@
       "why": "cloud installs 24/24 ok; his machines unmeasured; long cloud session keeps its start copy (lane cloud-hooks-stale-copy)",
       "covers": [
         "hooks/denial_note.py",
-        "hooks/feedback_*.py",
         "lint/check_hook_stubs.py",
         "lint/check_landed_dirs.py",
         "lint/check_mod_versions.py",
