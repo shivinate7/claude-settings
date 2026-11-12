@@ -23,13 +23,13 @@ Built-today lines in this record were not re-read by the edit of 2026-11-11 23:0
 - A draft PR runs no CI: `scope` skips on a draft, and every other job skips with it.
 - A merge needs a pull request and no approval.
 - Today's classic protection has `strict` false (`strict` requires the branch to be up to date with main).
-  GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`, a merge needs a green run on the current base).
+  GitHub merges a PR that lacks main's newest commit. The `merge` tool refuses it (`merge-needs-current-base`, a merge needs a green run on the current base), unless a small base move holds (`small_base_move` in `merge/merge.py`, decision `merge-needs-current-base`). It holds when main has no change since the merge base, or when main's paths since then share no path with the batch's (the records page aside), the merge of the head and main is clean, the scope turns no job on for main's paths, and the lints and affected suites pass on that merge. Otherwise the refusal says to merge main into the branch, push, and run again.
 - Today's classic protection includes admins (`enforce_admins`), so it binds the owner. Ruled, not yet built:
   bypass, below, lets the repository admin role skip the checks on pull requests only.
 - Today, a new repo's protection from project-ops `protect.py` (the script that sets branch protection) sets `strict` false, `enforce_admins` true, no review rule, no restrictions. Ruled, not yet built: `protect.py` sets a ruleset instead.
 - Today, classic protection blocks force pushes and branch deletion. Whether `main` has a ruleset today is unmeasured by this edit.
 - Today's protection holds the one required check. A new job goes in the `needs` of `all-jobs-passed`, not in
-  the required set. Today a pinned `merge.requiredChecks` list in `stamp.json` must equal a non-empty branch protection list, or `merge` stops and names both sets (sweep row `pinned-mismatch`, `refuse_pinned_mismatch`; roadmap step c189, the merge tool and branch protection work).
+  the required set. Today `merge` stops when a pinned `merge.requiredChecks` list in `stamp.json` differs from a non-empty branch protection list, and names both sets. An empty or unreadable protection list does not stop it: the pinned list stays in force, and an unreadable one is said aloud (`refuse_pinned_mismatch`, sweep row `pinned-mismatch`; roadmap step c189, the merge tool and branch protection work).
 - Today's switch changes only the required checks, through `protect.py`: preview
   `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo shivinate7/claude-settings --check all-jobs-passed`,
   then the same with `--confirm`. On a branch with a check rule it PATCHes the check list only; `strict` stays.
