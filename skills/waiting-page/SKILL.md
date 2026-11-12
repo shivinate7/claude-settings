@@ -49,7 +49,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
 
 - `items/<id>`: one per waiting item. The database key is the item's id. The `id` field is optional
-  and ignored: the page, the guard and the tools read the key. Each field (the table is generated: `python3 skills/waiting-page/field_table.py`; the guard rules are stated once, where each is defined below):
+  and ignored: the page, the guard and the tools read the key. Each field (the table is generated: `python3 skills/waiting-page/field_table.py`; each guard rule is stated once, where it is defined):
 
   <!-- gen:item-fields -->
   Guard rule `item-field-rendered` judges every field name: a write names only the fields below.
@@ -59,7 +59,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   | `id` | Optional and ignored: the page, the guard and the tools read the database key. |
   | `n` | A stable number the owner answers by. |
   | `kind` | `decision` or `task`. |
-  | `status` | `open` or `closed`. A closed item passes every rule in this row. |
+  | `status` | `open` or `closed`. |
   | `added` | ISO time the item was added. |
   | `ref` | Each id with its plain name. |
   | `title` | The item's name. |

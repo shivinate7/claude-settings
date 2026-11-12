@@ -2,7 +2,7 @@
   "id": {"meaning": "Optional and ignored: the page, the guard and the tools read the database key."},
   "n": {"meaning": "A stable number the owner answers by."},
   "kind": {"meaning": "`decision` or `task`."},
-  "status": {"meaning": "`open` or `closed`. A closed item passes every rule in this row."},
+  "status": {"meaning": "`open` or `closed`."},
   "added": {"meaning": "ISO time the item was added."},
   "ref": {"meaning": "Each id with its plain name."},
   "title": {"meaning": "The item's name."},
