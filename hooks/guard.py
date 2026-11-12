@@ -4712,10 +4712,12 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 
 # Rule `answers-session-write` (decision answers-session-write; pick 2 of waiting-page-one-store). An answer on
 # the waiting page is the owner's word. Claude has written one by mistake in normal work, and the page reads it as
-# the owner's grant. The rule judges three tools: ArtifactData (hooks/question_form.py answers_write_hit), Write and
+# the owner's grant. The rule judges four surfaces: ArtifactData (hooks/question_form.py answers_write_hit), Write and
 # Edit, and the shell (a redirect, `tee`, `cp`, `mv`, `rm`, `sed -i` by `shell_write_hit`, and a git add or commit that
 # names the path by `answers_git_hit`). The path test is question_form.is_answers_path. A read, and a mention in a quote,
 # a heredoc body or a comment, are no write. Cost: no process; a shell command that holds no "answers" is not read further.
+# A shell command is read with a leading `cd` followed, and an interpreter's script (`python -c`, a heredoc, `node -e`)
+# by `interpreter_write_hit`. A GitHub MCP write is read by `answers_github_hit`.
 # Known gaps: a `git add` of the whole waiting folder (the export copy needs it), and a write by an interpreter that
 # builds the path out of pieces.
 ANSWERS_REASON = ("this call would write an answer on the waiting page. An answer is the owner's own word, so a session "
@@ -4752,11 +4754,34 @@ def answers_git_hit(raw, cwd):
     return ""
 
 
+def _answers_path_at(word, where):
+    """The predicate of a shell write read with its `cd` followed: `word` may be a bare file name that
+    lands in an answers folder only through the folder `where` the cd entered."""
+    import question_form
+    return isinstance(word, str) and question_form.is_answers_path(word, where)
+
+
 def answers_shell_hit(raw, cwd):
     """The answers path the shell command writes, else ''."""
     if not isinstance(raw, str) or _layout_module().WAITING_ANSWERS not in raw:
         return ""   # the one cheap read: a command that never says "answers" writes none
-    return shell_write_hit(raw, cwd, _answers_word) or answers_git_hit(raw, cwd)
+    return (shell_write_hit(raw, cwd, _answers_path_at, follow_cd=True, literal_cd=True)
+            or (interpreter_may_write(raw) and interpreter_write_hit(raw, cwd, _answers_path_at, literal_cd=True))
+            or answers_git_hit(raw, cwd))
+
+
+ANSWERS_GITHUB_TOOLS = ("mcp__github__create_or_update_file", "mcp__github__push_files", "mcp__github__delete_file")
+
+
+def answers_github_hit(tool, tool_input, cwd):
+    """The answers path a GitHub MCP write names, else ''. `push_files` names each path in its `files` list.
+    The tool writes the remote repo, so no local `git` call shows the path to the shell reader."""
+    if tool not in ANSWERS_GITHUB_TOOLS or not isinstance(tool_input, dict):
+        return ""
+    files = tool_input.get("files")
+    paths = [tool_input.get("path")] + [f.get("path") for f in files if isinstance(f, dict)] if isinstance(files, list) \
+        else [tool_input.get("path")]
+    return next((p for p in paths if _answers_word(p, cwd)), "")
 
 
 # ------------------------------------------------------------------ a waiting page behind main is not published
@@ -6296,6 +6321,10 @@ def judge(payload) -> None:
         if matched:
             refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
         return
+
+    forged = answers_github_hit(tool, tool_input, cwd)
+    if forged:
+        refuse(tool, "deny", "answers-session-write", ANSWERS_REASON, forged)
 
     if tool == DATA_TOOL:
         import override  # the writer's record id (cse_<x> read as session_<x>); the payload's id is a local UUID
