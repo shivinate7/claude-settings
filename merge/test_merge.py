@@ -18388,6 +18388,24 @@ class BatchFreeze(CloudSession):
                  *(["--not", f"origin/{on}"] if on else []))
         return [line.split()[1] for line in out.splitlines() if len(line.split()) == 2]
 
+    @contextlib.contextmanager
+    def counted_reads(self):
+        """Yields a list that gathers, while the block runs, each `merge-base --all` merge runs through merge.git and each ancestry read it runs
+        through merge.ancestor, as (kind, arguments). Each call still reaches the real function."""
+        calls, real_git, real_ancestor = [], merge.git, merge.ancestor
+
+        def git(cwd, *a, input=None):
+            if "merge-base" in a and "--all" in a:
+                calls.append(("merge-base --all", a))
+            return real_git(cwd, *a, input=input)
+
+        def ancestor(cwd, tip, base):
+            calls.append(("ancestor", (tip, base)))
+            return real_ancestor(cwd, tip, base)
+
+        with unittest.mock.patch.object(merge, "git", git), unittest.mock.patch.object(merge, "ancestor", ancestor):
+            yield calls
+
     def body(self, n):
         return self.host.batch_pulls[n]["body"]
 
@@ -19772,6 +19790,44 @@ class BatchFreeze(CloudSession):
         self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
         self.assertTrue(self.on_origin(self.heads[101], "batch-nightly") and self.on_origin(self.heads[102], "batch-nightly"),
                         "batch-nightly does not hold both stacked lanes: %s" % out)
+
+    def test_stacked_check_reads_no_merge_base_for_open_prs_that_share_no_commit(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        others = list(range(104, 116))  # twelve open pull requests on main, none sharing a commit with a lane
+        for n in others:
+            self.lane(n)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        main = self.head("main")
+        for n in (101, 102, 103):  # scope: each lane shares with each other pull request only main
+            for o in others:
+                self.assertEqual(sh(self.co, "git", "merge-base", "--all", self.heads[n], self.heads[o]), main,
+                                 "setup: #%d and #%d share a commit besides main" % (n, o))
+        self.assertEqual(len(self.host.open_prs()), 15, "setup: the open pull requests are not three lanes and twelve others")
+        with self.counted_reads() as calls:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 0, "the build of three lanes that share no commit with the open pull requests exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+        merge_base = [a for kind, a in calls if kind == "merge-base --all"]
+        ancestry = [a for kind, a in calls if kind == "ancestor"]
+        self.assertEqual(merge_base, [], "the stacked check ran %d `merge-base --all` for open pull requests that share no commit: %s" % (len(merge_base), out))
+        self.assertEqual(ancestry, [], "the stacked check read ancestry %d times for open pull requests that share no commit: %s" % (len(ancestry), out))
+
+    def test_green_control_a_lane_stacked_on_an_open_pr_left_out_is_refused_and_named(self):
+        self.lane(90)  # open #90 is not in the request, and lane #101 is stacked on it
+        self.lane(101, on=90)
+        self.lane(102)
+        self.lane(103)
+        for n in range(104, 115):  # eleven more open pull requests: with #90, twelve others
+            self.lane(n)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 1, "control: a lane that holds a commit of an open pull request left out was not refused with exit 1: %s" % out)
+        self.assertIn("#101 holds a commit of #90, which is not in this request", out, "control: the refusal does not name #101 and #90: %s" % out)
+        self.assertIn("Add the missing pull request, or leave the stacked lane out. Nothing was pushed.", out,
+                      "control: the refusal's remedy or its nothing-pushed line changed: %s" % out)
+        self.assertEqual(self.host.created, [], "control: the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.pushes(), [], "control: the refused build pushed: %s" % out)
 
     def test_stacked_lanes_whose_shared_base_commit_is_requested_are_not_refused_for_an_outside_pr_stacked_on_that_base(self):
         self.lane(101)
