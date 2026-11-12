@@ -560,6 +560,54 @@ def C14_a_judge_error_that_holds_the_api_key_keeps_its_text_and_loses_the_key():
     return problems
 
 
+@case
+def C17_an_unreadable_token_file_with_the_api_key_set_fails_closed_and_the_key_stays_out():
+    """C17. a token file that cannot be decoded, and ANTHROPIC_API_KEY set in this process: the judge call fails
+    closed as an unreadable token file does (no verdict, no judge start), and the key value is in no judge env, no
+    error text, no Stop output, and no outcome record. Why: the key is a fallback for a judge with no setup token
+    only, so an unreadable token file must never hand the call to the key."""
+    sid = "model-auth-c17"
+    with scratch_config("c17", parent_key=FAKE_KEY) as cfg:
+        problems = scoped(cfg) + takes_session_id_problems()
+        problems += expect(os.environ.get(KEY_NAME) == FAKE_KEY, "scope: this process does not carry the fake key")
+        token_file(cfg, b"\x80\x81\xfe" + UNREADABLE_MARK)
+        problems += expect(os.path.isfile(os.path.join(cfg, HOOK_TOKEN_REL)), "scope: no token file was written")
+        if problems:
+            return problems
+        judge_envs = []
+
+        def judge_start(argv, *args, **kwargs):
+            judge_envs.append(dict(kwargs.get("env") or {}))
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"result": json.dumps(OK_VERDICT)}), "")
+
+        with model_run(judge_start):
+            verdict, error = dw.invoke_model("judge this", session_id=sid)
+        text = error or ""
+        problems += expect(verdict is None,
+                           "unreadable token file with the key set: the judge returned a verdict, want none")
+        problems += expect("token file" in text.lower() and "could not be read" in text.lower(),
+                           "unreadable token file with the key set: the error does not say the token file "
+                           "could not be read: %r" % text)
+        problems += expect(UNREADABLE_MARK.decode() not in text, "the error text holds the token file's bytes")
+        problems += expect(FAKE_KEY not in text, "the API key value is in the error text")
+        problems += expect(not judge_envs,
+                           "unreadable token file with the key set: %d judge start(s), want 0" % len(judge_envs))
+        for env in judge_envs:
+            problems += expect(KEY_NAME not in env and FAKE_KEY not in env.values(),
+                               "the API key reached the judge env")
+        p, msg, out = stop_message(sid)
+        problems += p
+        problems += expect("Model calls: 1 failed in a row" in msg, "no Stop line to check for the key: %r" % msg)
+        problems += expect(FAKE_KEY not in out, "the API key value is in the Stop output")
+        record = files_under(cfg, skip=(HOOK_TOKEN_REL,))
+        problems += expect(bool(record), "control: the failed call wrote no outcome record")
+        for rel in record:
+            with open(os.path.join(cfg, rel), "rb") as f:
+                if FAKE_KEY.encode("utf-8") in f.read():
+                    problems.append("the API key value is in the written file %s" % rel)
+    return problems
+
+
 FAKE_CLAUDE = (
     "#!/bin/sh\n"
     ": > \"${0%/*}/probe-ran\"\n"  # beside this fake: the child's PATH has no dirname, and no marker variable
