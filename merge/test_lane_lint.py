@@ -2375,6 +2375,15 @@ class PostReviewCommit(LaneFixture):
         self.assertEqual(rc, 0, "lane lint counted release's own guard commit, which the lane only merged in:\n" + out)
         self.assertEqual(len(pass_lines(out)), 1, out)
 
+    def test_a_review_log_that_none_parses_stops_the_lint_unknown_and_posts_no_pass(self):
+        self.commit_on("feat", {GUARD_PATH: "a guard path, behind a review log that none parses\n"}, "origin/feat")
+        self.host.records.append(tm.REVIEW_MARKER + "\nnot the fields of a review log\n")  # the marker, then junk
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 1, "lane lint passed a lane whose only review log does not parse:\n" + out)
+        self.assertIn("none parses", out, "the stop does not say that no review log parses:\n" + out)
+        self.assertEqual(self.lint_calls(), [], "the ci-job lint ran past the unknown stop:\n" + out)
+        self.assertEqual(self.host.posted, [], "an unknown lane lint posted a lane-lint PASS:\n" + out)
+
 
 if __name__ == "__main__":
     unittest.main()
