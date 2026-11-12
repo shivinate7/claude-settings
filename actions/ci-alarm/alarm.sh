@@ -14,7 +14,9 @@
 # A job cancelled at its cap raises the alarm: it ran at least its job-level `timeout-minutes` (completed_at - started_at, from the
 # jobs read), the cap read from the run's workflow file at its head; a job with no job-level `timeout-minutes` has GitHub's default
 # cap, 360 minutes. The issue names the job, the cap, the minutes and the run id, for a cancelled run and for a failure run whose job
-# was cancelled at its cap. The merge gate reads such a job as UNKNOWN; the alarm is the signal (it is a cap end, not a red job).
+# was cancelled at its cap. The merge gate (merge.py base_state) leaves a run with no red job and a job timed out at a job-level cap it
+# finds in its checkout out of red and out of unknown; it reads UNKNOWN for a cancelled job with no job-level cap or a cap it does not
+# find. The alarm is the signal (it is a cap end, not a red job).
 # A job cancelled under its cap (a person, or an earlier failure) stays quiet. A cancelled job with no started_at, a non-integer cap
 # (an expression), no single job of that name in the file, a cancelled run with no jobs, or a failed read is unknown, never
 # red and never clear. A cap end in an earlier attempt of a run whose newest attempt succeeded is only named, on a
