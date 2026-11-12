@@ -35,17 +35,34 @@ CUE_GAP = 4       # words before the claim word, in its own clause, that hold a 
 ATTRIBUTION_GAP = 5  # words before the claim word, in any clause, that hold the one who says it
 NEGATIONS = frozenset(("not", "never", "no", "nothing", "cannot"))
 CONDITIONS = frozenset((
-    "if", "when", "once", "until", "unless", "whether", "will", "would", "should", "must", "to", "can", "could", "may",
+    "if", "when", "once", "until", "unless", "whether", "will", "would", "should", "must", "can", "could", "may",
     "might", "make", "get", "gets", "getting", "need", "needs", "want", "wants", "expect", "expected"))
+# `to` is a cue only as an infinitive: right before the claim word, or before a linking verb ahead of it ("for the
+# tests to pass", "lint to go green"). "Merged to main and lint passed" holds a preposition, so it still claims.
+INFINITIVE = "to"
+LINKING_VERBS = frozenset(("be", "go", "turn", "stay", "come"))
+# A clause led by one of these words is an instruction, not a report: "Ensure lint passes", "Confirm the tests pass".
+# `clean` is a claim word too, so it leads an instruction only as "clean up" or "clean out".
+IMPERATIVES = frozenset((
+    "ensure", "confirm", "verify", "check", "keep", "run", "rerun", "make", "see", "wait", "watch", "try", "let"))
+CLEAN_VERB_PARTICLES = frozenset(("up", "out"))
+LEAD_CONNECTORS = frozenset(("please", "then", "and", "also", "so", "now", "first", "next", "just"))
 ATTRIBUTIONS = frozenset((
     "reviewer", "reviewers", "builder", "builders", "testauthor", "recordwriter", "refuter", "designer", "agent",
     "agents", "subagent", "reports", "reported", "says", "said", "claims", "claimed", "according"))
-BOUNDARY = "|"  # a comma, semicolon, parenthesis or dash ends a clause
+BOUNDARY = "|"  # a comma, semicolon, colon, slash, pipe, parenthesis or dash ends a clause
 
 FENCE_RE = re.compile(r"```.*?```", re.S)
-CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+# A backtick span or a double-quoted span: a quoted mention, read as `_span` reads it. A lone quote mark opens no span.
+CODE_SPAN_RE = re.compile(r"`[^`\n]*`|\"[^\"\n]*\"|“[^”\n]*”")
 SENTENCE_RE = re.compile(r"(?<=[.!?;])\s+|\n")
-TOKEN_RE = re.compile(r"[a-z0-9]+(?:['’][a-z]+)?|[,;()—–]|\s[-–—]{1,2}\s")
+TOKEN_RE = re.compile(r"[a-z0-9]+(?:['’][a-z]+)?|[,;:/|()—–]|\s[-–—]{1,2}\s")
+# A path-like token, one with a slash touching a word character or a file extension, is no claim word:
+# "tests/guard/s42900-pass-claim-send.py". A spaced slash is a clause break.
+PATH_RE = re.compile(r"\S*\w/\S*|\S*/\w\S*|\S*\w\.[a-z][a-z0-9]{0,4}\b\S*", re.I)
+# A singular check noun before "pass" names a run, not a result: "a second lint pass". "Lint passes" claims, and so
+# does "Lint: PASS", whose colon and capitals keep it out of this form.
+NOUN_PASS_RE = re.compile(r"\b((?i:lint|suite|ci-job))\s+[Pp]ass\b")
 # A count: "12 passed", "3/5 passed", "3/5 tests passed". A number ahead of a plain noun ("PR 7 lint passed") is no count.
 COUNT_NOUNS = "(?:tests?|checks?|suites?|cases|jobs|files|specs)"
 STAT_RE = re.compile(r"\b\d+(?:/\d+)?\s+(?:%s\s+)?(?:passed|passes|pass|green|clean)\b" % COUNT_NOUNS, re.I)
@@ -71,6 +88,27 @@ def _words(text):
     return [t if t[0].isalnum() else BOUNDARY for t in TOKEN_RE.findall(text)]
 
 
+def _infinitive(tokens, at):
+    """True when an infinitive `to` leads the claim word at `at`: "to pass", "to go green"."""
+    if tokens[at - 1:at] == [INFINITIVE]:
+        return True
+    return at >= 2 and tokens[at - 2] == INFINITIVE and tokens[at - 1] in LINKING_VERBS
+
+
+def _instruction(tokens, at):
+    """True when the clause that holds the claim word at `at` is led by an imperative: "Ensure lint passes",
+    "Make sure the tests pass", "Clean up the lint warnings"."""
+    start = at
+    while start > 0 and tokens[start - 1] != BOUNDARY:
+        start -= 1
+    while start < at and tokens[start] in LEAD_CONNECTORS:
+        start += 1
+    lead = tokens[start]
+    if lead == "clean":
+        return start + 1 < len(tokens) and tokens[start + 1] in CLEAN_VERB_PARTICLES
+    return lead in IMPERATIVES
+
+
 def _span(found):
     """A backtick span: kept bare when it is one word, so "Lint `passed`." still reads, else dropped as a quote."""
     inner = found.group()[1:-1]
@@ -81,7 +119,8 @@ def _sentence_needs(sentence):
     """The need of each check noun a sentence claims passed: [] when it claims none. A claim is a claim word with a
     check noun beside it, and none of the exempt forms: a negation or condition in its clause, a named speaker in the
     five words before it, a count."""
-    tokens = _words(STAT_RE.sub(" ", sentence))
+    # STAT_RE first: a path strip would eat the "3/5" of "3/5 tests passed" and leave "tests passed".
+    tokens = _words(NOUN_PASS_RE.sub(r"\1", PATH_RE.sub(" ", STAT_RE.sub(" ", sentence))))
     needs = []
     for at, word in enumerate(tokens):
         if word not in CLAIM_WORDS:
@@ -96,7 +135,9 @@ def _sentence_needs(sentence):
             if token == BOUNDARY or len(clause) == CUE_GAP:
                 break
             clause.append(token)
-        if any(_negates(t) or t in CONDITIONS for t in clause):
+        if any(_negates(t) or t in CONDITIONS for t in clause) or _infinitive(tokens, at):
+            continue
+        if _instruction(tokens, at):
             continue
         if any(t in ATTRIBUTIONS for t in [t for t in tokens[:at] if t != BOUNDARY][-ATTRIBUTION_GAP:]):
             continue

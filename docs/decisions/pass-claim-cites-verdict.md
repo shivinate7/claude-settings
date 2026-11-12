@@ -22,8 +22,11 @@ Claim: a claim word ("passed", "passes", "pass", "green", "clean") within four w
 
 What passes (each has a red sibling in the tests):
 
-- A whole sentence in backticks or in a code fence, and a question. A single word in backticks still counts, so "Lint `passed`." is a claim.
-- A negation or a condition within four words before the claim word, in the same clause ("not green", "hasn't passed", "when lint passes"). A comma, semicolon, parenthesis or dash ends the clause, so "No failures, lint passed." is a claim.
+- A whole sentence in backticks, in double quotes or in a code fence, and a question. A single word in backticks or quotes still counts, so "Lint `passed`." is a claim. A lone quote mark opens no quote.
+- A negation or a condition within four words before the claim word, in the same clause ("not green", "hasn't passed", "when lint passes"). A comma, semicolon, colon, slash, pipe, parenthesis or dash ends the clause, so "No failures, lint passed." and "No issues found: lint passed." are claims. `to` is a condition only as an infinitive ("for the tests to pass", "to go green"), so "Merged to main and lint passed." is a claim.
+- An instruction: a clause led by an imperative such as ensure, confirm, verify, check, keep, run, make sure or clean up ("Ensure lint passes before you hand off."). "Lint passes before you hand off." is a claim.
+- A singular check noun right before a lowercase "pass", which names a run ("a second lint pass"). "Lint: PASS." is a claim.
+- A path-like word, one with a slash or a file extension ("tests/guard/s42900-pass-claim-send.py").
 - A named speaker within five words before the claim word ("Reviewer: lint passed", "the builder reports lint green").
 - A count: a number, or a fraction, before the claim word, with at most one of tests, checks, suites, cases, jobs, files or specs between ("12 passed", "3/5 tests passed"). "PR 7 lint passed." is a claim.
 - A claim word with no check noun near it ("the merge is clean", "I passed the brief").

@@ -3100,7 +3100,9 @@ def pass_claim_reason(text, records):
         import pass_claim
         claim = pass_claim.problem(block_text(text), records)
         return owner_line("Pass-claim guard (rule pass-claim-cites-verdict)",
-                          "a report line says a check passed, and no verdict line of this session's transcript shows it: "
+                          "a report line says a check passed, and no verdict line of this session's transcript shows it "
+                          "for that check (a cite backs a claim only when its verdict command matches the claim's "
+                          "check, a roster command for lint or checks and a command that names a test for tests): "
                           + repr(claim)) if claim else ""
     except Exception as exc:
         print("pass-claim guard failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)

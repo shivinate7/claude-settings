@@ -4941,7 +4941,9 @@ def page_design_hit(writes, tool_input, cwd):
 
 PASS_CLAIM_REASON = ("Pass-claim guard (rule pass-claim-cites-verdict): this message says a check passed, and no verdict "
                      "line of this session's transcript shows it. Remedy: run it through verdict, as `verdict <cmd>`; "
-                     "its PASS line is the cite. A claim an agent made can be sent as its report, such as "
+                     "its PASS line is the cite. The verdict command must match the claim's check: a lint or checks "
+                     "claim needs a roster command such as `merge --lane-lint`, and a tests claim needs a command that "
+                     "names a test. A claim an agent made can be sent as its report, such as "
                      "\"builder reports green\". (decision guard-remedy-not-to-owner)")
 
 

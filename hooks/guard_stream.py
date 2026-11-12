@@ -241,6 +241,10 @@ TEST_MODULES = ("pytest", "unittest")
 TEST_SUBCOMMAND_RUNNERS = ("npm", "swift")          # `npm test`, `swift test`: the word right after the program
 TEST_SCRIPT_SHELLS = re.compile(r"(?:bash|sh|zsh|node|pwsh|powershell)$")
 POWERSHELL_FILE_FLAGS = ("-file", "-f")
+# A syntax check, a version screen or a help screen runs no test, whatever file it names: `node --check
+# tests/foo.test.mjs`, `bash -n tests/test_x.sh`, `pytest --version`. `pytest tests/` and `node --test` still run tests.
+SYNTAX_CHECK_FLAGS = {"node": ("--check", "-c"), "bash": ("-n",), "sh": ("-n",), "zsh": ("-n",)}
+PYTEST_INFO_FLAGS = ("--version", "-V", "--help", "-h")
 
 
 def _program_flags(tokens, index: int):
@@ -259,11 +263,12 @@ def _program_flags(tokens, index: int):
 def _test_run_word(tokens, index: int) -> str:
     """The program word when the command at `index` runs a test, else ''. Read through the same
     interpreter-operand reader as the check roster (`_script_operand`): a script whose name is a test's,
-    `pytest`, `python -m pytest|unittest`, `node --test`, `npm test`, `swift test`, `xcodebuild test`."""
+    `pytest`, `python -m pytest|unittest`, `node --test`, `npm test`, `swift test`, `xcodebuild test`. A syntax check
+    or an info screen (SYNTAX_CHECK_FLAGS, PYTEST_INFO_FLAGS) is no test run."""
     program = basename(tokens[index]).removesuffix(".exe")
     rest = tokens[index + 1:]
     if program == "pytest":
-        return program
+        return "" if any(word in PYTEST_INFO_FLAGS for word in rest) else program
     if program in TEST_SUBCOMMAND_RUNNERS:
         return program + " test" if rest[:1] == ["test"] else ""
     if program == "xcodebuild":
@@ -272,6 +277,8 @@ def _test_run_word(tokens, index: int) -> str:
     if not is_python and not TEST_SCRIPT_SHELLS.match(program):
         return ""
     flags, at = _program_flags(tokens, index)
+    if any(flag in SYNTAX_CHECK_FLAGS.get(program, ()) for flag, _ in flags):
+        return ""
     if is_python:
         module = next((value for flag, value in flags if flag == "-m"), "")
         if module in TEST_MODULES:
