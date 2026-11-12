@@ -39,8 +39,9 @@
 # most 100), one per earlier attempt of a failed, cancelled or succeeded re-run, one contents read of a run's workflow file when a job of
 # it was cancelled. A clear candidate N adds one jobs read, and one contents read of N's workflow file at N's head (headSha) unless N
 # leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most. Each woken attempt adds one pulls read, one
-# comments read of its pull request and at most one comment write (wake.sh). No long-lived process starts: short jq, awk, gh and python3
-# processes run, and the only files written are temp cache files in a folder this script removes on exit.
+# comments read of its pull request (one per 100 comments) and at most one comment write (wake.sh). No long-lived process starts: short jq (unmeasured),
+# awk (unmeasured), gh and python3 processes run. The files written are temp cache files in a folder this script removes on exit, and a failed wake
+# appends one message to GITHUB_STEP_SUMMARY.
 # Needs python3 (stdlib only) and clear_rule.py beside this file; no checkout.
 # Env: BRANCH, SELF (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0, except 1 when a cap end could not be woken.
 set -o pipefail

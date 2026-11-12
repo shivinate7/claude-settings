@@ -3,7 +3,7 @@
 # into main that holds commit SHA, which wakes the batch runner that watches that pull request. It opens no issue.
 # Needs REPO (owner/name), SHA, KEY, TEXT (the comment text) and GH_TOKEN. The env check below covers the
 # first four; a missing GH_TOKEN fails loud at the first gh call, the pulls read.
-# KEY is caller-chosen and names one alarm: the cap alarm (unbuilt, restart-plan R16) should use `cap:<run id>:<attempt>`. A caller with two
+# KEY is caller-chosen and names one alarm: the cap alarm (actions/ci-alarm/alarm.sh) uses `cap:<run id>:<attempt>`. A caller with two
 # alarm kinds on one run id must pick a distinct KEY per kind, or the second alarm's text is dropped.
 # The caller's token needs pull-requests: read for the pulls and comments reads, and pull-requests: write
 # for the comment post.
