@@ -133,6 +133,17 @@ def make_git_repo(files):
     return root
 
 
+GIT_VALUE_OPTIONS = ("-C", "-c")  # git's global options that take the next word as their value
+
+
+def git_subcommand(argv):
+    """The git subcommand of an argv, past the global options: `git [--literal-pathspecs] -C <dir> <read>`."""
+    words = list(argv)[1:]
+    while words and words[0].startswith("-"):
+        words = words[2:] if words[0] in GIT_VALUE_OPTIONS else words[1:]
+    return words[0] if words else None
+
+
 def make_tree(tending=None):
     """A copy of lint/ and hooks/ under the run folder, the runner at lint/tending.py, and, when `tending` is
     given, the copy's layout "tending" key set to it. The real layout is never edited."""
@@ -468,7 +479,7 @@ class CostTests(unittest.TestCase):
         self.assertTrue(started, "scope: the home-held read started no git process at all")
         for argv in started:
             self.assertEqual(os.path.basename(str(argv[0])), "git", "a home-held read started %r" % (argv,))
-            self.assertIn(argv[1], GIT_READS, "a home-held read started a git write: %r" % (argv,))
+            self.assertIn(git_subcommand(argv), GIT_READS, "a home-held read started a git write: %r" % (argv,))
 
     def test_no_file_is_written_when_no_verdict_changed(self):
         tree = make_tree({"probe": entry("home-held", close="mark")})
