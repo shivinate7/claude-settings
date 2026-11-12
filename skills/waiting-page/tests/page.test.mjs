@@ -3904,6 +3904,56 @@ test("reply to an item, case 19: a reply to a closed item whose line is on the p
   assert.equal(await page.getByText("Re: an item no longer on this page").count(), 0, `a row says No. ${IRP_CL_ON.n} is no longer on this page, while its line is`);
 });
 
+// A folded line has class withd only when it has a side press (Mark read). At 390 wide withd hides Show answer (page.html, .askc.folded.withd .frow .fgo).
+test("reply to an item, case 20: a folded line whose reply waits has no withd class, and its Show answer is drawn at 390 wide", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_WAIT], { [IRP_CL_WAIT_REC.id]: IRP_CL_WAIT_REC }, { viewport: { width: 390, height: 800 } }); if (!page) return;
+  const n = IRP_CL_WAIT.n, line = `#tier-answered #line-${n}`;
+  await mustHave(page, line, `line of No. ${n} in Answered`);
+  // Scope first: the folded row has no Mark read, so the line has no side press.
+  assert.equal(await page.locator(line).getByRole("button", { name: new RegExp(`^Mark read: No\\. ${n},`) }).count(), 0, `Mark read is on the folded line of No. ${n} while its reply waits`);
+  const cls = (await page.getAttribute(`#line-${n}`, "class")) ?? "";
+  assert.equal(cls.split(/\s+/).includes("withd"), false, `the folded line of No. ${n} has class withd with no side press: ${cls}`);
+  await mustHave(page, `#lrow-${IRP_CL_WAIT.id} .fgo`, `Show answer on the folded line of No. ${n}`);
+  const box = await page.locator(`#lrow-${IRP_CL_WAIT.id} .fgo`).boundingBox();
+  assert.ok(box && box.width > 2, `Show answer on the folded line of No. ${n} is ${box ? box.width : 0}px wide at 390, clipped out of sight`);
+});
+
+// Control for case 20: a folded line with a Mark read keeps its side press, so it keeps class withd.
+test("reply to an item, case 20, control: a folded line with Mark read keeps its withd class at 390 wide", async (t) => {
+  const plain = mk("irp-cl-plain", 9, IRP_CLOSED);
+  const page = await irpOpen(t, [plain], {}, { viewport: { width: 390, height: 800 } }); if (!page) return;
+  const n = plain.n, line = `#tier-answered #line-${n}`;
+  await mustHave(page, line, `line of No. ${n} in Answered`);
+  assert.equal(await page.locator(line).getByRole("button", { name: new RegExp(`^Mark read: No\\. ${n},`) }).count(), 1, `the folded line of No. ${n} has no Mark read to be its side press`);
+  const cls = (await page.getAttribute(`#line-${n}`, "class")) ?? "";
+  assert.equal(cls.split(/\s+/).includes("withd"), true, `the folded line of No. ${n} lost class withd though it has a side press: ${cls}`);
+});
+
+// The reply hint of an owed card names only controls the card has. A decision card has an options group, not "Your pick" or "Mark done" (page.html, syncReplyForm).
+test("reply to an item, case 21: the reply hint of an owed decision card names no control it lacks, so it does not say Your pick or Mark done", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await openReply(page, irpKey(IRP_OWED));
+  const hk = rplSel("rh-", irpKey(IRP_OWED));
+  await mustHave(page, hk, "hint of the owed card's reply box");
+  const hint = (await page.textContent(hk)) ?? "";
+  // Scope first: the reply hint of a card that is owed, which always says where the reply goes.
+  assert.ok(hint.includes("Your reply goes to"), "the reply hint of owed No. " + IRP_OWED.n + " does not say where the reply goes: " + JSON.stringify(hint));
+  assert.equal(/Your pick|Mark done/.test(hint), false, `the reply hint of owed No. ${IRP_OWED.n} names a control its card does not have: ${JSON.stringify(hint)}`);
+});
+
+// Control for case 21: an owed task card keeps the words its hint gives for a task, Mark done below answers it.
+const IRP_TASK = { ...TASK, id: "irp-task", n: 9, title: "Add the rail guard step", added: at(6), reply: "I added the step. Check again." };
+test("reply to an item, case 21, control: the reply hint of an owed task card still says Mark done below answers it", async (t) => {
+  const page = await open(t, { items: [IRP_TASK], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_TASK);
+  await openReply(page, irpKey(IRP_TASK));
+  const hk = rplSel("rh-", irpKey(IRP_TASK));
+  await mustHave(page, hk, "hint of the owed task's reply box");
+  const hint = (await page.textContent(hk)) ?? "";
+  assert.ok(hint.includes(`No. ${IRP_TASK.n} stays open: Mark done below answers it.`), `the reply hint of owed task No. ${IRP_TASK.n} does not say Mark done below answers it: ${JSON.stringify(hint)}`);
+});
+
 // ---------------------------------------------------------------- Mark read on an answered ask (step ask-dismiss)
 // Contract: docs/design/ask-dismiss-notes.md, sections 1-8; the mockup is docs/design/ask-dismiss.html.
 // Mark read writes `dismissed` (an ISO time) on the thread's root ask, with update. Mark unread writes `dismissed: null`. Nothing is deleted.
