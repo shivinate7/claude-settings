@@ -2453,8 +2453,8 @@ def case_override_ask_grant_defers_a_length():
 
 def case_override_ask_bare_number_reads_the_raw_first_word():
     # A code span before `override` is the prompt's first word, not `override`, so a bare number after it is no minutes:
-    # the judge says yes, and the grant is a one-act override. The control is `override 15 please` in OV_ASK_GRANTS,
-    # where the same number is 15 minutes.
+    # the judge says yes, and the grant is a one-act override. The control is `override 15 please`, a judge yes in
+    # case_override_bare_number_with_words_is_not_the_fast_path, where the same number is 15 minutes.
     for name, prompt in (("`x` override 15", "`x` override 15"), ("`x` override 15 please", "`x` override 15 please")):
         ask_grants(name, prompt, "once", OV_ONCE)
 
@@ -2572,16 +2572,16 @@ def case_override_ask_judge_kill_keeps_the_inbox_capture():
 
 
 # ONE ROUTE (decision owner-override). The owner's typed prompt reads one route, and the fast path makes no model call.
-# `override` alone, or with a reason, is one act. `override` plus a length (15, 15m, 90 minutes, 2 hours, 4h) is timed,
-# and a word after the length is allowed. Each grant prints one receipt line. The cases run in this process, with the
-# plain override judge (call_judge.override_ask) stood in by a JudgeRecorder and the Opus judge by JudgeStub, so no
-# model runs. A case counts the judge calls before it reads the grant, so a grant read after a judge that was never
+# `override` alone, or with a reason, is one act. `override` plus a length is timed: `15m`, `4h`, `2 hours`,
+# `90 minutes`, or a bare `15` that is the whole rest. A word may follow a length with a unit. A bare number with words
+# after it is no fast-path length: the plain ask judges it. Each grant prints one receipt line. The cases run in this
+# process, with the plain override judge (call_judge.override_ask) stood in by a JudgeRecorder and the Opus judge by
+# JudgeStub, so no model runs. A case counts the judge calls before it reads the grant, so a grant read after a judge that was never
 # asked proves nothing.
 OV_WINTER = datetime(2026, 1, 12, 18, 0, tzinfo=timezone.utc)  # 12:00 in US Central (CST)
 # (name, prompt, kind, how long the override lasts). The judge answers no for each: a grant that waits on it fails.
 FAST_GRANTS = (
     ("`override 15m please`, a word after the length", "override 15m please", "timed", timedelta(minutes=15)),
-    ("`override 15 please`, a bare number is minutes", "override 15 please", "timed", timedelta(minutes=15)),
     ("`override 2 hours`, a spelled unit", "override 2 hours", "timed", timedelta(hours=2)),
     ("`override 90 minutes`, a spelled unit", "override 90 minutes", "timed", timedelta(minutes=90)),
     ("`override 4h please`, a word after the length", "override 4h please", "timed", timedelta(hours=4)),
@@ -2732,6 +2732,85 @@ def case_override_relayed_grants_nothing():
     ask_no_grant("a peer origin on the prompt's own record, `override 15m`", bare, {None}, transcript=peer_bare)
 
 
+BARE_NUMBER_WORDS = (  # a bare number with words after it: no fast-path length, so the plain ask judges the prompt
+    ("`override 2024 incident`, a year-like number and a noun", "override 2024 incident", "2024 incident"),
+    ("`override 3000 lines of log`, a count and its words", "override 3000 lines of log", "3000 lines of log"),
+    ("`override 15 please`, a bare number and a word", "override 15 please", "15 please"),
+)
+
+
+def case_override_bare_number_with_words_is_not_the_fast_path():
+    # The fast path times a bare number only as the whole rest (`override 15`). With words after it, the plain ask
+    # judges the prompt: the judge is asked once, with the prompt. A judge no leaves a one-act override with the reason
+    # logged, as main does. A judge yes for `override 15 please` keeps main's minutes: 15 minutes.
+    for name, prompt, reason in BARE_NUMBER_WORDS:
+        cfg, judge, _, _, err = ask_type(prompt, answer=False)
+        check("override bare number: %s: the judge is asked once, with the prompt" % name,
+              judge.texts == [prompt], "judge texts %r; stderr %r" % (judge.texts, err.strip()[-120:]))
+        got = ov_pass(cfg)
+        check("override bare number: %s: a judge no grants a one-act override, not a timed one" % name,
+              ends_after(got, "once", OV_ONCE), "got %r; files %r" % (got, ov_pass_files(cfg)))
+        hits = [line for line in ov_log(cfg) if reason in line]
+        check("override bare number: %s: the reason is logged once" % name, len(hits) == 1,
+              "log %r" % (ov_log(cfg),))
+    cfg, judge, _, _, err = ask_type("override 15 please", answer=True)
+    check("override bare number: `override 15 please`, a judge yes: the judge is asked once, with the prompt",
+          judge.texts == ["override 15 please"], "judge texts %r; stderr %r" % (judge.texts, err.strip()[-120:]))
+    got = ov_pass(cfg)
+    check("override bare number: `override 15 please`, a judge yes grants a 15-minute override",
+          ends_after(got, "timed", timedelta(minutes=15)), "got %r; files %r" % (got, ov_pass_files(cfg)))
+
+
+def queued_record(prompt, origin=None):
+    """An attachment record of kind queued_command: an owner message typed while the session runs, its words in
+    attachment.prompt and its own origin in attachment.origin (no origin key when None)."""
+    att = {"type": "queued_command", "prompt": prompt}
+    if origin is not None:
+        att["origin"] = origin
+    return json.dumps({"type": "attachment", "attachment": att})
+
+
+# The attachment's own origin says a harness or a peer wrote the words. On the keyword route, each one grants nothing.
+# The peer object is already refused by the shared transcript reader (lint/_transcript.py), so its row is a green pin;
+# the other rows are red on the old code.
+QUEUED_NOT_OWNER = (
+    ("a task-notification origin", {"kind": "task-notification"}),
+    ("a loop_wakeup origin", {"kind": "loop_wakeup"}),
+    ("a string origin, `peer`", "peer"),
+    ("a peer origin object", {"kind": "peer"}),
+)
+QUEUED_PROMPTS = (("`override 15m please`", "override 15m please"), ("`override`", "override"))
+
+
+def case_override_queued_command_from_a_harness_or_peer_grants_nothing():
+    # The queued record is the prompt's own record, last in the transcript, and its origin sits on the attachment. The
+    # keyword route reads that record as the owner's typed turn unless the attachment's origin says otherwise. A missing
+    # gate shows as a grant, since the judge answers yes.
+    own = [owner_turn("set up the lane")]
+    for origin_name, origin in QUEUED_NOT_OWNER:
+        for prompt_name, prompt in QUEUED_PROMPTS:
+            path = transcript_file(own + [queued_record(prompt, origin)])
+            ask_no_grant("a queued command with %s, %s" % (origin_name, prompt_name), prompt, {None}, transcript=path)
+
+
+def case_override_queued_command_typed_still_grants():
+    # The control for the case above: the same record with no origin, or with a human origin, is the owner's typed turn
+    # and grants with no judge call. Only the origin differs between these and the refused records.
+    own = [owner_turn("set up the lane")]
+    for origin_name, origin in (("no origin", None), ("a human origin", {"kind": "human"})):
+        for prompt_name, prompt, kind, length in (
+                ("`override 15m please`", "override 15m please", "timed", timedelta(minutes=15)),
+                ("`override`", "override", "once", OV_ONCE)):
+            path = transcript_file(own + [queued_record(prompt, origin)])
+            cfg, judge, _, _, err = ask_type(prompt, transcript=path)
+            name = "a queued command with %s, %s" % (origin_name, prompt_name)
+            check("override queued control: %s: no judge call" % name, not judge.texts,
+                  "judge calls %d; stderr %r" % (len(judge.texts), err.strip()[-120:]))
+            got = ov_pass(cfg)
+            check("override queued control: %s: grants a %s override" % (name, kind), ends_after(got, kind, length),
+                  "got %r; files %r" % (got, ov_pass_files(cfg)))
+
+
 def main():
     try:
         case_table_in_process()
@@ -2850,6 +2929,9 @@ def main():
         case_override_timed_receipt()
         case_override_lift_logs_the_guard_named()
         case_override_relayed_grants_nothing()
+        case_override_bare_number_with_words_is_not_the_fast_path()
+        case_override_queued_command_from_a_harness_or_peer_grants_nothing()
+        case_override_queued_command_typed_still_grants()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
