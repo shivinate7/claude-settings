@@ -3457,6 +3457,18 @@ MUTATIONS = [
      '                           *sources, "--not", "--remotes")',
      '                           *sources, "--remotes")',
      "guard", "commit trailer: an Opus commit already on origin is not judged"),
+    ("commit-trailer-model: a later family word that differs no longer denies",
+     '    if any(other.group(1).lower() != own[0] for other in FAMILY_WORD.finditer(value, found.end())):',
+     '    if False:',
+     "guard", "commit trailer: a Claude Haiku 5.5 & Claude Opus 5.5 trailer from a Haiku agent is refused"),
+    ("commit-trailer-model: a dry run push is judged like a real push",
+     '        if read_verb is not None and read_verb("push", args):',
+     '        if False:',
+     "guard", "commit trailer: a git push -n of an Opus-trailer commit from a Haiku agent passes"),
+    ("commit-trailer-model: the call's own commit message is not read",
+     '        if read is not None and read[0] and read[1]:',
+     '        if False:',
+     "guard", "commit trailer: a commit with an Opus trailer chained to a push with && from a Haiku agent is refused"),
 ]
 
 
