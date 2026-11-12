@@ -116,11 +116,46 @@ else:
               NO_EXEC_BIT)
 
 
+# THE PATH COUNT. A tree of any count of changed paths is judged by the same read as a small one: 201 paths that
+# are all pushed copies are allowed, and one edit in no commit among them is still refused.
+sh("worktree remove: base copies, 201 changed paths that are all pushed copies, is allowed",
+   VCS + " worktree remove " + slash(BCCAP), "allow", cwd=BCMAIN)
+sh("worktree remove: base copies, the same 201 paths with one edit in no commit still denies",
+   VCS + " worktree remove " + slash(BCCAPUNIQUE), "deny", "shared-tree", cwd=BCMAIN)
+
+
+# THE INDEX READ FAILS. A stand-in git refuses `ls-files -s`, the one index read, and hands every other call to the
+# real git. The proof is then not reached, so the 201-path tree stays refused. POSIX only: see NO_STAND_IN.
+BCCAPBLIND = os.path.join(ROOT, "bc-cap-blind")  # the folder holding that stand-in git
+
+
+def _build_cap_stand_in():
+    """The stand-in for the index read. Read back before a case relies on it: the index read must be refused and
+    the status read must answer, so the case cannot pass on a stand-in that fails every call."""
+    materialize(BCCAP)
+    make_git_stand_in(BCCAPBLIND, fail_on="ls-files -s")
+    stand_in = os.path.join(BCCAPBLIND, VCS)
+    refused = subprocess.run([stand_in, "-C", BCCAP, "ls-files", "-s"], capture_output=True, text=True)
+    answered = subprocess.run([stand_in, "-C", BCCAP, "status", "--porcelain"], capture_output=True, text=True)
+    if refused.returncode == 0 or answered.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: the index-read stand-in exits %d on the index read and %d "
+                 "on the status read, want a refusal then an answer" % (refused.returncode, answered.returncode))
+
+
+if os.name != "nt":
+    lazy_fixture([BCCAPBLIND], _build_cap_stand_in)
+    sh("worktree remove: base copies, 201 changed paths whose index read fails still denies",
+       VCS + " worktree remove " + slash(BCCAP), "deny", "shared-tree", cwd=BCMAIN,
+       env_path=BCCAPBLIND + os.pathsep + GIT_PATH)
+else:
+    skip_case("worktree remove: base copies, 201 changed paths whose index read fails still denies", NO_STAND_IN)
+
+
 # THE COST OF THE PUSHED-COPY READ. dirty_paths_are_pushed_copies (git_reads.py) states its cost: at most 14
 # fixed git starts, then one ls-tree per candidate tried and one for-each-ref per candidate a match uses, with
 # 2 + BASE_COPY_REFLOG_CAP candidates at most. Each git start of that read goes through `_git`, so the count is
-# taken there, on a fresh load of git_reads.py. The incident tree must answer True: a False would stop the
-# read early and the count would prove nothing about the whole read.
+# taken there, on a fresh load of git_reads.py. A tree must answer True: a False would stop the read early
+# and the count would prove nothing about the whole read.
 def _load_git_reads():
     """git_reads.py, loaded fresh from the folder GUARD sits in, so a patch to it touches no other load."""
     import importlib.util
@@ -142,9 +177,9 @@ def _tree_marks(where):
     return marks
 
 
-def base_copies_read_cost_case():
-    """The stated cost of dirty_paths_are_pushed_copies, measured on the incident tree, writes nothing."""
-    materialize(BCINC)
+def _pushed_copy_read_cost(tree):
+    """The stated cost of dirty_paths_are_pushed_copies on TREE, which the read must answer True for, and which
+    it writes nothing to. (ok, note)"""
     git_reads = _load_git_reads()
     starts = []
     real_git = git_reads._git
@@ -153,11 +188,11 @@ def base_copies_read_cost_case():
         starts.append(args)
         return real_git(where, *args)
 
-    lines = _porcelain(BCINC)
-    marks = _tree_marks(BCINC)
+    lines = _porcelain(tree)
+    marks = _tree_marks(tree)
     git_reads._git = counting_git
     try:
-        got = git_reads.dirty_paths_are_pushed_copies(BCINC, lines)
+        got = git_reads.dirty_paths_are_pushed_copies(tree, lines)
     finally:
         git_reads._git = real_git
     fixed = [args for args in starts if "ls-tree" not in args and "for-each-ref" not in args]
@@ -166,7 +201,7 @@ def base_copies_read_cost_case():
     candidates = 2 + git_reads.BASE_COPY_REFLOG_CAP
     problems = []
     if got is not True:
-        problems.append("the incident tree read as %r, want True" % (got,))
+        problems.append("the tree read as %r, want True" % (got,))
     if len(fixed) > 14:
         problems.append("%d fixed git starts, want at most 14" % len(fixed))
     if len(ls_tree) > candidates:
@@ -174,9 +209,9 @@ def base_copies_read_cost_case():
     if len(for_each_ref) > len(ls_tree):
         problems.append("%d for-each-ref starts, want at most one per candidate tried (%d)"
                         % (len(for_each_ref), len(ls_tree)))
-    if _tree_marks(BCINC) != marks:
+    if _tree_marks(tree) != marks:
         problems.append("a file or folder in the tree changed mtime during the read")
-    if _porcelain(BCINC) != lines:
+    if _porcelain(tree) != lines:
         problems.append("git status --porcelain changed during the read")
     if problems:
         return False, "; ".join(problems)
@@ -184,7 +219,56 @@ def base_copies_read_cost_case():
         len(fixed), len(ls_tree), len(for_each_ref), candidates)
 
 
+def base_copies_read_cost_case():
+    """The stated cost of dirty_paths_are_pushed_copies, measured on the incident tree, writes nothing."""
+    materialize(BCINC)
+    return _pushed_copy_read_cost(BCINC)
+
+
+def path_cap_read_cost_case():
+    """The same stated cost on the 201-path tree: a count of changed paths does not raise it."""
+    materialize(BCCAP)
+    return _pushed_copy_read_cost(BCCAP)
+
+
 FIXTURELESS_CHECKS.add(base_copies_read_cost_case)  # builds only the base-copy trees it reads
+FIXTURELESS_CHECKS.add(path_cap_read_cost_case)
+
+
+# THE INDEX READ RAISES, IN PROCESS. The proof reads the index with `ls-files -s`. Each failure of that read below is
+# handed to the proof, which must answer None: a read that failed is not proved. The guard refuses None and False
+# alike, so only this check reads the value itself.
+class _IndexReadRaises:
+    """Stands in for git_reads' runner: an index read (`ls-files -s`) raises FAIL, and every other call runs for real."""
+
+    def __init__(self, real, fail):
+        self.real = real
+        self.fail = fail
+
+    def run(self, argv, **kwargs):
+        if "ls-files" in argv and "-s" in argv:
+            raise self.fail
+        return self.real.run(argv, **kwargs)
+
+
+def _index_read_raises_case(fail):
+    """A check: the proof on the 201-path tree answers None when its index read raises FAIL."""
+    def check():
+        materialize(BCCAP)
+        git_reads = _load_git_reads()
+        git_reads._nowindow = _IndexReadRaises(git_reads._nowindow, fail)
+        got = git_reads.dirty_paths_are_pushed_copies(BCCAP, _porcelain(BCCAP))
+        name = type(fail).__name__
+        if got is None:
+            return True, "the index read raised %s, and the proof answers None" % name
+        return False, "the index read raised %s, and the proof answered %r, want None" % (name, got)
+    return check
+
+
+path_cap_timeout_check = _index_read_raises_case(subprocess.TimeoutExpired(["git", "ls-files"], 10))
+path_cap_no_git_check = _index_read_raises_case(FileNotFoundError("git"))
+path_cap_long_line_check = _index_read_raises_case(OSError("Argument list too long"))
+FIXTURELESS_CHECKS.update((path_cap_timeout_check, path_cap_no_git_check, path_cap_long_line_check))
 
 # `git worktree prune`. This deletes NO FILES, only an administrative record, so the worst case
 # is an ASK, never a deny, whatever the run location.

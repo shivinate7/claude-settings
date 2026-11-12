@@ -455,6 +455,8 @@ BCLOCKED = os.path.join(ROOT, "bc-locked")          # the incident tree, locked
 BCLIVE = os.path.join(ROOT, "bc-live")              # the incident tree, with a live session standing in it
 BCLIVECFG = os.path.join(ROOT, "bc-livecfg")        # the config folder holding that session's record
 BCEXEC = os.path.join(ROOT, "bc-exec")              # the incident tree, f.txt at mode 100755 in the base
+BCCAP = os.path.join(ROOT, "bc-cap")                # 201 changed paths, each a pushed copy
+BCCAPUNIQUE = os.path.join(ROOT, "bc-cap-unique")   # the same 201 paths, one of them an edit in no commit
 
 # SYMLINK WORKTREES (the feed-build incident). An agent linked
 # `app/node_modules` to another worktree's packages. Git lists an untracked symlink as a FILE
@@ -2292,22 +2294,39 @@ def _base_git(where, *args):
     return done
 
 
-def _base_copy_tree(where, branch, moved=True, executable=False):
+def _numbered_paths(count):
+    """The names of a tree's `count` changed files: p000.txt, p001.txt and so on."""
+    return ["p%03d.txt" % i for i in range(count)]
+
+
+def _base_copy_tree(where, branch, moved=True, executable=False, many=0):
     """Build one base-copy tree at `where`: a linked worktree of BCMAIN on `branch`, pushed at the base P0.
     When `executable`, P0 is a commit that sets f.txt to mode 100755, so the base carries the exec bit.
+    When `many` is N, P0 also holds N files (see _numbered_paths), and P1 changes each of them in place of
+    f.txt and g.txt, so the tree is dirty in exactly N paths.
     When `moved`, BCSECOND pushes P1 (a change to f.txt, and a new g.txt) to that branch. BCMAIN then fetches
     it and moves the branch onto P1 with `update-ref`, which leaves the worktree's index on P0."""
+    names = _numbered_paths(many)
     _base_git(BCMAIN, "worktree", "add", "-q", where, "-b", branch)
     if executable:
         _base_git(where, "update-index", "--chmod=+x", "f.txt")
         _base_git(where, *IDENT, "commit", "-q", "-m", "make f.txt executable on " + branch)
+    if names:
+        for name in names:
+            write(os.path.join(where, name), "base %s\n" % name)
+        _base_git(where, "add", "-A")
+        _base_git(where, *IDENT, "commit", "-q", "-m", "base files on " + branch)
     _base_git(where, "push", "-q", "origin", branch)
     if not moved:
         return
     _base_git(BCSECOND, "fetch", "-q", "origin")
     _base_git(BCSECOND, "checkout", "-q", "-B", branch, "origin/" + branch)
-    write(os.path.join(BCSECOND, "f.txt"), "changed on %s\n" % branch)
-    write(os.path.join(BCSECOND, "g.txt"), "new on %s\n" % branch)
+    if names:
+        changes = {name: "changed on %s\n" % branch for name in names}
+    else:
+        changes = {"f.txt": "changed on %s\n" % branch, "g.txt": "new on %s\n" % branch}
+    for name, text in changes.items():
+        write(os.path.join(BCSECOND, name), text)
     _base_git(BCSECOND, "add", "-A")
     _base_git(BCSECOND, *IDENT, "commit", "-q", "-m", "change " + branch)
     _base_git(BCSECOND, "push", "-q", "origin", branch)
@@ -2413,9 +2432,23 @@ def _build_base_copies():
         os.chmod(os.path.join(BCEXEC, "f.txt"), 0o655)
         _require_base_copy(BCEXEC, ["MM f.txt", "D  g.txt"], 0)
 
+    # Path count: 201 changed paths, each staged as its base copy. 201 is one past 200, a count a cap of 200
+    # would refuse, so a case that allows this tree shows the count alone is no reason to refuse.
+    _base_copy_tree(BCCAP, "bc-cap", many=201)
+    _require_base_copy(BCCAP, ["M  " + name for name in _numbered_paths(201)], 0, staged_ancestor=False)
+    if _base_git(BCCAP, "diff", "--cached", "--name-only", "HEAD~1").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: the index of %r is not its base commit" % BCCAP)
+
+    # The same 201 paths, one of them edited in no commit: the content is not a pushed copy, so it stays refused.
+    _base_copy_tree(BCCAPUNIQUE, "bc-cap-unique", many=201)
+    write(os.path.join(BCCAPUNIQUE, "p100.txt"), "unique text, in no commit\n")
+    _require_base_copy(BCCAPUNIQUE,
+                       ["M  " + name for name in _numbered_paths(201) if name != "p100.txt"] + ["MM p100.txt"],
+                       0, staged_ancestor=False)
+
 
 lazy_fixture([BCMAIN, BCINC, BCUNIQUE, BCUNTRACKED, BCUNPUSHED, BCBYPASS, BCCLEAN, BCLOCKED, BCLIVE,
-              BCLIVECFG, BCEXEC], _build_base_copies)
+              BCLIVECFG, BCEXEC, BCCAP, BCCAPUNIQUE], _build_base_copies)
 
 
 def _build_links():
