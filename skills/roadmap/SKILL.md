@@ -16,6 +16,8 @@ Run from any folder:
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> [--record-branch <branch>] --block --out FILE
 
+`python3 ~/.claude/skills/roadmap/build.py --check-staged` is the pre-commit note cap (step c138): it reads the step files staged in the index, writes no page, and exits 1 naming each step whose staged note is over `NOTE_WORDS` words and is added or grown by the commit.
+
 `--record-branch` defaults to the extras key `record-branch` in `.claude/layout-extras.json`, else `roadmap`.
 With no flag, an extras file that cannot be read warns and reads `roadmap`. A `record-branch` value that is
 not a plain git branch name stops the script.
@@ -206,7 +208,7 @@ pass: the build prints `mockup file unread: <step id> <mockup id> (<why>)` and e
 After each build the roadmap build script prints the upkeep list for the triage thread. It names:
 
 - open-step notes that are too long;
-- untouched steps and empty notes in a live phase;
+- untouched steps and empty notes in a live phase (a phase that holds a `doing` or `active` step). The two rows read `todo`, `ready`, `queued`, `doing` and `active` steps; `blocked` and `folded` steps, and a step with no phase, are never listed;
 - new top steps with no "Placed ahead of" line;
 - landed feel-fix steps with no valid device trial, in the row `landed, waiting for a device trial`. A
   feel-fix is a step whose `feel` is set to anything but `false` or `null` (decision
@@ -225,7 +227,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   The session also needs the tag `cs-repo:<owner>/<repo>` for this
   repo's GitHub name, in any case, because `list_sessions` is account-wide and step ids repeat across
   repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
-  whose status is none of `todo`, `ready`, `doing`, `active` or `done` is listed as `<id> (unknown status
+  whose status is none of the known ones (`todo`, `ready`, `queued`, `blocked`, `folded`, `doing`, `active`, `done`; `KNOWN_STATUS` in `build.py`) is listed as `<id> (unknown status
   "<status>")`. Each other entry reads `<id> (set to todo)`, or `<id> (set to done: landed in #N)` when
   a `Step:` trailer is on main or a `landedPulls` row proves it. Triage sets each step back. The red line prints a `stalled step:` line
   for each entry except an unknown-status one, built from the same test. The row reads one `unknown (<why>)` entry,
