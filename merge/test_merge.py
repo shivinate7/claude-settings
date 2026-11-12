@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, base64, contextlib, fnmatch, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, contextlib, copy, fnmatch, importlib.util, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +25,7 @@ import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shall
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
+import layout as repo_layout  # noqa: E402  the one layout (lint/layout.py); a case moves its decisions kind in a copy of merge.py
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
@@ -16152,10 +16153,21 @@ class ReviewGuardTestPaths(unittest.TestCase):
         self.assertEqual(review_fn(self, "guard_hits")(["hooks/test_guard.py", "hooks/mutate_guard.py"]), ["hooks/mutate_guard.py"],
                          "guard_hits counts the test path hooks/test_guard.py, or drops the check hooks/mutate_guard.py")
 
+def merge_with_decisions_moved(path):
+    """A fresh load of merge.py whose decisions folder is `path`. merge.py reads the folder from the layout once, at import, so the layout is
+    patched for that load only; the merge module the other cases use is left as it is."""
+    moved_layout = copy.deepcopy(repo_layout.layout())
+    moved_layout["kinds"]["decisions"]["path"] = path
+    spec = importlib.util.spec_from_file_location("merge_with_moved_decisions", merge.__file__)
+    module = importlib.util.module_from_spec(spec)
+    with unittest.mock.patch.object(repo_layout, "layout", return_value=moved_layout):
+        spec.loader.exec_module(module)
+    return module
+
 class ReviewGuardKinds(unittest.TestCase):
     """merge.kind_misfits(kind, files): the sorted paths that break the kind, over the (path, status, additions) triples of the diff. docs-only:
-    each path that is not a doc, a .md under docs/ or the root README.md (merge.is_doc). delete-only: each path that adds lines (additions above
-    0), or is new (status added, renamed or copied). normal: none."""
+    each path that is not a doc, a .md under docs/ or the root README.md (merge.is_doc), and each decision record (a file under docs/decisions/,
+    in any letter case) that the diff does not remove. delete-only: each path that adds lines (additions above 0), or is new (status added, renamed or copied). normal: none."""
 
     def test_normal_owes_no_kind_check(self):
         self.assertEqual(review_fn(self, "kind_misfits")("normal", [("hooks/a.py", "modified", 4), ("x.py", "removed", 0)]), [])
@@ -16163,6 +16175,66 @@ class ReviewGuardKinds(unittest.TestCase):
     def test_docs_only_names_each_path_that_is_not_a_doc_sorted(self):
         files = [("lint/x.py", "modified", 2), ("docs/a.md", "modified", 1), ("hooks/y.txt", "modified", 0), ("docs/b.md", "removed", 0)]
         self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["hooks/y.txt", "lint/x.py"])
+
+    def test_docs_only_names_a_decision_record_it_adds(self):
+        # The Kind of a diff that files a decision record must not be docs-only (decision docs-only-prs-skip-review).
+        # Scope first: the decision path is a doc, so the naming below is the ruling check and not the doc check.
+        self.assertTrue(review_fn(self, "is_doc")("docs/decisions/new-ruling.md"), "scope: the decision path is not a doc, so the naming below would not be this check")
+        files = [("docs/decisions/new-ruling.md", "added", 12), ("docs/a.md", "modified", 1)]
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["docs/decisions/new-ruling.md"],
+                         "docs-only passed a decision record it adds")
+
+    def test_docs_only_names_a_decision_record_it_edits(self):
+        self.assertTrue(review_fn(self, "is_doc")("docs/decisions/old-ruling.md"), "scope: the decision path is not a doc, so the naming below would not be this check")
+        files = [("docs/decisions/old-ruling.md", "modified", 3), ("docs/b.md", "modified", 1)]
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["docs/decisions/old-ruling.md"],
+                         "docs-only passed a decision record it edits")
+
+    def test_docs_only_names_nothing_outside_the_decisions_folder(self):
+        # A debt, a map page and a folder whose name only starts with docs/decisions are not decision records, so none is named.
+        files = [("docs/debts/x.md", "added", 2), ("docs/map/x.md", "added", 2), ("docs/decisionsx/y.md", "added", 2)]
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), [], "docs-only names a doc outside the decisions folder")
+
+    def test_docs_only_names_a_decision_record_renamed_into_the_folder(self):
+        # A rename files its ruling under the new path, so the new path is named. The old path is a removed doc, which no rule names.
+        self.assertTrue(review_fn(self, "is_doc")("docs/decisions/moved-ruling.md"), "scope: the decision path is not a doc, so the naming below would not be this check")
+        files = [("docs/decisions/moved-ruling.md", "renamed", 0), ("docs/old-ruling.md", "removed", 0)]
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["docs/decisions/moved-ruling.md"],
+                         "docs-only passed a decision record renamed into the folder")
+
+    def test_docs_only_names_a_decision_record_copied_into_the_folder(self):
+        self.assertTrue(review_fn(self, "is_doc")("docs/decisions/copied-ruling.md"), "scope: the decision path is not a doc, so the naming below would not be this check")
+        files = [("docs/decisions/copied-ruling.md", "copied", 0), ("docs/a.md", "modified", 1)]
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["docs/decisions/copied-ruling.md"],
+                         "docs-only passed a decision record copied into the folder")
+
+    def test_docs_only_names_a_decision_record_whose_status_is_changed(self):
+        self.assertTrue(review_fn(self, "is_doc")("docs/decisions/changed-ruling.md"), "scope: the decision path is not a doc, so the naming below would not be this check")
+        files = [("docs/decisions/changed-ruling.md", "changed", 2)]
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["docs/decisions/changed-ruling.md"],
+                         "docs-only passed a decision record whose status is changed")
+
+    def test_docs_only_names_a_decision_record_in_any_letter_case(self):
+        # is_doc ignores letter case, so the folder test ignores it too: Docs/Decisions/x.md is a decision record.
+        path = "Docs/Decisions/new-ruling.md"
+        self.assertTrue(review_fn(self, "is_doc")(path), "scope: the decision path is not a doc, so the naming below would not be this check")
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", [(path, "added", 12)]), [path],
+                         "docs-only passed a decision record in another letter case")
+
+    def test_docs_only_names_nothing_for_a_removed_decision_record(self):
+        # Green control: a removed record files no ruling, so the rule does not name it.
+        self.assertTrue(review_fn(self, "is_doc")("docs/decisions/gone-ruling.md"), "scope: the decision path is not a doc, so the naming below would not be this check")
+        self.assertEqual(review_fn(self, "kind_misfits")("docs-only", [("docs/decisions/gone-ruling.md", "removed", 0)]), [],
+                         "docs-only named a removed decision record")
+
+    def test_docs_only_follows_the_decisions_folder_the_layout_names(self):
+        # The folder comes from the layout (merge.DECISIONS_DIR), so a layout that moves the decisions kind moves the ruling check with it.
+        moved = merge_with_decisions_moved("docs/rulings")
+        self.assertTrue(review_fn(self, "is_doc")("docs/rulings/new-ruling.md"), "scope: the moved path is not a doc, so the naming below would not be this check")
+        self.assertEqual(moved.kind_misfits("docs-only", [("docs/rulings/new-ruling.md", "added", 12)]), ["docs/rulings/new-ruling.md"],
+                         "docs-only passed a decision record under the folder the layout names")
+        self.assertEqual(moved.kind_misfits("docs-only", [("docs/decisions/x.md", "added", 12)]), [],
+                         "docs-only named a doc under docs/decisions/, which the layout no longer names as the decisions folder")
 
     def test_delete_only_names_each_path_that_adds_or_is_new_sorted(self):
         files = [("hooks/a.py", "removed", 0), ("README.md", "modified", 3), ("docs/moved.md", "renamed", 0), ("docs/old.md", "removed", 0),
@@ -16303,16 +16375,17 @@ class ReviewGuardRefusal(ReviewGuardEnv):
 class ReviewDocsOnlyDiff(ReviewGuardEnv):
     """`--kind docs-only` prints the record only when every changed path is a doc: a .md under docs/, or the root README.md, matched without
     regard to letter case and never stripped (decision docs-only-prs-skip-review). Any other .md is a rule, skill or agent file, which steers
-    behaviour, so it is refused. A path under a guard folder is refused by the guard before the kind is checked."""
+    behaviour, so it is refused. A decision record (a file under docs/decisions/, in any letter case) that the change does not remove is refused too: it files an owner
+    ruling, and that change owes its round (decision docs-only-prs-skip-review). A path under a guard folder is refused by the guard before the kind is checked."""
 
     def run_docs(self, *paths):
         """-> (rc, stdout, stderr) of a docs-only record for pull request 7 whose changed paths are `paths`, each modified with no added line."""
         self.host.changed = [(p, "modified", 0) for p in paths]
         return self.run_args(*self.review_argv("docs-only"))
 
-    def assert_docs_refused(self, rc, out, err, *paths):
-        """A docs-only record that names a path which is not a doc: rc 1, no record on stdout, the Kind reason on stderr, each path named."""
-        self.assertEqual(rc, 1, "docs-only record not refused: a path that is not a doc printed the record\n" + out + err)
+    def assert_docs_refused(self, rc, out, err, *paths, cause="a path that is not a doc"):
+        """A docs-only record that names a path the docs-only rule refuses (`cause` says which): rc 1, no record on stdout, the Kind reason on stderr, each path named."""
+        self.assertEqual(rc, 1, f"docs-only record not refused: {cause} printed the record\n" + out + err)
         self.assertEqual(out, "", "the refused docs-only record printed on stdout")
         self.assertIn("Kind", err, "the refusal does not hold on Kind\n" + err)
         for path in paths:
@@ -16380,8 +16453,25 @@ class ReviewDocsOnlyDiff(ReviewGuardEnv):
     def test_the_root_readme_alone_prints_the_record(self):
         self.assert_docs_printed(*self.run_docs("README.md"))
 
-    def test_a_docs_md_beside_a_records_file_prints_the_record(self):
-        self.assert_docs_printed(*self.run_docs("docs/decisions/x.md", "docs/records.md"))
+    def test_a_debt_md_beside_the_records_index_prints_the_record(self):
+        # The example stays outside docs/decisions/: a file there files a ruling and is refused (test_a_decision_record_refuses_the_docs_only_record).
+        self.assert_docs_printed(*self.run_docs("docs/debts/x.md", "docs/records.md"))
+
+    def test_a_decision_record_refuses_the_docs_only_record(self):
+        # Scope first: the decision path is a doc, so the refusal below is the ruling check, not the doc check.
+        self.assertTrue(review_fn(self, "is_doc")("docs/decisions/new-ruling.md"), "scope: the decision path is not a doc, so the refusal would not be the ruling check")
+        self.host.changed = [("docs/decisions/new-ruling.md", "added", 12)]
+        rc, out, err = self.run_args(*self.review_argv("docs-only"))
+        self.assert_docs_refused(rc, out, err, "docs/decisions/new-ruling.md", cause="a decision record that files an owner ruling")
+
+    def test_a_decision_record_prints_as_a_normal_record_with_one_round(self):
+        # The form the ruling check sends a decision record to: Kind normal, with one round.
+        self.host.changed = [("docs/decisions/new-ruling.md", "added", 12)]
+        rc, out, err = self.run_args(*self.review_argv("normal"))
+        self.assertEqual(rc, 0, out + err)
+        rec = parse_text(self, posted_body(self, out))
+        self.assertEqual(rec["kind"], "normal")
+        self.assertEqual(rec["rounds"], [(1, "reviewer", "sonnet", "PASS")], "a decision record under Kind normal does not print its one round")
 
     def test_an_empty_diff_prints_the_record(self):
         # The empty state: no changed path, so no path that is not a doc.
