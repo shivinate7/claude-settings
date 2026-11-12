@@ -10,7 +10,8 @@ FAMILY = "lane-closes-after-records"
 #   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
 #     cs-step slug refuses. None allows. A read that cannot run refuses: guards fail closed.
 #   - a lane whose repo is outside this session's GitHub scope (GitHub answers 404 on the open list): refuses, and the
-#     reason names the scope, the remedy add_repo (read access to the repo, then run the archive again), and the runner
+#     reason names the scope, the remedy add_repo (read access to the repo, or push access for a public repo, then run
+#     the archive again), and the runner
 #     that holds the repo, with no retry advice. A transient failure in scope (a 5xx) still says retry, and never names
 #     add_repo.
 #   - a lane whose record names branches (external_metadata.current_branches): each branch ahead of its repo's
@@ -277,6 +278,17 @@ archive_refuse("a lane whose cs-repo o/r answers 404 names o/r and add_repo as a
                role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ADD_REPO_PIN + ("o/r",))
 archive_refuse("a lane whose cs-repo o/r the cloud proxy refuses with a 403 names o/r and add_repo as a remedy",
                role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ADD_REPO_PIN + ("o/r",))
+# A read add attaches nothing for a public repo, so gh still cannot read its pull requests there. The remedy for a public
+# repo is add_repo with push access (access "push"). Each path has one row; the scope rows above keep the no-retry pins.
+PUBLIC_PUSH_PIN = (("push", "Push"), ("public repo", "Public repo"))
+archive_refuse("a lane whose cs-repo answers 404 on its open list, out of scope, names add_repo with push access for a public repo, and no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ADD_REPO_PIN + PUBLIC_PUSH_PIN, lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a lane whose cs-repo the cloud proxy refuses with a 403, out of scope, names add_repo with push access for a public repo, and no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ADD_REPO_PIN + PUBLIC_PUSH_PIN, lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a sources-only repo whose own read answers 404, out of scope, names add_repo with push access for a public repo, and no retry",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ADD_REPO_PIN + PUBLIC_PUSH_PIN, lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a lane whose branch compare in q_max is the cloud proxy's 403, out of scope, names add_repo with push access for a public repo, and no retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403), carries=ADD_REPO_PIN + PUBLIC_PUSH_PIN, lacks=ARCHIVE_SCOPE_LACKS)
 # The controls. A transient failure in scope still says retry and names neither the scope nor the runner. A 404 on a
 # branch's own tip is missing, not out of scope: it refuses as unreadable, with the read reason.
 TRANSIENT_PIN = ARCHIVE_READ_PIN + (("retry", "Retry"),)
