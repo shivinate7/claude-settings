@@ -536,5 +536,17 @@ for _name, _command, _carries in (
 sh("silent-write wrapper: an ordinary commit inside bash -c stays allowed",
    "bash -c '" + VCS + " commit -m x'", "allow", cwd=NOGIT)
 
+# The wrapper's inner text is scanned as source text (building-scanner-respects-strings). A merge named inside a
+# quoted echo is text, so it allows. A comment opener or a lone apostrophe inside those quotes must not hide the
+# real merge that follows, so the discarded merge still denies.
+sh("silent-write wrapper scanner: a merge named inside a quoted echo is text, allowed",
+   'bash -c "echo \'a && gh pr merge 3\'" >/dev/null', "allow", cwd=NOGIT)
+sh("silent-write wrapper scanner: a comment opener inside a quoted echo does not hide a discarded merge",
+   'bash -c "echo \'x # y\'; gh pr merge 3 --squash" >/dev/null', "deny", "silent-write",
+   carries=("a redirect silences", "gh pr merge"), cwd=NOGIT)
+sh("silent-write wrapper scanner: a lone apostrophe in an escaped echo does not hide a discarded merge",
+   'bash -c "echo don\\\'t; gh pr merge 3 --squash" >/dev/null', "deny", "silent-write",
+   carries=("a redirect silences", "gh pr merge"), cwd=NOGIT)
+
 
 # =========================================================================== 3. push and delete
