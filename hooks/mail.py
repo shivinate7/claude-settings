@@ -7,11 +7,15 @@ plumbing touches it, never a working tree. No log is written.
 Cost of a turn start: one git process (ls-remote) when the ref has not moved, and no file written. When it moved: at most four
 (ls-remote, fetch, grep, log), and files written only in the cache. The four bounds sum to 10 s, so a hung remote costs the
 prompt at most 10 s. A failure prints "mail unknown: <reason>", never "no mail".
+
+Cost of `mail wait`: one process, one lock file, and one ls-remote per interval (30 s) while the ref has not moved. A moved
+ref adds one fetch and one grep. Nothing else is written during a poll.
 """
 import hashlib
 import json
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -28,6 +32,9 @@ LOG_LIMIT = "200"  # commits the age lookup may walk
 HEADER = re.compile(r"^Msg (\S+) from (\S+) to (\S+) kind (\S+) re (\S+) try (\d+)")
 SAFE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
 NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says "[remote rejected]" and is not retried
+WINDOWS = sys.platform == "win32"  # read at call time, so a case can drive the Windows branch on any runner
+WAIT_INTERVAL, WAIT_MAX_SECONDS = 30, 6600  # `mail wait`: poll gap, and a run that ends before the 2 h background cap
+BODY_LIMIT = 160  # characters of a message's first body line that the wake line shows
 
 
 class MailError(Exception):
@@ -58,12 +65,39 @@ def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     # blob bytes and put a CR in an index path.
     data = None if input_text is None else utf8(input_text)
     try:
-        done = _nowindow.run(prefix + args, env=run_env, input=data, capture_output=True, timeout=timeout)
+        if WINDOWS:
+            done = _run_windows(prefix + args, run_env, data, timeout)
+        else:
+            done = _nowindow.run(prefix + args, env=run_env, input=data, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise MailError("timeout")
     except OSError as error:
         raise MailError("git: %s" % error)
     return done.returncode, _text(done.stdout), _text(done.stderr)
+
+
+def _run_windows(command, env, data, timeout):
+    """subprocess.run on Windows calls communicate() again after it kills a timed-out child, and that call blocks while a
+    grandchild (ssh) holds the pipes open. Here the pipes are closed after the kill and the wait is bounded. Unmeasured
+    on Windows: the cases drive this branch with a fake child."""
+    child = _nowindow.Popen(command, env=env, stdin=subprocess.PIPE if data is not None else None,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        out, err = child.communicate(data, timeout=timeout)
+    except BaseException:
+        child.kill()
+        for pipe in (child.stdin, child.stdout, child.stderr):
+            try:
+                if pipe is not None:
+                    pipe.close()
+            except OSError:
+                pass
+        try:
+            child.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        raise
+    return subprocess.CompletedProcess(command, child.returncode, out, err)
 
 
 def _text(value):
@@ -83,8 +117,9 @@ def reason(stderr):
     return re.sub(r"^(fatal|error): ", "", cause)[:160]
 
 
-def must(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
-    code, out, err = git(args, env, cache, timeout, input_text)
+def must(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None, run=None):
+    """git that raises MailError on a failure. `run` replaces git for one caller (mail wait's injected runner)."""
+    code, out, err = (run or git)(args, env, cache, timeout, input_text)
     if code:
         raise MailError(reason(err))
     # git exits 0 when core.protectNTFS skips an index path and prints only "Ignoring path" on stderr.
@@ -109,15 +144,15 @@ def ensure_cache(cache):
         handle.write("ref: %s\n" % REF)
 
 
-def remote_tip(env):
+def remote_tip(env, run=None):
     """The remote mail ref's sha, or None when the store has no mail ref yet."""
-    out = must(["ls-remote", env["MAILBOX_REPO"], REF], env, timeout=REMOTE_BOUND)
+    out = must(["ls-remote", env["MAILBOX_REPO"], REF], env, timeout=REMOTE_BOUND, run=run)
     return out.split()[0] if out.strip() else None
 
 
-def fetch(env, timeout=TRANSFER_BOUND):
+def fetch(env, timeout=TRANSFER_BOUND, run=None):
     ensure_cache(cache_path(env))
-    must(["fetch", "--quiet", "--no-tags", env["MAILBOX_REPO"], "+%s:%s" % (REF, REF)], env, cache_path(env), timeout)
+    must(["fetch", "--quiet", "--no-tags", env["MAILBOX_REPO"], "+%s:%s" % (REF, REF)], env, cache_path(env), timeout, run=run)
 
 
 def sync(env):
@@ -236,12 +271,12 @@ def own_addrs(session_id, cwd, env):
     return ([base + "/" + session_id] if session_id and safe(session_id) else []) + [base]
 
 
-def open_messages(env, tip, addrs):
+def open_messages(env, tip, addrs, run=None):
     """[{id, addr, from, kind, re, sent}] for each file directly under mail/<addr>/ at `tip`. Two git processes. A repo
     address is a path prefix of its session addresses, so grep's hits are filtered to the folders named."""
     cache = cache_path(env)
     paths = ["mail/%s/" % addr for addr in addrs]
-    code, out, err = git(["grep", "-I", "--no-color", "-e", "^Msg ", tip, "--"] + paths, env, cache, GREP_BOUND)
+    code, out, err = (run or git)(["grep", "-I", "--no-color", "-e", "^Msg ", tip, "--"] + paths, env, cache, GREP_BOUND)
     if code not in (0, 1):  # 1 is no match
         raise MailError(reason(err))
     found = {}
@@ -255,7 +290,7 @@ def open_messages(env, tip, addrs):
         # The age is a courtesy: a slow or failed lookup leaves "age unknown" and never hides the mail.
         try:
             rows = must(["log", "-n", LOG_LIMIT, "--format=@%ct", "--name-only", "--diff-filter=A", "--no-renames", tip,
-                         "--"] + paths, env, cache, LOG_BOUND).splitlines()
+                         "--"] + paths, env, cache, LOG_BOUND, run=run).splitlines()
         except MailError:
             rows = []
         for row in rows:
@@ -322,3 +357,166 @@ def turn_start_lines(payload, env):
         return render(saved["messages"], time.time())
     except Exception as error:  # a MailError, or a bug: advisory, so it never blocks the prompt
         return ["mail unknown: %s" % error]
+
+
+def _pid_alive(pid):
+    if WINDOWS:  # os.kill would end the process there, so ask for its exit code
+        try:
+            import ctypes
+            kernel = ctypes.windll.kernel32
+            handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return False
+            code = ctypes.c_ulong()
+            ok = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+            kernel.CloseHandle(handle)
+            return bool(ok) and code.value == 259  # STILL_ACTIVE
+        except Exception:
+            return True  # unknown reads as alive: the lock deadline still ends a stale waiter
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # EPERM: the process exists
+    return True
+
+
+def _start_time(pid):
+    """The process start time in clock ticks since boot, or None where /proc has none. It tells a reused pid from the
+    process that wrote a lock."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            return float(handle.read().rpartition(")")[2].split()[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _read_lock(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            record = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    return record if isinstance(record, dict) else None
+
+
+def _lock_is_stale(record, now, pid_alive, start_time):
+    """Stale: unreadable, its pid is dead, its deadline has passed, or its pid now started at another time (a reused pid)."""
+    if record is None or not isinstance(record.get("pid"), int) or not pid_alive(record["pid"]):
+        return True
+    if not isinstance(record.get("deadline"), (int, float)) or record["deadline"] <= now:
+        return True
+    began = start_time(record["pid"])
+    return began is not None and record.get("started") is not None and record["started"] != began
+
+
+def _take_lock(path, record, now, pid_alive, start_time):
+    """Create the lock file (O_EXCL). A stale holder's lock is removed first. Returns the holder's pid when a live waiter
+    holds it, else None."""
+    for _ in range(2):
+        try:
+            handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            held = _read_lock(path)
+            if not _lock_is_stale(held, now, pid_alive, start_time):
+                return held["pid"]
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+            continue
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            json.dump(record, out)
+        return None
+    return (_read_lock(path) or {}).get("pid", 0)
+
+
+def _first_body_line(text):
+    """The first line after the header block, cut to BODY_LIMIT and cleaned of control characters, since message text is
+    untrusted and lands in the session's context."""
+    body = text.partition("\n\n")[2]
+    line = next((row for row in body.splitlines() if row.strip()), "")
+    return re.sub(r"[\x00-\x1f\x7f]", " ", line).strip()[:BODY_LIMIT]
+
+
+def _wake_line(env, tip, message, run):
+    try:
+        text = must(["show", "%s:mail/%s/%s.md" % (tip, message["addr"], message["id"])], env, cache_path(env), run=run)
+        body = _first_body_line(text)
+    except MailError:
+        body = "body unreadable"
+    return "mail: new %s from %s kind %s: %s" % (message["id"], message["from"], message["kind"], body)
+
+
+def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=None, pid=None, ppid=None,
+         interval=None, max_seconds=None):
+    """Block until `addrs` has an open message that was not open at the start, print one line, and return the exit code:
+    0 new mail, 2 not started (no repo, no address, or a live waiter holds the lock), 3 ended at max_seconds with no mail
+    or because the lock was deleted or the parent died. One waiter per address, held by a lock file in the cache."""
+    interval = interval or WAIT_INTERVAL
+    max_seconds = max_seconds or WAIT_MAX_SECONDS
+    pid_alive, start_time = pid_alive or _pid_alive, start_time or _start_time
+    pid = os.getpid() if pid is None else pid
+    ppid = os.getppid() if ppid is None else ppid
+    if not env.get("MAILBOX_REPO") or not addrs:
+        print("mail wait: not started: %s" % ("MAILBOX_REPO is not set" if not env.get("MAILBOX_REPO") else "no address"))
+        return 2
+    cache = cache_path(env)
+    path = os.path.join(cache, "wait-%s.lock" % addrs[0].replace("/", "_"))
+    now = clock()
+    deadline = now + max_seconds
+    record = {"pid": pid, "ppid": ppid, "session": env.get("CLAUDE_CODE_SESSION_ID") or env.get("CLAUDE_CODE_REMOTE_SESSION_ID"),
+              "started": start_time(pid), "deadline": deadline}
+    os.makedirs(cache, exist_ok=True)
+    holder = _take_lock(path, record, now, pid_alive, start_time)
+    if holder is not None:
+        print("mail wait: not started: another waiter holds the lock (pid %s)" % holder)
+        return 2
+
+    def stop(signum, frame):
+        raise SystemExit(128 + signum)
+
+    try:
+        previous = signal.signal(signal.SIGTERM, stop)
+    except ValueError:  # not the main thread: no handler, and the lock still goes in the finally
+        previous = None
+    try:
+        # The baseline: what is open now never wakes the waiter. An empty store has no ref, so nothing is open.
+        try:
+            tip = remote_tip(env, run_git)
+            seen = set()
+            if tip:
+                fetch(env, run=run_git)
+                seen = {m["id"] for m in open_messages(env, tip, addrs, run_git)}
+        except MailError as error:
+            print("mail wait: not started: %s" % error)
+            return 2
+        while clock() < deadline:
+            sleep(interval)
+            held = _read_lock(path)
+            if not held or held.get("pid") != pid or not pid_alive(ppid):
+                break
+            try:
+                now_tip = remote_tip(env, run_git)
+                if not now_tip or now_tip == tip:
+                    continue
+                fetch(env, run=run_git)
+                fresh = [m for m in open_messages(env, now_tip, addrs, run_git) if m["id"] not in seen]
+                tip = now_tip
+                if fresh:
+                    print(_wake_line(env, now_tip, fresh[0], run_git))
+                    return 0
+            except MailError:
+                continue  # a transient failure: the tip stays as it was, so the next poll tries the same move again
+        print("mail wait: ended, no mail")
+        return 3
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+        held = _read_lock(path)
+        if held and held.get("pid") == pid:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
