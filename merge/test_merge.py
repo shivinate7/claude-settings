@@ -12945,6 +12945,8 @@ class ExpressPath(ScopedRepo, Env):
     FLAG_ARGV = ("7", "--confirm", "--express")
     FAIL_PRELUDE = 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'  # for stub_scope: prints two flags off, then fails
     SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
+    ALL_OFF_PRELUDE = ('for n in checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
+                       'pointer_windows checks_guard code mods guard sweep shoot; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n')  # for stub_scope: every flag off, exits 0
 
     def setUp(self):
         super().setUp()
@@ -12965,18 +12967,23 @@ class ExpressPath(ScopedRepo, Env):
             o = self.other
             sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
 
-    def scope_run(self):
-        """Run the real ci-scope.sh that the fixture put on feat, as the express check runs it: EVENT, BASE_SHA and GITHUB_OUTPUT set,
-        in the other checkout at feat. -> (exit code, {flag: value}). This is the fixture's own proof, read before any case relies on it."""
+    def scope_run(self, branch="feat", head_ref="", base=False):
+        """Run a ci-scope.sh against `branch` as the express check runs it: EVENT, BASE_SHA, HEAD_REF and GITHUB_OUTPUT set, in the other
+        checkout at branch. base=True runs origin/main's copy, the one the classifier reads; base=False runs the copy at branch.
+        -> (exit code, {flag: value}). This is the fixture's own proof, read before any case relies on it."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "--detach", "origin/feat")
+        sh(o, "git", "checkout", "-q", "--detach", f"origin/{branch}")
+        script = os.path.join(o, ".github/scripts/ci-scope.sh")
+        if base:
+            script = os.path.join(self.t, "base-ci-scope.sh")
+            put(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
         out_file = os.path.join(self.t, "scope.out")
         if os.path.exists(out_file):
             os.remove(out_file)
         env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
-        env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), GITHUB_OUTPUT=out_file)
-        r = subprocess.run(["bash", ".github/scripts/ci-scope.sh"], cwd=o, env=env, capture_output=True, text=True, timeout=120)
+        env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
+        r = subprocess.run(["bash", script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
         flags = {}
         if os.path.exists(out_file):
             with open(out_file, encoding="utf-8") as f:
@@ -13133,14 +13140,19 @@ class ExpressPath(ScopedRepo, Env):
     def test_an_invalid_ruling_line_is_refused(self):
         self.store(self.RULINGS)
         self.assert_prose_only()
-        bodies = {"no Ruling line": "", "a Ruling line with no id": "Ruling:\n", "an uppercase id": "Ruling: R55\n",
-                  "a path, not an id": "Ruling: ../r55\n", "an invalid first line, then a valid one": "Ruling: R55\nRuling: r55\n"}
-        for name, body in bodies.items():
+        bodies = {  # each body, and the express refusal's own text for it (merge.express_refusal)
+            "no Ruling line": ("", "it has none"),
+            "a Ruling line with no id": ("Ruling:\n", "reads ''"),
+            "an uppercase id": ("Ruling: R55\n", "reads 'R55'"),
+            "a path, not an id": ("Ruling: ../r55\n", "reads '../r55'"),
+            "an invalid first line, then a valid one": ("Ruling: R55\nRuling: r55\n", "reads 'R55'"),
+        }
+        for name, (body, text) in bodies.items():
             with self.subTest(body=name):
                 self.host.body = body
                 before = self.refs()
                 rc, out = self.run_express()
-                self.assert_refused(rc, out, before, "ruling")
+                self.assert_refused(rc, out, before, "--express needs a `Ruling: <id>` line", text)
 
     def test_a_scope_script_that_fails_is_refused_as_unknown(self):
         self.store(self.RULINGS)
@@ -13191,6 +13203,40 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
+
+    def test_the_head_scope_script_is_not_the_one_read(self):
+        """The classifier reads origin/main's ci-scope.sh. A head whose own copy writes every flag off and exits 0 is still refused,
+        because the PR adds hooks/note.py, which main's script turns code on for. A HEAD: read would accept it."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.ALL_OFF_PRELUDE)  # feat's own copy: every flag off, exit 0
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        head_rc, head_flags = self.scope_run()
+        self.assertEqual(head_rc, 0, "the head's own script does not exit 0: %d" % head_rc)
+        self.assertEqual(self.turned_on(head_flags), [], "the head's own script should say prose-only, or the case proves nothing: %r" % head_flags)
+        base_rc, base_flags = self.scope_run(base=True)
+        self.assertEqual(base_rc, 0, "main's script does not exit 0 on feat: %d" % base_rc)
+        self.assertIn("code", self.turned_on(base_flags), "main's script should turn code on for hooks/note.py: %r" % base_flags)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "hooks/note.py")
+
+    def test_a_prose_pr_on_a_batch_head_ref_still_merges(self):
+        """A batch- head ref sets mutation_report, which is not a job: the express check ignores it, so a prose-only PR on batch-x merges."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/feat:refs/heads/batch-x")
+        self.host.branch = "batch-x"
+        rc_scope, flags = self.scope_run(branch="batch-x", head_ref="batch-x")
+        self.assertEqual(rc_scope, 0, "the real ci-scope.sh does not exit 0 on batch-x: %d" % rc_scope)
+        self.assertEqual(flags.get("mutation_report"), "true", "the batch- head ref did not set mutation_report, so the case proves nothing: %r" % flags)
+        self.assertEqual(self.turned_on(flags), [], "the batch- head ref turns a job on: %r" % flags)
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
 
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
