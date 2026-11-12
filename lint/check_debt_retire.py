@@ -78,10 +78,27 @@ def scratch(wt, head):
     tree = os.path.join(tmp, "tree")
     try:
         made = _nowindow.run(["git", "-C", wt, "worktree", "add", "-q", "--detach", tree, head], capture_output=True).returncode == 0
+        if made:
+            link_packages(wt, tree)
         yield tree if made else None
     finally:
         _nowindow.run(["git", "-C", wt, "worktree", "remove", "--force", tree], capture_output=True)
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def link_packages(wt, tree):
+    """Link the checkout's installed `node_modules` into the scratch tree, at the root and beside each package.json the tree holds.
+    A fresh worktree has none, so a test that imports a package would exit "module not found" and read red (decision debt-close-runs-retire).
+    A folder `wt` lacks is not linked, so a test that needs it still fails. Best effort: a link that cannot be made leaves the test to run without it."""
+    listed = _nowindow.run(["git", "-C", tree, "ls-files", "-z", "--", "package.json", "*/package.json"], capture_output=True, encoding="utf-8")
+    for pkg in listed.stdout.split("\0"):
+        rel = os.path.join(os.path.dirname(pkg), "node_modules")
+        src, dst = os.path.join(wt, rel), os.path.join(tree, rel)
+        if pkg and os.path.isdir(src) and not os.path.lexists(dst):
+            try:
+                os.symlink(src, dst, target_is_directory=True)
+            except OSError:
+                pass
 
 
 def run_span(wt, span, timeout):
