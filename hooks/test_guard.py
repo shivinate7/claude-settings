@@ -107,6 +107,7 @@ FAMILIES = {
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
+    "push-target-named": "an agent's git push judged against the Push to: line of its own brief (rule push-target-named): the named, none, placeholder, missing and unreadable briefs, the fence, backtick and mid-line rules, the first line deciding, the dry run, the top-level push and the force verdict it leaves in place",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
