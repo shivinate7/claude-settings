@@ -19,10 +19,11 @@ def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=
         env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
-def step_allow(name, transcript, message, target=ROLE_OTHER):
-    """A send_message the guard lets through silently."""
+def step_allow(name, transcript, message, target=ROLE_OTHER, session=None, config=None):
+    """A send_message the guard lets through silently. `session` is the sending session, and `config` its config
+    folder, for a message whose relay line reads the sender's own feedback log."""
     add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message)
+        env=ROLE_ENV, session_id=target, message=message, session=session, config=config)
 
 
 # Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step
@@ -118,10 +119,17 @@ step_refuse("a lowercase marker, lane brief: x. topic: icons., to a lane on topi
 step_refuse("a Grant line, then a brief for topic colors to a lane on topic icons, is refused: the Grant line is skipped",
             role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nLane brief: icon-a. Topic: colors.",
             carries=("names a topic the lane does not hold",))
-# Passes, the green control beside the refusal above: a Grant line, then plain text with no marker, passes as plain
-# text does with no Grant line. The Grant line alone is not a refusal.
+# The sender of the relayed grant below, and its config folder. The feedback log those words sit in is built by the
+# relay fixture of s43517, which loads after this section, so the two values are named here, not taken from it.
+SENDER_LOG_ID = "relaysender01"
+SENDER_LOG_CFG = os.path.join(ROOT, "relay-cfg")
+# Passes, the green control beside the refusal above: a Grant line, then plain text with no marker. The Grant line
+# quotes the owner's words, which the sender's own log holds, so the relay check passes it. lane-one-topic reads
+# the marker only, so the Grant line alone is no topic refusal.
 step_allow("a Grant line, then plain status text with no marker, is allowed",
-           role_path("step-topic-lane"), "Grant: B is good, 13:19 CST Nov 10\nStatus: PR #12 merged for icon-a.")
+           role_path("step-topic-lane"),
+           'Grant: "go ahead and merge PR 12" (owner, 13:19 CST Nov 10) covers merging PR 12.\nStatus: PR #12 merged for icon-a.',
+           session=SENDER_LOG_ID, config=SENDER_LOG_CFG)
 # Refused: a placeholder Grant line is no grant, as on create_session. The brief's topic matches the lane, so only the
 # placeholder can refuse it.
 step_refuse("a Grant line that holds a placeholder is refused, though the brief's topic matches the lane",
