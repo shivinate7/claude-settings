@@ -33,21 +33,21 @@ Contract the builder codes against. The names are pinned in this block, and each
 import contextlib
 import io
 import json
-from collections import Counter
 import os
 import re
 import signal
 import subprocess
 import sys
 import unittest
+from collections import Counter
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import test_mail  # noqa: E402  the mailbox suite's fixtures; only the helpers imported below are used
-from test_mail import (MailCase, Starts, combined, fixture_env, git_subcommand, program_name,  # noqa: E402
-                       run_cli, snapshot, turn)
+from test_mail import (MailCase, PC_BASE, Starts, cli_module, combined, fixture_env, git_subcommand,  # noqa: E402
+                       in_folder, program_name, run_cli, snapshot, turn)
 
 mail_mod = test_mail.MAIL_MODULE
 MAIL_CLI = test_mail.MAIL_CLI
@@ -60,7 +60,9 @@ SLEEP_CAP = 500  # a run that ignores its deadline ends here, not in a spin
 PARENT_PID, WAITER_PID, SECOND_PID = 7000, 7001, 7002
 DEAD_PID, REUSED_PID, OLD_PID = 6999, 6998, 6997
 PROCESS_START, REUSED_START = 500.0, 250.0
-SKILL_REL = os.path.join("skills", "waiting-page", "reference", "routing-and-sessions.md")
+FAKE_PID = 4242  # the fake git child's pid: a tree kill names it
+FAILED_GIT = (128, "", "fatal: unable to access 'store': Could not resolve host: store")  # one transient git failure
+SKILL_REL =os.path.join("skills", "waiting-page", "reference", "routing-and-sessions.md")
 RECORD_REL = os.path.join("docs", "decisions", "session-messages.md")
 
 
@@ -121,13 +123,13 @@ def no_build_wait(env, addrs, **kwargs):
     return None
 
 
-def run_wait(env, fake, procs, pid=WAITER_PID, **extra):
+def run_wait(env, fake, procs, pid=WAITER_PID, addrs=None, **extra):
     """One waiter of this session, in process. Returns (exit code, printed text). A SystemExit from a signal handler
     gives its exit code. A run that the fake clock ends returns the code "test-ended"."""
     out = io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
         try:
-            code = wait_fn()(env, [ADDR], clock=fake.clock, sleep=fake.sleep, pid_alive=procs.pid_alive,
+            code = wait_fn()(env, addrs or [ADDR], clock=fake.clock, sleep=fake.sleep, pid_alive=procs.pid_alive,
                              start_time=procs.start_time, pid=pid, ppid=PARENT_PID, **extra)
         except SystemExit as exit_:
             code = exit_.code
@@ -373,25 +375,36 @@ class Windows(MailCase):
     the one that would block. Windows is unmeasured. On this Linux run only the branch is driven, by injection."""
 
     def timed_out_git(self, windows):
-        made = []
+        """Runs mail.git on a child whose first communicate() times out. Returns (the MailError raised or None, the fake
+        children, the taskkill argvs run through the seam). The seam is _nowindow.run, the one home of a no-window child
+        start: the Windows tree kill goes through it, and the recorder answers it without a process start. Only the
+        Windows case patches it, since the POSIX path runs its git through the same function."""
+        made, taskkills = [], []
 
         def factory(args, *rest, **kwargs):
             child = FakeChild(args, *rest, **kwargs)
             made.append(child)
             return child
 
+        def recorder(argv, *rest, **kwargs):
+            taskkills.append(list(argv))
+            if made:
+                made[-1].events.append(("taskkill", None))
+            return subprocess.CompletedProcess(argv, 0)
+
+        seam = mock.patch.object(mail_mod._nowindow, "run", recorder) if windows else contextlib.nullcontext()
         error = None
         with mock.patch.object(subprocess, "Popen", factory), \
                 mock.patch.object(subprocess, "_mswindows", windows), \
-                mock.patch.object(mail_mod, "WINDOWS", windows, create=True):
+                mock.patch.object(mail_mod, "WINDOWS", windows, create=True), seam:
             try:
                 mail_mod.git(["ls-remote", "file:///nowhere", mail_mod.REF], fixture_env(self.case), timeout=3)
             except mail_mod.MailError as caught:
                 error = caught
-        return error, made
+        return error, made, taskkills
 
     def test_timed_out_git_on_windows_never_calls_communicate_after_kill(self):
-        error, made = self.timed_out_git(windows=True)
+        error, made, _ = self.timed_out_git(windows=True)
         self.assertEqual(len(made), 1, "control: the helper started no child, so the timeout path never ran")
         events = made[0].events
         self.assertIn(("kill", None), events, "control: the timed-out child was never killed")
@@ -402,7 +415,7 @@ class Windows(MailCase):
         self.assertEqual(str(error), "timeout", "the timed-out git call raised %r, expected MailError('timeout')" % (error,))
 
     def test_control_timed_out_git_on_posix_returns_timeout_without_communicate_after_kill(self):
-        error, made = self.timed_out_git(windows=False)
+        error, made, _ = self.timed_out_git(windows=False)
         self.assertEqual(len(made), 1, "control: the helper started no child, so the timeout path never ran")
         events = made[0].events
         self.assertIn(("kill", None), events, "control: the timed-out child was never killed")
@@ -410,6 +423,24 @@ class Windows(MailCase):
         self.assertNotIn("communicate", after_kill, "control: the POSIX path called communicate() after kill")
         self.assertEqual(str(error), "timeout", "control: the POSIX timeout raised %r, expected MailError('timeout')"
                          % (error,))
+
+    def test_timed_out_git_on_windows_kills_the_child_tree_before_a_bounded_wait(self):
+        error, made, taskkills = self.timed_out_git(windows=True)
+        self.assertEqual(len(made), 1, "control: the helper started no child, so the timeout path never ran")
+        self.assertEqual(taskkills, [["taskkill", "/F", "/T", "/PID", str(FAKE_PID)]],
+                         "the timed-out Windows child's tree was not killed with taskkill /F /T /PID through the seam: %r"
+                         % taskkills)
+        names = [name for name, _ in made[0].events]
+        self.assertIn("taskkill", names, "control: the tree kill is missing from the child's events")
+        waits = [timeout for name, timeout in made[0].events[names.index("taskkill") + 1:] if name == "wait"]
+        self.assertTrue(waits and waits[-1] is not None,
+                        "after the tree kill the helper did not wait on the child with a bound: %r" % waits)
+
+    def test_timed_out_git_on_windows_never_closes_the_child_pipes(self):
+        error, made, _ = self.timed_out_git(windows=True)
+        self.assertEqual(len(made), 1, "control: the helper started no child, so the timeout path never ran")
+        closed = [name for name in ("stdin", "stdout", "stderr") if getattr(made[0], name).closed]
+        self.assertEqual(closed, [], "the helper closed the timed-out child's pipes: %r" % closed)
 
 
 class FakeChild:
@@ -419,7 +450,7 @@ class FakeChild:
 
     def __init__(self, args, *rest, **kwargs):
         self.args = args
-        self.pid = 0
+        self.pid = FAKE_PID
         self.stdin = io.BytesIO()
         self.stdout = io.BytesIO()
         self.stderr = io.BytesIO()
@@ -730,6 +761,256 @@ class Deadline(WaitCase):
         self.assert_ended_quiet(code, text)
         self.assertLess(fake.now, 7200, "the default max ends the waiter at %s s, past the 2 h background cap" % fake.now)
         self.assertGreaterEqual(fake.now, 6600, "the default max ended the waiter at %s s, expected 6600 s" % fake.now)
+
+
+class BaselineRetry(WaitCase):
+    """A baseline git call that fails at start is retried on the injected clock for about 300 s. Then the waiter prints
+    its not-started line, removes its lock and exits 2. The old code exits 2 at the first failure."""
+
+    def flaky_run(self, store, machine, down, recover_at=None, hook=None):
+        probe = {"failures": []}
+        fake = FakeTime(hook=hook)
+
+        def flaky_git(args, env, cache=None, timeout=mail_mod.TRANSFER_BOUND, input_text=None):
+            if args and args[0] in down and (recover_at is None or fake.now < recover_at):
+                probe["failures"].append(fake.now)
+                return FAILED_GIT
+            return mail_mod.git(args, env, cache, timeout, input_text)
+
+        code, text = run_wait(machine.env, fake, Procs(), run_git=flaky_git)
+        probe["lock_left"] = os.path.exists(lock_path(machine.cache))
+        return code, text, fake, probe
+
+    def test_baseline_ls_remote_that_never_recovers_exits_2_after_about_300_seconds(self):
+        store, machine = self.fixture()
+        code, text, fake, probe = self.flaky_run(store, machine, {"ls-remote"})
+        self.assertGreaterEqual(len(probe["failures"]), 2, "the baseline ls-remote failed %d time(s): the waiter did not "
+                                "retry it" % len(probe["failures"]))
+        self.assertEqual(code, 2, "a baseline that never recovered exited %r, expected 2 (not started)" % (code,))
+        self.assertRegex(text, r"(?m)^mail wait: not started: \S", "the give-up printed no not-started line: %r" % text)
+        self.assertTrue(300 <= fake.now <= 330, "the waiter gave up at %s s, expected about 300 s of retries" % fake.now)
+        self.assertFalse(probe["lock_left"], "the waiter left its lock behind after the baseline gave up")
+
+    def test_baseline_fetch_that_never_recovers_exits_2_after_about_300_seconds(self):
+        store, machine = self.fixture()
+        code, text, fake, probe = self.flaky_run(store, machine, {"fetch"})
+        self.assertGreaterEqual(len(probe["failures"]), 2, "the baseline fetch failed %d time(s): the waiter did not "
+                                "retry it" % len(probe["failures"]))
+        self.assertEqual(code, 2, "a baseline fetch that never recovered exited %r, expected 2 (not started)" % (code,))
+        self.assertRegex(text, r"(?m)^mail wait: not started: \S", "the give-up printed no not-started line: %r" % text)
+        self.assertTrue(300 <= fake.now <= 330, "the waiter gave up at %s s, expected about 300 s of retries" % fake.now)
+        self.assertFalse(probe["lock_left"], "the waiter left its lock behind after the baseline gave up")
+
+    def test_baseline_that_recovers_inside_300_seconds_proceeds_and_wakes_on_new_mail(self):
+        store, machine = self.fixture()
+        sent = {}
+
+        def send_after_the_outage(fake):
+            if fake.now >= 150 and not sent:
+                store.seed(ADDR, "0a1b2c3d4e70", "request", SENDER, "Body marker: after-outage")
+                sent["at"] = fake.now
+
+        code, text, fake, probe = self.flaky_run(store, machine, {"ls-remote", "fetch"}, recover_at=120,
+                                                 hook=send_after_the_outage)
+        self.assertGreaterEqual(len(probe["failures"]), 1, "the baseline never failed, so the outage was not tested")
+        self.assertTrue(sent, "the waiter never reached 150 s, so no mail landed after the outage")
+        self.assertEqual(code, 0, "a baseline that recovered at 120 s made the waiter exit %r, expected 0 (new mail)"
+                         % (code,))
+        self.assertTrue(text.startswith("mail: new 0a1b2c3d4e70 "), "the wake line is not the new message: %r" % text)
+
+
+class WakeLine(WaitCase):
+    """The wake line names the message's address with its read and take commands, and shows the subject as untrusted,
+    quoted text, cleaned and cut. A repo-address message wakes with its own --addr."""
+
+    def wake(self, body, addr=ADDR, waiter_addrs=None, msg_id="0a1b2c3d4e21"):
+        store, machine = self.fixture()
+        probe = {}
+
+        def land(fake):
+            if len(fake.sleeps) == 2 and "sent" not in probe:
+                store.seed(addr, msg_id, "request", SENDER, body)
+                probe["sent"] = True
+
+        code, text = run_wait(machine.env, FakeTime(hook=land), Procs(), addrs=waiter_addrs, max_seconds=600)
+        return code, text, probe
+
+    def test_wake_line_carries_the_read_and_take_commands_and_an_untrusted_quoted_subject(self):
+        code, text, probe = self.wake("Body marker: wake-new")
+        self.assertIn("sent", probe, "the send never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "new mail made mail wait exit %r, expected 0" % (code,))
+        lines = text.strip().splitlines()
+        self.assertEqual(len(lines), 1, "the wake printed %d lines, expected one: %r" % (len(lines), text))
+        line = lines[0]
+        self.assertIn("mail read --addr %s 0a1b2c3d4e21" % ADDR, line, "the wake line gives no read command with --addr: %r"
+                      % line)
+        self.assertIn("mail take --addr %s 0a1b2c3d4e21" % ADDR, line, "the wake line gives no take command with --addr: %r"
+                      % line)
+        self.assertIn("untrusted", line, "the wake line does not mark the subject untrusted: %r" % line)
+        self.assertIn('"Body marker: wake-new"', line, "the wake line does not quote the subject: %r" % line)
+        self.assertLess(line.index("untrusted"), line.index('"Body marker'),
+                        "the word untrusted does not come before the quoted subject: %r" % line)
+
+    def test_wake_line_strips_control_c1_and_bidi_characters_from_the_subject(self):
+        body = "Hello\x1b[31m\x07keepme\x9b‮gnp⁦tail"
+        code, text, probe = self.wake(body)
+        self.assertIn("sent", probe, "the send never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "new mail made mail wait exit %r, expected 0" % (code,))
+        self.assertEqual(len(text.strip().splitlines()), 1, "the wake printed more than one line: %r" % text)
+        for char in ("\x1b", "\x07", "\x9b", "‮", "⁦"):
+            self.assertNotIn(char, text, "the wake line keeps U+%04X from the subject: %r" % (ord(char), text))
+        for word in ("Hello", "keepme", "tail"):
+            self.assertIn(word, text, "the wake line lost the visible word %r: %r" % (word, text))
+
+    def test_wake_line_cuts_the_subject_to_160_characters(self):
+        code, text, probe = self.wake("W" * 300)
+        self.assertIn("sent", probe, "the send never landed: the waiter did not reach its second sleep")
+        longest = max(len(run) for run in re.findall(r"W+", text))
+        self.assertEqual(longest, 160, "the wake line shows a subject of %d characters, expected 160" % longest)
+
+    def test_repo_address_message_wakes_with_its_own_addr(self):
+        code, text, probe = self.wake("Body marker: repo-wide", addr=PC_BASE, waiter_addrs=[PC_BASE + "/S1", PC_BASE],
+                                      msg_id="0a1b2c3d4e61")
+        self.assertIn("sent", probe, "the repo-address send never landed: the waiter did not reach its second sleep")
+        self.assertEqual(code, 0, "new repo-address mail made mail wait exit %r, expected 0" % (code,))
+        self.assertIn("mail take --addr %s 0a1b2c3d4e61" % PC_BASE, text,
+                      "the wake for the repo address gives no take command with its own --addr: %r" % text)
+
+
+def lock_state(path):
+    """What a reader sees at this step: absent, empty, partly written (not whole JSON with the lock's fields), or whole."""
+    if not os.path.exists(path):
+        return "absent"
+    text = read_text(path) or ""
+    if not text:
+        return "empty"
+    try:
+        record = json.loads(text)
+    except ValueError:
+        return "partial"
+    whole = isinstance(record, dict) and {"pid", "ppid", "session", "started", "deadline"} <= set(record)
+    return "whole" if whole else "partial"
+
+
+class LockAtomic(WaitCase):
+    """A second start must never read the lock while it is empty or partly written. A leftover empty lock is stale."""
+
+    def test_a_second_start_never_sees_the_lock_empty_or_partly_written(self):
+        """Records the lock's state before each os call that creates or moves a lock file (os.open, os.fdopen, os.link,
+        os.replace). A waiter that creates the file empty and fills it after shows an empty state at fdopen, which a
+        second start could read. The seam is these four os functions; each recorder calls the real one."""
+        store, machine = self.fixture()
+        lock = lock_path(machine.cache)
+        steps = []
+        patches = []
+        for name in ("open", "fdopen", "link", "replace"):
+            real = getattr(os, name)
+
+            def watched(*args, _real=real, _name=name, **kwargs):
+                steps.append((_name, lock_state(lock)))
+                return _real(*args, **kwargs)
+
+            patches.append(mock.patch.object(os, name, watched))
+        for patch in patches:
+            patch.start()
+        try:
+            code, text = run_wait(machine.env, FakeTime(), Procs(), max_seconds=60)
+        finally:
+            for patch in reversed(patches):
+                patch.stop()
+        self.assertTrue(steps, "control: the waiter made no os step on the lock, so the watch saw nothing")
+        torn = [step for step in steps if step[1] in ("empty", "partial")]
+        self.assertEqual(torn, [], "a reader at a lock step saw the lock empty or partly written: %r" % torn)
+
+    def test_a_leftover_empty_lock_file_is_stale_and_replaced(self):
+        store, machine = self.fixture()
+        lock = lock_path(machine.cache)
+        os.makedirs(machine.cache, exist_ok=True)
+        with open(lock, "w", encoding="utf-8"):
+            pass
+        probe = {}
+
+        def first_poll(fake):
+            if len(fake.sleeps) == 1 and "holder" not in probe:
+                probe["holder"] = (read_lock(lock) or {}).get("pid")
+
+        code, text = run_wait(machine.env, FakeTime(hook=first_poll), Procs(), max_seconds=90)
+        self.assertIn("holder", probe, "the waiter never polled with the empty lock on disk: it did not start")
+        self.assertEqual(probe["holder"], WAITER_PID,
+                         "an empty lock file was not replaced: it still names pid %r" % (probe["holder"],))
+        self.assert_ended_quiet(code, text)
+
+
+class MaxSecondsBounds(WaitCase):
+    """bin/mail refuses a --max-seconds above 7000 or below 1 as a not-started wait, before any wait runs. The cases run
+    bin/mail's main in process with its wait replaced by a recorder: an accepted value shows as a call, a refused one
+    as none. No case waits on a clock."""
+
+    def cli_wait(self, *args):
+        store, machine = self.fixture()
+        calls = []
+
+        def recorder(env, addrs, **kwargs):
+            calls.append(kwargs)
+            return 0
+
+        out = io.StringIO()
+        code = None
+        with mock.patch.object(cli_module().mail, "wait", recorder), \
+                mock.patch.dict(os.environ, machine.env, clear=True), in_folder(machine.checkout), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            try:
+                code = cli_module().main(["wait", *args])
+            except SystemExit as exit_:
+                code = exit_.code
+        return code, out.getvalue(), calls
+
+    def test_max_seconds_above_7000_is_refused_as_not_started(self):
+        code, text, calls = self.cli_wait("--max-seconds", "7001")
+        self.assertEqual(calls, [], "--max-seconds 7001 was accepted, so the waiter would run for 7001 s: %r" % calls)
+        self.assertEqual(code, 2, "--max-seconds 7001 exited %r, expected 2" % (code,))
+        self.assertIn("mail wait: not started: --max-seconds above 7000", text,
+                      "--max-seconds 7001 printed no not-started line: %r" % text)
+
+    def test_max_seconds_below_1_is_refused_as_not_started(self):
+        code, text, calls = self.cli_wait("--max-seconds", "0")
+        self.assertEqual(calls, [], "--max-seconds 0 was accepted, so the waiter would run: %r" % calls)
+        self.assertEqual(code, 2, "--max-seconds 0 exited %r, expected 2" % (code,))
+        self.assertIn("mail wait: not started: --max-seconds below 1", text,
+                      "--max-seconds 0 printed no not-started line: %r" % text)
+
+
+class WakeCost(WaitCase):
+    """A wake's git reads, counted from the send onward: the poll that sees the mail runs ls-remote, fetch, grep, then
+    the age lookup (log) and the subject read (show). Beyond the fetch and grep that a moved sha costs, a wake adds one
+    git show and one git log."""
+
+    def wake_window(self):
+        store, machine = self.fixture()
+        mark = {}
+        with Starts() as starts:
+            def send(fake):
+                if len(fake.sleeps) == 2 and "at" not in mark:
+                    cut = len(starts.argv)
+                    store.seed(ADDR, "0a1b2c3d4e71", "request", SENDER, "Body marker: cost")
+                    del starts.argv[cut:]  # the seed's own git starts are the case's writes, not the waiter's
+                    mark["at"] = len(starts.argv)
+
+            code, _ = run_wait(machine.env, FakeTime(hook=send), Procs(), max_seconds=600)
+        window = starts.argv[mark["at"]:] if "at" in mark else []
+        return code, window
+
+    def test_a_wake_adds_exactly_one_git_show_and_one_git_log_beyond_fetch_and_grep(self):
+        code, window = self.wake_window()
+        self.assertEqual(code, 0, "control: the send did not wake the waiter: exit %r, expected 0" % (code,))
+        counted = dict(Counter(git_names(window)))
+        self.assertEqual(counted, {"ls-remote": 1, "fetch": 1, "grep": 1, "log": 1, "show": 1},
+                         "the wake poll ran git %r, expected one each of ls-remote, fetch, grep, log and show" % counted)
+
+    def test_the_record_names_the_wake_cost_the_hour_measured(self):
+        text = read_text(os.path.join(REPO, RECORD_REL)) or ""
+        self.assertIsNotNone(re.search(r"wake adds one `git show`[^\n]*`git log`", text),
+                             "the record's wake cost does not name one git show and one git log")
 
 
 if __name__ == "__main__":
