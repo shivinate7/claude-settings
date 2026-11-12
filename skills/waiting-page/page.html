@@ -1453,7 +1453,7 @@ function readyText(it) {
 // The longest lines a multi item's ready line can show: every option ticked, with each ending, and the lines with no tick.
 function readyFits(it) {
   const all = "Ready to send: " + namesOf(it, (it.options || []).map((o) => o.key));
-  return [all + (it.ranked === true ? ", your order." : ", your choice."), "Ready to send: none of these, with your note.", "My pick goes with your next Send."];
+  return [all + (it.ranked === true ? ", your order." : ", your choice."), "Ready to send: none of these, with your note.", "My pick stands and is not sent. Press it to send it with your next Send."];
 }
 // The AI sparkle: a four-point star with two small ones. It takes the colour of its box.
 function sparkle() {
