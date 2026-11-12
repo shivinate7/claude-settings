@@ -3841,13 +3841,43 @@ def _loads_module(source: str, stem: str) -> bool:
     return False
 
 
+def _guard_section_sources(tracked) -> list:
+    """The text of each tracked `.py` file directly in the folder that the runner SUITE reads its guard sections from. The
+    folder is the runner's SECTION_DIR, found by `rule_audit._section_dir`, the one home of that path. Empty when the runner
+    names no folder. A file that cannot be read is skipped."""
+    import ast
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import rule_audit
+    try:
+        with open(SUITE, encoding="utf-8") as handle:
+            folder = rule_audit._section_dir(ast.parse(handle.read()), SUITE)
+    except (OSError, ValueError, SyntaxError):
+        return []
+    if not folder:
+        return []
+    rel = os.path.relpath(os.path.normpath(folder), os.path.dirname(HERE)).replace(os.sep, "/")
+    sources = []
+    for item in tracked:
+        if os.path.dirname(item) != rel or not item.endswith(".py"):
+            continue
+        try:
+            with open(item, encoding="utf-8") as handle:
+                sources.append(handle.read())
+        except (OSError, ValueError):
+            continue
+    return sources
+
+
 def tests_for_main(argv) -> int:
     """Print the suites that test one file, a line each, sorted, once each. A file listed in REPORT_TARGETS prints exactly its
     suites. Any other `.py` file prints each tracked `test_<stem>.py` and `test_<stem>_*.py` beside it, plus each tracked
-    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A file with a row
-    in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
-    `hooks/test_guard.py`. Any other file prints the suites beside it only. A suite that cannot be read or parsed is skipped. It is the `select` command of the
-    `claude_settings` profile. A file with no suite prints nothing."""
+    `test_*.py` in the repository of the working folder that imports or loads its module (`_loads_module`). A guard section
+    file (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
+    with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain whole
+    `hooks/test_guard.py`. A non-`.py` file prints the suites beside it only. A suite that cannot be read or parsed is skipped.
+    It is the `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     import re
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
@@ -3881,6 +3911,9 @@ def tests_for_main(argv) -> int:
                     continue
                 if _loads_module(source, stem):
                     names.add(item)
+            # The runner reads each guard section file, so it stands for a section file that loads the module.
+            if any(_loads_module(source, stem) for source in _guard_section_sources(tracked)):
+                names.add("hooks/test_guard.py")
         if path in GUARD_MODULE_FAMILIES:
             # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
             names.discard("hooks/test_guard.py")
