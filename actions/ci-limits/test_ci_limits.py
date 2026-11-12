@@ -6,17 +6,15 @@ restart-plan R3). Stdlib only.
 
 These cases pin the interface of ci_limits.py:
 
-  job_limits(jobs_by_run, caps, kinds=None, window=30, cut_counts_as_sample=True) -> (limits, misjudged)
+  job_limits(jobs_by_run, caps, kinds=None, window=30) -> (limits, misjudged)
       jobs_by_run: completed push runs on main, newest first: [{"run_id": int, "jobs": [jobs-API job, ...]}].
       caps: {job name: timeout-minutes in force}. A job cancelled at or past its cap is a cut sample.
-      cut_counts_as_sample=False ignores a cut run: a limit is then the green max x 1.5, floored by the median.
       kinds: {job name: kind}. limits: {job name: minutes, "job/step": minutes}, over every name in caps.
       misjudged: the job names cut at their estimate while still new.
   deadline_minutes(jobs_by_run, limits, window=30) -> minutes. limits holds the job-level limits only.
-  read_limits(fetch, caps, kinds=None, window=30) -> (limits, misjudged, warnings). fetch() returns jobs_by_run,
-      or raises. limits adds "deadlineMinutes". An error gives every limit 360 and one warning line.
-  main(argv, fetch, caps, kinds=None, out=None, err=None) -> exit code. argv is ["--json"] or ["--table"],
-      and "--green-only" may follow it: that sets cut_counts_as_sample=False.
+  read_limits(fetch, caps, kinds=None, window=30) -> (limits, misjudged, warnings).
+      fetch() returns jobs_by_run, or raises. limits adds "deadlineMinutes". An error gives every limit 360, one warning.
+  main(argv, fetch, caps, kinds=None, out=None, err=None) -> exit code. argv is ["--json"] or ["--table"].
       Warnings go to err; the JSON or the table goes to out.
 
 Minutes are whole seconds over 60, read from the fixtures' own timestamps. No clock is injected, and nothing sleeps.
@@ -62,9 +60,12 @@ def step(name, start, minutes, conclusion="success"):
             "started_at": ts(start), "completed_at": ts(start + minutes)}
 
 
-def job(name, minutes, conclusion="success", start=0.0, steps=()):
-    return {"name": name, "status": "completed", "conclusion": conclusion,
-            "started_at": ts(start), "completed_at": ts(start + minutes), "steps": list(steps)}
+def job(name, minutes, conclusion="success", start=0.0, steps=(), attempt=None):
+    row = {"name": name, "status": "completed", "conclusion": conclusion,
+           "started_at": ts(start), "completed_at": ts(start + minutes), "steps": list(steps)}
+    if attempt is not None:
+        row["run_attempt"] = attempt  # the jobs API's attempt number: a re-run of the same run has a higher one
+    return row
 
 
 def run(run_id, *jobs):
@@ -224,6 +225,21 @@ class Deadline(unittest.TestCase):
         got = ci_limits.deadline_minutes(runs, {"checks": 100})
         self.assertEqual(got, 360, "300 min x 1.5 is 450: the deadline must clamp to 360")
 
+    def test_a_re_run_does_not_stretch_the_wall_clock(self):
+        # Attempt 1 ran 0 to 10 min. Attempt 2, a re-run 300 min later, ran 300 to 310. Each is 10 min of wall clock.
+        runs = [run(1, job("checks", 10, start=0, attempt=1), job("checks", 10, start=300, attempt=2))]
+        got = ci_limits.deadline_minutes(runs, {"checks": 15})
+        self.assertEqual(got, 15,
+                         "a re-run 300 min after attempt 1 stretched the run's wall clock to %r: each attempt "
+                         "is 10 min, and 10 x 1.5 = 15" % (got,))
+
+    def test_a_failed_run_does_not_set_the_deadline(self):
+        runs = [run(2, job("checks", 100, "failure")), run(1, job("checks", 10))]
+        got = ci_limits.deadline_minutes(runs, {"checks": 15})
+        self.assertEqual(got, 15,
+                         "a failed run of 100 min wall clock set the deadline to %r: only green runs set it, so 15"
+                         % (got,))
+
 
 class ApiError(unittest.TestCase):
     def test_api_error_gives_every_limit_360_and_one_warning(self):
@@ -298,13 +314,32 @@ class MedianFloor(unittest.TestCase):
                          % (limits["tiny"],))
 
     def test_job_cut_at_61_seconds_on_a_1_minute_cap_cannot_get_1(self):
-        caps = {"cut-job": 1, "lint-a": 30, "checks": 75}
+        # The peers are 40 s jobs, so the median floor is 1. A limit of 2 is then only there when the cut counts.
+        caps = {"cut-job": 1, "tiny-a": 1, "tiny-b": 1}
         runs = [run(2, job("cut-job", 61 / 60, "cancelled")),
-                run(1, job("cut-job", 40 / 60), job("lint-a", 20), job("checks", 50))]
+                run(1, job("cut-job", 40 / 60), job("tiny-a", 40 / 60), job("tiny-b", 40 / 60))]
         limits, _ = ci_limits.job_limits(runs, caps)
-        self.assertGreaterEqual(limits["cut-job"], 2,
-                                "cut-job was cut at 61 s on a 1 min cap and got %r: the cut is a sample of 61 s, "
-                                "so its limit is at least 2" % (limits["cut-job"],))
+        self.assertEqual(limits["cut-job"], 2,
+                         "cut-job was cut at 61 s on a 1 min cap and got %r, want 2: the cut is a sample of 61 s, "
+                         "and 61 s x 1.5 rounds up to 2" % (limits["cut-job"],))
+
+    def test_median_of_an_even_count_rounds_up(self):
+        # Limits 1 (a 40 s job), 30, 31 and 75: the median is (30 + 31) / 2 = 30.5, which rounds up to 31.
+        caps = {"tiny": 5, "lint-a": 30, "mid": 30, "checks": 75}
+        runs = [run(1, job("tiny", 40 / 60), job("lint-a", 20), job("mid", 20.5), job("checks", 50))]
+        limits, _ = ci_limits.job_limits(runs, caps)
+        self.assertEqual(limits["tiny"], 31,
+                         "the median of 1, 30, 31, 75 is 30.5, which rounds up to 31: tiny got %r" % (limits["tiny"],))
+
+    def test_new_job_estimate_does_not_join_the_median_floor(self):
+        # Measured limits: 1, 1 (the 40 s jobs) and 360 (the 240 min job). The new job has no kind, so its estimate
+        # is the largest 360 x 1.5, clamped to 360. The floor is the median of the measured limits: 1.
+        caps = {"tiny-a": 5, "tiny-b": 5, "long": 360, "new-job": 60}
+        runs = [run(1, job("tiny-a", 40 / 60), job("tiny-b", 40 / 60), job("long", 240))]
+        limits, _ = ci_limits.job_limits(runs, caps)
+        self.assertEqual(limits["tiny-a"], 1,
+                         "the new job's estimate joined the median floor: tiny-a, a 40 s job, got %r, want 1, the "
+                         "median of the measured limits 1, 1, 360" % (limits["tiny-a"],))
 
 
 class CutRule(unittest.TestCase):
@@ -314,12 +349,22 @@ class CutRule(unittest.TestCase):
         self.assertEqual(limits["checks-guard"], 93,
                          "a 62 min cut on a 60 min cap is a sample: 62 x 1.5 = 93, got %r" % (limits["checks-guard"],))
 
-    def test_cancelled_at_5_minutes_on_a_60_minute_cap_is_not_a_sample(self):
-        runs = [run(2, job("checks-guard", 5, "cancelled")), run(1, job("checks-guard", 20))]
+    def test_cancelled_at_25_minutes_on_a_60_minute_cap_is_not_a_sample(self):
+        # 25 min is above the green 20 min, so counting this cancel would move the limit from 30 to 38.
+        runs = [run(2, job("checks-guard", 25, "cancelled")), run(1, job("checks-guard", 20))]
         limits, _ = ci_limits.job_limits(runs, {"checks-guard": 60})
         self.assertEqual(limits["checks-guard"], 30,
-                         "a cancel at 5 min, short of the 60 min cap, is no sample: 20 x 1.5 = 30, got %r"
-                         % (limits["checks-guard"],))
+                         "a cancel at 25 min, short of the 60 min cap, counted as a sample: 25 x 1.5 = 38, "
+                         "want 30 from 20 x 1.5, got %r" % (limits["checks-guard"],))
+
+    def test_cancelled_run_with_a_failed_step_is_not_a_cut(self):
+        # Cancelled at 62 min on its 60 min cap, but its Guard step failed: a real failure, not a cut by the cap.
+        runs = [run(2, job("checks-guard", 62, "cancelled", steps=[step("Guard suite", 0, 62, "failure")])),
+                run(1, job("checks-guard", 20))]
+        limits, _ = ci_limits.job_limits(runs, {"checks-guard": 60})
+        self.assertEqual(limits["checks-guard"], 30,
+                         "a cancelled run with a failed step at 62 min on a 60 min cap was counted as a cut: "
+                         "limit %r, want 30 from the green 20 min run" % (limits["checks-guard"],))
 
     def test_new_job_cancelled_at_5_minutes_is_not_misjudged(self):
         runs = [run(3, job("lint-b", 5, "cancelled"))] + OLD_RUNS
@@ -392,6 +437,15 @@ class NotMeasured(unittest.TestCase):
         limits, _ = ci_limits.job_limits(runs, SKIPPED_CAPS)
         self.assertIsNotNone(limits["all-jobs-passed"],
                              "all-jobs-passed ran green in one run of the window and lost its limit")
+
+    def test_deadline_with_no_measured_job_is_360_not_0(self):
+        caps = {"a": 60}
+        runs = [run(2, job("a", 0, "skipped")), run(1, job("a", 0, "skipped"))]
+        limits, _ = ci_limits.job_limits(runs, caps)
+        self.assertIsNone(limits["a"], "fixture: a was skipped in every run, so it must have no limit")
+        got = ci_limits.deadline_minutes(runs, limits)
+        self.assertEqual(got, 360,
+                         "with no measured job the deadline is %r, want 360: no data is never a 0 deadline" % (got,))
 
 
 def job_rows(count):
@@ -512,46 +566,35 @@ class WorkflowCapsRef(unittest.TestCase):
         self.assertEqual(caps.get("checks"), 60,
                          "checks on main is 60 (the checkout says 5, HEAD says 20), got %r" % (caps.get("checks"),))
 
+    def test_workflow_caps_with_no_ref_reads_origin_main(self):
+        git(self.root, "update-ref", "refs/remotes/origin/main", "refs/heads/main")
+        found = subprocess.run(["git", "rev-parse", "--verify", "-q", "refs/remotes/origin/main"],
+                               cwd=self.root, capture_output=True).returncode
+        self.assertEqual(found, 0, "fixture: no refs/remotes/origin/main was made")
+        caps = ci_limits.workflow_caps(root=self.root)
+        self.assertEqual(caps.get("checks"), 60,
+                         "workflow_caps() with no ref read checks as %r, want 60 from origin/main "
+                         "(HEAD says 20, the checkout 5)" % (caps.get("checks"),))
 
-# checks-guard: green at 20 min (limit 30), and cut at 62 on its 60 min cap, so counting the cut gives 62 x 1.5 = 93.
-# Ignoring the cut gives the green 30, floored by the median of 30 and checks' 60, which is 45.
-SWITCH_CAPS = {"checks-guard": 60, "checks": 75}
-SWITCH_RUNS = [run(2, job("checks-guard", 62, "cancelled"), job("checks", 40)),
-               run(1, job("checks-guard", 20), job("checks", 40))]
+
+# checks-guard: green at 20 min (limit 30), and cut at 62 on its 60 min cap, so the cut counts: 62 x 1.5 = 93.
+CUT_CAPS = {"checks-guard": 60, "checks": 75}
+CUT_RUNS = [run(2, job("checks-guard", 62, "cancelled"), job("checks", 40)),
+            run(1, job("checks-guard", 20), job("checks", 40))]
 
 
-class CutSwitch(unittest.TestCase):
+class CutCounts(unittest.TestCase):
     def test_default_counts_a_62_minute_cut_on_a_60_minute_cap(self):
-        limits, _ = ci_limits.job_limits(SWITCH_RUNS, SWITCH_CAPS)
+        limits, _ = ci_limits.job_limits(CUT_RUNS, CUT_CAPS)
         self.assertEqual(limits["checks-guard"], 93,
                          "by default a 62 min cut is a sample: 62 x 1.5 = 93, got %r" % (limits["checks-guard"],))
 
-    def test_switch_off_ignores_the_cut_and_floors_the_green_limit_at_the_median(self):
-        params = inspect.signature(ci_limits.job_limits).parameters
-        self.assertIn("cut_counts_as_sample", params,
-                      "job_limits has no cut_counts_as_sample switch: a cut run always counts as a sample")
-        limits, _ = ci_limits.job_limits(SWITCH_RUNS, SWITCH_CAPS, cut_counts_as_sample=False)
-        self.assertEqual(limits["checks-guard"], 45,
-                         "with the cut ignored checks-guard is its green 30, floored by the median 45, got %r"
-                         % (limits["checks-guard"],))
-
     def test_cli_default_counts_the_cut(self):
         out, err = io.StringIO(), io.StringIO()
-        rc = ci_limits.main(["--json"], fetch=lambda: SWITCH_RUNS, caps=SWITCH_CAPS, out=out, err=err)
+        rc = ci_limits.main(["--json"], fetch=lambda: CUT_RUNS, caps=CUT_CAPS, out=out, err=err)
         self.assertEqual(rc, 0, "--json exited %r, want 0" % (rc,))
         self.assertEqual(json.loads(out.getvalue())["checks-guard"], 93,
-                         "--json without --green-only should count the 62 min cut: 93")
-
-    def test_cli_green_only_flag_ignores_the_cut(self):
-        out, err = io.StringIO(), io.StringIO()
-        try:
-            rc = ci_limits.main(["--json", "--green-only"], fetch=lambda: SWITCH_RUNS, caps=SWITCH_CAPS,
-                                out=out, err=err)
-        except SystemExit:
-            self.fail("main rejects --green-only: the CLI has no switch, so a cut always counts as a sample")
-        self.assertEqual(rc, 0, "--json --green-only exited %r, want 0" % (rc,))
-        self.assertEqual(json.loads(out.getvalue())["checks-guard"], 45,
-                         "--green-only should ignore the cut: checks-guard is 45")
+                         "--json should count the 62 min cut: 93")
 
 
 if __name__ == "__main__":
