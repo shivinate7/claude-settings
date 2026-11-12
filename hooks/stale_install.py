@@ -2,8 +2,8 @@
 """UserPromptSubmit hook: in a cloud session, reinstall the hooks when origin's tip moved past the installed sha, and say so.
 
 A cloud session copies hooks at start, so a hook merged later stays stale for the whole session. Each turn this
-hook reads the install record (<config dir>/.claude-settings-install.json: ref, sha, source, installer) that
-install.sh --cloud writes, asks origin for the recorded ref's tip, and acts on the answer:
+hook reads the install record that install.sh --cloud writes (<config dir>/.claude-settings-install.json: ref,
+sha, source, installer). It asks origin for the recorded ref's tip and acts on the answer:
 - tip equals the recorded sha: prints nothing.
 - tip differs: runs the recorded installer once (`install.sh --cloud`) and prints one line naming both 7-character
   shas. A second line follows when a changed path needs a new session to read it again: CLAUDE.md, output-styles/,
@@ -27,9 +27,11 @@ import sys
 
 RECORD_NAME = ".claude-settings-install.json"
 SHORT = 7
-FETCH_TIMEOUT = 10  # seconds for the one network read; CLAUDE_SETTINGS_FETCH_TIMEOUT replaces it
-INSTALL_TIMEOUT = 100  # seconds for one installer run, inside the hook's own 120 in settings.json
-# What a running session reads once and never again, so a new session must start to see a change.
+# Seconds for the one network read. CLAUDE_SETTINGS_FETCH_TIMEOUT replaces it.
+FETCH_TIMEOUT = 10
+# Seconds for one installer run. The hook's own limit in settings.json is 120.
+INSTALL_TIMEOUT = 100
+# A running session reads these once. A new session must start to see a change.
 RESTART_PATHS = ("CLAUDE.md", "output-styles/")
 RESTART_SETTINGS_KEYS = ("model", "effortLevel")
 PREFIX = "claude-settings: "
