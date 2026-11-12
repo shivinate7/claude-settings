@@ -3904,14 +3904,15 @@ def newest_review(bodies):
     """-> the parsed newest record of `bodies` (one pull request's review record texts, oldest first), None when it does not parse. The one home of
     that read, for `merge --reviewed`, the --root blocks and the lane Stop hook. A newest record with a Fix check line, no round and no Grant line
     takes the rounds of the newest earlier record on the same pull request whose Head is the fix check's reviewed head and that has no Fix check
-    line: a lane may log the round and the fix check at different heads (step review-record-fix-check-reads). Its own Kind, Guard or check and Net
-    value stay. Cost: one parse per record, no read."""
+    line: a lane may log the round and the fix check at different heads (step review-record-fix-check-reads). Its own Kind and Guard or check stay;
+    the Net value is the earlier record's (decision hold-unsafe-after-round-3: a fix keeps the net value its round gave). `inherited` marks the
+    result, so a caller that checks for edits reads every record. Cost: one parse per record, no read."""
     recs = [parse_review(b) for b in bodies]
     rec = recs[-1]
     if rec and rec["fix"] and not rec["rounds"] and not rec["grant"]:
         for old in reversed(recs[:-1]):
             if old and old["n"] == rec["n"] and old["head"] == rec["fix"][0] and old["rounds"] and not old["fix"]:
-                return {**rec, "rounds": old["rounds"]}
+                return {**rec, "rounds": old["rounds"], "net": old["net"], "inherited": True}  # the Net value goes with the rounds: a fix record never lifts a hold or settles a net value owed
     return rec
 
 def review_state(rec, head):
@@ -4354,8 +4355,8 @@ def release_check(root, h, numbers, lints, root_why=None):
                     out.append(why)
                 if created is None or updated is None:
                     out.append(unknown_reason("the newest review record gave no timestamps"))
-                elif created != updated:
-                    out.append("the newest review record was edited after it was posted")
+                elif created != updated or (rec and rec.get("inherited") and any(c != u for _, c, u in rows)):  # inherited rounds come from an older record: it must be unedited too
+                    out.append("the newest review record was edited after it was posted" if created != updated else "a review record that gives the rounds was edited after it was posted")
         if lints.get(n) is None:
             out.append("no lint verdict was given")
         elif lints[n][0] != i["head"]:
@@ -5332,8 +5333,8 @@ def main(argv, host=None, lock=None, hosts=None):
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
-                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
-                last = earlier[-1] if earlier else None
+                earlier = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                last = newest_review(earlier) if earlier else None  # an inherited round counts, so a fix after a merge of main reads the record as --reviewed does
                 if not earlier:  # a PR opened after the review has no record to name the verified head: it may predate the PR, so the new head must hold it
                     ok = h.holds_head(a.fix_check[0], a.head)
                 elif not last or last["head"] != a.fix_check[0]:
