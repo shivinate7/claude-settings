@@ -745,6 +745,12 @@ SPO_FOLDER_BRACE_OWN = SPO_FOLDER_SUB + ((SPO_OTHER, "own1/x.txt", "from B\n"),
                                          (SPO_OTHER, "own2/y.txt", "from B\n"))
 SPO_FOLDER_PARENT_OWN = SPO_FOLDER_SUB + ((SPO_OTHER, "own/x.txt", "from B\n"),
                                           (SPO_OTHER, "own/deep/y.txt", "from B\n"))
+# Agent B's own file and folders, which it moves into agent A's `sub`: the move takes nothing from A.
+SPO_FOLDER_MOVE_OWN = SPO_FOLDER_SUB + ((SPO_OTHER, "own.txt", "from B\n"),
+                                        (SPO_OTHER, "own1/x.txt", "from B\n"),
+                                        (SPO_OTHER, "own2/y.txt", "from B\n"))
+# Agent A's second folder `d2`, which a numeric range over d1..d3 names.
+SPO_FOLDER_RANGE = SPO_FOLDER_SUB + ((SPO_WRITER, "d2/f.txt", "from A\n"),)
 
 
 def spo_folder_writes(fx, name, writes):
@@ -802,6 +808,18 @@ SPO_FOLDER_FORMS = (
      lambda s: "rm -rf %s" % os.path.join(s, "sub", "deep")),
     ("folder-move-1", "folder move 1, agent B's mv of agent A's folder",
      lambda s: "mv %s %s" % (os.path.join(s, "sub"), os.path.join(s, "moved"))),
+    # A brace list nested in another one: bash expands the inner list too, so `sub` is one of the words.
+    ("folder-rm-19", "folder rm 19, agent B's rm -rf of agent A's folder in a nested brace list",
+     lambda s: "rm -rf %s/{x,{sub,y}}" % s),
+    # A brace list inside a name: `su{b,c}` is `sub` and `suc`, so the text before the list is kept.
+    ("folder-rm-20", "folder rm 20, agent B's rm -rf of agent A's folder by a brace list inside its name",
+     lambda s: "rm -rf %s/su{b,c}" % s),
+    # An empty brace element: `sub{,.bak}` is `sub` and `sub.bak`.
+    ("folder-rm-21", "folder rm 21, agent B's rm -rf of agent A's folder by a brace list with an empty element",
+     lambda s: "rm -rf %s/sub{,.bak}" % s),
+    # A letter range: `{s..u}ub` is `sub`, `tub` and `uub`.
+    ("folder-rm-22", "folder rm 22, agent B's rm -rf of agent A's folder by a letter range",
+     lambda s: "rm -rf %s/{s..u}ub" % s),
     # A brace list is expanded by bash before rm runs, so each name in it is a folder to remove.
     ("folder-rm-13", "folder rm 13, agent B's rm -rf of agent A's folder in a brace list, the folder first",
      lambda s: "rm -rf %s/{sub,nothing}" % s),
@@ -1182,6 +1200,60 @@ spo_register("scratchpad-owner: folder rm control 8, agent B's rm -rf of S/own/.
                                      lambda s: "rm -rf %s" % os.path.join(s, "own", "..", "own"),
                                      "agent B's rm -rf of its own folder through a parent segment is allowed",
                                      want="allow"))
+spo_register("scratchpad-owner: folder rm 23, agent B's rm -rf of agent A's folder in a numeric range: refused",
+             lambda: spo_folder_case("folder-rm-23", "folder rm 23, agent B's rm -rf of agent A's folder in a numeric "
+                                     "range", SPO_FOLDER_RANGE, SPO_OTHER,
+                                     lambda s: "rm -rf %s/d{1..3}" % s,
+                                     "agent B's rm -rf of a numeric range naming agent A's folder is refused"))
+spo_register("scratchpad-owner: folder rm control 9, agent B's rm -rf of a numeric range naming no folder: allowed",
+             lambda: spo_folder_case("folder-ctl-9", "folder rm control 9, agent B's rm -rf of a numeric range naming "
+                                     "no folder", SPO_FOLDER_RANGE, SPO_OTHER,
+                                     lambda s: "rm -rf %s/d{5..6}" % s,
+                                     "agent B's rm -rf of a numeric range with no folder in it is allowed",
+                                     want="allow"))
+# Agent B's own file or folders moved into agent A's folder: the move takes nothing from A, so it passes. A move that
+# takes A's file out of its folder is refused, and a copy of A's folder takes nothing away.
+spo_register("scratchpad-owner: folder move control 1, agent B's mv of its own file into agent A's folder: allowed",
+             lambda: spo_folder_case("folder-move-ctl-1", "folder move control 1, agent B's mv of its own file into "
+                                     "agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s %s/" % (os.path.join(s, "own.txt"), os.path.join(s, "sub")),
+                                     "agent B's mv of its own file into agent A's folder is allowed", want="allow"))
+spo_register("scratchpad-owner: folder move control 2, agent B's mv of its own folder into agent A's folder: allowed",
+             lambda: spo_folder_case("folder-move-ctl-2", "folder move control 2, agent B's mv of its own folder into "
+                                     "agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s %s" % (os.path.join(s, "own1"), os.path.join(s, "sub")),
+                                     "agent B's mv of its own folder into agent A's folder is allowed", want="allow"))
+spo_register("scratchpad-owner: folder move control 3, agent B's mv of a brace list of its own folders into agent A's "
+             "folder: allowed",
+             lambda: spo_folder_case("folder-move-ctl-3", "folder move control 3, agent B's mv of a brace list of its "
+                                     "own folders into agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s/{own1,own2} %s/" % (s, os.path.join(s, "sub")),
+                                     "agent B's mv of a brace list of its own folders into agent A's folder is allowed",
+                                     want="allow"))
+spo_register("scratchpad-owner: folder move control 4, agent B's mv -t of its own file into agent A's folder: allowed",
+             lambda: spo_folder_case("folder-move-ctl-4", "folder move control 4, agent B's mv -t of its own file into "
+                                     "agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv -t %s %s" % (os.path.join(s, "sub"), os.path.join(s, "own.txt")),
+                                     "agent B's mv -t of its own file into agent A's folder is allowed", want="allow"))
+spo_register("scratchpad-owner: folder move control 5, agent B's mv of its own file to a new name in agent A's folder: "
+             "allowed",
+             lambda: spo_folder_case("folder-move-ctl-5", "folder move control 5, agent B's mv of its own file to a new "
+                                     "name in agent A's folder", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s %s" % (os.path.join(s, "own.txt"),
+                                                             os.path.join(s, "sub", "new.txt")),
+                                     "agent B's mv of its own file to a new name in agent A's folder is allowed",
+                                     want="allow"))
+spo_register("scratchpad-owner: folder move control 6, agent B's cp -r of agent A's folder to a new name: allowed",
+             lambda: spo_folder_case("folder-move-ctl-6", "folder move control 6, agent B's cp -r of agent A's folder to "
+                                     "a new name", SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "cp -r %s %s" % (os.path.join(s, "sub"), os.path.join(s, "copy")),
+                                     "agent B's cp -r of agent A's folder to a new name is allowed", want="allow"))
+spo_register("scratchpad-owner: folder move 2, agent B's mv of agent A's file out of its folder: refused",
+             lambda: spo_folder_case("folder-move-2", "folder move 2, agent B's mv of agent A's file out of its folder",
+                                     SPO_FOLDER_MOVE_OWN, SPO_OTHER,
+                                     lambda s: "mv %s %s" % (os.path.join(s, "sub", "a.txt"),
+                                                             os.path.join(s, "mine.txt")),
+                                     "agent B's mv of agent A's file out of its folder is refused"))
 # The walk's limits: the cap at its boundary (over a real folder, as the guard runs in its own process), and the symlinks.
 spo_register("scratchpad-owner: folder rm walk cap 1, agent B's rm -rf of a folder's entries, agent A's file the last "
              "entry inside the walk cap: refused",
