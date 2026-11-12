@@ -237,6 +237,8 @@ def lone_pause_command(command):
     rest = tokens[3:]
     if set(rest[0]) <= punct or rest[0] in COMMAND_STARTERS + BLOCK_OPENERS + BLOCK_CLOSERS:
         return False
+    if rest[0] == "sleep":  # a second pause is no command to read
+        return False
     for tok in rest:
         if set(tok) <= punct and not (tok in PIPE_OPS or (set(tok) <= set("<>&") and "&&" not in tok and tok != "&")):
             return False
@@ -443,16 +445,19 @@ SHELLS = ("sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish", "csh", "tcs
 LEAF_COMMANDS = ("sleep",)
 
 
-def has_waiter(table, pid):
+def has_waiter(table, pid, include_root=False):
     """True when a process under pid is a waiter: not a shell, with a child that is still alive. A tool
     that waits on its children (merge on its git children, a python script on a subprocess) is working
     while a child runs, though the job prints nothing. A shell is no waiter: `( )`, `$( )` and a loop body
     are copies of the job shell, and a copy that waits on `sleep 100` is the hung shape the watcher ends.
     A copy that exec'd its last command shows as that command, so a LEAF_COMMANDS process is no waiter
     either; a copy that exec'd a non-leaf command (`( git fetch & git fetch )`) still reads as one.
-    pid itself is left out, as in tree_cpu."""
+    pid itself is left out, as in tree_cpu, unless include_root: at Stop the job's shell may have exec'd
+    the waiter, so the root is the waiter and is checked too."""
     rows, kids, _ = table
     stack, seen = list(kids.get(str(pid), [])), set()
+    if include_root and str(pid) in rows:
+        stack.append(str(pid))
     while stack:
         cur = stack.pop()
         if cur in seen:
@@ -491,8 +496,8 @@ BUSY_BUDGET = 6.0  # seconds for the whole busy check at Stop; the Stop hook is 
 
 
 def busy_outputs(paths):
-    """The output files in paths whose job has CPU time advancing in a process under it, the Stop-side
-    form of the watcher's CPU-time-as-life rule. posix with lsof only: else none. A job's processes are
+    """The output files in paths whose job has CPU time advancing in a process under it, or a waiter in
+    its tree (has_waiter, root included), the Stop-side form of the watcher's CPU-time and waiter life rules. posix with lsof only: else none. A job's processes are
     found by the output file they hold as stdout or stderr (the job has no pid at Stop); the files are
     the ones about to be listed. Two ps reads CPU_SAMPLE apart, and only when some process holds a file.
     One deadline, BUSY_BUDGET, bounds lsof, both ps reads and the wait: each call's timeout is the time
@@ -530,7 +535,7 @@ def busy_outputs(paths):
     busy = set()
     for name, pids in holders.items():
         for root in (p for p in pids if p in after[0] and after[0][p][1] not in pids):
-            if cpu_advanced(tree_cpu(before, root), tree_cpu(after, root)):
+            if cpu_advanced(tree_cpu(before, root), tree_cpu(after, root)) or has_waiter(after, root, include_root=True):
                 busy.add(names[name])
     return busy
 
@@ -622,7 +627,8 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None, unwatc
     both before the job starts, and the job removes them when it ends; log_fd and beat_fd are those
     handles, so a job that ends at once loses no output.
     lone_pause is True for a job that is one `sleep N` and one command (lone_pause_command): it is
-    never reported before its first output, which is the one command's read after the pause."""
+    never reported before its first output, on LOG, BEAT or a named log, which is the one command's read
+    after the pause."""
     last = time.monotonic()
     marks = log_marks(also)
     next_check = 0.0
@@ -653,8 +659,8 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None, unwatc
                     last = time.monotonic()
                 if also:
                     seen = log_marks(also)
-                    if seen != marks:  # the job still writes to a log it named
-                        marks, last = seen, time.monotonic()
+                    if seen != marks:  # the job still writes to a log it named: its pause is over
+                        marks, last, lone_pause = seen, time.monotonic(), False
                 if beat and bf is None:
                     try:
                         bf = open(beat, "rb")

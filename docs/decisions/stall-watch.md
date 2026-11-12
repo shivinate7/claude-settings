@@ -80,12 +80,16 @@ guard rule, so the watcher does the waiting and the session is told once.
   A shell is no waiter, so `( )`, `$( )` and a loop body that wait on a `sleep` are still ended, and so is a
   `sleep` with a live child (dash runs the last command of `( sleep N & sleep N )` by exec). Limit: a copy that
   exec'd another command, `( git fetch & git fetch )`, reads as a waiter. The ps `comm` column gives the
-  name; the check adds no process or call.
+  name; the check adds no process or call. Stop counts a waiter as life too, by the same check (has_waiter),
+  at the job's holder root as well as under it, so a job whose shell exec'd the waiter is not listed.
+  Limit: a waiter over a hung child is never ended or reported.
   A lone pause is life until its command's first output: a job that is one `sleep N` and one command
   (`sleep 420; gh api ...`, joined by `;`, `&&` or a newline; the command a simple command or a pipeline) is
-  not reported before its first output byte. The hook reads the original and passes `--lone-pause 1`.
-  Limit: a hung command after the pause is never reported. A second pause, a second list item, `&`, `||` or a
-  group makes the job an ordinary one.
+  not reported before its first output byte, on the job's log, its beat file or a named log (`--also`). The
+  hook reads the original and passes `--lone-pause 1`.
+  Limit: a hung command after the pause that never writes is never reported, and `sleep N; cat deadfifo` is
+  never reported. A second pause (`sleep N; sleep M`), a second list item, `&`, `||` or a group makes the job
+  an ordinary one.
   Cost: no new process, timer or file. The once-a-second `ps` that reads the job's state reads the
   process table with CPU time, and the watcher compares each process to its last reading. On Linux ps
   gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall. So may a serial
