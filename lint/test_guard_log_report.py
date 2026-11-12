@@ -903,7 +903,7 @@ def fresh_log(lines=None):
 
 class CloudCheckOneHome(unittest.TestCase):
     """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". The brake guard in
-    guard.py holds that one function (owner glossary ruling topic 1, 14:36 CST Nov 10: no local/cloud split of the brake)."""
+    guard.py and this report both hold that one function, so the cloud check cannot drift between them."""
 
     def helper(self):
         import guard_core
@@ -919,12 +919,18 @@ class CloudCheckOneHome(unittest.TestCase):
                     os.environ["CLAUDE_CODE_REMOTE"] = value
                 self.assertIs(fn(), want)
 
+    def test_the_report_holds_guard_core_is_cloud(self):
+        fn = self.helper()
+        self.assertTrue(callable(fn), "guard_core has no is_cloud: the cloud check has no one home yet")
+        self.assertIs(getattr(glr, "is_cloud", None), fn, "guard_log_report does not hold guard_core.is_cloud")
+
 
 class CloudPaceReadTests(unittest.TestCase):
-    """Pace number four (reports-batch-pace-numbers) reads the brake count from guard.log. A cloud session reads it the
-    same way a local one does (CLAUDE_CODE_REMOTE == "true", the same brake everywhere), so `--between ... --rule
-    load-brake` prints the rows and the unknown count, then the cloud caveat, never n/a. Every other read keeps today's
-    output. Each test sets or pops the variable itself, so the runner's own environment decides nothing.
+    """Pace number four (reports-batch-pace-numbers) reads the brake count from guard.log. In a cloud session
+    (CLAUDE_CODE_REMOTE == "true") `--between ... --rule load-brake` prints the rows and the unknown count, then the
+    cloud caveat, since the log is this container's and the count is partial. A local session prints no caveat. Every
+    other read keeps today's output. Each test sets or pops the variable itself, so the runner's own environment decides
+    nothing.
     """
 
     def read(self, argv, remote):
