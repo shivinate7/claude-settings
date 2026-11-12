@@ -16078,6 +16078,11 @@ class ReviewGuardPaths(unittest.TestCase):
     def test_the_file_entry_is_settings_json(self):
         self.assertEqual(getattr(merge, "GUARD_FILES", None), ("settings.json",), "merge.GUARD_FILES must be ('settings.json',), matched exactly")
 
+    def test_the_text_file_exception_is_the_pull_request_template_and_nothing_else(self):
+        # The one exception under .github/: the PR template, a text file that no code reads by path. Its name is the constant's only entry.
+        self.assertTrue(hasattr(merge, "GUARD_TEXT_FILES"), "merge.GUARD_TEXT_FILES is not defined, so the pull request template has no named exception")
+        self.assertEqual(merge.GUARD_TEXT_FILES, (".github/pull_request_template.md",), "merge.GUARD_TEXT_FILES must be ('.github/pull_request_template.md',)")
+
     def test_the_rule_dirs_are_read_from_the_module(self):
         # A copy of the tuple keeps the default. Here the module's tuple is swapped before merge loads, so only a read of it shows the swap.
         code = ("import sys\n"
@@ -16131,6 +16136,34 @@ class ReviewGuardHits(unittest.TestCase):
     def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
         self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
                          ["hooks/a.py", "lint/b.py", "merge/m.py"])
+
+    def test_the_pull_request_template_is_no_hit(self):
+        # A text template no code reads by path: a PR that touches only it changes no guard or check.
+        self.assertEqual(review_fn(self, "guard_hits")([".github/pull_request_template.md"]), [],
+                         ".github/pull_request_template.md is a guard hit, but the pull request template is a text file, not a guard")
+
+    def test_other_github_files_stay_hits_and_the_exception_is_the_whole_name(self):
+        # Only the template's exact name is excepted. A workflow, the stamp config and a name that begins with the template's name stay hits.
+        guard_hits = review_fn(self, "guard_hits")
+        for path in (".github/workflows/checks.yml", ".github/stamp.json", ".github/pull_request_template.md.bak", ".github/pull_request_template.mdx"):
+            with self.subTest(path=path):
+                self.assertEqual(guard_hits([path]), [path], f"{path} is no guard hit, but only the exact pull request template name is excepted under .github/")
+
+    def test_the_template_beside_a_workflow_leaves_only_the_workflow(self):
+        self.assertEqual(review_fn(self, "guard_hits")([".github/pull_request_template.md", ".github/workflows/checks.yml"]),
+                         [".github/workflows/checks.yml"],
+                         "guard_hits drops the workflow beside the template, or keeps the template")
+
+    def test_the_exception_is_read_from_the_named_constant(self):
+        # A copy of the exception in guard_hits keeps the default. Swapping the constant must change the answer both ways.
+        self.assertTrue(hasattr(merge, "GUARD_TEXT_FILES"), "merge.GUARD_TEXT_FILES is not defined, so guard_hits has no named exception to read")
+        guard_hits = review_fn(self, "guard_hits")
+        with unittest.mock.patch.object(merge, "GUARD_TEXT_FILES", ()):
+            self.assertEqual(guard_hits([".github/pull_request_template.md"]), [".github/pull_request_template.md"],
+                             "guard_hits keeps the template exception with GUARD_TEXT_FILES empty, so the exception is a copy, not the constant")
+        with unittest.mock.patch.object(merge, "GUARD_TEXT_FILES", ("hooks/notes.txt",)):
+            self.assertEqual(guard_hits(["hooks/notes.txt"]), [],
+                             "guard_hits counts hooks/notes.txt, which GUARD_TEXT_FILES names, so guard_hits does not read the constant")
 
 TEST_PATHS = ("hooks/test_guard.py", "merge/test_merge.py", "lint/test_stale_cites.py", "githooks/test_pre_commit.sh")
 
@@ -16209,6 +16242,19 @@ class ReviewGuardRefusal(ReviewGuardEnv):
     def test_a_hooks_markdown_file_refuses(self):
         self.host.changed = [("hooks/README.md", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv()), "hooks/README.md")
+
+    def test_a_pull_request_touching_only_the_template_passes_guard_no(self):
+        # The template is no guard change, so a PR that touches only it prints its record with Guard or check no.
+        self.host.changed = [(".github/pull_request_template.md", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assertEqual(rc, 0, "a PR touching only the pull request template was refused as a guard change:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+
+    def test_the_template_beside_a_workflow_refuses_and_names_only_the_workflow(self):
+        self.host.changed = [(".github/pull_request_template.md", "modified", 0), (".github/workflows/checks.yml", "modified", 0)]
+        rc, out, err = self.run_args(*self.review_argv())
+        self.assert_refused(rc, out, err, ".github/workflows/checks.yml")
+        self.assertNotIn(".github/pull_request_template.md", err, "the refusal names the template, which is no guard change")
 
     def test_docs_only_on_a_guard_path_refuses(self):
         # hooks/README.md is no doc, but the guard refuses it before the kind is checked, so the Guard reason holds
