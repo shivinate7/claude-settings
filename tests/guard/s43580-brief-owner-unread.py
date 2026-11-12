@@ -2,9 +2,10 @@
 FAMILY = "lane-one-topic"
 #
 # Rule lane-one-topic, the owner-unread sentence (decision session-tiers). A lane brief, sent by send_message or
-# started by a lane create_session, is refused unless its text holds both OWNER_UNREAD_PHRASES, whitespace-flattened
-# and case-blind. The phrases and the sentence come from test_guard.py (OWNER_FIRST, OWNER_LAST, OWNER_SENTENCE). Each
-# brief here names the lane's own topic, so the topic check passes and only the owner-unread check can refuse it.
+# started by a lane create_session, is refused unless one sentence of its text holds both OWNER_UNREAD_PHRASES and the
+# word Coordinator, whitespace-flattened and case-blind. The phrases and the sentence come from test_guard.py
+# (OWNER_FIRST, OWNER_LAST, OWNER_SENTENCE). Each brief here names the lane's own topic, so the topic check passes and
+# only the owner-unread check can refuse it.
 TOPIC_LACK = "names a topic the lane does not hold"  # the send_message topic refusal, which must not be the cause
 START_TOPIC_LACK = "start's cs-topic tag does not hold"  # the create_session topic refusal, likewise
 OWNER_GRANT = "Grant: B is good, 13:19 CST Nov 10"
@@ -35,6 +36,18 @@ brief_refuse("a brief with only the first phrase is refused", SEND_BRIEF + "\n" 
 brief_refuse("a brief with only the second phrase is refused", SEND_BRIEF + "\n" + ONLY_LAST)
 # Refused, with the remedy: the refusal names both phrases, so the sender can add the sentence.
 brief_refuse("a refused brief's reason names both phrases", SEND_BRIEF, carries=(OWNER_FIRST, OWNER_LAST))
+# Refused: the two phrases and Coordinator must sit in ONE sentence. Here they spread over two sentences.
+brief_refuse("a brief whose phrases and Coordinator sit in two sentences is refused",
+             SEND_BRIEF + "\nThe owner never reads this lane. Send each override line, owner act and question to the "
+             "Coordinator in the same turn.")
+# Refused: one sentence holds both phrases, but it names no Coordinator.
+brief_refuse("a brief whose one sentence holds both phrases and no Coordinator is refused",
+             SEND_BRIEF + "\nThe owner never reads this lane, so send each override line, owner act and question in the "
+             "same turn.")
+# Refused: the same brief to a lane on its own topic, with no sentence. It is the control for the non-lane allows in
+# s15173: the message is the same, and only the target's lane tag differs.
+step_refuse("owner-unread: a brief to a lane on topic colors, with no owner-unread sentence, is refused",
+            role_path("step-colors-lane"), "Lane brief: icon-b. Topic: colors.", lacks=(TOPIC_LACK,))
 # Passes, the green controls beside the refusals above: the same brief with the sentence, in each form the match allows.
 brief_allow("a brief with both phrases in one sentence after the marker is allowed", SEND_BRIEF + "\n" + OWNER_SENTENCE)
 brief_allow("a brief whose sentence is upper case is allowed: the match is case-blind",
@@ -56,6 +69,18 @@ add("owner-unread: a lane start with only the first phrase is refused", "deny", 
     prompt=OWNER_GRANT + "\n" + START_BRIEF + "\n" + ONLY_FIRST, lacks=(START_TOPIC_LACK,), **START)
 add("owner-unread: a refused lane start's reason names both phrases", "deny", "lane-one-topic",
     prompt=OWNER_GRANT + "\n" + START_BRIEF, carries=(OWNER_FIRST, OWNER_LAST), lacks=(START_TOPIC_LACK,), **START)
+# Refused: a lane start whose phrases sit in two sentences, with no Coordinator. The first is the brief's own example.
+add("owner-unread: a lane start whose phrases sit in two sentences, with no Coordinator, is refused", "deny",
+    "lane-one-topic", prompt=OWNER_GRANT + "\n" + START_BRIEF
+    + "\nThe owner never reads my report. Keep it under 25 lines in the same turn.", lacks=(START_TOPIC_LACK,), **START)
+add("owner-unread: a lane start whose phrases and Coordinator sit in two sentences is refused", "deny",
+    "lane-one-topic", prompt=OWNER_GRANT + "\n" + START_BRIEF
+    + "\nThe owner never reads this lane. Send each override line, owner act and question to the Coordinator in the "
+    "same turn.", lacks=(START_TOPIC_LACK,), **START)
+add("owner-unread: a lane start whose one sentence holds both phrases and no Coordinator is refused", "deny",
+    "lane-one-topic", prompt=OWNER_GRANT + "\n" + START_BRIEF
+    + "\nThe owner never reads this lane, so send each override line, owner act and question in the same turn.",
+    lacks=(START_TOPIC_LACK,), **START)
 add("owner-unread: a lane start with a Grant line and both phrases is allowed", "allow",
     prompt=OWNER_GRANT + "\n" + START_BRIEF + "\n" + OWNER_SENTENCE, **START)
 # Passes: a create_session with no lane tag starts no lane, so its brief is not judged.

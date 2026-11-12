@@ -2793,6 +2793,11 @@ MUTATIONS = [
      'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',
      'isinstance(t, str) and t.strip() == LANE_TAG for t in lane_tags(tool_input))',
      "guard", "floor lane: an upper-case lane tag on haiku gets the lane remedy"),
+    # RULE lane-one-topic, the owner-unread call. Deleting the call lets a lane brief with no owner-unread sentence through.
+    ("lane-one-topic: the owner-unread call is deleted, so a lane brief with no owner sentence is allowed",
+     '    owner_unread = brief_owner_hit(tool, tool_input)\n',
+     '    owner_unread = None\n',
+     "guard", "owner-unread: a brief with no Grant line and no owner-unread sentence is refused"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",

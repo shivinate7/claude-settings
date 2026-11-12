@@ -19,10 +19,11 @@ def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=
         env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
-def step_allow(name, transcript, message, target=ROLE_OTHER):
-    """A send_message the guard lets through silently."""
+def step_allow(name, transcript, message, target=ROLE_OTHER, owner=True):
+    """A send_message the guard lets through silently. A lane brief gets the owner-unread sentence, unless `owner` is
+    False: a brief to a target that is no lane is sent as it is, and the guard passes it with no sentence."""
     add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=owner_brief(message))
+        env=ROLE_ENV, session_id=target, message=owner_brief(message) if owner else message)
 
 
 # Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step
@@ -85,12 +86,14 @@ step_allow("a brief for a new step on topic icons to a lane that create_session 
            role_path("step-create-json"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
 step_allow("a brief for a new step on topic icons to a lane that create_session started (plain result) is allowed",
            role_path("step-create-text"), "Lane brief: icon-b. Topic: icons.", target=ROLE_NEW)
-# Passes: a brief to a target that is no lane is not judged, whatever its topic line says.
+# Passes with no owner-unread sentence (owner=False): a brief to a target that is no lane is not judged, whatever its
+# topic line says, so the owner-unread check does not judge it either. The same brief to a lane is refused in s43580.
 step_allow("a brief with topic colors to a target that is no lane (cs-build:triage) is allowed",
-           role_path("step-triage"), "Lane brief: icon-b. Topic: colors.")
-# Passes: the newest record decides. A lane read, then a newer triage read, makes the target no lane.
+           role_path("step-triage"), "Lane brief: icon-b. Topic: colors.", owner=False)
+# Passes with no owner-unread sentence (owner=False). The newest record decides: a lane read, then a newer triage read,
+# makes the target no lane.
 step_allow("the newest record decides: a lane read, then a newer triage read, lets a brief through",
-           role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.")
+           role_path("step-lane-then-triage"), "Lane brief: icon-b. Topic: colors.", owner=False)
 # Refused: the target's tags were set after its newest record, so the record is stale. The steer re-reads the record
 # with get_session. It never tells the sender to start a new lane, for a topic lane or a lane with no topic.
 step_refuse("a brief for topic icons, after set_session_tags on a topic lane, is refused: re-read the record with get_session",
