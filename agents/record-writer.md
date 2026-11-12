@@ -25,3 +25,5 @@ When worktree isolation refuses a command as too complex, split it into plain, s
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Start with the point. No preamble. Report in under 25 lines unless the brief names another cap.
+
+Keep your prose to what the reader needs, with no narration; reasoning and tool inputs are never cut.
