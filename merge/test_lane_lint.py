@@ -17,8 +17,10 @@ prints cost the same per lint. The wrong-cause loop runs six lints. A stub exits
 at any exit code, and a tally at exit 1 fails. Measured: the 30 mutation cases took 16.1 s in one run, with the module's import; their lint-run
 count is unmeasured since the batch-head cases were added.
 BatchHeadMutation (class BatchHeadMutation) lints a batch head, `--batch-build NAME --ready`, and the same head by hand-off, `--lane-lint <sha>`,
-on one touched lane. Cost per case: one run (the batch build or the hand-off lint), one ci-job stub start, and one mutate stub start where the
-run starts (the batch head's lint starts none). Measured: its 4 cases took 3.8 s in one run.
+on one touched lane. Its pre-join cases run `--lane-lint <pr>` through the gh shim, in a cloud session with the batch-runner role or with none; the
+shim's comment list holds the hand-off PASS record. Cost per case: one run (the batch build or the lint), one ci-job stub start, and one mutate stub
+start where the run starts (the batch head's lint starts none). Measured on a9ee17e88 with these cases: its 9 cases took 3.7 s to 3.9 s over two runs,
+one of them red.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -2435,8 +2437,10 @@ MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off
 class BatchHeadMutation(LaneFixture):
     """The batch head's lint against the hand-off lint of one touched diff. `merge --lane-lint` on a head starts the mutation test run. The batch
     head (`--batch-build NAME --ready`) lints the same lane files and starts none: the lane's hand-off lint already ran it, and the batch head says
-    so (MUTATE_SKIPPED). The caller decides, not the diff: the control case lints the same head by hand-off and sees the run start. Each batch-head
-    case's scope comes first: the batch head's lint ran once, at the batch head, and the batch's diff holds what the case claims."""
+    so (MUTATE_SKIPPED). The batch runner's pre-join call, `merge --lane-lint <pr>` in a session that holds the batch-runner role, skips the run only
+    when a hand-off PASS names the live head (lint_state reads the lane-lint comments). Any other head starts it, and a hand-off session with no role
+    always starts it. The caller decides, not the diff: the control cases lint the same head by hand-off and see the run start. Each case's scope
+    comes first: the lint ran once, at the head the case names, and the lane's diff holds what the case claims."""
 
     def touched_lane(self):
         """Lane PR 7's one commit touches a mutation test file: it adds the mutate script and the workflow of the real job. -> the lane's head."""
@@ -2507,6 +2511,7 @@ class BatchHeadMutation(LaneFixture):
         rc, text = self.run_lane("--batch-build", "nightly", "--ready")
         self.assert_lint_ran_at(batch_head, text)
         self.assertEqual(self.mutation_test_calls(), [], "the untouched batch head's lint started a mutation test run: " + text)
+        self.assertNotIn(MUTATE_SKIPPED, text, "the untouched batch head's lint printed the skip line, though its diff holds no mutation test file: " + text)  # the skip line is for a touched diff only
         self.assertEqual(self.host.readies, [pr], "--ready did not mark the untouched batch PR ready once: " + text)
         self.assertEqual(rc, 0, text)
 
@@ -2524,6 +2529,85 @@ class BatchHeadMutation(LaneFixture):
         self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for a batch head that reads unknown: " + text)
         self.assertIn(MUTATE_SKIPPED, text, "the batch head's lint does not say the mutation test run was skipped there, and why: " + text)
         self.assertEqual(self.host.readies, [pr], "--ready with --lint-unknown-ok did not mark the batch PR ready once: " + text)
+        self.assertEqual(rc, 0, text)
+
+
+    def pre_join(self, comments, role="batch-runner"):
+        """The batch runner's pre-join call: `merge --lane-lint 7` in a cloud session, through the real Host on the gh shim, with `comments` as the
+        repo's issue comments, which the hand-off PASS record is read from. `role` is the session's recorded merge role; None records none, as a lane's
+        hand-off session does. -> (rc, stdout and stderr)."""
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self, issue_comments=comments)
+        if role is not None:
+            self.put_role(role)
+        out, err = io.StringIO(), io.StringIO()
+        with self.cloud():
+            try:
+                rc = self.run_merge("--lane-lint", "7", host=merge.Host(), stdout=out, stderr=err)[0]
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue() + err.getvalue()
+
+    def assert_touches_mutate_file(self, head):
+        """Scope first: the lane's diff against main holds a mutation test file, so the run is the one the case is about."""
+        self.assertTrue(any(f.startswith("hooks/mutate_") for f in self.diff_files(head)), "precondition: the lane's diff holds no mutation test file")
+
+    def assert_run_starts_once_at(self, head, text):
+        """The pre-join lint ran its lint once at `head`, and the mutation test run started once there, with no skip line printed."""
+        self.assert_lint_ran_at(head, text)
+        calls = self.mutation_test_calls()
+        self.assertEqual(len(calls), 1, "the mutation test run started %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(calls[0]["head"], head, "the mutation test run ran on a head other than the one linted: " + text)
+        self.assertNotIn(MUTATE_SKIPPED, text, "the mutation test run started, and the lint also printed the skip line: " + text)
+
+    def test_the_batch_runners_pre_join_lint_of_a_head_with_a_hand_off_pass_starts_no_mutation_run_and_says_it_was_skipped(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.touched_lane()
+        self.fresh_run()
+        self.assert_touches_mutate_file(head)
+        rc, text = self.pre_join([lint_comment(501, head)])
+        self.assert_lint_ran_at(head, text)
+        self.assertEqual(self.mutation_test_calls(), [], "the pre-join lint started the mutation test run although a hand-off PASS names this head: " + text)
+        self.assertIn(MUTATE_SKIPPED, text, "the pre-join lint does not say the mutation test run was skipped, and why: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the pre-join lint printed no single PASS line: " + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_batch_runners_pre_join_lint_with_no_hand_off_pass_for_its_head_starts_the_mutation_test_run_once(self):  # the control: no PASS names the head, so the run starts
+        self.use_ci_job(PASSING, 0)
+        head = self.touched_lane()
+        self.fresh_run()
+        self.assert_touches_mutate_file(head)
+        rc, text = self.pre_join([])
+        self.assert_run_starts_once_at(head, text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_batch_runners_pre_join_lint_with_a_hand_off_pass_for_an_older_head_starts_the_run_once_at_the_live_head(self):  # the control: a moved head is not the head the PASS names
+        self.use_ci_job(PASSING, 0)
+        old = self.touched_lane()
+        head = self.push_lane({"lanes/7-second.txt": "lane 7, second commit\n"})
+        self.fresh_run()
+        self.assertNotEqual(head, old, "precondition: the lane's head did not move after the PASS")
+        self.assert_touches_mutate_file(head)
+        rc, text = self.pre_join([lint_comment(501, old)])
+        self.assert_run_starts_once_at(head, text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_hand_off_lint_with_no_recorded_role_starts_the_run_even_when_a_pass_names_its_head(self):  # the control: the hand-off always starts the run
+        self.use_ci_job(PASSING, 0)
+        head = self.touched_lane()
+        self.fresh_run()
+        self.assert_touches_mutate_file(head)
+        rc, text = self.pre_join([lint_comment(501, head)], role=None)
+        self.assert_run_starts_once_at(head, text)
+        self.assertEqual(rc, 0, text)
+
+    def test_a_pre_join_lint_whose_head_has_only_a_fail_record_starts_the_run_once(self):  # only a PASS skips: a FAIL record for the head does not
+        self.use_ci_job(PASSING, 0)
+        head = self.touched_lane()
+        self.fresh_run()
+        self.assert_touches_mutate_file(head)
+        rc, text = self.pre_join([lint_comment(501, head, verdict="FAIL")])
+        self.assert_run_starts_once_at(head, text)
         self.assertEqual(rc, 0, text)
 
 
