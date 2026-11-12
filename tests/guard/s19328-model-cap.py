@@ -504,4 +504,15 @@ chained_ask("cap var: a cap write to a settings path held in a shell variable, t
    "F=" + PROJ_SETTINGS + "; python3 -c \"import os; os.system('echo " + CAP_KEY + "=opus >> $F')\"",
    cwd=NOGIT, carries=("agent-model-cap",))
 
+# THE CAP ASK NAMES ITS LIFT FIELD (debt cap-until-field-taught-late). The deadline key `_agentCapUntil` is how
+# a cap is lifted past its expiry, so the ask names it, and an approver reads the field before the write is
+# approved. The green control is the existing cap asks that carry the model name (cap: a redirect onto a project
+# settings file asks, and its Write sibling), which pass on main.
+add("cap-until: a Write that sets the cap asks and names the _agentCapUntil field", "ask", "agent-model-cap",
+    tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(), carries="_agentCapUntil")
+sh("cap-until: a shell redirect that sets the cap asks and names the _agentCapUntil field",
+   "printf '%s' '" + cap_settings(compact=True) + "' > " + PROJ_LOCAL, "ask", "agent-model-cap",
+   cwd=NOGIT, carries="_agentCapUntil")
+
+
 # =========================================================================== 6c. ask alone
