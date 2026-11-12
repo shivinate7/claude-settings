@@ -1,14 +1,14 @@
 {
   "id": "cloud-mod-bands-missing",
   "title": "Find why mod bands (weather) do not draw on cloud sessions",
-  "status": "doing",
+  "status": "ready",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
-  "lane": "session_013NEJL3nz3ETqgU4E5fN9TJ",
+  "lane": "",
   "why": "Mod bands draw locally but not on cloud sessions; the cause is unknown.",
-  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 7). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. A lane reads one cloud session's debug log to find why mod bands (weather) do not draw on cloud sessions. A platform limit gets a record and an upstream report. Lane prose-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 7). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. A lane reads one cloud session's debug log to find why mod bands (weather) do not draw on cloud sessions. A platform limit gets a record and an upstream report. Lane prose-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Back to ready 11:50 CST Nov 12: lane fan-prose-unmapped-1 left it unstarted.",
   "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "updatedAt": "2026-11-12T11:52:25-06:00",
   "blockedBy": []
 }

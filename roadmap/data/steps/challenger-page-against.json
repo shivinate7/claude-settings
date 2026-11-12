@@ -1,10 +1,10 @@
 {
   "title": "Page questions get a blind best case against the pick",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.3688,
   "why": "The owner sees the strongest counter-argument before picking.",
-  "note": "Owner picked a on item 284, 13:08 CST, and noted: some challengers should run Opus, not all Sonnet. Glossary word is \"refuter\" (item 282 b).\nAudit build 3, coordinator 12:57 CST. 1 Sonnet call per decision item. Waits on owner item 284 a. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1377. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1377). Lane prose-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
-  "updatedAt": "2026-11-12T07:29:00-06:00",
-  "lane": "session_013NEJL3nz3ETqgU4E5fN9TJ"
+  "note": "Owner picked a on item 284, 13:08 CST, and noted: some challengers should run Opus, not all Sonnet. Glossary word is \"refuter\" (item 282 b).\nAudit build 3, coordinator 12:57 CST. 1 Sonnet call per decision item. Waits on owner item 284 a. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1377. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1377). Lane prose-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Back to ready 11:50 CST Nov 12: lane fan-prose-unmapped-1 left it unstarted; it is code (option a of item 284).",
+  "updatedAt": "2026-11-12T11:52:25-06:00",
+  "lane": ""
 }
