@@ -4,7 +4,7 @@
 Modes:
 - --auth-check: At session start, checks that a model call can log in. With a token file it does nothing.
   With none it makes one short probe call. It prints one systemMessage line with the fix when that call cannot
-  authenticate (or answers with a login prompt), and says a judge uses ANTHROPIC_API_KEY when no setup token is saved. It shows that fix
+  authenticate (or answers with a login prompt), and says a judge uses ANTHROPIC_API_KEY when no setup token is saved and ANTHROPIC_API_KEY is set. It shows that fix
   once per missing token: a later start with no token file prints nothing, and the line returns after a token file
   has been present and is gone, or after a judge call has succeeded. It prints nothing otherwise. One probe costs
   about $0.02 (one cloud sample) and runs at the model's default effort, and runs only when no fix mark is set.
@@ -855,7 +855,7 @@ def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
 # The error's `kind` decides the probe. AUTH gives the setup-token fix, and its Stop line comes at the first failure. RUN (a timeout or a failed start) says
 # the check failed and names the error, with no fix, since the login may be fine; its Stop line waits for STREAK_MIN. REPLY (`ReplyError`) means the
 # model ran and answered badly: that login works, so it stays silent and resets the streak.
-# A token is never printed or written: `invoke_model` scrubs it from the error before either reader.
+# A token or API key is never printed or written: `invoke_model` scrubs both from the error before either reader.
 STREAK_SUB = "model-streak"
 STREAK_MIN = 3  # failures in a row before the Stop line speaks, for a failure that does not name the login
 PROBE_TIMEOUT = 20  # seconds; far under MODEL_TIMEOUT and the hook's own timeout in settings.json
@@ -868,12 +868,12 @@ def _token_path():
     return os.path.join(guard.config_dir(), "state", "hook-token")
 
 
-API_KEY_NOTE = "A judge uses ANTHROPIC_API_KEY when no setup token is saved."
+API_KEY_NOTE = "A judge uses ANTHROPIC_API_KEY when no setup token is saved and ANTHROPIC_API_KEY is set."
 
 
 def _token_fix():
     """The one fix text. It needs nothing from the state it repairs. It says the judge uses ANTHROPIC_API_KEY
-    when no setup token is saved, so an account with only an API key is told its route."""
+    when no setup token is saved and ANTHROPIC_API_KEY is set, so an account with only an API key is told its route."""
     return "run `claude setup-token`, then save the printed token as %s. %s" % (_token_path(), API_KEY_NOTE)
 
 

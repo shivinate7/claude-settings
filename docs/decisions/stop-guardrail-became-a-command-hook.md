@@ -27,8 +27,9 @@ as below.
   and `--safe-mode`. `cwd` and `CLAUDE_CONFIG_DIR` both point at a fresh, empty directory, never this
   project, with only the credential file copied in. So a nested call inherits no permission and cannot
   fire this hook at its own turn end. The child's environment is built from a named allow list, never by
-  subtracting from the parent's (`predicate-is-the-act`). A session that authenticates by API key sees
-  the isolated call fail closed, as UNKNOWN.
+  subtracting from the parent's (`predicate-is-the-act`). With no setup token, a session
+  that has `ANTHROPIC_API_KEY` set runs the judge on that key; with neither, the isolated call fails
+  closed, as UNKNOWN.
 - **The `why` field is capped, cleaned, and attributed.** It is bounded to 300 characters, cleaned the way
   the guard's own printed reasons are, and quoted as "the judge model reported" rather than stated
   plainly.
