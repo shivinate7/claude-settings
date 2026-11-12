@@ -6,7 +6,7 @@ cases of hooks/test_waiting_export.py and of tests/guard use it. Standard librar
 import os
 import shutil
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 TREE_SKIP = shutil.ignore_patterns("test_*", "*_test.py", "__pycache__")
 
 

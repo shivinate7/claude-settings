@@ -453,7 +453,7 @@ def mh_judged(name, data, action="set", windows=False):
     return decision, reason, calls, rows
 
 
-def mh_deny_problem(decision, reason, rows):
+def mh_refuse_problem(decision, reason, rows):
     """None when a run denied on rule mockup-home: the reason opens with the rule, names the file field and no
     forbidden target, and guard.log holds the deny row. Else the one cause, with the run's last guard.log row."""
     if decision != "deny":
@@ -480,7 +480,7 @@ def mh_case(label, name, data, want, checker, action="set", windows=False, says=
         if decision != want:  # one cause per failure: a wrong decision is the cause, the rest follow from it
             return False, "want %s, got %s: %s" % (want, decision, reason[:160])
         if want == "deny":
-            problem = mh_deny_problem(decision, reason, rows)
+            problem = mh_refuse_problem(decision, reason, rows)
             if problem:
                 return False, problem
             for text in says:
@@ -537,8 +537,8 @@ mh_case("a Windows-form design path inside the design folder is allowed, as it i
 # The page is in the registry form with no `collections` key, so the write's read reaches the collection list, which
 # the skill folder holds. The copy with no folder must still deny what the full checkout denies (rule mockup-home), so
 # the bare check runs the guard from that copy, as a subprocess. Its control runs the same write from this checkout.
-sys.path.insert(0, os.path.join(REPO, "tests", "support"))
-import bare_tree  # noqa: E402  the copy with no skill folder, one home in tests/support/bare_tree.py
+sys.path.insert(0, os.path.join(REPO, "tests", "guard", "support"))
+import bare_tree  # noqa: E402  the copy with no skill folder, one home in tests/guard/support/bare_tree.py
 PD_BARE = []  # the guard file of the copy with no skill folder, made once per run
 
 
@@ -562,7 +562,7 @@ def mh_registry_check(name, bare):
         if bare and os.path.exists(os.path.join(os.path.dirname(os.path.dirname(guard)), "skills")):
             return False, "scope: the copy holds a skills folder"
         decision, reason, rows = pd_run(name, pd_body(repo, pd_item(designs=[mh_design(file=MH_MACHINE)])), guard=guard)
-        problem = mh_deny_problem(decision, reason, rows)
+        problem = mh_refuse_problem(decision, reason, rows)
         return (problem is None), (problem or "deny, as wanted")
     return check
 

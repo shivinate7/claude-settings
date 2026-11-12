@@ -31,8 +31,8 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(REPO, "tests", "support"))
-import bare_tree  # noqa: E402  the copy with no skill folder, one home in tests/support/bare_tree.py
+sys.path.insert(0, os.path.join(REPO, "tests", "guard", "support"))
+import bare_tree  # noqa: E402  the copy with no skill folder, one home in tests/guard/support/bare_tree.py
 
 ROOT = _test_temp.run_folder()
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
