@@ -7,7 +7,7 @@ debt with a one-line gist. Only the merge tool rebuilds the page. A branch never
 
 The tool rebuilds the page on the integration branch before the branch goes ready. `merge <pr> --confirm`
 on a draft PR is that step, and it never merges. It refuses a head that does not hold the base tip, as
-`--confirm` does, and a head that carries a claim. It commits the page alone, pushes it, and stops: mark
+`--confirm` does, and a head that carries a claim. It claims the record numbers, rebuilds the page, commits both as one commit, pushes it, and stops: mark
 the PR ready, then run `--confirm` again. The tool sends no GraphQL, so the batch runner marks the PR ready
 by its session's route (route pr-ready-mcp-cloud), after the draft run of the pushed head shows (skill
 ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
@@ -20,12 +20,11 @@ change the tree, `--confirm` refuses before any wait, claim or push. The refusal
 the remedy: return the PR to draft (route pr-draft-mcp-cloud), run
 `merge <n> --confirm` on the draft, then mark it ready after its draft run shows. A head that holds a
 Record-claim on a base with no stamp kinds first reverts that claim commit, since the draft step refuses a
-claim head. A current page makes no
-commit. A claim stays at confirm under the lock, so its numbers are free on the base tip, as before. The
-claim commit carries the rebuilt page, so the claim and the page share one commit. That batch still runs
-CI twice (unmeasured in other repos; none in this repo, Oct 24 to 31). The draft step refuses a claim head,
-so the claim cannot move earlier. A resumed claim with a stale page still pushes the page, for the same
-reason. When only the page conflicts with the base, the tool rebuilds it on the merged tree. That heal is
+claim head. A current page with nothing to claim makes no
+commit. The draft step claims without the merge lock (owner ask, Nov 12 13:15 CST, one CI run per merge, replacing the earlier
+ruling that a claim stays at confirm). A number taken on the base after the draft step is refused at the ready confirm by the
+stamp check, and the remedy is the revert of the claim commit, then the draft step again. A resumed claim with a stale page
+still pushes the page: that heal stays. When only the page conflicts with the base, the tool rebuilds it on the merged tree. That heal is
 unchanged. Owner ask to stop the double CI run: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST.
 
 A lane never commits a change to `docs/records.md`, not even one made by `lint/hook_catalog.py`. PR CI

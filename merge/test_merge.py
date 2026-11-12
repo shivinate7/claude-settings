@@ -9706,6 +9706,22 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual([sha for sha, _ in self.host.waits], [prepared])
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
 
+    def test_a_pr_with_a_record_to_claim_pushes_nothing_after_the_ready_run(self):
+        """Ruling: records-index-at-merge (owner ask, Oct 31 14:12 CDT and Nov 12 13:15 CST: one CI run per merge). The draft step claims the
+        numbers and rebuilds the page in one commit before ready, so the ready confirm waits on that head and pushes nothing."""
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})  # a record summary the page must show, and a pending id to claim
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        ready_head = self.rev("origin/feat")
+        self.assertNotEqual(self.log1("%(trailers:key=Record-claim,valueonly)", ready_head).strip(), "", "the draft step claimed no number")
+        self.assertIn("docs/records.md", sh(self.co, "git", "show", "--name-only", "--format=", ready_head).splitlines())
+        self.host.draft = False
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rev("origin/main^2"), ready_head, "a commit was pushed after the ready run")
+        self.assertEqual(self.host.waits, [(ready_head, None)], "the ready confirm waited on a head other than the ready head")
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
     def test_prepare_draft_confirm_never_calls_merge_on_any_path(self):
         # One repo, four draft confirms in turn: a stale page, a current page, a refused push, and a head behind main.
         # On each, merge is never called and the pull request stays open.

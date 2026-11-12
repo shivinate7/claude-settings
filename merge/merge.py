@@ -5,7 +5,7 @@
                           nothing. A draft is previewed too; a dropped line prints one `BLOCKED:` line and exits 1.
                           A `Drops-lines:` line in the PR body excuses its path, as a commit trailer does.
   merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, push, wait, merge, sync the local base, clean up.
-                          On a draft it is the records step and never merges: rebuild the page, push it, ask to mark the PR ready.
+                          On a draft it is the records step and never merges: claim the record numbers, rebuild the page, push both as one commit, ask to mark the PR ready.
                           A repo that lists merge.readyChecks in its config (step names of the checks job, such as "check invariants")
                           gets them run first: `bin/ci-job checks --step NAME ... --base origin/<base>` in a temporary worktree on the tree
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
@@ -3369,8 +3369,8 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             records = "rebuild docs/records.md" if rebuild_records(wt) else "current"  # after the claim, as confirm does
             if records != "current" and not (info["draft"] or trailer or resumed):  # confirm refuses a page with no claim to ride, so a ready PR never gets a page-only push
                 records += ". --confirm refuses it. " + stale_page_remedy(n, head_claim(wt))
-            elif info["draft"] and records != "current" and not (trailer or resumed or stale):  # a claim commits at confirm anyway, so the draft step would save no run; it refuses a stale head
-                records += f". merge {n} --confirm on the draft pushes it before ready, so the ready run is the merge run"
+            elif info["draft"] and (records != "current" or trailer) and not (resumed or stale):  # the draft step pushes the claim and the page; it refuses a claim head and a stale head
+                records = (records if records != "current" else "page current") + f". merge {n} --confirm on the draft pushes it before ready, so the ready run is the merge run"
     finally:
         drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
@@ -3423,10 +3423,10 @@ def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, an
         raise LintFail(message, lines, log) if state == "fail" else Stop(message)
     say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
 
-def draft_step(root, cfg, n, host, info):
-    """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
-    stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
-    Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
+def draft_step(root, cfg, cfgrel, n, host, info):
+    """`merge <pr> --confirm` on a draft: claim the record numbers and rebuild the records page on the head in one commit, push it,
+    mark the pull request ready, and stop. So the branch is final at ready, and the ready confirm pushes nothing (decision
+    records-index-at-merge). Takes no lock and never merges. A number taken on the base before the merge is refused at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
     ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree."""
     base = info["base"]
@@ -3454,13 +3454,15 @@ def draft_step(root, cfg, n, host, info):
                     raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
                 if stands:
                     say(f"merge: {stands}. The green run stands.")
-                rebuilt = rebuild_records(wt)
-                sha = commit_claim(wt, None) if rebuilt else None
+                stamp_cfg = base_stamp_config(wt, tmp, cfgrel, f"origin/{base}")  # None: no kinds, so nothing to claim
+                trailer = do_claim(wt, stamp_cfg, f"origin/{base}") if stamp_cfg else None
+                rebuilt = rebuild_records(wt)  # after the claim, as confirm does
+                sha = commit_claim(wt, trailer) if (trailer or rebuilt) else None
                 if checks:
                     run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
-                if rebuilt:
+                if sha:
                     push_branch(wt, info["branch"])
-                    say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+                    say(f"merge: {trailer or 'the records page'} pushed to {info['branch']} at {sha[:9]}.")
                 else:
                     say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
         finally:
@@ -3529,7 +3531,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
     if info["draft"]:  # the records step: no lock, no claim, no wait, never a merge
-        return draft_step(root, cfg, n, host, info)
+        return draft_step(root, cfg, cfgrel, n, host, info)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
@@ -3547,7 +3549,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
         if info["draft"]:  # it turned draft after the first read: the records step, never a merge
-            return draft_step(root, cfg, n, host, info)
+            return draft_step(root, cfg, cfgrel, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
         busy = batch_refusal(host, n, base, info["head"])
