@@ -19,7 +19,8 @@ writes, so a session cannot grant itself an override. It is valid only while now
   before the owner's words does not hide it. That line grants only as the bare word, `off` or a length, with no
   reason and no Opus word. Pasted blocks and closed machine blocks are dropped first (CLOSED_BLOCKS); the owner never
   types pasted text. An unclosed machine block before the form does not hide it; an unclosed code fence does. That
-  line obeys the plain ask's gates but the notice start (_owner_ask): payload `source`, a fired-task body, a cloud seed.
+  line obeys the plain ask's gates (_owner_ask): payload `source`, a fired-task body, a promptSource `system` record, a
+  cloud seed, and a notice start other than the status block (STATUS_BLOCK_TAG).
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
   one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
@@ -96,10 +97,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 try:  # stdlib only: the one home of the machine-text tags and the config dir
-    from shared_names import MACHINE_TAGS, NOTICE_FRAMES, config_dir
+    from shared_names import MACHINE_TAGS, NOTICE_FRAMES, STATUS_BLOCK_TAG, config_dir
     NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
 except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
     NOTICE_TAGS = ()
+    STATUS_BLOCK_TAG = None
 
     def config_dir():  # a copy by need: an override file must stay readable while the helper lands late
         return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
@@ -290,9 +292,9 @@ def _override_rest(prompt, source=None, transcript=None):
     a length, so a reason or the Opus word there grants nothing. The last-line read cuts pasted blocks and closed
     machine blocks first (CLOSED_BLOCKS), so their text never supplies the line, and an unclosed machine block before
     the form does not hide it. An unclosed code fence before the form grants nothing: that line is quoted. The
-    last-line read also obeys the plain ask's gates (_owner_ask) except the notice start, since a status block starts
-    with a notice tag: `source`, a fired-task body, a promptSource `system` record and a cloud seed prompt grant
-    nothing. With no machine tags known there is no last-line read."""
+    last-line read also obeys the plain ask's gates (_owner_ask): `source`, a fired-task body, a promptSource `system`
+    record and a cloud seed prompt grant nothing. Of the notice starts, only the status block (STATUS_BLOCK_TAG) may
+    lead the prompt; any other notice start grants nothing. With no machine tags known there is no last-line read."""
     said = PROMPT.match(prompt)
     if said:
         return said.group(1)
@@ -304,7 +306,7 @@ def _override_rest(prompt, source=None, transcript=None):
         return None
     if "\n".join(lines[:-1]).count("```") % 2:
         return None
-    return said.group(1) if _owner_ask(prompt, source, transcript, lambda text: True, notice_start=False) else None
+    return said.group(1) if _owner_ask(prompt, source, transcript, lambda text: True, status_start=True) else None
 
 
 def _keyword_rest(rest):
@@ -363,18 +365,20 @@ def _file_role(roles):
     return None if not roles else roles[0] if len(roles) == 1 else roles
 
 
-def _text_of(rec):
-    """The owner text of one transcript record (lint/_transcript.py owner_text), or None."""
+def _text_of(rec, raw=False):
+    """The owner text of one transcript record (lint/_transcript.py owner_text), or None. With `raw`, a record whose
+    text starts with a notice tag keeps its text too."""
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.insert(0, lint)
     import _transcript
-    return _transcript.owner_text(rec, NOTICE_TAGS)
+    return _transcript.owner_text(rec, () if raw else NOTICE_TAGS)
 
 
-def _tail_prompts(transcript):
+def _tail_prompts(transcript, raw=False):
     """[(offset, record)] for each owner prompt record in the last SEED_READ_MAX bytes, in order. Attachment, assistant
-    and other non-prompt records are left out. Cost: one open, one read of that tail."""
+    and other non-prompt records are left out. With `raw`, prompt records that start with a notice tag stay in
+    (_text_of). Cost: one open, one read of that tail."""
     if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
         return []
     try:
@@ -391,7 +395,7 @@ def _tail_prompts(transcript):
             rec = json.loads(line)
         except ValueError:
             rec = None
-        if isinstance(rec, dict) and _text_of(rec) is not None:
+        if isinstance(rec, dict) and _text_of(rec, raw) is not None:
             found.append((at, rec))
         at += len(line)
     return found
@@ -444,10 +448,15 @@ def _seed_record(transcript, found, prompt):
     return None
 
 
-def _system_prompt_last(found, prompt):
-    """True when the last owner prompt record of `found` is the prompt itself with promptSource "system": a timed
-    check-in or other harness turn."""
-    return bool(found) and found[-1][1].get("promptSource") == "system" and _text_of(found[-1][1]).strip() == prompt.strip()
+def _system_prompt_last(records, prompt):
+    """True when the prompt's own record is the last owner prompt record of `records` (_tail_prompts with `raw`) and has
+    promptSource "system": a timed check-in or other harness turn. The own record is matched on its raw text, since a
+    prompt that starts with a status block has no owner text; other notice records do not count as last."""
+    said, last = prompt.strip(), None
+    for _, rec in records:
+        if _text_of(rec) is not None or _text_of(rec, True).strip() == said:
+            last = rec
+    return last is not None and last.get("promptSource") == "system" and _text_of(last, True).strip() == said
 
 
 def _context_prompts(found, prompt, seed=None):
@@ -478,25 +487,30 @@ def _scoped_roles(scope_judge, text, context):
     return sorted({w.strip().lower() for w in named if isinstance(w, str)} & set(ASK_ROLES))
 
 
-def _owner_ask(prompt, source, transcript, wanted, notice_start=True):
+def _owner_ask(prompt, source, transcript, wanted, status_start=False):
     """The gates of the plain asks (grant_opus_ask, grant_override_ask) and of the override's last-line read
-    (_override_rest, with `notice_start` False: its prompt starts with a status block), the one home. Returns (text, found, seed) for a
-    prompt that may go to a judge, else None. `text` is the prompt less its pasted and notice blocks. `found` is the
-    tail read (_tail_prompts). `seed` is a cloud session's seed record offset, else None. `wanted(text)` is the route's
-    own test of the words, run before the transcript is read. None for: a non-string, a `source` outside
-    OPUS_ASK_SOURCES, a missing NOTICE_TAGS, a prompt that starts with a notice, a fired-task block, words the route
-    does not want, a prompt whose own record is last in the transcript with promptSource "system", and in a cloud
-    session (env LANE_ENV set) a prompt with no earlier owner turn (the seed prompt)."""
+    (_override_rest, with `status_start`), the one home. Returns (text, found, seed) for a prompt that may go to a
+    judge, else None. `text` is the prompt less its pasted and notice blocks. `found` is the tail read (_tail_prompts).
+    `seed` is a cloud session's seed record offset, else None. `wanted(text)` is the route's own test of the words, run
+    before the transcript is read. None for: a non-string, a `source` outside OPUS_ASK_SOURCES, a missing NOTICE_TAGS,
+    a prompt that starts with a notice (with `status_start`, any notice but the status block, STATUS_BLOCK_TAG), a
+    fired-task block, words the route does not want, a prompt whose own record is last in the transcript with
+    promptSource "system", and in a cloud session (env LANE_ENV set) a prompt with no earlier owner turn (the seed
+    prompt)."""
     if not isinstance(prompt, str) or source not in OPUS_ASK_SOURCES:
         return None
-    if not NOTICE_TAGS or (notice_start and prompt.lstrip().startswith(NOTICE_TAGS)) or FIRED_TASK.search(prompt):
+    start = prompt.lstrip()
+    status = status_start and STATUS_BLOCK_TAG and start.startswith(STATUS_BLOCK_TAG)
+    notice = start.startswith(NOTICE_TAGS) and not status
+    if not NOTICE_TAGS or notice or FIRED_TASK.search(prompt):
         return None  # a stored task, a notice or no tag list: not typed words
     text = _strip_blocks(prompt)
     if not wanted(text):
         return None
-    found = _tail_prompts(transcript)
-    if _system_prompt_last(found, prompt):
+    records = _tail_prompts(transcript, raw=True)
+    if _system_prompt_last(records, prompt):
         return None
+    found = [(at, rec) for at, rec in records if _text_of(rec) is not None]
     seed = _seed_record(transcript, found, prompt) if os.environ.get(LANE_ENV) else None
     if os.environ.get(LANE_ENV) and seed is None:
         return None

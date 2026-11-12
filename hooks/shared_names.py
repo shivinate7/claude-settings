@@ -32,7 +32,9 @@ _HAND_BACK_TAGS = tuple("<agent-message" + end for end in "> \t\n\r")
 # Bandaid (debt inbox-saves-other-notices): a peer's send_message frame, bare at the start of the
 # prompt. The tag name ends at `>` or whitespace.
 _PEER_FRAME_TAGS = tuple("<cross-session-message" + end for end in "> \t\n\r")
-MACHINE_TAGS = ("<system-reminder>", TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + tuple(
+# The app's status block ("Linked sessions now"). The override's last-line read lets a prompt start with it.
+STATUS_BLOCK_TAG = "<system-reminder>"
+MACHINE_TAGS = (STATUS_BLOCK_TAG, TASK_NOTIFICATION_TAG) + _HAND_BACK_TAGS + tuple(
     frame + "\n" + tag
     for frame in ("Another Claude session sent a message:",
                   "Another Claude session sent a message while you were working:")
