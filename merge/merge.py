@@ -3087,7 +3087,12 @@ def lint_slot():
         yield
     finally:
         if fd is not None:
-            os.close(fd)  # closing the fd frees the lock
+            import guard_core  # hooks/, on sys.path from the top of this file
+            try:
+                guard_core.unlock_fd(fd)  # Windows may free a byte-range lock late after close, so unlock first
+            except OSError:
+                pass
+            os.close(fd)
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
