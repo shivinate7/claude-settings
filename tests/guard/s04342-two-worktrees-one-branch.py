@@ -257,6 +257,31 @@ sh("two-worktrees: branch --list is a list, another act, and is allowed",
    VCS + " branch --list", "allow", cwd=TWACT)
 sh("two-worktrees: branch --list with a force letter and a held name is a list, another act, and is allowed",
    VCS + " branch --list -f x", "allow", cwd=TWACT)
+# THE EXCLUDED MODE LETTERS AND LONG MODES, WITH FORCE. A force letter or --force beside a copy, move, list or
+# delete mode is another act, whichever letter or long spelling names the mode. Each row names the held x, so a
+# mode that the rule reads as a hold turns its own row red.
+sh("two-worktrees: branch -fC x y, a forced copy of a held branch, is another act, and is allowed",
+   VCS + " branch -fC x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fc x y, a forced copy of a held branch, is another act, and is allowed",
+   VCS + " branch -fc x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fM x y, a forced move of a held branch, is another act, and is allowed",
+   VCS + " branch -fM x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fl x, a forced list with a held name, is another act, and is allowed",
+   VCS + " branch -fl x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fL x, a forced list with a held name, is another act, and is allowed",
+   VCS + " branch -fL x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --delete x, a forced delete of a held branch, is another act, and is allowed",
+   VCS + " branch --force --delete x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --move x, a forced move of a held branch, is another act, and is allowed",
+   VCS + " branch --force --move x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --copy x, a forced copy of a held branch, is another act, and is allowed",
+   VCS + " branch --force --copy x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --edit-description x, a forced description edit, is another act, and is allowed",
+   VCS + " branch --force --edit-description x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --show-current x, a forced show of the current branch, is another act, and is allowed",
+   VCS + " branch --force --show-current x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --list x, a forced list with a held name, is another act, and is allowed",
+   VCS + " branch --force --list x", "allow", cwd=TWACT)
 # THE OWN TREE THROUGH `git -C`. The tree a `git -C` names is the tree the call runs in, so the holder's own
 # update-ref of x is allowed there.
 sh("two-worktrees: git -C <holder> update-ref refs/heads/x HEAD, run in the holder's own tree, is allowed",
