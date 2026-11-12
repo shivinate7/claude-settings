@@ -1075,6 +1075,25 @@ _RUNS_A_SUBSTITUTION = re.compile(r"\$[({]|`|[<>]\(")
 # A sed `e` command or flag, or a `w`/`W` command or flag: at a script's start, or after an address or a
 # separator (`1e cmd`, `$e`, `/x/e`, `s/a/b/e`, `;w f`).
 _SED_RUNS_OR_WRITES = re.compile(r"(?:^|[\d$/;{}!,\s])\s*[ewW](?:\s|;|}|$)")
+# The start of a sed `s` command: at a script's start or after an address or a separator, then its delimiter.
+_SED_S_COMMAND = re.compile(r"(?:^|(?<=[\d$/;{}!,\s]))s(?=[^\w\s\\])")
+
+
+def _sed_s_flag_runs(script: str) -> bool:
+    """True when a sed `s` command in `script` ends in an `e` flag, whatever its delimiter: the delimiter is
+    the character after the `s`, so `s|a|rm F|e` and `s#a#rm F#e` read as `s/a/rm F/e` does. A backslash
+    escapes the next character. A command that never closes its two parts has no flags to read."""
+    for found in _SED_S_COMMAND.finditer(script):
+        delimiter, at, closed = script[found.end()], found.end() + 1, 0
+        while at < len(script) and closed < 2:
+            if script[at] == "\\":
+                at += 1
+            elif script[at] == delimiter:
+                closed += 1
+            at += 1
+        if closed == 2 and "e" in re.match(r"[A-Za-z0-9]*", script[at:]).group():
+            return True
+    return False
 
 
 def _runs_a_substitution(word: str) -> bool:
@@ -1088,7 +1107,7 @@ def _runs_a_substitution(word: str) -> bool:
 def _runs_its_text(command: str, rest) -> bool:
     """True when a reader's arguments hold text it runs as a command: a git alias that starts with `!`,
     `git rebase -x`, `git submodule foreach`, `git bisect run`, a sed `e` or `w` command, `rg --pre`, or a
-    python script handed a `mv` or `rm` word, which it may run."""
+    python script handed a mutating word (`MUTATING_COMMAND`), which it may run."""
     words = [_unquoted(word) for word in rest]
     if command == "git":
         values = [value for flag, value in zip(words, words[1:]) if flag == "-c"]
@@ -1106,9 +1125,11 @@ def _runs_its_text(command: str, rest) -> bool:
         scripts += [word for word in words if word.startswith("--expression=")]
         if not scripts:
             scripts = [word for word in words if not word.startswith("-")][:1]
-        return any(_SED_RUNS_OR_WRITES.search(script) for script in scripts)
+        return any(_SED_RUNS_OR_WRITES.search(script) or _sed_s_flag_runs(script) for script in scripts)
     if command in ("python", "python3"):
-        return any(word in ("mv", "rm") for word in words)
+        # pytest's `-k EXPR` names tests to select, so its value is a filter word, not a command.
+        selected = {at + 1 for at, word in enumerate(words) if word == "-k" and "pytest" in words[:at]}
+        return any(re.fullmatch(MUTATING_COMMAND, word) for at, word in enumerate(words) if at not in selected)
     if command == "rg":
         return any(word == "--pre" or word.startswith("--pre=") for word in words)
     return False
