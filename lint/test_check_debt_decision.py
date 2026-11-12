@@ -10,7 +10,8 @@ The value names the decision by its slug, or is `none`.
 The check reads the lines the change adds or edits (origin/main...HEAD) in docs/debts/. It judges each Decision line:
 
 - the value names a decision by its slug: the README's template form, with a prose word before the slug
-  (`The decision `slug`: ...`), counts. The value is `none`, or names a decision file in docs/decisions/ of the tree;
+  (`The decision `slug`: ...`), counts, and so does a comma gloss after it (`slug`, words that say what it rules).
+  The value is `none`, or names a decision file in docs/decisions/ of the tree;
 - a value that names no decision file is red, and its FAIL line names that missing slug;
 - a first word with a `/` (a path cite), or ending `.md`, is red, whatever it names;
 - a debt the change adds, or edits so that its Decision part is gone (deleted, or rewritten out of the marker),
@@ -231,13 +232,27 @@ class DebtDecisionTests(unittest.TestCase):
         self.change({DEBT: debt("The decision `merge-lock`: one lock per base.")})
         self.assert_passes()
 
+    def test_default_passes_a_comma_gloss_after_a_decision_slug(self):
+        # The slug, a comma, then plain words that say what the decision rules. Pinned green: the check reads it today.
+        self.change({DEBT: debt("`merge-lock`, one lock per base.")})
+        self.assert_passes()
+
     def test_default_flags_a_prose_word_before_a_slug_that_names_no_file(self):
         self.change({DEBT: debt("The decision `merge-lok`: one lock per base.")})
+        self.assert_flags((DEBT, DECISION_LINE, "merge-lok"))
+
+    def test_default_flags_a_comma_gloss_after_a_slug_that_names_no_file(self):
+        self.change({DEBT: debt("`merge-lok`, one lock per base.")})
         self.assert_flags((DEBT, DECISION_LINE, "merge-lok"))
 
     def test_default_flags_a_rule_anchor_that_names_no_decision_file(self):
         # verdict-rewritten-xcode-output.md line 7: a rule anchor, and no decision file has its slug.
         self.change({DEBT: debt("Rule `verification-report-unknown-reads` (a read that could not run is unknown, never clear).")})
+        self.assert_flags((DEBT, DECISION_LINE, "verification-report-unknown-reads"))
+
+    def test_default_flags_a_rule_anchor_with_a_comma_gloss(self):
+        # The comma gloss does not make a rule anchor a decision: its slug names no decision file, so it is red.
+        self.change({DEBT: debt("Rule `verification-report-unknown-reads`, a read that could not run is unknown.")})
         self.assert_flags((DEBT, DECISION_LINE, "verification-report-unknown-reads"))
 
     def test_default_flags_an_edit_that_deletes_the_decision_part(self):
