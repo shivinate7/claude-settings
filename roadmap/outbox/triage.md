@@ -980,3 +980,11 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - guard-reads-ruled-store 16:09 CST Nov 12: Sighting 16:09 CST Nov 12: page write of item 662 passed the past-ruling hook though R55 and batch-freeze-lane-set settle it; only the report-time guard caught it (second case after item 651).
 - [note for docs/debts/notes.md] Coordinator 16:13 CST Nov 12: guard lane-closes-after-records refused an archive three times without naming the stranded branch; it expects archive/<full branch name> (archive/lane/<slug>), the coordinator pushed archive/<slug>. The refusal should name the stranded branch and the archive ref it expects. A debt only if it repeats.
 - [next branch delete batch] Coordinator 16:13 CST Nov 12: archive/agent-model-cap-string-false-alarm and archive/agent-model-cap-string-false-alarm-tests are redundant copies; the same tips sit under archive/lane/.
+- reviewer-model-hook-latest 16:13 CST Nov 12: lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12: agents/reviewer.md pins haiku, but fix checks need sonnet (rule roles-third-round-steps-up: reviewers run Sonnet from round 2).
+- shoot-job-cap 16:13 CST Nov 12: lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12: bin/shoot truncates the body scroller (a page whose scroll sits on an inner element is cut off).
+- [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] skills/roadmap/SKILL.md:46-47 says the coordinator writes a step's lane field; triage does now. Record-writer fix.
+- [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] R22 point 2 wording needs an owner rewrite (what is wrong asked of the coordinator 16:14 CST before any page item).
+- [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] Four new notes in docs/debts/notes.md for #2747, #2833 and #2913 (land with those PRs).
+- [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] Note message-ref-pr-lines-word may be a debt: a refused message gets resent.
+- [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] A subagent's new-file Write in docs/debts was refused, so #2748's debts stayed as notes; possible false alarm, check which guard refused.
+- [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] All PRs handed to runner 10: #2661, #2715-#2717, #2726, #2736, #2747, #2748, #2833, #2913; merge order #2748, #2833, #2913.
