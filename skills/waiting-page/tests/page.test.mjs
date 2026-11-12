@@ -727,10 +727,12 @@ for (const width of [390, 1440]) {
   });
 }
 
-test("SKILL.md and the designer agent carry the mockup convention", async () => {
-  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+test("SKILL.md, reference/designs.md and the designer agent carry the mockup convention", async () => {
+  // The mockup convention moved from SKILL.md to reference/designs.md, so the skill's text is read from both files.
+  const skill = ["SKILL.md", path.join("reference", "designs.md")]
+    .map((f) => fs.readFileSync(path.join(HERE, "..", f), "utf8")).join("\n");
   const designer = fs.readFileSync(path.join(HERE, "..", "..", "..", "agents", "designer.md"), "utf8");
-  for (const [name, text] of [["SKILL.md", skill], ["designer.md", designer]]) {
+  for (const [name, text] of [["SKILL.md and reference/designs.md", skill], ["designer.md", designer]]) {
     assert.match(text, /"Sample" banner/, name + " has no Sample banner line");
     assert.match(text, /"Today: <part>"/, name + " has no Today label");
     assert.match(text, /"New: <part>"/, name + " has no New label");
