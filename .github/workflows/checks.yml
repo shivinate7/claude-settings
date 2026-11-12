@@ -1388,8 +1388,9 @@ jobs:
     # measured lane PR 1163 alone at 946 s locally (+236 s) and lane PR 1157 at 768 s (+58 s). If those add up and the
     # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound.
     # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving, as one job.
-    # The mutants now run in two shards, this job (MUTATE_SHARD 1/2) and checks-mutate-guard-2 (2/2), which share one cap.
-    # No sharded run is measured yet, so the cap stays 75: the next green run gives the per-shard figure to re-cap from.
+    # The mutants run in two shards, this job (MUTATE_SHARD 1/2) and checks-mutate-guard-2 (2/2). Each job has its own 75 min cap.
+    # No sharded run is measured yet, so both caps stay 75: the first green sharded run gives the per-shard time to re-cap from
+    # (debt mutate-shard-recap). The 16 min figure above is the unsplit set, not a shard.
     # Now 75, above the 3600 s suite cap in hooks/mutate_guard.py, so the suite cap fires first (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
     steps:
@@ -1411,8 +1412,8 @@ jobs:
         run: python3 hooks/mutate_guard.py
 
       # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not in the guard suite, which runs in the
-      # sibling shards (checks-guard is split in two, decision ci-job-caps); this job is projected at about 16 min, 21% of its 75 min cap, and this step adds 101 s locally (16 tests, about 1.7 min,
-      # so about 24%, under the 70% warn line of the merge tool; unmeasured in CI).
+      # sibling shards (checks-guard is split in two, decision ci-job-caps); this job's shard time is unmeasured, so its share of the 75 min cap is unknown until the first green sharded run (debt mutate-shard-recap).
+      # This step adds 101 s locally (16 tests, about 1.7 min; unmeasured in CI).
       # Same `guard` scope flag as the guard mutation test above. Own 5 min cap (3x the local time), so a hang reads red here.
       - name: Guard progress beat suite
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1424,7 +1425,7 @@ jobs:
   checks-mutate-guard-2:
     runs-on: ubuntu-latest
     needs: scope
-    # Shares checks-mutate-guard's cap (75, interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps), which carries the figures.
+    # Own 75 min cap, the same value as checks-mutate-guard (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps), which carries the figures; the first green sharded run sets both re-caps (debt mutate-shard-recap).
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
