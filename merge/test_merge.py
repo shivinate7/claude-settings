@@ -9,7 +9,7 @@ No network, no real repo. Every run uses a local bare origin in a temp dir, the 
 actions/stamp/stamp.mjs, and a fake Host for the git half. The lock backend is
 GitLock against that origin. GhLock and the GitHub half (Host) are covered with a fake `gh` on PATH.
 """
-import ast, atexit, base64, contextlib, fnmatch, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
+import ast, atexit, base64, contextlib, copy, fnmatch, importlib.util, inspect, io, pathlib, json, os, re, shutil, signal, socket, stat, subprocess, sys, tempfile, threading, time, tokenize, types, unittest, unittest.mock
 import ctypes  # the Windows-branch test patches os.name; ctypes' own import would then take the Windows path on Linux, so it loads here first
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +25,7 @@ import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shall
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
+import layout as repo_layout  # noqa: E402  the one layout (lint/layout.py); a case moves its decisions kind in a copy of merge.py
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
@@ -16152,6 +16153,17 @@ class ReviewGuardTestPaths(unittest.TestCase):
         self.assertEqual(review_fn(self, "guard_hits")(["hooks/test_guard.py", "hooks/mutate_guard.py"]), ["hooks/mutate_guard.py"],
                          "guard_hits counts the test path hooks/test_guard.py, or drops the check hooks/mutate_guard.py")
 
+def merge_with_decisions_moved(path):
+    """A fresh load of merge.py whose decisions folder is `path`. merge.py reads the folder from the layout once, at import, so the layout is
+    patched for that load only; the merge module the other cases use is left as it is."""
+    moved_layout = copy.deepcopy(repo_layout.layout())
+    moved_layout["kinds"]["decisions"]["path"] = path
+    spec = importlib.util.spec_from_file_location("merge_with_moved_decisions", merge.__file__)
+    module = importlib.util.module_from_spec(spec)
+    with unittest.mock.patch.object(repo_layout, "layout", return_value=moved_layout):
+        spec.loader.exec_module(module)
+    return module
+
 class ReviewGuardKinds(unittest.TestCase):
     """merge.kind_misfits(kind, files): the sorted paths that break the kind, over the (path, status, additions) triples of the diff. docs-only:
     each path that is not a doc, a .md under docs/ or the root README.md (merge.is_doc), and each decision record (a file under docs/decisions/,
@@ -16165,7 +16177,7 @@ class ReviewGuardKinds(unittest.TestCase):
         self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), ["hooks/y.txt", "lint/x.py"])
 
     def test_docs_only_names_a_decision_record_it_adds(self):
-        # A decision record files an owner ruling, so a docs-only change may not carry it (decision docs-only-prs-skip-review).
+        # The Kind of a diff that files a decision record must not be docs-only (decision docs-only-prs-skip-review).
         # Scope first: the decision path is a doc, so the naming below is the ruling check and not the doc check.
         self.assertTrue(review_fn(self, "is_doc")("docs/decisions/new-ruling.md"), "scope: the decision path is not a doc, so the naming below would not be this check")
         files = [("docs/decisions/new-ruling.md", "added", 12), ("docs/a.md", "modified", 1)]
@@ -16179,7 +16191,7 @@ class ReviewGuardKinds(unittest.TestCase):
                          "docs-only passed a decision record it edits")
 
     def test_docs_only_names_nothing_outside_the_decisions_folder(self):
-        # Debts, the map and a folder whose name only starts with docs/decisions file no owner ruling.
+        # A debt, a map page and a folder whose name only starts with docs/decisions are not decision records, so none is named.
         files = [("docs/debts/x.md", "added", 2), ("docs/map/x.md", "added", 2), ("docs/decisionsx/y.md", "added", 2)]
         self.assertEqual(review_fn(self, "kind_misfits")("docs-only", files), [], "docs-only names a doc outside the decisions folder")
 
@@ -16214,6 +16226,15 @@ class ReviewGuardKinds(unittest.TestCase):
         self.assertTrue(review_fn(self, "is_doc")("docs/decisions/gone-ruling.md"), "scope: the decision path is not a doc, so the naming below would not be this check")
         self.assertEqual(review_fn(self, "kind_misfits")("docs-only", [("docs/decisions/gone-ruling.md", "removed", 0)]), [],
                          "docs-only named a removed decision record")
+
+    def test_docs_only_follows_the_decisions_folder_the_layout_names(self):
+        # The folder comes from the layout (merge.DECISIONS_DIR), so a layout that moves the decisions kind moves the ruling check with it.
+        moved = merge_with_decisions_moved("docs/rulings")
+        self.assertTrue(review_fn(self, "is_doc")("docs/rulings/new-ruling.md"), "scope: the moved path is not a doc, so the naming below would not be this check")
+        self.assertEqual(moved.kind_misfits("docs-only", [("docs/rulings/new-ruling.md", "added", 12)]), ["docs/rulings/new-ruling.md"],
+                         "docs-only passed a decision record under the folder the layout names")
+        self.assertEqual(moved.kind_misfits("docs-only", [("docs/decisions/x.md", "added", 12)]), [],
+                         "docs-only named a doc under docs/decisions/, which the layout no longer names as the decisions folder")
 
     def test_delete_only_names_each_path_that_adds_or_is_new_sorted(self):
         files = [("hooks/a.py", "removed", 0), ("README.md", "modified", 3), ("docs/moved.md", "renamed", 0), ("docs/old.md", "removed", 0),
