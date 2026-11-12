@@ -17,7 +17,7 @@ The contract of `bin/shoot`:
 - A shot fails on a navigation error, a timeout, an HTTP status of 400 or more, or an image of one colour only.
 - It uses the installed Playwright package only. If the package is missing, it prints one line that names it and exits 2. It never runs `playwright install`.
 - It takes a simulator screenshot only when that device is already booted. It never boots a simulator, because the repos ration them. A device that is not booted is a skip, not a fail.
-- Cost: one browser process for each run, closed at exit. No daemon and no watcher.
+- Cost: one browser process for each run, closed at exit (unmeasured). No daemon and no watcher.
 
 Why: each repo had its own way to take screenshots, and banchi's script had a fixed viewport. One command gives one place to fix the sizes, the themes and the blank-page check.
 
