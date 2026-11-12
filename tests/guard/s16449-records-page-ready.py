@@ -9,6 +9,13 @@ FAMILY = "records-page-ready"
 # feat-stale (the no-selector form reads the folder's branch), and a repo with no stamp file (not a merge-tool repo).
 # Each case's fake gh answers for its own pull request with the head's real sha. The fixture assumes the base's
 # .github/stamp.json names the default branch, read from origin/<base>, and that the page is what lint/hook_catalog.py writes.
+#
+# THE GITHUB NAMES. The fixture's own repo, y/x, is the origin of each checkout (RPR_REPO, RPR_NOSEL, RPR_SHALLOW), so a
+# call that names y/x names the checkout's own repo. git reads https://github.com/y/x.git as RPR_ORIGIN through
+# url.<path>.insteadOf, set in each case's environment by _rpr_urls. The other repo, y/child, has a bare origin of its own
+# (RPR_CHILD_ORIGIN) that holds its heads and no others. y/gone maps to a path that does not exist, so its read fails.
+# No case reaches GitHub. Caveat: `git remote get-url` expands insteadOf, so inside a case it prints the local path;
+# `git config --get remote.origin.url` prints the literal URL.
 RPR = os.path.join(ROOT, "readypage")
 RPR_ORIGIN = os.path.join(RPR, "origin.git")
 RPR_SEED = os.path.join(RPR, "seed")
@@ -38,6 +45,18 @@ RPR_SHALLOW_WT = os.path.join(RPR, "shallow-wt")   # a worktree of that clone at
 GHREADY_SHALLOW = os.path.join(RPR, "gh-shallow")  # feat-behind in RPR_SHALLOW: the ancestry is unknown, so the ready mark is refused
 GHREADY_SHALLOW_NAMED = os.path.join(RPR, "gh-shallow-named")  # the same, and every call must name repos/y/x
 RPR_UNKNOWN_LACKS = ("--confirm", "merge <pr>", "merge 12")  # the unknown reason names no merge command: it says to retry, or to draft first
+RPR_X = "https://github.com/y/x.git"             # the fixture's own repo: each checkout's origin names it, and it reads as RPR_ORIGIN
+RPR_CHILD_URL = "https://github.com/y/child.git"  # another repo: its heads live on RPR_CHILD_ORIGIN only
+RPR_GONE_URL = "https://github.com/y/gone.git"    # a repo that cannot be fetched: its URL maps to RPR_GONE, a path that is not there
+RPR_CHILD = os.path.join(RPR, "child")
+RPR_CHILD_ORIGIN = os.path.join(RPR_CHILD, "origin.git")
+RPR_CHILD_SEED = os.path.join(RPR_CHILD, "seed")
+# Outside ROOT on purpose: git's error text names the path it could not read, and the generic reason check refuses a reason
+# that names a fixture folder. A fresh uuid, so no folder of that name exists.
+RPR_GONE = os.path.join(os.sep, "no-such-repo-%s.git" % uuid.uuid4().hex)
+GHREADY_CHILD_STALE = os.path.join(RPR, "gh-child-stale")      # y/child, head child-stale: a debt and no page
+GHREADY_CHILD_CURRENT = os.path.join(RPR, "gh-child-current")  # y/child, head child-current: a debt and the page the generator writes
+GHREADY_GONE = os.path.join(RPR, "gh-gone")                    # y/gone, head child-stale: the repo cannot be fetched
 
 
 def _rpr_git(where, *args):
@@ -53,6 +72,31 @@ def _rpr_need(ok, what):
         sys.exit("fixture setup failed in the records-page-ready fixtures: " + what)
 
 
+def _rpr_commit(seed, message, files=None, page=False):
+    """Commit `files` (path -> text) on the checkout at `seed`. `page` writes the page the generator writes for that tree, as the
+    merge tool does before the branch goes ready."""
+    for rel, text in (files or {}).items():
+        write(os.path.join(seed, *rel.split("/")), text)
+    if page:
+        done = subprocess.run([sys.executable, RPR_GEN, "--root", seed, "--records-only"], capture_output=True, text=True)
+        _rpr_need(done.returncode == 0, "the generator refused the seed tree: " + done.stderr.strip())
+    _rpr_git(seed, "add", "-A")
+    _rpr_git(seed, "commit", "-q", "-m", message)
+
+
+def _rpr_branch(seed, name, base):
+    _rpr_git(seed, "checkout", "-q", "-B", name, base)
+
+
+def _rpr_ls_remote(where, pairs, url):
+    """(return code, stdout) of `git ls-remote <url>`, with the GitHub URLs in `pairs` read as local paths. A fixture's own check
+    that a URL reaches the path it names, and that no read goes to GitHub."""
+    env = dict(os.environ)
+    env.update(_rpr_urls(*pairs))
+    done = subprocess.run([VCS, "ls-remote", url], cwd=where, capture_output=True, text=True, env=env)
+    return done.returncode, done.stdout
+
+
 def _build_ready_page():
     os.makedirs(RPR, exist_ok=True)
     _rpr_git(RPR, "init", "-q", "--bare", "-b", "main", RPR_ORIGIN)
@@ -61,16 +105,10 @@ def _build_ready_page():
     _rpr_git(RPR_SEED, "remote", "add", "origin", RPR_ORIGIN)
 
     def commit(message, files=None, page=False):
-        for rel, text in (files or {}).items():
-            write(os.path.join(RPR_SEED, *rel.split("/")), text)
-        if page:  # the generator writes the page for this tree, as the merge tool does before the branch goes ready
-            done = subprocess.run([sys.executable, RPR_GEN, "--root", RPR_SEED, "--records-only"], capture_output=True, text=True)
-            _rpr_need(done.returncode == 0, "the generator refused the seed tree: " + done.stderr.strip())
-        _rpr_git(RPR_SEED, "add", "-A")
-        _rpr_git(RPR_SEED, "commit", "-q", "-m", message)
+        _rpr_commit(RPR_SEED, message, files, page)
 
     def branch(name, base):
-        _rpr_git(RPR_SEED, "checkout", "-q", "-B", name, base)
+        _rpr_branch(RPR_SEED, name, base)
 
     commit("base", {".github/stamp.json": RPR_STAMP, "README.md": "base\n"})
     branch("feat-behind", "main")                         # cut here, before main moves on
@@ -137,6 +175,47 @@ def _build_ready_page():
     behind_pr = dict(head_sha=behind, head_ref="feat-behind", draft=True)
     make_fake_gh(GHREADY_SHALLOW, "main", **behind_pr)
     make_fake_gh(GHREADY_SHALLOW_NAMED, "main", need=["y/x"], **behind_pr)
+    # The checkouts' origin is the fixture's own repo, y/x, so a call that names y/x names the checkout's own repo. The URL is set
+    # last: every fetch above reads the origin as RPR_ORIGIN, through the case's mapping, not through this URL.
+    for clone in (RPR_REPO, RPR_NOSEL, RPR_SHALLOW):
+        _rpr_git(clone, "remote", "set-url", "origin", RPR_X)
+        _rpr_need(_rpr_git(clone, "config", "--get", "remote.origin.url") == RPR_X, "the origin of %r is not y/x" % clone)
+    listed_rc, listed = _rpr_ls_remote(RPR_REPO, [(RPR_X, RPR_ORIGIN)], RPR_X)
+    _rpr_need(listed_rc == 0 and ("%s\trefs/heads/main" % head("main")) in listed,
+              "y/x's URL does not read RPR_ORIGIN through the mapping: %r" % listed)
+    _build_ready_child()
+
+
+def _build_ready_child():
+    """The other repo, y/child: a bare origin of its own, which holds its heads and no others, so the checkout's own origin cannot
+    answer for them. Its base carries the stamp, so the read finds the default branch there, and its base differs from the
+    fixture's base, so no sha is shared between the two repos."""
+    os.makedirs(RPR_CHILD_SEED, exist_ok=True)
+    _rpr_git(RPR_CHILD, "init", "-q", "--bare", "-b", "main", RPR_CHILD_ORIGIN)
+    _rpr_git(RPR_CHILD_SEED, "init", "-q", "-b", "main", ".")
+    _rpr_git(RPR_CHILD_SEED, "remote", "add", "origin", RPR_CHILD_ORIGIN)
+    _rpr_commit(RPR_CHILD_SEED, "child base", {".github/stamp.json": RPR_STAMP, "README.md": "child base\n"})
+    _rpr_branch(RPR_CHILD_SEED, "child-stale", "main")
+    _rpr_commit(RPR_CHILD_SEED, "a debt and no page", {"debts/gap-one.md": RPR_DEBT})
+    _rpr_branch(RPR_CHILD_SEED, "child-current", "main")
+    _rpr_commit(RPR_CHILD_SEED, "a debt and the page the generator writes", {"debts/gap-one.md": RPR_DEBT}, page=True)
+    _rpr_git(RPR_CHILD_SEED, "push", "-q", "origin", "main", "child-stale", "child-current")
+    stale = _rpr_git(RPR_CHILD_SEED, "rev-parse", "--verify", "child-stale")
+    current = _rpr_git(RPR_CHILD_SEED, "rev-parse", "--verify", "child-current")
+    # Scope before subject: each head is the state its case names, and the checkout's own repo lacks the heads.
+    _rpr_need("gap-one" in _rpr_git(RPR_CHILD_SEED, "show", "child-current:docs/records.md"), "child-current carries no page")
+    _rpr_need(_rpr_git(RPR_CHILD_SEED, "ls-tree", "--name-only", "child-stale", "--", "docs/records.md") == "", "child-stale carries a page")
+    _rpr_need(run_vcs(RPR_REPO, "cat-file", "-e", current + "^{commit}").returncode != 0,
+              "the checkout's own repo holds child-current, so a read there would answer for it")
+    # The URLs: y/child reads its own origin, and y/gone reads a path that is not there, so its read fails.
+    listed_rc, listed = _rpr_ls_remote(RPR_REPO, [(RPR_CHILD_URL, RPR_CHILD_ORIGIN)], RPR_CHILD_URL)
+    _rpr_need(listed_rc == 0 and ("%s\trefs/heads/child-current" % current) in listed,
+              "y/child's URL does not read its own origin: %r" % listed)
+    gone_rc, _ = _rpr_ls_remote(RPR_REPO, [(RPR_GONE_URL, RPR_GONE)], RPR_GONE_URL)
+    _rpr_need(gone_rc != 0 and not os.path.exists(RPR_GONE), "y/gone's URL reaches a repo")
+    make_fake_gh(GHREADY_CHILD_STALE, "main", head_sha=stale, head_ref="child-stale", draft=True, need=["y/child"])
+    make_fake_gh(GHREADY_CHILD_CURRENT, "main", head_sha=current, head_ref="child-current", draft=True, need=["y/child"])
+    make_fake_gh(GHREADY_GONE, "main", head_sha=stale, head_ref="child-stale", draft=True, need=["y/gone"])
 
 
 lazy_fixture([RPR], _build_ready_page)
@@ -147,14 +226,32 @@ def _rpr_env(fake):
     return fake + os.pathsep + GIT_PATH + os.pathsep + PY_PATH
 
 
-def rpr_bash(name, command, expected, fake, cwd=RPR_REPO, tool="Bash", carries=(), lacks=()):
+_RPR_BASE_PAIRS = ((RPR_X, RPR_ORIGIN),)  # every case's own repo, y/x, reads the fixture's origin
+
+
+def _rpr_urls(*pairs):
+    """The case environment that makes git read each (GitHub URL, local path) pair as that local path: url.<path>.insteadOf.
+    The runner's own GIT_CONFIG_* entries stay, and the new ones append after them. The one home of the URL mapping, so no
+    ready-page case reaches GitHub."""
+    count = int(os.environ.get("GIT_CONFIG_COUNT") or 0)
+    env = {}
+    for url, path in pairs:
+        env["GIT_CONFIG_KEY_%d" % count] = "url.%s.insteadOf" % slash(path)
+        env["GIT_CONFIG_VALUE_%d" % count] = url
+        count += 1
+    env["GIT_CONFIG_COUNT"] = str(count)
+    return env
+
+
+def rpr_bash(name, command, expected, fake, cwd=RPR_REPO, tool="Bash", carries=(), lacks=(), pairs=()):
     sh(name, command, expected, rule=RPR_RULE if expected == "deny" else None, tool=tool, cwd=cwd,
-       env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks)
+       env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks, env=_rpr_urls(*_RPR_BASE_PAIRS, *pairs))
 
 
-def rpr_mcp(name, expected, fake, carries=(), lacks=(), cwd=RPR_REPO, **tool_input):
+def rpr_mcp(name, expected, fake, carries=(), lacks=(), cwd=RPR_REPO, pairs=(), **tool_input):
     add(name, expected, rule=RPR_RULE if expected == "deny" else None, tool="mcp__github__update_pull_request",
-        cwd=cwd, env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks, **tool_input)
+        cwd=cwd, env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks,
+        env=_rpr_urls(*_RPR_BASE_PAIRS, *pairs), **tool_input)
 
 
 RPR_STALE_LACKS = ("unknown",)  # a stale refusal names the page, never an unread
@@ -211,6 +308,17 @@ rpr_mcp("records-page-ready: MCP draft true on a stale page is allowed", "allow"
 rpr_bash("records-page-ready: gh pr ready 12 in a repo that does not use the merge tool is allowed", "gh pr ready 12",
          "allow", GHREADY_PLAIN, cwd=RPR_PLAIN)
 rpr_bash("records-page-ready: gh pr view 12 on a stale page is allowed", "gh pr view 12", "allow", GHREADY_STALE)
+# Another repo's pull request. The call names y/child, which is not the checkout's own repo, so the read goes to y/child's origin:
+# its head is there and nowhere else, so a read of the checkout's origin cannot answer for it.
+CHILD_PAIRS = ((RPR_CHILD_URL, RPR_CHILD_ORIGIN),)
+rpr_mcp("records-page-ready: MCP draft false on a current page of another repo is allowed", "allow", GHREADY_CHILD_CURRENT,
+        owner="y", repo="child", pullNumber=12, draft=False, pairs=CHILD_PAIRS)
+rpr_mcp("records-page-ready: MCP draft false on a stale page of another repo is refused", "deny", GHREADY_CHILD_STALE,
+        carries=RPR_CARRY, lacks=RPR_STALE_LACKS, owner="y", repo="child", pullNumber=12, draft=False, pairs=CHILD_PAIRS)
+# A repo that cannot be fetched is unknown, never allowed: its URL maps to a path that is not there.
+rpr_mcp("records-page-ready: MCP draft false on a page of another repo that cannot be fetched is refused unknown", "deny",
+        GHREADY_GONE, carries=("unknown",), lacks=RPR_UNKNOWN_LACKS, owner="y", repo="gone", pullNumber=12, draft=False,
+        pairs=((RPR_GONE_URL, RPR_GONE),))
 
 
 def _rpr_no_read(tool_input):
