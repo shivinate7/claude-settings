@@ -106,6 +106,22 @@ own optional field in meta/page. The incident: an answer that sat unread 10.5 h 
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
 
+Lag mode, run by the writer at a comment wake, after the folder of answers and receipts it saved (SKILL.md, "Read the answers"):
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --lag <folder> [--max-age <min>] [--now <iso>]
+
+<folder> holds answers/ and receipts/, each the folder `ArtifactData list` saved (<id>.json per doc, the data alone, and the
+.complete marker). It measures how long each item answer took to be read back. Lines, then the total, which is always last:
+`read-delay <id> answered <at>, read <read>, delay <N>s` (a receipt whose `read` is at or after the answer's `at`; `filed` is never read),
+`unread-old <id> answered <at>, no read after it, age <N>s` (no such receipt, and the answer is older than --max-age), and
+`lag total: A answers, R read, U unread older than M min, Y unread within M min`. An unread answer within the max age prints no line
+and is counted in the total. Times print in US Central (hooks/local_time.central_full). Exit 0 with no unread-old line, 1 with one.
+Exit 2 with `unknown:` lines and no total when a folder or its marker is missing, a file is not JSON, an answer has no readable `at`,
+or the answer's receipt has no readable `read`; an unread read is never a clean or an old line. A park answer is skipped, as in --unread
+(--parked reads it). --max-age is whole minutes and defaults to 60: an unmeasured pick, a default and not a ruling. --now defaults to
+the clock. The incident: an answer that sat unread 10.5 h (owner's report).
+Cost: one python process, reads the answers and receipts files the writer already saved, writes none, starts no git, no timer.
+
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 extra process for --answers (it reads one more file, a folder one per answer), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
@@ -795,9 +811,81 @@ def unread_mode(argv):
     return 2 if unknown else 1 if lines else 0
 
 
+LAG_MAX_AGE = 60  # minutes: an unmeasured default for how old an unread answer may be before --lag names it, not a ruling
+
+
+def lag_docs(folder, name):
+    """{doc id: data} of <folder>/<name>/, the folder the writer saved; ValueError with the cause when it cannot be read."""
+    path = os.path.join(folder, name)
+    if not os.path.isdir(path):
+        raise ValueError("%s is not a folder" % path)
+    docs, complete = load_docs(path, name, keyed=True)  # export_page.docs_in, the one home of reading this folder
+    if not complete:
+        raise ValueError("%s has no .complete marker, so its list may be cut short" % path)
+    return dict(docs)
+
+
+def lag_mode(argv):
+    """`--lag <folder> [--max-age <min>] [--now <iso>]`: how long each item answer took to be read back, and which are unread past the max age."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--lag", required=True)
+    ap.add_argument("--max-age", type=int, default=LAG_MAX_AGE)
+    ap.add_argument("--now")
+    args = ap.parse_args(argv)
+    now = parse_utc(args.now) if args.now else datetime.datetime.now(datetime.timezone.utc).timestamp()
+    if now is None or args.max_age < 0:
+        print("unknown: --now is not an ISO time, or --max-age is below 0 (%s, %s)" % (args.now, args.max_age))
+        return 2
+    try:
+        if not os.path.isdir(args.lag):
+            raise ValueError("%s is not a folder" % args.lag)
+        answers, receipts = lag_docs(args.lag, "answers"), lag_docs(args.lag, "receipts")
+    except ValueError as err:
+        print("unknown: cannot read the lag folder (%s)" % err)
+        return 2
+    from local_time import central_full  # the one home of the Central stamp
+    stamp = lambda t: central_full(datetime.datetime.fromtimestamp(t, datetime.timezone.utc))
+    lines, unknown, read, old, young = [], [], 0, 0, 0
+    for key, data in answers.items():
+        if not isinstance(data, dict):
+            unknown.append("unknown: the answer %s is not an object" % key)
+            continue
+        # A park answer is read by the --parked mode, never here: keyed park.<id>, parked: true, or act park.
+        if key.startswith("park.") or data.get("parked") is True or data.get("act") == "park":
+            continue
+        at = parse_utc(data.get("at"))
+        if at is None:  # an unreadable time is never counted read or unread
+            unknown.append("unknown: the answer %s has no readable at" % key)
+            continue
+        receipt = receipts.get(key)
+        if receipt is not None and not isinstance(receipt, dict):
+            unknown.append("unknown: the receipt of answer %s is not an object" % key)
+            continue
+        seen = parse_utc(receipt.get("read")) if receipt is not None and receipt.get("read") is not None else None
+        if receipt is not None and seen is None:
+            unknown.append("unknown: the receipt of answer %s has no readable read" % key)
+        elif seen is not None and seen >= at:  # a read from before the answer is of an older answer
+            read += 1
+            lines.append("read-delay %s answered %s, read %s, delay %ds" % (key, stamp(at), stamp(seen), seen - at))
+        elif now - at > args.max_age * 60:
+            old += 1
+            lines.append("unread-old %s answered %s, no read after it, age %ds" % (key, stamp(at), now - at))
+        else:
+            young += 1
+    if unknown:
+        print("\n".join(unknown))
+        return 2
+    lines.append("lag total: %d answers, %d read, %d unread older than %d min, %d unread within %d min"
+                 % (read + old + young, read, old, args.max_age, young, args.max_age))
+    print("\n".join(lines))
+    return 1 if old else 0
+
+
 def main(argv):
     if "--unread" in argv:
         return unread_mode(argv)
+    if "--lag" in argv:
+        return lag_mode(argv)
     if "--parked" in argv:
         return parked_mode(argv)
     if "--session-line" in argv:
@@ -808,7 +896,8 @@ def main(argv):
         sys.exit("usage: stale_pages.py <fetched-dir> [<repo root> ...]\n"
                  "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
                  "       stale_pages.py --parked <dir> [--now <iso>]\n"
-                 "       stale_pages.py --unread <dir>")
+                 "       stale_pages.py --unread <dir>\n"
+                 "       stale_pages.py --lag <folder> [--max-age <min>] [--now <iso>]")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
     with open(TEMPLATE, encoding="utf-8") as f:
