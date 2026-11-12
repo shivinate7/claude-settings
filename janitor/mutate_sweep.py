@@ -263,7 +263,7 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
      '        if stale_agent_lock is not True:\n'
      '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
      '                        and (not fast or batch is not None)\n'
@@ -289,7 +289,7 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
      '        if stale_agent_lock is not True:\n'
      '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
      '                        and (not fast or batch is not None)\n'
@@ -306,6 +306,14 @@ MUTATIONS = [
      '        return {"path": path, "action": "keep", "reason": "unreadable-subject"}',
      "test_refusal_unreadable_subject_worktree",
      "posix"),
+    # The finish gate on a live-form lock whose host is dead (decision when-a-worktree-may-be-removed,
+    # the finished-agent section). The ungated verdict frees such a lock with no proof of the finish,
+    # and a general sweep reaps the tree with a shell the agent may have left inside.
+    ("finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
+     "sweep",
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n',
+     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n',
+     "test_a_dead_host_live_lock_with_no_stop_row_keeps_the_tree"),
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
     ("keep rule: the ancestry test never proves a branch empty",
