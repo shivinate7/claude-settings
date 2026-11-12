@@ -119,9 +119,9 @@
                           and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
                           A cloud run needs the batch-runner role.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
-                          lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
-                          head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
-                          real host the run stops there and names the session's route to mark it ready. A FAIL of the lint or of a ready
+                          run the repo's ready checks on the head of batch-NAME (no lane lint: batch CI runs the lint first, and each lane
+                          linted at hand-off), and record the head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
+                          real host the run stops there and names the session's route to mark it ready. A FAIL of a ready
                           check stores each lane it names (Blamed:) and prints its drop command. A FAIL, or an unknown with no reason,
                           leaves the draft and exits 1. A PR list, if given, must be the frozen set. A ready pull request whose head is the
                           Linted head is left as it is. Takes no lock. A cloud run needs the batch-runner role.
@@ -4789,7 +4789,7 @@ def record_in_block(h, branch, **fields):
 
 def batch_ready_checks(root, cfg, pr, name, branch, base):
     """The ready checks of `--batch-build NAME --ready` (decision lanes-run-no-full-ci-job): the repo's merge.readyChecks, run once on the batch head,
-    after its lint and before the ready mark, as the draft step runs them. A repo with none runs none."""
+    before the ready mark, as the draft step runs them. The batch head runs no lane lint: each lane linted at hand-off, and batch CI runs the lint first. A repo with none runs none."""
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
         return
@@ -4802,9 +4802,8 @@ def batch_ready_checks(root, cfg, pr, name, branch, base):
 
 def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the integration branch and its one draft pull request, or the same set again.
-    With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the one
-    lint of the integration branch head runs, then the repo's ready checks, and the host is asked to mark the draft ready (Host.ready sends nothing, so
-    a real run stops there and names the route). The block records the head that passed (`Linted:`), and the lanes a FAIL of the lint or of a ready
+    With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the repo's ready checks run, and the host is asked to mark the draft ready (Host.ready sends nothing, so
+    a real run stops there and names the route). The block records the head that passed (`Linted:`), and the lanes a FAIL of a ready
     check names (`Blamed:`): a ready batch whose head is that head is left as it is, and any other head is linted again,
     ready or not. `on` and `base` default to the block's.
     Returns 0, or 1 when a batch stacked on a rebuilt one could not be rebuilt."""
@@ -4879,7 +4878,6 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
     if ready:
         cfg = load_config(root, base, config, " " + FREEZE_CITE)  # before the lint: a config that cannot be read stops the run before the 14 minutes
         try:
-            lane_lint(root, branch, h, base, unknown_ok)  # the one lint of the batch head: a build never lints, a lane's own lint is not repeated
             batch_ready_checks(root, cfg, pr, name, branch, base)  # a FAIL here blames by the same path as a lint FAIL
         except LintFail as e:
             blamed = blamed_lanes(root, e, heads, base)

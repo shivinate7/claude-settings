@@ -18767,6 +18767,18 @@ class BatchFreeze(CloudSession):
         self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after --ready with its checks passing: %s" % out)
         self.assertEqual(rc, 0, "--ready with its checks passing exited %s: %s" % (rc, out))
 
+    def test_ready_runs_no_lane_lint_on_the_batch_head_and_still_runs_the_ready_checks(self):  # owner ruling R4, 14:56 CST Nov 10: batch CI lints first
+        self.ready_checks_on_main()
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        with self.no_lint_or_ready_check(ready_state="pass", checks_state="pass") as mocks:
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(self.lint_calls(mocks), [], "--ready linted the batch head: batch CI runs the lint first, so the ready step does not: %s" % out)
+        self.assertTrue([c for c in mocks["ci_job_run"].call_args_list if "--pinned" in c.args], "--ready ran no ready check: %s" % out)
+        self.assertEqual(self.host.readies, [pr], "--ready did not mark the batch PR ready once: %s" % out)
+        self.assertEqual(rc, 0, "--ready exited %s: %s" % (rc, out))
+
     def test_ready_on_a_batch_whose_head_a_lint_already_read_says_already_ready_and_lints_nothing(self):
         for n in (101, 102):
             self.lane(n)
