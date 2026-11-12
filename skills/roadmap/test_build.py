@@ -4391,6 +4391,27 @@ class HealthMap(Fixture):
                                             "skill": ["skills/yak/"]},
                          "the parts no row names are not listed by kind")
 
+    def test_a_janitor_or_merge_part_with_no_row_is_named_under_its_own_kind(self):
+        # The check scans janitor/ and merge/. Their parts must not raise in the build, and each is listed under its kind.
+        self.put_files("hooks/a.py", "janitor/sweep.py", "merge/launch.py")
+        for rel in ("lint", "skills"):
+            (self.repo / rel).mkdir(exist_ok=True)  # hooks/, lint/ and skills/ must exist for the parts to read
+        self.put_map([self.row(1, "red", ["hooks/a.py"])])
+        self.on_main()
+        try:
+            code, out = run_build("--repo", str(self.repo), "--out", str(self.out))
+        except Exception as e:
+            self.fail("the build raised %s (%s) on a janitor or merge part with no row" % (type(e).__name__, e))
+        self.assertIn(code, (0, None), out)
+        h = build_info(self.out.read_text(encoding="utf-8")).get("healthMap")
+        self.assertIsNotNone(h, "the build wrote no healthMap key")
+        coverage = h["coverage"]
+        self.assertIsNotNone(coverage, "coverage is None although the parts list reads")
+        self.assertEqual((coverage["total"], coverage["named"]), (3, 1), "the janitor and merge parts are not counted")
+        self.assertEqual({k: v for k, v in coverage["left"].items() if v},
+                         {"janitor": ["janitor/sweep.py"], "merge": ["merge/launch.py"]},
+                         "the janitor and merge parts are not listed under their own kinds")
+
     def test_a_map_that_does_not_read_is_unknown_with_why_never_zero(self):
         self.put_files("hooks/a.py")
         (self.repo / "docs").mkdir(exist_ok=True)
