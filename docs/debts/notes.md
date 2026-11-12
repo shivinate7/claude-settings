@@ -2180,3 +2180,8 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- Reply side: a bare item <n> with no page or triage word passes (scope ruling 22:45 CST Nov 7, lane item-cite-carries-name).
+- item-cite-pipe-gloss: a status cell passes as a name, `| item 46 | in progress |` and `| D12 | waiting on owner |` (lint/report_guard.py `GLOSS_AFTER_RE`). Rule: speak-cite-id-plus-gloss.
+- item-cite-name-forms: `` item 9 `search-pill` ``, `page item 9 [search pill clear](url)` and `item 9 "a b"` refuse, though each carries a name (lint/report_guard.py `ITEM_SLUG_AFTER_RE`). Rule: speak-cite-id-plus-gloss.
+- handoff-cite-whole-file: an Edit to the handoff refuses when a stale bare cite sits elsewhere in the file (hooks/guard.py `handoff_cite_hit`). Rule: speak-cite-id-plus-gloss.
+- item-cite-weak-lead: `` `foo.py` fails, item 3 `` passes, as the lead reads "py fails," (lint/report_guard.py `ITEM_RECORD_RE`, shared with the record-id reader). Rule: speak-cite-id-plus-gloss.

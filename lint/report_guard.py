@@ -638,7 +638,7 @@ def done_format_problem(text):
 CITE_ID_RE = re.compile(r"(?<![\w/.#:$-])(?:D\d{1,4}|[Dd]ecisions?\s+#?\d{1,4})(?!\w|\.\d|:[A-Z]\d)")
 CITE_SKIP_RE = re.compile(r"```.*?```|`[^`\n]*`|https?://\S+|\[[^\]\n]*\]\([^)\n]*\)", re.S)
 GLOSS_AFTER_RE = re.compile(
-    r"""^["')\]]*\s*(?:[,:;(=—–-]|\s-{1,2}\s)\s*\(?[A-Za-z][\w'-]*\s+[\w'-]+"""
+    r"""^["')\]]*\s*(?:[,:;(=|—–-]|\s-{1,2}\s)\s*\(?["“]?[A-Za-z][\w'-]*\s+[\w'-]+"""
     r"""|^["')\]]*\s+(?:says|means|is|covers|rules)\s+[A-Za-z][\w'-]*\s+[\w'-]+""")
 GLOSS_POSSESSIVE_RE = re.compile(r"^['’]s\s+[A-Za-z][\w'-]*\s+[\w'-]+")
 GLOSS_BEFORE_RE = re.compile(r"[A-Za-z]{2,}[^\n(]{0,60}\(\s*$")
@@ -646,7 +646,7 @@ GLOSS_BEFORE_RE = re.compile(r"[A-Za-z]{2,}[^\n(]{0,60}\(\s*$")
 GLOSS_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:[,:—–=]|--|\s-)\s*$")
 
 
-def bare_cite(text):
+def bare_record_cite(text):
     """Return the first record id in `text` with no short gloss beside it, else ''."""
     clean = CITE_SKIP_RE.sub(" ", text)
     for m in CITE_ID_RE.finditer(clean):
@@ -660,6 +660,87 @@ def bare_cite(text):
             continue
         return m.group(0)
     return ""
+
+
+# speak-cite-id-plus-gloss, page item numbers: `item 46`, `items 46 and 47`, `items 46, 47` (an optional `page` or
+# `waiting-page` before; the head is read in any case). The first cite of a number carries its short name: two words
+# (the record-id rules above) or one hyphenated slug in parentheses, or the item's record before it
+# (`precompact-handoff, item 9`, `x.md item 3`, a record name in backticks counts). A later cite of a named number
+# needs none. Each number of a list is judged on its own; a list tail joins numbers only after a plural `items`.
+# A lead gloss ends at a comma or dash, not a colon: `Open: item 46` is a label, not a name.
+# Scope: `scoped=False` reads every item cite (a handoff). `scoped=True` (a reply) reads a bare `item <n>` only when
+# the text holds the whole word page or triage outside skipped text; `page item <n>` always holds that word.
+ITEM_HEAD_RE = re.compile(r"(?<![\w/.#:$-])(items?)\s+(\d{1,4})(?![\w]|\.\d)", re.I)
+ITEM_NEXT_RE = re.compile(r"(?:\s*\([^)\n]*\))?\s*(?:,\s*(?:and\s+)?|\band\s+|&\s*)(\d{1,4})(?![\w]|\.\d)")
+ITEM_SLUG_AFTER_RE = re.compile(r"^\s*\(\s*\w+(?:-\w+)+\s*\)")
+ITEM_PAGE_PREFIX_RE = re.compile(r"(?:waiting[- ])?page\s+$", re.I)
+ITEM_SCOPE_RE = re.compile(r"\b(?:page|triage)\b", re.I)
+# a record before the item: a path or file name with an extension, or a hyphenated slug and a comma
+ITEM_RECORD_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}\s*,?\s*$|(?<![\w-])(?!waiting-page\b)\w+(?:-\w+)+\s*,\s*$")
+# a code span that is a record name: a path or file name with an extension, or a hyphenated slug
+ITEM_RECORD_SPAN_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}|\w+(?:-\w+)+")
+
+
+def gloss_lead(before, label_ok=True):
+    """True when `before` ends in a two-word gloss and a separator (the record-id lead reader). `label_ok=False`
+    drops a lead that ends at a colon or equals sign, which is a label."""
+    m = GLOSS_LEAD_RE.search(before)
+    return bool(m) and (label_ok or not m.group(0).rstrip().endswith((":", "=")))
+
+
+def _item_skip(match):
+    """CITE_SKIP_RE replacement for an item cite: a backticked record name stays as the record, other skipped text goes."""
+    text = match.group(0)
+    if len(text) > 2 and text[0] == "`" and text[-1] == "`" and not text.startswith("```") \
+            and ITEM_RECORD_SPAN_RE.fullmatch(text[1:-1]):
+        return text[1:-1]
+    return " "
+
+
+def _item_named(before, after):
+    """True when an item number has its short name after it, or (`before` given, the head of a list) before it."""
+    if ITEM_SLUG_AFTER_RE.match(after) or GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
+        return True
+    before = ITEM_PAGE_PREFIX_RE.sub("", before)
+    if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
+        return True
+    return bool(before and (gloss_lead(before, label_ok=False) or ITEM_RECORD_RE.search(before)))
+
+
+def bare_item_cite(text, scoped=False):
+    """Return the first page item number in `text` cited with no short name, else ''. A number named at
+    an earlier cite needs none later. `scoped` limits the read to text that holds page or triage."""
+    if scoped and not ITEM_SCOPE_RE.search(CITE_SKIP_RE.sub(" ", text)):
+        return ""
+    clean = CITE_SKIP_RE.sub(_item_skip, text)
+    named = set()
+    pos = 0
+    while True:
+        head = ITEM_HEAD_RE.search(clean, pos)
+        if not head:
+            return ""
+        before = clean[max(0, head.start() - 80):head.start()]
+        cites = [(head.group(2), head.end(), before)]
+        end = head.end()
+        while head.group(1).lower() == "items":
+            nxt = ITEM_NEXT_RE.match(clean, end)
+            if not nxt:
+                break
+            cites.append((nxt.group(1), nxt.end(), ""))
+            end = nxt.end()
+        for number, stop, lead_before in cites:
+            if number in named:
+                continue
+            if _item_named(lead_before, clean[stop:stop + 80]):
+                named.add(number)
+            else:
+                return number
+        pos = end
+
+
+def bare_cite(text):
+    """Return the first record id, else the first page item number, in `text` with no short name beside it, else ''."""
+    return bare_record_cite(text) or bare_item_cite(text, scoped=True)
 
 
 # answered-needs-source: a reply line that says "answered" names where the answer came from. The source
@@ -3299,8 +3380,13 @@ def main():
         pass
     cite = bare_cite(text)
     if cite:
-        reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
-                                  "%r is a record id with no short gloss" % cite))
+        if cite.isdigit():
+            reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
+                                      "page item " + cite + " has no short name; write the number plus its name the "
+                                      "first time, like \"item 46 (search pill clear)\", or name its record first"))
+        else:
+            reasons.append(owner_line("Cite-gloss guard (rule speak-cite-id-plus-gloss)",
+                                      "%r is a record id with no short gloss" % cite))
     if refusal:
         reasons.append(refusal)
     if reasons:
