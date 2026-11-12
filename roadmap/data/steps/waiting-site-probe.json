@@ -1,0 +1,14 @@
+{
+ "id": "waiting-site-probe",
+ "title": "Probe route B: the owner's own small site that holds a GitHub token",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner ruling R28 (one store for page data, git first) and owner 12:10 CST: \"Custom connectors are not allowed -- so we can do route B\".",
+ "source": "coordinator 12:28 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store rewritten to route B on #2829, owner 12:10 CST)",
+ "note": "Owner-yes acts, each its own yes when the step starts: the Cloudflare account (the owner has one: decision github-apps-keep-access says Cloudflare serves joyous through its worker), a GitHub token mint, a test deploy and an access gate. No custom domain or paid plan. The lane holds until the coordinator starts it.",
+ "updatedAt": "2026-11-12T12:29:13-06:00"
+}

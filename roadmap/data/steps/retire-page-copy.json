@@ -7,10 +7,11 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [
-  "page-db-off-guard"
+  "site-wakes-writer",
+  "writer-writes-git"
  ],
  "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
  "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
- "note": "Delete export mode of export_page.py and export_check in hooks/feedback_guard.py; keep --all; close step waiting-export-miss-cloud as superseded; rewrite decision waiting-data-in-repo in place.",
- "updatedAt": "2026-11-12T11:55:51-06:00"
+ "note": "Delete export mode of export_page.py and export_check in hooks/feedback_guard.py; keep --all; close step waiting-export-miss-cloud as superseded; rewrite decision waiting-data-in-repo in place. Route B order (coordinator 12:28 CST Nov 12). Owner-yes act: delete the old claude.ai page (cannot be undone).",
+ "updatedAt": "2026-11-12T12:29:13-06:00"
 }

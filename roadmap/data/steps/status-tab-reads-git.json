@@ -1,7 +1,7 @@
 {
  "id": "status-tab-reads-git",
  "title": "The Status tab reads steps through the connector, not the baked roadmap block",
- "status": "blocked",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -11,6 +11,6 @@
  ],
  "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
  "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
- "note": "Replaces the baked roadmap block on the waiting page's Status tab.",
- "updatedAt": "2026-11-12T11:55:51-06:00"
+ "note": "Replaces the baked roadmap block on the waiting page's Status tab. Folded 12:29 CST Nov 12: route D only; the route B list replaces it (coordinator 12:28 CST).",
+ "updatedAt": "2026-11-12T12:29:13-06:00"
 }

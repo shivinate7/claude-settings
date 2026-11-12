@@ -1,0 +1,16 @@
+{
+ "id": "waiting-skill-drops-artifact",
+ "title": "The waiting-page skill drops the claude.ai artifact page",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "retire-page-copy"
+ ],
+ "why": "Owner ruling R28 (one store for page data, git first) and owner 12:10 CST: \"Custom connectors are not allowed -- so we can do route B\".",
+ "source": "coordinator 12:28 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store rewritten to route B on #2829, owner 12:10 CST)",
+ "note": "",
+ "updatedAt": "2026-11-12T12:29:13-06:00"
+}
