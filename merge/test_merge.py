@@ -20103,6 +20103,158 @@ class BatchFreeze(CloudSession):
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
 
+    # Busy files: merge.busyFiles names the paths that lanes must not share in one new build (plan R26 part 4). Two lanes of one build that
+    # change the same busy file are refused, and the second goes in a stacked batch (--on) instead. A file the list does not name is never refused.
+
+    def busy_config(self, value):
+        """origin's main names merge.busyFiles as `value`, as a repo's own config does. Called before the lanes, so they branch off it."""
+        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], busyFiles=value))))
+
+    def busy_lane(self, n, path, text, on=None):
+        """Lane #n with one commit of its own that changes `path`. lane() makes the lane and its pull request. -> its head."""
+        self.lane(n, on=on)
+        return self.lane_commit(n, path, text, f"lane {n} changes {path}")
+
+    def changed(self, n):
+        """The files lane #n changes against origin/main, read from git: the diff the build reads for each lane."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        return sh(self.co, "git", "diff", "--name-only", f"origin/main...{self.heads[n]}").splitlines()
+
+    def test_busy_file_two_lanes_that_change_it_in_one_build_are_refused_and_nothing_is_pushed(self):
+        self.busy_config(["src/busy.py"])
+        for n in (101, 102):
+            self.busy_lane(n, "src/busy.py", "same edit\n")  # identical text: git merges them clean, so the refusal is the rule's, not a conflict's
+        for n in (101, 102):
+            self.assertIn("src/busy.py", self.changed(n), "setup: lane #%d does not change src/busy.py" % n)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "two lanes that change the same busy file were not refused with exit 1: %s" % out)
+        self.assertIn("src/busy.py", out, "the refusal does not name the busy file both lanes change: %s" % out)
+        self.assertIn("#101", out, "the refusal does not name lane #101: %s" % out)
+        self.assertIn("#102", out, "the refusal does not name lane #102: %s" % out)
+        self.assertIn("--on batch-nightly", out, "the refusal does not give the stacked remedy, a build with --on batch-nightly: %s" % out)
+        self.assertIn("nothing was pushed", out, "the refusal does not say nothing was pushed: %s" % out)
+        self.assertIn(merge.FREEZE_CITE, out, "the refusal does not cite the decision: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch-nightly"), "", "the refused build put batch-nightly on origin: %s" % out)
+
+    def test_busy_file_full_size_build_refuses_only_the_two_lanes_that_share_a_file_and_pushes_nothing(self):
+        self.busy_config(["src/busy.py"])
+        numbers = [9, 10, 100, *range(101, 110)]  # twelve lanes, as the full-size build case has; only #9 and #100 share the busy file
+        for n in numbers:
+            if n in (9, 100):
+                self.busy_lane(n, "src/busy.py", "same edit\n")
+            else:
+                self.lane(n)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", *(str(n) for n in reversed(numbers)))
+        self.assertEqual(rc, 1, "a twelve-lane build with two lanes on one busy file was not refused with exit 1: %s" % out)
+        self.assertIn("src/busy.py", out, "the refusal does not name the busy file the two lanes share: %s" % out)
+        self.assertIn("#9", out, "the refusal does not name lane #9: %s" % out)
+        self.assertIn("#100", out, "the refusal does not name lane #100: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused twelve-lane build pushed: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused twelve-lane build opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch-nightly"), "", "the refused twelve-lane build put batch-nightly on origin: %s" % out)
+
+    def test_busy_file_lane_stacked_on_a_running_batch_that_changes_it_is_allowed(self):
+        self.busy_config(["src/busy.py"])
+        self.busy_lane(101, "src/busy.py", "lane 101\n")
+        self.frozen_batch("x", [101])  # the running batch: #101 is in it
+        self.busy_lane(102, "src/busy.py", "lane 102\n", on=101)  # stacked on #101's head, so #102's diff holds #101's change as well
+        for n in (101, 102):
+            self.assertIn("src/busy.py", self.changed(n), "setup: lane #%d does not change src/busy.py" % n)
+        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "batch-x")
+        self.assertEqual(rc, 0, "a lane stacked on a running batch that changes the same busy file was refused: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "the stacked build did not put #102 on batch-nightly: %s" % out)
+
+    def test_busy_files_lanes_that_change_different_busy_files_in_one_build_are_allowed(self):
+        self.busy_config(["busy/*.txt"])  # both files match the one pattern, so the rule is per file, not per pattern
+        self.busy_lane(101, "busy/a.txt", "lane 101\n")
+        self.busy_lane(102, "busy/b.txt", "lane 102\n")
+        self.assertIn("busy/a.txt", self.changed(101), "setup: lane #101 does not change busy/a.txt")
+        self.assertIn("busy/b.txt", self.changed(102), "setup: lane #102 does not change busy/b.txt")
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "lanes that change different busy files were refused as one build: %s" % out)
+        for n in (101, 102):
+            self.assertTrue(self.on_origin(self.heads[n], "batch-nightly"), "batch-nightly does not hold lane #%d: %s" % (n, out))
+
+    def test_busy_files_lanes_that_share_a_file_the_list_does_not_name_are_allowed(self):
+        self.busy_config(["src/busy.py"])
+        for n in (101, 102):
+            self.busy_lane(n, "docs/notes.md", "same note\n")
+        for n in (101, 102):
+            self.assertIn("docs/notes.md", self.changed(n), "setup: lane #%d does not change docs/notes.md" % n)
+            self.assertNotIn("src/busy.py", self.changed(n), "setup: lane #%d changes the busy file" % n)
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "lanes that share a file the busyFiles list does not name were refused: %s" % out)
+        for n in (101, 102):
+            self.assertTrue(self.on_origin(self.heads[n], "batch-nightly"), "batch-nightly does not hold lane #%d: %s" % (n, out))
+
+    def test_busy_files_empty_or_missing_allows_two_lanes_that_share_a_file(self):
+        """merge.busyFiles of [] and a config that leaves the key out both allow two lanes that change the same file: the default changes nothing."""
+        for label, value in (("empty", []), ("missing", None)):
+            with self.subTest(busyFiles=label):
+                self.setUp()
+                merge_block = json.loads(self.show("main", ".github/stamp.json"))["merge"]
+                if value is None:
+                    self.assertNotIn("busyFiles", merge_block, "setup: origin's main names busyFiles, so the missing row is not missing")
+                else:
+                    self.busy_config(value)
+                    self.assertEqual(json.loads(self.show("main", ".github/stamp.json"))["merge"]["busyFiles"], [],
+                                     "setup: origin's main does not hold busyFiles as []")
+                for n in (101, 102):
+                    self.busy_lane(n, "src/shared.py", "same edit\n")
+                rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+                self.assertEqual(rc, 0, "two lanes that share a file were refused with busyFiles %s: %s" % (label, out))
+
+    def test_busy_file_one_lane_alone_that_changes_it_is_allowed(self):
+        self.busy_config(["src/busy.py"])
+        self.busy_lane(101, "src/busy.py", "lane 101\n")
+        self.assertIn("src/busy.py", self.changed(101), "setup: lane #101 does not change src/busy.py")
+        rc, out = self.run_batch("--batch-build", "nightly", "101")
+        self.assertEqual(rc, 0, "one lane that changes a busy file was refused: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[101], "batch-nightly"), "batch-nightly does not hold lane #101: %s" % out)
+
+    def test_busy_files_of_the_wrong_type_stops_the_build_before_any_push(self):
+        """merge.busyFiles is a list of strings, as the repo's other lists are. A string, an object, or a list with a non-string item stops
+        the build with one line naming the field. It is a stop of the config, so it comes before any push and is no unknown-field refusal."""
+        for value in ("busy/*.txt", {"path": "busy/a.txt"}, [5], [None]):
+            with self.subTest(value=repr(value)):
+                self.setUp()
+                self.busy_config(value)
+                for n in (101, 102):
+                    self.lane(n)
+                self.record_pushes()
+                rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+                self.assertEqual(rc, 1, "a merge.busyFiles of %r did not stop the build with exit 1: %s" % (value, out))
+                self.assertIn("merge.busyFiles", out, "the stop does not name merge.busyFiles for %r: %s" % (value, out))
+                self.assertNotIn("unknown field", out, "merge.busyFiles of %r is refused as an unknown field, not as a wrong type: %s" % (value, out))
+                self.assertEqual(self.pushes(), [], "the build pushed past a bad merge.busyFiles of %r: %s" % (value, out))
+                self.assertEqual(self.host.created, [], "the build opened a pull request past a bad merge.busyFiles of %r: %s" % (value, out))
+
+    def test_busy_files_is_a_merge_field_that_load_config_reads_as_set(self):
+        self.busy_config(["src/busy.py"])
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                cfg = merge.load_config(self.co, "main", ".github/stamp.json")
+        except merge.Stop as e:
+            self.fail("load_config refused merge.busyFiles, so no build can read it: %s" % e)
+        self.assertEqual(cfg["merge"].get("busyFiles"), ["src/busy.py"], "load_config did not return merge.busyFiles as origin's main sets it")
+
+    def test_busy_files_a_repeat_of_a_frozen_set_that_shares_a_busy_file_is_unaffected(self):
+        self.busy_config(["src/busy.py"])
+        for n in (101, 102):
+            self.busy_lane(n, "src/busy.py", "same edit\n")
+        pr = self.frozen_batch("nightly", [101, 102])  # the batch exists already, as a build made before the rule holds it
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
+        self.assertEqual(rc, 0, "a repeat of an existing frozen set that shares a busy file was refused: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the repeat opened a second pull request: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
 # The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
