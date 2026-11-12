@@ -2359,6 +2359,59 @@ skills_bak11() {
   rm -rf "$h"
 }
 
+# Only *.pyc files inside __pycache__ are skipped. A .pyc anywhere else is a change, so it is backed up.
+# Green control: the hash counts a .pyc outside __pycache__, so the copy differs from its record.
+skills_bak12() {
+  name="skills_bak12: a .pyc file outside __pycache__ in the installed copy is a change, so it is backed up"
+  skills_bak_setup skills_bak12
+  skills_bak_run
+  if [ "$rc" -ne 0 ] || [ "$(cat "$cfg/skills/fresh-prose/SKILL.md" 2>/dev/null)" != "v1" ]; then
+    bad "$name" "the first cloud run did not land the skill: $out"
+    rm -rf "$h"; return
+  fi
+  mkdir -p "$cfg/skills/fresh-prose/scripts"
+  printf 'real pyc\n' > "$cfg/skills/fresh-prose/scripts/helper.pyc"
+  if [ ! -f "$cfg/skills/fresh-prose/scripts/helper.pyc" ]; then
+    bad "$name" "setup: helper.pyc was not written into the installed copy"
+    rm -rf "$h"; return
+  fi
+  skills_bak_run
+  bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then bad "$name" "no backup under $cfg/backups/skills; skills/ holds: $(ls "$cfg/skills")"
+  elif [ "$(cat "$bak/scripts/helper.pyc" 2>/dev/null)" != "real pyc" ]; then bad "$name" "backup lacks scripts/helper.pyc with its content"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md" 2>/dev/null)" != "v1" ]; then bad "$name" "skill was not refreshed"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+# A folder named x.pyc under __pycache__ is a folder of files, not a cache file, so the hash must walk into it.
+skills_bak13() {
+  name="skills_bak13: a directory named x.pyc under __pycache__ in the installed copy holds a change, so it is backed up"
+  skills_bak_setup skills_bak13
+  skills_bak_run
+  if [ "$rc" -ne 0 ] || [ "$(cat "$cfg/skills/fresh-prose/SKILL.md" 2>/dev/null)" != "v1" ]; then
+    bad "$name" "the first cloud run did not land the skill: $out"
+    rm -rf "$h"; return
+  fi
+  mkdir -p "$cfg/skills/fresh-prose/__pycache__/x.pyc"
+  printf 'real\n' > "$cfg/skills/fresh-prose/__pycache__/x.pyc/real.txt"
+  if [ ! -f "$cfg/skills/fresh-prose/__pycache__/x.pyc/real.txt" ]; then
+    bad "$name" "setup: real.txt was not written into the installed copy"
+    rm -rf "$h"; return
+  fi
+  skills_bak_run
+  bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+  elif [ -z "$bak" ]; then bad "$name" "no backup under $cfg/backups/skills; skills/ holds: $(ls "$cfg/skills")"
+  elif [ "$(cat "$bak/__pycache__/x.pyc/real.txt" 2>/dev/null)" != "real" ]; then bad "$name" "backup lacks __pycache__/x.pyc/real.txt with its content"
+  elif has_bak "$cfg/skills"; then bad "$name" "skills/ holds a .bak.* entry"
+  elif [ "$(cat "$cfg/skills/fresh-prose/SKILL.md" 2>/dev/null)" != "v1" ]; then bad "$name" "skill was not refreshed"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
 # ---- copy-mode case: a fake `ln` that copies instead of linking must not pile up .bak entries
 # across repeated runs. Git Bash's `ln -sfn` on a Windows account without symlink rights makes a
 # real copy, so the next run sees a real file/dir where land_dir()/land_skills_dir() expect a
@@ -5807,6 +5860,8 @@ run skills_bak8
 run skills_bak9
 run skills_bak10
 run skills_bak11
+run skills_bak12
+run skills_bak13
 run copymode_case1
 run backup_case1
 run backup_case2
