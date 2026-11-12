@@ -293,7 +293,7 @@ class Denies(Guarded):
         self.assertDenied(self.write("docs/CHANGELOG.md"), "Write to the file entry docs/CHANGELOG.md")
         self.assertAllowed(self.write("docs/CHANGELOG.md.bak"), "Write to docs/CHANGELOG.md.bak, a sibling of the entry")
 
-    def test_the_deny_quotes_the_why_of_the_entry_it_matched(self):
+    def test_the_refusal_quotes_the_why_of_the_entry_it_matched(self):
         reason = self.assertDenied(self.write("fixtures/a.csv"), "Write under fixtures/")
         self.assertIn(WHY, reason, "the deny for fixtures/ does not quote its why: %s" % reason[:200])
         reason = self.assertDenied(self.write("docs/CHANGELOG.md"), "Write to docs/CHANGELOG.md")
