@@ -98,6 +98,8 @@ EOF
 # run_script <case> <name> <script> [VAR=value ...]: runs a script in an empty environment from the
 # case's cwd, with output in <case>/out-<name>.txt. Sets rc to its exit code and secs to its wall
 # time. Output goes to a file, so a child left running cannot hold a pipe open.
+# The temp roots are a case's own empty root, not the production list: the suite's checkout sits
+# under the run folder, which is under the system temp dir, and install.sh skips a clone there.
 run_script() {
   rs_c=$1
   rs_n=$2
@@ -107,6 +109,7 @@ run_script() {
   ( cd "$rs_c/cwd" && env -i PATH="$rs_c/bin:$BASE_PATH" HOME="$rs_c/home" \
       CLAUDE_CONFIG_DIR="$rs_c/cfg" TMPDIR="$rs_c/tmp" GIT_CEILING_DIRECTORIES="$rs_c/cwd" \
       CLAUDE_SETTINGS_SEARCH_ROOTS="$rs_c/roots" CLAUDE_SETTINGS_RAW="$DEAD_RAW" \
+      CLAUDE_SETTINGS_TEMP_ROOTS="$rs_c/no-such-temp-root" \
       HTTPS_PROXY="$DEAD_PROXY" https_proxy="$DEAD_PROXY" $rs_extra \
       timeout 90 bash "$rs_s" < /dev/null > "$rs_c/out-$rs_n.txt" 2>&1 )
   rc=$?
