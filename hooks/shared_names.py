@@ -175,16 +175,18 @@ def route_flags_path(session_id: object) -> Optional[str]:
 # The one home of the words that say a roadmap step waits on pull request #N (step dead-pr-waits). The guard's
 # placement end (rule dead-pr-wait) and the roadmap build's check end (skills/roadmap/build.py) both read it.
 # build.WAIT_ON_PULL_PHRASES adds its own longer list on top of these.
-DEAD_PR_WAIT_PHRASES = ("after", "once", "until", "when", "blocked on", "wait on", "waits on", "waiting for")
+DEAD_PR_WAIT_PHRASES = ("after", "once", "until", "when", "blocked on", "wait on", "waits on", "waiting on", "wait for",
+                        "waits for", "waiting for")
 # The step fields a wait is read from, one tuple for the guard and the roadmap build.
 DEAD_PR_WAIT_FIELDS = ("title", "why", "note", "ask")
 
 
 def wait_regex(phrases: tuple[str, ...], optional_pr: bool = False) -> "re.Pattern[str]":
     """The pattern for `<phrase> #N` (group 1 is N), read without case. `optional_pr` lets `PR ` sit before #N.
-    A match followed by closed or merged is history ("continues here after #46 closed"), not a wait."""
+    A match followed directly by closed, merged, was closed, was merged, landed or is on main is history ("continues
+    here after #46 closed"), not a wait. Only those words skip: "waits on #41 was ..." stays a wait."""
     words = "|".join(r"\s+".join(map(re.escape, phrase.split())) for phrase in phrases)
-    return re.compile(r"\b(?:%s)\s+%s#(\d+)\b(?!\s+(?:closed|merged)\b)" % (words, r"(?:PR\s+)?" if optional_pr else ""), re.I)
+    return re.compile(r"\b(?:%s)\s+%s#(\d+)\b(?!\s+(?:(?:was\s+)?(?:closed|merged)|landed|is\s+on\s+main)\b)" % (words, r"(?:PR\s+)?" if optional_pr else ""), re.I)
 
 
 DEAD_PR_WAIT = wait_regex(DEAD_PR_WAIT_PHRASES, optional_pr=True)

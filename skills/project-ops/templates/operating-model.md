@@ -28,6 +28,9 @@ A spawner is a session that starts its own agents. Each session role is a set of
   `lane` when the page item has one, so it can list an item whose lane is gone.
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
   branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
+  The same publisher is to write `prStates`: `[{number, state, merged}]` for each pull request an open step waits on
+  with a bare `#N`, with `state` `open` or `closed` and `merged` a bool. The build flags a wait on a PR closed unmerged.
+  Nothing writes `prStates` yet, so that line reads unknown.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
   step with no live lane and no open PR becomes `todo` or `done`, or gets a `paused` field with who decides; an item
   is re-routed or closed. When triage marks a step `done`, its note gets the line

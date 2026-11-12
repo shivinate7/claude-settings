@@ -223,7 +223,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        title, why, note or ask, a wait on a bare PR number (`waits on #42` or `PR #42`; the words are
                        shared_names.DEAD_PR_WAIT_PHRASES, read without case) when the step it leaves has no slug in
                        blockedBy, and a write that clears the slug the old step named while the wait stays. A wait the
-                       old file held with no slug, and a wait quoted, fenced, in code or in a blockquote, pass. The remedy names blockedBy. One read of the step file, no process. An override lifts it.
+                       old file held with no slug, a wait quoted, fenced, in code or in a blockquote, and history
+                       (`after #42 landed`, `was merged`, `is on main`) pass. The remedy names blockedBy. One read of the step file, no process. An override lifts it.
                        (step dead-pr-waits)
   records-page-ready   deny. Marking a pull request ready (MCP update_pull_request with draft false, or the gh ready
                        command without --undo) while its head's records page is stale, or when that read cannot run, in

@@ -675,7 +675,8 @@ def live_work(path, steps, slug=None):
     branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
     list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
     `prStates`: [{"number": int, "state": "open"|"closed", "merged": bool}] (optional), GitHub's state of each PR a step
-    waits on, which the publisher reads once per build; it is kept as given and dead_pr_waits reads it row by row.
+    waits on. The triage publisher that fills landedPulls is to write it; nothing writes it yet. It is kept as given
+    and dead_pr_waits reads it row by row.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -1209,9 +1210,9 @@ def stale_drafts(work):
 
 # The words that say a step waits on pull request #N: the shared words (hooks/shared_names.py, which the guard's
 # placement rule dead-pr-wait reads too) and these longer ones. A placement check can share it.
-WAIT_ON_PULL_PHRASES = DEAD_PR_WAIT_PHRASES + ("stacked on", "stacks on", "stack on", "built on", "wait for", "waits for",
-                                               "waiting on", "lands with")
-# `PR ` may sit before #N. A match followed by closed or merged is history ("continues here after #46 closed"), not a wait.
+WAIT_ON_PULL_PHRASES = DEAD_PR_WAIT_PHRASES + ("stacked on", "stacks on", "stack on", "built on", "lands with")
+# `PR ` may sit before #N. A history word right after #N (closed, merged, landed, is on main: shared_names.wait_regex)
+# makes it history ("continues here after #46 closed"), not a wait.
 WAIT_ON_PULL = wait_regex(WAIT_ON_PULL_PHRASES, optional_pr=True)
 
 
@@ -1246,10 +1247,10 @@ DEAD_WAIT_LINE = "dead PR wait"
 def dead_pr_waits(open_, work):
     """(lines, dead): one line per open step and PR #N where the step's title, why, note or ask waits on a bare #N
     (shared_names.bare_pr_waits, the matcher the guard's rule dead-pr-wait uses). `lines` read `closed` when the live
-    file's prStates list shows #N closed and not merged, and `unknown (why)` when it has no usable state for #N: no
-    prStates key, a value that is not a list, an empty list, no valid row for #N, or rows for #N that disagree. A
-    PR shown open or merged adds no line. `dead` is True when any line reads closed, and the build then exits 1.
-    With no --live file at all, one unknown line stands for every wait, not one line per step."""
+    file's prStates list shows #N closed and not merged, and `unknown (why)` when the list has no usable state for #N:
+    no valid row for #N, or rows for #N that disagree. A PR shown open or merged adds no line. `dead` is True when any
+    line reads closed, and the build then exits 1. With no live file, or a prStates that is missing, empty or not a
+    list, one unknown line stands for every wait and names no step: no state can judge any one of them."""
     waits = [(k, n) for k, d in open_ for n in dict.fromkeys(
         n for f in DEAD_PR_WAIT_FIELDS for n in bare_pr_waits(d.get(f)))]
     if not waits:
@@ -1258,18 +1259,17 @@ def dead_pr_waits(open_, work):
         return ["%s: %s (%d waits on a bare PR number)" % (DEAD_WAIT_LINE, (work or {}).get("read") or "unknown (no live file)",
                                                            len(waits))], False
     states = work.get("prStates")
+    if not isinstance(states, list) or not states:
+        why = "prStates is empty" if isinstance(states, list) else "the live file has no prStates list"
+        return ["%s: unknown (%s; %d waits on a bare PR number)" % (DEAD_WAIT_LINE, why, len(waits))], False
     seen = {}
-    for row in states if isinstance(states, list) else []:
+    for row in states:
         if isinstance(row, dict) and type(row.get("number")) is int and row.get("state") in ("open", "closed") \
                 and isinstance(row.get("merged"), bool):
             seen.setdefault(row["number"], set()).add(row["state"] == "closed" and row["merged"] is False)
     lines, dead = [], False
     for k, n in waits:
-        if not isinstance(states, list):
-            lines.append("%s: %s (#%d) unknown (the live file has no prStates list)" % (DEAD_WAIT_LINE, k, n))
-        elif not states:
-            lines.append("%s: %s (#%d) unknown (prStates is empty)" % (DEAD_WAIT_LINE, k, n))
-        elif len(seen.get(n, ())) != 1:
+        if len(seen.get(n, ())) != 1:
             lines.append("%s: %s (#%d) unknown (%s)" % (DEAD_WAIT_LINE, k, n, "prStates rows for it disagree" if n in seen
                                                        else "no valid prStates row for it"))
         elif True in seen[n]:
