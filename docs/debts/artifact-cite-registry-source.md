@@ -1,9 +1,9 @@
-# The push check reads the registry from the pushing checkout
+# The record branch check reads the checkout's registry, the push check reads origin's
 
-**What.** Rule `roadmap-artifact-cites` reads the registry from the pushing checkout's `.claude/layout-extras.json`. A checkout on the record branch has no such file, so the check notes "unknown" and judges no cite. A checkout behind main holds an older registry and can deny a clean cite. `check()` in the same module fails all 17 cites on the record branch with no registry. The two paths disagree.
+**What.** Rule `roadmap-artifact-cites` judges a pushed cite against the registry on origin's default branch, and against the pushing checkout's own file only when origin's cannot be read. The whole-branch check `check()` in the same module still reads only the checkout's `.claude/layout-extras.json`. A checkout on the record branch has no such file, so `check()` calls every cite there unregistered, and a checkout behind main calls a cite of a newer page unregistered. The two paths can disagree.
 
-**Where.** `lint/check_artifact_cites.py`: `registry_ids`, `pushed_step_findings`, `check`. `hooks/guard_merge.py`: `record_push_hit`.
+**Where.** `lint/check_artifact_cites.py`: `check`, against `registry_ids`.
 
 **Decision.** waiting-data-in-repo (git is each artifact's home).
 
-**Retire.** Both paths read the registry from one source, origin's default branch, and judge a cite the same way when the pushing checkout has no registry file. A case in `lint/test_check_artifact_cites.py` pushes a clean head from an extras-less checkout and shows no deny and no note.
+**Retire.** `check()` reads its registry through `registry_ids`, so both paths judge a cite the same way. A case in `lint/test_check_artifact_cites.py` runs `check()` from an extras-less checkout whose origin holds the registry, and shows no FAIL for a registered cite.

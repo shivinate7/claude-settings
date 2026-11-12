@@ -32,7 +32,7 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 
 Cost: each run of the page writer makes one list call per page of each collection and starts one python process. It makes one commit when a file changed. No timer and no watcher.
 
-Cost of rule `roadmap-artifact-cites`: a `git push` to the record branch that the triage session may make starts two git processes per ref sent (`git ls-tree`, `git cat-file --batch`). It starts one when the head holds no step. These add to the one-writer check's reads. A dry run and a push to another branch start none. No timer. A noted verdict writes one guard.log line. Nothing else is written.
+Cost of rule `roadmap-artifact-cites`: a `git push` to the record branch that the triage session may make starts, per ref sent, `git ls-tree` and `git cat-file --batch` on the pushed head. It starts `ls-tree` alone when the head holds no step. Each read of the registry on origin's default branch starts up to two `git show` (origin/HEAD, then origin/main). The registry is read twice per ref when no cite is found and once when one is. That makes up to four `git show` per ref, or two when a cite is found. These add to the one-writer check's reads. A dry run and a push to another branch start none. No timer. A noted verdict writes one guard.log line. Nothing else is written.
 
 Known limits:
 

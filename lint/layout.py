@@ -344,12 +344,13 @@ GIT_SHOW_TIMEOUT = 10  # seconds one `git show` may run
 
 
 def _default_branch_extras(root):
-    """The extras file of `root` as read from the repo's default branch, (dict, "<ref>:<path>"), else None. For a
-    checkout that holds no extras file of its own, such as a worktree on the record branch. It reads origin/HEAD's
+    """The extras file of `root` as read from the repo's default branch, (dict, "<ref>:<path>"), else None. Its
+    callers are `waiting_page`, for a checkout that holds no extras file of its own (a worktree on the record
+    branch), and `default_branch_artifact_ids`, on every read of the registry. It reads origin/HEAD's
     branch, else origin/main, from the ref alone: no checkout moves and no fetch runs. None for no extras path, no
     such ref, a git error or a timeout, and for a file that does not parse.
-    Cost: at most two `git show` processes per call (the second only when origin/HEAD does not resolve), and
-    only when the checkout holds no extras file. No file is written."""
+    Cost: at most two `git show` processes per call (the second only when origin/HEAD does not resolve). No file
+    is written."""
     where = layout().get("extras")
     if not where:
         return None
