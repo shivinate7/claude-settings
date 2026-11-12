@@ -1058,6 +1058,32 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
+# Commands that only read what their arguments name. A mutating word among their arguments is data
+# (`grep rm F`, `sed -n 'rm x' F`), so a segment led by one is read at its command position alone.
+_READS_ITS_ARGUMENTS = frozenset((
+    "grep", "egrep", "fgrep", "rg", "ag", "sed", "cat", "head", "tail", "less", "more", "wc", "diff", "cmp",
+    "ls", "stat", "file", "git", "python", "python3", "pytest", "test", "["))
+# A substitution or backtick that the shell runs inside a word that is not single-quoted.
+_RUNS_A_SUBSTITUTION = re.compile(r"\$[({]|`|[<>]\(")
+
+
+def _reads_by_position(command_and_rest, raw_words) -> bool:
+    """True when a segment's mutating words may be read at its command position alone (`read_forms`), as the
+    fail-closed rule allows. False reads it by the plain-argument rule, which refuses more. The shell may run
+    a mutating word in a command word it cannot name (a subshell, a function body, a command built from a
+    `$` or a backtick), in a `$( )`, backtick or `<( )` substitution, or after a leading word that hands
+    its arguments to a command (`stdbuf`, `flock`, `su -c`, `coproc`, a `case` arm): the old reading."""
+    command, rest = command_and_rest
+    if not command:
+        return False
+    if any(_RUNS_A_SUBSTITUTION.search(word) for word in raw_words
+           if not (len(word) > 1 and word[0] == word[-1] == "'")):
+        return False
+    if command in _READS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS or _mutates_as_command(command, rest):
+        return True
+    return not any(re.fullmatch(MUTATING_COMMAND, word) for word in rest)
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                      command_position=False, predicate_command=False, script_data=False, read_forms=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
@@ -1131,7 +1157,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         # printer's or PowerShell's quoted text alone: it may be a program another command runs
         # (`echo '...' | python -`, a scriptblock).
         by_position = command_position or (
-            read_forms and kinds[number] not in ("printer", "message") and not is_powershell(cmd))
+            read_forms and kinds[number] not in ("printer", "message") and not is_powershell(cmd)
+            and _reads_by_position(_segment_command(script), scripts[number]))
         for nested in _powershell_scripts_of(segments[number]):
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
             hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
