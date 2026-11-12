@@ -4,10 +4,10 @@
 Modes:
 - --auth-check: At session start, checks that a model call can log in. With a token file it does nothing.
   With none it makes one short probe call. It prints one systemMessage line with the fix when that call cannot
-  authenticate, and says an API key is no route for hook judges. It shows that fix once per missing token: a later
-  start with no token file prints nothing, and the line returns after a token file has been present and is gone
-  again. It prints nothing otherwise. One probe costs about $0.02 (one cloud sample) and runs at the model's
-  default effort.
+  authenticate (or answers with a login prompt), and says an API key is no route for hook judges. It shows that fix
+  once per missing token: a later start with no token file prints nothing, and the line returns after a token file
+  has been present and is gone, or after a judge call has succeeded. It prints nothing otherwise. One probe costs
+  about $0.02 (one cloud sample) and runs at the model's default effort, and runs only when no fix mark is set.
 
 WHAT THIS FILE DOES. A command hook. A command hook receives the Stop JSON (`transcript_path`,
 `session_id`, `cwd`) with no permission check at all, so it cannot fail in `auto` mode the way a
@@ -709,6 +709,10 @@ AUTH_TEXT = re.compile(r"\b401\b|invalid api key|/login|authenticat\w*|unauthori
                        re.IGNORECASE)
 
 
+# What an exit-0 reply says when it is a login prompt and not a verdict. Narrower than AUTH_TEXT. Read only by `auth_check`.
+LOGIN_PROMPT = re.compile(r"/login|not logged in", re.IGNORECASE)
+
+
 def _failure(text, kind=None):
     """A ModelError for a failed call. `kind` None reads the text: AUTH when it names a lost login, else RUN."""
     return ModelError(text, kind or ("AUTH" if AUTH_TEXT.search(text) else "RUN"))
@@ -819,21 +823,23 @@ def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
 # A model call that cannot authenticate must not be quiet: every hook judge fails open on an error,
 # so a lost login turns them all off with no sign. Two readers, no timer and no new process:
 #   `auth_check`, the SessionStart entry (`--auth-check`). One file read per session start. At most
-#     one probe call (about 2-3 s, measured) and only when no token file exists. The probe
+#     one probe call (about 2-3 s, measured) and only when no token file exists and no fix mark is set. The probe
 #     goes through `invoke_model`, the path real calls take, so it does not depend on the credential
 #     it checks. A token file means no probe. No token file is not a failure by itself: a cloud
 #     session called the model with no token file and no credentials file, so only the probe knows.
 #     The fix line shows once per missing token: one small marker file (`state/auth-prompted`) is written
-#     with it and removed at the next start that finds a token file.
+#     with it and removed at the next start that finds a token file, or by a judge call that succeeds.
+#     A probe reply that is not the answer asked for and asks for a login (`LOGIN_PROMPT`) shows the fix too.
 #   `record_model_outcome` and `streak_line`. One small write per outcome change (none for a success
-#     with no failure on record), one file read per Stop (`hooks/stall_watch.py --stop`). Stop hooks
+#     with no failure on record; a success deletes the fix mark and the streak file when present),
+#     one file read per Stop (`hooks/stall_watch.py --stop`). Stop hooks
 #     run side by side, so a Stop line reports failures from calls that ended before it began.
-# The error's `kind` decides the probe. AUTH gives the setup-token fix. RUN (a timeout or a failed start) says
-# the check failed and names the error, with no fix, since the login may be fine. REPLY (`ReplyError`) means the
+# The error's `kind` decides the probe. AUTH gives the setup-token fix, and its Stop line comes at the first failure. RUN (a timeout or a failed start) says
+# the check failed and names the error, with no fix, since the login may be fine; its Stop line waits for STREAK_MIN. REPLY (`ReplyError`) means the
 # model ran and answered badly: that login works, so it stays silent and resets the streak.
 # A token is never printed or written: `invoke_model` scrubs it from the error before either reader.
 STREAK_SUB = "model-streak"
-STREAK_MIN = 3  # failures in a row before the Stop line speaks
+STREAK_MIN = 3  # failures in a row before the Stop line speaks, for a failure that does not name the login
 PROBE_TIMEOUT = 20  # seconds; far under MODEL_TIMEOUT and the hook's own timeout in settings.json
 PROBE_PROMPT = 'Reply with exactly {"ok": true}'
 PROBE_SHAPE = {"ok": (True, False)}
@@ -900,8 +906,15 @@ def auth_check(model_call=invoke_model):
         return ""
     _verdict, error = model_call(PROBE_PROMPT, model=MODEL, timeout=PROBE_TIMEOUT, shape=PROBE_SHAPE, effort=None)
     kind = getattr(error, "kind", "RUN")  # an error with no kind reads as RUN, as record_model_outcome does
-    if error is None or kind == "REPLY":
+    if error is None:
         return ""
+    if kind == "REPLY":
+        # The probe asks for one fixed reply, so a reply that asks for a login is a lost login, not an off-shape
+        # answer. Any other off-shape reply is a working login. Only the probe reads this: a real judge's reply
+        # may discuss /login without meaning it.
+        if not LOGIN_PROMPT.search(error):
+            return ""
+        kind = "AUTH"
     if kind == "RUN":  # no fix named, so it may repeat: a later start can still find the real cause
         return ("Model calls: the login check failed (%s), so it is unknown whether hook judges can run."
                 % _one_line(error))
@@ -935,12 +948,14 @@ def _read_streak(path):
 
 
 def record_model_outcome(session_id, error):
-    """Count this session's consecutive model-call failures. `error` None is a success. A `ReplyError` is
-    a call that ran, so it counts as a success. The kind of the last error is kept for the Stop line. No session id records nothing. Never raises."""
+    """Count this session's consecutive model-call failures. `error` None is a success: it also clears the
+    prompted mark. A `ReplyError` is a call that ran, so it counts as a success. The kind of the last error is kept for the Stop line. No session id records nothing. Never raises."""
     path = _streak_path(session_id)
     if not path:
         return
     try:
+        if error is None:
+            _clear_prompted()  # the login works again: a later lost login shows the fix again
         if error is None or isinstance(error, ReplyError):
             if os.path.exists(path):
                 os.remove(path)
@@ -959,12 +974,13 @@ def record_model_outcome(session_id, error):
 
 
 def streak_line(session_id):
-    """The Stop line for STREAK_MIN or more failures in a row this session, else ''."""
+    """The Stop line for this session's failures in a row, else ''. A last error of kind AUTH (a lost login) gives
+    it from the first failure, with the fix. Any other kind waits for STREAK_MIN."""
     path = _streak_path(session_id)
     if not path:
         return ""
     count, last, kind = _read_streak(path)
-    if count < STREAK_MIN:
+    if count < (1 if kind == "AUTH" else STREAK_MIN):  # a lost login speaks at the first failure (owner, 11:43 CST Nov 6)
         return ""
     line = "Model calls: %d failed in a row this session (last: %s). Hook judges are not running." % (count, last)
     if kind == "RUN":
