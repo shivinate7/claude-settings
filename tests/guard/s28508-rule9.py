@@ -672,15 +672,17 @@ for _name, _prompt in PHRASING_CONTROLS:
     add("brief-write-needs-writer: brief-write-phrasing-misses control: Workflow Explore agent with %s is allowed" % _name,
         "allow", tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
 # brief-write-long-line-cost: one 36 KB line of whole sentences, so the order ends a sentence. The limit is 1.0 s, a
-# generous bound: the reader's cost grows with each write verb in the line, and today the line takes seconds. The verdict
-# is the short brief's: deny with the order, allow without it.
+# generous bound: the reader's cost grows with each write verb in the line, and today the line takes seconds. The bound
+# times the whole guard run, so it is not read on Windows, where the full suite runs only on pushes (as s13406-merge does).
+# The verdict is the short brief's: deny with the order, allow without it.
+LONG_LINE_LIMIT_S = 1.0 if os.name != "nt" else None
 LONG_FILLER = "Write, add, make, log and record each note; put it in the list and save the rest. "
 LONG_LINE = LONG_FILLER * (36000 // len(LONG_FILLER))
 add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief that orders a write is denied "
     "within 1.0 s", "deny", WRITE_BRIEF, tool="Agent", prompt=LONG_LINE + WRITE_CANONICAL, subagent_type="Explore",
-    max_seconds=1.0)
+    max_seconds=LONG_LINE_LIMIT_S)
 add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief with no order is allowed "
-    "within 1.0 s", "allow", tool="Agent", prompt=LONG_LINE, subagent_type="Explore", max_seconds=1.0)
+    "within 1.0 s", "allow", tool="Agent", prompt=LONG_LINE, subagent_type="Explore", max_seconds=LONG_LINE_LIMIT_S)
 # brief-write-tool-negator: a negator before "the Write tool" passes, and a test named for the tool passes. A use of the
 # tool to save a file still refuses.
 add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that says you may not use the Write tool is allowed",
@@ -691,6 +693,11 @@ add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that runs
     "allow", tool="Agent", prompt="Run the write tool test in tests/guard/s28508-rule9.py.", subagent_type="Explore")
 add("brief-write-needs-writer: brief-write-tool-negator control: Explore brief that uses the Write tool to save a path is denied",
     "deny", WRITE_BRIEF, tool="Agent", prompt="Use the Write tool to save docs/a.md", subagent_type="Explore")
+# A bare may or will is no negator: a fix that counts them as one would pass these.
+add("brief-write-needs-writer: brief-write-tool-negator control: Explore brief that may use the Write tool to save a path is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="You may use the Write tool to save docs/a.md.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-tool-negator control: Explore brief that will use the Write tool to save a path is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="You will use the Write tool to save docs/a.md.", subagent_type="Explore")
 # brief-write-dotted-word-path: a comparison whose right side is a dotted word is no redirect target. A redirect to a path
 # in a command span still refuses.
 add("brief-write-needs-writer: brief-write-dotted-word-path: Explore brief that keeps a comparison on a dotted word is allowed",
@@ -700,6 +707,9 @@ add("brief-write-needs-writer: brief-write-dotted-word-path control: Explore bri
     "deny", WRITE_BRIEF, tool="Agent", prompt="Run `echo x > out.txt` and report.", subagent_type="Explore")
 add("brief-write-needs-writer: brief-write-dotted-word-path control: Explore brief that redirects a span to a bare path is denied",
     "deny", WRITE_BRIEF, tool="Agent", prompt="Run `> docs/a.md` and report.", subagent_type="Explore")
+# A comparison in prose names no target, so a fix that reads ">" in prose must still pass it.
+add("brief-write-needs-writer: brief-write-dotted-word-path control: Explore brief that reports a comparison in prose is allowed",
+    "allow", tool="Agent", prompt="Report whether score > limit holds for each case.", subagent_type="Explore")
 # brief-write-comma-prohibit: a comma inside a negated clause keeps the negator's window. A comma clause with no negator
 # still refuses.
 add("brief-write-needs-writer: brief-write-comma-prohibit: Explore brief that says do not, under any circumstances, write to "
@@ -708,6 +718,10 @@ add("brief-write-needs-writer: brief-write-comma-prohibit: Explore brief that sa
 add("brief-write-needs-writer: brief-write-comma-prohibit control: Explore brief with an unnegated comma clause that orders a "
     "write is denied", "deny", WRITE_BRIEF, tool="Agent",
     prompt="Under any circumstances, write the findings to docs/audit.md.", subagent_type="Explore")
+# A negator before a comma does not cover an order after it: "do not skip" negates the skip, not the write.
+add("brief-write-needs-writer: brief-write-comma-prohibit control: Explore brief that says do not skip the spec, then writes "
+    "a path is denied", "deny", WRITE_BRIEF, tool="Agent",
+    prompt="Do not skip the spec, write the findings to docs/audit.md.", subagent_type="Explore")
 
 
 # ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
