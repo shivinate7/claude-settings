@@ -1741,12 +1741,14 @@ test("pending cite: a repo with no unscanned pending cite passes --check and --c
 
 test("pending cite: an excluded file that only teaches the cite syntax passes --check and --claim", () =>
   withTempDir((root) => {
-    const teaching = "# Citing\n\nWrite `[[p]]` to cite a record.\n\n```\n[[p]]\n```\n";
+    // A placeholder slug, not the pending p: the refusal reads a code span as a cite too, so a
+    // pending slug in this example would be refused for the wrong reason.
+    const teaching = "# Citing\n\nWrite `[[slug]]` to cite a record.\n\n```\n[[slug]]\n```\n";
     pendingCiteRepo(root, { scanGlobs: ["**/*.md"], excludeGlobs: ["docs/citation-syntax.md"] }, {
       "docs/citation-syntax.md": teaching,
       "docs/guide.md": "See [[p]] for the plan.\n",
     });
-    assert.equal(read(root, "docs/citation-syntax.md").includes("`[[p]]`"), true, "scope: the syntax file must show the cite in a code span");
+    assert.equal(read(root, "docs/citation-syntax.md").includes("`[[slug]]`"), true, "scope: the syntax file must show the placeholder in a code span");
 
     const check = runStamp(root, ".github/stamp.json", "check");
     assert.equal(check.status, 0, `--check refused a file that only teaches the syntax:\n${outputOf(check)}`);
