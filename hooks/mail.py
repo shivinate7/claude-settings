@@ -67,10 +67,28 @@ def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
     # blob bytes and put a CR in an index path.
     data = None if input_text is None else utf8(input_text)
     try:
-        if WINDOWS:
-            done = _run_windows(prefix + args, run_env, data, timeout)
-        else:
-            done = _nowindow.run(prefix + args, env=run_env, input=data, capture_output=True, timeout=timeout)
+        done = _nowindow.run(prefix + args, env=run_env, input=data, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise MailError("timeout")
+    except OSError as error:
+        raise MailError("git: %s" % error)
+    return done.returncode, _text(done.stdout), _text(done.stderr)
+
+
+def git_bounded(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
+    """git() for `mail wait`, whose polls run for hours. Off Windows it is git(). On Windows (read at call time) a timeout
+    kills the child's tree and waits with a bound, since subprocess.run would call communicate() again after the kill.
+    Own copy of git()'s env and command build: the send path and turn-start read keep git() byte for byte, so the
+    Windows child start is scoped to the wait."""
+    if not WINDOWS:
+        return git(args, env, cache, timeout, input_text)
+    run_env = dict(env, GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
+    if not env.get("GIT_SSH_COMMAND") and not env.get("GIT_SSH"):
+        run_env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=3"
+    prefix = ["git", "-c", "commit.gpgsign=false"] + (["--git-dir", cache] if cache else [])
+    data = None if input_text is None else utf8(input_text)
+    try:
+        done = _run_windows(prefix + args, run_env, data, timeout)
     except subprocess.TimeoutExpired:
         raise MailError("timeout")
     except OSError as error:
@@ -447,7 +465,7 @@ def _first_body_line(text):
     and a double quote becomes a single quote so the text cannot close the quotes the wake line puts around it."""
     body = text.partition("\n\n")[2]
     line = next((row for row in body.splitlines() if row.strip()), "")
-    line = re.sub("[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]", " ", line).replace('"', "'")
+    line = re.sub(r"[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]", " ", line).replace('"', "'")
     return line.strip()[:BODY_LIMIT]
 
 
@@ -464,8 +482,11 @@ def _wake_line(env, tip, message, run):
 def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=None, pid=None, ppid=None,
          interval=None, max_seconds=None):
     """Block until `addrs` has an open message that was not open at the start, print one line, and return the exit code:
-    0 new mail, 2 not started (no repo, no address, or a live waiter holds the lock), 3 ended at max_seconds with no mail
-    or because the lock was deleted or the parent died. One waiter per address, held by a lock file in the cache."""
+    0 new mail. 2 not started: MAILBOX_REPO unset, no address, a live waiter holds the lock, the lock cannot be taken, or the
+    baseline stayed unreadable for BASELINE_RETRY_SECONDS (bin/mail also exits 2 for a bad --interval or --max-seconds).
+    3 ended at max_seconds with no mail, or the lock was deleted, or the parent died. One waiter per address, held by a
+    lock file in the cache. `run_git` replaces git_bounded for every git call."""
+    run_git = run_git or git_bounded
     interval = interval or WAIT_INTERVAL
     max_seconds = max_seconds or WAIT_MAX_SECONDS
     pid_alive, start_time = pid_alive or _pid_alive, start_time or _start_time
@@ -504,8 +525,7 @@ def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=N
         previous = None
     try:
         # The baseline: what is open now never wakes the waiter. An empty store has no ref, so nothing is open.
-        # A failed read at the start is retried for BASELINE_RETRY_SECONDS, since a mailbox that is briefly down at the
-        # start of a session is common; a baseline that never reads would otherwise make every later poll a false wake.
+        # A failed read is retried for BASELINE_RETRY_SECONDS: a waiter with no baseline would call every open message new.
         give_up = clock() + BASELINE_RETRY_SECONDS
         while True:
             try:

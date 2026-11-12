@@ -6,7 +6,8 @@
 # --addr names the folder the message sits in, as the turn-start line prints it. Without it, the session's own address.
 # The git mailbox (decision session-messages). The plumbing and the addresses live in hooks/mail.py.
 # Exit 0 ok; 1 not sent, not taken, or mail unknown; 2 bad use or MAILBOX_REPO not set. Windows: bin/mail.cmd.
-# wait exits 0 on new mail, 2 not started (no MAILBOX_REPO, no address, or a waiter already runs), 3 ended with no mail.
+# wait exits 0 on new mail; 2 not started (MAILBOX_REPO unset, no address, a waiter already runs, the lock cannot be taken,
+# the mailbox unreadable at start for about 5 minutes, or a bad --interval or --max-seconds); 3 ended with no mail.
 import argparse
 import os
 import secrets
