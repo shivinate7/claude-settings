@@ -287,6 +287,15 @@ def _test_run_word(tokens, index: int) -> str:
     return ""
 
 
+def test_run_stage(segment: str) -> str:
+    """The program word when one segment runs a test (`_test_run_word`), else ''."""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None:
+        return ""
+    return _test_run_word(tokens, _skip_uv_run(tokens, index))
+
+
 def check_stage(segment: str, background: bool, bare: bool = False) -> str:
     """The command word when one segment runs a named check, else ''. `ci-job` counts only in the
     background, or in the foreground too when `bare` is set (rule bare-check). A bare run also counts a test

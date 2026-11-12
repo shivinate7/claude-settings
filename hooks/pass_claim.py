@@ -151,9 +151,9 @@ def verdict_commands(command):
 def _kinds(command):
     """The kinds of check a verdict command backs: "roster" for a named check (guard_stream's one roster), "test" for
     a command that names a test. `verdict true` backs none."""
-    from guard_stream import check_stage
+    from guard_stream import check_stage, test_run_stage
     kinds = set()
-    if check_stage(command, False, True):
+    if check_stage(command, False, True) and not test_run_stage(command):
         kinds.add("roster")
     if TEST_COMMAND_RE.search(command):
         kinds.add("test")
