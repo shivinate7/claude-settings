@@ -23,7 +23,8 @@ Limits:
 - A shell-run heredoc body is read whole. An unquoted body's `$(` is read, because bash runs it while writing the file.
 - A quoted body that python, perl, ruby or node runs is not read as shell lines. A bare `gh pr create` line in a body with no backtick is allowed.
 - A quoted perl, ruby or node body with any backtick is read whole, split at each backtick. A body with none is not read, except a node body at its shell calls (the line below).
-- A body that python alone runs adds none of its own lines, even with a backtick. A quoted python or node body adds the text of each shell call it makes (`os.system`, `os.popen`, `subprocess` with a shell, node's `exec`, `execSync`, `spawnSync`), read through `script_spots`. A double-quoted `$(` or backtick span in that call runs, so a `gh pr create` in it is refused. A string the script only prints is data and is allowed. A call whose argument is no literal reads the whole script.
+- A body that python alone runs adds none of its own lines, even with a backtick. A quoted python or node body adds the text of each shell call it makes, read through `script_spots`. Python calls: `os.system`, `os.popen`, `os.exec*`, `os.spawn*`, and `subprocess` `run`, `call`, `check_call`, `check_output`, `Popen`, `getoutput` and `getstatusoutput`, with or without a shell. Node calls: `exec`, `execSync`, `execFile`, `execFileSync`, `spawn` and `spawnSync`. A string the script only prints is data and is allowed. A call whose argument is no literal reads the whole script.
+- A double-quoted `$(` or backtick span in a call's string runs, so a `gh pr create` in it is refused. These are allowed, in python and node: a single-quoted span (`os.system('echo $(gh pr create)')`), a bare command (`os.system("gh pr create")`, `subprocess.run("gh pr create", shell=True)`), and an argv list (`subprocess.run(["gh", "pr", "create"])`, `cp.execFile("gh", ["pr", "create"])`).
 - A body piped into a shell (`python3 - <<'EOF' | sh`) is read only when the body itself holds the words as shell text. A body that only prints them is allowed, as on main.
 - Each body is judged by its own stage of the header line, or for a written file by the stages that run it.
 - Words decide who runs a body, never a path. A file named `python/t.pl` that perl runs is read, and a written file's own name is no runner.
@@ -35,7 +36,8 @@ Limits:
 - A body fed to python on stdin stays python's, even behind a known wrapper word.
 - A runner word the guard does not know in front of python (`stdbuf -o0 python3 f.py`) leaves the body python's, so it is allowed.
 - A runner word outside the guard's interpreter list (nodejs, perl5.36) is not known, so `python3 f.py && nodejs f.py` is allowed.
-- ash is named only beside python. A file that python runs and ash then runs (`ash f`, `busybox ash f`, `cat f | ash`, `ash -c "$(cat f)"`) is read as shell lines, so a bare `gh pr create` line in it is refused. A file that only ash runs is not read, as on main.
+- ash is named only beside python. A file that python runs and ash then runs (`ash f`, `busybox ash f`, `cat f | ash`, `ash -c "$(cat f)"`) is read as shell lines, so a bare `gh pr create` line in it is refused. A file that only ash runs is not read, as on main. A bare line in `perl f.pl; ash f.pl`, `ruby f.rb; ash f.rb` or `node f.js; ash f.js` is allowed. The ash fix covers python only.
+- After `python3 f.py`, a shell word the guard does not name is allowed, and a bare line in the file is not read: `rbash`, `fish`, `csh`, `tcsh`, `ksh93`, `mksh`, `yash`, `posh` and `$SHELL`. The guard's shell list (`bash`, `sh`, `zsh`, `dash`, `ksh`, `pwsh`, `powershell`) and `ash` are read.
 - An unknown runner drops the body, as on main, for a non-.sh file name and for stdin. A .sh name stays read, so `mysh f.sh` is refused.
 - A PowerShell here-string is read as shell lines when `iex` or `Invoke-Expression` takes it after a space.
 - It is also read when `[scriptblock]::Create(` builds a block from it, or when `pwsh` or `powershell` takes it after `-Command` or `-c`.
@@ -57,6 +59,10 @@ Limits:
 - The guard does not judge a `gh api` POST to the pulls endpoint, or `hub pull-request`. Each can open a non-draft PR.
 - A short-flag cluster such as `-dt x` is refused, a rare false alarm.
 - A pull request that turns draft during the merge wait is not stopped.
+- A python `subprocess` call that gives a shell its script on stdin is allowed, even with a `$(` span in the input: `subprocess.run(["bash"], input="$(gh pr create)")`. In node, `spawnSync("sh", [], {input: ...})` is allowed the same way.
+- A python script that writes a `.sh` file and then runs it is allowed. The file's text is not read.
+- A node `eval(...)` or `new Function(...)` that runs code the script does not name in plain text is allowed, such as `eval(Buffer.from("...", "base64").toString())`. A call named in plain text inside a `new Function(...)` string is read.
+- A false alarm: a python heredoc with a non-literal argument to a `subprocess` call is read whole as shell text. A statement that starts with the word `impeccable`, such as `impeccable = 1`, is refused. With a literal argument, the same heredoc is allowed.
 - Unmeasured: that `ready_for_review` starts `checks.yml` (it comes from GitHub's documented behavior), and the saving in runs.
 
 Kind: process
