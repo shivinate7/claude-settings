@@ -39,6 +39,11 @@ URL = "https://claude.ai/artifact/" + REGISTERED
 CODE_URL = "https://claude.ai/code/artifact/" + REGISTERED
 REGISTRY = {"kinds": {}, "rolled-out": True,
             "artifacts": [{"id": REGISTERED, "url": URL, "role": "waiting-page", "account": "work"}]}
+# A page registered on origin's default branch after the checkout's registry was written: the checkout is behind it.
+NEWER = "page02"
+NEWER_REGISTRY = {"kinds": {}, "rolled-out": True,
+                  "artifacts": REGISTRY["artifacts"] + [{"id": NEWER, "url": "https://claude.ai/artifact/" + NEWER,
+                                                         "role": "waiting-page", "account": "work"}]}
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
@@ -99,17 +104,28 @@ class CiteTests(unittest.TestCase):
         except checker.Unknown as err:
             self.fail("pushed_step_findings read %s as unknown: %s" % (ref, err))
 
+    def commit_files(self, paths, ref):
+        """One root commit holding `paths` ({repo path: text}), made into `ref`. A temp index file keeps the checkout's
+        own index and working tree as they are."""
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.root, ".git", "record-index"))
+        self.git("read-tree", "--empty", env=env)
+        for rel, text in paths.items():
+            blob = self.git("hash-object", "-w", "--stdin", stdin=text, env=env).strip()
+            self.git("update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, rel), env=env)
+        tree = self.git("write-tree", env=env).strip()
+        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
+        self.git("update-ref", ref, commit)
+
+    def origin_default(self, registry):
+        """origin's default branch, as a fetch leaves it: refs/remotes/origin/main holds `registry`, and origin/HEAD names
+        it. The checkout's own registry file is not touched."""
+        self.commit_files({EXTRAS: json.dumps(registry)}, "refs/remotes/origin/main")
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
     def steps(self, files, origin=False, branch="roadmap"):
         """The record branch: one commit on `branch` (roadmap by default) whose roadmap/data/steps holds each {name: text}.
         With origin, the commit lives on a bare origin only, the state a fetch leaves: no local ref."""
-        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.root, ".git", "record-index"))
-        self.git("read-tree", "--empty", env=env)
-        for name, text in files.items():
-            blob = self.git("hash-object", "-w", "--stdin", stdin=text, env=env).strip()
-            self.git("update-index", "--add", "--cacheinfo", "100644,%s,roadmap/data/steps/%s" % (blob, name), env=env)
-        tree = self.git("write-tree", env=env).strip()
-        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
-        self.git("update-ref", "refs/heads/" + branch, commit)
+        self.commit_files({"roadmap/data/steps/" + name: text for name, text in files.items()}, "refs/heads/" + branch)
         if origin:
             bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
             self.addCleanup(tracked_tree.rm_tree, bare)
@@ -257,6 +273,29 @@ class CiteTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.root, *EXTRAS.split("/"))), "scope: the registry file is absent")
         self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + REGISTERED})}, branch="steps-reg")
         self.assertEqual(self.pushed("steps-reg"), [], "a pushed cite of a registered page was listed")
+
+    def test_a_cite_of_a_page_registered_only_on_origins_default_branch_is_not_refused_from_an_older_checkout(self):
+        self.origin_default(NEWER_REGISTRY)
+        working = json.loads(self.read(EXTRAS))
+        self.assertNotIn(NEWER, [entry["id"] for entry in working["artifacts"]],
+                         "scope: the checkout's registry already registers the page, so the older-checkout case is not built")
+        origin = json.loads(self.git("show", "refs/remotes/origin/main:" + EXTRAS))
+        self.assertIn(NEWER, [entry["id"] for entry in origin["artifacts"]],
+                      "scope: origin's default branch does not register the page")
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + NEWER})}, branch="steps-newer")
+        self.assertEqual(self.pushed("steps-newer"), [],
+                         "a cite of a page on origin's default branch was refused: the checkout's older registry was read")
+
+    def test_a_cite_registered_on_neither_registry_is_still_listed_from_an_older_checkout(self):
+        self.origin_default(NEWER_REGISTRY)
+        self.steps({"c1.json": json.dumps({"title": "Step", "ask": "artifact:" + UNREGISTERED})}, branch="steps-ghost")
+        found = self.pushed("steps-ghost")
+        self.assertEqual([rel for rel, _ in found], ["roadmap/data/steps/c1.json"],
+                         "a cite of a page in neither registry was not listed from an older checkout. Found: %r" % (found,))
+
+    def read(self, rel):
+        with open(os.path.join(self.root, *rel.split("/")), encoding="utf-8") as handle:
+            return handle.read()
 
 
 if __name__ == "__main__":
