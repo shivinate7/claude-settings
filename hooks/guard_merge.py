@@ -18,7 +18,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, bare_pr_waits, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, DEAD_PR_WAIT_FIELDS, bare_pr_waits, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -2059,11 +2059,11 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
 #
 # A roadmap step whose text waits on a bare PR number (`waits on #42`) with no blockedBy slug (rule dead-pr-wait,
 # step dead-pr-waits). The PR may close unmerged, and then nobody acts on the step. The words come from
-# shared_names.bare_pr_waits, the one matcher the roadmap build's check shares. Judged: the title, why and note of
-# the step a Write, Edit or MultiEdit leaves in a roadmap/data/steps/<name>.json file. Only a wait the write ADDS is
-# refused, so a step with an old bare wait stays editable. Cost: one read of the step file, only for a write to a step
+# shared_names.bare_pr_waits, the one matcher the roadmap build's check shares. Judged: the title, why, note and ask of
+# the step a Write, Edit or MultiEdit leaves in a roadmap/data/steps/<name>.json file. A wait the write ADDS is
+# refused, and so is a bare wait the write leaves with no slug where the old step named one (a cleared blockedBy). A
+# step with an old bare wait and no slug stays editable. Cost: one read of the step file, only for a write to a step
 # file; no process, no log.
-DEAD_PR_WAIT_FIELDS = ("title", "why", "note")
 DEAD_PR_WAIT_REASON = (
     "Rule (roadmap): this step's text waits on {what} with no step in blockedBy. A pull request can close unmerged, "
     "and then nobody acts on the wait. "
@@ -2151,8 +2151,10 @@ def dead_pr_wait_hit(tool: str, tool_input, cwd: str = ""):
             olds = [tool_input.get("old_string")] + [e.get("old_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
             old_waits = old_waits + [n for x in olds if isinstance(x, str) for n in _fragment_waits(x)]
     added = [n for n in new_waits if n not in old_waits]
-    if added and not blocked:
-        what = "#" + str(added[0])
+    # A wait the old step held, now with the slug it named cleared: the wait is left bare.
+    cleared = [n for n in new_waits if n in old_waits] if step is not None and _step_blocked(old_step) else []
+    if (added or cleared) and not blocked:
+        what = "#" + str((added or cleared)[0])
         return what, DEAD_PR_WAIT_REASON.format(what=what)
     return None
 

@@ -224,7 +224,7 @@ sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names and lane head refs, shared with the guard (hooks/shared_names.py)
-    BUILD_TAG, DEAD_PR_WAIT_PHRASES, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, bare_pr_waits, lane_head_refs, repo_tag_names, wait_regex,
+    BUILD_TAG, DEAD_PR_WAIT_FIELDS, DEAD_PR_WAIT_PHRASES, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, bare_pr_waits, lane_head_refs, repo_tag_names, wait_regex,
 )
 sys.path.insert(0, str(LINT))
 try:
@@ -1244,14 +1244,14 @@ DEAD_WAIT_LINE = "dead PR wait"
 
 
 def dead_pr_waits(open_, work):
-    """(lines, dead): one line per open step and PR #N where the step's title, why or note waits on a bare #N
+    """(lines, dead): one line per open step and PR #N where the step's title, why, note or ask waits on a bare #N
     (shared_names.bare_pr_waits, the matcher the guard's rule dead-pr-wait uses). `lines` read `closed` when the live
     file's prStates list shows #N closed and not merged, and `unknown (why)` when it has no usable state for #N: no
     prStates key, a value that is not a list, an empty list, no valid row for #N, or rows for #N that disagree. A
     PR shown open or merged adds no line. `dead` is True when any line reads closed, and the build then exits 1.
     With no --live file at all, one unknown line stands for every wait, not one line per step."""
     waits = [(k, n) for k, d in open_ for n in dict.fromkeys(
-        n for f in ("title", "why", "note") for n in bare_pr_waits(d.get(f)))]
+        n for f in DEAD_PR_WAIT_FIELDS for n in bare_pr_waits(d.get(f)))]
     if not waits:
         return [], False
     if not work or "pulls" not in work:  # the live file is missing or unreadable: one line, not one per step
@@ -1260,7 +1260,7 @@ def dead_pr_waits(open_, work):
     states = work.get("prStates")
     seen = {}
     for row in states if isinstance(states, list) else []:
-        if isinstance(row, dict) and type(row.get("number")) is int and isinstance(row.get("state"), str) \
+        if isinstance(row, dict) and type(row.get("number")) is int and row.get("state") in ("open", "closed") \
                 and isinstance(row.get("merged"), bool):
             seen.setdefault(row["number"], set()).add(row["state"] == "closed" and row["merged"] is False)
     lines, dead = [], False

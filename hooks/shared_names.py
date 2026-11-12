@@ -176,6 +176,8 @@ def route_flags_path(session_id: object) -> Optional[str]:
 # placement end (rule dead-pr-wait) and the roadmap build's check end (skills/roadmap/build.py) both read it.
 # build.WAIT_ON_PULL_PHRASES adds its own longer list on top of these.
 DEAD_PR_WAIT_PHRASES = ("after", "once", "until", "when", "blocked on", "wait on", "waits on", "waiting for")
+# The step fields a wait is read from, one tuple for the guard and the roadmap build.
+DEAD_PR_WAIT_FIELDS = ("title", "why", "note", "ask")
 
 
 def wait_regex(phrases: tuple[str, ...], optional_pr: bool = False) -> "re.Pattern[str]":
@@ -185,7 +187,7 @@ def wait_regex(phrases: tuple[str, ...], optional_pr: bool = False) -> "re.Patte
     return re.compile(r"\b(?:%s)\s+%s#(\d+)\b(?!\s+(?:closed|merged)\b)" % (words, r"(?:PR\s+)?" if optional_pr else ""), re.I)
 
 
-DEAD_PR_WAIT = wait_regex(DEAD_PR_WAIT_PHRASES)
+DEAD_PR_WAIT = wait_regex(DEAD_PR_WAIT_PHRASES, optional_pr=True)
 # Text that quotes a wait, not makes one: a fenced block (an unclosed fence runs to the end), an inline code span, a
 # blockquote line and a double-quoted phrase on one line. Removed before the match, in this order.
 _QUOTED = (re.compile(r"```.*?(?:```|\Z)", re.S), re.compile(r"`[^`\n]*`"), re.compile(r"^[ \t]*>.*$", re.M),
@@ -193,7 +195,8 @@ _QUOTED = (re.compile(r"```.*?(?:```|\Z)", re.S), re.compile(r"`[^`\n]*`"), re.c
 
 
 def bare_pr_waits(text: object) -> list[int]:
-    """The PR numbers N, each once and in order, that `text` waits on with a bare `<phrase> #N` (DEAD_PR_WAIT_PHRASES).
+    """The PR numbers N, each once and in order, that `text` waits on with a bare `<phrase> #N` or `<phrase> PR #N`
+    (DEAD_PR_WAIT_PHRASES).
     Quoted, fenced and coded text holds none. Anything that is not a string holds none."""
     if not isinstance(text, str):
         return []
