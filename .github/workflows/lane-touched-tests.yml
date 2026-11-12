@@ -69,7 +69,7 @@ jobs:
     needs: touched
     if: ${{ github.event.pull_request.draft && needs.touched.outputs.any == 'true' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10   # provisional, 4 runs, slowest 4.7 min (decision ci-job-caps)
+    timeout-minutes: 10   # provisional, 4 runs, slowest 4.7 min (run 42487770521)
     # One entry per system that has tests to run: the selector leaves a system out when its list is empty.
     strategy:
       fail-fast: false

@@ -32,11 +32,13 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    run replaces it. Give each default-branch run its own group. Put the PR draft state in the group,
    as `snippets.md`, section 4 shows. A draft run skips every job (step 11), so it must never cancel
    a ready run. Runners with a low concurrency cap, such as hosted macOS, queue first.
-5. **Cap each job's time.** A job's time limit ends a hang and nothing else, so it is generous and
-   computed, never a number picked by hand: `actions/ci-limits/ci_limits.py` prints each limit from the
-   newest 30 completed push runs on main. Decision `time-limits-end-hangs-only` holds the rule (a cut run
-   is a sample, a new job takes its kind's limit x 1.5, the deadline is computed). Decision `ci-job-caps`
-   holds the table and how to measure again. The merge tool's `warn` mode flags a job past 70% of its cap.
+5. **Cap each job's time.** A CI job's total-time limit ends a hang and nothing else, so it is generous
+   and computed from recent green runs (the slowest times 1.5), never a number stored by hand. A new job
+   takes its nearest similar job's limit x 1.5, else the largest job's x 1.5, and is flagged misjudged if
+   a cut ends it. Decision `time-limits-end-hangs-only` holds the rule. Only claude-settings has the
+   script, `actions/ci-limits/ci_limits.py`, which reads this repo's runs and caps; in another repo,
+   measure the same way with `gh run view`. Decision `ci-job-caps` holds this repo's table.
+   The merge tool's `warn` mode flags a job past 70% of its cap.
    Give a network CI step, such as a browser install, its own short cap. When a job nears its cap,
    split its slowest suite by family into its own job. Give the measured CI time before and after.
    Decision `test-strategy-reset` (a test must not fail on runner speed) holds that split.

@@ -35,12 +35,13 @@ Premises of the script:
 
 `actions/ci-limits/ci_limits.py` reads the newest 30 completed push runs of `checks.yml` on main from the GitHub jobs API. One script run makes 1 + n `gh api` calls (n = 30 runs), plus one more per further 100 job rows of a run, with no timer and no file written. It reads the caps from `checks.yml` on `origin/main`, never from the checkout. It prints the limits as JSON (`--json`, with `deadlineMinutes`) or as the markdown table of decision `ci-job-caps` (`--table`). When the API cannot be read, every limit is 360 and one warning goes to stderr: a hung job still ends, and a good job is never cut. Its test is `actions/ci-limits/test_ci_limits.py`, run by `checks.yml` with the other opt-in template suites.
 
-## Not built yet
+## Not built yet, and known limits
 
 The script only measures. Later steps of the plan (`docs/plans/restart-plan.md`, section 3.2) change what reads it:
 
 - The `timeout-minutes` values in `.github/workflows/checks.yml` still hold stored numbers.
 - The merge tool still reads `merge.deadlineMinutes` from `.github/stamp.json`, which holds 80 today (`load_config` in `merge/merge.py` reads it). The script computes the figure; the merge tool reads it in series step S2.
+- `gh_api` in the script has a fixed `timeout=120` in code. A slow network degrades every limit to 360 with one warning, never a red run.
 - The silence stop, the one retry and the red "hung" rollup of part 2 are not built.
 - These local limits keep their raised stopgap values until the silence stop replaces them: `LINT_SECONDS` in `merge/merge.py`, `TIMEOUT` in `lint/check_debt_retire.py` and `lint/check_python_floor.py`, and `timeout` in `hooks/mutate_guard.py` and `janitor/mutate_sweep.py`.
 
