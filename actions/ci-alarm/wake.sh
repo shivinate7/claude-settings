@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # The one wake for a CI alarm on a push to main. It posts one comment on the earliest merged pull request
 # into main that holds commit SHA, which wakes the batch runner that watches that pull request. It opens no issue.
-# Needs REPO (owner/name), SHA, KEY (one alarm, such as a run id), TEXT (the comment text) and GH_TOKEN.
+# Needs REPO (owner/name), SHA, KEY, TEXT (the comment text) and GH_TOKEN. The env check below covers the
+# first four; a missing GH_TOKEN fails loud at the first gh call, the pulls read.
+# KEY is caller-chosen and names one alarm: the cap alarm uses `cap:<run id>:<attempt>`. A caller with two
+# alarm kinds on one run id must pick a distinct KEY per kind, or the second alarm's text is dropped.
+# The caller's token needs pull-requests: read for the pulls and comments reads, and pull-requests: write
+# for the comment post.
 # The hidden marker `<!-- main-alarm:KEY -->` in the comment is the memory: a pull request that already
 # holds it gets no second comment. WAKE_DRY=1 (the test seam) prints the body and posts nothing.
 # A commit with no pull request merged into main has nobody to wake: the message goes to GITHUB_STEP_SUMMARY when
