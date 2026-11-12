@@ -886,7 +886,6 @@ class OffsetWindowTests(unittest.TestCase):
         self.assertEqual((rows, unknown), ([], 1))
 
 
-CLOUD_NA = "n/a (cloud)\n"
 UNKNOWN_LINE = "unknown (old lines with no zone that could fall inside): %d"
 BRAKE_WINDOW = ["--between", "2026-11-01T06:30:00+00:00", "2026-11-01T07:30:00+00:00"]  # 07:00 UTC is inside
 SHARED_INSIDE = "2026-11-01T12:00:00+05:00\tBash\tdeny\tshared-tree\tgit stash\t" + SID  # 07:00 UTC
@@ -902,8 +901,8 @@ def fresh_log(lines=None):
 
 
 class CloudCheckOneHome(unittest.TestCase):
-    """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". This report's n/a (cloud) check
-    and the brake guard in guard.py hold that one function (decision session-tiers: the brake is local-only)."""
+    """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". The brake guard in
+    guard.py holds that one function (owner glossary ruling topic 1, 14:36 CST Nov 10: no local/cloud split of the brake)."""
 
     def helper(self):
         import guard_core
@@ -919,17 +918,12 @@ class CloudCheckOneHome(unittest.TestCase):
                     os.environ["CLAUDE_CODE_REMOTE"] = value
                 self.assertIs(fn(), want)
 
-    def test_the_report_check_holds_the_guard_core_is_cloud(self):
-        fn = self.helper()
-        self.assertTrue(callable(fn), "guard_core has no is_cloud: the cloud check has no one home yet")
-        self.assertIs(getattr(glr, "is_cloud", None), fn, "the n/a (cloud) check does not hold guard_core.is_cloud")
-
 
 class CloudPaceReadTests(unittest.TestCase):
-    """Pace number four (reports-batch-pace-numbers) reads the local brake count. In a cloud session,
-    CLAUDE_CODE_REMOTE == "true" (the check merge/merge.py makes), `--between ... --rule load-brake` prints
-    `n/a (cloud)`, never 0: a 0 would claim a reading that was never taken. Every other read keeps today's
-    output. Each test sets or pops the variable itself, so the runner's own environment decides nothing.
+    """Pace number four (reports-batch-pace-numbers) reads the brake count from guard.log. A cloud session reads it the
+    same way a local one does (CLAUDE_CODE_REMOTE == "true", the same brake everywhere), so `--between ... --rule
+    load-brake` prints the rows and the unknown count, never n/a. Every other read keeps today's output. Each test
+    sets or pops the variable itself, so the runner's own environment decides nothing.
     """
 
     def read(self, argv, remote):
@@ -940,16 +934,17 @@ class CloudPaceReadTests(unittest.TestCase):
                 os.environ["CLAUDE_CODE_REMOTE"] = remote
             return run_main(argv)
 
-    def test_cloud_brake_read_prints_n_a_and_not_the_line(self):
-        path = fresh_log([PLUS_FIVE_LINE])
-        rc, out = self.read(["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"], "true")
-        self.assertEqual((rc, out), (0, CLOUD_NA))
+    def test_cloud_brake_read_prints_the_rows_and_the_unknown_count(self):
+        path = fresh_log([PLUS_FIVE_LINE, OLD_LINE])
+        argv = ["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"]
+        expected = PLUS_FIVE_LINE + "\n" + UNKNOWN_LINE % 1 + "\n"
+        self.assertEqual(self.read(argv, "true"), (0, expected))
 
-    def test_cloud_brake_read_with_no_log_file_prints_n_a(self):
+    def test_cloud_brake_read_with_no_log_file_matches_the_local_read(self):
         path = fresh_log()
         self.assertFalse(os.path.exists(path))
-        rc, out = self.read(["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"], "true")
-        self.assertEqual((rc, out), (0, CLOUD_NA))
+        argv = ["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"]
+        self.assertEqual(self.read(argv, "true"), self.read(argv, None))
 
     def test_local_brake_read_keeps_the_row_and_the_unknown_count(self):
         path = fresh_log([PLUS_FIVE_LINE, OLD_LINE])
