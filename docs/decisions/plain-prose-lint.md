@@ -7,7 +7,7 @@ Where the lint cannot judge meaning, it nudges and never refuses.
 
 Owner, 2026-11-02 13:22 CST: drop Simplified Technical English (STE) as a named writing standard, everywhere. Write plainly only. The one standard is rule `output-write-in-ste` in `CLAUDE.md`: "Write plainly: short sentences, one term per meaning, no filler." The lint keeps its current checks and names for now. Renaming the lint, its CI step and its shared action is a separate follow-up.
 
-Owner: a lint rule either refuses or does not exist. A rule nobody can see is not a rule. The six advisory codes below are the one exception. `RULES` in `lint/ste_lint.py` is the home.
+Owner: a lint rule either refuses or does not exist. A rule nobody can see is not a rule. The seven advisory codes below are the one exception. `RULES` in `lint/ste_lint.py` is the home.
 
 STE018 (a gendered pronoun) is deleted outright. STE006 (a semicolon) is prose-only and has no mechanism. Neither raises a finding (owner ruling 2026-09-23).
 
@@ -18,8 +18,8 @@ STE018 (a gendered pronoun) is deleted outright. STE006 (a semicolon) is prose-o
 - STE020 (label length) and STE021 (bad UI escape) are dropped (owner, 2026-10-22 10:10 CDT). The
   icon-and-label rule and design review carry label length. A UI escape is `ste-disable-line CODE: reason`
   or `ste-disable-next-line CODE: reason` in a comment. Any other escape suppresses nothing.
-- Six codes are advisory and never refuse: STE003 (nominalization), STE007 (Latin abbreviation), STE008
-  (contraction), STE009 (phrasal verb), STE015 (condition order) and STE017 (omitted "that").
+- Seven codes are advisory and never refuse: STE003 (nominalization), STE007 (Latin abbreviation), STE008
+  (contraction), STE009 (phrasal verb), STE015 (condition order), STE017 (omitted "that") and STE022 (a name that `GLOSSARY.md` retires, rule `speak-one-name-per-thing`; owner page item 533 a, 2026-11-12 11:59 CST).
 - Autofix covers STE011 only, and only a fixed bloat phrase. A borderline STE011 row has no fix and still
   errors, as does a bloat phrase in ALL CAPS.
 - STE001 reads one key, `max_words`, set to 30. Mode decides only whether STE015 runs.

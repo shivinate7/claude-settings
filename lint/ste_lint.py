@@ -116,6 +116,13 @@ _rule(
     "'that' marks where the main clause ends. Many languages cannot omit it, so\n"
     "translation of the sentence becomes ambiguous.",
 )
+_rule(
+    "STE022", "one-term", "warning", "[GR-8]",
+    "The text uses a name that GLOSSARY.md retires.",
+    "Rule speak-one-name-per-thing: one term per meaning. GLOSSARY.md lists the name to use and the\n"
+    "names to avoid. Warn-only: it never fails a run. A name written `word (this sense)` in the\n"
+    "glossary retires one sense of an everyday word, so prose is left to the reviewer.",
+)
 
 # --------------------------------------------------------------------------
 # Word tables
@@ -1557,7 +1564,102 @@ def ui_suppressions(copy: _UICopy) -> Dict[int, Optional[List[str]]]:
 # --------------------------------------------------------------------------
 
 
+# The one home of the retired names: GLOSSARY.md, read on each run, never copied here. The real path of this
+# file leads to the repo, so a symlinked install finds the glossary too.
+GLOSSARY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "GLOSSARY.md")
+_USES_RE = re.compile(r"uses '([^']+)'; the glossary name is '([^']+)'")
+_ONE_TERM_CACHE = {}
+
+
+def reset_one_term_cache():
+    _ONE_TERM_CACHE.clear()
+
+
+_MODULE_KEY = ("check_glossary",)  # the cache key of the module, apart from the path keys of the table
+# Word edges as check_glossary.words reads them: a non-alphanumeric run, or a case step (batchBranch). Case is
+# read in the edges even under re.I, so GATEWAY is one word and holds no `gate`.
+_CASE_STEP = r"(?-i:(?<=[a-z0-9])(?=[A-Z]))"
+_EDGE_BEFORE = r"(?:(?<![A-Za-z0-9])|%s)" % _CASE_STEP
+_EDGE_AFTER = r"(?:(?![A-Za-z0-9])|%s)" % _CASE_STEP
+_WORD_JOIN = r"(?:[^A-Za-z0-9]+|%s)" % _CASE_STEP
+
+
+def _check_glossary():
+    """The check_glossary module, or None when it does not load (said once on stderr): STE022 is then off,
+    and every other check runs as before."""
+    if _MODULE_KEY not in _ONE_TERM_CACHE:
+        try:
+            import check_glossary
+        except ImportError as e:
+            check_glossary = None
+            print("ste_lint: unknown: lint/check_glossary.py does not load (%s), so STE022 did not run" % e,
+                  file=sys.stderr)
+        _ONE_TERM_CACHE[_MODULE_KEY] = check_glossary
+    return _ONE_TERM_CACHE[_MODULE_KEY]
+
+
+def _glossary_table():
+    """The glossary table, read once per run and path, or None when it cannot be read (said once on stderr)."""
+    if GLOSSARY_PATH not in _ONE_TERM_CACHE:
+        table = None
+        check_glossary = _check_glossary()
+        if check_glossary is not None:
+            try:
+                with open(GLOSSARY_PATH, encoding="utf-8-sig") as f:
+                    table = check_glossary.rows(f.read())
+            except (OSError, ValueError, IndexError):
+                print("ste_lint: unknown: GLOSSARY.md is unreadable at %s, so STE022 did not run" % GLOSSARY_PATH,
+                      file=sys.stderr)
+        _ONE_TERM_CACHE[GLOSSARY_PATH] = table
+    return _ONE_TERM_CACHE[GLOSSARY_PATH]
+
+
+def one_term_skip(path):
+    """True for a file that names the retired words on purpose or is vendored: the list check_glossary keeps.
+    True also when check_glossary does not load, since STE022 cannot run."""
+    check_glossary = _check_glossary()
+    if check_glossary is None:
+        return True
+    p = path.replace("\\", "/")
+    return any(p.endswith(e) if not e.endswith("/") else e in p for e in check_glossary.SKIP_CODE)
+
+
+def one_term_findings(text):
+    """(offset, name, term) for each use of a retired name in `text`. Nothing when GLOSSARY.md is unreadable.
+
+    Cost: one read of GLOSSARY.md per run, in the process already running; no file written."""
+    table = _glossary_table()
+    if table is None:
+        return []
+    check_glossary = _check_glossary()
+
+    def platform(word):
+        return word in check_glossary.PLATFORM_NAMES or word.startswith(check_glossary.PLATFORM_PREFIXES)
+    out = []
+    for problem in check_glossary.name_problems("", text, table, plain=True):
+        m = _USES_RE.search(problem)
+        if not m:
+            continue
+        name, term = m.group(1), m.group(2)
+        if platform(name):
+            continue
+        # A spelling of the name: its words between word edges, plural too, or a camelCase run of the same words.
+        # A name with no spelling found is not reported, so no finding lands on a word that is not the name.
+        parts = [re.escape(w) for w in re.split(r"[^A-Za-z0-9]+", name) if w]
+        pattern = _EDGE_BEFORE + _WORD_JOIN.join(parts) + r"(?:e?s)?" + _EDGE_AFTER
+        for hit in re.finditer(pattern, text, re.I):
+            at = hit.start()
+            # The whole identifier around the spelling, so `(SubagentStop` reads as SubagentStop.
+            ident = re.search(r"\w*\Z", text[:at]).group(0) + re.match(r"\w*", text[at:]).group(0)
+            if platform(ident):
+                continue  # Claude Code's own name, kept by check_glossary.PLATFORM_NAMES
+            out.append((at, name, term))
+    return out
+
+
 class Linter:
+    skip_one_term = False
+
     def __init__(self, config: dict):
         self.config = config
         self.enabled = self._enabled_codes()
@@ -1634,6 +1736,12 @@ class Linter:
                       "%r turns an action into a noun." % match.group(0),
                       "Use the verb that the noun comes from.", match.group(0))
 
+        if not self.skip_one_term:
+            for offset, name, term in one_term_findings(text):
+                self._add(out, seg, offset, "STE022",
+                          "The name %r is retired; the glossary name is %r." % (name, term),
+                          "Write %r." % term, name)
+
         return out
 
     # -- sentence-level rules ---------------------------------------------
@@ -1669,6 +1777,7 @@ class Linter:
     # -- file ------------------------------------------------------------
 
     def check_text(self, path: str, text: str) -> List[Finding]:
+        self.skip_one_term = one_term_skip(path)
         lines = text.splitlines()
         paragraphs, suppressed, file_disable = segment_markdown(
             lines, "procedural" if self.config["mode"] == "procedural" else "descriptive")
@@ -1687,6 +1796,7 @@ class Linter:
         paragraphs = source_prose_paragraphs(path, text)
         if paragraphs is None:
             return self.check_text(path, text)
+        self.skip_one_term = one_term_skip(path)
         findings = self._check_paragraphs(paragraphs)
         for finding in findings:
             finding.path = path
@@ -1701,6 +1811,7 @@ class Linter:
         only in procedural mode, which Markdown headings and list items select,
         and UI copy has neither.
         """
+        self.skip_one_term = one_term_skip(path)
         copy = ui_copy(path, text)
         findings = [f for f in self._check_paragraphs(copy.paragraphs)
                     if f.code not in UI_SKIP]
