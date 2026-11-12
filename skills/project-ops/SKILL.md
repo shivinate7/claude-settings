@@ -59,7 +59,13 @@ that triage or the batch runner writes for its successor.
    `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main]`,
    then the same with `--confirm`. It refuses no `--check`, any name but `all-jobs-passed`, and more than one, so no repo starts with none (decision `same-check-kinds`). merge reads the
    required checks from this protection, so keep `merge.requiredChecks` at `"protection"`.
-7. **Report** the record branch, the files written, the protection set, and each placeholder the owner must still fill.
+7. **Add the PR template.** If the adopting repo has no `.github/pull_request_template.md`, copy
+   `templates/pull_request_template.md` to that path. Put it in by a pull request on the repo's default
+   branch, never on the record branch. The template holds the two PR-body lines the merge tool reads:
+   `Retire-run:` (a debt close with no runnable check) and `Drops-lines:` (lines dropped on purpose).
+   The file sits twice on purpose: GitHub reads only the copy under `.github/`, and this skill ships the copy under `templates/`.
+   If the file exists, leave it, and report whether it holds both lines.
+8. **Report** the record branch, the files written, the protection set, each placeholder the owner must still fill, and whether the PR template was added or already present.
 
 ## The roadmap block
 

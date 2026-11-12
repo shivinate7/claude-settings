@@ -150,9 +150,9 @@ class Case(unittest.TestCase):
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
 
     def git(self, *args):
-        subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.com",
-                        "-c", "core.autocrlf=false", *args],
-                       check=True, capture_output=True, text=True, env=GIT_ENV)
+        return subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.com",
+                               "-c", "core.autocrlf=false", *args],
+                              check=True, capture_output=True, text=True, env=GIT_ENV).stdout
 
     def commit(self, msg, files):
         for rel, text in files.items():
@@ -173,8 +173,9 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args, path_tools=False, env=None):
+    def lint(self, *args, path_tools=False, env=None, exclude=()):
         args = args or ("--base", "origin/main")
+        args = (*args, *(x for prefix in exclude for x in ("--exclude", prefix)))
         run_env = dict(GIT_ENV, **(env or {}))
         run_env.pop("CODE_CHECK_TOOLS", None)
         if path_tools:
@@ -414,6 +415,102 @@ class Ratchet(Case):
         rc, out = self.lint("--base", "origin/no-such-branch")
         self.assertNotEqual(rc, 0, out)
         self.assertIn("no-such-branch", out)
+
+
+class MovedLines(Case):
+    """A line the diff moves is not new. A line counts as moved only when the same diff deletes that exact text,
+    from a file this check scans. Each deleted copy excuses at most one added copy, and the first add in diff
+    order takes it, whatever file that add is in.
+
+    Each case cuts one base file into pieces. The change first proves its own state: each piece is a new file,
+    not a rename of the cut file, and each comment the pieces take is deleted from the base file. Only then does
+    the check run, so a clean result can only come from the move."""
+
+    BLOCK_A = "def a():\n    x = 1\n    # owner ruling applies here\n    return x\n"
+    BLOCK_B = "def b():\n    y = 2\n    # fixed in round 2\n    return y\n"
+    BLOCK_C = "def c():\n    z = 3\n    # MEASURED 40 ms\n    return z\n"
+    PROBE = "w = 9\n# see PR 1234\n"  # flagged; under an excluded prefix it must stay out of the run
+
+    def cut(self, pieces, keep=None, source="old.py", exclude=()):
+        """Base: `source` holds BLOCK_A, BLOCK_B and BLOCK_C. The change keeps `keep` in it (None deletes it) and
+        adds `pieces`. Returns the check's (exit code, output), run with each `exclude` prefix."""
+        self.base({source: "\n\n".join((self.BLOCK_A, self.BLOCK_B, self.BLOCK_C))})
+        self.change({source: keep, **pieces})
+        status = self.git("diff", "-M", "--name-status", "origin/main")
+        for path in pieces:
+            self.assertIn("A\t%s\n" % path, status, "fixture state: %s is not a new file\n%s" % (path, status))
+        patch = self.git("diff", "-U0", "-M", "origin/main")
+        for block in (self.BLOCK_A, self.BLOCK_B, self.BLOCK_C):
+            if block not in (keep or ""):
+                comment = next(row for row in block.splitlines() if "#" in row)
+                self.assertIn("\n-" + comment + "\n", patch, "fixture state: the base comment is not deleted: " + comment)
+        return self.lint(exclude=exclude)
+
+    def cut_past_exclude(self, source):
+        """cut() with `--exclude legacy/`, a BLOCK_B copy in src/b.py, and PROBE in legacy/probe.py. PROBE is a hit
+        with no prefix, so its absence under the prefix shows the prefix reached the check."""
+        rc, out = self.cut({"src/b.py": self.BLOCK_B, "legacy/probe.py": self.PROBE}, source=source,
+                           exclude=("legacy/",))
+        _, unscoped = self.lint()
+        self.assertHit(unscoped, "legacy/probe.py", 2)
+        return rc, out
+
+    def test_deletion_from_an_excluded_folder_does_not_excuse_a_copy_in_code(self):
+        rc, out = self.cut_past_exclude("legacy/a.py")
+        self.assertNoHit(out, "legacy/probe.py", 2)
+        self.assertEqual(rc, 1, "a deletion from an excluded folder excused its copy in scanned code\n" + out)
+        self.assertHit(out, "src/b.py", 3)
+
+    def test_deletion_from_a_scanned_folder_still_excuses_its_copy_past_the_same_exclude(self):
+        rc, out = self.cut_past_exclude("kept/a.py")
+        self.assertNoHit(out, "legacy/probe.py", 2)
+        self.assertEqual(rc, 0, "a deletion from a scanned folder stopped excusing its moved copy\n" + out)
+
+    def test_comments_moved_out_of_a_deleted_file_are_clean(self):
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/b.py": self.BLOCK_B, "parts/c.py": self.BLOCK_C})
+        self.assertEqual(rc, 0, "moved comments counted as added\n" + out)
+
+    def test_comments_moved_out_of_a_kept_file_are_clean(self):
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A}, keep=self.BLOCK_B + "\n\n" + self.BLOCK_C)
+        self.assertEqual(rc, 0, "moved comment counted as added while its file is kept\n" + out)
+
+    def test_flagged_comment_the_base_holds_in_an_untouched_part_still_fails(self):
+        keep = self.BLOCK_B + "\n\n" + self.BLOCK_C
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/d.py": "def d():\n    # fixed in round 2\n    return 4\n"},
+                           keep=keep)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "parts/d.py", 2)
+
+    def test_moved_comment_changed_while_moved_still_fails(self):
+        changed = self.BLOCK_A.replace("applies here\n", "applies here.\n")
+        rc, out = self.cut({"parts/a.py": changed, "parts/b.py": self.BLOCK_B, "parts/c.py": self.BLOCK_C})
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "parts/a.py", 3)
+
+    def test_new_flagged_comment_beside_a_move_still_fails(self):
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/b.py": self.BLOCK_B, "parts/c.py": self.BLOCK_C,
+                            "parts/new.py": "x = 1\n# owner ruling is new here\n"})
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "parts/new.py", 2)
+
+    def test_second_copy_beside_a_scanned_copy_still_fails(self):
+        keep = self.BLOCK_B + "\n\n" + self.BLOCK_C
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/b.py": self.BLOCK_A}, keep=keep)
+        self.assertEqual(rc, 1, "one deleted copy excused two added copies\n" + out)
+        self.assertHit(out, "parts/b.py", 3)
+        self.assertNoHit(out, "parts/a.py", 3)
+
+    def test_second_copy_still_fails_when_an_unscanned_copy_comes_first(self):
+        keep = self.BLOCK_B + "\n\n" + self.BLOCK_C
+        rc, out = self.cut({"a.md": self.BLOCK_A, "parts/b.py": self.BLOCK_A}, keep=keep)
+        self.assertEqual(rc, 1, "a copy in an unscanned file did not use up the deleted copy\n" + out)
+        self.assertHit(out, "parts/b.py", 3)
+
+    def test_comment_deleted_from_a_doc_and_added_in_code_still_fails(self):
+        keep = self.BLOCK_B + "\n\n" + self.BLOCK_C
+        rc, out = self.cut({"lint/x.py": self.BLOCK_A}, keep=keep, source="docs/notes.md")
+        self.assertEqual(rc, 1, "a comment deleted from a file the check never reads excused its copy in code\n" + out)
+        self.assertHit(out, "lint/x.py", 3)
 
 
 class Quiet(Case):

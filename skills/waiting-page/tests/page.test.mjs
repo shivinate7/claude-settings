@@ -727,10 +727,12 @@ for (const width of [390, 1440]) {
   });
 }
 
-test("SKILL.md and the designer agent carry the mockup convention", async () => {
-  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+test("SKILL.md, reference/designs.md and the designer agent carry the mockup convention", async () => {
+  // The mockup convention moved from SKILL.md to reference/designs.md, so the skill's text is read from both files.
+  const skill = ["SKILL.md", path.join("reference", "designs.md")]
+    .map((f) => fs.readFileSync(path.join(HERE, "..", f), "utf8")).join("\n");
   const designer = fs.readFileSync(path.join(HERE, "..", "..", "..", "agents", "designer.md"), "utf8");
-  for (const [name, text] of [["SKILL.md", skill], ["designer.md", designer]]) {
+  for (const [name, text] of [["SKILL.md and reference/designs.md", skill], ["designer.md", designer]]) {
     assert.match(text, /"Sample" banner/, name + " has no Sample banner line");
     assert.match(text, /"Today: <part>"/, name + " has no Today label");
     assert.match(text, /"New: <part>"/, name + " has no New label");
@@ -1914,8 +1916,16 @@ test("rank never moves an item across tiers", async (t) => {
   assert.deepEqual(tiers.map((x) => x[1]), [["hold-rank9"], ["calm-rank0"], ["stand-rank0"]]);
 });
 
-test("SKILL.md names the page's one writer and the rank field", async () => {
-  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+// The skill's text: SKILL.md plus every reference/*.md, since its steps moved into reference/. A check on what the skill says reads all of it.
+function skillText() {
+  const dir = path.join(HERE, "..", "reference");
+  const refs = fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+  assert.ok(refs.length > 0, "reference/ has no .md file, so the skill's text would be SKILL.md alone");
+  return [fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8"), ...refs.map((f) => fs.readFileSync(path.join(dir, f), "utf8"))].join("\n");
+}
+
+test("the skill names the page's one writer and the rank field", async () => {
+  const skill = skillText();
   assert.match(skill, /`writer`/);
   assert.match(skill, /`rank`/);
   assert.match(skill, /re-rank/i);
@@ -1926,8 +1936,8 @@ test("SKILL.md names the page's one writer and the rank field", async () => {
 
 // Decision questions-go-to-owner, "Answer on the page, not in a comment thread":
 // a rebuilt page drops its threads, so a session rewrites the item instead.
-test("SKILL.md answers a comment by rewriting the item, never in a comment thread", async () => {
-  const skill = fs.readFileSync(path.join(HERE, "..", "SKILL.md"), "utf8");
+test("the skill answers a comment by rewriting the item, never in a comment thread", async () => {
+  const skill = skillText();
   assert.doesNotMatch(skill, /action `reply`/);
   assert.doesNotMatch(skill, /reply in the comment thread/i);
   assert.match(skill, /never reply in a comment thread/i);

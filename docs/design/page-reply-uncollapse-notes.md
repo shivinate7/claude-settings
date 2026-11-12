@@ -24,7 +24,7 @@ Settled by the brief and the coordinator (Nov 6), not options here:
 - Gain: each owed item is one press shorter. A reply that asks a new question shows its options at once, so a
   seen card needs no "reopen". Loss: the page is longer by each seen card's answer parts (measured: No. 20,
   a two-option decision at 390, 581px open against a 48px fold control).
-- Departs from: SKILL.md lines 55 to 57 ("A seen card folds every answer part behind one control ... under a
+- Departs from: skill `waiting-page`, "The database", the `rank` field ("A seen card folds every answer part behind one control ... under a
   divider that reads Asked before"); stale-asks-sink-notes points 3, 4 and 5 (the fold, what it holds, the lock
   on a seen card); page.html `buildCard` (`const fold = isSeen(it) || sunk ? [] : null` becomes `sunk ? [] : null`),
   and the seen branch of `foldEls` and `unfoldBtn`. The sunk branch, the `foldLocked` lock and the words stay.
@@ -110,7 +110,7 @@ Settled by the brief and the coordinator (Nov 6), not options here:
 
 - `replied` is not in page.html's `itemFields` (line 901) or the SKILL.md item schema. Until it is, an item
   that carries it shows "This item carries a field the page does not draw."
-- SKILL.md lines 55 to 57 need rewriting for point 1, and the item schema for `replied`.
+- Skill `waiting-page`, "The database", the `rank` field needs rewriting for point 1, and the item schema for `replied`.
 
 ## Checked
 
