@@ -273,14 +273,6 @@ def _script_mutates(script: str) -> bool:
     return False
 
 
-# An in-place editor on the segment. `sed` takes `-i` (alone or with a suffix) or `--in-place`; `perl`
-# takes `-i` as the last letter of a cluster of flags that take no value (`-pi`, `-0777pi.bak`).
-# A flag starts a word (`(?<!\S)`), so `--in-place` inside a quoted pattern is text. A cluster is `-Ei`, `-ni`,
-# `-ibak`: letters that take no value, then `i`. `e`, `f` and `l` take one, so `-ei` is a script, not `-i`.
-_SED_IN_PLACE = r"\bsed\b[^\n;|&]*(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)[^\n;|&]*"
-_PERL_IN_PLACE = r"\bperl\b[^\n;|&]*\s-[0-9aCcFlnpsStTuUvwW]*i[^\n;|&]*"
-
-
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
@@ -965,19 +957,8 @@ def _cp_start(raw) -> int:
     return start if start is not None and _name(raw[start]) == "cp" else -1
 
 
-def _fixed_prefix_outside(prefix: str, stop: str, predicate, cwd) -> bool:
-    """True when a `cp` destination, cut at its first `$`, backtick, glob or brace character (`stop`),
-    has a literal prefix in a fixed directory that `predicate` does not accept. Whatever the rest of
-    the word expands to is read as one name in that directory. A redirect character, a prefix with no
-    directory (`bak_$x`, `$x`) and one inside a test root (`tests/$x`, `tests/bak_$x`) are not."""
-    if stop in "<>" or "/" not in prefix.replace("\\", "/"):
-        return False
-    return not (predicate(prefix + "x", cwd) or predicate(prefix.rstrip("/\\") + "/_", cwd))
-
-
-def _copy_reads(raw, predicate, cwd, prefix=False):
-    """The indexes of the words of a `cp` segment that are only read, else an empty set. With `prefix`, a
-    destination that holds a `$`, a glob or a brace is read by its literal prefix (`_fixed_prefix_outside`)."""
+def _copy_reads(raw, predicate, cwd):
+    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
     words = [_unquoted(word) for word in raw]
     start = _cp_start(raw)
     if start < 0:
@@ -1027,12 +1008,8 @@ def _copy_reads(raw, predicate, cwd, prefix=False):
             return set()
         shown = raw[operands[-1]]
         target = words[operands.pop()]
-    if not operands or not target:
+    if not operands or not target or (_CP_DEST_UNSAFE.search(target) and not _QUOTED_VAR.fullmatch(shown)):
         return set()
-    unsafe = None if _QUOTED_VAR.fullmatch(shown) else _CP_DEST_UNSAFE.search(target)
-    if unsafe:
-        return set(operands) if prefix and _fixed_prefix_outside(
-            target[:unsafe.start()], unsafe.group(), predicate, cwd) else set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
     return set(operands)
@@ -1743,7 +1720,7 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
-        data = set() if closed else _copy_reads(raw, predicate, cwd, command_position)
+        data = set() if closed else _copy_reads(raw, predicate, cwd)
         sed_targets = {}
         if command_position:
             sed_targets = _sed_script_words(scripts[number])   # the builder test check only: a script names no file but w, W, e, with or without -i; read with its newlines
