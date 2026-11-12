@@ -887,6 +887,7 @@ class OffsetWindowTests(unittest.TestCase):
 
 
 UNKNOWN_LINE = "unknown (old lines with no zone that could fall inside): %d"
+CLOUD_CAVEAT = "cloud session: guard.log is per container, so cloud lanes in other containers are not counted"
 BRAKE_WINDOW = ["--between", "2026-11-01T06:30:00+00:00", "2026-11-01T07:30:00+00:00"]  # 07:00 UTC is inside
 SHARED_INSIDE = "2026-11-01T12:00:00+05:00\tBash\tdeny\tshared-tree\tgit stash\t" + SID  # 07:00 UTC
 OLD_SHARED = "2026-11-01T07:00:00\tBash\tdeny\tshared-tree\tgit stash\t" + SID  # no zone
@@ -922,8 +923,8 @@ class CloudCheckOneHome(unittest.TestCase):
 class CloudPaceReadTests(unittest.TestCase):
     """Pace number four (reports-batch-pace-numbers) reads the brake count from guard.log. A cloud session reads it the
     same way a local one does (CLAUDE_CODE_REMOTE == "true", the same brake everywhere), so `--between ... --rule
-    load-brake` prints the rows and the unknown count, never n/a. Every other read keeps today's output. Each test
-    sets or pops the variable itself, so the runner's own environment decides nothing.
+    load-brake` prints the rows and the unknown count, then the cloud caveat, never n/a. Every other read keeps today's
+    output. Each test sets or pops the variable itself, so the runner's own environment decides nothing.
     """
 
     def read(self, argv, remote):
@@ -937,14 +938,14 @@ class CloudPaceReadTests(unittest.TestCase):
     def test_cloud_brake_read_prints_the_rows_and_the_unknown_count(self):
         path = fresh_log([PLUS_FIVE_LINE, OLD_LINE])
         argv = ["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"]
-        expected = PLUS_FIVE_LINE + "\n" + UNKNOWN_LINE % 1 + "\n"
+        expected = PLUS_FIVE_LINE + "\n" + UNKNOWN_LINE % 1 + "\n" + CLOUD_CAVEAT + "\n"
         self.assertEqual(self.read(argv, "true"), (0, expected))
 
-    def test_cloud_brake_read_with_no_log_file_matches_the_local_read(self):
+    def test_cloud_brake_read_with_no_log_file_says_so_then_the_caveat(self):
         path = fresh_log()
         self.assertFalse(os.path.exists(path))
         argv = ["--log", path] + BRAKE_WINDOW + ["--rule", "load-brake"]
-        self.assertEqual(self.read(argv, "true"), self.read(argv, None))
+        self.assertEqual(self.read(argv, "true"), (0, "unreadable: log not found\n" + CLOUD_CAVEAT + "\n"))
 
     def test_local_brake_read_keeps_the_row_and_the_unknown_count(self):
         path = fresh_log([PLUS_FIVE_LINE, OLD_LINE])
