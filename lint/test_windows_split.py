@@ -689,14 +689,14 @@ def mutate_problems(text):
     jobs = all_jobs(text)
     homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == MUTATE_CMD]
     problems = []
-    if homes != MUTATE_JOBS:
+    if sorted(homes) != sorted(MUTATE_JOBS):
         problems.append(f"{MUTATE_CMD!r} runs in {homes}, want exactly {MUTATE_JOBS!r}")
     for index, name in enumerate(MUTATE_JOBS, start=1):
         if name not in jobs:
             continue
         if not (jobs[name]["os"] or "").startswith("ubuntu"):
             problems.append(f"{name} runs on {jobs[name]['os']}, want ubuntu-latest")
-        shards = [(st.get("env") or {}).get("MUTATE_SHARD") for st in jobs[name]["steps"] if st.get("run") == MUTATE_CMD]
+        shards = [yaml_scalar(str((st.get("env") or {}).get("MUTATE_SHARD", ""))) for st in jobs[name]["steps"] if st.get("run") == MUTATE_CMD]
         if shards != [f"{index}/{len(MUTATE_JOBS)}"]:
             problems.append(f"{name}: the mutate step sets MUTATE_SHARD {shards}, want ['{index}/{len(MUTATE_JOBS)}']")
     return problems
@@ -1225,6 +1225,9 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(mutate_problems(three.replace("checks-mutate-guard-c", "checks")))  # a shard in the lint job
         self.assertTrue(mutate_problems(three.replace("checks-mutate-guard-c:\n    runs-on: ubuntu-latest",
                                                       "checks-mutate-guard-c:\n    runs-on: windows-latest")))  # on Windows
+        self.assertEqual(mutate_problems(three.replace("MUTATE_SHARD: 2/3", "MUTATE_SHARD: \"2/3\"  # shard two")), [])  # quotes and comment
+        self.assertEqual(mutate_problems("jobs:\n" + shard_job("checks-mutate-guard-c", "3/3") + shard_job("checks-mutate-guard", "1/3")
+                                         + shard_job("checks-mutate-guard-b", "2/3")), [])  # job order is free
         self.assertTrue(mutate_problems(three.replace("2/3", "1/3")))  # two shards run the same mutants
         self.assertTrue(mutate_problems(three.replace("        env:\n          MUTATE_SHARD: 3/3\n", "")))  # no shard set: runs all
         self.assertTrue(mutate_problems("jobs:\n" + shard_job("checks-mutate-guard", "1/3")))  # shards 2 and 3 missing

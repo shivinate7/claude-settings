@@ -123,6 +123,35 @@ class ShardTests(unittest.TestCase):
             self.assertEqual(self.run_shard(value, list("abc")), (1, []))
         self.assertEqual(self.run_shard("3/3", list("ab")), (1, []))  # empty slice proved nothing
 
+    def test_shard_runs_only_the_controls_its_mutants_read(self):
+        asked = []
+
+        def control(key):
+            def run():
+                asked.append(key)
+                return 0, [], ["case"], []
+            return run
+        entries = [("a", "t1"), ("b", "t2"), ("c", "t1")]
+        controls = {"t1": control("t1"), "t2": control("t2")}
+
+        def run_one(entry):
+            return entry[0], 1, RED_RIGHT, REQUIRED, None
+        env = dict(os.environ, MUTATE_SHARD="2/2")
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+            code = mutate_shared.run_mutants(entries, run_one, controls=controls, control_of=lambda e: e[1])
+        self.assertEqual((code, asked), (0, ["t2"]))  # entries[1::2] is only ("b", "t2")
+
+    def test_red_control_reads_unknown_in_a_shard(self):
+        def red():
+            return 1, ["FAIL x"], ["case"], []
+
+        def run_one(entry):
+            return entry, 1, RED_RIGHT, REQUIRED, None
+        env = dict(os.environ, MUTATE_SHARD="1/2")
+        with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()):
+            code = mutate_shared.run_mutants(["a", "b"], run_one, controls={"k": red}, control_of=lambda e: "k")
+        self.assertEqual(code, 1)
+
 
 def write_files(root, files):
     for rel, body in files.items():

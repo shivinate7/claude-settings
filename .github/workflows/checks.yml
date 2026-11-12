@@ -1389,8 +1389,8 @@ jobs:
     # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound.
     # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving. The cap
     # is a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
-    # One shard holds a third of the list (batch 103's unsplit job ran 35 min), so 25 min; its time is unmeasured until the first PR run.
-    timeout-minutes: 25
+    # One shard holds a third of the list (batch 103's unsplit job ran 35 min). Provisional 60 min cap until 5 green runs (ci-job-caps, How to measure again item 6); each shard's time is unmeasured until the first PR run.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1421,8 +1421,8 @@ jobs:
   checks-mutate-guard-b:
     runs-on: ubuntu-latest
     needs: scope
-    # Shard 2/3 of the guard mutation test; see checks-mutate-guard. 25 min cap, unmeasured until the first PR run.
-    timeout-minutes: 25
+    # Shard 2/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
@@ -1444,8 +1444,8 @@ jobs:
   checks-mutate-guard-c:
     runs-on: ubuntu-latest
     needs: scope
-    # Shard 3/3 of the guard mutation test; see checks-mutate-guard. 25 min cap, unmeasured until the first PR run.
-    timeout-minutes: 25
+    # Shard 3/3 of the guard mutation test; see checks-mutate-guard. Provisional 60 min cap until 5 green runs (ci-job-caps); unmeasured until the first PR run.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
