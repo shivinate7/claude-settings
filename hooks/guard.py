@@ -59,7 +59,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   two-worktrees-one-branch
                        deny. A `checkout -B` or `switch -C` of a branch another worktree of the clone holds, a
                        forced `worktree add` of one, or `checkout` or `switch` with
-                       `--ignore-other-worktrees` and any branch. The worktree list is read only for these forms,
+                       `--ignore-other-worktrees` and any branch, a `branch -f` or `branch --force` of one, or an
+                       `update-ref refs/heads/<name>` of one. The worktree list is read only for these forms,
                        and a read that fails refuses. An override lifts it.
   pointer-edit         deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
                        pointer checkout's own files. The pointer's `.git`, a linked worktree under

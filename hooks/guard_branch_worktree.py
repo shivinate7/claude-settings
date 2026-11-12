@@ -117,6 +117,8 @@ WORKTREE_PRUNE_ASK_REASON = (
 #   `checkout -B <name>`, `switch -C <name>` (also `--force-create`): refused when another worktree holds <name>.
 #   `worktree add -f|--force`: refused when another worktree holds the branch the add would take.
 #   `checkout|switch --ignore-other-worktrees`: refused with any branch, so no list is read.
+#   `branch -f|--force <name>`, `update-ref refs/heads/<name>`: refused when another worktree holds <name>.
+#   (`update-ref -d`, `--stdin` and `branch -d/-m/-c` are other acts; this rule does not read them.)
 # Any other call, a plain `checkout x` and an unforced add included, is git's own refusal to make.
 # The list is read once, only for a refused form; a read that fails refuses.
 TWO_WORKTREES_REFUSE_REASON = (
@@ -140,13 +142,82 @@ def _ref_name(name: str) -> str:
     return name
 
 
+BRANCH_OTHER_MODE_LETTERS = "dDmMcClL"
+BRANCH_OTHER_MODE_LONG = ("--delete", "--move", "--copy", "--list", "--edit-description", "--show-current")
+BRANCH_VALUE_LETTERS = "u"
+
+
+def _branch_force_form(args):
+    """(False, [name]) for `git branch -f|--force <name> ...`, else None. A delete, move, copy or
+    list call is another act. The name is the first word that is no option, as git reads it."""
+    force = other = skip = False
+    plain = []
+    for index, arg in enumerate(args):
+        if skip:
+            skip = False
+        elif arg == "--":
+            plain.extend(args[index + 1:])
+            break
+        elif arg.startswith("--"):
+            force = force or long_flag_abbrev(arg, "--force", "--forc")
+            other = other or any(long_flag_abbrev(arg, full, full[:4]) for full in BRANCH_OTHER_MODE_LONG)
+            skip = "=" not in arg and long_flag_abbrev(arg, "--set-upstream-to", "--set-u")
+        elif arg.startswith("-") and arg != "-":
+            for offset, char in enumerate(arg[1:], start=2):
+                if char == "f":
+                    force = True
+                elif char in BRANCH_OTHER_MODE_LETTERS:
+                    other = True
+                elif char in BRANCH_VALUE_LETTERS:
+                    skip = not arg[offset:]
+                    break
+        else:
+            plain.append(arg)
+    if not force or other or not plain:
+        return None
+    return False, [plain[0]]
+
+
+def _update_ref_form(args):
+    """(False, [name]) for `git update-ref [-m reason] refs/heads/<name> ...`, else None. A delete
+    (`-d`) and `--stdin` are other acts. The ref is the first word that is no option."""
+    skip = False
+    for index, arg in enumerate(args):
+        if skip:
+            skip = False
+        elif arg == "--":
+            ref = args[index + 1] if index + 1 < len(args) else ""
+            break
+        elif arg.startswith("--"):
+            if arg == "--stdin":
+                return None
+        elif arg.startswith("-") and arg != "-":
+            if arg.startswith("-m"):
+                skip = arg == "-m"   # `-mreason` carries its value; `-m reason` takes the next word
+            elif "d" in arg[1:]:
+                return None
+        else:
+            ref = arg
+            break
+    else:
+        return None
+    if ref.startswith("refs/heads/") and len(ref) > len("refs/heads/"):
+        return False, [ref[len("refs/heads/"):]]
+    return None
+
+
 def two_worktrees_form(subcommand: str, args):
     """Return (ignore, names) for a call this rule reads, else None.
 
     `ignore` is True when the call carries `--ignore-other-worktrees`. `names` are the branch names
-    the call would take: a `-B`/`-C` value, or the branch a forced `worktree add` checks out. A
-    call that is none of the forms, or a forced add that takes no branch, returns None.
+    the call would take: a `-B`/`-C` value, the branch a forced `worktree add` checks out, the name
+    a forced `branch` re-points, or the branch an `update-ref` writes. A call that is none of the
+    forms, or a forced add that takes no branch, returns None.
     """
+    if subcommand == "branch":
+        return _branch_force_form(args)
+    if subcommand == "update-ref":
+        return _update_ref_form(args)
     if subcommand in ("checkout", "switch"):
         reset, create = ("C", "c") if subcommand == "switch" else ("B", "b")
         ignore = False

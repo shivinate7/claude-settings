@@ -200,6 +200,94 @@ sh("two-worktrees: worktree add -f --detach, a forced detached add that takes no
    VCS + " worktree add -f --detach ../n2 x", "allow", cwd=TWACT)
 
 
+# BRANCH AND REF FORMS. `branch -f` and `branch --force` re-point a branch the way `checkout -B` does, and
+# `update-ref refs/heads/<name>` writes the branch ref with no check at all. Measured on git 2.43: git itself
+# refuses a forced `branch` of a branch another worktree holds ("cannot force update the branch ... used by
+# worktree"), and lets `update-ref` through. So the `branch` refused rows pin this rule's own refusal, which
+# runs first and names the remedy, and the `update-ref` rows pin the only refusal that form has.
+sh("two-worktrees: branch -f of a branch another worktree holds is refused",
+   VCS + " branch -f x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: branch -f with a start point, the reset of a held branch, is refused",
+   VCS + " branch -f x origin/x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: branch --force of a branch another worktree holds is refused",
+   VCS + " branch --force x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: branch --force with a start point is refused",
+   VCS + " branch --force x origin/x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: branch -qf, the force letter inside a cluster, is refused",
+   VCS + " branch -qf x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: update-ref of a held branch's ref is refused",
+   VCS + " update-ref refs/heads/x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: update-ref -m, a reason word before the held branch's ref, is refused",
+   VCS + " update-ref -m moved refs/heads/x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: update-ref of a quoted held branch's ref is refused",
+   VCS + ' update-ref "refs/heads/x" HEAD', "deny", TWO_RULE, cwd=TWACT)
+# THE BRANCH AND REF CONTROLS. A name no worktree holds passes, the holder's own tree passes its own branch, a
+# tag that shares a held name is not a branch, and a branch create without force is git's own refusal.
+sh("two-worktrees: branch -f of a branch no worktree holds is allowed",
+   VCS + " branch -f y HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: update-ref of a branch no worktree holds is allowed",
+   VCS + " update-ref refs/heads/y HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: branch -f of the holder's own branch, run in the holder's own tree, is allowed",
+   VCS + " branch -f x HEAD", "allow", cwd=TWHOLD)
+sh("two-worktrees: update-ref of the holder's own branch, run in the holder's own tree, is allowed",
+   VCS + " update-ref refs/heads/x HEAD", "allow", cwd=TWHOLD)
+sh("two-worktrees: update-ref of a tag named like a held branch is allowed",
+   VCS + " update-ref refs/tags/x HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: branch of a held name with no force is git's own refusal, not this rule's",
+   VCS + " branch x HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: the branch -f form inside an echo's quotes is text, not a move",
+   "echo 'git branch -f x HEAD'", "allow", cwd=TWACT)
+# THE EXCLUDED FORMS, PINNED ALLOWED. `update-ref -d`, `update-ref --stdin`, and the branch delete, move and list
+# modes are other acts, and this rule does not read them. A form that takes a name names the held x, so its row can
+# go red when that form is read as a hold. `--stdin` also names the held ref: a bare `--stdin` returns before any ref
+# is read, so only a ref after it tells this row apart from a rule that reads the ref.
+sh("two-worktrees: update-ref -d of a held branch's ref is a delete, another act, and is allowed",
+   VCS + " update-ref -d refs/heads/x", "allow", cwd=TWACT)
+sh("two-worktrees: update-ref --stdin naming a held branch's ref reads stdin, another act, and is allowed",
+   VCS + " update-ref --stdin refs/heads/x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fD of a held branch, a forced delete, is another act, and is allowed",
+   VCS + " branch -fD x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fd of a held branch, a forced delete, is another act, and is allowed",
+   VCS + " branch -fd x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fm of a held branch, a forced move, is another act, and is allowed",
+   VCS + " branch -fm x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch -m of a held branch with no force is another act, and is allowed",
+   VCS + " branch -m x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch --list is a list, another act, and is allowed",
+   VCS + " branch --list", "allow", cwd=TWACT)
+sh("two-worktrees: branch --list with a force letter and a held name is a list, another act, and is allowed",
+   VCS + " branch --list -f x", "allow", cwd=TWACT)
+# THE EXCLUDED MODE LETTERS AND LONG MODES, WITH FORCE. A force letter or --force beside a copy, move, list or
+# delete mode is another act, whichever letter or long spelling names the mode. Each row names the held x, so a
+# mode that the rule reads as a hold turns its own row red.
+sh("two-worktrees: branch -fC x y, a forced copy of a held branch, is another act, and is allowed",
+   VCS + " branch -fC x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fc x y, a forced copy of a held branch, is another act, and is allowed",
+   VCS + " branch -fc x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fM x y, a forced move of a held branch, is another act, and is allowed",
+   VCS + " branch -fM x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fl x, a forced list with a held name, is another act, and is allowed",
+   VCS + " branch -fl x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fL x, a forced list with a held name, is another act, and is allowed",
+   VCS + " branch -fL x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --delete x, a forced delete of a held branch, is another act, and is allowed",
+   VCS + " branch --force --delete x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --move x, a forced move of a held branch, is another act, and is allowed",
+   VCS + " branch --force --move x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --copy x, a forced copy of a held branch, is another act, and is allowed",
+   VCS + " branch --force --copy x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --edit-description x, a forced description edit, is another act, and is allowed",
+   VCS + " branch --force --edit-description x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --show-current x, a forced show of the current branch, is another act, and is allowed",
+   VCS + " branch --force --show-current x", "allow", cwd=TWACT)
+sh("two-worktrees: branch --force --list x, a forced list with a held name, is another act, and is allowed",
+   VCS + " branch --force --list x", "allow", cwd=TWACT)
+# THE OWN TREE THROUGH `git -C`. The tree a `git -C` names is the tree the call runs in, so the holder's own
+# update-ref of x is allowed there.
+sh("two-worktrees: git -C <holder> update-ref refs/heads/x HEAD, run in the holder's own tree, is allowed",
+   VCS + " -C " + slash(TWHOLD) + " update-ref refs/heads/x HEAD", "allow", cwd=TWHOLD)
+
+
 def _two_worktrees_calls(command, cwd):
     """Run `command` through the guard with the logging stand-in on PATH. Returns (decision, reason, the
     argv lines the stand-in logged for this one run)."""
