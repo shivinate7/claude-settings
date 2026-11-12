@@ -198,6 +198,17 @@ PFR_FIX_PASS_RECORD = pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "PASS"
 PFR_FIX_FAIL_RECORD = pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"), n=PFR_FIX_PR)
 PFR_ROUND_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PASS")], n=PFR_FIX_PR)
 
+def pfr_fix_after_round1(report_head):
+    """A round 1 FAIL at head A, recorded at A. Then a fix check PASS whose report names `report_head`, and the fix
+    record: Head B, with its Fix check line at A, where the fix diff starts. Only the fix report's head varies."""
+    return (pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_A,
+                                                       PFR_FINDING))
+            + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=PFR_HEAD_A))
+            + pfr_call("toolu_rev2", pfr_report(pfr_fix_verdict("PASS"), "Reviewed at head %s" % report_head,
+                                                PFR_FINDING), blocks=True)
+            + pfr_post("toolu_c2", pfr_record(fix=(PFR_HEAD_A, "reviewer", PFR_MODEL, "PASS"), head=PFR_HEAD_B)))
+
+
 # The session's own files, one per case, each a list of JSON lines. An empty list is a zero-byte file.
 PFR_LINES = {
     # The incident: the PR is open, the FAIL comes back in the foreground, then the push.
@@ -278,6 +289,15 @@ PFR_LINES = {
                    blocks=True)
         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")],
                                           fix=(PFR_HEAD_A, "reviewer", PFR_MODEL, "PASS"), head=PFR_HEAD_B)),
+    # A fix check that reviewed head B, recorded at head B with its Fix check line at A, where the fix diff starts.
+    # The control names head A, the Fix check line's own sha.
+    "fix-head-b-record-fix-a": pfr_fix_after_round1(PFR_HEAD_B),
+    "fix-head-a-record-fix-a": pfr_fix_after_round1(PFR_HEAD_A),
+    # A round report whose text reads `Base: main head B, reviewed A`: its reviewed head is A, and a record at A holds
+    # it.
+    "round-base-head-b-reviewed-a-record-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+        pfr_verdict("FAIL", 1), "Base: main head %s, reviewed %s" % (PFR_HEAD_B, PFR_HEAD_A), PFR_FINDING))
+        + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=PFR_HEAD_A)),
     # A Fix check line clears no round report, and it denies a push to its PR's head branch before the round ask.
     "round-fail-fix-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                              + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
@@ -750,6 +770,9 @@ pfr_fix_refuse("a fix check PASS for PR 1464 posted, a round 2 FAIL unrecorded, 
 pfr_fix_refuse("a FAIL round 1 with a Fix check record line for PR 1467, then a push to its head branch: deny, "
                "the fix-branch rule comes before the pending ask", PFR_PUSH, pfr_path("round-fail-fix-record"),
                lacks=PFR_BRANCH)
+# A round 1 FAIL unrecorded beside a record that holds only a Fix check line: a push to another branch still asks.
+pfr_ask("a FAIL round 1 unrecorded beside a Fix check record line for PR 1467, then a push to another branch",
+        PFR_NEXT_PUSH, pfr_path("round-fail-fix-record"))
 # A documented miss, pinned: a fix check whose PR head is unknown is allowed, so the next PR is never deadlocked.
 pfr_allow("a fix check PASS for a PR the transcript never opens, then a push to its branch", PFR_FIX_PUSH,
           pfr_path("fix-pass-unknown-head"))
@@ -771,6 +794,15 @@ pfr_ask("the #2871 shape: a round 1 record at head A, then a round 2 FAIL at hea
 # A fix check is cleared by its own reviewed sha: the round 1 record's Head line (head B) does not decide it.
 pfr_allow("a round 1 FAIL at head B and a fix check PASS at head A, the record at head B holds both, "
           "then a push to another branch", PFR_NEXT_PUSH, pfr_path("round-head-b-fix-head-a"))
+# A fix check reviewed at head B, recorded at head B with its Fix check line at A: the fix record's Head is the one
+# the report names. The control reviews head A, the Fix check line's sha, and already allows.
+pfr_allow("a fix check reviewed at head B, recorded at head B with its Fix check line at A, then a push to another "
+          "branch", PFR_NEXT_PUSH, pfr_path("fix-head-b-record-fix-a"))
+pfr_allow("the same fix check reviewed at head A, then a push to another branch", PFR_NEXT_PUSH,
+          pfr_path("fix-head-a-record-fix-a"))
+# A round report whose text reads `Base: main head B, reviewed A` is reviewed at A, and the record at A clears it.
+pfr_allow("a round 1 FAIL whose text reads Base main head B, reviewed A, with its record at A, then the push", PFR_PUSH,
+          pfr_path("round-base-head-b-reviewed-a-record-a"))
 
 pfr_ask("a fix check FAIL unrecorded, then a fix check PASS with its record posted, then the push", PFR_NEXT_PUSH,
            pfr_path("fix-fail-then-fix-pass"))
