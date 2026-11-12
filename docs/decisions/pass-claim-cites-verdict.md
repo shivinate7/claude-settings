@@ -10,7 +10,7 @@ Question: what backs a session's claim that a check passed? Ruling: coordinator,
 - The newest verdict line per command wins. A FAIL after a PASS of the same command cancels it. A SKIP line backs no claim.
 - Text in a reply, an Agent result, a sidechain call or a bare run is no cite.
 - A claim an agent made is attributed ("builder reports green") and is no claim of this session.
-- The roster of bare runs that `verdict` should wrap is the other half of the rule. It lives in `background-check-through-verdict`. "Tests" are not on that roster: no incident names a test command, and a guard on them would cry wolf (`guard-that-cries-wolf-is-spent`).
+- The roster of bare runs that `verdict` should wrap is the other half of the rule. It lives in `background-check-through-verdict`. Test runs are on that roster since the coordinator's ruling of 12:55 CST on 2026-11-12 (owner R20 part 2, rule `tokens-run-through-verdict`), which reversed the first pick. The false-alarm cost is named in that record.
 
 ## Incident, risk and cost
 
