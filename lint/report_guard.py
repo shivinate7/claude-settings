@@ -156,18 +156,23 @@ blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed 
 process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
 commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
 
-The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner): a Done item with a pick word (picked,
-chose, pick, skipped asking, did not ask, or took before a pick, option, key, choice or option letter; none joined
-by a hyphen, and no duration such as "took 4 min") and a ruling cue (ruling, rulings) must cite the ruling as
-`under ruling <ref> (<stamp>)`, where <ref> is `item <N> <key>` (a waiting-page answer on the roadmap branch, or the
-item's `lastAnswer` once the page closed it) or a decision id. A claim with no ref or stamp, or a ref that does not
-resolve, refuses with no model call. A resolved cite goes to the refuter (RULING_REFUTER_MODEL), one call for all
-the claims of a reply, which sees only each ruling text and each Done act; a model error, a timeout, an odd answer
-or a spent deadline refuses. A decision record goes in whole up to 6000 bytes, else as its head plus each bullet
-that carries the cited stamp. The past-ruling call, the refuter and the reads share one Stop deadline
-(STOP_BUDGET). It runs on every Stop, landed or not, and again on a rewrite. Cost: no call and no git read on a
-reply with no claim; one Sonnet call (at most 20 s of the shared budget) and at most two git processes on a reply
-with a claim.
+The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner): a Done item that claims a pick under
+a ruling must cite the ruling as `under ruling <ref> (<stamp>)`, where <ref> is `item <N> <key>` (a waiting-page answer
+on the roadmap branch, or the item's `lastAnswer` once the page closed it) or a decision id, and `on` may come before
+the item. A claim is a pick and a ruling cue (ruling, rulings) in one clause. A pick is picked, chose, skipped asking
+or did not ask; or the noun pick, or took before a pick, option, key, choice or option letter, each confirmed by the
+word after it (_is_pick: a link word such as under, given or which, and for a pick noun also a
+determiner, a letter, or one verb such as was or made first). No pick word is joined by a hyphen, and a duration such
+as "took 4 min" is no pick. Clauses end at `;`, except that a clause that opens with a ruling cue followed by a cite,
+a verb from RULING_COVER_VERBS or nothing joins the clause before it (_clause_spans). A claim with no ref or stamp, or
+a ref that does not resolve, refuses with no model call. A resolved cite goes to the refuter (RULING_REFUTER_MODEL),
+one call for all the claims of a reply, which sees only each ruling text and each Done act. A refuter "no" refuses
+on every Stop. A model error, a timeout, an odd answer or a spent deadline refuses the first Stop; a rewrite after it
+passes with one stderr line, so one outage does not refuse every rewrite. A decision record goes in whole up to 6000
+bytes, else as its head plus each bullet that carries the cited stamp. The past-ruling call, the refuter and the
+reads share one Stop deadline (STOP_BUDGET), and the past-ruling call leaves the refuter its full limit when the reply
+holds a cited claim. Cost: no call and no git read on a reply with no claim; one Sonnet call (at most 20 s of the
+shared budget) and at most two git processes on a reply with a claim.
 """
 import bisect
 import datetime
@@ -3000,14 +3005,15 @@ def question_keys_problem(after, text):
 
 
 # The ruling-skip check (rule `ruling-skip-check`, decision questions-go-to-owner, owner item 284 b):
-# a Done item that claims a pick under a ruling (a pick word and a ruling cue) cites that ruling as
-# `under ruling <ref> (<stamp>)`.
+# a Done item that claims a pick under a ruling (_is_pick_claim: a confirmed pick and a ruling cue in one clause)
+# cites that ruling as `under ruling <ref> (<stamp>)`.
 # <ref> is `item <N> <key>` (a waiting-page answer, read from the roadmap branch) or a decision id (a record in
 # docs/decisions). A claim with no ref or stamp, or a ref that does not resolve, refuses with no model call: an
 # unknown read is red (decision ci-unknown-is-red). A resolved cite goes to the refuter, one model call for all
 # the claims of the reply, which sees only each ruling text and each Done act and says whether the ruling names
-# that act. A model error, a timeout or an odd answer refuses. Cost: no call and no git read on a reply with no
-# claim; on a reply with a claim, one Sonnet call and at most two git processes (the items, then one answer).
+# that act. A refuter "no" refuses. A model error, a timeout or an odd answer refuses the first Stop and passes a
+# rewrite (ruling_skip_problem). Cost: no call and no git read on a reply with no claim; on a reply with a claim,
+# one Sonnet call and at most two git processes (the items, then one answer).
 RULING_REFUTER_MODEL = "claude-sonnet-5-5"  # the one setting: lane debate-model-tiers may change it here
 RULING_REFUTER_TIMEOUT = 20
 RULING_TEXT_MAX = 6000  # bytes of a decision record's head; a bullet carrying the cited stamp is added in full
@@ -3015,7 +3021,7 @@ RULING_BULLET_MAX = 12000
 RULING_ROADMAP_REFS = ("origin/roadmap", "roadmap")
 # A pick word, never joined by a hyphen (pick-route, cherry-pick). "took" counts only before what it picked: a pick,
 # option, key or choice, or an option letter that starts no duration ("took a under the ruling", never "took 4 min"
-# or "took a while").
+# or "took a while"). A pick noun or letter is a candidate: _is_pick confirms it from the word after it.
 RULING_PICK_RE = re.compile(
     r"(?<![-\w])(?:picked|chose|pick|skipped asking|did not ask"
     r"|took\s+(?:(?:the|owner'?s?|my|your|option|key)\s+)*(?:picks?|options?|keys?|choices?"
@@ -3038,29 +3044,52 @@ def _ruling_stamp_ok(stamp):
     return bool(m) and m.groups()[-1] in ("CST", "CDT")
 
 
-# Words after a pick word that leave it a pick: a preposition that links it to its ruling, or a determiner.
+# Words after a pick noun or option letter that leave it a pick: a word that links it to its ruling. After a pick
+# noun, a determiner also does ("pick the", "took the option that").
 PICK_LINK_WORDS = frozenset(("under", "per", "by", "from", "over", "on", "as", "since", "following", "because", "via",
-                             "with", "after"))
+                             "with", "after", "given", "in", "according", "based", "where", "which", "when"))
 PICK_DETERMINERS = frozenset(("the", "a", "an", "that", "this", "it", "which", "each", "every"))
+# A verb a pick noun may take before its letter or link word: "the pick was b", "pick made under the ruling".
+PICK_NOUN_VERBS = frozenset(("is", "was", "were", "made", "taken"))
 PICK_NEXT_RE = re.compile(r"\s*([A-Za-z']+)")
+# A verb that says a ruling covers an act: "the ruling covers it". A ruling cue that opens a clause joins
+# that clause to the one before it only when a cite (`on`, `item`), one of these verbs or the clause end follows it.
+# "the ruling table", "the ruling tests pass" and "the ruling is filed" name no ruling for a pick.
+RULING_COVER_VERBS = ("covers", "names", "allows", "permits", "grants", "lets", "says")
+RULING_LEAD_RE = re.compile(r"\s*(?:the\s+)?(?:owner'?s?\s+)?rulings?(?![-\w'])", re.I)
+RULING_LEAD_NEXT_RE = re.compile(r"\s+(?:on|item|%s)\b|[\s.]*$" % "|".join(RULING_COVER_VERBS), re.I)
+
+
+def _next_word(act, pos):
+    """The word that starts at `pos` after spaces, lowered, and its end; ('', pos) when none does (a `;` or the end)."""
+    following = PICK_NEXT_RE.match(act, pos)
+    return (following.group(1).lower(), following.end()) if following else ("", pos)
 
 
 def _is_pick(act, match):
-    """Whether a RULING_PICK_RE match in `act` names a pick. A past-tense verb or `skipped asking` always does. A pick
-    noun (pick, option, key, choice) or an option letter does only when no other word follows it, or a preposition
-    that links it to its ruling does: "pick list", "key ruling" and "took a look" name no pick."""
+    """Whether a RULING_PICK_RE match in `act` names a pick. A past-tense verb, `skipped asking` or `did not ask`
+    always does. An option letter after took does when nothing or a link word follows it. A pick noun (pick, or took
+    before a pick, option, key or choice) does when nothing, a link word, a determiner or an option letter follows
+    it. A pick noun may first take one verb from PICK_NOUN_VERBS; then only a link word, or an option letter with
+    nothing or a link word after it, counts. So "pick list", "took the key ruling", "took a look" and "the pick was
+    merged" name no pick, and "the pick was b under" and "pick made under" do."""
     text = match.group(0).lower()
     if text.endswith(("picked", "chose", "asking", "ask")):
         return True
-    following = PICK_NEXT_RE.match(act, match.end())
-    word = following.group(1).lower() if following else ""
+    word, end = _next_word(act, match.end())
     if re.fullmatch(r"[a-f]", text.split()[-1]):  # an option letter
         return not word or word in PICK_LINK_WORDS
+    if word in PICK_NOUN_VERBS:
+        word, end = _next_word(act, end)
+        if re.fullmatch(r"[a-f]", word):
+            after, _ = _next_word(act, end)
+            return not after or after in PICK_LINK_WORDS
+        return word in PICK_LINK_WORDS
     return not word or word in PICK_LINK_WORDS or word in PICK_DETERMINERS or bool(re.fullmatch(r"[a-f]", word))
 
 
 def _is_pick_claim(act):
-    """Whether a Done item claims a pick under a ruling: a pick and a ruling cue in one clause (clauses end at `;`)."""
+    """Whether a Done item claims a pick under a ruling: a pick and a ruling cue in one clause (see _clause_spans)."""
     for clause_start, clause_end in _clause_spans(act):
         if RULING_CUE_RE.search(act, clause_start, clause_end) and any(
                 _is_pick(act, m) for m in RULING_PICK_RE.finditer(act, clause_start, clause_end)):
@@ -3068,10 +3097,26 @@ def _is_pick_claim(act):
     return False
 
 
+def _leads_with_ruling(act, start, end):
+    """Whether the clause act[start:end] opens with a ruling cue as its subject: the cue, then a cite (`on`, `item`,
+    or a decision id with a valid time), a verb from RULING_COVER_VERBS or the clause end."""
+    lead = RULING_LEAD_RE.match(act, start, end)
+    if not lead:
+        return False
+    cite = RULING_REF_RE.match(act, lead.end(), end)
+    return bool(RULING_LEAD_NEXT_RE.match(act, lead.end(), end)
+                or (cite and _ruling_stamp_ok(cite.group("stamp"))))
+
+
 def _clause_spans(act):
-    """(start, end) of each `;` clause of `act`."""
+    """(start, end) of each clause of `act`. Clauses end at `;`, except before a clause that opens with a ruling cue
+    as its subject (_leads_with_ruling): that clause names the ruling of the clause before it, so the two read as one.
+    "Skipped asking; the ruling covers it" is one clause; "chose X; the ruling table is regenerated" is two."""
     spans, start = [], 0
     for m in re.finditer(r";", act):
+        nxt = act.find(";", m.end())
+        if _leads_with_ruling(act, m.end(), len(act) if nxt < 0 else nxt):
+            continue
         spans.append((start, m.start()))
         start = m.end()
     return spans + [(start, len(act))]
