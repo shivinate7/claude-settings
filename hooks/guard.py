@@ -187,9 +187,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A `Grant:` line before the marker
                        that holds a `<` or no letter or digit is a refusal. A brief to a lane that clears those checks is
-                       refused unless its text names Coordinator
+                       refused unless its text names each of Coordinator, Triage and Batch runner
                        (guard_merge.ROLE_LABELS) as a whole word, without case, anywhere in the message (`_Coordinator_` counts,
-                       `Coordinators-only` does not). Triage and Batch runner need no label. No session id is required, and one may follow a label
+                       `Coordinators-only` does not). No session id is required, and one may follow a label
                        (cost: message text only). A lane `create_session` whose prompt has the marker line
                        is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.

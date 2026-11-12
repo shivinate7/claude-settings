@@ -3,8 +3,8 @@ Lane brief: <step-slug>. Topic: <topic-slug>. <Plain name of the step>.
 
 The lane treats the Grant line as the owner's grant. It checks the grant against the coordinator's chat only when the act cannot be undone.
 
-Ask: Coordinator, for scope and merges.
-Name the Coordinator as a whole word, in any case. The guard refuses a brief that lacks it (rule `lane-one-topic`). Triage and the batch runner need no label: a lane reaches neither. A session id after the label is optional: the coordinator may copy its own from the Standing sessions roster in the record branch's CLAUDE.md.
+Ask: Coordinator for scope, Triage for records and the page, Batch runner for merges.
+Name each of the three roles as a whole word, in any case. The guard refuses a brief that lacks one (rule `lane-one-topic`). A session id after a label is optional: copy it from the Standing sessions roster in the record branch's CLAUDE.md.
 
 <Who runs it: a cloud lane, or a lane on a named local machine.> The coordinator
 starts it with the tags `cs-repo:<owner>/<name>`, `cs-build:lane` and `cs-step:<step id>`. Base: <branch and commit>.
