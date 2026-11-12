@@ -9760,7 +9760,7 @@ test("Health tab: the read line says Measured and keeps the commit inside the di
   assert.doesNotMatch(summary, /Graded at/, "the read line still says Graded at");
   assert.match(summary, /Measured Nov 11/, "the read line does not say Measured with the date");
   assert.doesNotMatch(summary, /abc1234/, "the commit sits on the read line, not in the disclosure");
-  assert.match(await page.locator("#healthRead > ul").innerText(), /abc1234/, "the disclosure does not hold the commit");
+  assert.match(await page.locator("#healthRead > ul").textContent(), /abc1234/, "the disclosure does not hold the commit");
 });
 
 // A repo with no health map file: the page says so, and the ask names the file and the cause once.
