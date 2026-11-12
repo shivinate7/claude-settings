@@ -2233,7 +2233,7 @@ def hook_bypass_hit(texts):
 #
 # FETCH_HEAD is one file per checkout, and every fetch in that checkout rewrites it. Read-only agents may share a
 # checkout (parallelism-each-own-checkout), so a read of FETCH_HEAD can return the ref another agent fetched
-# (decision fetch-head-shared-race: 2026-11-12, two audit agents, one PR read wrong). The one safe read sits in the
+# (decision fetch-head-shared-race: two audit agents moved it between a fetch and a read). The one safe read sits in the
 # same command as its own fetch, after it: no other command runs between the two. Read off the parsed tokens of
 # a segment whose COMMAND WORD is git, so an echo, a grep pattern, a commit message and quoted text that name the
 # word are never read; a read is a ref argument of a read verb that is FETCH_HEAD, or a range or revision form of
