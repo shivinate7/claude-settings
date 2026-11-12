@@ -155,7 +155,7 @@ HANDOFF_REPO = {
                                 [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]], broken_tip=True),
     # An earlier commit adds a file outside the handoff and a later one removes it: the tree diff against the tip
     # shows the handoff alone, so only the commits in the range show the file.
-    "history-hole": _handoff_repo("history-hole", "lane/outbox-a",
+    "history-gap": _handoff_repo("history-gap", "lane/outbox-a",
                                   [[("put", "docs/secret.md", "s\n")],
                                    [("rm", "docs/secret.md")],
                                    [("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]]),
@@ -288,7 +288,7 @@ record_allow("roadmap-one-writer handoff: the own handoff pushed from a detached
 PINNED_LEASE = "a" * 40  # a sha the lease names; the guard reads the pin, never the object
 record_refuse("roadmap-one-writer handoff: an earlier commit that adds then removes a file outside the handoff is "
               "refused, though the tree diff shows the handoff alone",
-              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["history-hole"])
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["history-gap"])
 record_refuse("roadmap-one-writer handoff: --tags on the own handoff push is refused",
               VCS + " push --tags origin HEAD:roadmap", LANE, cwd=HANDOFF_REPO["modify-own"])
 record_refuse("roadmap-one-writer handoff: --follow-tags on the own handoff push is refused",
