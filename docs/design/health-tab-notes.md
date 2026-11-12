@@ -106,7 +106,7 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
 15. A load still opens Questions (`one-page-notes.md` item 5). The answer bar stays on the Health tab,
     as on Status (item 7). The mockup does not draw the bar.
 
-## Critique (impeccable, single context: no sub-agent tool)
+## Critique (impeccable, single context: no agent tool)
 
 - Fixed: the view option showed two read times. Health's own stamp is dropped there.
 - Fixed: the coverage sentence was a flex row, so "38 of 57" had wide gaps. It is plain text now.

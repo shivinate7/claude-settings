@@ -66,12 +66,12 @@ home yet, and the session board's store lives on one machine, so both read "unkn
 ## Health map
 
 A repo that keeps `docs/health-map.json` gets a Health tab on its waiting page. The build bakes the map into the
-one roadmap block as `window.ROADMAP_BUILD.healthMap`: the rows worst first (broken, has issues, not measured,
-healthy; the map's own order inside a grade), each with its `gold` line (what good looks like, a proposed target),
-and a coverage line made by `lint/check_health_map.py`'s own readers: how many hooks, checks and skills the rows name,
-and which none names. A map or a parts list that does not read gives "unknown" with the reason, never 0 or clear. A
-repo with neither the map nor `lint/check_health_map.py` gets no key and no tab. The map read costs one file read
-and three folder listings per build; it adds no timer, process or file.
+one roadmap block as `window.ROADMAP_BUILD.healthMap`. The rows go worst first: broken, has issues, not measured,
+healthy. Inside a grade, the rows keep the map's own order. Each row carries its `gold` line (what good looks like,
+a proposed target). A coverage line comes from `lint/check_health_map.py`'s own readers. It says how many hooks,
+checks and skills the rows name, and which none names. A map or a parts list that does not read gives "unknown" with
+the reason, never 0 or clear. A repo with neither the map nor `lint/check_health_map.py` gets no key and no tab. The
+map read costs one file read and three folder listings per build; it adds no timer, process or file.
 
 ## Live work
 
