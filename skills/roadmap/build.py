@@ -224,7 +224,7 @@ sys.path.insert(0, str(HERE.parent.parent / "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of a checkout's GitHub repo, shared with the guard (hooks/git_reads.py)
 from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.REPO_TAG to the shared object  the one home of the tag names and lane head refs, shared with the guard (hooks/shared_names.py)
-    BUILD_TAG, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, lane_head_refs, repo_tag_names,
+    BUILD_TAG, DEAD_PR_WAIT_FIELDS, DEAD_PR_WAIT_PHRASES, LANE_TAG, REPO_TAG, STEP_TAG, TOPIC_TAG, bare_pr_waits, lane_head_refs, repo_tag_names, wait_regex,
 )
 sys.path.insert(0, str(LINT))
 try:
@@ -674,6 +674,9 @@ def live_work(path, steps, slug=None):
     the kept rows, which pull_landed_marks reads. A row that is not an object, whose number is not an int, whose
     branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
     list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
+    `prStates`: [{"number": int, "state": "open"|"closed", "merged": bool}] (optional), GitHub's state of each PR a step
+    waits on. The triage publisher that fills landedPulls is to write it; nothing writes it yet. It is kept as given
+    and dead_pr_waits reads it row by row.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -795,7 +798,7 @@ def live_work(path, steps, slug=None):
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
             "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions,
-            "landedPulls": landed_pulls}
+            "landedPulls": landed_pulls, "prStates": raw.get("prStates")}
 
 
 def live_age_minutes(read):
@@ -956,6 +959,9 @@ def main(argv=None):
         print("%s: %s %s (%s)" % (MOCKUP_LINE, sid, mid, MOCKUP_REMEDY))
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
+    dead_lines, dead_wait = dead_pr_waits(open_steps(data["steps"]), info["live"])
+    if dead_lines:
+        print("\n".join(dead_lines))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
            slug, repo, args.main_branch, unread, ref)
     lines = stalled_lines(info["stalled"])
@@ -964,7 +970,7 @@ def main(argv=None):
     lines = ready_lines(info["ready"])
     if lines:
         print("\n".join(lines))
-    if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"] or over_limit(info["ready"]):
+    if pairs or misses or dead_wait or info["stalled"]["steps"] or info["stalled"]["items"] or over_limit(info["ready"]):
         raise SystemExit(1)
 
 
@@ -1202,13 +1208,12 @@ def stale_drafts(work):
     return out
 
 
-# The words that say a step waits on pull request #N. One list, so a placement check can share it.
-WAIT_ON_PULL_PHRASES = ("after", "once", "until", "when", "blocked on", "stacked on", "stacks on", "stack on",
-                        "built on", "wait on", "waits on", "wait for", "waits for", "waiting on", "waiting for",
-                        "lands with")
-# `PR ` may sit before #N. A match followed by closed or merged is history ("continues here after #46 closed"), not a wait.
-WAIT_ON_PULL = re.compile(r"\b(?:%s)\s+(?:PR\s+)?#(\d+)\b(?!\s+(?:closed|merged)\b)"
-                          % "|".join(r"\s+".join(map(re.escape, ph.split())) for ph in WAIT_ON_PULL_PHRASES), re.I)
+# The words that say a step waits on pull request #N: the shared words (hooks/shared_names.py, which the guard's
+# placement rule dead-pr-wait reads too) and these longer ones. A placement check can share it.
+WAIT_ON_PULL_PHRASES = DEAD_PR_WAIT_PHRASES + ("stacked on", "stacks on", "stack on", "built on", "lands with")
+# `PR ` may sit before #N. A history word right after #N (closed, merged, landed, is on main: shared_names.wait_regex)
+# makes it history ("continues here after #46 closed"), not a wait.
+WAIT_ON_PULL = wait_regex(WAIT_ON_PULL_PHRASES, optional_pr=True)
 
 
 def waits_on_closed_pulls(open_, work, repo=None, ref=None):
@@ -1234,6 +1239,44 @@ def waits_on_closed_pulls(open_, work, repo=None, ref=None):
     dead -= {r["number"] for r in work["landedPulls"]
              if r["number"] in waited and head_on_main(repo, ref, r.get("head"), seen)}
     return ["%s (#%d)" % (k, n) for k, ns in waits for n in sorted(ns & dead)]
+
+
+DEAD_WAIT_LINE = "dead PR wait"
+
+
+def dead_pr_waits(open_, work):
+    """(lines, dead): one line per open step and PR #N where the step's title, why, note or ask waits on a bare #N
+    (shared_names.bare_pr_waits, the matcher the guard's rule dead-pr-wait uses). `lines` read `closed` when the live
+    file's prStates list shows #N closed and not merged, and `unknown (why)` when the list has no usable state for #N:
+    no valid row for #N, or rows for #N that disagree. A PR shown open or merged adds no line. `dead` is True when any
+    line reads closed, and the build then exits 1. With no live file, or a prStates that is missing, empty or not a
+    list, one unknown line stands for every wait and names no step: no state can judge any one of them."""
+    waits = [(k, n) for k, d in open_ for n in dict.fromkeys(
+        n for f in DEAD_PR_WAIT_FIELDS for n in bare_pr_waits(d.get(f)))]
+    if not waits:
+        return [], False
+    if not work or "pulls" not in work:  # the live file is missing or unreadable: one line, not one per step
+        return ["%s: %s (%d waits on a bare PR number)" % (DEAD_WAIT_LINE, (work or {}).get("read") or "unknown (no live file)",
+                                                           len(waits))], False
+    states = work.get("prStates")
+    if not isinstance(states, list) or not states:
+        why = "prStates is empty" if isinstance(states, list) else "the live file has no prStates list"
+        return ["%s: unknown (%s; %d waits on a bare PR number)" % (DEAD_WAIT_LINE, why, len(waits))], False
+    seen = {}
+    for row in states:
+        if isinstance(row, dict) and type(row.get("number")) is int and row.get("state") in ("open", "closed") \
+                and isinstance(row.get("merged"), bool):
+            seen.setdefault(row["number"], set()).add(row["state"] == "closed" and row["merged"] is False)
+    lines, dead = [], False
+    for k, n in waits:
+        if len(seen.get(n, ())) != 1:
+            lines.append("%s: %s (#%d) unknown (%s)" % (DEAD_WAIT_LINE, k, n, "prStates rows for it disagree" if n in seen
+                                                       else "no valid prStates row for it"))
+        elif True in seen[n]:
+            dead = True
+            lines.append("%s: %s waits on #%d, which is closed and not merged (name the step it waits on in blockedBy, "
+                         "or drop the wait)" % (DEAD_WAIT_LINE, k, n))
+    return lines, dead
 
 
 def lane_live(work, lane, item=False):

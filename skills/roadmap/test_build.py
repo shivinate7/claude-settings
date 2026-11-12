@@ -577,10 +577,11 @@ class UpkeepFixture(Fixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "step " + sid)
 
-    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None):
+    def publish(self, sessions=None, pulls=(), threads=(), read_at=None, items=None, landed=None, pr_states=None):
         """Write the --live file. threads=_ABSENT leaves the threads key out. The sessions, items and landedPulls keys
         appear only when given, and landed is written
-        as given (a case may send a value that is not a list). readAt is five minutes old by default."""
+        as given (a case may send a value that is not a list). prStates, the state of each PR a step waits on,
+        is written as given when not None. readAt is five minutes old by default."""
         value = {"readAt": read_at or iso_ago(5)}
         if threads is not _ABSENT:
             value["threads"] = list(threads)
@@ -591,6 +592,8 @@ class UpkeepFixture(Fixture):
             value["items"] = items
         if landed is not None:
             value["landedPulls"] = landed
+        if pr_states is not None:
+            value["prStates"] = pr_states
         self.write_live(value)
         return value
 
@@ -2774,6 +2777,26 @@ class WaitOnClosedPull(UpkeepFixture):
         self.assertNotIn("fix-check-chain (#46)", self.listed(out),
                          "a note that says a lane continued after #46 merged is listed as a wait on #46")
 
+    def test_history_landed_was_merged_or_on_main_is_not_a_wait(self):
+        """The legacy row reads the same matcher, so it skips the same history. The bare 'Reopened after #49.' is the
+        control: it has no history word, so it is listed."""
+        history = (("fix-landed", "Reopened after #46 landed.", 46),
+                   ("fix-was-merged", "Reopened when #47 was merged.", 47),
+                   ("fix-on-main", "Reopened after #48 is on main.", 48))
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        for sid, note, _ in history:
+            self.commit_step(sid, note=note)
+        self.commit_step("fix-bare", note="Reopened after #49.")
+        self.publish(landed=[self.closed(41), self.closed(49)] + [self.closed(n) for _, _, n in history])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertIn("fix-bare (#49)", self.listed(out),
+                      "the bare 'Reopened after #49.' is not listed, so the history cases prove nothing")
+        for sid, _, n in history:
+            with self.subTest(step=sid):
+                self.assertNotIn("%s (#%d)" % (sid, n), self.listed(out),
+                                 "history on closed unmerged #%d (%s) is listed as a wait" % (n, sid))
+
     def test_wait_phrases_until_when_and_wait_on_are_listed_bare_and_with_PR(self):
         # The PR form is the one the regex took later; each bare form is the control at every sha that has the row.
         waits = (("until", "Held until #61 lands."), ("until PR", "Held until PR #62 lands."),
@@ -4326,6 +4349,262 @@ class SharedTagNames(unittest.TestCase):
                     "CS-REPO:shivinate7/claude-settings", "cs-repo:claude-settings", None, 7):
             with self.subTest(tag=tag):
                 self.assertFalse(build.repo_tag_names(tag, slug))
+
+
+class DeadPrWaits(UpkeepFixture):
+    """Part (b) of step dead-pr-waits, the check end. The build flags an open step whose title, why, note or ask waits
+    on a bare PR number (#N, or PR #N) when the live file's prStates list (the publisher's one read per build) shows
+    that PR closed and unmerged. The flag line names the step and the PR, and the build exits 1. A wait with no usable
+    state reads unknown and exits 0, never clean. A state is usable only when it is open or closed. Matcher: the words
+    of DEAD_PR_WAIT_PHRASES (after, waits on, wait on, waiting on, waits for, wait for, waiting for, blocked on, once,
+    until, when). A note that says the PR landed, was merged or is on main is history, not a wait. The build prints one
+    summary line, not one per step, when no prStates list can judge any wait. Every not-flagged case sits beside a
+    flagged control in the same build, so a quiet check cannot pass as clean. The read time and the step times are
+    fixed: no case reads the clock."""
+
+    READ_AT = "2026-11-12T13:00:00Z"
+    CONTROL = "dead-pr-control"
+    CONTROL_PR = {"number": 99, "state": "closed", "merged": False}
+    CLOSED = {"number": 42, "state": "closed", "merged": False}
+    STEPS = {CONTROL: dict(STEP, note="The lint lane waits on #99.")}  # flagged in every case that reads #99 as closed
+    FORMS = {  # each matcher word, with its own step note; the step ids are the word with dashes
+        "after": "Runs after #42 lands.",
+        "waits on": "The lint lane waits on #42.",
+        "wait on": "Both lanes wait on #42.",
+        "waiting on": "The lint lane is waiting on #42.",
+        "waits for": "The lint lane waits for #42.",
+        "wait for": "Both lanes wait for #42.",
+        "waiting for": "The lint lane is waiting for #42.",
+        "blocked on": "The lint lane is blocked on #42.",
+        "once": "Starts once #42 is in.",
+        "until": "Held until #42 lands.",
+        "when": "Ships when #42 lands.",
+    }
+
+    def add_steps(self, notes, **fields):
+        """Write one open step per id in notes, with `fields` on each, and commit them on the record branch in one commit."""
+        for sid, note in notes.items():
+            self.write_step(sid, dict(STEP, note=note, **fields))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "steps")
+
+    def run_build(self, pr_states, expect=(0, 1)):
+        self.publish(sessions=[], items=[], read_at=self.READ_AT, pr_states=pr_states)
+        return self.out_with_live(expect=expect)
+
+    def lines_for(self, out, sid, pr=None):
+        """The output lines that name step sid, and PR #pr as a whole number when pr is given."""
+        found = [line for line in out.splitlines() if sid in line]
+        if pr is not None:
+            found = [line for line in found if re.search(r"#%d(?!\d)" % pr, line)]
+        return found
+
+    def flagged(self, out, sid, pr):
+        """The lines that name step sid and PR #pr and say closed."""
+        return [line for line in self.lines_for(out, sid, pr) if "closed" in line.lower()]
+
+    def assert_control_flagged(self, out):
+        """Scope first: the control's closed wait on #99 must be flagged in this build before any absence counts."""
+        self.assertTrue(self.flagged(out, self.CONTROL, 99), "the control's wait on closed #99 was not flagged:\n%s" % out)
+
+    def test_closed_unmerged_wait_prints_a_flag_line(self):
+        self.add_steps({"dead-wait-closed": "The lint lane waits on #42."})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "dead-wait-closed", 42),
+                        "the wait on closed unmerged #42 was not flagged:\n%s" % out)
+
+    def test_closed_unmerged_wait_exits_one(self):
+        self.add_steps({"dead-wait-closed": "The lint lane waits on #42."})
+        self.run_build([self.CLOSED, self.CONTROL_PR], expect=(1,))
+
+    def test_each_wait_word_of_the_matcher_flags_a_closed_wait(self):
+        self.add_steps({"form-" + word.replace(" ", "-"): note for word, note in self.FORMS.items()})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        for word in self.FORMS:
+            sid = "form-" + word.replace(" ", "-")
+            with self.subTest(word=word):
+                self.assertTrue(self.flagged(out, sid, 42), "the %r wait on closed #42 was not flagged:\n%s" % (word, out))
+
+    def test_open_pr_wait_is_not_flagged(self):
+        self.add_steps({"wait-open": "The lint lane waits on #43."})
+        out = self.run_build([{"number": 43, "state": "open", "merged": False}, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertEqual(self.flagged(out, "wait-open", 43), [], "a wait on open #43 was flagged:\n%s" % out)
+
+    def test_merged_pr_wait_is_not_flagged(self):
+        self.add_steps({"wait-merged": "The lint lane waits on #44."})
+        out = self.run_build([{"number": 44, "state": "closed", "merged": True}, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertEqual(self.flagged(out, "wait-merged", 44), [], "a wait on merged #44 was flagged:\n%s" % out)
+
+    def test_done_step_on_closed_pr_is_not_flagged(self):
+        self.add_steps({"wait-done": "The lint lane waits on #42."}, status="done")
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertEqual(self.flagged(out, "wait-done", 42), [], "a done step was flagged:\n%s" % out)
+
+    def test_ordinary_mention_without_a_wait_word_is_not_flagged(self):
+        self.add_steps({"mention": "Compare the result with #42 before merging."})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertEqual(self.flagged(out, "mention", 42), [], "an ordinary #42 mention was flagged:\n%s" % out)
+
+    def test_number_prefix_does_not_match_a_longer_number(self):
+        self.add_steps({"prefix": "The lint lane waits on #4."})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertEqual(self.flagged(out, "prefix", 4), [], "a wait on #4 was flagged by closed #42:\n%s" % out)
+
+    def test_wait_inside_a_fenced_code_block_is_not_flagged(self):
+        self.add_steps({"fenced": "Example:\n```\nThe lint lane waits on #42.\n```\nThe lint is held."})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertEqual(self.flagged(out, "fenced", 42), [], "a wait inside a code fence was flagged:\n%s" % out)
+
+    def test_quoted_wait_text_is_not_flagged(self):
+        quoted = {
+            "double-quotes": 'The old note said "waits on #42" and was dropped.',
+            "blockquote": "> The lint lane waits on #42.\n\nThe lint is held.",
+            "inline-code": "The note reads `waits on #42` as an example.",
+        }
+        self.add_steps({"quoted-" + kind: note for kind, note in quoted.items()})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        for kind in quoted:
+            with self.subTest(form=kind):
+                self.assertEqual(self.flagged(out, "quoted-" + kind, 42), [],
+                                 "a wait in %s was flagged:\n%s" % (kind, out))
+
+    def test_comment_opener_in_the_text_does_not_hide_the_wait(self):
+        self.add_steps({"opener": "Path /* is a glob; the lint lane waits on #42."})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "opener", 42), "a wait after /* in the text was not flagged:\n%s" % out)
+
+    def test_wait_on_the_second_line_of_a_note_is_flagged(self):
+        self.add_steps({"second-line": "Brief is written.\nThe lint lane waits on #42."})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "second-line", 42), "a wait on a second line was not flagged:\n%s" % out)
+
+    def test_lone_apostrophe_does_not_hide_the_wait(self):
+        self.add_steps({"apostrophe": "Owner's call: the lint lane waits on #42."})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "apostrophe", 42), "a wait after a lone apostrophe was not flagged:\n%s" % out)
+
+    def test_full_size_note_with_the_wait_at_its_end_is_flagged(self):
+        self.add_steps({"full-size": "Brief is written. " * 400 + "The lint lane waits on #42."})
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "full-size", 42), "a wait at the end of a full-size note was not flagged:\n%s" % out)
+
+    def test_many_closed_waits_are_each_flagged(self):
+        notes = {"many-%02d" % i: "The lint lane waits on #42." for i in range(40)}
+        self.add_steps(notes)
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        missed = [sid for sid in notes if not self.flagged(out, sid, 42)]
+        self.assertEqual(missed, [], "these waits on closed #42 were not flagged:\n%s" % out)
+
+    UNKNOWN_SIDS = ("wait-unknown-a", "wait-unknown-b", "wait-unknown-c")
+
+    def assert_one_unknown_summary(self, out, sids):
+        """With no usable prStates list the build prints one dead-PR-wait line for all its waits, and it reads unknown.
+        The line names no step: the build has no state to judge any one wait by."""
+        lines = [line for line in out.splitlines() if build.DEAD_WAIT_LINE in line]
+        self.assertEqual(len(lines), 1,
+                         "want one dead PR wait line for the whole build, got %d:\n%s" % (len(lines), out))
+        self.assertIn("unknown", lines[0], "the dead PR wait line does not read unknown:\n%s" % out)
+        for sid in sids:
+            self.assertNotIn(sid, lines[0], "the dead PR wait line names the step %s:\n%s" % (sid, out))
+
+    def test_no_pr_states_key_reads_unknown(self):
+        self.add_steps({sid: "The lint lane waits on #42." for sid in self.UNKNOWN_SIDS})
+        out = self.run_build(None, expect=(0,))
+        self.assert_one_unknown_summary(out, self.UNKNOWN_SIDS + (self.CONTROL,))
+
+    def test_empty_pr_states_reads_unknown(self):
+        self.add_steps({sid: "The lint lane waits on #42." for sid in self.UNKNOWN_SIDS})
+        out = self.run_build([], expect=(0,))
+        self.assert_one_unknown_summary(out, self.UNKNOWN_SIDS + (self.CONTROL,))
+
+    def test_number_with_no_entry_reads_unknown(self):
+        self.add_steps({"wait-unknown": "The lint lane waits on #42."})
+        out = self.run_build([{"number": 7, "state": "closed", "merged": False}, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue([line for line in self.lines_for(out, "wait-unknown", 42) if "unknown" in line],
+                        "a wait on #42 with no entry did not read unknown:\n%s" % out)
+        self.assertEqual(self.flagged(out, "wait-unknown", 42), [], "a wait with no entry was flagged closed:\n%s" % out)
+
+    def test_unreadable_pr_states_reads_unknown(self):
+        """A prStates that is not a list reads the same as a missing one: one summary line, exit 0."""
+        self.add_steps({sid: "The lint lane waits on #42." for sid in self.UNKNOWN_SIDS})
+        out = self.run_build("closed", expect=(0,))
+        self.assert_one_unknown_summary(out, self.UNKNOWN_SIDS + (self.CONTROL,))
+
+    def test_open_wait_only_exits_zero(self):
+        """A green control: a wait on an open PR, and no closed one, leaves the build clean."""
+        self.add_steps({"wait-open-only": "The lint lane waits on #43."})
+        out = self.run_build([{"number": 43, "state": "open", "merged": False}], expect=(0,))
+        self.assertEqual(self.flagged(out, "wait-open-only", 43), [], "an open wait was flagged:\n%s" % out)
+
+    BAD_STATES = {42: "CLOSED", 43: "Closed", 44: "OPEN", 45: ""}  # PR number -> a prStates state that is not open or closed
+
+    def test_bad_state_value_reads_unknown(self):
+        """A row whose state is not the lower-case open or closed (gh's CLOSED, Closed, OPEN, or empty) gives no usable
+        state: its wait reads unknown, never clean and never closed. The valid closed control keeps the build at 1."""
+        self.add_steps({"bad-state-%d" % n: "The lint lane waits on #%d." % n for n in self.BAD_STATES})
+        rows = [{"number": n, "state": state, "merged": False} for n, state in self.BAD_STATES.items()]
+        out = self.run_build(rows + [self.CONTROL_PR], expect=(1,))
+        self.assert_control_flagged(out)
+        for n, state in self.BAD_STATES.items():
+            sid = "bad-state-%d" % n
+            with self.subTest(state=state):
+                self.assertTrue([line for line in self.lines_for(out, sid, n) if "unknown" in line],
+                                "the wait on #%d with state %r did not read unknown:\n%s" % (n, state, out))
+                self.assertEqual(self.flagged(out, sid, n), [],
+                                 "the wait on #%d with state %r was flagged closed:\n%s" % (n, state, out))
+
+    def test_bad_state_alone_reads_unknown_and_exits_zero(self):
+        self.add_steps({"bad-alone": "The lint lane waits on #42."})
+        out = self.run_build([{"number": 42, "state": "CLOSED", "merged": False}], expect=(0,))
+        self.assertTrue([line for line in self.lines_for(out, "bad-alone", 42) if "unknown" in line],
+                        "the wait on #42 with state 'CLOSED' did not read unknown:\n%s" % out)
+        self.assertEqual(self.flagged(out, "bad-alone", 42), [], "the wait on #42 with state 'CLOSED' was flagged closed:\n%s" % out)
+
+    def test_pr_form_wait_flags_a_closed_wait(self):
+        """`PR #N` after a wait word is a wait too: the legacy WAIT_ON_PULL reads it, so the build must."""
+        self.add_steps({"pr-form": "Start once PR #1120 merges."})
+        out = self.run_build([{"number": 1120, "state": "closed", "merged": False}, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "pr-form", 1120), "the PR-form wait on closed #1120 was not flagged:\n%s" % out)
+
+    def test_wait_in_ask_flags_a_closed_wait(self):
+        """The ask field is step text too, as title, why and note are: a wait in it on a closed unmerged PR is flagged."""
+        self.add_steps({"ask-wait": "Brief is written."}, ask="The lint lane waits on #42.")
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "ask-wait", 42), "a wait in the ask field on closed #42 was not flagged:\n%s" % out)
+
+    def test_history_after_a_wait_word_is_not_flagged(self):
+        """History is not a wait, as the guard reads it: a PR that landed, was merged or is on main is skipped. The bare
+        'Reopened after #42.' has no history word, so it stays a wait and is flagged in the same build."""
+        history = {"landed": "Reopened after #42 landed.", "was-merged": "Reopened when #42 was merged.",
+                   "on-main": "Reopened after #42 is on main."}
+        notes = {"history-" + kind: note for kind, note in history.items()}
+        notes["history-control"] = "Reopened after #42."
+        self.add_steps(notes)
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "history-control", 42),
+                        "the bare 'Reopened after #42.' was not flagged, so the history case proves nothing:\n%s" % out)
+        for kind in history:
+            with self.subTest(history=kind):
+                self.assertEqual(self.flagged(out, "history-" + kind, 42), [],
+                                 "history on closed #42 (%s) was flagged as a wait:\n%s" % (kind, out))
 
 
 if __name__ == "__main__":
