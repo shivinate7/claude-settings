@@ -10,6 +10,7 @@ Temp files follow decisions/test-temp-standard.md: one run folder from lint/_tes
 """
 import importlib.machinery
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -94,6 +95,7 @@ class LeaseCase(unittest.TestCase):
     def setUp(self):
         base = tempfile.mkdtemp(dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, base, True)
+        self.base = base
         self.cfg = os.path.join(base, "cfg")
         self.home = os.path.join(base, "home")
         self.shims = os.path.join(base, "shims")
@@ -170,13 +172,14 @@ class LeaseCase(unittest.TestCase):
         env.update(extra)
         return env
 
-    def run_tool(self, *args, env=None):
-        return subprocess.run([sys.executable, SIM_LEASE, *args], env=self.env(**(env or {})),
+    def run_tool(self, *args, env=None, tool=None):
+        return subprocess.run([sys.executable, tool or SIM_LEASE, *args], env=self.env(**(env or {})),
                               capture_output=True, text=True, timeout=60)
 
-    def take(self, device, pid, wait=1, env=None, udid=False):
+    def take(self, device, pid, wait=1, env=None, udid=False, tool=None):
         extra = ["--udid"] if udid else []
-        return self.run_tool("take", "--device", device, "--pid", str(pid), "--wait", str(wait), *extra, env=env)
+        return self.run_tool("take", "--device", device, "--pid", str(pid), "--wait", str(wait), *extra, env=env,
+                             tool=tool)
 
     def give(self, pid):
         return self.run_tool("give", "--pid", str(pid))
@@ -531,12 +534,13 @@ class Brake(LeaseCase):
         self.assertNotIn("1-min", lines[0], "the refusal still names the load averages: %s" % lines[0])
         self.assertFalse(mentions(self.status().stdout, pid), "the refused take is still on the queue")
 
-    def test_an_unreadable_load_and_disk_grant_a_take(self):
-        self.set_load_text("")
+    def test_an_unreadable_disk_grants_a_take_when_the_brake_is_loaded(self):
         self.set_disk_unreadable()
         pid = self.spawn().pid
-        self.assertEqual(grant(self.take("duo", pid)), (0, "1"),
-                         "an unreadable reading refuses the take: a read error counts as normal")
+        r = self.take("duo", pid)
+        self.assertGreaterEqual(self.brake_reads(), 1,
+                                "the brake did not read the disk: it is not loaded, so the grant below proves nothing")
+        self.assertEqual(grant(r), (0, "1"), "an unreadable disk reading refuses the take: a read error counts as normal")
 
     def test_the_busy_bar_is_under_the_smaller_of_10_percent_and_15_gb(self):
         for total, free, granted in ((926, 14.9, False), (926, 15.0, True), (100, 9.9, False), (100, 10.0, True)):
@@ -551,6 +555,82 @@ class Brake(LeaseCase):
                 else:
                     self.assertEqual(r.returncode, 1,
                                      "a %s GB disk with %s GB free is not busy: the take is granted" % (total, free))
+
+
+SYNTAX_BROKEN = "def read_load(:\n    pass\n"
+
+
+class BrokenBrake(LeaseCase):
+    """The brake's module cannot load. A missing guard module refuses (decision guard-hooks-fail-closed): a take then
+    exits 1 with one stderr line that says the brake could not be loaded, leases nothing and leaves no queue place,
+    and status says so. An unreadable reading is different: class Brake grants on it."""
+
+    def copy_tool(self, module=None, text=None):
+        """A copy of the tool under test with its hooks/ tree beside it, so the copy loads its own brake. `module` names
+        the file in the copy's hooks/ that `text` replaces. Returns the copy's bin/sim-lease. The copy is copied from
+        the tool under test so that a mutant run copies the mutant's files, and it lives in this case's folder."""
+        root = os.path.dirname(os.path.dirname(os.path.realpath(SIM_LEASE)))
+        copy = os.path.join(self.base, "copy")
+        os.makedirs(os.path.join(copy, "bin"))
+        shutil.copy(SIM_LEASE, os.path.join(copy, "bin", "sim-lease"))
+        shutil.copytree(os.path.join(root, "hooks"), os.path.join(copy, "hooks"),
+                        ignore=shutil.ignore_patterns("__pycache__", "test_*", "*.pyc"))
+        if module:
+            with open(os.path.join(copy, "hooks", module), "w") as f:
+                f.write(text)
+        return os.path.join(copy, "bin", "sim-lease")
+
+    def assert_copy_fails_to_compile(self, module):
+        """Scope before subject: the copy's module really is broken, so a refusal below is the brake's absence."""
+        path = os.path.join(self.base, "copy", "hooks", module)
+        with open(path) as f:
+            text = f.read()
+        with self.assertRaises(SyntaxError, msg="scope: the copy's %s compiles, so the brake can load" % module):
+            compile(text, path, "exec")
+
+    def state_pids(self, key):
+        """The pids in the tool's own leases.json list `key` (leases or queue), read with no lock."""
+        try:
+            with open(os.path.join(self.cfg, "state", "sim-lease", "leases.json")) as f:
+                return [e["pid"] for e in json.load(f).get(key, [])]
+        except FileNotFoundError:
+            return []
+
+    def assert_take_refuses_with_brake_unloaded(self, module):
+        tool = self.copy_tool(module, SYNTAX_BROKEN)
+        self.assert_copy_fails_to_compile(module)
+        pid = self.spawn().pid
+        r = self.take("duo", pid, tool=tool)
+        self.assertEqual(r.returncode, 1, "a take with %s broken is granted: a missing brake must refuse" % module)
+        self.assertEqual(r.stdout.strip(), "", "a take with the brake not loaded prints a slot")
+        lines = [line for line in r.stderr.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "the refusal with %s broken is not one stderr line" % module)
+        self.assertIn("brake could not be loaded", lines[0],
+                      "the refusal with %s broken does not say the brake could not be loaded: %s" % (module, lines[0]))
+        self.assertNotIn(pid, self.state_pids("leases"), "the refused take leaves a lease")
+        self.assertNotIn(pid, self.state_pids("queue"), "the refused take is still in the queue")
+
+    def test_an_intact_copy_grants_slot_1(self):
+        """The control for the copy harness: with nothing broken, the copy's tool loads its brake and grants. Without it
+        a crash in the copy would read as a refusal."""
+        tool = self.copy_tool()
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid, tool=tool)), (0, "1"),
+                         "the intact copy does not grant slot 1: the copy harness is broken")
+
+    def test_a_broken_guard_module_refuses_a_take(self):
+        self.assert_take_refuses_with_brake_unloaded("guard.py")
+
+    def test_a_broken_guard_core_refuses_a_take(self):
+        self.assert_take_refuses_with_brake_unloaded("guard_core.py")
+
+    def test_status_says_the_brake_could_not_be_loaded(self):
+        tool = self.copy_tool("guard.py", SYNTAX_BROKEN)
+        self.assert_copy_fails_to_compile("guard.py")
+        r = self.run_tool("status", tool=tool)
+        self.assertEqual(r.returncode, 0, "status exits non-zero with the brake not loaded")
+        self.assertIn("brake could not be loaded", r.stdout,
+                      "status does not say the brake could not be loaded: %s" % r.stdout)
 
 
 class Concurrency(LeaseCase):
