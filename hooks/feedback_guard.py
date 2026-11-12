@@ -192,9 +192,14 @@ _STANDING_ACT = r"always|standing|from now on|(?:all|any|every)\s+(?:repos?|prs?
 ACT = re.compile(_WORD % (r"merge|push|delete|deploy|release|publish|" + _STANDING_ACT), re.IGNORECASE)
 # A standing scope however worded. ACT keeps its short list; these words only bar a once: home.
 _STANDING_SCOPE = (r"whenever|going forward|from here on|in (?:the )?future|by default|"
-                   r"until (?:withdrawn|revoked|further notice|i say otherwise)|(?:each|every)\s+time|"
-                   r"(?:all|any|every)\s+(?:open|green|new|future)")
-STANDING = re.compile(_WORD % (_STANDING_ACT + "|" + _STANDING_SCOPE), re.IGNORECASE)  # no one-shot home covers it
+                   r"until (?:withdrawn|revoked|further notice|i say otherwise)|(?:each|every)\s+time")
+# A scope noun counts as standing only in a sentence that approves or acts on it (see standing_word); "Hand in any PR"
+# is the lane's own handoff, not an approval to act on every PR.
+_SCOPE_NOUN = r"(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?|open|green|new|future)"
+STANDING = re.compile(_WORD % (r"always|standing|from now on|" + _STANDING_SCOPE), re.IGNORECASE)  # counts anywhere
+STANDING_NOUN = re.compile(_WORD % _SCOPE_NOUN, re.IGNORECASE)
+ACT_VERB = re.compile(_WORD % r"merge|push|delete|deploy|release|publish", re.IGNORECASE)
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
@@ -891,12 +896,23 @@ def is_grant(text):
     return GRANT.search(plain) is not None and ACT.search(plain) is not None
 
 
+def standing_word(text):
+    """True when the message, fenced text left out, holds a standing word. A scope noun ("any PR", "every open") counts
+    only when its own sentence holds a grant word or an act verb; narrowest reading: a sentence that only describes the
+    lane's handoff has neither, so it is no standing approval."""
+    plain = unfenced(text)
+    if STANDING.search(plain):
+        return True
+    return any(STANDING_NOUN.search(sent) and (GRANT.search(sent) or ACT_VERB.search(sent))
+               for sent in SENTENCE_END.split(plain))
+
+
 def once_home(it, text):
     """True when the item is an open `[note] -> once:<act>` for a one-shot approval. A message with a standing
     word is a standing grant, so no once: home covers it."""
     word = home_word(it[1])
     return (it[1].startswith("[note]") and not it[3] and word.startswith(ONCE_HOME)
-            and len(word) > len(ONCE_HOME) and STANDING.search(unfenced(text)) is None)
+            and len(word) > len(ONCE_HOME) and not standing_word(text))
 
 
 def grant_problem(b, text, items):
@@ -914,7 +930,7 @@ def grant_problem(b, text, items):
             return None
     head = text.split("\n")[0][:40]
     barred = any(it is not None and it[2] and it[1].startswith("[note]") and home_word(it[1]).startswith(ONCE_HOME)
-                 for it in items) and STANDING.search(unfenced(text)) is not None
+                 for it in items) and standing_word(text)
     if barred:
         return ("the message at %s (%s) holds a grant word and has no home for it: a standing word bars a %s home,"
                 " so add %s" % (b["stamp"], head, ONCE_HOME, STANDING_HOMES))
