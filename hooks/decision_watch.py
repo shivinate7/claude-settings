@@ -600,10 +600,12 @@ JUDGE_INSTRUCTIONS = (
 # THE TOKEN FILE. The copied credentials file never renews: its access token expires and
 # the child cannot refresh it (measured expiry 2026-09-23). `state/hook-token` in the config
 # directory holds a one-year token. `_hook_token` reads it; the child gets it as
-# `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened means no
-# token: the child then gets the parent's `ANTHROPIC_API_KEY` (token first, key second, and with
-# neither the call fails closed). A file that opens but is not text fails closed: no call is
-# made. The parent's own env token is never passed (the allowlist stays closed), and
+# `CLAUDE_CODE_OAUTH_TOKEN`. No file, an empty one, or one that cannot be opened (a directory,
+# a permission error) means no token: the child then gets the parent's `ANTHROPIC_API_KEY` when
+# it is set (test K1). With neither, the child falls back to the copied credentials
+# file or the `ANTHROPIC_BASE_URL` host's own auth, and the call goes ahead (test K3); a call
+# that cannot authenticate fails closed, reported as UNKNOWN. A file that opens but is not text
+# fails closed: no call is made. The parent's own env token is never passed (the allowlist stays closed), and
 # `invoke_model` scrubs the token and the key from any error text it returns.
 # See docs/decisions/reply-judge-samples-never-refuses.md.
 CREDENTIALS_FILENAME = ".credentials.json"
