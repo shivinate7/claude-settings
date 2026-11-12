@@ -3051,6 +3051,10 @@ MESSAGE_PR_GAP_NOT = re.compile(
 # The issue word or closing verb right before an `owner/repo#N`, so `Issue o/r#5` and `Fixes o/r#5` name no PR.
 MESSAGE_ISSUE_BEFORE = re.compile(
     r"\b(?:%s|%s)\W{0,3}$" % (MESSAGE_ISSUE_WORDS, MESSAGE_CLOSING_WORDS), re.IGNORECASE)
+# The most characters a MESSAGE_ISSUE_BEFORE match spans: the longest word plus the 3 of `\W{0,3}`. Searching only this
+# window before a ref keeps each ref's check constant; a search from `pos` still reads the character before it for `\b`.
+MESSAGE_ISSUE_BEFORE_SPAN = max(len(word.replace("?", "")) for word in
+                                (MESSAGE_ISSUE_WORDS + "|" + MESSAGE_CLOSING_WORDS).split("|")) + 3
 # This repo's own `owner/repo#N`, the owner/repo to be compared with the origin.
 MESSAGE_OWN_REF = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)#(\d+)")
 MESSAGE_PR_NUMBERED = re.compile(r"#(\d+)\s*\(\s*(?:PR|pull\s+request)\s*\)", re.IGNORECASE)
@@ -3182,6 +3186,7 @@ def message_refs(text: str, where: str):
         return origin[0]
 
     shas, prs, comments = [], [], []
+    prs_seen = set()
     kept = []   # the lines outside `> ` quotes and double-quoted spans: quoted text may come from another repo
     for raw in text.split("\n"):
         line = report_unquoted(raw)
@@ -3198,7 +3203,8 @@ def message_refs(text: str, where: str):
         if "#" in line and MESSAGE_OWN_REF.search(line) and this() is not None:
             numbers += [ref.group(3) for ref in MESSAGE_OWN_REF.finditer(line)
                         if (ref.group(1).lower(), ref.group(2).lower()) == this()
-                        and not MESSAGE_ISSUE_BEFORE.search(line[:ref.start()])]
+                        and not MESSAGE_ISSUE_BEFORE.search(
+                            line, max(0, ref.start() - MESSAGE_ISSUE_BEFORE_SPAN), ref.start())]
         if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
                 and message_names_other_repo(line, this()):
             continue
@@ -3206,7 +3212,8 @@ def message_refs(text: str, where: str):
             if sha not in shas:
                 shas.append(sha)
         for n in numbers:
-            if n not in prs:
+            if n not in prs_seen:   # a set, so a line of many distinct numbers dedupes in linear time
+                prs_seen.add(n)
                 prs.append(n)
     text = "\n".join(kept)
     if re.search(r"github\.com", text, re.IGNORECASE):
