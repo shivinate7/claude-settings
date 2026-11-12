@@ -59,19 +59,19 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
-   `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
-   each lane head before the build starts, once per lane. A red lane does not join. Before it marks
-   the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
-   on the batch head, after the draft step's page push. A ref target posts no comment, so it cannot
-   satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
-   merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
+   `~/.claude/bin/merge --lane-lint <pr>` once, before it hands off. The batch runner runs no lint: the join reads that
+   hand-off PASS comment at the live head, and a red lane does not join. The batch's CI run starts with a `lint` job
+   that runs beside the other jobs and, when it goes red, posts the red comment and cancels the run
+   (owner ruling R4, 14:56 CST Nov 10; decision `lanes-run-no-full-ci-job`). The red files name the lane to drop, and the next run is the one that merges.
+   The lint counts a clash between two heads only when both
+   merge clean with their base. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
    freezes at its build). A release or a drop that arrives after that goes to the next batch. It never
    triggers a rebuild. The one change after the freeze is the drop of a blamed lane, with any
    lane that depends on it. A lane is blamed when a red run of the batch head names it. Build the batch as a draft,
-   run the batch-head lane lint, then mark the integration PR ready, with no rebuild between
+   run the ready checks, then mark the integration PR ready, with no rebuild between
    (decision `draft-until-reviewed`). A draft run skips every job, so never rebuild a draft batch
    only to close it. The
    next batch builds and runs on top of the one in CI. While its head holds the running batch's head,
@@ -80,9 +80,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    on the new head.
    The merge tool enforces the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
    builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. A changed set is
-   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then the ready
-   checks, then records the head that passed. When the head moved since the last lint, it lints again. It does not mark the PR ready:
-   the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of the lint or of a ready check
+   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the ready
+   checks on the batch head, then records the head that passed. When the head moved since the last pass, it runs them again. It does not mark the PR ready:
+   the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of a ready check
    stores the lanes it names (`Blamed:`). For a red CI run, `merge --batch-build NAME --blame PR --run <run URL>` stores the blame. It
    refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
    `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
