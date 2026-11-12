@@ -148,6 +148,26 @@ pass_allow("control, negation reaches only its clause, to @parent", "SendMessage
 pass_allow("control, a count is no claim, to @parent", "SendMessage", "3/5 tests passed.", UNCITED, to=SEND_TO)
 pass_allow("control, a claim wholly in backticks, to @parent", "SendMessage", "`Lint passed.`", UNCITED, to=SEND_TO)
 
+# A colon, slash or pipe ends a negation clause, so the negation does not reach the claim after it. `to` is no
+# condition cue. An instruction, a path token and a double-quoted mention are no claim. Each has a refused sibling.
+for _claim in ("No issues found: lint passed.", "No failures: lint passed.", "Nothing to fix: lint passed.",
+               "No failures / lint passed.", "No failures | lint passed.", "Merged to main and lint passed."):
+    pass_refuse("claim form, uncited, to @parent: " + _claim, "SendMessage", _claim, UNCITED, to=SEND_TO)
+pass_allow("control, lint did not pass, to @parent", "SendMessage", "Lint did not pass.", UNCITED, to=SEND_TO)
+for _msg in ("Ensure lint passes before you hand off.", "Confirm the tests pass.", "Verify the checks are green.",
+             "Clean up the lint warnings in hooks/x.py.", "Run a second lint pass.",
+             "Files: tests/guard/s42900-pass-claim-send.py", 'the guard flags a "lint passed" claim.'):
+    pass_allow("no claim, to @parent: " + _msg, "SendMessage", _msg, UNCITED, to=SEND_TO)
+for _msg in ("Lint passes before you hand off.", "The tests pass.", "The checks are green.", "Files: lint passed.",
+             "the guard flags a lint passed claim.", 'Size 12" and lint passed.'):
+    pass_refuse("sibling, claim, to @parent: " + _msg, "SendMessage", _msg, UNCITED, to=SEND_TO)
+
+# The refusal names the remedy's key phrase: the verdict command must match the claim. Both send tools read one reason.
+pass_refuse("the refusal says the command must match the claim, to @parent", "SendMessage", "Lint passed.", UNCITED,
+            to=SEND_TO, carries="must match the claim")
+pass_refuse("the refusal says the command must match the claim, to a session", MCP_TOOL, "Lint passed.", UNCITED,
+            session_id=SEND_SESSION, carries="must match the claim")
+
 # Rule 4: a cite backs a claim only when its check matches. verdict true backs no claim, and a test-file cite backs
 # no lint claim. Each refusal has an allowed sibling that differs only in the check.
 TRUE_CITE = transcript_file("true-cite.jsonl", [HUMAN] + call_records("verdict true", "PASS true (1.2s)", "tu_t"))
