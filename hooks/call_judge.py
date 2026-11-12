@@ -446,15 +446,18 @@ def plan_texts(root, numbers):
     """({R-number: [`<plan file> R<n>: <text>`]}, the R-numbers no plan defines) for the plan R-numbers a pick cites.
     A plan is a file of docs/plans in the repo root; an R-number's text runs from its bullet (`- **R22.`) to the next
     top-level bullet or heading, white space collapsed and capped. A file that cannot be read is skipped."""
-    folder = os.path.join(root, "docs", "plans")
-    try:
-        names = sorted(n for n in os.listdir(folder) if n.endswith(".md"))
-    except OSError:
-        names = []
-    found = {n: [] for n in numbers}
-    for name in names:
+    import question_form
+    files = []  # the folder of kind plans in lint/layout.py, the one home: the repo's own path, then the layout's
+    for where in question_form._layout().candidates(root, "plans"):
+        folder = os.path.join(root, *where.split("/"))
         try:
-            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+            files += [(n, os.path.join(folder, n)) for n in sorted(os.listdir(folder)) if n.endswith(".md")]
+        except OSError:
+            continue
+    found = {n: [] for n in numbers}
+    for name, full in files:
+        try:
+            with open(full, encoding="utf-8") as handle:
                 lines = handle.read().splitlines()
         except (OSError, UnicodeDecodeError):
             continue
