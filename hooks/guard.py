@@ -536,7 +536,7 @@ while True:
         from guard_core import (
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
-            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
+            _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, bare_segment_dirs, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
@@ -4261,7 +4261,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    # a git segment with no folder of its own runs where the shell stands when it runs, so each reads
+    # its own folder; a substitution's segments and any line the walk does not know take the whole call's
+    bare_dirs = {}
+    for text_segment, folder in bare_segment_dirs(stripped, cwd):
+        bare_dirs.setdefault(text_segment, []).append(folder)
+    for text_number, segment in ((number, part) for number, text in enumerate(texts) for part in split_segments(text)):
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -4269,6 +4274,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+        elif text_number == 0 and bare_dirs.get(segment):
+            root = bare_dirs[segment].pop(0)
+            work_tree = GIT_WORK_TREE_RE.search(segment)
+            if work_tree:
+                root = _absolute(work_tree.group(2), root)
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
