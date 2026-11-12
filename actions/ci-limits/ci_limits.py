@@ -58,8 +58,13 @@ def load_merge():
     global _merge
     if _merge is None:
         spec = importlib.util.spec_from_file_location("merge_for_ci_limits", os.path.join(ROOT, "merge", "merge.py"))
-        _merge = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(_merge)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(spec.name, None)  # a failed load leaves nothing half-built to serve or to import
+            raise
+        _merge = module  # cached only once it is whole
     return _merge
 
 
