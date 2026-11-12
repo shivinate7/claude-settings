@@ -6,7 +6,7 @@ Owner steer, 2026-10-30 12:50 CDT: a question to the owner has one form and one 
 
 - The form. A decision on the page (in `context`), or a chat question with two or more options (in the question text), has these lines in this order:
   - `Goal: <the goal, in the owner's terms>`
-  - `Problem (<stake>): <text>`, per rule `style-question-form` (one plain problem sentence, and why it needs the owner's word). The stake is one of the values in constant `OWNER_STAKES`. A stood pick (`stands: true`) may write `Problem: <text>`.
+  - `Problem (<stake>): <text>`, per rule `style-question-form` (one plain problem sentence, and why it needs the owner's grant). The stake is one of the values in constant `OWNER_STAKES`. A stood pick (`stands: true`) may write `Problem: <text>`.
   - One to three `Based on (<kind>): <premise>` lines, one premise each, per rule `style-question-form`. The kind is one of `PREMISE_KINDS` in `hooks/precompact_handoff.py` (decision `premise-format`).
   - `Departs from: <what on main> — <what changes>`, after the Based on lines. Decision `port-keeps-behaviour` (a port keeps the existing app's behaviour) holds the rule.
 - Each option states its gain and its loss: a page option has non-empty `gain` and `lose` fields; a chat option's description holds `Gain: <text>` and `Lose: <text>`.
