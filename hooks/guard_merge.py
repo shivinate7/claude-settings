@@ -1273,16 +1273,19 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
 RECORD_WRITER_TIER = "triage"
 DEFAULT_RECORD_BRANCH = "roadmap"
+RECORD_CITE = (
+    "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
+)
 RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
     "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
-    "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
-    "own turn, then retry. A lane may push only its own roadmap/outbox/<slug>-handoff.md, as plain commits that "
+    "cs-build:triage, same cs-repo). A lane may push only its own roadmap/outbox/<slug>-handoff.md, as plain commits that "
     "each add or change that file alone, with no force, lease or tags. If the lane's push was refused for that "
     "form: fetch the record branch's origin tip (a single-branch clone widens its fetch refspec first), then rebase "
     "the commits onto that tip, with no merge commit, since a pull's merge commit is refused. Make each commit in its "
     "own call first, then retry the handoff push in a later call: a push chained after a commit is read before that "
-    "commit exists. (decision session-tiers, the triage session is the only writer of the record branch)"
+    "commit exists. If this session is triage: run get_session (no argument) alone in its "
+    + RECORD_CITE
 )
 
 
@@ -1305,7 +1308,7 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
     """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
     follows it. Fails closed: no env id, no transcript or any read error is False."""
     tags = _own_proved_tags(transcript)
-    return tags is not None and ROLE_TAG_PREFIX + tier in tags
+    return tags is not None and ROLE_TAG_PREFIX + tier in tags  # glossary-ok: tier is the parameter name of a helper that lint/report_guard.py imports
 
 
 def _open_substitutions(text: str) -> int:
@@ -1432,7 +1435,7 @@ def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tag
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
-    name `roadmap`, and the own record proves neither the triage tier nor a lane's own handoff push, else ''.
+    name `roadmap`, and the own record proves neither the triage role nor a lane's own handoff push, else ''.
     `record_branch_of(root)` reads the checkout's branch (lint/layout.py); a read error means the default.
     `read_verb(subcommand, args)` is guard.py's own test for a dry run, which moves nothing. The proof is
     read only after a push reaches the branch. Triage is allowed with no diff read. A lane is allowed only
@@ -1451,7 +1454,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
             if not {record, DEFAULT_RECORD_BRANCH} & set(destinations):
                 continue
             tags = _own_proved_tags(transcript)
-            if tags is not None and ROLE_TAG_PREFIX + RECORD_WRITER_TIER in tags:
+            if tags is not None and ROLE_TAG_PREFIX + RECORD_WRITER_TIER in tags:  # glossary-ok: the constant's name is anchored by hooks/mutate_guard.py
                 continue
             if (tags is not None and LANE_TAG in tags and len(destinations) == 1 and root
                     and _lane_handoff_holds(args, where, overrides, root, destinations[0], tags)):
