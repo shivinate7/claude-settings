@@ -4767,6 +4767,35 @@ stable_fixture() {
   advance_github_fixture "$1" "$2"
 }
 
+# default_cloud_install HOME SCRATCH BIN: one cloud install with no CLAUDE_SETTINGS_REF in its environment (env -i
+# clears it), so install.sh takes its default ref. Sets rc and out.
+default_cloud_install() {
+  out=$(cd "$2" && env -i PATH="$3:$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" \
+        GIT_CEILING_DIRECTORIES="$2" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  rc=$?
+}
+
+# advance_stable_fixture DIR TAG: moves the fixture's stable one commit on, from its own tip. main does not move.
+advance_stable_fixture() {
+  s_tip=$(git -C "$1/bare.git" rev-parse refs/heads/stable)
+  git -C "$1/src" checkout -q -b "st-$2" "$s_tip"
+  printf 'stable %s\n' "$2" > "$1/src/STABLE-$2.txt"
+  git -C "$1/src" add -A
+  git -C "$1/src" -c user.email=t@example.com -c user.name=t commit -q -m "stable $2"
+  git -C "$1/src" push -q "$1/bare.git" HEAD:refs/heads/stable
+  git -C "$1/src" checkout -q main
+}
+
+# local_stable_clone CLONE FX: a plain clone of the stable_fixture origin FX, its origin set to GitHub's URL, so
+# git reaches FX through the redirect in HOME's .gitconfig. Local main is origin's main; origin/stable is stable.
+# It also writes $work/npm-stub/npm, an npm that does nothing: a local install in a case must not reach the registry.
+local_stable_clone() {
+  git clone -q "$2/bare.git" "$1"
+  git -C "$1" remote set-url origin https://github.com/shivinate7/claude-settings.git
+  mkdir -p "$work/npm-stub"; printf '#!/bin/sh\nexit 0\n' > "$work/npm-stub/npm"; chmod +x "$work/npm-stub/npm"
+}
+
 # ---- caseK12: with no CLAUDE_SETTINGS_REF, a fresh cloud install clones the stable branch, not main ----
 caseK12() {
   name="caseK12: with no CLAUDE_SETTINGS_REF, a fresh cloud install clones the stable branch, not main"
@@ -4780,11 +4809,7 @@ caseK12() {
   fi
   write_redirect "$h" "$fx/bare.git"
   make_curl_stub "$bin" fail-tarball
-  # env -i clears CLAUDE_SETTINGS_REF, so install.sh takes its default ref.
-  out=$(cd "$scratch" && env -i PATH="$bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
-        GIT_CEILING_DIRECTORIES="$scratch" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        CLAUDE_SETTINGS_REF=main bash -s -- --cloud < "$INSTALL_SH" 2>&1)
-  rc=$?
+  default_cloud_install "$h" "$scratch" "$bin"
   co="$h/claude-settings"
 
   if [ $rc -ne 0 ]; then
@@ -4820,6 +4845,112 @@ caseK13() {
     bad "$name" "no clone at $co/.git: $(install_problems)"
   elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
     bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the fixture main $want, not stable $stable_sha"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK14: a default cloud start moves a clone at an older stable to the new stable, and logs "refreshed ... to stable" ----
+caseK14() {
+  name="caseK14: a default cloud start moves a clone at an older stable to the new stable, and logs 'refreshed ... to stable'"
+  fx="$work/k14-fx"; h="$work/k14-home"; scratch="$work/k14-scratch"; bin="$work/k14-bin"; co="$h/claude-settings"
+  mkdir -p "$h" "$scratch"
+  stable_fixture "$fx" k14
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin" stable
+  old=$(git -C "$fx/bare.git" rev-parse refs/heads/stable)
+  if [ $rc -ne 0 ] || [ "$(git -C "$co" rev-parse HEAD 2>/dev/null)" != "$old" ]; then
+    bad "$name" "setup: the install at stable did not clone the old stable $old: $(install_problems)"
+    return
+  fi
+  advance_stable_fixture "$fx" k14s2
+  want=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$want" = "$old" ]; then
+    bad "$name" "FIXTURE stable did not move from $old"
+    return
+  fi
+  default_cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc on the default start: $(install_problems)"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want the new stable $want (old stable $old, main $main_sha)"
+  elif ! printf '%s\n' "$out" | grep -q 'refreshed the clone .* to stable$'; then
+    bad "$name" "no 'refreshed the clone ... to stable' line in the install output: $(install_problems)"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP1: a local install with no pin makes the pin at origin's stable commit, not at local main ----
+caseP1() {
+  name="caseP1: a local install with no pin makes the pin at origin's stable commit, not at local main"
+  fx="$work/p1-fx"; h="$work/p1-home"; co="$work/p1-co"; cfg="$work/p1-cfg"
+  mkdir -p "$h"
+  stable_fixture "$fx" p1
+  stable_sha=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$stable_sha" = "$main_sha" ]; then
+    bad "$name" "FIXTURE stable and main are both $stable_sha; the case cannot tell them apart"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  if [ "$pin_head" != "$stable_sha" ]; then
+    bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want origin's stable $stable_sha, not local main $main_sha (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP2: CLAUDE_SETTINGS_REF=main still makes the local pin at local main: the recovery path (green control) ----
+caseP2() {
+  name="caseP2: CLAUDE_SETTINGS_REF=main still makes the local pin at local main, the recovery path"
+  fx="$work/p2-fx"; h="$work/p2-home"; co="$work/p2-co"; cfg="$work/p2-cfg"
+  mkdir -p "$h"
+  stable_fixture "$fx" p2
+  stable_sha=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$stable_sha" = "$main_sha" ]; then
+    bad "$name" "FIXTURE stable and main are both $stable_sha; the case cannot tell them apart"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_REF=main bash ./install.sh 2>&1)
+  rc=$?
+  pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  if [ "$pin_head" != "$main_sha" ]; then
+    bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want local main $main_sha with CLAUDE_SETTINGS_REF=main (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP3: a local install refuses a pinned checkout detached at local main, not at origin's stable, and names stable ----
+caseP3() {
+  name="caseP3: a local install refuses a pinned checkout detached at local main, not at origin's stable, and names stable"
+  fx="$work/p3-fx"; h="$work/p3-home"; co="$work/p3-co"; cfg="$work/p3-cfg"
+  mkdir -p "$h"
+  stable_fixture "$fx" p3
+  stable_sha=$(git -C "$fx/bare.git" rev-parse refs/heads/stable); main_sha=$(fixture_sha "$fx")
+  if [ "$stable_sha" = "$main_sha" ]; then
+    bad "$name" "FIXTURE stable and main are both $stable_sha; the case cannot tell them apart"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  if ! git -C "$co" worktree add -q --detach --lock --reason "claude-settings live pin" "$co-live" "$main_sha" 2>/dev/null; then
+    bad "$name" "FIXTURE git worktree add of the pin at local main failed"
+    return
+  fi
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "install exited 0 with the pin at local main $main_sha, not at origin's stable $stable_sha"
+  elif ! printf '%s\n' "$out" | grep -q stable; then
+    bad "$name" "the refusal does not name stable (install exit $rc): $(install_problems)"
   else
     ok "$name"
   fi
@@ -5829,6 +5960,10 @@ run caseK10
 run caseK11
 run caseK12
 run caseK13
+run caseK14
+run caseP1
+run caseP2
+run caseP3
 run caseL1
 run caseL2
 run caseL3

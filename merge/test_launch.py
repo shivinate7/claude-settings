@@ -54,6 +54,7 @@ class Launch(unittest.TestCase):
         self.release("v1")
         sh(self.work, "git", "remote", "add", "origin", self.bare, env=self.env)
         sh(self.work, "git", "push", "-q", "origin", "main", env=self.env)
+        sh(self.work, "git", "push", "-q", "origin", "main:refs/heads/stable", env=self.env)
         self.co = self.clone("co")
 
     def rewrite(self, target):
@@ -64,14 +65,18 @@ class Launch(unittest.TestCase):
         # Signing is on, as in a real checkout, so the import above is what keeps these commits off the signer.
         put(self.cfg, f'[user]\n\tname = t\n\temail = t@t\n[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n[url "{target.replace(os.sep, "/")}"]\n\tinsteadOf = {URL}\n')
 
-    def release(self, tag):
+    def release(self, tag, stable=True):
         # The stub prints its tag and, when ARGS_FILE is set, records the arguments it received.
+        # stable=True moves origin's stable with main, so a case that expects the released tag still
+        # checks the head the launcher fetches; stable=False leaves stable where it was.
         put(os.path.join(self.work, "merge", "merge.py"), "import os, sys\nprint('RAN %s')\n"
             "f = os.environ.get('ARGS_FILE')\nif f: open(f, 'w').write(repr(sys.argv[1:]))\n" % tag)
         sh(self.work, "git", "add", "-A", env=self.env)
         sh(self.work, "git", "commit", "-q", "-m", tag, env=self.env)
         if tag != "v1":
             sh(self.work, "git", "push", "-q", "origin", "main", env=self.env)
+            if stable:
+                sh(self.work, "git", "push", "-q", "origin", "main:refs/heads/stable", env=self.env)
 
     def clone(self, name):
         d = os.path.join(self.t, name)
@@ -130,9 +135,8 @@ class Launch(unittest.TestCase):
 
     def test_runs_origin_stable_not_main(self):
         # The launcher runs the stable branch, the commit sessions install from (restart-plan R42 part 2).
-        v1 = self.head(self.work)
-        sh(self.work, "git", "push", "-q", "origin", "main:refs/heads/stable", env=self.env)
-        self.release("v2")  # main moves on; stable stays at v1
+        v1 = self.head(self.work)  # setUp pushed stable at v1
+        self.release("v2", stable=False)  # main moves on; stable stays at v1
         self.assertEqual(sh(self.bare, "git", "rev-parse", "refs/heads/stable"), v1, "FIXTURE stable is not v1")
         rc, out, err = self.merge()
         self.assertEqual((rc, out.strip()), (0, "RAN v1"), err)
