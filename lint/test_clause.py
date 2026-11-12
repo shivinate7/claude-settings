@@ -355,6 +355,26 @@ class SeparatorFieldTests(unittest.TestCase):
         self.assertEqual(parse(sentence)[0].sent_end, len(sentence), "sent_end: no stop follows the clause")
 
 
+class ClauseCutTests(unittest.TestCase):
+    """The clause cut at a period with no space after it. A period inside a token (report_guard.py, v1.2) cuts nothing."""
+
+    def test_a_period_with_no_space_before_a_capital_ends_a_clause(self):
+        # Catches: a period with no space after it is read as part of a token, so the clause holding "did not" also holds
+        # the claim after the period, and the claim is read as negated.
+        sentence = "It did not fail on main.The failure is pre-existing."
+        found = parse(sentence)
+        self.assertEqual(len(found), 2, "clauses: no cut at the period before The")
+        self.assertEqual(sentence[found[1].start:found[1].end], "The failure is pre-existing",
+                         "clauses: the clause after the glued period is wrong")
+        self.assertFalse(found[1].negated, "negated: the negator before the glued period reaches the claim")
+
+    def test_a_dot_inside_a_file_or_version_name_cuts_no_clause(self):
+        # Catches: every period with no space after it cuts a clause, so report_guard.py and v1.2 split in two.
+        for sentence in ("Lint fails in report_guard.py on main too.", "It fails at v1.2 on main too."):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(len(parse(sentence)), 1, "clauses: a dot inside a token cut the clause")
+
+
 class LexiconTests(unittest.TestCase):
     def test_negators_are_the_negation_words(self):
         # Catches: a negation word dropped from NEGATORS, or a non-negator added to it.

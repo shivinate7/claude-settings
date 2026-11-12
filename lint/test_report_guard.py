@@ -5188,6 +5188,38 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
 
+    def test_pe_red_not_yet_and_yet_to_hedges_are_no_claim(self):
+        # A negator before "yet" sits in the claim's clause, so the claim is exempt. The clause cut at "yet" separates the
+        # negator from the claim, so each hedge is refused.
+        rows = [
+            # Catches: "not" before "yet confirmed" is cut from the claim after "yet", so the hedge is refused.
+            "I have not yet confirmed the failure is pre-existing.",
+            # Catches: "yet to" is cut at "yet", so the negator "yet to" never reaches the claim after it.
+            "I have yet to confirm the failure is pre-existing.",
+            # Catches: "not" before "yet confirmed as" is cut from the claim after "yet", so the hedge is refused.
+            "The failure is not yet confirmed as pre-existing.",
+            # Catches: "not" before "yet been shown" is cut from the claim after "yet", so the hedge is refused.
+            "The failure has not yet been shown to be pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_glued_period_before_a_capital_is_refused(self):
+        # A period with no space after it, before a capital, ends a clause. A negator before it exempts no claim after it,
+        # and the claim after it is refused.
+        rows = [
+            # Catches: "did not" before "main.The" reaches the claim after the glued period, so the claim is exempt.
+            "It did not fail on main.The failure is pre-existing.",
+            # Catches: "did not" before "fail.The" reaches the claim after the glued period, so the claim is exempt.
+            "The lint did not fail.The failure is pre-existing.",
+            # Catches: "Nothing" before "lint.The" reaches the claim after the glued period, so the claim is exempt.
+            "Nothing in this PR touches lint.The failure is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_pe_green_brief_control_on_main_at_sha_passes(self):
@@ -5346,6 +5378,17 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         rows = [
             "Lint fails in a.py on main too.",
             "Lint fails in a.py on 32b5f8b8e too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_pin_a_dot_in_a_file_or_version_name_ends_no_clause(self):
+        # Catches: a period with no space after it ends a clause, so the failure word in "report_guard.py" or "v1.2" loses
+        # the "on main too" after it. Both rows stay refusals.
+        rows = [
+            "Lint fails in report_guard.py on main too.",
+            "It fails at v1.2 on main too.",
         ]
         for line in rows:
             with self.subTest(line=line):
