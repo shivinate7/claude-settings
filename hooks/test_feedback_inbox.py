@@ -4325,11 +4325,11 @@ HOME_READS = ("rev-parse", "for-each-ref", "cat-file")  # the git reads a ruling
 GIT_NAMES = ("git", "git.exe")
 
 
-def close_run(cfg, sid, items, handoff_ids=(), extra_env=None, text="settled items"):
+def close_run(cfg, sid, items, handoff_ids=(), extra_env=None, text="settled items", cwd=None):
     """Jots one message of `items`, writes a handoff that holds `handoff_ids` as standing ids, then runs one Stop."""
     write_file(inbox_of(cfg, sid), render_block(text, items=items))
     write_file(handoff_of(cfg, sid), "# Handoff\n" + "".join("- %s standing\n" % i for i in handoff_ids))
-    return guard(cfg, sid, extra_env=extra_env)
+    return guard(cfg, sid, cwd=cwd, extra_env=extra_env)
 
 
 def case_stop_closes_a_ruling_and_a_task_whose_home_holds():
@@ -4358,6 +4358,22 @@ def case_stop_closes_a_held_item_after_its_repeat_mark():
           inbox_line(cfg, sid, ITEM_ID) == item + MARKED + CLOSED, inbox_line(cfg, sid, ITEM_ID))
 
 
+def case_stop_closes_only_a_home_that_main_holds():
+    """R27 says `on main`. A home that only a lane branch tracks is not closed, though the blocking check passes it."""
+    lane = make_repo("close-lane", tracked=("decisions/x.md",))
+    lane_file(lane, "decisions/lane-only.md")
+    cfg, sid = new_cfg(), "close-lane"
+    main_held = "- fb-0958-1 [ruling] -> decisions/x.md"
+    lane_only = "- fb-0958-6 [ruling] -> decisions/lane-only.md"
+    p = close_run(cfg, sid, (main_held, lane_only), cwd=lane)
+    check("close main: the ruling main holds is closed", inbox_line(cfg, sid, "fb-0958-1") == main_held + CLOSED,
+          inbox_line(cfg, sid, "fb-0958-1"))
+    check("close main: the ruling only a lane holds keeps its line",
+          inbox_line(cfg, sid, "fb-0958-6") == lane_only, inbox_line(cfg, sid, "fb-0958-6"))
+    check("close main: the lane-only ruling raises no home refusal", "fb-0958-6" not in (block_reason(p) or ""),
+          p.desc())
+
+
 def case_stop_leaves_an_item_whose_home_does_not_resolve_open():
     cfg, sid = new_cfg(), "close-unresolved"
     p = close_run(cfg, sid, (HELD_RULING, UNHELD_RULING))
@@ -4373,12 +4389,15 @@ def case_stop_closes_only_ruling_and_task_items():
     cfg, sid = new_cfg(), "close-kinds"
     question = "- fb-0958-3 [question] -> answered"
     standing = "- fb-0958-5 [standing] -> handoff"
-    p = close_run(cfg, sid, (HELD_RULING, question, standing), handoff_ids=("fb-0958-5",))
+    note = "- fb-0958-4 [note] -> decisions/a-ruling.md"  # a file home that holds, on a kind the close does not cover
+    p = close_run(cfg, sid, (HELD_RULING, question, note, standing), handoff_ids=("fb-0958-5",))
     check("close kinds: the Stop passes", p.code == 0 and block_reason(p) is None, p.desc())
     check("close kinds: the held ruling is closed",
           inbox_line(cfg, sid, "fb-0958-1") == HELD_RULING + CLOSED, inbox_line(cfg, sid, "fb-0958-1"))
     check("close kinds: a question line is not closed by this", inbox_line(cfg, sid, "fb-0958-3") == question,
           inbox_line(cfg, sid, "fb-0958-3"))
+    check("close kinds: a note line whose file home holds is not closed by this",
+          inbox_line(cfg, sid, "fb-0958-4") == note, inbox_line(cfg, sid, "fb-0958-4"))
     check("close kinds: a standing line is not closed by this", inbox_line(cfg, sid, "fb-0958-5") == standing,
           inbox_line(cfg, sid, "fb-0958-5"))
 
@@ -4794,6 +4813,7 @@ CASES = (
     case_page_form_undone_wake_passes,
     case_stop_closes_a_ruling_and_a_task_whose_home_holds,
     case_stop_closes_a_held_item_after_its_repeat_mark,
+    case_stop_closes_only_a_home_that_main_holds,
     case_stop_leaves_an_item_whose_home_does_not_resolve_open,
     case_stop_closes_only_ruling_and_task_items,
     case_stop_leaves_an_already_closed_item_alone,
