@@ -2035,6 +2035,68 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
         self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the failed post was kept as a posted comment")
 
 
+class LintSetsBatchLabel(LintPostsPassComment):
+    """`merge --lane-lint <pr> --integration` adds the `batch` label to the integration pull request when the lint passes (decision pr-ledger):
+    without it the ledger reads the integration PR `none`, red. Only a PASS on a PR number adds it; a FAIL, an unknown and a plain lint add none.
+    A failed add prints a reason that says how to label it by hand, and the PASS still exits 0. Each case reads the REST call through the gh shim.
+    Subclasses LintPostsPassComment for its setUp; its own cases run again here, which only repeats them."""
+
+    def labeled(self):
+        return tm.GhHalf.gh_state(self, "labeled") or []
+
+    def test_a_passing_integration_lint_adds_the_batch_label_by_rest(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self)
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.labeled(), [{"n": 7, "labels": ["batch"]}], "an integration lint PASS left no `batch` label on #7:\n" + out)
+
+    def test_a_plain_lint_pass_adds_no_label(self):  # control: green on the old code
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self)
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", host=merge.Host())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.labeled(), [], "a lane lint with no --integration added a label:\n" + out)
+
+    def test_an_integration_fail_adds_no_label(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self)
+        self.use_ci_job(FAILING, 1)
+        rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.labeled(), [], "a FAIL added the batch label:\n" + out)
+
+    def test_an_integration_unknown_adds_no_label(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self)
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.labeled(), [], "an unknown added the batch label:\n" + out)
+
+    def test_a_failed_label_add_prints_the_pass_and_a_hand_fix_and_exits_zero(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self, label_fail=tm.rest_err(403, "Forbidden"))
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
+        self.assertEqual(rc, 0, "a PASS whose label failed to add did not exit 0:\n" + out)
+        self.assertTrue(pass_lines(out), "a PASS whose label failed to add printed no PASS line:\n" + out)
+        reasons = [l for l in out.splitlines() if "batch" in l and "label" in l and not l.startswith("PASS:")]
+        self.assertTrue(reasons, "a failed label add printed no reason line that names the `batch` label:\n" + out)
+        self.assertEqual(self.labeled(), [], "the failed add was kept as a label")
+
+    def test_integration_with_a_commit_target_is_a_usage_error(self):
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", self.head("feat"), "--integration")
+        self.assertEqual(rc, 2, out)
+
+    def test_integration_without_lane_lint_is_a_usage_error(self):
+        rc, out = self.lane("--integration", "7")
+        self.assertEqual(rc, 2, out)
+
+
 class LintCheckReviewed(tm.ReviewEnv):
     """`merge --reviewed` leaves a pull request not done unless a lane-lint PASS names its live head (decision lanes-run-no-full-ci-job). The
     one review record here is done, so only the lint comment decides. A PASS for an older head, a FAIL, and a PASS by a non-owner each leave
