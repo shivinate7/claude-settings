@@ -13,7 +13,7 @@ Settled by the brief (not options here): an item reply is a new `asks/<id>` reco
 The writer routes it to the item's `owner`, or takes it when that session has ended. The session answers on that ask record
 (`reply`, `answered`), never on the item's `reply`. While its item is on the page, the record shows only on the item's card. It is not in the Asks list, it does not count in the ask pill,
 and it makes no "Re: an ask not on this page" row. The session that closes the item holds the close for at most 7 days while a reply waits (effect unmeasured). After that the item closes, and the closed line keeps the reply. A new answer marks the card "New reply"
-and opens a sunk card, as `replied` does today. Item 11 asks what "gone" means while the closed item is still a line.
+and opens a sunk card, as `replied` does today. Item 11 covers the reply while the closed item is still a line.
 
 No. 41 in the card states is answered with its filing pending ("Filing pending, sent"). Main draws a filed answer as one line
 (page.html `routedOpen`, `entryFor`), so a filed No. 41 would not be a card. No. 15 is drawn as main's filed line.
