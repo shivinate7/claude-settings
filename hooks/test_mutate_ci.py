@@ -1773,6 +1773,7 @@ WALK_SUITES = {
     "hooks/guard_merge.py": ["lint/test_hook_catalog.py", "lint/test_report_guard_review.py", "lint/test_settings_matcher.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
+    "hooks/guard_load.py": ["hooks/test_guard_load_os.py", "lint/test_sim_lease.py"],
 }
 
 
