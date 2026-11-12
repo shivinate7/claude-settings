@@ -904,13 +904,17 @@ def task_str_replace_hit(entry):
 def decision_form_hit(op: str, data):
     """(rule, matched) when this write of a waiting-page decision breaks the form. A closed item and a
     record that is neither a decision nor a task pass. An update is judged for the fields it carries, and
-    only with kind decision or task: the guard cannot see the stored kind. A task that carries a non-empty
+    only with kind decision or task, or with steps and no decision kind (steps are task-only): the guard
+    cannot see the stored kind. A task that carries a non-empty
     `options` list gets the Departs from check alone (rule question-departs), on its `context`: the Goal,
     Problem and Based on lines and the gain and lose effects are a decision's form. A task with no options
     passes."""
     if not isinstance(data, dict) or data.get("status") == "closed":
         return PASS
-    if data.get("kind") == "task":
+    kind = data.get("kind")
+    # Steps are task-only, so an update that carries them and is no decision is a task. A set with steps and
+    # no kind stays on the decision path below, as on main.
+    if kind == "task" or (op != "set" and kind != "decision" and data.get("steps")):
         return _task_departs_hit(op, data)
     if op == "set":
         if data.get("kind") not in (None, "decision"):
