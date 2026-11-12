@@ -1,11 +1,11 @@
 {
   "title": "banchi #961 (glossary) and #944 (dry-run decode) wait for the owner's keep or close",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 250,
   "owner": "coordinator",
-  "lane": "session_013NEJKyjpRKEfQatYAcyFVU",
+  "lane": "",
   "why": "Two banchi PRs are parked, and each needs the owner's keep or close. Title from the coordinator's 21:42 CST correction, Nov 7.",
-  "note": "Held by the owner's item 384 hold (21:42 CST Nov 7). Filed from the coordinator, 21:41 and 21:42 CST Nov 7. Owner item 385 a (06:18 CST Nov 8): runner 9 closes banchi #961 and #944 as parked and keeps each branch; a later lane reopens them. Lane prose-claude-1 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
-  "updatedAt": "2026-11-12T07:29:00-06:00"
+  "note": "Held by the owner's item 384 hold (21:42 CST Nov 7). Filed from the coordinator, 21:41 and 21:42 CST Nov 7. Owner item 385 a (06:18 CST Nov 8): runner 9 closes banchi #961 and #944 as parked and keeps each branch; a later lane reopens them. Lane prose-claude-1 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Skipped by lane fan-prose-claude-1 (coordinator 08:56 CST Nov 12): banchi repo; the owner's keep or close is pending. Back to ready, no lane.",
+  "updatedAt": "2026-11-12T08:55:00-06:00"
 }

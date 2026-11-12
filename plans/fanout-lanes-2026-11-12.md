@@ -441,6 +441,7 @@ How lanes were cut: steps of one repo and one kind (code or prose) that name the
   - notes-1796-fix-lines: #1796's archive-then-delete notes each carry a Fix line (ruling text: "owner 20:24")
   - notes-204-ponytail-drop: Drop docs/debts/notes.md:204 and the unused ponytail marketplace (ruling text: "owner 2026-11-11 13:36")
   - owner-health-tab: A tab on claude-settings' page shows the owner what he sees, what makes it happen, and how healthy e (ruling text: "Owner 11:35")
+  - page-term-sweep: Prose says "page" and "page item", after #2660 merges (coordinator 08:56 CST Nov 12)
 
 ## prose-claude-3
 

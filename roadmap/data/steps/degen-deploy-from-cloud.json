@@ -1,12 +1,12 @@
 {
   "title": "Degen deploys run from a cloud session through Tailscale, with the image built in GitHub Actions",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "ready",
   "order": 1006,
   "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
-  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: claude-settings outbox home-cloud-setup.md bullet 4. Touches the degen and home CLAUDE.md deploy lines; needs the HA check-in rule (degen rule ha-deploy-check-in) and the owner's word before any deploy. Lane prose-claude-1 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
-  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: claude-settings outbox home-cloud-setup.md bullet 4. Touches the degen and home CLAUDE.md deploy lines; needs the HA check-in rule (degen rule ha-deploy-check-in) and the owner's word before any deploy. Lane prose-claude-1 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Skipped by lane fan-prose-claude-1 (coordinator 08:56 CST Nov 12): no owner words. Back to ready, no lane.",
+  "updatedAt": "2026-11-12T08:55:00-06:00",
   "owner": "triage",
-  "lane": "session_013NEJKyjpRKEfQatYAcyFVU",
+  "lane": "",
   "blockedBy": []
 }

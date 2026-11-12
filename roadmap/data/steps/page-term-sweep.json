@@ -1,0 +1,14 @@
+{
+ "id": "page-term-sweep",
+ "title": "Prose says \"page\" and \"page item\", not \"waiting page\" and \"waiting-page item\"",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "About 167 prose mentions still say \"waiting page\" or \"waiting-page item\" after #2660 renames the terms.",
+ "source": "coordinator 08:56 CST Nov 12, from lane fan-prose-claude-1",
+ "note": "Prose. Starts after #2660 merges. Start at GLOSSARY.md:91 and skills/waiting-page/SKILL.md:156, 218, 246. The skill id waiting-page stays. On lane prose-claude-2 (not started yet).",
+ "updatedAt": "2026-11-12T08:55:00-06:00"
+}
