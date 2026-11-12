@@ -41,6 +41,23 @@ for _who, _record in (("no session record", None), ("a lane", "lane"), ("a batch
 sh("auto-merge: the GraphQL disable mutation stays allowed", GQL_DISABLE, "allow", cwd=NOGIT)
 sh("auto-merge: gh pr merge --disable-auto on a green head stays allowed", "gh pr merge 5 --disable-auto", "allow",
    silent=True, cwd=NOGIT, **GREEN_HEAD)
+# A flag before the `graphql` endpoint must not hide the mutation. Each shape sends the same mutation, so each is refused
+# in the same sessions as the bare endpoint above.
+GQL_FLAGGED = (
+    "gh api -X POST graphql",
+    "gh api -H 'X-Github-Next-Global-ID: 1' graphql",
+    "gh api --hostname github.com graphql",
+)
+for _shape in GQL_FLAGGED:
+    for _who, _record in (("no session record", None), ("a lane", "lane"), ("a batch runner", "runner"),
+                          ("a coordinator", "coordinator"), ("an untagged session", "untagged")):
+        _role = {} if _record is None else dict(transcript=role_path(_record), env=ROLE_ENV)
+        sh("auto-merge: the GraphQL enable mutation as `%s` in %s is refused" % (_shape, _who),
+           GQL_ENABLE.replace("gh api graphql", _shape), "deny", "auto-merge", cwd=NOGIT, carries=AUTO_CARRY,
+           lacks=AUTO_CLI_LACKS, **_role)
+# The `--auto=true` form reaches the same button, so it is refused on a green head like `--auto`.
+sh("auto-merge: gh pr merge --auto=true on a green head is refused", "gh pr merge 5 --auto=true", "deny", "auto-merge",
+   cwd=NOGIT, carries=AUTO_CARRY, lacks=AUTO_CLI_LACKS, **GREEN_HEAD)
 
 
 # =========================================================================== draft-pr through gh api
@@ -141,6 +158,11 @@ ready_case("ready-lane: update_pull_request with no draft key stays allowed in a
            "mcp__github__update_pull_request", dict(owner="y", repo="x", pullNumber=5, title="x"), None)
 ready_case("ready-lane: update_pull_request with draft true stays allowed in a lane session", "allow", "lane",
            "mcp__github__update_pull_request", dict(owner="y", repo="x", pullNumber=5, draft=True), None)
+# Pins that kill a mutant: a PATCH that sets no draft field, or sets draft true, marks nothing ready, so a lane keeps it.
+ready_case("ready-lane: gh api PATCH with a title and no draft field stays allowed in a lane session", "allow", "lane",
+           "Bash", {}, "gh api -X PATCH repos/o/r/pulls/5 -f title=x")
+ready_case("ready-lane: gh api PATCH with -F draft=true stays allowed in a lane session", "allow", "lane", "Bash", {},
+           "gh api -X PATCH repos/o/r/pulls/5 -F draft=true")
 # A record that cannot be read proves no lane, so the mark is judged as main judges it. `unreadable` is a folder (13406).
 ready_case("ready-lane: a ready mark with an unreadable own record is allowed (fails open)", "allow", "unreadable",
            "mcp__github__update_pull_request", dict(owner="y", repo="x", pullNumber=5, draft=False), None)
@@ -157,6 +179,13 @@ ready_case("ready-lane: the GraphQL ready mark in a heredoc body is no call", "a
            "cat <<'EOF'\n" + GQL_READY + "\nEOF")
 ready_case("ready-lane: the GraphQL ready mark in a comment is no call", "allow", "lane", "Bash", {},
            "echo ok # " + GQL_READY)
+# A flag before the `graphql` endpoint must not hide the ready mark. A lane is refused; a batch runner is allowed.
+for _shape in GQL_FLAGGED:
+    _command = GQL_READY.replace("gh api graphql", _shape)
+    ready_case("ready-lane: the GraphQL ready mark as `%s` is refused in a lane session" % _shape, "deny", "lane",
+               "Bash", {}, _command)
+    ready_case("ready-lane: the GraphQL ready mark as `%s` is allowed in a batch runner session" % _shape, "allow",
+               "runner", "Bash", {}, _command)
 # gh pr merge --auto through each call shape, on a green head: a call is refused, and text that holds it is no call.
 for _label, _command, _expected in call_shapes(GH_AUTO_MERGE):
     _deny = _expected == "deny"
