@@ -1546,32 +1546,34 @@ def _words(text) -> set:
     return set(WORD.findall(str(text).lower())) - STOPWORDS
 
 
-def _ruling_text(body) -> str:
+def _ruling_text(body, cap=INDEX_CAP) -> str:
     """The whole `## The ruling` section (to the next `## `), else the body after the title line, white space
-    collapsed and capped."""
+    collapsed and capped at `cap`."""
     match = RULING_HEADING.search(body)
     if match:
         section = body[match.end():]
         nxt = re.search(r"^##[ \t]", section, re.M)
         text = " ".join((section[:nxt.start()] if nxt else section).split())
         if text:
-            return text[:INDEX_CAP]
+            return text[:cap]
     lines = body.splitlines()
     if lines and lines[0].startswith("#"):
         lines = lines[1:]
-    return " ".join(" ".join(lines).split())[:INDEX_CAP]
+    return " ".join(" ".join(lines).split())[:cap]
 
 
-def _record_index(root, folder, unknown, label, seen):
+def _record_index(root, folder, unknown, label, seen, only=None, cap=INDEX_CAP):
     """(folder exists, index lines `<folder>/<stem>: <ruling>`) for the records of root/docs/<folder>. A record
-    or folder that cannot be read adds an unreadable source to `unknown`."""
+    or folder that cannot be read adds an unreadable source to `unknown`. `only` (a set of stems) reads just
+    those records, so a caller that needs a few pays for a few reads; `cap` caps each ruling text."""
     path = os.path.join(root, "docs", folder)
     if not os.path.isdir(path):
         return False, []
     lines = []
     try:
         names = sorted(n for n in os.listdir(path) if n.endswith(".md") and n.lower() != "readme.md"
-                       and not (folder == "debts" and n.lower() == "notes.md"))  # the notes file holds no ruling
+                       and not (folder == "debts" and n.lower() == "notes.md")  # the notes file holds no ruling
+                       and (only is None or n[:-3] in only))
     except OSError as exc:
         unknown.append("%s (%s: %s)" % (label, UNREADABLE, type(exc).__name__))
         return True, lines
@@ -1586,7 +1588,7 @@ def _record_index(root, folder, unknown, label, seen):
             unknown.append("%s (%s: %s)" % (label, UNREADABLE, name))
             continue
         seen.add(record_id)
-        lines.append("%s: %s" % (record_id, _ruling_text(body)))
+        lines.append("%s: %s" % (record_id, _ruling_text(body, cap)))
     return True, lines
 
 
@@ -1687,12 +1689,9 @@ def _step_rulings(steps, words):
     return [line for _, _, line in sorted(scored)[:STEP_TOP]]
 
 
-def past_rulings(question_text, repo_root):
-    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the step
-    rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
-    for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
-    "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
-    candidates, unknown, seen = [], [], set()
+def _decision_roots(repo_root, unknown):
+    """The checkouts whose decision records are read: the repo first (it wins a repeated slug), then the
+    claude-settings checkout the global rules point at. An absent pointer adds to `unknown`."""
     roots = [repo_root]
     try:
         import guard_pointer  # the claude-settings checkout: the one home of the pointer line
@@ -1703,6 +1702,34 @@ def past_rulings(question_text, repo_root):
         unknown.append("claude-settings decision records (absent)")
     elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
+    return roots
+
+
+NAMED_MAX, NAMED_CAP = 8, 1500
+
+
+def named_rulings(slugs, repo_root):
+    """(lines, unknown): `decisions/<slug>: <ruling section>` for the first NAMED_MAX of `slugs` that have a record
+    in the repo or the claude-settings checkout, in `slugs` order. A slug with no file adds nothing. Reads only
+    those records; one that cannot be read adds to `unknown`."""
+    unknown = []
+    roots = _decision_roots(repo_root, unknown)
+    unknown = [u for u in unknown if "(absent)" not in u]  # an absent pointer is no read that failed
+    present = [s for s in slugs if any(os.path.isfile(os.path.join(r, "docs", "decisions", s + ".md")) for r in roots)]
+    wanted, lines, seen = set(present[:NAMED_MAX]), [], set()
+    for root in roots:
+        lines += _record_index(root, "decisions", unknown, "decision records", seen, wanted, NAMED_CAP)[1]
+    order = {"decisions/%s" % s: i for i, s in enumerate(present)}
+    return sorted(lines, key=lambda line: order[line.split(": ", 1)[0]]), unknown
+
+
+def past_rulings(question_text, repo_root):
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the step
+    rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
+    for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
+    "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
+    candidates, unknown, seen = [], [], set()
+    roots = _decision_roots(repo_root, unknown)
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
         for root in roots if folder == "decisions" else roots[:1]:
