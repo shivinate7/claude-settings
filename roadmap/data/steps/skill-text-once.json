@@ -4,13 +4,16 @@
   "status": "doing",
   "order": 103.3625,
   "why": "Owner ask ask-mw5ax2zb2j: improve the page as it grew.",
-  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): M. Generate it from itemFields and the guard rules. The 8-second Undo is stated 3 times, and \"the guard cannot see the stored field\" 5 times. Built in #1441 (head 3dc4ed5c4), with runner 8 to merge (coordinator, 14:10 CST Nov 7). Doing 05:58 CST Nov 10: open PR #1441 on branch skill-text-once (triage live build).",
-  "updatedAt": "2026-11-11T22:50:00-06:00",
+  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): M. Generate it from itemFields and the guard rules. The 8-second Undo is stated 3 times, and \"the guard cannot see the stored field\" 5 times. Built in #1441 (head 3dc4ed5c4), with runner 8 to merge (coordinator, 14:10 CST Nov 7). Doing 05:58 CST Nov 10: open PR #1441 on branch skill-text-once (triage live build). Lane report (coordinator 23:11 CST Nov 11): its work is PR #1441 (code), which re-points onto #2619 after the guard test split.",
+  "updatedAt": "2026-11-11T23:12:00-06:00",
   "paused": {
     "why": "Waits on step page-reply-uncollapse to merge.",
     "decides": "coordinator",
     "at": "2026-11-06T14:39:00-06:00",
     "by": "triage"
   },
-  "lane": "session_013NEJKzJG4GXQ3nzaHE94Ks"
+  "lane": "session_013NEJKzJG4GXQ3nzaHE94Ks",
+  "blockedBy": [
+    "test-guard-split-per-rule"
+  ]
 }

@@ -6,10 +6,10 @@
   "phase": "next",
   "lane": "session_013NEJKzJG4GXQ3nzaHE94Ks",
   "why": "The skill file is 883 lines; every session that loads it pays for history it does not need.",
-  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 3). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. skills/waiting-page SKILL.md (883 lines) splits by topic and drops its PR history. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
+  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 3). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. skills/waiting-page SKILL.md (883 lines) splits by topic and drops its PR history. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane report (coordinator 23:11 CST Nov 11): PR #2619, head 2efdc1501, also re-points 3 tests and the ci-scope lists, so it batches as code, not prose.",
   "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-11T22:50:00-06:00",
+  "updatedAt": "2026-11-11T23:12:00-06:00",
   "blockedBy": [],
   "order": 0.101
 }
