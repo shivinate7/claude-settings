@@ -1,0 +1,6 @@
+# The two guard mutation shards have unmeasured caps
+
+- **What.** The guard mutation test runs in two shards, `checks-mutate-guard` (`MUTATE_SHARD` 1/2) and `checks-mutate-guard-2` (2/2). Each job has its own `timeout-minutes` of 75, an interim stopgap (owner 12:11 CST Nov 10, decision `ci-job-caps`). No sharded run is measured yet, so neither cap is set from a step time.
+- **Where.** Jobs `checks-mutate-guard` and `checks-mutate-guard-2` in `.github/workflows/checks.yml`, and their row and sharded-run bullet in `docs/decisions/ci-job-caps.md`.
+- **Decision.** `ci-job-caps` (each CI job's cap leaves its slowest run under 80%).
+- **Retire.** The per-shard step times come from the job steps of the first green run of both shards on main. Each job's comment beside `timeout-minutes` then carries its shard's slowest step time. Its cap is set, or kept, by the cap rule of decision `ci-job-caps` in force at the time. While the stopgap holds, that rule is suspended, so 75 may stay. No runnable check reads these figures yet; debt `measured-time-table` (a table of measured times) holds the reader. The closing pull request cites a green run on its own head with the line Retire-run: mutate-shard-recap -- run URL.
