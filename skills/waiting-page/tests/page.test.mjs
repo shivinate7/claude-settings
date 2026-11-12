@@ -124,7 +124,7 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false, holdMeasure = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -142,6 +142,8 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, holdAsks, dbExtra, noStore, hold, keepItems });
   await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
+  // holdMeasure: the page drops every mockup's height report, so a case reads the boxes before any measure, as on first paint.
+  if (holdMeasure) await page.addInitScript(() => { if (window.parent === window) window.addEventListener("message", (e) => { if (e.data && e.data.dfit === 1) e.stopImmediatePropagation(); }, true); });
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   if (clock) await page.clock.setFixedTime(new Date(clock));
   await page.goto(ORIGIN);
@@ -639,9 +641,10 @@ test("a look question with three options, a GitHub folder link and no designs sh
 
 const PICS = { "price-a": "<p>a</p>", "price-b": "<p>b</p>", "price-c": "<p>c</p>" };
 // Option A may take a focus, a declared size or a differing picture. The other options stay plain.
-const picItem = (id, n, { focus, size, differs } = {}) => mk(id, n, {
-  options: LOOK_OPTS.map((o) => (o.key === "a" && differs ? { ...o, differs } : o)), pick: "a",
-  designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, ...(o.key === "a" && focus ? { focus, ...(size ? { size } : {}) } : {}) })),
+// count: how many options the card has (the first `count` of LOOK_OPTS). declared: a size every option's design declares.
+const picItem = (id, n, { focus, size, differs, count = 3, declared } = {}) => mk(id, n, {
+  options: LOOK_OPTS.slice(0, count).map((o) => (o.key === "a" && differs ? { ...o, differs } : o)), pick: "a",
+  designs: LOOK_OPTS.slice(0, count).map((o) => ({ slug: o.design, label: o.label, ...(o.key === "a" && focus ? { focus, ...(size ? { size } : {}) } : {}), ...(declared ? { size: declared } : {}) })),
 });
 // A mockup h px tall, 390 wide: a gradient over a 50px band at the end.
 const TALL_PIC = (h) => `<body style="margin:0"><div style="height:${h - 50}px;background:linear-gradient(#2a6,#26a)"></div><div style="height:50px;background:#a62"></div></body>`;
@@ -1133,6 +1136,130 @@ test("a tall picture adds no sideways scroll to the page at 390 wide, even scrol
   await page.locator(boxSel(it.id)).evaluate((w) => { w.scrollTop = w.scrollHeight; });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
 });
+
+// ---------------------------------------------------------------- an option's picture fills its card (docs/design/page-pics-fill-card-notes.md, sections 2, 3, 5, 8)
+// The box is the card's column less its 2px border, or 2x the picture's own width when that is less. The column is the .opic's width; the 2px is for its rounding.
+// Sizes are read from the card and never pinned in pixels, so no case depends on the fonts.
+const PHONE = TALL_PIC(844); // a 390 x 844 phone picture
+const SAME = (html) => ({ "price-a": html, "price-b": html, "price-c": html });
+// A w x h focus box under 300px of page and over 600px of it: the mockup is 900 + h tall.
+const FOCUS_BOX = (w, h) => `<body style="margin:0"><div style="height:300px;background:#ccc"></div><div id="panel" style="width:${w}px;height:${h}px;background:#a62"></div><div style="height:600px;background:#999"></div></body>`;
+// Every option card's picture in one pass: the column it sits in, the box and its scroll, the frame's width and the scrollbar gutter.
+const optBoxes = (page, id) => page.evaluate((i) => [...document.querySelectorAll(`#item-${i} label.opt`)].map((l) => {
+  const o = l.querySelector(".opic"), w = o.querySelector(".dfitwrap"), f = w.querySelector("iframe");
+  return { opt: l.getAttribute("for"), col: o.clientWidth, wrapW: w.getBoundingClientRect().width, wrapH: w.getBoundingClientRect().height, fw: f.getBoundingClientRect().width, cls: w.className, g: w.offsetWidth - w.clientWidth - 2, top: l.getBoundingClientRect().top };
+}), id);
+// Waits until n option frames have posted a mockup h px tall.
+const framesAt = (page, n, h) => page.waitForFunction(([N, H]) => Object.values(FIT).filter((c) => c.h === H).length >= N, [n, h]);
+// Waits until every box of the card keeps its width for two frames, so a read is the last fit and not a first pass.
+const boxesSettled = (page, id) => page.waitForFunction((i) => new Promise((done) => {
+  const ws = () => [...document.querySelectorAll(`#item-${i} label.opt .dfitwrap`)].map((w) => w.getBoundingClientRect().width).join();
+  const a = ws();
+  requestAnimationFrame(() => requestAnimationFrame(() => done(ws() === a)));
+}), id, { polling: 50 });
+const assertScope = (boxes, count, width) => {
+  assert.equal(boxes.length, count, "the card does not hold the options the case gave it");
+  if (width === 1280) assert.ok(boxes.every((b) => Math.abs(b.top - boxes[0].top) <= 1), "the cards are not in one row at 1280");
+};
+
+// A phone picture draws whole at the card's width: 390 x 844 at 287 wide is 622 high. Red on the old code: it drew 224 wide and scrolled.
+const phoneFill = async (t, { count, width, scheme }) => {
+  const it = picItem("fill-phone", 80, { count });
+  const page = await open(t, { items: [it], designData: SAME(PHONE), scheme, viewport: { width, height: 900 } }); if (!page) return;
+  await framesAt(page, count, 844);
+  await boxesSettled(page, it.id);
+  const boxes = await optBoxes(page, it.id);
+  assertScope(boxes, count, width);
+  for (const b of boxes) {
+    assert.ok(Math.abs(b.wrapW - b.col) <= 2, `${b.opt} box is ${b.wrapW} wide in a ${b.col} wide column, not the column`);
+    assert.ok(!/scroll/.test(b.cls), `${b.opt} phone picture scrolls, so it is not drawn whole`);
+    const want = (844 * b.fw) / 390;
+    assert.ok(Math.abs(b.wrapH - want) <= 2, `${b.opt} box is ${b.wrapH} high, not the phone's ${want.toFixed(1)} at ${b.fw} wide`);
+  }
+};
+for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) for (const count of [2, 3]) {
+  test(`an option's phone picture fills its card's width and draws whole, with ${count} options at ${width} wide, ${scheme} scheme`, async (t) => {
+    await phoneFill(t, { count, width, scheme });
+  });
+}
+
+// A tall picture scrolls in its 480px box at the card width less the gutter. Red on the old code at 390, and two per row at 1280: 221.8 wide.
+const tallFill = async (t, { count, width, scheme }) => {
+  const it = picItem("tall-fill", 81, { count });
+  const page = await open(t, { items: [it], designData: SAME(TALL_PIC(2400)), scheme, viewport: { width, height: 900 } }); if (!page) return;
+  await framesAt(page, count, 2400);
+  await boxesSettled(page, it.id);
+  const boxes = await optBoxes(page, it.id);
+  assertScope(boxes, count, width);
+  for (const b of boxes) {
+    assert.ok(/scroll/.test(b.cls), `${b.opt} tall picture does not scroll`);
+    assert.ok(Math.abs(b.wrapW - b.col) <= 2, `${b.opt} box is ${b.wrapW} wide in a ${b.col} wide column, not the column`);
+    assert.ok(Math.abs(b.fw - (b.col - 2 - b.g)) <= 2, `${b.opt} picture is ${b.fw} wide, not the column less the border and the ${b.g}px gutter`);
+    assert.ok(Math.abs(b.wrapH - 480) <= 1, `${b.opt} box is ${b.wrapH} high, not 480`);
+  }
+};
+for (const scheme of ["light", "dark"]) for (const [count, width] of [[2, 390], [3, 390], [2, 1280]]) {
+  test(`a tall option picture scrolls at the card width less the gutter, with ${count} options at ${width} wide, ${scheme} scheme`, async (t) => {
+    await tallFill(t, { count, width, scheme });
+  });
+}
+// Green control: three per row at 1280 the tall picture already scrolled at the card width less the gutter, so it must stay so.
+for (const scheme of ["light", "dark"]) {
+  test(`green control: a tall option picture, three per row at 1280 wide, scrolls at the card width less the gutter, as today, ${scheme} scheme`, async (t) => {
+    await tallFill(t, { count: 3, width: 1280, scheme });
+  });
+}
+
+// A focus box fills the card too, and a box so small that 2x its width is less than the card draws at 2x. Red on the old code: 182 wide and 102 wide.
+const focusFill = async (t, { w, h, width, scheme }) => {
+  const it = picItem("focus-fill", 82, { focus: "#panel" });
+  const page = await open(t, { items: [it], designData: { ...PICS, "price-a": FOCUS_BOX(w, h) }, scheme, viewport: { width, height: 900 } }); if (!page) return;
+  await frameSettled(page, 900 + h);
+  await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(it.id));
+  await settleFit(page, it.id);
+  const b = (await optBoxes(page, it.id))[0];
+  const want = Math.min(b.col, 2 * w + 2);
+  assert.ok(Math.abs(b.wrapW - want) <= 2, `the focus box is ${b.wrapW} wide, not min(column ${b.col}, 2 x ${w} + 2) = ${want}`);
+};
+for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
+  test(`a focus box 180 x 120 fills its card width, with 3 options at ${width} wide, ${scheme} scheme`, async (t) => {
+    await focusFill(t, { w: 180, h: 120, width, scheme });
+  });
+  test(`a focus box 100 x 70 draws at 2x its width, not the card width, with 3 options at ${width} wide, ${scheme} scheme`, async (t) => {
+    await focusFill(t, { w: 100, h: 70, width, scheme });
+  });
+}
+
+// Before the frame reports, a declared size sets the box from the card: its width, and the height of a 390 x 844 phone at that width.
+// holdMeasure drops every report, so the case reads the first paint and not a measure.
+for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
+  test(`an option's phone picture has its box from the card on first paint, before any measure, with 3 options at ${width} wide, ${scheme} scheme`, async (t) => {
+    const it = picItem("first-paint", 83, { declared: { w: 390, h: 844 } });
+    const page = await open(t, { items: [it], designData: SAME(PHONE), scheme, viewport: { width, height: 900 }, holdMeasure: true }); if (!page) return;
+    await boxesSettled(page, it.id);
+    assert.equal(await page.evaluate(() => Object.keys(FIT).length), 0, "a measure arrived, so the read is not the first paint");
+    const boxes = await optBoxes(page, it.id);
+    assertScope(boxes, 3, width);
+    for (const b of boxes) {
+      assert.ok(Math.abs(b.wrapW - b.col) <= 2, `${b.opt} box is ${b.wrapW} wide in a ${b.col} wide column before any measure`);
+      const want = (844 * b.wrapW) / 390;
+      assert.ok(Math.abs(b.wrapH - want) <= 3, `${b.opt} box is ${b.wrapH} high before any measure, not the declared phone's ${want.toFixed(1)} at ${b.wrapW} wide`);
+    }
+  });
+}
+
+// Green control: the tap on a picture that fills its card still opens the viewer, and never picks the option.
+for (const width of [390, 1280]) {
+  test(`green control: a tap on a phone picture that fills its card opens the viewer and picks nothing, at ${width} wide`, async (t) => {
+    const it = picItem("tap-fill", 84);
+    const page = await open(t, { items: [it], designData: SAME(PHONE), viewport: { width, height: 900 } }); if (!page) return;
+    await framesAt(page, 3, 844);
+    await boxesSettled(page, it.id);
+    await card(page, it).locator(`label.opt[for="o-${it.id}-b"] .opic`).click();
+    assert.equal(await page.isChecked(`#o-${it.id}-b`), false, "a tap on the picture picked the option");
+    assert.equal(await page.locator("#dsheet").isVisible(), true, "the viewer did not open");
+  });
+}
 
 // A 60-character URL has no break point, so the step must wrap inside the card rather than widen it.
 const LONG_URL = "https://waiting.test/" + "a".repeat(60 - "https://waiting.test/".length);
