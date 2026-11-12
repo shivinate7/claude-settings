@@ -27,7 +27,9 @@ Interface the hook must match:
   Every other refusal is liftable.
 - The Explore remedy: the spawn prompt's fix clause and the Agent fallback reason name the audit marker,
   EXPLORE_AUDIT_MARKER in hooks/guard.py, read at test time and never copied here.
-- Any model error, or malformed input, fails open: no deny, exit 0, one stderr line.
+- A model error on an Agent spawn, or malformed input, fails open: no deny, exit 0, one stderr line. An owner question
+  whose check cannot run (a model error or timeout, or lint/report_guard.py that cannot be imported) is refused as
+  Unvetted, unless its own text carries an `Unvetted:` line. On a send or a page write that refusal is rule past-ruling.
 - AskUserQuestion: a box that fails the code check (hooks/question_form.py chat_hit) is refused before
   any model call, with the rule chat_hit names. The model sees only a box that passes it, and judges only
   what code cannot (the cases are in hooks/test_question_form.py, which reuses run_hook below).
@@ -237,6 +239,9 @@ def _fake_run(argv, **kwargs):
     prompt = prompt.decode("utf-8", "replace") if isinstance(prompt, bytes) else str(prompt)
     with open(os.environ["CJ_RECORD"], "a", encoding="utf-8") as f:
         f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
+    # CJ_MODEL_TIMEOUT makes the call time out, as the real one does at its limit: the call is recorded, then it raises.
+    if os.environ.get("CJ_MODEL_TIMEOUT"):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
     if os.environ.get("CJ_MODEL_FAIL"):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
     # CJ_FORM_FAIL makes only the form call fail: a call whose prompt lacks the dedicated call's text.
@@ -248,7 +253,12 @@ def _fake_run(argv, **kwargs):
     if "Judge only item 8 below" in prompt:
         if os.environ.get("CJ_PAST_FAIL"):
             return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub past-ruling failure")
-        answer = os.environ.get("CJ_PAST_ANSWER") or answer
+        # CJ_PAST_IF: the dedicated call refuses only when that text is in its prompt, else it allows.
+        only_if = os.environ.get("CJ_PAST_IF")
+        if only_if is not None and only_if not in prompt:
+            answer = '{"ok": true}'
+        else:
+            answer = os.environ.get("CJ_PAST_ANSWER") or answer
     return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": answer}), stderr="")
 
 
@@ -288,6 +298,9 @@ class _WatchQuestionForm:
 
 
 sys.meta_path.insert(0, _WatchQuestionForm())
+# CJ_BLOCK_IMPORT names a module the child cannot import: None in sys.modules makes its import raise ImportError.
+if os.environ.get("CJ_BLOCK_IMPORT"):
+    sys.modules[os.environ["CJ_BLOCK_IMPORT"]] = None
 '''
 
 
@@ -339,10 +352,12 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, past_fail=False, form_fail=False):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, past_fail=False, form_fail=False,
+             block=None, model_timeout=False, past_if=None):
     """One hook run. `answer` is the canned model answer. `past` is the dedicated past-ruling call's answer, and
     `past_fail` makes only that call fail; unset, the dedicated call takes `answer`. `form_fail` makes only the form call
-    fail."""
+    fail. `block` names a module the child cannot import. `model_timeout` makes every model call time out. `past_if` makes
+    the dedicated call answer `past` only when that text is in its prompt, and allow otherwise."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -363,6 +378,12 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, 
         env["CJ_PAST_FAIL"] = "1"
     if form_fail:
         env["CJ_FORM_FAIL"] = "1"
+    if block:
+        env["CJ_BLOCK_IMPORT"] = block
+    if model_timeout:
+        env["CJ_MODEL_TIMEOUT"] = "1"
+    if past_if is not None:
+        env["CJ_PAST_IF"] = past_if
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
@@ -2209,6 +2230,145 @@ def case_send_with_the_form_only_in_a_fence_makes_no_call():
         check("fenced send via %s: not refused" % tool, r.code == 0 and r.deny() is None, detail(r))
 
 
+# ------------------------------------------------------------------ a check that cannot run: no fail open, and its rule
+#
+# A check that cannot run on an owner question refuses it as Unvetted, unless the question's own text carries an
+# `Unvetted:` line. On a send or a page write the refusal names rule past-ruling. An import that fails is a check that
+# cannot run, so it refuses too and never allows.
+PICK_SLUG = "the-2026-11-09-pick-stands"
+PICK_RULING = "Owner, 2026-11-09: the pick stands and is not asked again. Marker pick-4b6e."
+PICK_REPO = make_repo("picks", decisions={PICK_SLUG: PICK_RULING})
+PICK_GOAL = "Goal: approve the 2026-11-09 pick again."
+PICK_PROBLEM = "Problem (rule): the owner already picked it on 2026-11-09, so the question is not new."
+
+
+def case_send_check_that_cannot_run_refuses_unvetted():
+    # report_guard cannot be imported, so the past-ruling check cannot run. The question is one a listed ruling settles,
+    # so an allowed send is the defect. Each claim is its own check. The control is a send that carries its own
+    # Unvetted line: it is not refused, as the check it names is the one that can run.
+    marked = INCIDENT_357 + "\n" + UNVETTED_LINE
+    for tool in SEND_TOOLS:
+        name = "send, check cannot run (report_guard blocked), via %s" % tool
+        r = run_hook(send_input(tool, INCIDENT_357), answer=ruled(WORKTREE_SLUG), block="report_guard")
+        check(name + ": refused, not allowed", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check(name + ": the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+        check(name + ": the refusal names the check that could not run", "could not run" in r.reason(), r.reason()[:160])
+        check(name + ": the refusal holds no Remedy or Unvetted text",
+              "Remedy:" not in r.reason() and "Unvetted:" not in r.reason(), r.reason()[:160])
+        check(name + ": no fail-open line on stderr", "call judge failed open" not in r.err, r.err[-200:])
+        r = run_hook(send_input(tool, marked), answer=ruled(WORKTREE_SLUG), block="report_guard")
+        check(name + " with an Unvetted line: not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_page_check_that_cannot_run_refuses_unvetted():
+    # The same defect on a page write: the dedicated past-ruling call cannot run, so the item write is refused as
+    # Unvetted, rule past-ruling, and no form-judge call follows. The control carries its own Unvetted line.
+    page_item_passes_the_form("cannot run")
+    r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, block="report_guard")
+    check("page, check cannot run (report_guard blocked): refused, not allowed",
+          (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("page, check cannot run: the refusal is rule past-ruling", r.reason().startswith("past-ruling: "),
+          r.reason()[:160])
+    check("page, check cannot run: no form-judge call follows", len(form_calls(r)) == 0, detail(r))
+    check("page, check cannot run: no fail-open line on stderr", "call judge failed open" not in r.err, r.err[-200:])
+    marked = dict(WORKTREE_PAGE_ITEM, context=WORKTREE_PAGE_ITEM["context"] + "\n" + UNVETTED_LINE)
+    r = run_hook(page_input("set", marked, cwd=INCIDENT_REPO), answer=ALLOW, block="report_guard")
+    check("page, check cannot run, with an Unvetted line in context: not refused", r.code == 0 and r.deny() is None,
+          detail(r))
+
+
+def case_send_timeout_refusal_is_labelled_past_ruling():
+    # A model timeout on a send is the dedicated past-ruling check that could not run. Its refusal is Unvetted, and its
+    # rule is past-ruling, in the reason and in guard.log, as a refusal the check itself makes names it.
+    for tool in SEND_TOOLS:
+        name = "send, model timeout, via %s" % tool
+        r = run_hook(send_input(tool, INCIDENT_357), model_timeout=True)
+        check(name + ": the one dedicated call is made and times out", len(r.calls) == 1, detail(r))
+        check(name + ": refused as Unvetted", (r.deny() or {}).get("permissionDecision") == "deny"
+              and "Unvetted guard" in r.reason(), detail(r))
+        check(name + ": the rule label is past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+        check(name + ": guard.log records a past-ruling deny", "\tdeny\tpast-ruling\t" in r.log, r.log[-200:])
+
+
+def case_page_dedicated_error_refusal_is_labelled_past_ruling():
+    # A model error in the dedicated past-ruling call of a page write: the Unvetted refusal is rule past-ruling too.
+    page_item_passes_the_form("label")
+    r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, past_fail=True)
+    check("page label: the dedicated call fails and the write is refused as Unvetted",
+          (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted guard" in r.reason(), detail(r))
+    check("page label: the rule label is past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+    check("page label: guard.log records a past-ruling deny", "\tdeny\tpast-ruling\t" in r.log, r.log[-200:])
+
+
+def case_send_cap_keeps_a_later_question():
+    # A send past ASK_TEXT_MAX whose second question starts past the cap. The cap cuts the text from the first form line,
+    # so the second question never reaches the dedicated call and the send is allowed. The judge refuses only when the
+    # second Goal line is in its prompt (CJ_PAST_IF), so an allowed send means that line was not sent. The controls
+    # hold the same two questions with no filler (within the cap), and a full-size send near the 64 KiB bound.
+    cap = guard_constant(REPORT_GUARD, "ASK_TEXT_MAX")
+    later = PICK_GOAL + "\n" + PICK_PROBLEM
+    first_goal = INCIDENT_357.split("\n")[1]
+    message = INCIDENT_357 + "\n" + SEND_LOG_FILLER + later
+    check("send later question: the message is longer than ASK_TEXT_MAX",
+          isinstance(cap, int) and len(message) > cap, cap)
+    check("send later question: the second Goal starts past ASK_TEXT_MAX after the first form line",
+          isinstance(cap, int) and message.index(PICK_GOAL) - message.index(first_goal) > cap, "fixture offsets")
+    check("send later question: the message is under the 64 KiB send bound",
+          len(message.encode("utf-8")) < 65536, len(message.encode("utf-8")))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, message, cwd=PICK_REPO), past=ruled(PICK_SLUG), past_if=PICK_GOAL)
+        name = "send later question past the cap via %s" % tool
+        check(name + ": the later question reaches the dedicated call",
+              any(PICK_GOAL in c["prompt"] for c in past_calls(r)), detail(r))
+        check(name + ": refused as past-ruling", (r.deny() or {}).get("permissionDecision") == "deny"
+              and r.reason().startswith("past-ruling: "), r.reason()[:160])
+    short = INCIDENT_357 + "\n" + later
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, short, cwd=PICK_REPO), past=ruled(PICK_SLUG), past_if=PICK_GOAL)
+        name = "send later question within the cap, control, via %s" % tool
+        check(name + ": the later question reaches the dedicated call",
+              any(PICK_GOAL in c["prompt"] for c in past_calls(r)), detail(r))
+        check(name + ": refused as past-ruling", (r.deny() or {}).get("permissionDecision") == "deny"
+              and r.reason().startswith("past-ruling: "), r.reason()[:160])
+    full = INCIDENT_357 + "\n" + SEND_LOG_FILLER * 8 + later
+    check("send later question, full size: the message is longer than ASK_TEXT_MAX",
+          isinstance(cap, int) and len(full) > cap, cap)
+    check("send later question, full size: the message is under the 64 KiB send bound",
+          len(full.encode("utf-8")) < 65536, len(full.encode("utf-8")))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, full, cwd=PICK_REPO), past=ruled(PICK_SLUG), past_if=PICK_GOAL)
+        name = "send later question, full size, via %s" % tool
+        check(name + ": the later question reaches the dedicated call",
+              any(PICK_GOAL in c["prompt"] for c in past_calls(r)), detail(r))
+        check(name + ": refused as past-ruling", (r.deny() or {}).get("permissionDecision") == "deny"
+              and r.reason().startswith("past-ruling: "), r.reason()[:160])
+
+
+def case_send_problem_line_in_an_open_fence_or_tab_block_is_judged():
+    # The Goal and Problem lines of INCIDENT_357, with the Problem line moved under an unclosed fence line, or indented
+    # with a tab after a blank line. Both are code to the reader, so the Problem line is hidden and the send makes no
+    # call. The two controls: a tab-indented Problem line with no blank line before it is prose, and a Problem line in a
+    # closed fence is code, so no call is the right answer there.
+    title, goal, problem, *rest = INCIDENT_357.split("\n")
+    variants = (
+        ("after an unclosed fence line", "\n".join([title, goal, "```", problem] + rest), True),
+        ("tab-indented after a blank line", "\n".join([title, goal, "", "\t" + problem] + rest), True),
+        ("tab-indented with no blank line (control)", "\n".join([title, goal, "\t" + problem] + rest), True),
+        ("in a closed fence (control)", "\n".join([title, goal, "```", problem, "```"] + rest), False),
+    )
+    for label, message, judged in variants:
+        for tool in SEND_TOOLS:
+            name = "send, Problem line %s, via %s" % (label, tool)
+            r = run_hook(send_input(tool, message), answer=ruled(WORKTREE_SLUG))
+            if judged:
+                check(name + ": the check is made", len(r.calls) == 1, detail(r))
+                check(name + ": refused as past-ruling", (r.deny() or {}).get("permissionDecision") == "deny"
+                      and r.reason().startswith("past-ruling: "), r.reason()[:160])
+            else:
+                check(name + ": no model call, the Problem line is code", len(r.calls) == 0, detail(r))
+                check(name + ": not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
 def defined_send_tools(path):
     """The names bound to SEND_TOOLS at module level in `path`, read as syntax, or None when it binds none."""
     import ast
@@ -2306,6 +2466,11 @@ def main():
                  case_send_over_the_cap_keeps_the_goal_and_problem,
                  case_send_over_the_cap_keeps_a_based_on_line_above_the_goal,
                  case_send_with_the_form_only_in_a_fence_makes_no_call,
+                 case_send_check_that_cannot_run_refuses_unvetted, case_page_check_that_cannot_run_refuses_unvetted,
+                 case_send_timeout_refusal_is_labelled_past_ruling,
+                 case_page_dedicated_error_refusal_is_labelled_past_ruling,
+                 case_send_cap_keeps_a_later_question,
+                 case_send_problem_line_in_an_open_fence_or_tab_block_is_judged,
                  case_send_tool_names_come_from_shared_names):
         try:
             case()
