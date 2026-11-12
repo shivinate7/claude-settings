@@ -15351,6 +15351,33 @@ class ReviewRoundModel(ReviewEnv):
         parse_text(self, haiku)
         self.assertEqual(record_state(self, haiku), record_state(self, sonnet), "a posted round 2 on haiku reads a different state from its sonnet twin")
 
+    def test_a_round_one_on_sonnet_is_accepted_with_guard_yes_as_with_guard_no(self):
+        # Control, green on main: the --round check floors sonnet at round 2, never at round 1, so round 1 on sonnet passes for a
+        # guard or check change too (decision agent-model-cap, the reviewer row).
+        for guard in ("yes", "no"):
+            with self.subTest(guard=guard):
+                flags = ("--kind", "normal", "--guard", guard, "--head", self.head(), "--round", "1:reviewer:sonnet:PASS")
+                rc, out, err = self.run_args("7", "--review-record", *flags)
+                self.assertEqual(rc, 0, f"round 1 on sonnet with --guard {guard} was refused:\n" + out + err)
+                parse_text(self, posted_body(self, out))
+
+    def test_round_two_on_opus_is_accepted_when_the_record_round_row_names_opus(self):
+        # One home (decision agent-model-cap): the --round check reads the round row of the record the guard reads, so a changed row
+        # changes this verdict with no code edit. Main reads no round row and refuses round 2 on opus under any record, so this is red there.
+        root = tempfile.mkdtemp(dir=run_folder())
+        pointer = os.path.join(root, "pointer")
+        os.makedirs(os.path.join(pointer, "docs", "decisions"))
+        with open(os.path.join(pointer, "docs", "decisions", "agent-model-cap.md"), "w", encoding="utf-8") as handle:
+            handle.write("| Role | Round | Model | Effort |\n|---|---|---|---|\n| reviewer | 2 | opus | high |\n")
+        config = os.path.join(root, "config")
+        os.makedirs(config)
+        with open(os.path.join(config, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % pointer.replace(os.sep, "/"))
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            rc, out, err = self.run_args("7", "--review-record", *self.round_flags("1:reviewer:sonnet:FAIL", "2:reviewer:opus:PASS"))
+        self.assertEqual(rc, 0, "round 2 on opus was refused under a record whose round 2 row names opus:\n" + out + err)
+        self.assertNotIn("Traceback", err)
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
@@ -16129,6 +16156,11 @@ class ReviewGuardHits(unittest.TestCase):
         guard_hits = review_fn(self, "guard_hits")
         self.assertEqual(guard_hits(["README.md", "docs/hooks/notes.md", "merges.md", "lint.md"]), [])
         self.assertEqual(guard_hits([]), [])
+
+    def test_a_diff_of_prose_decision_records_and_docs_is_no_guard_change(self):
+        # docs/ is no guard path, so a prose-only diff of docs and decision records holds no hit (decision docs-only-prs-skip-review).
+        # Control, green on main. A decision record that holds a guard's round rows is not in this case (see the report).
+        self.assertEqual(review_fn(self, "guard_hits")(["docs/decisions/docs-only-prs-skip-review.md", "docs/map/hooks.md", "docs/todo.md"]), [])
 
     def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
         self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
