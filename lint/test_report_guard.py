@@ -5220,6 +5220,99 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
 
+    # Red: a yet hedge, an as clause, a plain-verb as, a glued period and a dotted name. One test per line.
+
+    def test_pe_red_yet_before_say_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the bare verb "say" cuts the clause, so "cannot" never reaches the claim after it.
+        self.assert_allowed("I cannot yet say the failure is pre-existing.")
+
+    def test_pe_red_yet_before_known_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before "known" cuts the clause ("known" is no participle), so "not" never reaches the claim.
+        self.assert_allowed("The failure is not yet known to be pre-existing.")
+
+    def test_pe_red_yet_before_know_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the bare verb "know" cuts the clause, so "don't" never reaches the claim after it.
+        self.assert_allowed("We don't yet know the failure is pre-existing.")
+
+    def test_pe_red_yet_before_sure_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before the adjective "sure" cuts the clause, so "not" never reaches the claim after it.
+        self.assert_allowed("I am not yet sure whether the failure is pre-existing.")
+
+    def test_pe_red_yet_before_that_is_a_hedge_not_a_claim(self):
+        # Catches: "yet" before "that" cuts the clause, so "no" never reaches the claim after it.
+        self.assert_allowed("I have no proof yet that the failure is pre-existing.")
+
+    def test_pe_red_as_yet_is_a_hedge_not_a_claim(self):
+        # Catches: "as" before "yet", then "yet" itself, cut the clause, so "not" never reaches the claim after them.
+        self.assert_allowed("I have not established as yet that the failure is pre-existing.")
+
+    def test_pe_red_as_before_pre_existing_is_not_cut_by_a_later_be_verb(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and the CI is red.")
+
+    def test_pe_red_as_before_pre_existing_is_not_cut_when_while_follows(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and the CI is red while main is red.")
+
+    def test_pe_red_as_being_is_no_clause_cut(self):
+        # Catches: "as" before "being" opens a clause, so the negator "did not" never reaches the claim after it.
+        self.assert_allowed("I did not confirm the failure as being pre-existing.")
+
+    def test_pe_red_as_before_pre_existing_and_unrelated_is_no_clause_cut(self):
+        # Catches: "as" before "pre-existing" cuts the clause because a later "is" in the same clause reads as a verb.
+        self.assert_allowed("I have not confirmed the failure as pre-existing and unrelated to my change.")
+
+    def test_pe_red_as_before_a_pronoun_and_a_plain_verb_opens_a_clause(self):
+        # Catches: "as" before "it also fails" opens no clause, so "did not" reaches the claim and the line passes.
+        line = "I did not rerun it as it also fails on 32b5f8b8e."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_as_before_it_fails_with_a_too_opens_a_clause(self):
+        # Catches: "as" before "it fails" opens no clause, so "did not" reaches the claim and the line passes.
+        line = "I did not fix it as it fails on abc1234 too."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_as_before_a_noun_subject_and_a_plain_verb_opens_a_clause(self):
+        # Catches: "as" before "the failure seems" opens no clause, so "did not" reaches the claim and the line passes.
+        line = "I did not touch it as the failure seems pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_after_a_code_span_before_a_capital_ends_a_clause(self):
+        # Catches: a period after a code span cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail on `main`.The failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_after_a_close_paren_before_a_capital_ends_a_clause(self):
+        # Catches: a period after a close paren cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail (see the log).The failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_before_a_capital_i_ends_a_clause(self):
+        # Catches: a period before "I" cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail on main.I think the failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_after_an_upper_case_word_before_a_capital_ends_a_clause(self):
+        # Catches: a period after an upper-case word cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail on CI.The failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_before_a_lower_case_determiner_ends_a_clause(self):
+        # Catches: a period before "the" cuts no clause, so "did not" reaches the claim after it.
+        # The blocked pin for report_guard.py has the same letter-dot-letter shape, so the word after the period must
+        # decide the cut, not the shape alone.
+        line = "It did not fail on main.the failure is pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_glued_period_before_a_digit_after_a_letter_ends_a_clause(self):
+        # Catches: a period between a letter and a digit cuts no clause, so "did not" reaches the claim after it.
+        line = "It did not fail on it.2 failures are pre-existing."
+        self.assert_blocked(line, line)
+
+    def test_pe_red_dotted_pascal_name_in_a_claim_ends_no_clause(self):
+        # Catches: the period in Console.WriteLine cuts the clause, so "is pre-existing" loses the "not" before it.
+        self.assert_allowed("I have not confirmed the failure in Console.WriteLine is pre-existing.")
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_pe_green_brief_control_on_main_at_sha_passes(self):
@@ -5353,6 +5446,48 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         for line in rows:
             with self.subTest(line=line):
                 self.assert_allowed(line)
+
+    def test_pe_green_twins_without_the_hedge_pass(self):
+        # Control: each hedge's twin, with its "yet" taken out, is allowed on the current code, and stays allowed.
+        rows = [
+            "I cannot confirm the failure is pre-existing.",
+            "The failure is not known to be pre-existing.",
+            "We don't know the failure is pre-existing.",
+            "I am not sure whether the failure is pre-existing.",
+            "I have no proof that the failure is pre-existing.",
+            "I have not established that the failure is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_as_before_a_claim_with_no_later_verb_passes(self):
+        # Control: "as" before a bare claim, with no verb after it, opens no clause, so the negator reaches the claim.
+        self.assert_allowed("I have not confirmed the failure as pre-existing.")
+
+    def test_pe_green_as_before_a_verb_with_a_run_on_main_passes(self):
+        # Control: a line that names its run on main passes whether or not "as" opens a clause, and a line with no claim passes.
+        rows = [
+            "I did not touch it as the failure seems pre-existing on main at 174b005c1.",
+            "I did not touch it as the failure seems fixed.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_glued_period_with_a_run_on_main_passes(self):
+        # Control: a line that names its run on main passes whether or not the period cuts a clause.
+        rows = [
+            "It did not fail on main.The failure is pre-existing on main at 174b005c1.",
+            "It did not fail on main. The failure is pre-existing on main at 174b005c1.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_dotted_name_twin_without_the_dot_passes(self):
+        # Control: the twin with the dot taken out of the name is allowed on the current code, and stays allowed.
+        self.assert_allowed("I have not confirmed the failure in Console is pre-existing.")
 
     # Pins: green on the built code. Each row's claim sits after a word that the clause cut splits at, with a negator before
     # that word, so the negator reaches the claim only when the cut is gone. Each row goes red on that removal.
