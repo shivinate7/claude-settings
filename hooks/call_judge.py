@@ -410,7 +410,7 @@ PICK_PROMPT = (
     "a number the cited text lacks), or when the message says `no ruling found` and a listed ruling decides the pick. "
     "An old ruling is a past ruling to weigh, not a standing law. When a later ruling supersedes an older one, judge the "
     "pick against the later ruling and cite the later one; the dates in the text and the `at` time of a page answer say "
-    "which is later. Never refuse a pick for an older ruling that a later one replaced. A source marked not searched "
+    "which is later; a page answer marked `later/current ruling` outranks one marked `superseded`. Never refuse a pick for an older ruling that a later one replaced. A source marked not searched "
     "cannot be checked: never refuse for that alone, and never read it as clear. When you refuse, the reason names the "
     "cited ruling (its id, or the plan R-number), says what it states, and is worded as a past ruling to weigh, never as "
     "a rule the sender is bound by. Block only on a clear miss; when unsure answer {\"ok\": true}. "
@@ -428,7 +428,7 @@ PICK_WEIGH = "Treat it as a past ruling to weigh: a later ruling may supersede i
 PICK_WORD = re.compile(r"(?<![\w-])(?<!\bon[ \t])(?:pick|picks|picked|hold|holds|held)(?![\w-])(?![ \t]+(?:on|up)\b)", re.I)
 PICK_NO_RULING = re.compile(r"\bno ruling found[ \t*_`]*:[ \t*_`]*\w", re.I)  # markdown may wrap the label and the text
 PICK_PLAN_REF = re.compile(r"(?<![\w-])R(\d{1,3})(?!\w)")
-PICK_ITEM_REF = re.compile(r"\bpage[ \t]+items?[ \t]+#?(\d+)", re.I)  # a bare "item N" is no cite
+PICK_ITEM_REF = re.compile(r"\bpage[ \t]+items?[ \t]+#?(\d+)(?!\w)", re.I)  # a bare "item N" is no cite
 PICK_RECORD_REF = re.compile(r"\b(?:decisions?|debts?|steps?)[ \t]+[`'\"]?(\w+(?:-\w+)+)", re.I)
 PICK_PATH_REF = re.compile(r"(?<![\w/-])(?:decisions|debts)/([\w.-]*\w)")
 PICK_PLAN_CAP = 6000
@@ -585,22 +585,35 @@ def _flat(value):
 def _page_lines(reader, items):
     """([line], [not searched entry]) for the page items `items` (number strings): the owner's answer of each, read from
     waiting/answers/*.json on origin/roadmap (a row whose `n` is the number), oldest `at` first, then the question from
-    waiting/items/<slug>.json for each answered slug. A missing ref, folder or answer is a not searched entry."""
+    waiting/items/<slug>.json for each answered slug. Several answers of one number all stay: each older one says it is
+    superseded by the answer below, and the last says it is the later ruling. A missing ref, folder or answer is a not
+    searched entry. So is an answered number whose question file is missing, malformed or named by no `item` key."""
     answers = _ref_files(reader, PICK_PAGE_BRANCH + ":" + PICK_PAGE_ANSWERS)
     if answers is None:
         return [], ["page item %s (%s has no %s)" % (n, PICK_PAGE_BRANCH, PICK_PAGE_ANSWERS) for n in items]
     rows = [row for _, text in answers for row in _page_json(text) if _flat(row.get("n")) in items]
-    rows.sort(key=lambda row: _flat(row.get("at")))
-    lines, slugs = [], []
-    for row in rows:
+    rows.sort(key=lambda row: _flat(row.get("at")))  # stable: equal times keep the file order
+    lines, slugs, read = [], [], set()
+    for i, row in enumerate(rows):
+        number = _flat(row.get("n"))
         choice = row.get("choice")
         choice = ", ".join(map(str, choice)) if isinstance(choice, list) else choice
-        answer = "page item %s answer (%s, %s): choice %s; %s" % (
-            _flat(row.get("n")), PICK_PAGE_BRANCH, _flat(row.get("at")), _flat(choice), _flat(row.get("note") or ""))
+        said = "choice %s" % _flat(choice) if choice not in (None, "") else "parked, no choice"
+        later = any(_flat(r.get("n")) == number for r in rows[i + 1:])
+        mark = ""
+        if later:
+            mark = " [superseded by the answer below]"
+        elif any(_flat(r.get("n")) == number for r in rows[:i]):
+            mark = " [later/current ruling]"
+        answer = "page item %s answer (%s, %s)%s: %s; %s" % (
+            number, PICK_PAGE_BRANCH, _flat(row.get("at")), mark, said, _flat(row.get("note") or ""))
         lines.append(answer[:PICK_PAGE_CAP])
         slug = row.get("item")
-        if isinstance(slug, str) and PICK_SLUG.match(slug) and slug not in slugs:
-            slugs.append(slug)
+        if isinstance(slug, str) and PICK_SLUG.match(slug):
+            if slug not in slugs:
+                slugs.append(slug)
+            row["_slug"] = slug
+    questions = []
     for slug in slugs:
         item = reader.get("%s:%s/%s.json" % (PICK_PAGE_BRANCH, PICK_PAGE_ITEMS, slug))
         for data in _page_json(item[1].decode("utf-8", "replace")) if item and item[0] == b"blob" else []:
@@ -610,10 +623,16 @@ def _page_lines(reader, items):
             question = "page item %s question (%s): %s%s" % (
                 _flat(data.get("n")), PICK_PAGE_BRANCH, _flat(data.get("title") or ""),
                 (" Options: " + options) if options else "")
-            lines.append(question[:PICK_PAGE_CAP])
+            questions.append(question[:PICK_PAGE_CAP])
+            read.add(slug)
+    lines += questions
     answered = {_flat(row.get("n")) for row in rows}
-    return lines, ["page item %s (no answer in %s on %s)" % (n, PICK_PAGE_ANSWERS, PICK_PAGE_BRANCH)
-                   for n in items if n not in answered]
+    unknown = ["page item %s question (no readable %s/<slug>.json for its answer on %s)" % (n, PICK_PAGE_ITEMS, PICK_PAGE_BRANCH)
+               for n in items if n in answered and not any(
+                   row.get("_slug") in read for row in rows if _flat(row.get("n")) == n)]
+    unknown += ["page item %s (no answer in %s on %s)" % (n, PICK_PAGE_ANSWERS, PICK_PAGE_BRANCH)
+                for n in items if n not in answered]
+    return lines, unknown
 
 
 def _source_label(line):
