@@ -2793,11 +2793,16 @@ MUTATIONS = [
      'isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in lane_tags(tool_input))',
      'isinstance(t, str) and t.strip() == LANE_TAG for t in lane_tags(tool_input))',
      "guard", "floor lane: an upper-case lane tag on haiku gets the lane remedy"),
-    # RULE lane-one-topic, the owner-unread call. Deleting the call lets a lane brief with no owner-unread sentence through.
-    ("lane-one-topic: the owner-unread call is deleted, so a lane brief with no owner sentence is allowed",
-     '    owner_unread = brief_owner_hit(tool, tool_input)\n',
-     '    owner_unread = None\n',
+    # RULE lane-one-topic, the owner-unread call. brief_hit (guard_merge.py) judges a lane brief by it on two paths,
+    # so each path gets its own mutant: deleting the call lets a brief with no owner-unread sentence through.
+    ("lane-one-topic: the send path's owner-unread call is deleted, so a lane brief with no owner sentence is allowed",
+     '    return topic_hit(first, tags) or brief_owner_hit(text)\n',
+     '    return topic_hit(first, tags)\n',
      "guard", "owner-unread: a brief with no Grant line and no owner-unread sentence is refused"),
+    ("lane-one-topic: the lane-start path's owner-unread call is deleted, so a lane start with no owner sentence is allowed",
+     '        return topic_hit(first, lane_tags(tool_input), start=True) or brief_owner_hit(text)\n',
+     '        return topic_hit(first, lane_tags(tool_input), start=True)\n',
+     "guard", "owner-unread: a lane start with a Grant line and no owner-unread sentence is refused"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
