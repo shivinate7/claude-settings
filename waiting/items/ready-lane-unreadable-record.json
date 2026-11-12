@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-12T23:06:00Z",
+  "context": "Goal: only the batch runner marks a pull request ready, and the batch runner is never blocked by mistake.\nProblem (rule): the new check stops a lane from marking its pull request ready; when it cannot read the session's own record, the lane built it to let the act through.\nBased on (ruling): your fail-closed ruling of Oct 12 covers a guard whose script is missing, not a guard that cannot read a record, so no ruling covers this case.\nBased on (read): refusing here would also block a batch runner whose record cannot be read.\nDeparts from: main has no ready check \u2014 adds one that lets the act through when the session record cannot be read.",
+  "home": "step auto-merge-refused",
+  "id": "ready-lane-unreadable-record",
+  "kind": "decision",
+  "n": 667,
+  "options": [
+    {
+      "gain": "The batch runner is never stopped by a missing record.",
+      "how": "When the session record cannot be read, the check allows marking ready.",
+      "id": "pass-unreadable",
+      "key": "a",
+      "label": "Let it through (lane's pick)",
+      "lose": "A lane with an unreadable record can mark its own pull request ready."
+    },
+    {
+      "gain": "No lane can mark a pull request ready by accident.",
+      "how": "When the session record cannot be read, the check refuses and names the fix.",
+      "id": "refuse-unreadable",
+      "key": "b",
+      "label": "Refuse it",
+      "lose": "A batch runner with an unreadable record stops until someone fixes the record."
+    }
+  ],
+  "owner": "lane auto-merge-refused (session_013NEJL3sJVXCG9wJYPEN1Az)",
+  "pick": "a",
+  "ref": "draft PR #3018 (ready-lane rule); lane question 17:04 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Ready check: unreadable session record",
+  "stands": true,
+  "status": "open",
+  "title": "When the new ready check cannot read who a session is, does it let the session mark a PR ready?",
+  "why": "The lane took this pick; it stands unless you choose b."
+}
