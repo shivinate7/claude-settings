@@ -294,7 +294,8 @@ class Ref:
         return [n for n in self.names(prefix) if n.endswith(".json") and "/" not in n[len(prefix):]]
 
     def read(self, names):
-        """Every blob in one git cat-file process."""
+        """Every blob in one git cat-file process. A name that is not a blob (a folder, a submodule) reads as missing:
+        its bytes are a tree's entries, never a file's text."""
         if not names:
             return {}
         try:
@@ -311,8 +312,10 @@ class Ref:
             at = end + 1
             if head.endswith(b" missing"):
                 continue
-            size = int(head.rsplit(b" ", 1)[1])
-            found[name] = raw[at:at + size].decode("utf-8", errors="replace")
+            _oid, kind, size = head.split(b" ")
+            size = int(size)
+            if kind == b"blob":
+                found[name] = raw[at:at + size].decode("utf-8", errors="replace")
             at += size + 1
         return found
 
@@ -1630,30 +1633,41 @@ OUTBOX_FOLDER = "roadmap/outbox/"
 
 
 def outbox_rulings(texts):
-    """[(step, home, words)] for each owner-ruling line in the record branch's outbox files, in file then line order."""
-    found = []
+    """([(step, home, words)], [file:line]): each owner-ruling line in the record branch's outbox files, then each
+    line that carries `[ruling]` but misses the format (nothing may drop silently), in file then line order. The
+    folder's README.md and any fenced code line are skipped: the README template shows the format."""
+    found, malformed = [], []
     for name, text in sorted(texts.items()):
-        if not (name.startswith(OUTBOX_FOLDER) and name.endswith(".md")):
+        if not (name.startswith(OUTBOX_FOLDER) and name.endswith(".md")) or name == OUTBOX_FOLDER + "README.md":
             continue
-        for line in text.splitlines():
-            hit = OUTBOX_RULING.match(line)
-            if hit:
-                found.append((hit["step"], hit["home"], hit["words"]))
-    return found
+        fenced = False
+        for n, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith(ruling_home.FENCE_MARKERS):
+                fenced = not fenced
+            elif not fenced and "[ruling]" in line:
+                hit = OUTBOX_RULING.match(line)
+                if hit:
+                    found.append((hit["step"], hit["home"], hit["words"]))
+                else:
+                    malformed.append("%s:%d" % (name, n))
+    return found, malformed
 
 
-def outbox_ruling_lines(rulings, repo, ref):
-    """One output line per outbox ruling: `held` when the home's text on `ref` holds the words (whitespace folded),
+def outbox_ruling_lines(rulings, malformed, repo, ref):
+    """One output line per malformed ruling line (`unknown: malformed`), then one per outbox ruling: `held` when the home's text on `ref` holds the words (whitespace folded),
     `not held` when the home exists on some branch but its text on `ref` lacks them or `ref` has no such file, and
     `unknown` when no branch holds the home or git cannot read it. A home that is not a repo path (a decision id,
-    an absolute or climbing path) reads unknown. Three git starts at most: one batch read of the homes on `ref`,
+    an absolute or climbing path) or that is a folder reads unknown. One pair of backticks around a home is
+    unwrapped as hooks/ruling_home.py does. Three git starts at most: one batch read of the homes on `ref`,
     one ref list, one batch for every branch (the last two only for homes `ref` lacks)."""
+    lines = ["%s: %s -> unknown: malformed" % (OUTBOX_RULING_LINE, where) for where in malformed]
     if not rulings:
-        return []
+        return lines
     paths = {}
     for _step, home, _words in rulings:
-        norm = os.path.normpath(home).replace(os.sep, "/")
-        if not (os.path.isabs(home) or norm in (".", "..") or norm.startswith("../")) and ("/" in norm or "." in norm):
+        bare = ruling_home._unwrap(home)
+        norm = os.path.normpath(bare).replace(os.sep, "/")
+        if not (os.path.isabs(bare) or norm in (".", "..") or norm.startswith("../")) and ("/" in norm or "." in norm):
             paths[home] = norm
     on_main = Ref(repo, ref).read(sorted(set(paths.values()))) if ref and paths else {}
     elsewhere = {}
@@ -1663,12 +1677,12 @@ def outbox_ruling_lines(rulings, repo, ref):
             elsewhere = ruling_home.resolve_paths(str(repo), ruling_home._list_refs(str(repo)), lacking)
         except ruling_home._GitFailure:
             elsewhere = {}
-    lines = []
     for step, home, words in rulings:
         norm = paths.get(home)
         if norm is None or ref is None:
             verdict = "unknown"
         elif norm in on_main:
+            # a substring match after whitespace folding: the words must appear as quoted, not as a whole phrase
             verdict = "held" if " ".join(words.split()) in " ".join(on_main[norm].split()) else "not held"
         else:
             verdict = "not held" if elsewhere.get(norm) else "unknown"
@@ -1729,7 +1743,8 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
     for label, v in rows:
         if v:
             print(f"  {label}: {', '.join(v)}")
-    for line in outbox_ruling_lines(outbox_rulings(texts or {}), repo, ref):
+    rulings, malformed = outbox_rulings(texts or {})
+    for line in outbox_ruling_lines(rulings, malformed, repo, ref):
         print(line)
 
 
