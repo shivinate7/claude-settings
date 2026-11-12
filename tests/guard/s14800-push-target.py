@@ -11,6 +11,7 @@ FAMILY = "push-target-named"
 PUSH_TARGET_RULE = "push-target-named"
 PUSH_TARGET_AGENT = "b2f4c6d8e0a1b3c5d"  # an agent id as the harness sends it: 17 hex characters
 PUSH_TARGET_NO_TARGET = "names no push target"  # the remedy a refusal prints for a brief that holds no real target
+PUSH_NONE_REMEDY = "pushes nothing"  # the fragment a refusal for a none brief prints, and no other refusal prints
 LONG_BRIEF = "".join("Context line %d, not a push line.\n" % i for i in range(400))  # full size: 400 lines before the target
 PUSH_TARGET_FIXTURES = []
 
@@ -59,8 +60,18 @@ pt_fixture("pt-agent-folder", [(PUSH_TARGET_AGENT, None)])
 pt_fixture("pt-tick-value", pt_one("Push to: `lane-x`\n\nTask: push."))
 pt_fixture("pt-dot-value", pt_one("Push to: lane-x.\n\nTask: push."))
 pt_fixture("pt-refs-value", pt_one("Push to: refs/heads/lane-x\n\nTask: push."))
-# A bold lead is no line.
-pt_fixture("pt-bold-lead", pt_one("**Push to:** lane-x\n\nTask: push."))
+# The value is the first whitespace-delimited word after Push to:, with backticks, asterisks, underscores, full stops,
+# commas, semicolons and parentheses stripped from both ends. The words after it are a note, not the value.
+pt_fixture("pt-paren-note", pt_one("Push to: lane-x (the lane branch)\n\nTask: push."))
+pt_fixture("pt-none-note", pt_one("Push to: none (report only)\n\nTask: report only."))
+pt_fixture("pt-wrapped-value", pt_one("Push to: (lane-x);\n\nTask: push."))
+pt_fixture("pt-bold-value", pt_one("**Push to: lane-x**\n\nTask: push."))
+pt_fixture("pt-underscore-value", pt_one("_Push to: lane-x_\n\nTask: push."))
+pt_fixture("pt-tick-dot-value", pt_one("Push to: `lane-x`.\n\nTask: push."))
+pt_fixture("pt-comma-value", pt_one("Push to: lane-x, then none\n\nTask: push."))
+pt_fixture("pt-placeholder-note", pt_one("Push to: <branch> (name it)\n\nTask: push."))
+# The stars after the colon are markup, so the value is the word after them.
+pt_fixture("pt-bold-colon", pt_one("**Push to:** lane-x\n\nTask: push."))
 # A placeholder line is skipped, indented or not, and the real line below it decides.
 pt_fixture("pt-placeholder-then-x", pt_one("Push to: <branch>\nPush to: lane-x\n"))
 pt_fixture("pt-indented-placeholder-then-x", pt_one("    Push to: <branch>\nPush to: lane-x\n"))
@@ -207,10 +218,57 @@ pt_case("push-target-named: an origin/ Push to: value refuses a push to another 
         VCS + " push origin HEAD:lane-y", "deny", "pt-origin-prefix", rule=PUSH_TARGET_RULE,
         lacks=("lane-y", PUSH_TARGET_NO_TARGET))
 
-# A bold lead is no line, so the push is refused with the no-target remedy.
-pt_case("push-target-named: a bold **Push to:** lead is no line, so the push is refused with the remedy",
-        VCS + " push origin HEAD:lane-x", "deny", "pt-bold-lead", rule=PUSH_TARGET_RULE,
+# The first word after Push to: is the value, with its edges stripped. Each allow reads a value the rule must strip; each
+# refusal beside one is its control.
+pt_case("push-target-named: a Push to: value with a note in parentheses allows a push to the branch before the note",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-paren-note", silent=True)
+pt_case("push-target-named: a Push to: value with a note in parentheses refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-paren-note", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET, PUSH_NONE_REMEDY))
+pt_case("push-target-named: a none value with a note in parentheses refuses the push with the none remedy",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-none-note", rule=PUSH_TARGET_RULE,
+        carries=(PUSH_NONE_REMEDY,), lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+pt_case("push-target-named: a Push to: value in parentheses before a semicolon allows a push to its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-wrapped-value", silent=True)
+pt_case("push-target-named: a Push to: value in parentheses before a semicolon refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-wrapped-value", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET, PUSH_NONE_REMEDY))
+pt_case("push-target-named: a Push to: value wrapped in bold stars allows a push to its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-bold-value", silent=True)
+pt_case("push-target-named: a Push to: value wrapped in bold stars refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-bold-value", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET, PUSH_NONE_REMEDY))
+pt_case("push-target-named: a Push to: value wrapped in underscores allows a push to its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-underscore-value", silent=True)
+pt_case("push-target-named: a Push to: value wrapped in underscores refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-underscore-value", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET, PUSH_NONE_REMEDY))
+pt_case("push-target-named: a backticked Push to: value with a trailing full stop allows a push to its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-tick-dot-value", silent=True)
+pt_case("push-target-named: a backticked Push to: value with a trailing full stop refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-tick-dot-value", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET, PUSH_NONE_REMEDY))
+pt_case("push-target-named: a comma list's first word decides, so a push to it is allowed",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-comma-value", silent=True)
+pt_case("push-target-named: a comma list's later word is no value, so a push to another branch is no none refusal",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-comma-value", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET, PUSH_NONE_REMEDY))
+pt_case("push-target-named: a placeholder first word with a note after it is skipped, so the push gets the remedy",
+        VCS + " push origin HEAD:lane-x", "deny", "pt-placeholder-note", rule=PUSH_TARGET_RULE,
         carries=(PUSH_TARGET_NO_TARGET,), lacks=("lane-x",))
+
+# The stars after the colon are markup, so a bold colon names its branch.
+pt_case("push-target-named: a bold **Push to:** line names its branch, so a push to it is allowed",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-bold-colon", silent=True)
+pt_case("push-target-named: a bold **Push to:** line refuses a push to another branch, without the no-target remedy",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-bold-colon", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+
+# The push-main ask is pending when this step runs, so the deny is the verdict: a brief that names another branch refuses
+# a push to main, and does not ask.
+pt_case("push-target-named: a non-forced push to main under a brief naming another branch is refused, not asked",
+        VCS + " push origin HEAD:main", "deny", "pt-lane-x", rule=PUSH_TARGET_RULE,
+        lacks=("main", PUSH_TARGET_NO_TARGET, PUSH_NONE_REMEDY))
 
 # A placeholder line is skipped, indented or not. The real line below it decides, so a refusal for another branch names a
 # mismatch, never a brief with no target.
