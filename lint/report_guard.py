@@ -232,7 +232,7 @@ def _hooks_on_path():
 
 
 _hooks_on_path()
-from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
+from shared_names import LANE_TAG, MODEL_FAMILIES  # noqa: E402  the one home of the lane tag and the model families, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -736,7 +736,6 @@ def answered_problem(text):
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
-MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
 # and "builder and reviewer sonnet" all count.
 _ROLE = r"(?:builder|reviewer|test-author|record-writer)"

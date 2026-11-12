@@ -243,6 +243,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        left out; push-main asks about the latter. A remote named by a URL or a path
                        counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
                        config` more per pushed ref for such a remote. (octopus-push-refused)
+  commit-trailer-model deny. An agent's `git push` whose unpushed commits hold a Co-Authored-By trailer (git's
+                       own trailer parse) that names another model family, or the same family with another
+                       version, than the agent's own: the last assistant record's `message.model` in its
+                       subagent transcript. A trailer with no model word passes. An unread transcript, an
+                       unmapped id or a git error allows. (commit-trailer-model)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -496,7 +501,7 @@ if sys.path[:1] != [_HERE]:
 
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
-                   "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
+                   "guard_push_delete", "guard_merge", "guard_trailer", "guard_frozen", "guard_env",
                    "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
@@ -578,6 +583,8 @@ while True:
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
+        _loading = "guard_trailer"
+        from guard_trailer import commit_trailer_hit
         _loading = "guard_frozen"
         from guard_frozen import (
             FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
@@ -4649,6 +4656,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = octopus_push_hit(stripped, cwd, read_verb)
     if matched:
         refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)
+
+    # 6c4. An agent's push of a commit whose Co-Authored-By names another model than the agent's own (rule
+    # commit-trailer-model). Cost: one transcript read and one log read per agent push; none for any other call.
+    trailer = commit_trailer_hit(stripped, cwd, transcript, scratchpad_agent(payload))
+    if trailer:
+        refuse(tool, "deny", "commit-trailer-model", trailer[1], trailer[0])
 
     # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
     # shell spots are lines of their own (`shell_write_hit`).
