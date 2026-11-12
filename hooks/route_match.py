@@ -105,8 +105,44 @@ def matching_rows(rows, outcome, calls):
 
 
 _ACT_SPLIT = re.compile(r"&&|\|\||;")
-_ACT_PREFIX = re.compile(r"(?:env\s+)?(?:[A-Za-z_]\w*=\S*\s+)*")
+_CONTINUATION = re.compile(r"(?<!\\)((?:\\\\)*)\\\r?\n")  # a backslash-newline that is not itself escaped
+# What a route row skips to reach the program: env, NAME=value, nohup, and timeout with its options and duration.
+_TIMEOUT_OPTS = r"(?:\s+(?:--(?:foreground|preserve-status|verbose)|-[vp]|(?:-s|-k)\s+\S+|--(?:signal|kill-after)=\S+))*"
+_ACT_PREFIX = re.compile(r"(?:(?:env|nohup)\s+|[A-Za-z_]\w*=\S*\s+|timeout" + _TIMEOUT_OPTS + r"\s+\d+(?:\.\d+)?[smhd]?\s+)*")
+# gh's repo flag between `gh` and the subcommand; a row names the subcommand, so the cover reads the act without it.
+_GH_REPO_FLAG = re.compile(r"^gh(?:\s+(?:-R|--repo)(?:=|\s+)(?:\"[^\"]*\"|'[^']*'|\S+))+")
 _BACKTICK_SPAN = re.compile(r"`([^`]+)`")
+
+
+def _split_line(line):
+    """`line` split at &&, || and ; that sit outside quotes, so a `;` inside a quoted flag value stays in its act. A
+    line whose quote never closes (a lone apostrophe in text) splits at every operator, as it did before quotes were read."""
+    pieces, start, i, quote = [], 0, 0, None
+    while i < len(line):
+        char = line[i]
+        if quote:
+            if char == "\\" and quote == '"':
+                i += 1
+            elif char == quote:
+                quote = None
+        elif char == "\\" and line[i + 1:i + 2] in ("'", '"'):
+            i += 1
+        elif char in "'\"":
+            quote = char
+        elif line.startswith(("&&", "||"), i) or char == ";":
+            pieces.append(line[start:i])
+            i += 1 if char == ";" else 2
+            start = i
+            continue
+        i += 1
+    if quote:
+        return _ACT_SPLIT.split(line)
+    return pieces + [line[start:]]
+
+
+def _act_of(piece):
+    """One piece with its wrappers dropped (see _ACT_PREFIX) and, for gh, the repo flag before the subcommand."""
+    return _GH_REPO_FLAG.sub("gh", _ACT_PREFIX.sub("", piece.strip(), count=1).strip(), count=1).strip()
 
 
 class _Span(str):
@@ -121,10 +157,10 @@ def act_texts(task):
     act, and a command line chains several, so the cover reads each piece, not the whole line."""
     command = task.get("command")
     commands = list(command.values()) if isinstance(command, dict) else [command]
-    pieces = [_ACT_PREFIX.sub("", piece.strip(), count=1).strip()
+    pieces = [_act_of(piece)
               for text in commands if isinstance(text, str)
-              for line in text.splitlines()
-              for piece in _ACT_SPLIT.split(line)]
+              for line in _CONTINUATION.sub(r"\1 ", text).splitlines()
+              for piece in _split_line(line)]
     pieces = [piece for piece in pieces if piece]
     if pieces:
         return pieces
