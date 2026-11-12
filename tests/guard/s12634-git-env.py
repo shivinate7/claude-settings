@@ -109,9 +109,9 @@ for _cmd in (
     r"Write-Output $env:GIT_WORK_TREE",
     r"Remove-Item env:GIT_DIR",
     r"Remove-Item Env:GIT_INDEX_FILE",
-    r'$env:GIT_DIRX = "1"; python -m pytest',
-    r'$env:MYGIT_DIR = "1"; python -m pytest',
-    r'$env:GIT_TRACE = "1"; python -m pytest',
+    r'$env:GIT_DIRX = "1"; verdict python -m pytest',
+    r'$env:MYGIT_DIR = "1"; verdict python -m pytest',
+    r'$env:GIT_TRACE = "1"; verdict python -m pytest',
     r"Select-String '$env:GIT_DIR = ' f.ps1",
 ):
     sh("git env set: PowerShell allowed, %s" % _cmd[:40], _cmd, "allow", tool="PowerShell",

@@ -339,10 +339,10 @@ def register_simulator_boot_cases():
     # The remedy is the phrase "Run `sim-test", not the bare word: the refusal's own text also names the
     # sim-test lock, so the bare word would hold whatever remedy the refusal printed.
     sh("route: a test of a shut-down simulator by id names sim-test",
-       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     sh("route: a test with the action after its options, a shut-down simulator by name, names sim-test",
-       "xcodebuild -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini' test",
+       "verdict xcodebuild -scheme App -destination 'platform=iOS Simulator,name=Gamma Mini' test",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     sh("route: a build of a shut-down simulator names the generic destination",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
@@ -362,58 +362,58 @@ def register_simulator_boot_cases():
     # Order: route is judged after cap and twin, so a test of a shut-down device that either rule
     # refuses names that rule, not simulator-boot-route.
     sh("route is judged after the cap: a test of a shut-down simulator with two booted names the cap",
-       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
        "deny", rule="simulator-boot-cap", env_path=cap_path, config=cap_cfg, carries=(SIM_UA, SIM_UB))
     sh("route is judged after the twin: a test of a shut-down twin names the idle twin",
-       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UT1 + "'",
+       "verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UT1 + "'",
        "deny", rule="simulator-boot-twin", env_path=twin_path, config=twin_cfg, carries=(SIM_UT0,))
 
     # The route rule judges an xcodebuild boot wherever it sits: inside a wrapper (bash -c, sh -lc), with a `)`
     # glued to the destination, or after an option with a colon (`-only-testing:X`). Each case pins that the boot
     # is refused with its remedy, since a boot the route misses skips the lock.
     sh("route: a test of a shut-down simulator inside bash -c names sim-test",
-       "bash -c \"xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
+       "bash -c \"verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'\"",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     sh("route: a test of a shut-down simulator inside sh -lc names sim-test",
-       "sh -lc 'xcodebuild test -scheme App -destination \"platform=iOS Simulator,id=" + SIM_UC + "\"'",
+       "sh -lc 'verdict xcodebuild test -scheme App -destination \"platform=iOS Simulator,id=" + SIM_UC + "\"'",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     # Its control: a raw boot inside the same wrapper is refused by the bypass rule today, so the wrapper is read.
     sh("route: a raw boot inside bash -c is refused by the bypass rule (control: the wrapper is read)",
        "bash -c \"xcrun simctl boot " + SIM_UC + "\"", "deny", rule="simulator-boot-bypass",
        env_path=one_path, config=one_cfg, carries="sim-test")
     sh("route: a test in a subshell, the closing paren glued to the destination, names sim-test",
-       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "')",
+       "(cd ios && verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "')",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     # Its control: the same subshell with the paren apart from the quote. The guard reads this one today, so the
     # glued case fails on the glue, not on the subshell.
     sh("route: a test in a subshell, the closing paren apart from the destination, names sim-test (control)",
-       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' )",
+       "(cd ios && verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' )",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     sh("route: a test with -only-testing before the action names sim-test",
-       "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
+       "verdict xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
 
     # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects and a background `&`
     # are not arguments of xcodebuild, so the remedy holds none of them, whether spaced or glued to a quote.
     sh("route: a test of a shut-down simulator with 2>&1 names sim-test -scheme App, with no redirect word",
-       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' 2>&1",
+       "verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' 2>&1",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
        carries="Run `sim-test -scheme App", lacks=("2>&1", ">", "&"))
     sh("route: a test of a shut-down simulator with > out.log names sim-test -scheme App, with no > word",
-       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
+       "verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
        carries="Run `sim-test -scheme App", lacks=(">",))
     sh("route: a test of a shut-down simulator, the quote glued to a trailing &, names sim-test -scheme App",
-       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
+       'verdict xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
        carries="Run `sim-test -scheme App", lacks=("&",))
     sh("route: a test of a shut-down simulator, the quote glued to a redirect, names sim-test -scheme App",
-       'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
+       'verdict xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
        carries="Run `sim-test -scheme App", lacks=(">",))
     # A boolean flag between the scheme and the action is no option with a value, so the action is still `test`.
     sh("route: a boolean flag before the action, -skipMacroValidation, still names sim-test",
-       "xcodebuild -scheme App -skipMacroValidation test -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
+       "verdict xcodebuild -scheme App -skipMacroValidation test -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
     # OS=17.0 picks the 17.0 copy of Delta, which is booted, so nothing is booted and the route allows. The
     # control is the same destination without the glued paren. Today the glued value reads OS as "17.0)",
@@ -653,7 +653,7 @@ def sim_override_check(name, rule, tool, tool_input, path):
 def sim_route_override_check():
     """The owner override lifts simulator-boot-route. A test of a shut-down device is refused with no override.
     The call runs on the "one" fixture (one booted, one shut down), so the route rule is what refuses it."""
-    command = "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
+    command = "verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'"
     return sim_override_check("sim-route-override", "simulator-boot-route", "Bash",
                               {"command": command}, folder_path("one"))
 

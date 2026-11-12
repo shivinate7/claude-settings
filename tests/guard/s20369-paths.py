@@ -321,7 +321,7 @@ sh("builder script file: a python script over 256 KB writing dist/o.txt, with a 
    "python3 tools/big_dist_write.py", "allow", **SB)
 # GREEN pair: the same over-limit script, with its test write inside the first 256 KB, stays refused.
 sh("builder script file: a python script over 256 KB whose test write is within the first 256 KB is refused",
-   "python3 tools/big_early_test.py", "deny", rule=BT, **SB)
+   "verdict python3 tools/big_early_test.py", "deny", rule=BT, **SB)
 # RED, a node script that writes under a temp folder it made. The join's head is a name bound to fs.mkdtempSync or
 # os.tmpdir(), which the scan does not follow, so the bare test name is judged as a repo path.
 sh("builder script file: a node script writing a.test.js under a folder from mkdtemp(os.tmpdir()) is allowed",

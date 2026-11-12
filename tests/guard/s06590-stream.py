@@ -1047,7 +1047,7 @@ add("background-end: a dev server with an until note is allowed", "allow", cwd=N
 add("background-end: a build under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="npm run build", run_in_background=True)
 add("background-end: the guard suite under run_in_background needs no note, allowed", "allow",
-    cwd=NOGIT, command="python3 hooks/test_guard.py", run_in_background=True)
+    cwd=NOGIT, command="verdict python3 hooks/test_guard.py", run_in_background=True)
 add("background-end: a note does not unlock gh run watch, the waiter rule still refuses it",
     "deny", "waiter", cwd=NOGIT, command="gh run watch 7", run_in_background=True,
     description="until: run 7 ends")
