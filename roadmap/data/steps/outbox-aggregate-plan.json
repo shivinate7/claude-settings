@@ -1,0 +1,15 @@
+{
+ "id": "outbox-aggregate-plan",
+ "title": "A plan to gather every finding in other repos' outboxes into claude-settings triage, so those outboxes clear; then a plan to mechanize it",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner ask with pick 493 a, carried on step page-feedback-to-template; that lane (14:55 CST Nov 12) built only the page-form route (#2965) and left the plan open.",
+ "source": "owner, item 493 a; lane page-feedback-to-template 14:55 CST Nov 12",
+ "note": "Read-only sweep of each repo's outbox; propose the gather route (end state: the session mailbox) as a plan, then the mechanism. Plan before build; the owner reads the plan.",
+ "updatedAt": "2026-11-12T14:58:30-06:00",
+ "order": -290
+}

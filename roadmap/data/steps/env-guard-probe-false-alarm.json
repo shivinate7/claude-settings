@@ -1,0 +1,14 @@
+{
+ "id": "env-guard-probe-false-alarm",
+ "title": "The env-file guard lets through a Python probe that opens no environment file",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane agent-commit-file-scope 14:55 CST Nov 12: a round-3 reviewer's Python probe that touched no environment file was refused by the env-file guard (decision env-file-stays-unread); a differently written probe ran. Unmeasured: no guard.log line read.",
+ "source": "lane agent-commit-file-scope 14:55 CST Nov 12",
+ "note": "First read the refusal in guard.log and the probe text; if the guard matched no env path, red first on that form and narrow the match. A guard verdict change: round 3 gets the net-value test. Relates to env-file-shell-c (item 399 a). A note only, if the log shows the probe did name an env path.",
+ "updatedAt": "2026-11-12T14:58:30-06:00"
+}
