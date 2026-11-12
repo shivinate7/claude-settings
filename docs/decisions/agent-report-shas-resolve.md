@@ -32,7 +32,8 @@ The payload must carry a valid `agent_id`. Every agent type is judged, reviewers
 ## Fail open
 
 - No git repo at `cwd`, or git fails: allowed.
-- A shallow clone (cloud clones fetch 50 commits) with a missing sha: allowed, and logged `report-sha-shallow`, since an old main sha may sit beyond the clone's depth.
+- A shallow clone allows every missing sha, and logs `report-sha-shallow`, since an old main sha may sit beyond the clone's depth.
+- Cloud sessions' clones are shallow. Their depth is set outside this repo and is not verified here.
 
 ## Cost
 
