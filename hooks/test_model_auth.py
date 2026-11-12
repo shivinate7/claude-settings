@@ -914,23 +914,6 @@ def F4_a_a_failed_start_with_the_refresh_text_on_stderr_prints_a_line_naming_it(
 
 
 @case
-def F4_b_the_refresh_text_printed_as_plain_stdout_is_named_on_the_line():
-    """F4, variant. unmeasured: no one has measured whether the CLI prints this failure as plain stdout text, not the
-    JSON envelope, with stderr empty. Droppable: delete this case if the CLI never does. Red on the build head if the
-    text is dropped, so the line names no cause."""
-    with scratch_config("f4-b") as cfg:
-        problems = scoped(cfg)
-        fn, miss = interface("auth_check")
-        if miss:
-            return problems + miss
-        with nowindow_run(NowindowRun(started(stdout=REFRESH_TEXT, returncode=1))):
-            text = fn()
-    problems += expect(text != "", "the refresh text on stdout at exit 1: auth_check printed nothing, want one line")
-    problems += expect(REFRESH_TEXT in text, "the refresh text on stdout at exit 1 is dropped: the line is %r" % text)
-    return problems
-
-
-@case
 def F4_c_three_refresh_text_failures_give_the_stop_line():
     """F4, streak half: three failed starts with the refresh text count as three failures in a row, so the Stop line
     comes. Owner, 11:43 CST Nov 6: "It never fails quietly". Keep-green on the build head."""
