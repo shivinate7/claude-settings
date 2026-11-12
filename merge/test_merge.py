@@ -1833,8 +1833,8 @@ class SmallBaseMove(Env):
             merge.hit_suites(self.other, ["docs/guide.md"], set())
 
     def test_a_workflow_without_the_checks_merge_install_job_stops_the_suite_read(self):
-        """hit_suites reads the suites of each job in CHECKS_SUITE_JOBS. A workflow that holds `checks` alone stops and names the
-        missing job; the control first shows that both jobs read the suite of `checks`, so the stop is the missing job's."""
+        """hit_suites reads the suites of each job in CHECKS_SUITE_JOBS. A workflow that lacks checks-merge-install stops and names
+        it; the control first shows that the workflow with all four of those jobs hits the suite of `checks`, so the stop is the missing job's."""
         root = tempfile.mkdtemp(dir=self.run_dir)
         put(os.path.join(root, "hooks", "test_reads_guide.py"), DOC_SUITE)
         put(os.path.join(root, "hooks", "x.py"), "X = 1\n")  # the merge install step's suite: read, names no path
@@ -1850,6 +1850,19 @@ class SmallBaseMove(Env):
         with self.assertRaises(merge.Stop, msg="hit_suites read a workflow with no checks-merge-install job and did not stop") as cm:
             hits(checks + split)
         self.assertIn("checks-merge-install", str(cm.exception))
+
+    def test_a_suite_only_checks_install_checkout_runs_gets_hit_by_hit_suites(self):
+        """hit_suites reads checks-install-checkout too: the guide suite that only that job runs is a hit, so a list without the job misses it."""
+        workflow = CHECKS_YML.replace("      - name: Guide reader suite\n        run: python3 hooks/test_reads_guide.py\n", "").replace(
+            "      - name: Install checkout suite\n        run: python3 hooks/x.py\n",
+            "      - name: Install checkout suite\n        run: python3 hooks/test_reads_guide.py\n")
+        jobs = {name: job_block(workflow, name) or "" for name in ("checks", "checks-merge-install", "checks-install-checkout", "checks-merge-git")}
+        self.assertIn("hooks/test_reads_guide.py", jobs["checks-install-checkout"], "fixture: checks-install-checkout does not run the guide suite")
+        self.assertNotIn("test_reads_guide", "".join(text for name, text in jobs.items() if name != "checks-install-checkout"),
+                         "fixture: a job other than checks-install-checkout runs the guide suite")
+        self.scoped(workflow=workflow)
+        self.assertIn("hooks/test_reads_guide.py", self.suites_hit_on_other("docs/guide.md"),
+                      "hit_suites did not read the suite of checks-install-checkout")
 
     def test_a_folder_named_only_in_a_temp_tree_is_no_hit(self):
         hit = lambda src: merge.python_suite_hits(src, "hooks/test_x.py", ["docs/decisions/x.md"])

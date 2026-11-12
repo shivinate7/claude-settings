@@ -16,7 +16,7 @@ CHECKS_YML overrides the path (used for red runs on a scratch copy).
 CiCoverage also proves every tracked test file has a run step: test_*.py, test_*.sh, test_*.mjs, *.test.mjs,
 *.test.js and *.test.ps1. A file the mod-test collector prints is covered by the step that runs that collector.
 
-SplitJobs does the same for the Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
+SplitJobs does the same for the Linux split (the four jobs of CHECKS_SUITE_JOBS) and the macOS split (checks-macos, checks-macos-b):
 each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`. It also reads the Linux guard split
 (checks-guard, checks-guard-2): the guard suite runs in one shard per job, each with its GUARD_SHARD value, and both shards
 are named in the all-jobs-passed and ci-done needs.
@@ -71,9 +71,9 @@ REQUIRED = [
 
 
 # The suites the single `checks` job ran (Linux) and the single `checks-macos` job ran (macOS) before the split, each with
-# its step's `if:` and `shell:`. checks-merge-install and checks-macos-b took some of them, so each suite runs in exactly one
-# job of its split. A suite is a run of a test file, a mutation test or the mod tests. The Linux pair is CHECKS_SUITE_JOBS,
-# its one home in lint/workflow_steps.py; the macOS lists stay here.
+# its step's `if:` and `shell:`. checks-merge-install, checks-install-checkout, checks-merge-git and checks-macos-b took some of
+# them, so each suite runs in exactly one job of its split. A suite is a run of a test file, a mutation test or the mod tests.
+# The Linux jobs are CHECKS_SUITE_JOBS, its one home in lint/workflow_steps.py; the macOS lists stay here.
 LINUX_SPLIT = CHECKS_SUITE_JOBS
 LINUX_CODE = "needs.scope.outputs.code == 'true'"
 LINUX_CODE_SWEEP = f"{LINUX_CODE} && needs.scope.outputs.sweep == 'true'"
@@ -329,7 +329,7 @@ ROADMAP_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/ro
 FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
            "checks-guard-2": "checks_guard"}
 FLAG_OF[WAITING_PAGE_JOB] = "shoot"
-# The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
+# The lint jobs run on every PR with no scope condition: the Linux jobs, read from their one home CHECKS_SUITE_JOBS.
 LINT_JOBS = CHECKS_SUITE_JOBS
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
 ALL_JOBS_PASSED_JOB = "all-jobs-passed"
@@ -1284,7 +1284,7 @@ def without_need(text, job, name):
 
 
 class SplitJobs(unittest.TestCase):
-    """The Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b): each suite of the old
+    """The Linux split (the four jobs of CHECKS_SUITE_JOBS) and the macOS split (checks-macos, checks-macos-b): each suite of the old
     single job runs in exactly one job of its split, with its pinned `if:` and `shell:` and no env (LINUX_SUITES, MACOS_SUITES)."""
 
     def setUp(self):
@@ -1462,6 +1462,14 @@ class SplitJobs(unittest.TestCase):
             for shard in LINUX_GUARD_SHARD:
                 with self.subTest(job=job, shard=shard):
                     self.assertTrue(check(without_need(planned, job, shard)), f"{shard} left out of {job}")
+
+    def test_ci_done_needs_checks_install_checkout_and_checks_merge_git(self):
+        # Named failure: a split job runs on a pull request but is not in ci-done's needs, so a red run posts no wake comment for it.
+        needs_of, _, _ = fan_in_rules()
+        self.assertIsNotNone(job_block(self.text, "ci-done"), "checks.yml has no ci-done job")
+        needs = needs_of(job_block(self.text, "ci-done")) or []
+        self.assertEqual([j for j in ("checks-install-checkout", "checks-merge-git") if j not in needs], [],
+                         "ci-done's needs lack a Linux split job")
 
 
 class TopLevelOr(unittest.TestCase):
