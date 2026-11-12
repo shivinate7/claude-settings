@@ -399,4 +399,21 @@ sh("ask-alone: (h) a lone python body that calls subprocess.run with shell=True 
    "subprocess.run(\"python3 roadmap/build.py\", shell=True)\nPY", "ask", "force-push", cwd=PUSHFEAT)
 
 
+# (h) A SCRIPT WHOSE OUTPUT A SHELL RUNS. A python body that prints a `$( )` is text only while nothing runs its
+# output. Written to x.sh and run by sh, or piped to sh, the `$( )` runs: both deny as a force-push.
+sh("ask-alone: (h) a python body printing a forced push in $( ), written to x.sh and run by sh, denies as force-push",
+   "python3 - <<'PY' > x.sh\nprint(\"" + PY_PUSH + "\")\nPY\nsh x.sh", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python body printing a forced push in $( ), piped to sh, denies as force-push",
+   "python3 - <<'PY' | sh\nprint(\"" + PY_PUSH + "\")\nPY", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+# Two more ways a script hands a string to a shell: a zx template (a dollar sign then a backtick) and os.spawnl.
+sh("ask-alone: (h) a node body running a zx template around a forced push in $( ), denies as force-push",
+   "node - <<'JS'\nawait $`echo " + PY_PUSH + "`\nJS", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a python body calling os.spawnl around a forced push in $( ), denies as force-push",
+   PY_HEADER + "import os\nos.spawnl(os.P_WAIT, \"/bin/bash\", \"bash\", \"-c\", \"echo " + PY_PUSH + "\")\nPY",
+   "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY, lacks=(CHAIN_ASK,))
+
+
 # =========================================================================== ordinary work
