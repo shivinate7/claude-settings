@@ -16,6 +16,7 @@ from here, so its UserPromptSubmit path loads no guard module. No other file hol
 """
 
 import ast
+import copy
 import glob
 import importlib
 import json
@@ -531,6 +532,205 @@ def case_guard_merge_binds_tag_prefixes_to_shared_names():
     return not problems, "; ".join(problems) or "both prefixes read the shared tags"
 
 
+# ------------------------------------------------------------------ the artifact tool names
+#
+# Every live name of the artifact tools: the cloud three and the fifteen Mac names of claude-artifacts. The three family
+# constants and canonical_artifact_call are read from shared_names at test time, never copied here. A family name that
+# shared_names does not hold reads as an unknown tool, and a case names that tool.
+MAC = "mcp__claude-artifacts__"
+ARTIFACT_FAMILY_NAMES = ("ARTIFACT_DATA_TOOLS", "ARTIFACT_PAGE_TOOLS", "ARTIFACT_COMMENTS_TOOLS")
+# Pinned the way MACHINE_TAGS is: the eighteen names a live session can call.
+LIVE_ARTIFACT_NAMES = (
+    "Artifact", "ArtifactData", "ArtifactComments",
+    MAC + "db_get", MAC + "db_list", MAC + "db_query", MAC + "db_str_replace", MAC + "db_usage", MAC + "db_write",
+    MAC + "declare_capabilities", MAC + "describe_capabilities", MAC + "get_artifact", MAC + "guide",
+    MAC + "list_artifacts", MAC + "publish_files", MAC + "read_artifact",
+    MAC + "read_comments", MAC + "watch",
+)
+PAGE_URL = "https://claude.ai/artifact/waitpage"
+
+
+def _family_names(shared):
+    """The names of each family constant, keyed by the constant's name. A constant the module lacks holds none."""
+    return {name: tuple(getattr(shared, name, None) or ()) for name in ARTIFACT_FAMILY_NAMES}
+
+
+def case_every_live_artifact_name_has_one_family():
+    shared = _shared()
+    families = _family_names(shared)
+    if not any(families.values()):  # scope first: with no family names, every live name would fail for one reason
+        return False, "shared_names holds no artifact family names: every live name is an unknown tool"
+    unplaced = []
+    for live in LIVE_ARTIFACT_NAMES:
+        homes = [name for name, names in families.items() if live in names]
+        if len(homes) != 1:
+            unplaced.append("%s (%s)" % (live, "unknown tool" if not homes else "in " + " and ".join(homes)))
+    stray = sorted({n for names in families.values() for n in names} - set(LIVE_ARTIFACT_NAMES))
+    return not unplaced and not stray, "unplaced: %s; names no live session calls: %s" % (
+        unplaced or "none", stray or "none")
+
+
+def case_canonical_artifact_call_is_defined():
+    fn = getattr(_shared(), "canonical_artifact_call", None)
+    return callable(fn), "canonical_artifact_call is %s" % (
+        "callable" if callable(fn) else "missing: no Mac call maps to the ArtifactData or Artifact shape")
+
+
+def _canon(name, tool_input):
+    """canonical_artifact_call's (name, input). While the function is missing the call comes back unchanged, so a
+    mapping case fails on the name it did not map, as an assert, and never as a crash."""
+    fn = getattr(_shared(), "canonical_artifact_call", None)
+    return fn(name, tool_input) if callable(fn) else (name, tool_input)
+
+
+def _has(got, want):
+    """True when `got` is a dict holding each key of `want` with that value. The fields the guards read; extra keys pass."""
+    return isinstance(got, dict) and all(got.get(key) == value for key, value in want.items())
+
+
+def _writes_view(canonical):
+    """A batch's writes as (op, collection, doc_id, data, ifVersion) tuples, or None when they are not a list."""
+    writes = canonical.get("writes") if isinstance(canonical, dict) else None
+    if not isinstance(writes, list):
+        return None
+    return [(w.get("op"), w.get("collection"), w.get("doc_id"), w.get("data"), w.get("ifVersion"))
+            if isinstance(w, dict) else w for w in writes]
+
+
+DB_WRITE_OPS = [
+    {"op": "set", "path": "items/it-1", "data": {"kind": "decision", "status": "open"}, "ifVersion": 3},
+    {"op": "merge", "path": "items/it-2", "data": {"status": "closed"}},
+    {"op": "update", "path": "items/it-3", "data": {"title": "Ship it"}},
+    {"op": "delete", "path": "meta/page"},
+]
+WANT_DB_WRITES = [
+    ("set", "items", "it-1", {"kind": "decision", "status": "open"}, 3),
+    ("update", "items", "it-2", {"status": "closed"}, None),
+    ("update", "items", "it-3", {"title": "Ship it"}, None),
+    ("delete", "meta", "page", None, None),
+]
+
+
+def case_db_write_maps_each_op_to_a_batch_write():
+    ops = copy.deepcopy(DB_WRITE_OPS)
+    name, got = _canon(MAC + "db_write", {"url": PAGE_URL, "ops": ops})
+    ok = (name == "ArtifactData" and _has(got, {"action": "batch", "url": PAGE_URL})
+          and _writes_view(got) == WANT_DB_WRITES and ops == DB_WRITE_OPS)
+    return ok, "db_write -> %r, writes %r, caller's ops unchanged: %s" % (name, _writes_view(got), ops == DB_WRITE_OPS)
+
+
+def case_db_write_with_no_ops_is_an_empty_batch():
+    name, got = _canon(MAC + "db_write", {"url": PAGE_URL, "ops": []})
+    return (name == "ArtifactData" and _has(got, {"action": "batch"}) and _writes_view(got) == [],
+            "empty ops -> %r, writes %r" % (name, _writes_view(got)))
+
+
+def case_db_write_of_fifty_ops_keeps_every_write_in_order():
+    ops = [{"op": "set", "path": "items/it-%02d" % i, "data": {"n": i}} for i in range(50)]
+    want = [("set", "items", "it-%02d" % i, {"n": i}, None) for i in range(50)]
+    name, got = _canon(MAC + "db_write", {"url": PAGE_URL, "ops": ops})
+    return (name == "ArtifactData" and _writes_view(got) == want,
+            "50 ops -> %r, %d writes, order kept: %s" % (name, len(_writes_view(got) or []), _writes_view(got) == want))
+
+
+def case_db_write_doc_id_is_the_rest_of_the_path():
+    name, got = _canon(MAC + "db_write", {"ops": [{"op": "set", "path": "items/a/b", "data": {}}]})
+    return (name == "ArtifactData" and _writes_view(got) == [("set", "items", "a/b", {}, None)],
+            "items/a/b -> writes %r" % (_writes_view(got),))
+
+
+def case_db_get_maps_to_a_get_of_one_document():
+    name, got = _canon(MAC + "db_get", {"url": PAGE_URL, "path": "answers/a-7k2"})
+    return (name == "ArtifactData" and _has(got, {"action": "get", "url": PAGE_URL, "collection": "answers",
+                                                   "doc_id": "a-7k2"}),
+            "db_get answers/a-7k2 -> %r, %r" % (name, got))
+
+
+def case_db_list_maps_to_a_list_of_the_collection():
+    name, got = _canon(MAC + "db_list", {"url": PAGE_URL, "collection": "answers"})
+    return (name == "ArtifactData" and _has(got, {"action": "list", "collection": "answers", "url": PAGE_URL}),
+            "db_list answers -> %r, %r" % (name, got))
+
+
+def case_db_query_maps_to_a_query_with_its_text():
+    name, got = _canon(MAC + "db_query", {"url": PAGE_URL, "collection": "items", "query": "status"})
+    return (name == "ArtifactData" and _has(got, {"action": "query", "collection": "items", "query": "status"}),
+            "db_query items -> %r, %r" % (name, got))
+
+
+def case_db_str_replace_maps_to_a_str_replace_of_one_field():
+    name, got = _canon(MAC + "db_str_replace", {"url": PAGE_URL, "path": "items/it-1", "field": "context",
+                                                "old_str": "Ship", "new_str": "Hold"})
+    return (name == "ArtifactData" and _has(got, {"action": "str_replace", "collection": "items", "doc_id": "it-1",
+                                                   "field": "context", "old_str": "Ship", "new_str": "Hold"}),
+            "db_str_replace items/it-1 -> %r, %r" % (name, got))
+
+
+def case_publish_files_maps_the_index_page_to_an_artifact_publish():
+    name, got = _canon(MAC + "publish_files", {"url": PAGE_URL, "files": [
+        {"as": "app.js", "path": "/w/app.js"}, {"as": "index.html", "path": "/w/page.html"}]})
+    return (name == "Artifact" and _has(got, {"action": "publish", "url": PAGE_URL, "file_path": "/w/page.html"}),
+            "publish_files -> %r, %r" % (name, got))
+
+
+UNCHANGED_CALLS = [
+    ("ArtifactData", {"action": "get", "collection": "items", "doc_id": "p1"}),
+    ("Artifact", {"action": "publish", "file_path": "/w/page.html"}),
+    ("ArtifactComments", {"action": "read"}),
+    (MAC + "db_usage", {}),
+    (MAC + "read_artifact", {"url": PAGE_URL}),
+    (MAC + "get_artifact", {"url": PAGE_URL}),
+    (MAC + "list_artifacts", {}),
+    (MAC + "guide", {}),
+    (MAC + "read_comments", {"url": PAGE_URL}),
+    (MAC + "watch", {"url": PAGE_URL}),
+    ("Bash", {"command": "ls"}),
+]
+
+
+def case_other_names_come_back_unchanged():
+    bad = [name for name, tool_input in UNCHANGED_CALLS if _canon(name, tool_input) != (name, tool_input)]
+    return not bad, "names not returned unchanged: %s" % (bad or "none")
+
+
+# Each call is malformed in one way: a non-object input, ops that are not a list or not objects, a missing or
+# non-string path or field, a path with no doc id, an op outside set, merge, update and delete, or files not a list.
+MALFORMED_CALLS = [
+    (MAC + "db_write", None),
+    (MAC + "db_write", "ops"),
+    (MAC + "db_write", {"ops": {"op": "set", "path": "items/it-1"}}),
+    (MAC + "db_write", {"ops": "set items/it-1"}),
+    (MAC + "db_write", {"ops": ["set"]}),
+    (MAC + "db_write", {"ops": [{"op": "set", "path": "items/it-1", "data": {}}, "junk"]}),
+    (MAC + "db_write", {"ops": [{"op": "set", "data": {}}]}),
+    (MAC + "db_write", {"ops": [{"op": "set", "path": 7, "data": {}}]}),
+    (MAC + "db_write", {"ops": [{"op": "set", "path": "items", "data": {}}]}),
+    (MAC + "db_write", {"ops": [{"op": "drop", "path": "items/it-1"}]}),
+    (MAC + "db_get", {"url": PAGE_URL}),
+    (MAC + "db_get", {"path": None}),
+    (MAC + "db_get", {"path": "answers"}),
+    (MAC + "db_list", {"url": PAGE_URL}),
+    (MAC + "db_query", {"collection": 3}),
+    (MAC + "db_str_replace", {"path": "items/it-1", "old_str": "a", "new_str": "b"}),
+    (MAC + "publish_files", {"files": "index.html"}),
+    (MAC + "publish_files", {"url": PAGE_URL}),
+    (MAC + "publish_files", None),
+]
+
+
+def case_malformed_input_comes_back_unchanged_and_never_raises():
+    bad = []
+    for name, tool_input in MALFORMED_CALLS:
+        try:
+            got = _canon(name, tool_input)
+        except Exception as error:
+            bad.append("%s raised %s" % (name, type(error).__name__))
+            continue
+        if got != (name, tool_input):
+            bad.append("%s came back as %r" % (name, got[0]))
+    return not bad, "malformed calls not returned unchanged: %s" % (bad or "none")
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -568,6 +768,24 @@ CASES = [
      case_scan_flags_a_copy_whose_default_sits_in_a_helper),
     ("(q) a fallback copy whose .claude default sits in a helper is not flagged",
      case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper),
+    ("(r) every live artifact tool name sits in exactly one family of shared_names",
+     case_every_live_artifact_name_has_one_family),
+    ("(r2) shared_names defines canonical_artifact_call", case_canonical_artifact_call_is_defined),
+    ("(r3) a db_write maps each op to a batch write, merge to update, and keeps the caller's ops",
+     case_db_write_maps_each_op_to_a_batch_write),
+    ("(r4) a db_write with no ops is an empty batch", case_db_write_with_no_ops_is_an_empty_batch),
+    ("(r5) a db_write of fifty ops keeps every write in order", case_db_write_of_fifty_ops_keeps_every_write_in_order),
+    ("(r6) a db_write's doc id is the rest of its path", case_db_write_doc_id_is_the_rest_of_the_path),
+    ("(r7) a db_get maps to a get of one document", case_db_get_maps_to_a_get_of_one_document),
+    ("(r8) a db_list maps to a list of the collection", case_db_list_maps_to_a_list_of_the_collection),
+    ("(r9) a db_query maps to a query with its text", case_db_query_maps_to_a_query_with_its_text),
+    ("(r10) a db_str_replace maps to a str_replace of one field",
+     case_db_str_replace_maps_to_a_str_replace_of_one_field),
+    ("(r11) publish_files maps the index.html entry to an Artifact publish",
+     case_publish_files_maps_the_index_page_to_an_artifact_publish),
+    ("(r12) names outside the Mac write and read set come back unchanged", case_other_names_come_back_unchanged),
+    ("(r13) malformed input comes back unchanged and never raises",
+     case_malformed_input_comes_back_unchanged_and_never_raises),
 ]
 
 

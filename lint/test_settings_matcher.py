@@ -42,14 +42,64 @@ SHARED_NAMES = os.environ.get("SHARED_NAMES_UNDER_TEST") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "hooks", "shared_names.py")
 
 
-def remote_outward_tools():
-    """REMOTE_OUTWARD_TOOLS of hooks/shared_names.py, the one home of the claude-code-remote tools an agent may not
-    call. SHARED_NAMES_UNDER_TEST points the test at another copy (a red run on a stand-in list)."""
+def shared_names_module():
+    """hooks/shared_names.py, the one home of the names. SHARED_NAMES_UNDER_TEST points the test at another copy (a red
+    run on a stand-in list)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("shared_names_under_test", SHARED_NAMES)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return tuple(module.REMOTE_OUTWARD_TOOLS)
+    return module
+
+
+def remote_outward_tools():
+    """REMOTE_OUTWARD_TOOLS of hooks/shared_names.py, the one home of the claude-code-remote tools an agent may not
+    call."""
+    return tuple(shared_names_module().REMOTE_OUTWARD_TOOLS)
+
+
+# The artifact tools. A matcher that names a cloud tool must name every name of that tool's family, the Mac names
+# included, or a Mac call never reaches the guard. Each family is one constant in hooks/shared_names.py.
+ARTIFACT_MAC_PREFIX = "mcp__claude-artifacts__"
+
+
+def artifact_family(constant):
+    """The names of one artifact family constant, read from shared_names at test time. A constant the module lacks
+    reads as no names, and the case that reads it says so."""
+    return tuple(getattr(shared_names_module(), constant, None) or ())
+
+
+def matchers_naming(tool):
+    """(event, matcher) for each settings.json hook entry, of any event, whose matcher names `tool` as one alternative."""
+    with open(SETTINGS, encoding="utf-8") as handle:
+        hooks = json.load(handle).get("hooks", {})
+    return [(event, entry["matcher"]) for event, entries in hooks.items() for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("matcher"), str)
+            and tool in entry["matcher"].split("|")]
+
+
+class ArtifactMatcher(unittest.TestCase):
+    """Every settings.json matcher that names ArtifactData or Artifact covers that tool's family. ArtifactComments
+    names no matcher today, so it has no case here; its family is pinned in hooks/test_shared_names.py."""
+
+    def assert_family_covered(self, cloud, constant):
+        # Scope first: the scan must find a matcher, and the family must hold names, or the coverage check passes on nothing.
+        found = matchers_naming(cloud)
+        self.assertTrue(found, "no settings.json hook names %s: the scan is broken or the tool is gone" % cloud)
+        family = artifact_family(constant)
+        self.assertTrue(family, "shared_names has no %s names, so no matcher can be checked against them" % constant)
+        gaps = []
+        for event, matcher in found:
+            missing = [name for name in family if not re.fullmatch(matcher, name)]
+            if missing:
+                gaps.append("%s matcher %r names %s and misses %s" % (event, matcher, cloud, ", ".join(missing)))
+        self.assertFalse(gaps, "; ".join(gaps))
+
+    def test_matchers_naming_artifactdata_cover_the_data_family(self):
+        self.assert_family_covered("ArtifactData", "ARTIFACT_DATA_TOOLS")
+
+    def test_matchers_naming_artifact_cover_the_page_family(self):
+        self.assert_family_covered("Artifact", "ARTIFACT_PAGE_TOOLS")
 
 
 class RemoteOutwardMatcher(unittest.TestCase):
@@ -781,6 +831,32 @@ class PermissionsAllow(unittest.TestCase):
         held = [entry for entry in self.allow_list()
                 if entry == "ArtifactComments" or entry.startswith("ArtifactComments(")]
         self.assertFalse(held, "ArtifactComments is on permissions.allow, but it posts visible text and must stay asking")
+
+    def live_mac_names(self):
+        # Scope first: a family constant that is missing or empty leaves no live names, and the checks below must say so.
+        names = tuple(name for constant in ("ARTIFACT_DATA_TOOLS", "ARTIFACT_PAGE_TOOLS", "ARTIFACT_COMMENTS_TOOLS")
+                      for name in artifact_family(constant) if name.startswith(ARTIFACT_MAC_PREFIX))
+        self.assertTrue(names, "shared_names holds no claude-artifacts names in any artifact family")
+        return names
+
+    def test_mac_data_and_read_tools_on_the_list_stay_listed_and_live(self):
+        # The data and read tools the allow list holds today stay listed, and each is a live name of its family, so the
+        # constant and the list cannot drift apart. No entry is added here: the list is the owner's to grow.
+        allow = self.allow_list()
+        live = self.live_mac_names()
+        for short in ("db_get", "db_list", "db_query", "db_str_replace", "db_usage", "db_write", "read_artifact", "watch"):
+            name = ARTIFACT_MAC_PREFIX + short
+            with self.subTest(name=name):
+                self.assertIn(name, allow, "%s is missing from permissions.allow" % name)
+                self.assertIn(name, live, "%s is on permissions.allow but no artifact family of shared_names holds it" % name)
+
+    def test_every_mac_allow_entry_is_a_live_name(self):
+        # A typo in the list is an allow for a name no live session calls, so every claude-artifacts entry must be a live name.
+        live = self.live_mac_names()
+        mac_entries = [entry for entry in self.allow_list() if isinstance(entry, str) and entry.startswith(ARTIFACT_MAC_PREFIX)]
+        self.assertTrue(mac_entries, "permissions.allow names no claude-artifacts tool")
+        unknown = [entry for entry in mac_entries if entry not in live]
+        self.assertFalse(unknown, "permissions.allow names a claude-artifacts tool no artifact family holds: %s" % ", ".join(unknown))
 
 
 if __name__ == "__main__":

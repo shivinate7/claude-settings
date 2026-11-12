@@ -2882,6 +2882,34 @@ def case_page_note_get_saves_one_block():
           [m["text"] for m in parsed] == [label_of(3, "it-4f2a", PAGE_NOTE)], parsed)
 
 
+MAC_GET = "mcp__claude-artifacts__db_get"
+MAC_LIST = "mcp__claude-artifacts__db_list"
+
+
+def case_page_note_mac_db_get_saves_the_block_as_artifactdata_does():
+    # A Mac db_get of one answer is the same read as ArtifactData's get of it: the same inbox text is saved.
+    mac_cfg, mac_sid = new_cfg(), "pn-mac-get"
+    p = page_note(mac_cfg, mac_sid, response_of([("a-7k2", answer_data())]),
+                  inp={"path": "answers/a-7k2", "url": PAGE_URL}, tool_name=MAC_GET)
+    check("page note mac get: the mode ran", ran_page_note(p), p.desc())
+    twin_cfg, twin_sid = new_cfg(), "pn-mac-get-twin"
+    page_note(twin_cfg, twin_sid, response_of([("a-7k2", answer_data())]))
+    check("page note mac get: one block, the label of the note",
+          captured_texts(mac_cfg, mac_sid) == [label_of(3, "it-4f2a", PAGE_NOTE)], captured_texts(mac_cfg, mac_sid))
+    check("page note mac get: the inbox text equals the one an ArtifactData get saves",
+          read_or_empty(inbox_of(mac_cfg, mac_sid)) == read_or_empty(inbox_of(twin_cfg, twin_sid)),
+          read_or_empty(inbox_of(mac_cfg, mac_sid))[:200])
+
+
+def case_page_note_mac_db_list_saves_nothing():
+    # A list is not a get: as with ArtifactData, the Mac db_list of answers saves no note.
+    cfg, sid = new_cfg(), "pn-mac-list"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]),
+                  inp={"collection": "answers", "url": PAGE_URL}, tool_name=MAC_LIST)
+    check("page note mac list: the mode ran and saved no note",
+          ran_page_note(p) and captured_texts(cfg, sid) == [], captured_texts(cfg, sid))
+
+
 def case_page_note_same_get_twice_saves_once():
     cfg, sid = new_cfg(), "pn-dedup"
     first = response_of([("a-7k2", answer_data())])
@@ -4421,6 +4449,8 @@ CASES = (
     table_reorient_forms,
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
     case_page_note_get_saves_one_block,
+    case_page_note_mac_db_get_saves_the_block_as_artifactdata_does,
+    case_page_note_mac_db_list_saves_nothing,
     case_page_note_same_get_twice_saves_once,
     case_page_note_other_calls_save_nothing,
     case_page_note_blank_and_accepted_notes_save_nothing,
