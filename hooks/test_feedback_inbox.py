@@ -3278,10 +3278,10 @@ def sidecar_of(cfg, sid):
     return os.path.join(cfg, sidecar_rel(sid))
 
 
-def write_old_inbox(cfg, sid, text, sidecar=None):
-    """Another session's inbox: one block of `text`, with one jotted item. `sidecar` (a repo path),
+def write_old_inbox(cfg, sid, text, sidecar=None, header=BLOCK_HEADER):
+    """Another session's inbox: one block of `text` under `header`, with one jotted item. `sidecar` (a repo path),
     when given, writes the session's sidecar the way capture does on its first save."""
-    write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-0812-1 [note] -> noted",)))
+    write_file(inbox_of(cfg, sid), render_block(text, header=header, items=("- fb-0812-1 [note] -> noted",)))
     if sidecar is not None:
         write_file(sidecar_of(cfg, sid), sidecar)
 
@@ -3970,6 +3970,140 @@ def case_repeat_same_minute_blocks_keep_their_own_candidates():
           inbox_line(cfg, NEW_SID, "fb-1040-1"))
     check("same minute control: the earlier item names its own message and gets no mark",
           inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+
+
+# A same-inbox candidate less than 30 minutes from its item's own block is not that item's candidate (decision
+# owner-feedback-inbox, "Repeats"). The window is stamp to stamp: each block's own header decides, never the clock.
+# Each Stop here keeps the roadmap step as a candidate, so the model is called and the prompt can be read.
+WINDOW_ITEM_ID = "fb-1004-1"
+WINDOW_ITEM_LINE = "- fb-1004-1 [note] -> noted"
+BEFORE_29 = "2026-10-13 09:35 CDT (UTC-05:00)"  # 29 minutes before EARLY_HEADER
+AFTER_29 = "2026-10-13 10:33 CDT (UTC-05:00)"  # 29 minutes after EARLY_HEADER
+BEFORE_31 = "2026-10-13 09:33 CDT (UTC-05:00)"  # 31 minutes before EARLY_HEADER
+AFTER_31 = "2026-10-13 10:35 CDT (UTC-05:00)"  # 31 minutes after EARLY_HEADER
+OTHER_1003 = "2026-10-13 10:03 CDT (UTC-05:00)"  # one minute before EARLY_HEADER, in another session's inbox
+TODAY_DRAFT_PRS = ("can we have it be that draft PRs first have to check with batch runner that it's not using mac os "
+                   "runners at this time before opening the pr for CI to be ready? or is there anyway to expand the "
+                   "amount of mac runners we have? i also have my own macbook registered as a runner now that we can "
+                   "maybe rely on for batches?")
+TODAY_OTHER_WAYS = ("are there other ways to also just buy/add more runners that aren't just from github? like how do "
+                    "other startups do this etc?")
+TODAY_MAC_NOW = ("my mac is literally on right now so you can add it as a runner if need be (degen's already used it) "
+                 "anyways agreed on e, my mac isn't available all the time but imjust saying it shd be available rn "
+                 "and it can help")
+TODAY_MAC_STUDIO = ("changed the approval requirements ! im pretty down to buy a mac studio / mini, how many runners / "
+                    "throughput does those kinda devices offer me? and how about old macs like a mac pro running intel "
+                    "xeon etc?")
+
+
+def new_ref(header):
+    """The candidate ref of a block of this session's inbox, for a block whose minute no other block shares."""
+    return "inbox:%s@%s" % (NEW_SID[:8], header[:16])
+
+
+def case_repeat_candidate_within_thirty_minutes_is_not_a_candidate():
+    """The item's inbox holds a block 29 minutes before it and one 29 minutes after it, both saying what the item
+    says. Neither is the item's candidate, so neither ref is in the prompt, and the stub naming both is rejected."""
+    root = repeat_repo("repeat-window-drop", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(BEFORE_29, MSG_ONE, []), (EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE]),
+                               (AFTER_29, MSG_ONE, [])])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": new_ref(BEFORE_29)},
+                                     {"id": WINDOW_ITEM_ID, "ref": new_ref(AFTER_29)}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("window drop: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("window drop: the block 29 minutes before is not a candidate", new_ref(BEFORE_29) not in refs, refs)
+    check("window drop: the block 29 minutes after is not a candidate", new_ref(AFTER_29) not in refs, refs)
+    check("window drop: the item gets no mark", inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+    check("window drop: no flag is printed", "may repeat" not in p.out, p.desc())
+
+
+def case_repeat_candidate_thirty_one_minutes_away_stays_a_candidate():
+    """Control: the blocks 31 minutes before and after the item are its candidates, and the stub's naming of the
+    earlier one marks the item. The clock is set a minute after that block, so a window measured from now would
+    drop it; a window measured stamp to stamp keeps it."""
+    root = repeat_repo("repeat-window-keep", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(BEFORE_31, MSG_ONE, []), (EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE]),
+                               (AFTER_31, MSG_ONE, [])])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": new_ref(BEFORE_31)}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer, extra_env={"LOCAL_TIME_NOW": "2026-10-13T09:34:00-05:00"})
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("window keep: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("window keep: the block 31 minutes before is a candidate", new_ref(BEFORE_31) in refs, refs)
+    check("window keep: the block 31 minutes after is a candidate", new_ref(AFTER_31) in refs, refs)
+    check("window keep: the item is marked against the block 31 minutes before",
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE + " repeats " + new_ref(BEFORE_31),
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_other_session_one_minute_away_stays_a_candidate():
+    """Control: the same text one minute before the item, in another session's inbox that names this repo. Another
+    session's inbox is not the item's own thread, so its block stays the candidate and the item is marked."""
+    root = repeat_repo("repeat-other-session", step=True)
+    cfg = new_cfg()
+    write_old_inbox(cfg, OLD_A_SID, MSG_ONE, sidecar=os.path.realpath(root), header=OTHER_1003)
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE])])
+    other_ref = "inbox:%s@%s" % (OLD_A_SID[:8], OTHER_1003[:16])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": other_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("other session: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("other session: the block one minute before, in the other inbox, is a candidate", other_ref in refs, refs)
+    check("other session: the item is marked against that block",
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE + " repeats " + other_ref,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_today_false_pairs_are_not_marked():
+    """Today's two false marks, in one Stop. fb-1419-4 (14:19) was marked against the 14:16 message, and fb-1422-2
+    (14:22) against the 14:19 mac message. Each is within 30 minutes of its item, so neither is a candidate, and
+    the stub's naming of either ref is rejected. The two 14:19 messages share a minute, so the mac message is the
+    third block of the inbox and takes `#3` (inbox_refs)."""
+    root = repeat_repo("repeat-today", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [
+        ("2026-11-12 14:16 CST (UTC-06:00)", TODAY_DRAFT_PRS, []),
+        ("2026-11-12 14:19 CST (UTC-06:00)", TODAY_OTHER_WAYS, ["- fb-1419-4 [note] -> noted"]),
+        ("2026-11-12 14:19 CST (UTC-06:00)", TODAY_MAC_NOW, []),
+        ("2026-11-12 14:22 CST (UTC-06:00)", TODAY_MAC_STUDIO, ["- fb-1422-2 [note] -> noted"]),
+    ])
+    draft_ref = "inbox:%s@2026-11-12 14:16" % NEW_SID[:8]
+    mac_ref = "inbox:%s@2026-11-12 14:19#3" % NEW_SID[:8]
+    answer = json.dumps({"repeats": [{"id": "fb-1419-4", "ref": draft_ref}, {"id": "fb-1422-2", "ref": mac_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("today: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("today: the 14:16 message is not a candidate", draft_ref not in refs, refs)
+    check("today: the 14:19 mac message is not a candidate", mac_ref not in refs, refs)
+    check("today: fb-1419-4 is not marked", inbox_line(cfg, NEW_SID, "fb-1419-4") == "- fb-1419-4 [note] -> noted",
+          inbox_line(cfg, NEW_SID, "fb-1419-4"))
+    check("today: fb-1422-2 is not marked", inbox_line(cfg, NEW_SID, "fb-1422-2") == "- fb-1422-2 [note] -> noted",
+          inbox_line(cfg, NEW_SID, "fb-1422-2"))
+    check("today: no flag is printed", "may repeat" not in p.out, p.desc())
+
+
+def case_repeat_prompt_says_a_follow_up_on_the_same_topic_is_not_a_repeat():
+    """The model is told that a follow-up or detail on the same topic is not a repeat, and that a candidate is named
+    only when the new item asks again for a change it already asked for and got an answer. The words are checked in
+    the prompt's head, before its NEW ITEMS text, case-insensitively."""
+    root = repeat_repo("repeat-prompt", step=True)
+    cfg, sid = new_cfg(), "repeat-prompt"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    head = (calls[0]["prompt"] if len(calls) == 1 else "").split("\nNEW ITEMS\n", 1)[0].lower()
+    check("prompt: one model call", len(calls) == 1, p.desc())
+    check("prompt: a follow-up or detail on the same topic is not a repeat",
+          all(w in head for w in ("follow-up", "same topic", "not a repeat")), head[-400:])
+    check("prompt: a repeat asks again for a change it already asked for and got an answer",
+          all(w in head for w in ("asks again", "already asked", "answer")), head[-400:])
 
 
 def case_repeat_todo_home_is_never_a_candidate_for_its_item():
@@ -4730,6 +4864,11 @@ CASES = (
     case_repeat_own_home_is_never_a_candidate_for_its_item,
     case_repeat_each_item_is_judged_against_the_other_messages,
     case_repeat_same_minute_blocks_keep_their_own_candidates,
+    case_repeat_candidate_within_thirty_minutes_is_not_a_candidate,
+    case_repeat_candidate_thirty_one_minutes_away_stays_a_candidate,
+    case_repeat_other_session_one_minute_away_stays_a_candidate,
+    case_repeat_today_false_pairs_are_not_marked,
+    case_repeat_prompt_says_a_follow_up_on_the_same_topic_is_not_a_repeat,
     case_repeat_todo_home_is_never_a_candidate_for_its_item,
     case_repeat_notes_home_is_never_a_candidate_for_its_item,
     case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item,
