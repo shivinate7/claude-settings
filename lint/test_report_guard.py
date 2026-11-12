@@ -5147,6 +5147,37 @@ class PromiseNeedsMechanismTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, "Promise guard", line)
 
+    def test_pr_red_a_first_person_handoff_subject_stays_a_promise(self):
+        # Scope first: a report of another handoff's text is still allowed, so the rows below are judged as the
+        # session's own promise and not as a report.
+        self.assert_allowed("The handoff file said from now on the page is exported.")
+        rows = [
+            # Catches: the report cut takes "My own handoff says" as a report, so the session's promise passes.
+            "My own handoff says from now on every wake exports.",
+            # Catches: the report cut takes "My latest handoff says" as a report, so the session's promise passes.
+            "My latest handoff says from now on every wake exports.",
+            # Catches: the report cut takes "This session's handoff says" as a report, so the promise passes.
+            "This session's handoff says from now on every wake exports.",
+            # Catches: the report cut takes "The session handoff says" as a report, so the promise passes.
+            "The session handoff says from now on every wake exports.",
+            # Control: the plain form stays refused, since the report cut keeps a my or our subject.
+            "My handoff says from now on every wake exports.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_red_a_second_promise_after_a_reported_one_counts(self):
+        # Catches: the report cut takes the line's only handoff word, so the session's second promise passes.
+        line = "The handoff file said from now on the page is exported; I will keep to that from now on."
+        self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_green_a_second_promise_with_a_mechanical_home_passes(self):
+        # Control: the same line with a PR cite on its second promise passes. Catches: a fix that refuses every
+        # second promise on a line that reports a handoff.
+        self.assert_allowed("The handoff file said from now on the page is exported; I will keep to that from now on, "
+                            "see #1400.")
+
 
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
