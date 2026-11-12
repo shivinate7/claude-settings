@@ -3,13 +3,11 @@ FAMILY = "frozen"
 #
 # The sed operand reader. The frozen-path rule must refuse a write to a frozen file whatever flags,
 # wrapper, `w` command or pipe feed the `sed` takes, and must allow a sed that only names the file
-# as text or reads it. Each CONTROL pins a form the rule refuses or allows, and the cost of a long
-# command.
+# as text or reads it. Each CONTROL pins a form the rule refuses or allows. The cost of a long
+# command is judged in section 35200.
 #
 # Failure classes, one per group: flag-cluster, flag-suffix, flag-long, flag-after-operand,
-# w-command, wrapper, pipe-feed, false-alarm, script-as-target, script-file, scanner-strings, cost-budget.
-
-H_PAD = " ".join("word%d" % i for i in range(6000))
+# w-command, wrapper, pipe-feed, false-alarm, script-as-target, script-file, scanner-strings.
 
 # --- flag-cluster: -i inside a cluster of short flags is a write (class: flag-cluster) ---
 sh("sed-operand flag-cluster: sed -ni onto a frozen hook is refused",
@@ -114,11 +112,3 @@ sh("sed-operand scanner-strings: -ni with a lone quote in the script, onto a fro
    "sed -ni \"s/don't/do not/\" " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 sh("sed-operand scanner-strings: -ni with a quoted newline in the script, onto a frozen hook is refused",
    "sed -ni '1i\\\ntext' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
-
-# --- cost-budget: a 6000-word command is judged in under 5 s by the whole guard run (class: cost-budget) ---
-# The limit is the guard subprocess's wall time, read with time.monotonic by decide(); a case over it reads as slow.
-add("sed-operand cost-budget control: a 6000-word sed -i onto a frozen hook is judged in under 5 s",
-    "deny", "frozen-path", tool="Bash", cwd=NOGIT, max_seconds=5,
-    command="sed -i 's/a/b/' " + CFG_HOOK + " " + H_PAD)
-add("sed-operand cost-budget control: a 6000-word plain echo is judged in under 5 s",
-    "allow", tool="Bash", cwd=NOGIT, max_seconds=5, command="echo " + H_PAD)
