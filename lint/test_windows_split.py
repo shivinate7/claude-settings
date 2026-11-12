@@ -3,8 +3,8 @@
 
 WindowsSplit proves: (1) each suite command in REQUIRED runs in exactly one `windows-latest` job (none
 dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry those suites.
-Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
-slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
+Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; the windows
+slice is gone, so GUARD_TESTS appears nowhere in checks.yml; the guard mutation test has its own
 Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job's
 job-level if, if any, holds only the draft guard; its scope condition sits in each step
 (read_scope_condition, step_rest), so a step cannot run outside the scope condition.
@@ -291,22 +291,20 @@ def windows_jobs(text):
 # The slice step has the same `run:` as the full step, so it is told apart by its env.
 SLICE = "python merge/test_merge.py [windows-slice]"
 SLICE_ENV = {"MERGE_TESTS": "windows-slice"}
-# The same pattern for the guard suite (GUARD_TESTS=windows-slice, cut F). Its own Windows job,
-# checks-windows-guard, runs shard 1 of the full suite and the slice on pull_request, and every shard on push.
+# The guard suite (cut F). Its own Windows job, checks-windows-guard, runs shard 1 of the full suite. There is no
+# windows slice: the guard shards carry the whole suite on a pull_request the scope marks guard.
 GUARD_CMD = "python hooks/test_guard.py"
-GUARD_SLICE = "python hooks/test_guard.py [windows-slice]"
-GUARD_SLICE_ENV = {"GUARD_TESTS": "windows-slice"}
 GUARD_JOB = "checks-windows-guard"
 # A long suite splits across shard jobs: the base job, then `<base>-2` to `<base>-<n>`. The full step of each
 # carries SHARD_VAR[base]=<i>/<n> in its step env, and the n values cover 1 to n once each, so every case runs
-# once. A merge shard past the first never runs on pull_request (SHARD_JOB_IF). A guard shard past the first runs on a
-# pull_request the scope marks guard, and its job-level if says so (guard_shard_if_ok). The slice stays in the base job,
-# with no shard value.
+# once. A merge shard past the first never runs on pull_request (SHARD_JOB_IF). A guard shard past the first has no
+# job-level if: its checkout, setup-python and shard step each carry GUARD_SCOPE, so it starts on every pull_request
+# and skips every step unless the scope marks guard.
 SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD"}
 SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py"}
 SHARD_JOB_IF = "${{ github.event_name != 'pull_request' }}"
-# A guard shard past the first: its job-level if runs on push and on a pull_request the scope marks guard (guard_shard_if_ok).
-GUARD_SHARD_JOB_IF = "${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}"
+# The guard scope condition: a pull_request the scope marks guard (a change to a guard file), or any other event.
+GUARD_SCOPE = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
 
 
 def shard_base(name):
@@ -339,13 +337,11 @@ ALL_JOBS_PASSED_JOB = "all-jobs-passed"
 
 
 def key(st):
-    """A step's run command; a test_merge or test_guard step with its slice env reads as its SLICE."""
+    """A step's run command; a test_merge step with its slice env reads as its SLICE."""
     run = st.get("run")
     env = st.get("env") if isinstance(st.get("env"), dict) else {}
     if run == "python merge/test_merge.py" and "MERGE_TESTS" in env:
         return SLICE
-    if run == GUARD_CMD and "GUARD_TESTS" in env:
-        return GUARD_SLICE
     return run
 
 
@@ -401,10 +397,8 @@ IF_PIN = {"python janitor/mutate_sweep.py":
           "python merge/test_merge.py":
           "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}",
           SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}",
-          # The full guard suite runs on every event; its scope condition (guard, or not a pull_request) sits in the step of the
-          # base job, and a shard job's job-level if carries it (guard_shard_if_ok). The guard slice runs only on pull_request (cut F).
-          GUARD_CMD: "${{ !cancelled() && needs.scope.outputs.code == 'true' }}",
-          GUARD_SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}"}
+          # The full guard suite: its scope condition (GUARD_SCOPE) sits in the step of each job, so the step's own part is code.
+          GUARD_CMD: "${{ !cancelled() && needs.scope.outputs.code == 'true' }}"}
 
 
 FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows",
@@ -582,22 +576,11 @@ def if_runs(expr, event, flags, draft=False):
     return True if expr is None else flag_runs(expr, event, flags, draft)
 
 
-def guard_shard_if_ok(expr):
-    """A guard shard's job-level if: it runs on push, runs on a pull_request the scope marks guard, and skips a pull_request it
-    does not mark. None is refused: the job itself must stay off a pull_request that touches no guard file, not only its steps."""
-    if expr is None:
-        return False
-    try:
-        return (if_runs(expr, "push", ALL_ON) and if_runs(expr, "pull_request", GUARD_ON)
-                and not if_runs(expr, "pull_request", GUARD_OFF))
-    except Exception:
-        return False
-
-
 def job_check_problems(name, job, flag=None):
-    """`needs: scope`. A guard shard past the first has the job-level if guard_shard_if_ok reads. A merge shard past the first
-    keeps the event job-level if (SHARD_JOB_IF) and nothing else. The lint jobs (LINT_JOBS) have no scope condition. A lint or
-    scoped job's job-level if, if any, is the draft guard (draft_guard_only).
+    """`needs: scope`. A guard shard past the first has no job-level if: its steps carry the scope condition, as a scoped job's
+    steps do, so it is read as a scoped job with the guard flag. A merge shard past the first keeps the event job-level if
+    (SHARD_JOB_IF) and nothing else. The lint jobs (LINT_JOBS) have no scope condition. A lint or scoped job's job-level if,
+    if any, is the draft guard (draft_guard_only).
     A scoped job's scope condition G is the one its steps carry (read_scope_condition), every step carries G
     (scope_condition_step_problems), and G keeps the scope condition rules (scope_condition_property_problems). `flag` names
     the scope output for a job whose flag is not its own name (FLAG_OF)."""
@@ -606,14 +589,14 @@ def job_check_problems(name, job, flag=None):
         problems.append(f"{name}: needs is {job['needs']}, want scope")
     expr = job["if"]
     if shard_base(name) == GUARD_JOB:
-        return problems + ([] if guard_shard_if_ok(expr) else
-                           [f"{name}: guard shard job if is {expr}, want one that runs on push and on a pull_request the scope marks guard, "
-                            "and skips a pull_request it does not mark"])
-    if shard_base(name):
+        flag = flag or FLAG_OF[GUARD_JOB]
+        if expr is not None:
+            problems.append(f"{name}: guard shard keeps a job-level if {expr}: its steps carry the scope condition, and the job starts on every pull_request")
+    elif shard_base(name):
         return problems + ([] if expr == SHARD_JOB_IF else [f"{name}: shard job if is {expr}, want {SHARD_JOB_IF}"])
-    if name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
+    elif name in LINT_JOBS:  # they run on every PR: no scope condition, and a job-level if only when it is the draft guard
         return problems + ([] if expr is None or draft_guard_only(expr) else [f"{name}: job-level if: {expr}"])
-    if expr is not None and not draft_guard_only(expr):
+    elif expr is not None and not draft_guard_only(expr):
         return problems + [f"{name}: scoped job keeps a job-level if, its scope condition belongs in its steps: {expr}"]
     scope_condition = read_scope_condition(job)
     if scope_condition is None:
@@ -652,7 +635,7 @@ def hardening_problems(text):
     n = text.count("MERGE_TESTS")  # one mention only: the slice step's env. Job, workflow or $GITHUB_ENV copies would slice every run.
     if n != 1:
         problems.append(f"MERGE_TESTS appears {n} times in checks.yml, want exactly 1 (the slice step's env)")
-    slice_envs = {SLICE: SLICE_ENV, GUARD_SLICE: GUARD_SLICE_ENV}
+    slice_envs = {SLICE: SLICE_ENV}
     # A shard value outside a full step's own env (job, workflow or $GITHUB_ENV) would reach the slice on pull_request.
     for var in SHARD_VAR.values():
         homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
@@ -676,7 +659,9 @@ def hardening_problems(text):
                 problems.append(f"{name}: slice env is {st['env']}, want {slice_envs[cmd]}")
             if "!cancelled()" not in (step_if(st) or ""):
                 problems.append(f"{name}: {cmd!r} if lacks !cancelled(): {step_if(st)}")
-            if cmd in IF_PIN and step_rest(st, read_scope_condition(job), bool(shard_base(name))) != unwrap(IF_PIN[cmd]):
+            # A guard shard is a scoped job: its steps carry the scope condition, so its step's own part is the rest after it.
+            flat = bool(shard_base(name)) and shard_base(name) != GUARD_JOB
+            if cmd in IF_PIN and step_rest(st, read_scope_condition(job), flat) != unwrap(IF_PIN[cmd]):
                 problems.append(f"{name}: {cmd!r} condition is not the pinned text: {step_if(st)}")
             if st.get("shell") != SHELL.get(cmd):
                 problems.append(f"{name}: {cmd!r} shell is {st.get('shell')}, want {SHELL.get(cmd)}")
@@ -684,37 +669,27 @@ def hardening_problems(text):
 
 
 def guard_problems(text):
-    """Cut F. The guard suite has its own windows-latest job, GUARD_JOB. It runs the full suite off pull_request
-    and the slice on it, both run only on the guard flag. No other Windows job runs the guard suite."""
+    """Cut F. The guard suite has its own windows-latest job, GUARD_JOB. Its full step runs on every event the scope allows,
+    and the guard shards are the only other jobs that run it. There is no windows slice."""
     jobs = windows_jobs(text)
     if GUARD_JOB not in jobs:
         return [f"no windows-latest job named {GUARD_JOB}"]
     problems = []
     for name, job in jobs.items():
-        if name not in (GUARD_JOB, ) and shard_base(name) != GUARD_JOB and any(
-                key(st) in (GUARD_CMD, GUARD_SLICE) for st in job["steps"]):
+        if name not in (GUARD_JOB, ) and shard_base(name) != GUARD_JOB and any(key(st) == GUARD_CMD for st in job["steps"]):
             problems.append(f"{name} runs the guard suite; it belongs to {GUARD_JOB} and its shard jobs alone")
-        if shard_base(name) and any(key(st) in (SLICE, GUARD_SLICE) for st in job["steps"]):
-            problems.append(f"{name} runs a slice; the slice belongs to the base job, the required check")
     job = jobs[GUARD_JOB]
     problems += job_check_problems(GUARD_JOB, job, FLAG_OF[GUARD_JOB])
     steps = {}
     for st in job["steps"]:
         steps.setdefault(key(st), st)
-    for cmd in (GUARD_CMD, GUARD_SLICE):
-        if cmd not in steps:
-            problems.append(f"{GUARD_JOB} has no step {cmd!r}")
-    if GUARD_CMD in steps and step_rest(steps[GUARD_CMD], read_scope_condition(job)) != unwrap(IF_PIN[GUARD_CMD]):
+    if GUARD_CMD not in steps:
+        problems.append(f"{GUARD_JOB} has no step {GUARD_CMD!r}")
+    elif step_rest(steps[GUARD_CMD], read_scope_condition(job)) != unwrap(IF_PIN[GUARD_CMD]):
         problems.append(f"{GUARD_JOB}: full guard condition is not the pinned text: {step_if(steps[GUARD_CMD])}")
-    if GUARD_SLICE in steps:
-        st = steps[GUARD_SLICE]
-        if st.get("env") != GUARD_SLICE_ENV:
-            problems.append(f"{GUARD_JOB}: slice env is {st.get('env')}, want {GUARD_SLICE_ENV}")
-        if step_rest(st, read_scope_condition(job)) != unwrap(IF_PIN[GUARD_SLICE]):
-            problems.append(f"{GUARD_JOB}: slice condition is not the pinned text: {step_if(st)}")
-    g = text.count("GUARD_TESTS")  # one mention only: the slice step's env
-    if g != 1:
-        problems.append(f"GUARD_TESTS appears {g} times in checks.yml, want exactly 1 (the guard slice step's env)")
+    g = text.count("GUARD_TESTS")  # the windows slice is gone: no step, env or comment may name it
+    if g:
+        problems.append(f"GUARD_TESTS appears {g} times in checks.yml, want 0: the windows slice is gone")
     # CI runs the whole guard suite. A GUARD_FAMILY here would make CI run one family and call it green.
     f = text.count("GUARD_FAMILY")
     if f:
@@ -1168,22 +1143,19 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(hardening_problems(doc(full=full_e.replace(" && needs.scope.outputs.code == 'true'", ""))))
 
     def test_checker_sees_the_shard_defects(self):
-        scope_condition = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
-        full_e, slice_e = unwrap(IF_PIN[GUARD_CMD]), unwrap(IF_PIN[GUARD_SLICE])
+        full_e = unwrap(IF_PIN[GUARD_CMD])
 
-        def job(name, shard, base=False, slice_=False):
-            # The base job is scoped: the scope condition sits in each step. A shard keeps its job-level if (GUARD_SHARD_JOB_IF) and its steps' own ifs.
-            def cond(e):
-                return f"${{{{ ({scope_condition}) && {e} }}}}" if base else f"${{{{ {e} }}}}"
-
-            head = f"  {name}:\n    runs-on: windows-latest\n    needs: scope\n" + ("" if base else f"    if: {GUARD_SHARD_JOB_IF}\n")
-            setup = "      - uses: actions/setup-python@abc # v6\n" + (f"        if: ${{{{ {scope_condition} }}}}\n" if base else "")
-            full = (f"      - name: Full\n        if: {cond(full_e)}\n"
+        def job(name, shard, base=False, unscoped=False):
+            # A guard shard is a scoped job: no job-level if, and each of its steps carries the scope condition. The base job's
+            # setup and full steps carry it too. unscoped drops it from the shard's full step.
+            head = f"  {name}:\n    runs-on: windows-latest\n    needs: scope\n"
+            setup = f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {GUARD_SCOPE} }}}}\n"
+            checkout = "" if base else f"      - uses: actions/checkout@abc # v5\n        if: ${{{{ {GUARD_SCOPE} }}}}\n"
+            cond = f"${{{{ {full_e} }}}}" if unscoped else f"${{{{ ({GUARD_SCOPE}) && {full_e} }}}}"
+            full = (f"      - name: Full\n        if: {cond}\n"
                     + (f"        env:\n          GUARD_SHARD: {shard}\n" if shard else "")
                     + "        run: python hooks/test_guard.py\n")
-            sl = (f"      - name: Slice\n        if: {cond(slice_e)}\n        env:\n          GUARD_TESTS: windows-slice\n"
-                  "        run: python hooks/test_guard.py\n") if slice_ else ""
-            return head + "    steps:\n" + setup + full + sl
+            return head + "    steps:\n" + checkout + setup + full
 
         def doc(*jobs):
             return "jobs:\n" + "".join(jobs)
@@ -1191,28 +1163,29 @@ class WindowsSplit(unittest.TestCase):
         def place(text):
             return [p for p in placement_problems(text) if "test_guard" in p]
 
-        base = job("checks-windows-guard", "1/3", base=True, slice_=True)
+        base = job("checks-windows-guard", "1/3", base=True)
         good = doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "3/3"))
         self.assertEqual(place(good), [])
         self.assertEqual(guard_problems(good), [])
-        self.assertEqual(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": GUARD_SHARD_JOB_IF, "steps": []}), [])
-        # The merge shards' event-only if is refused on a guard shard: a guard shard runs on a guard pull_request, and that if skips it.
-        self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": SHARD_JOB_IF, "steps": []}))
+        shard_2 = all_jobs(good)["checks-windows-guard-2"]
+        self.assertEqual(job_check_problems("checks-windows-guard-2", shard_2), [])
+        # A job-level if on a guard shard is refused, the guard one and the event-only one alike: the job starts on every pull_request.
+        for label, job_if in (("the guard if", "${{ " + GUARD_SCOPE + " }}"), ("the event-only if", SHARD_JOB_IF)):
+            with self.subTest(job_if=label):
+                self.assertTrue(job_check_problems("checks-windows-guard-2", {**shard_2, "if": job_if}), label)
         bad = {
             "a shard dropped": doc(base, job("checks-windows-guard-2", "2/3")),
             "a shard doubled": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "2/3")),
             "a shard unset": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-guard-3", "")),
             "n disagrees": doc(base, job("checks-windows-guard-2", "2/2"), job("checks-windows-guard-3", "3/3")),
-            "a lone shard": doc(job("checks-windows-guard", "1/2", base=True, slice_=True)),
+            "a lone shard": doc(job("checks-windows-guard", "1/2", base=True)),
             "a stray job name": doc(base, job("checks-windows-guard-2", "2/3"), job("checks-windows-rest", "3/3")),
         }
         for label, text in bad.items():
             self.assertTrue(place(text) or guard_problems(text), label)
-        # A guard shard with no job-level if starts on a pull_request the scope does not mark guard: its job must be skipped there.
-        self.assertTrue(job_check_problems("checks-windows-guard-2", {"needs": "scope", "if": None, "steps": []}))
-        # A shard job that runs the slice takes the slice's PR verdict out of the required check.
-        self.assertTrue(guard_problems(doc(base, job("checks-windows-guard-2", "2/3", slice_=True),
-                                           job("checks-windows-guard-3", "3/3"))))
+        # A shard's full step without the scope condition runs on a pull_request the scope does not mark guard.
+        unscoped = doc(base, job("checks-windows-guard-2", "2/3", unscoped=True), job("checks-windows-guard-3", "3/3"))
+        self.assertTrue([p for p in hardening_problems(unscoped) if p.startswith("checks-windows-guard-2")])
         # A shard value set for the whole job or workflow would cut the PR slice too.
         self.assertFalse([p for p in hardening_problems(good) if "GUARD_SHARD appears" in p])
         for leak in (good.replace("    steps:\n", "    env:\n      GUARD_SHARD: 1/3\n    steps:\n", 1),
@@ -1229,25 +1202,24 @@ class WindowsSplit(unittest.TestCase):
         bad = [p for p in guard_problems(self.text + "\n# GUARD_FAMILY=shared-tree\n") if "GUARD_FAMILY" in p]
         self.assertTrue(bad)
 
-    def test_checker_sees_the_guard_slice_and_mutate_defects(self):
-        scope_condition = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
-        full_e, slice_e = unwrap(IF_PIN[GUARD_CMD]), unwrap(IF_PIN[GUARD_SLICE])
+    def test_checker_sees_the_guard_and_mutate_defects(self):
+        scope_condition = GUARD_SCOPE
+        full_e = unwrap(IF_PIN[GUARD_CMD])
 
-        def doc(full=full_e, slice_=slice_e, env="windows-slice", scope_condition_=scope_condition, job_if=None, extra="", more=""):
+        def doc(full=full_e, scope_condition_=scope_condition, job_if=None, extra="", more=""):
             return ("jobs:\n  checks-windows-guard:\n    runs-on: windows-latest\n    needs: scope\n"
                     + (f"    if: {job_if}\n" if job_if else "") + extra + "    steps:\n"
                     f"      - uses: actions/setup-python@abc # v6\n        if: ${{{{ {scope_condition_} }}}}\n"
-                    f"      - name: Full\n        if: ${{{{ ({scope_condition_}) && {full} }}}}\n        run: python hooks/test_guard.py\n"
-                    f"      - name: Slice\n        if: ${{{{ ({scope_condition_}) && {slice_} }}}}\n        env:\n"
-                    f"          GUARD_TESTS: {env}\n        run: python hooks/test_guard.py\n" + more)
+                    f"      - name: Full\n        if: ${{{{ ({scope_condition_}) && {full} }}}}\n        run: python hooks/test_guard.py\n" + more)
         self.assertEqual(guard_problems(doc()), [])
-        self.assertTrue(guard_problems(doc(slice_=full_e)))  # slice runs on push
-        self.assertTrue(guard_problems(doc(full=slice_e)))  # the full suite's step runs only on pull_request
-        self.assertTrue(guard_problems(doc(env="full")))  # slice env not pinned
-        self.assertTrue(guard_problems(doc(extra="    env:\n      GUARD_TESTS: windows-slice\n")))  # job-level env
+        # The full suite's step runs only on pull_request.
+        self.assertTrue(guard_problems(doc(full="!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'")))
         self.assertTrue(guard_problems(doc(job_if=scope_condition)))  # a job-level if on the scoped job
         self.assertTrue(guard_problems(doc(scope_condition_=scope_condition.replace("guard", "checks_windows"))))  # wrong flag
         self.assertTrue(guard_problems(doc(scope_condition_="needs.scope.outputs.guard == 'true'")))  # skips on push
+        self.assertTrue(guard_problems(doc(more="      - name: Slice\n        if: ${{ needs.scope.outputs.guard == 'true' }}\n"
+                                               "        env:\n          GUARD_TESTS: windows-slice\n"
+                                               "        run: python hooks/test_guard.py\n")))  # the slice is gone
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
                                                "    steps:\n      - run: python hooks/test_guard.py\n")))
@@ -1328,9 +1300,9 @@ def without_need(text, job, name):
 
 class GuardPrShards(unittest.TestCase):
     """The guard suite's Windows shards on a pull_request, read from checks.yml with the scope outputs set one way per run.
-    A pull_request the scope marks guard (a change to a guard file) runs shard 1 in the base job and every shard past it in
-    its own job. A pull_request the scope does not mark runs none, and each shard job past the first is skipped by its
-    job-level if. A push runs them all. A shard runs only when its job-level if and its step's if both run."""
+    A pull_request the scope marks guard (a change to a guard file) runs shard 1's step in the base job, and in each shard
+    past it its checkout, setup-python and shard step. A pull_request the scope does not mark runs none of those steps. A
+    shard past the first has no job-level if, so each of its steps decides. A push runs them all."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
@@ -1351,8 +1323,19 @@ class GuardPrShards(unittest.TestCase):
         self.assertEqual(len(steps), 1, f"{job} has {len(steps)} steps that run {cmd!r} with GUARD_SHARD {shard}, want 1")
         return steps[0]
 
+    def steps_of(self, i):
+        """The steps a shard past the first carries, by role: its checkout, its setup-python and its shard step."""
+        steps = self.jobs[self.job_of[i]]["steps"]
+        found = {}
+        for label, prefix in (("checkout", "actions/checkout@"), ("setup-python", "actions/setup-python@")):
+            hits = [st for st in steps if st.get("uses", "").startswith(prefix)]
+            self.assertEqual(len(hits), 1, f"{self.job_of[i]} has {len(hits)} {label} steps, want 1")
+            found[label] = hits[0]
+        found["shard"] = self.shard[i]
+        return found
+
     def runs(self, i, event, flags, draft=False):
-        """Whether shard i runs: its job-level if (none on the base job) and its step's if both run."""
+        """Whether shard i runs: its job-level if (none on the base job or a shard past it) and its shard step's if both run."""
         return (if_runs(self.jobs[self.job_of[i]]["if"], event, flags, draft)
                 and if_runs(self.shard[i].get("if"), event, flags, draft))
 
@@ -1365,26 +1348,32 @@ class GuardPrShards(unittest.TestCase):
         self.assertTrue(self.runs(1, "pull_request", GUARD_ON),
                         f"shard 1 (GUARD_SHARD 1/{self.n}) does not run on a pull_request the scope marks guard")
 
-    def test_a_pr_the_scope_marks_guard_runs_each_shard_job_past_the_first(self):
+    def step_runs(self, i, st, event, flags):
+        """Whether a step of shard i runs: its job's if and its own if both run."""
+        return if_runs(self.jobs[self.job_of[i]]["if"], event, flags) and if_runs(st.get("if"), event, flags)
+
+    def test_a_pr_the_scope_marks_guard_lists_every_step_of_each_shard_past_the_first(self):
+        # Named failure: a step of a shard past the first does not run on a pull_request the scope marks guard.
+        for i in range(2, self.n + 1):
+            for label, st in self.steps_of(i).items():
+                with self.subTest(shard=i, step=label):
+                    self.assertTrue(self.step_runs(i, st, "pull_request", GUARD_ON),
+                                    f"the {label} step of {self.job_of[i]} does not run on a pull_request the scope marks guard")
+
+    def test_a_pr_the_scope_does_not_mark_guard_skips_every_step_of_each_shard_past_the_first(self):
+        # Control: a non-guard pull_request runs none of the steps, so no shard past the first does work there.
+        for i in range(2, self.n + 1):
+            for label, st in self.steps_of(i).items():
+                with self.subTest(shard=i, step=label):
+                    self.assertFalse(self.step_runs(i, st, "pull_request", GUARD_OFF),
+                                     f"the {label} step of {self.job_of[i]} runs on a pull_request the scope does not mark guard")
+
+    def test_a_guard_shard_past_the_first_has_no_job_level_if(self):
+        # Its steps decide. A job-level if would skip the job on a non-guard pull_request, and the scope condition sits in each step.
         for i in range(2, self.n + 1):
             with self.subTest(job=self.job_of[i]):
-                self.assertTrue(if_runs(self.jobs[self.job_of[i]]["if"], "pull_request", GUARD_ON),
-                                f"{self.job_of[i]} is skipped by its job-level if on a pull_request the scope marks guard")
-
-    def test_a_pr_the_scope_marks_guard_runs_each_shard_step_past_the_first(self):
-        for i in range(2, self.n + 1):
-            with self.subTest(shard=i):
-                self.assertTrue(if_runs(self.shard[i].get("if"), "pull_request", GUARD_ON),
-                                f"the GUARD_SHARD {i}/{self.n} step of {self.job_of[i]} is skipped on a pull_request the scope marks guard")
-
-    def test_a_pr_the_scope_does_not_mark_guard_skips_each_shard_job_past_the_first(self):
-        # Control: a non-guard pull_request starts no Windows runner for a shard, because the job-level if skips the job.
-        for i in range(2, self.n + 1):
-            with self.subTest(job=self.job_of[i]):
-                job_if = self.jobs[self.job_of[i]]["if"]
-                self.assertIsNotNone(job_if, f"{self.job_of[i]} has no job-level if: it starts on every pull_request")
-                self.assertFalse(if_runs(job_if, "pull_request", GUARD_OFF),
-                                 f"{self.job_of[i]} runs on a pull_request the scope does not mark guard")
+                self.assertIsNone(self.jobs[self.job_of[i]]["if"],
+                                  f"{self.job_of[i]} has a job-level if {self.jobs[self.job_of[i]]['if']}: its steps carry the scope condition")
 
     def test_a_pr_the_scope_does_not_mark_guard_runs_no_shard(self):
         # Control: the gate is the guard output alone, with every other output on.
