@@ -1,0 +1,16 @@
+{
+ "id": "silent-undo-session-url-line",
+ "title": "lint/check_silent_undo.py reads a PR body's key lines when the session URL line follows the attribution line",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "test-guard-split-per-rule"
+ ],
+ "why": "last_paragraph misses the key lines when the Claude session URL follows the attribution line, so the check can miss what it reads for.",
+ "source": "coordinator 23:10 CST Nov 11, from lane pr-template-merge-lines (PR #2613)",
+ "note": "Code. Seen on PR #2613.",
+ "updatedAt": "2026-11-11T23:11:00-06:00"
+}

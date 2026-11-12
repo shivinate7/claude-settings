@@ -1,0 +1,16 @@
+{
+ "id": "find-copies-pr-template",
+ "title": "lint/find_copies.py does not flag an adopting repo's .github pull request template as a copy",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "test-guard-split-per-rule"
+ ],
+ "why": "An adopting repo must keep its own .github/pull_request_template.md, and find_copies.py reports it as a copied file.",
+ "source": "coordinator 23:10 CST Nov 11, from lane pr-template-merge-lines (PR #2613)",
+ "note": "Code. Seen on PR #2613.",
+ "updatedAt": "2026-11-11T23:11:00-06:00"
+}
