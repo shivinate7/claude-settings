@@ -1,5 +1,6 @@
 # section 34371
 FAMILY = "scratchpad-owner"
+FAMILIES["scratchpad-owner"] = "rule scratchpad-owner: an agent that runs a script another agent of its session wrote into the shared scratchpad is refused; the write-time record, the run forms, the passes, the reads and the cost"
 SPO_RULE = "scratchpad-owner"
 SPO_WRITER = "spo-writer-01"   # an agent id in the shape AGENT_ID accepts
 SPO_OTHER = "spo-other-02"

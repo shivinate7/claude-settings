@@ -1,5 +1,6 @@
 # section 13406
 FAMILY = "merge"
+FAMILIES["merge"] = "merge into main, draft pull requests and the merge guard"
 #
 # Decision 8 ("Merge into main: allow and report") supersedes Decision 2 ("ask always"). Every
 # merge call is an ALLOW, and the allow is silent: no printed reason and no log line. The silent

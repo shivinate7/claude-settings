@@ -1,5 +1,6 @@
 # section 21304
 FAMILY = "diff"
+FAMILIES["diff"] = "the diff judged at commit, push and stop"
 BASE_FILES = {
     "src/app.py": "x = 1\n", "src/contest.py": "y = 1\n", "latest_results.md": "ok\n",
     "tests/test_a.py": "def test_a():\n    assert True\n", "pyproject.toml": "[project]\nname = 'x'\n[tool.pytest.ini_options]\nminversion = '7'\n",

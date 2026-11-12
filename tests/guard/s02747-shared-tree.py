@@ -1,5 +1,6 @@
 # section 2747
 FAMILY = "shared-tree"
+FAMILIES["shared-tree"] = "stash, reset, restore, checkout and the subject read"
 #
 # TRAPLN holds one real directory, a link to it, a file and a link to it.
 TRAPLN = os.path.join(ROOT, "trapln")

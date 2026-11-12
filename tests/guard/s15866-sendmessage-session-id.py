@@ -1,5 +1,6 @@
 # section 15866
 FAMILY = "sendmessage-session-id"
+FAMILIES["sendmessage-session-id"] = "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule"
 #
 # Rule sendmessage-session-id. SendMessage addresses an agent by name. A `session_` id is no agent name, and auto mode
 # refused a SendMessage that named one. So a SendMessage whose `to` starts `session_` is refused: its hand-off could go

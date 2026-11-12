@@ -1,5 +1,6 @@
 # section 35192
 FAMILY = "mask-script"
+FAMILIES["mask-script"] = "mask_script lexemes"
 
 # The timing cases guard mask_script. Its earlier regex form could take each backslash after an
 # unclosed quote as one `.` or as half of a `\\.` pair, so the paths grew like Fibonacci. Measured

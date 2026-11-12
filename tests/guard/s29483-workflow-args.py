@@ -1,5 +1,6 @@
 # section 29483
 FAMILY = "workflow-args"
+FAMILIES["workflow-args"] = "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name"
 WORKFLOW_ARGS_RULE = "workflow-args-shape-check"
 WORKFLOW_ARGS_FIX = ("replace", "real value", "fill in")
 WORKFLOW_ARGS_SCRIPT = _step_flow("'Check the named files.'", "agentType: 'reviewer', model: 'sonnet'")

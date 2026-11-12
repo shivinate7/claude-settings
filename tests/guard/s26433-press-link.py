@@ -1,5 +1,6 @@
 # section 26433
 FAMILY = "press-link"
+FAMILIES["press-link"] = "the page writer: a press in a web app carries a link to the exact page"
 #
 # A waiting item that asks the owner to press in a web app (GitHub, a PR, a pull request, a
 # `home#374` ref, Settings) carries a link to that exact page: on the option whose label or how asks

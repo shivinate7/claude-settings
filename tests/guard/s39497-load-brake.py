@@ -1,5 +1,6 @@
 # section 39497
 FAMILY = "load-brake"
+FAMILIES["load-brake"] = "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets"
 # The machine-load brake. On a start call only (Agent, Task, Workflow, mcp__ccd_session__start_session)
 # the guard reads the machine's load once: memory in use as a share of this machine's memory, and disk free on
 # the home drive in GB against the drive's size. CPU is not read (decision machine-load-brake): a 200 ms CPU

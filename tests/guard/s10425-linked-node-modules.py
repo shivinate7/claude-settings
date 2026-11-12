@@ -1,5 +1,6 @@
 # section 10425
 FAMILY = "linked-node-modules"
+FAMILIES["linked-node-modules"] = "a dependency install or a recursive delete through a node_modules that is a link"
 NM_RULE = "linked-node-modules"
 # The remedy names the link and the real folder to make, and never names the refused act.
 NM_REMEDY = ("link", ("real folder", "real directory"), "setup")

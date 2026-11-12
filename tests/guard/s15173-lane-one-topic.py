@@ -1,5 +1,6 @@
 # section 15173
 FAMILY = "lane-one-topic"
+FAMILIES["lane-one-topic"] = "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread"
 #
 # Rule lane-one-topic. A lane is one topic: its cs-topic tag, set at create_session beside its cs-step tags. A
 # send_message whose first non-blank line is `Lane brief: <step>. Topic: <topic>.` is refused when the target's newest

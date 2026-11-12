@@ -1,5 +1,6 @@
 # section 38287
 FAMILY = "handoff-sections"
+FAMILIES["handoff-sections"] = "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost"
 HS_RULE = "handoff-sections"
 HS_SID = "5d2a7c10-0000-4000-8000-00000000f00d"      # the session that writes
 HS_OTHER = "9e41b0c3-0000-4000-8000-00000000beef"    # another session's handoff

@@ -1,5 +1,6 @@
 # section 25010
 FAMILY = "impeccable"
+FAMILIES["impeccable"] = "impeccable is review-only"
 #
 # Owner ruling, 2026-10-10, decisions/design-skills.md: the impeccable plugin loads only for review
 # (audit, critique). Its build commands and its settings writers are refused. Other skills pass.

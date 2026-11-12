@@ -1,5 +1,6 @@
 # section 35850
 FAMILY = "reload-stamp"
+FAMILIES["reload-stamp"] = "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows"
 RELOAD_DELAY_S = 1.0
 INSTALL_ID = "3f1a9c2e-5b7d-4e8f-9a0b-1c2d3e4f5a6b"
 STALE_INSTALL_ID = "0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a"

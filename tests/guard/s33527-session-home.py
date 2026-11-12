@@ -1,5 +1,6 @@
 # section 33527
 FAMILY = "session-home"
+FAMILIES["session-home"] = "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost"
 SH_AGENT = "shomeagent0f1e2d3c"  # an agent id in the shape AGENT_ID accepts
 
 

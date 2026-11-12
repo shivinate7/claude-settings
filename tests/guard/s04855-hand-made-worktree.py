@@ -1,5 +1,6 @@
 # section 4855
 FAMILY = "hand-made-worktree"
+FAMILIES["hand-made-worktree"] = "a worktree made by hand outside the agent home folder"
 #
 # A worktree comes only from the Agent tool's `isolation: 'worktree'` or the EnterWorktree tool
 # (debt agents-write-main-clone; decision predicate-is-the-act). The act refused is a real

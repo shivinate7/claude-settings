@@ -1,5 +1,6 @@
 # section 36421
 FAMILY = "override"
+FAMILIES["override"] = "the owner override: one act or a timed override, one session, the exclusions it never lifts"
 #
 # The owner types `override` as a whole prompt, and the guard lets the next refused act through (a
 # one-act override). `override 15m` or `override 3h` lets every refused act through until the override ends

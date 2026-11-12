@@ -1,5 +1,6 @@
 # section 14736
 FAMILY = "lane-closes-after-records"
+FAMILIES["lane-closes-after-records"] = "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read"
 #
 # Rule lane-closes-after-records. The cases pin when archive_session of a lane is refused and when it is allowed.
 # A lane must not close while its records pull request is open, or those records are lost. The guard reads

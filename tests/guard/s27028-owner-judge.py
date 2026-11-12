@@ -1,5 +1,6 @@
 # section 27028
 FAMILY = "owner-judge"
+FAMILIES["owner-judge"] = "the page writer: a decision states the question form (Goal, Problem with its stake, one to three Based on lines, gain and lose in each option), or is a closed decision or a task"
 #
 # Rules question-form and owner-judge: one form for a waiting-page decision, judged by hooks/question_form.py.
 # These cases run the real guard; the module's own cases, with item 92's shape, are in

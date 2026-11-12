@@ -1,5 +1,6 @@
 # section 27394
 FAMILY = "item-field-rendered"
+FAMILIES["item-field-rendered"] = "the page writer: a write names only item fields the page renders (the itemFields block of page.html)"
 #
 # docs/decisions/item-field-rendered.md, rule item-field-rendered, built against a named incident
 # (incident in the record): live items carried `reply`, and page.html never showed it. A write of a waiting item is refused when it names a

@@ -1,5 +1,6 @@
 # section 6590
 FAMILY = "stream"
+FAMILIES["stream"] = "live streams, narrating commands, ln -s, waiter loops and background end conditions"
 #
 # A follow flag never ends on its own, so it outlives the turn and the agent that started it.
 

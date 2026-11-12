@@ -1,5 +1,6 @@
 # section 18211
 FAMILY = "frozen"
+FAMILIES["frozen"] = "frozen paths"
 #
 # Ported from q_max, with that repository's own two frozen paths replaced by the global set. The
 # file-tool check is the WALL: an exact resolved path, and no heuristics. The shell check is a

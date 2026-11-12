@@ -1,5 +1,6 @@
 # section 16449
 FAMILY = "records-page-ready"
+FAMILIES["records-page-ready"] = "a ready pull request whose head holds a stale records page is refused, on the MCP draft:false call and on gh pr ready in each form; a current, non-default, claim-holding, behind-the-base, empty, undo, draft, title-only or non-merge-tool call is allowed; a read that cannot run, or an ancestry unknown in a shallow clone, is refused unknown, and the unknown reason names no --confirm"
 #
 # `records-page-ready`. Marking a pull request ready is refused while its head holds a stale records page: the merge
 # tool rebuilds the page only on a draft, before the branch goes ready (decision records-index-at-merge). The rule

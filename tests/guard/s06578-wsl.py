@@ -1,5 +1,6 @@
 # section 6578
 FAMILY = "wsl"
+FAMILIES["wsl"] = "the WSL launch allow list, the refused WSL forms, and quoted or commented text"
 for _label, _open, _close, _mw in (
         ("EOF-1", "EOF-1", "EOF-1", "EOF"),
         ('"E"OF', '"E"OF', "EOF", "E"),

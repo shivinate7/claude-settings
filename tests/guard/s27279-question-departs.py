@@ -1,5 +1,6 @@
 # section 27279
 FAMILY = "question-departs"
+FAMILIES["question-departs"] = "the page writer: a decision says how it departs from main in a Departs from line, not a restatement of main"
 #
 # Rule question-departs (decision owner-judge's ruling, Oct 30: a question to the owner that restates main is
 # not a question). A decision carries a line at a line start in `context`: `Departs from: <what on main> — <what

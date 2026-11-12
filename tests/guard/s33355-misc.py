@@ -1,5 +1,6 @@
 # section 33355
 FAMILY = "misc"  # this literal mixes several rules, so its log checks are not one family
+FAMILIES["misc"] = "anything outside a tagged section"
 LOG_CHECKS = (
     ("log: one line per refusal and none for an allow", log_case),
     ("log: the refused file is named in the log and nowhere else", log_env_case),

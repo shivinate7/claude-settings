@@ -1,5 +1,6 @@
 # section 38816
 FAMILY = "handoff-checked-stamp"
+FAMILIES["handoff-checked-stamp"] = "a write to a session handoff that restamps a premise's Checked value is refused without evidence in the session's transcript after its last compact boundary: the incident, the evidence forms, the boundary, the agent and handoff reads, the fail-open copies, the non-handoff files, and the cost"
 HCS_RULE = "handoff-checked-stamp"
 HCS_SID = "4b8e1d62-0000-4000-8000-00000000c0a1"       # the session that restamps
 HCS_SID_FULL = "4b8e1d62-0000-4000-8000-00000000f0a1"  # a full-size handoff, in the same config folder

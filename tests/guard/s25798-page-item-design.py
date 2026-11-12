@@ -1,5 +1,6 @@
 # section 25798
 FAMILY = "page-item-design"
+FAMILIES["page-item-design"] = "the page writer: a design picture that misses its focus, its state or its height is refused at write, and an allowed publish of the waiting page records the published file"
 
 PD_STAMP = "waiting-page-published"  # the stamp file, in the git common dir
 PD_DOC = "fill-of-volume-card"

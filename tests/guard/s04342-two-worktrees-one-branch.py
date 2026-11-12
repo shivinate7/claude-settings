@@ -1,5 +1,6 @@
 # section 4342
 FAMILY = "two-worktrees-one-branch"
+FAMILIES["two-worktrees-one-branch"] = "a checkout, switch or worktree add that would take a branch another worktree of the clone holds is refused; the forms that take no such branch, and the holder's own checkout, pass"
 #
 # Rule two-worktrees-one-branch (the decision of the same name): the guard refuses a git command that
 # checks out a branch another worktree of the clone already holds. The forms are `checkout -B` and

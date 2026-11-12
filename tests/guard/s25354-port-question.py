@@ -1,5 +1,6 @@
 # section 25354
 FAMILY = "port-question"
+FAMILIES["port-question"] = "the page writer: a port question carries a Departs from line and holds nothing"
 #
 # Decision port-keeps-behaviour: a waiting item about a port or
 # redesign carries a "Departs from:" line and never holds work. The refusal reads the item the

@@ -1,5 +1,6 @@
 # section 26800
 FAMILY = "gh-login-switch"
+FAMILIES["gh-login-switch"] = "the page writer: a gh command in a task switches login first, shivinate7 by default and ssemwal-cdc only for a repo shivinate7 cannot reach"
 #
 # The default gh login is shivinate7; ssemwal-cdc is only for a repo shivinate7 cannot reach (decision
 # `act-in-place`). A task's `command` runs on the owner's computer, so a gh command in it runs as whichever
