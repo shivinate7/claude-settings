@@ -108,9 +108,16 @@ agent).
 Leave network access at Trusted, or add `raw.githubusercontent.com`, `github.com`, and
 `codeload.github.com` to a Custom list. The setup script cannot read the environment's
 variables or secrets. If this repo goes private, add it under the environment's Repositories.
-install.sh also writes a `SessionStart` hook that re-runs it, so each new or resumed session
+In a session thread, install.sh also writes a `SessionStart` hook that re-runs it, so each new or resumed session
 re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
 `CLAUDE_SETTINGS_REF=<sha>` as an environment variable. Only the `SessionStart` hook reads it.
+
+A project's cloud thread runs none of a repo's own `.claude/settings.json` hooks, deny rules, or
+`SessionStart` hooks. The docs say repo hooks run "outside a project thread" (code.claude.com/docs/en/cloud-environments,
+"Setup scripts vs. SessionStart hooks"). So a repo that needs a `SessionStart` hook or its own deny
+rule for setup or safety must provision in the environment setup script instead. A guard that must
+hold in project threads belongs in this repo's guard, `hooks/guard.py`: it still loads there, while
+the repo's own settings did not (measured 2026-11-03 in a project thread).
 
 ## Verify the install
 
