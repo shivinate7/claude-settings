@@ -2184,5 +2184,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
-- stall-watch-empty-ps: an empty `ps` answer reads as a job that ended, so `watch` exits 0 with no STALL (hooks/stall_watch.py `job_state`). Fix: none — note until an incident. Until: 2026-11-22
 - stall-watch-empty-ps: an empty `ps` answer reads as a job that ended, so `watch` exits 0 with no STALL (hooks/stall_watch.py `job_state`). Fix: none — note until an incident. Until: 2026-11-22. Decision: stall-watch.
