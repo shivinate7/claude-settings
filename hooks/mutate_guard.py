@@ -2796,8 +2796,8 @@ MUTATIONS = [
     # ---- lane-title-slug. A lane create_session's title opens with `Lane <branch slug>:`. guard.py lane_title_hit reads the
     # opening with shared_names.py LANE_TITLE_OPENING, cut from LANE_TITLE_FORM with LANE_SLUG_PATTERN for the placeholder.
     # Each mutant breaks one clause: the verdict, the refusal, the lane tag condition, the empty or missing title, the colon,
-    # the slug, the Lane word, the anchor, the leading blanks, or the slug's case. The printed form has no mutant of its own:
-    # the opening is cut from it, so a changed form changes the opening with it.
+    # the slug, the Lane word, the anchor, the leading blanks, the slug's case, or the example opening. The printed form's
+    # one mutant changes its colon in the refusal; the opening is cut from the same form, so a changed form changes it too.
     ("lane-title-slug: the hit always allows, so a lane start with a free title is allowed",
      '    if LANE_TITLE_OPENING.match(text):\n        return ""\n    return text[:80] or "(none)"',
      '    return ""',
@@ -2843,9 +2843,13 @@ MUTATIONS = [
      'LANE_SLUG_PATTERN = r"[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*"',
      "guard", "lane-title-slug: a title with a session number as its slug is denied"),
     ("lane-title-slug: the refusal prints the form with its colon changed, so it does not carry the printed form verbatim",
-     '(rule lane-title-slug)." % LANE_TITLE_FORM',
-     '(rule lane-title-slug)." % LANE_TITLE_FORM.replace(":", ";")',
+     '    % (LANE_TITLE_FORM, LANE_TITLE_EXAMPLE_OPENING)',
+     '    % (LANE_TITLE_FORM.replace(":", ";"), LANE_TITLE_EXAMPLE_OPENING)',
      "guard", "lane-title-slug: the refusal carries the printed form verbatim"),
+    ("lane-title-slug: the example opening holds a session number, so the refusal shows Lane N as its example",
+     'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "my-step" + _FORM_TAIL',
+     'LANE_TITLE_EXAMPLE_OPENING = _FORM_HEAD + "N20" + _FORM_TAIL',
+     "guard", "lane-title-slug: a lane start with a free title is denied"),
     # RULE roadmap-one-writer. A push to the record branch needs the triage tag in the own record, with no
     # set_session_tags call after it.
     ("roadmap-one-writer: the triage tag is not checked, so any own record is a proof",
