@@ -1,0 +1,11 @@
+{
+ "id": "r60",
+ "at": "2026-11-12T15:07:00-06:00",
+ "ruling": "- **R60. An option keeps its letter and carries an id.** Read: at 14:39 CST Nov 12 triage reordered item 646 after the chat question went out, so chat a became page b. The owner's \"a\" (15:03 CST) could have been filed as the opposite pick. Owner 15:07 CST: \"in general if sessions create options triage should hold those letters the same (or they shd be referenced by IDs each option rather than A B which can be arbitrarily swapped)\". 1. Triage keeps each option's letter as the asking session wrote it; a rule-driven change adds a note to the option and reorders nothing. 2. Each option carries a short id, and a stored pick records that id, not the letter. 3. An answer to an item whose letters moved after it was shown is held, and the owner confirms in words. Step: option-keys-match-chat (#2682).",
+ "quote": "in general if sessions create options triage should hold those letters the same (or they shd be referenced by IDs each option rather than A B which can be arbitrarily swapped)",
+ "source": "plans/restart-plan.md@restart-plan c92e5bca, R60; home decision question-form",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "main: no rule fixes an option letter once shown; decision question-form (docs/decisions/question-form.md) is the record step option-keys-match-chat rewrites",
+ "title": "An option keeps its letter and carries an id."
+}

@@ -1,0 +1,14 @@
+{
+ "id": "busy-file-across-batches",
+ "title": "The busy-file check compares a batch's lanes with lanes in other open batches built from the same main",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane busy-file-stacked-batches 15:08 CST Nov 12 (#2972): the check compares lanes within one batch request only; express batches now run beside ordinary ones (R55), so two batches built from main can both touch a file unseen.",
+ "source": "lane busy-file-stacked-batches via coordinator 15:08 CST Nov 12",
+ "note": "Extend the busy-file check to read the other open batch PRs' lane sets and compare touched files across them; red first on two batches from one main that touch one file. After #2972 merges.",
+ "updatedAt": "2026-11-12T15:10:29-06:00"
+}
