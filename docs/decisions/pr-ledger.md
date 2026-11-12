@@ -73,20 +73,20 @@ The first match wins, in this order. A held or unparseable record matches no rec
 
 The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
-Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Lane round (1 to 4), fix check and fresh full review are 72 h, set from the measure in "The round-age measure" below (the coordinator's 72 h picks of 12:01 CST Nov 12 stand). Batch and batch run are 24 h, from the same measure. Lane lint is 72 h, unmeasured (lane pick, 12:13 CST Nov 12). `waits on` has no limit: a hold goes red when it has no page item or debt. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red. Red only prints (a flag on the `--reviewed` line and in the two totals); the join, the lane lint and the merge never read it, so no limit cuts work off (owner, 12:54 CST Nov 12, item 595 note: a stored number is fine when it does not cut work off).
+Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Lane round 2 to 4, fix check and fresh full review are 72 h, set from the record-to-record row of "The round-age measure" below (the coordinator's 72 h picks of 12:01 CST Nov 12 stand); that row does not split fix check from fresh full review. Batch is 24 h, from the last-record-to-merge row. Lane round 1 (72 h, aged from the PR's last update), batch run (24 h, aged from its label) and lane lint (72 h, lane pick 12:13 CST Nov 12) are unmeasured. `waits on` has no limit: a hold goes red when it has no page item or debt. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red. Red only prints (a flag on the `--reviewed` line); the join, the lane lint and the merge never read it, so no limit cuts work off (owner, 12:54 CST Nov 12, item 595 note: a stored number is fine when it does not cut work off).
 
 ## The round-age measure
 
-Measured 13:10 CST Nov 12, by REST (`gh api repos/shivinate7/claude-settings/...`, no GraphQL), on claude-settings only. Sample: every eighth PR from #1100 to #2863, plus all 351 open PRs: 524 PRs, 393 with a review record, created 2026-11-02 to 2026-11-12. A record's time is its comment's `created_at`.
+Measured 13:10 CST Nov 12, by REST (`gh api repos/shivinate7/claude-settings/...`, no GraphQL), on claude-settings only. Sample: every eighth PR from #1100 to #2863, plus all 351 open PRs: 524 PRs, 393 with a review log, created 2026-11-02 to 2026-11-12. A record's time is its comment's `created_at`.
 
 | Age | Samples | Median | 90th | Max | Over the limit |
 | --- | --- | --- | --- | --- | --- |
-| PR opened to first record (limit 72 h) | 393 | 0.2 h | 2.1 h | 122.0 h | 2 |
+| PR opened to first record (no limit reads it) | 393 | 0.2 h | 2.1 h | 122.0 h | 2 |
 | One record to the next (limit 72 h) | 709 | 0.6 h | 10.8 h | 56.8 h | 0 |
 | Last record to merge (limit 24 h) | 47 | 7.8 h | 12.6 h | 22.3 h | 0 |
 
-- No round waited past 57 h before the next one, so 72 h stops no round that went on. Two first records came after 72 h (the longest 122 h); a 72 h flag on them was an early warning, and no work stopped.
-- Of 288 open PRs with a record, 100 are over 72 h since the newest record (max 118 h); of 63 open with no record, 23 are over 72 h since the last update. They are right-cut: they may still get a round. They are the stalled PRs the ledger exists to show.
+- No round waited past 57 h before the next one, so 72 h stops no round that went on. Two PRs got their first record after 72 h (the longest 122 h). The opened-to-first-record row is context only; lane round 1 ages from the last update.
+- Of 288 open PRs with a record, 100 are over 72 h since the newest record (max 118 h); of 63 open with no record, 23 are over 72 h since the last update. They are still open: they may yet get a round. They are the stalled PRs the ledger exists to show.
 - 24 h for batch holds all 47 merges, with 1.7 h to spare. A main-red hold runs past it by design and shows red.
 - A tighter limit would flag live work: 24 h on one record to the next flags 30 of 709.
 
