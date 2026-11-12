@@ -48,7 +48,6 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 import guard  # noqa: E402
 import sweep  # noqa: E402
-import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 VCS = "g" + "it"  # assembled so this file cannot itself look like the command it tests
 IDENT = ["-c", "user.email=janitor-cases@example.invalid", "-c", "user.name=janitor-cases"]
