@@ -262,10 +262,17 @@ MIXED_FILES = {"x/1.py": CALC_BASE, "y/1.py": CALC_BASE, "test_x.py": add_catche
                "a/deps.lock": LOCK_TEXT, "b/deps.lock": LOCK_TEXT, "c/deps.lock": LOCK_TEXT}
 
 
-def mixed_defect_run(installs):
-    """`--known-defects` of one planted defect in x/1.py, against mixed_profile with `installs` = (a, b, c)."""
-    repo = defect_repo(extra_files=MIXED_FILES)
-    defects = [defect("kb-mix", "return a + b", "return a - b", "test_x.py", file="x/1.py")]
+def importing_catcher(path):
+    """add_catcher(path), after `import kb_oracle`. When the install that provides kb_oracle failed, the load hook logs the
+    missing import, so the defect reads UNKNOWN."""
+    return "import kb_oracle\n" + add_catcher(path)
+
+
+def mixed_defect_run(installs, file="x/1.py", suite="test_x.py", extra_files=None):
+    """`--known-defects` of one planted defect in `file` (x/1.py by default), run by `suite`, against mixed_profile with
+    `installs` = (a, b, c). `extra_files` joins MIXED_FILES."""
+    repo = defect_repo(extra_files={**MIXED_FILES, **(extra_files or {})})
+    defects = [defect("kb-mix", "return a + b", "return a - b", suite, file=file)]
     return known_run(defects, repo, profile=mixed_profile(*installs))
 
 
@@ -1083,6 +1090,33 @@ class KnownDefectsTests(unittest.TestCase):
                          "pick A, 15:54 CST: a defect whose catcher loads no missing module reads CAUGHT, though part c's "
                          "install failed\n" + out + err)
         self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_failed_part_b_install_reads_unknown_naming_part_b_when_its_catcher_imports_the_module(self):
+        # Part b's install failed. The catcher imports kb_oracle, the module that install would have provided, so the load
+        # hook logs it and the defect reads UNKNOWN naming part b.
+        code, out, err = mixed_defect_run((PASSING_INSTALL, FAILING_INSTALL, PASSING_INSTALL), file="y/1.py",
+                                          suite="test_kb_y.py",
+                                          extra_files={"test_kb_y.py": importing_catcher(("y", "1.py"))})
+        self.assertEqual(verdicts_of(out), {"kb-mix": "UNKNOWN"},
+                         "a catcher that imports a module a failed install would provide reads UNKNOWN, never CAUGHT\n"
+                         + out + err)
+        lines = [text for text in out.splitlines() if text.startswith("UNKNOWN kb-mix")]
+        self.assertEqual(len(lines), 1, "one UNKNOWN line for kb-mix:\n" + out)
+        self.assertIn("part b", lines[0], "the UNKNOWN reason must name part b's install: " + lines[0])
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
+
+    def test_a_failed_part_c_install_reads_unknown_naming_part_c_when_its_catcher_imports_the_module(self):
+        # Part c's install failed. The catcher imports kb_oracle, so the load hook logs it and the defect reads UNKNOWN
+        # naming part c.
+        code, out, err = mixed_defect_run((PASSING_INSTALL, PASSING_INSTALL, FAILING_INSTALL), suite="test_kb_x.py",
+                                          extra_files={"test_kb_x.py": importing_catcher(("x", "1.py"))})
+        self.assertEqual(verdicts_of(out), {"kb-mix": "UNKNOWN"},
+                         "a catcher that imports a module a failed install would provide reads UNKNOWN, never CAUGHT\n"
+                         + out + err)
+        lines = [text for text in out.splitlines() if text.startswith("UNKNOWN kb-mix")]
+        self.assertEqual(len(lines), 1, "one UNKNOWN line for kb-mix:\n" + out)
+        self.assertIn("part c", lines[0], "the UNKNOWN reason must name part c's install: " + lines[0])
+        self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
 
 
 # ---------------------------------------------------------------------------------------------------
