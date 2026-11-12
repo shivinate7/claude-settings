@@ -1,6 +1,6 @@
-# A hung parent over a helper child is never reported
+# A hung parent over a long-lived child is never reported
 
-**What.** A parent with a long-lived helper child reads as a waiter for its whole run, so the stall watch never reports it. A hung `playwright install` through its launcher is the shape. That is the incident that founded the stall watch. Which launcher form the incident used is unmeasured. Other cases: xdist workers, an MCP server, ssh ProxyJump, `git push` on a dead network.
+**What.** A parent with a long-lived child reads as a waiter for its whole run, so the stall watch never reports it. A hung `playwright install` through its launcher is the shape. That is the incident that founded the stall watch. Which launcher form the incident used is unmeasured. Other cases: xdist workers, an MCP server, ssh ProxyJump, `git push` on a dead network.
 
 **Where.** `has_waiter` and `runs_shell` in `hooks/stall_watch.py`, and the Stop check `busy_outputs`. Both count a non-shell process with a live child as life.
 
