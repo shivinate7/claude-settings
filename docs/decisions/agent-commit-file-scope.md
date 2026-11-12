@@ -34,13 +34,13 @@ Limits.
 
 ## Cost
 
-One `stall_watch` import at each commit and push of an agent with a role. One read of the agent's transcript at a commit, push or stop. It happens only when the agent has a change of its own to judge, and it stops at the first user record. Each pointer adds one read of one file of at most 64 KB. A run with a `/` and no extension adds one listing of the checkout's top folder, once per judgement. The first path outside scope adds an import of `lint/hook_catalog.py`, a default-branch read and one `git merge-base`. Each such path adds one `git cat-file -e`. No timer, no process, no file written except the one guard.log line a refusal or a logged state writes.
+One `stall_watch` import at each commit and push of an agent with a role. One read of the agent's transcript at a commit, push or stop. It happens only when the agent has a change of its own to judge, and it stops at the first user record. Each pointer adds one read of one file of at most 64 KB. A run with a `/` and no extension adds one listing of the checkout's top folder, once per judgement. The first path outside scope adds imports of `lint/layout.py` and `lint/hook_catalog.py`, a default-branch read and one `git merge-base`. Each such path adds one `git cat-file -e`. No timer, no process. Files written: the one guard.log line a refusal or a logged state writes, and the `.pyc` files Python writes into `__pycache__` the first time it loads `stall_watch`, `lint/layout.py` or `lint/hook_catalog.py`, and again when the cached copy is missing or stale. Python writes them unless bytecode writing is off. The guard turns it off only for its sim-lease load.
 
 The reader of those lines is `lint/guard_log_report.py` (rules `brief-scope-diff`, `brief-scope-new`, `brief-scope-unnamed`, `brief-scope-unread`, `brief-scope-unresolved`). A cull reads `brief-scope-unread` and `brief-scope-unnamed` to see how many briefs the guard could not judge.
 
 ## Measure
 
-`GUARD_FAMILY=brief-scope python3 hooks/test_guard.py`: 65 of 65 cases pass on this tip.
+`GUARD_FAMILY=brief-scope python3 hooks/test_guard.py`: 68 of 68 cases pass on this tip. Run with this tip's test files on origin/main (2deb827ad1), 35 of 68 cases are wrong (measured 2026-11-12).
 
 Kind: build
 Plan: docs/decisions/agent-commit-file-scope.md#the-ruling (all)
