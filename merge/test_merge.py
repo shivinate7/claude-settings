@@ -20199,6 +20199,43 @@ class BatchFreeze(CloudSession):
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
 
+    # Pipeline: the real Host.heads_busy and running_batch, through PullsHost's count_gh: each REST route goes through the real Host.api and
+    # pages, and a scripted gh answers it as GitHub does. Each batch head has its check `checks` pending, so every batch pull is busy.
+
+    def busy_chain_host(self, base, chain):
+        """-> a PullsHost whose open pulls are the ready batch pull requests of `chain`: (batch name, head sha) pairs, all on `base`. Each batch
+        stacks on the one before it (its On line); the first stacks on nothing."""
+        pulls, rows, on = [], {}, None
+        for i, (name, sha) in enumerate(chain):
+            body = freeze_body(freeze_inner(name, [(101, OWN_SHA)], on=on))
+            pulls.append({**batch_pull(201 + i, sha, base=base, head_ref=merge.integration_branch(name)), "state": "open", "body": body})
+            rows[sha] = [batch_run("checks")]
+            on = (merge.integration_branch(name), sha)
+        return PullsHost(pulls, rows, count_gh=True)
+
+    def test_running_batch_reads_the_required_checks_of_the_base_it_is_given(self):
+        host = self.busy_chain_host("release", [("x", "1" * 40), ("y", "2" * 40)])
+        tip = merge.running_batch(host, "release")
+        protection = [rel for rel in host.gh_calls if "/protection/" in rel]
+        self.assertTrue(protection, "running_batch on release read no branch protection at all")
+        self.assertIn("branches/release/protection/required_status_checks", protection,
+                      "running_batch on release did not read the protection of release: %s" % protection)
+        self.assertNotIn("branches/main/protection/required_status_checks", protection,
+                         "running_batch on release read the protection of main: %s" % protection)
+        self.assertEqual(tip, "batch-y", "running_batch on release did not return the tip of the running chain: %s" % tip)
+
+    def test_heads_busy_reads_the_required_checks_once_for_all_the_busy_batch_pulls(self):
+        chain = [("x", "1" * 40), ("y", "2" * 40), ("z", "3" * 40)]
+        host = self.busy_chain_host("main", chain)
+        tip = merge.running_batch(host, "main")
+        judged = sorted(rel for rel in host.gh_calls if rel.endswith("/check-runs"))
+        self.assertEqual(judged, sorted(f"commits/{sha}/check-runs" for _name, sha in chain),
+                         "heads_busy did not read the check runs of each of the three busy batch heads: %s" % judged)
+        protection = [rel for rel in host.gh_calls if "/protection/" in rel]
+        self.assertEqual(len(protection), 1,
+                         "heads_busy read branch protection %d times for three busy batch pull requests, not once: %s" % (len(protection), protection))
+        self.assertEqual(tip, "batch-z", "running_batch did not return the tip of the three-batch chain: %s" % tip)
+
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
 # The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
