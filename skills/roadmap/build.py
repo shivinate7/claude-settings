@@ -675,7 +675,7 @@ def live_work(path, steps, slug=None):
     reads the answer; a row keeps each only when the file has the key.
     `laneTags` holds the cs-topic: and cs-build: tags of the live sessions, for lane_live.
     Two more optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
-    enum name; missing reads as not completed) and a pulls row's `head` (the head commit sha). `laneSessions` holds the
+    enum name; missing reads as not completed) and a pulls row's `head` (the head commit sha). `sessionRows` holds the
     kept session rows, or None. Old files without them read as before. A sessions row's `updated_at` (ISO time, text)
     is copied the same way for session_board.
     One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool}], the closed
@@ -739,7 +739,7 @@ def live_work(path, steps, slug=None):
         if sid and (sid not in steps or steps[sid].get("status") == "done"):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
-    why, session_steps, live_steps, lane_sessions = [], [], [], None  # the first reason wins
+    why, session_steps, live_steps, session_rows = [], [], [], None  # the first reason wins
     lane_tags = []  # the cs-topic: and cs-build: tags of the same live sessions, for lane_live
     if read.startswith("unknown"):
         why.append(read)
@@ -773,7 +773,7 @@ def live_work(path, steps, slug=None):
         live_steps = sorted(step_tag_ids(t for r in rows if r.get("status_bucket") not in ENDED_BUCKETS
                                          for t in r.get("tags") or []))
         lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
-        lane_sessions = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
+        session_rows = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
                           "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None,
                           "updated_at": r.get("updated_at") if isinstance(r.get("updated_at"), str) else None}
                          for r in sessions]
@@ -805,7 +805,7 @@ def live_work(path, steps, slug=None):
             "threadsWhy": None if has_threads else THREADS_MISSING_WHY, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
-            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions,
+            "pageItems": page_items, "itemsWhy": items_why, "sessionRows": session_rows,
             "landedPulls": landed_pulls}
 
 
@@ -1593,7 +1593,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
 
     open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
     # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
-    ours = [row for row in work.get("laneSessions") or []
+    ours = [row for row in work.get("sessionRows") or []
             if LANE_TAG in [t.strip() for t in row["tags"] if isinstance(t, str)]
             and any(repo_tag_names(t, slug) for t in row["tags"])]
     live = [row for row in ours if row["session_status"] != ARCHIVED_SESSION]
@@ -1663,7 +1663,7 @@ def session_board(work, steps, slug, repo):
     if not slug:
         return ["unknown (the repo's GitHub name could not be read)"]
     now = datetime.datetime.now(datetime.timezone.utc)
-    ours = [row for row in work.get("laneSessions") or []
+    ours = [row for row in work.get("sessionRows") or []
             if any(repo_tag_names(t, slug) for t in row["tags"]) and row["session_status"] != ARCHIVED_SESSION]
     cands = []
     for row in ours:

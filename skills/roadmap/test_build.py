@@ -1003,7 +1003,7 @@ class LiveThreadsOptional(UpkeepFixture):
                 self.assertIsNone(live["staleWhy"])
                 self.assertIsNone(live["itemsWhy"])
                 self.assertEqual(live["pageItems"], [self.item(12, lane=None)])
-                self.assertEqual([s["id"] for s in live["laneSessions"]], ["session_test01"])
+                self.assertEqual([s["id"] for s in live["sessionRows"]], ["session_test01"])
                 self.assertEqual(live["sessionSteps"], ["c1"])
                 self.assertEqual(live["liveSteps"], ["c1"])
                 pair = [line for line in out.splitlines() if line.startswith(build.PAIR_LINE)]
@@ -4854,7 +4854,7 @@ class SessionBoard(UpkeepFixture):
         self.assertIn("session_a (waiting for action; -; no PR)", entries,
                       "a session with no cs-step tag does not read a dash for its steps")
 
-    def test_tier_session_is_listed_and_a_session_with_no_cs_build_tag_is_not(self):
+    def test_session_role_session_is_listed_and_a_session_with_no_cs_build_tag_is_not(self):
         self.publish(sessions=[self.board_row("session_tier", BUCKET_BLOCKED, "cs-build:batch-runner"),
                                self.board_row("session_topic", BUCKET_BLOCKED, "cs-topic:roadmap")])
         entries = self.board_entries()
@@ -5014,10 +5014,10 @@ class SessionBoard(UpkeepFixture):
         work, steps = self.read()
         self.assertSameEntries(self.board(work, steps), ["session_a (waiting for action; c1; no PR)"],
                                "control: the blocked session is not listed beside no raw row")
-        work["laneSessions"].append({"id": "session_list", "session_status": "SESSION_STATUS_IDLE",
+        work["sessionRows"].append({"id": "session_list", "session_status": "SESSION_STATUS_IDLE",
                                      "tags": [self.REPO, self.LANE, "cs-step:c2"], "status_bucket": [BUCKET_BLOCKED],
                                      "updated_at": None})
-        self.assertIsInstance(work["laneSessions"][-1]["status_bucket"], list,
+        self.assertIsInstance(work["sessionRows"][-1]["status_bucket"], list,
                               "scope: the raw list-valued row did not reach the work the board reads")
         try:
             entries = self.board(work, steps)
@@ -5109,7 +5109,7 @@ class SessionBoard(UpkeepFixture):
         self.publish(sessions=[self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1", updated_at=stamp),
                                self.board_row("session_b", BUCKET_BLOCKED, self.LANE, "cs-step:c2")])
         work, _ = self.read()
-        rows = {row["id"]: row for row in work["laneSessions"]}
+        rows = {row["id"]: row for row in work["sessionRows"]}
         self.assertEqual(rows["session_a"]["status_bucket"], BUCKET_WORKING,
                          "control: live_work does not copy the bucket of a session row")
         self.assertEqual(rows["session_a"].get("updated_at"), stamp, "live_work dropped the updated_at of a session row")
