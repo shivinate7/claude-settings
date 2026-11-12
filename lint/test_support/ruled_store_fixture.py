@@ -65,7 +65,7 @@ def ruling_files(entries):
 def entry(rid, **over):
     """A valid ruling entry for `rid`: open, dated AT, with one test ref under supersedes. A key set to None is left out."""
     body = {"id": rid, "at": AT, "ruling": "Owner: keep the store to one place.",
-            "owner_words": "keep it in one place", "source": "page item 1", "status": "open",
+            "quote": "keep it in one place", "source": "page item 1", "status": "open",
             "supersedes": [dict(ref) for ref in TEST_SUPERSEDES]}
     body.update(over)
     return {key: value for key, value in body.items() if value is not None}
