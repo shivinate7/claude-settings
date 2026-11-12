@@ -18212,8 +18212,8 @@ def passed_to(spy, real, name):
 
 def freeze_inner(name, lanes, dropped=(), on=None, blamed=()):
     """The lines between a frozen block's markers: `Batch:`, `On: BRANCH SHA` when the batch stacks on one, one `Lane:` line per (PR, head)
-    by PR number, then one `Dropped:` per dropped PR and one `Blamed:` per lane a red lint of the batch head blamed."""
-    return [f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *(f"Lane: #{n} {sha}" for n, sha in sorted(lanes)),
+    in the order given, which is the order the lanes were handed in, then one `Dropped:` per dropped PR and one `Blamed:` per lane a red lint of the batch head blamed."""
+    return [f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *(f"Lane: #{n} {sha}" for n, sha in lanes),
             *(f"Dropped: #{n}" for n in dropped), *(f"Blamed: #{n}" for n in sorted(blamed))]
 
 def freeze_body(inner):
@@ -18379,6 +18379,14 @@ class BatchFreeze(CloudSession):
         sh(self.co, "git", "fetch", "-q", "origin")
         out = sh(self.co, "git", "log", "--merges", "--format=%P", f"origin/{branch}")
         return {line.split()[1] for line in out.splitlines() if len(line.split()) == 2}
+
+    def merge_order(self, branch, on=None):
+        """The head each no-ff merge brought into origin's `branch`, oldest first: the order the build merged the lanes in. With `on`, the merges
+        that `on` already holds are left out, since a stacked batch holds its On batch's merges too."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        out = sh(self.co, "git", "log", "--first-parent", "--merges", "--reverse", "--format=%P", f"origin/{branch}",
+                 *(["--not", f"origin/{on}"] if on else []))
+        return [line.split()[1] for line in out.splitlines() if len(line.split()) == 2]
 
     def body(self, n):
         return self.host.batch_pulls[n]["body"]
@@ -18577,8 +18585,8 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [], "the build called Host.ready: only --ready marks a batch ready: %s" % out)
         self.assertEqual((pr["branch"], pr["base"], pr["title"]), ("batch-nightly", "main", "Batch nightly"),
                          "the batch PR is not batch-nightly into main, titled Batch nightly")
-        self.assertEqual(block_lines(pr["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in (101, 102, 103)]),
-                         "the batch PR body does not hold the frozen block: %s" % out)
+        self.assertEqual(block_lines(pr["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in (103, 101, 102)]),
+                         "the batch PR body does not hold the frozen block in the order the lanes were handed in: %s" % out)
         self.assertIn("merge: batch nightly built: PR #%d" % pr["n"], out, "the verdict line does not start with the built line: %s" % out)
         self.assertNotIn("PR #%d ready" % pr["n"], out, "the verdict says the new draft is ready: %s" % out)
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
@@ -18593,16 +18601,106 @@ class BatchFreeze(CloudSession):
         for name, mock in mocks.items():
             self.assertFalse(mock.called, "the build called merge.%s: a batch build runs no lane lint and no ready check" % name)
 
-    def test_full_size_set_lists_every_lane_once_in_pr_number_order(self):
-        numbers = [9, 10, 100, *range(101, 110)]  # twelve lanes; a text sort would put #10 and #100 before #9
+    def test_full_size_set_lists_every_lane_once_in_the_order_handed_in(self):
+        numbers = [9, 10, 100, *range(101, 110)]  # twelve lanes, handed in from the highest number down
+        handed = list(reversed(numbers))
         for n in numbers:
             self.lane(n)
-        rc, out = self.run_batch("--batch-build", "nightly", *(str(n) for n in reversed(numbers)))
+        rc, out = self.run_batch("--batch-build", "nightly", *(str(n) for n in handed))
         self.assertTrue(self.head("batch-nightly"), "the build did not push batch-nightly for twelve lanes: %s" % out)
         self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request for twelve lanes: %s" % out)
-        self.assertEqual(block_lines(self.host.created[0]["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in numbers]),
-                         "the frozen block of twelve lanes is not one Lane line each, sorted by PR number: %s" % out)
+        self.assertEqual(block_lines(self.host.created[0]["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in handed]),
+                         "the frozen block of twelve lanes is not one Lane line each, in the order handed in: %s" % out)
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    # The lanes merge in the order they are handed in, and the frozen block lists them in that order. A drop, a heal, a restack and a
+    # --ready run keep the frozen order; a rerun's own order does not change it.
+
+    def test_build_merges_the_lanes_in_the_order_handed_in(self):
+        for n in (101, 102):
+            self.lane(n)
+        rc, out = self.run_batch("--batch-build", "nightly", "102", "101")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+        self.assertEqual(self.merge_order("batch-nightly"), [self.heads[102], self.heads[101]],
+                         "the build merged #101 before #102, in PR-number order, not in the order the lanes were handed in: %s" % out)
+        self.assertEqual(block_lines(self.host.created[0]["body"]), freeze_inner("nightly", [(102, self.heads[102]), (101, self.heads[101])]),
+                         "the frozen block does not list #102 before #101, the order handed in: %s" % out)
+
+    def test_a_drop_keeps_the_order_of_the_lanes_left_in_the_batch(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [103, 101, 102], draft=True, blamed=(101,))
+        self.assertEqual(self.merge_order("batch-nightly"), [self.heads[n] for n in (103, 101, 102)],
+                         "setup: batch-nightly does not merge the lanes in the order they were handed in")
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "101")
+        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
+        self.assertEqual(self.merge_order("batch-nightly"), [self.heads[103], self.heads[102]],
+                         "the drop rebuilt batch-nightly with #102 before #103, not in the order the kept lanes were handed in: %s" % out)
+        self.assertEqual(block_lines(self.body(pr)), freeze_inner("nightly", [(103, self.heads[103]), (102, self.heads[102])], dropped=[101]),
+                         "the frozen block after the drop does not list #103 before #102: %s" % out)
+
+    def test_a_heal_rebuilds_the_lanes_in_the_order_the_frozen_block_lists_them(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [103, 101, 102], draft=True)
+        self.drift_batch("nightly", [103])  # origin's batch-nightly lost #101 and #102; the frozen block still lists all three
+        self.assertEqual(self.merge_order("batch-nightly"), [self.heads[103]], "setup: origin's batch-nightly does not hold only #103")
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "103", "101", "102")
+        self.assertEqual(rc, 0, "the heal exited %s: %s" % (rc, out))
+        self.assertEqual(self.merge_order("batch-nightly"), [self.heads[n] for n in (103, 101, 102)],
+                         "the heal merged the lanes in PR-number order, not in the order the frozen block lists them: %s" % out)
+        self.assertEqual(self.frozen_lanes(pr), [103, 101, 102], "the heal changed the order of the frozen block: %s" % out)
+
+    def test_a_rerun_handed_the_same_set_in_another_order_is_not_refused_and_heals_in_the_frozen_order(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.frozen_batch("nightly", [103, 101, 102], draft=True)
+        self.drift_batch("nightly", [103])
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "102", "101", "103")
+        self.assertEqual(rc, 0, "a rerun with the same set in another order was refused: %s" % out)
+        self.assertEqual(self.merge_order("batch-nightly"), [self.heads[n] for n in (103, 101, 102)],
+                         "the heal did not merge the lanes in the frozen block's order; the rerun's own order does not set it: %s" % out)
+
+    def test_green_control_an_ascending_request_merges_and_lists_the_lanes_ascending(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 0, "control: the build exited %s: %s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "control: the build did not open exactly one pull request: %s" % out)
+        self.assertEqual(self.merge_order("batch-nightly"), [self.heads[n] for n in (101, 102, 103)],
+                         "control: the build did not merge the lanes ascending: %s" % out)
+        self.assertEqual(block_lines(self.host.created[0]["body"]), freeze_inner("nightly", [(n, self.heads[n]) for n in (101, 102, 103)]),
+                         "control: the frozen block does not list the lanes ascending: %s" % out)
+
+    def test_a_restack_rebuilds_the_stacked_batch_in_the_order_its_block_lists_its_lanes(self):
+        for n in (101, 102, 103, 104):
+            self.lane(n)
+        self.frozen_batch("x", [101, 102], draft=True, blamed=(102,))
+        nightly_pr = self.frozen_batch("nightly", [104, 103], draft=True, on="batch-x")
+        self.assertEqual(self.merge_order("batch-nightly", on="batch-x"), [self.heads[104], self.heads[103]],
+                         "setup: batch-nightly does not merge #104 before #103, the order it was handed in")
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "x", "102")
+        self.assertEqual(rc, 0, "the drop exited %s: %s" % (rc, out))
+        self.assertEqual(self.merge_order("batch-nightly", on="batch-x"), [self.heads[104], self.heads[103]],
+                         "the restack of batch-nightly merged #103 before #104, not in the order its frozen block lists them: %s" % out)
+        self.assertEqual(self.frozen_lanes(nightly_pr), [104, 103], "the restack changed the order of batch-nightly's frozen block: %s" % out)
+
+    def test_a_ready_run_with_no_pr_list_heals_in_the_order_the_frozen_block_lists_them(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.frozen_batch("nightly", [103, 101, 102], draft=True)
+        self.drift_batch("nightly", [103])
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(rc, 0, "the --ready run exited %s: %s" % (rc, out))
+        self.assertEqual(self.merge_order("batch-nightly"), [self.heads[n] for n in (103, 101, 102)],
+                         "the --ready heal merged the lanes in PR-number order, not in the order the frozen block lists them: %s" % out)
 
     # Build on a batch that exists: a set that differs is refused, the same set is allowed.
 
