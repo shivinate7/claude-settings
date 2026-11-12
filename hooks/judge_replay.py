@@ -27,7 +27,6 @@ import io
 import json
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import time
@@ -40,6 +39,7 @@ for _path in (HERE, os.path.join(REPO, "lint")):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
+import _nowindow  # noqa: E402  the one home of a no-window child start
 import decision_watch  # noqa: E402  the one model seam; invoke_model is looked up here at call time
 import layout  # noqa: E402  the one home of the record folders
 
@@ -290,8 +290,8 @@ def sendmessage(case_input, calls):
 
 def git(cwd, *args, **env):
     full = dict(os.environ, **env)
-    subprocess.run(["git", "-C", cwd, "-c", "user.name=replay", "-c", "user.email=replay@example.invalid",
-                    "-c", "commit.gpgsign=false", *args], check=True, capture_output=True, env=full)
+    _nowindow.run(["git", "-C", cwd, "-c", "user.name=replay", "-c", "user.email=replay@example.invalid",
+                  "-c", "commit.gpgsign=false", *args], check=True, capture_output=True, env=full)
 
 
 def watch(case_input, calls):
@@ -443,8 +443,8 @@ def replay(name, runs=1):
 def changed_paths(base):
     """The paths the committed diff BASE...HEAD touches, or None when git cannot say."""
     spec = base if "..." in base else base + "...HEAD"
-    run = subprocess.run(["git", "-C", REPO, "diff", "--name-only", "--no-renames", spec],
-                         capture_output=True, text=True)
+    run = _nowindow.run(["git", "-C", REPO, "diff", "--name-only", "--no-renames", spec],
+                        capture_output=True, text=True)
     if run.returncode != 0:
         print("UNKNOWN: git diff %s failed: %s" % (spec, " ".join(run.stderr.split())[:200]))
         return None
@@ -472,10 +472,10 @@ def pin_changed(base):
     """True when the committed diff BASE...HEAD moves the claude CLI pin: a change to a file of CLI_DIR (the one home of the
     pin), or an added or removed line of the workflow that holds PIN_TEXT, a pin typed into a step. None when git cannot say."""
     spec = base if "..." in base else base + "...HEAD"
-    names = subprocess.run(["git", "-C", REPO, "diff", "--name-only", "--no-renames", spec, "--", *CLI_FILES],
-                           capture_output=True, text=True)
-    lines = subprocess.run(["git", "-C", REPO, "diff", "-U0", "--no-renames", spec, "--", WORKFLOW],
-                           capture_output=True, text=True)
+    names = _nowindow.run(["git", "-C", REPO, "diff", "--name-only", "--no-renames", spec, "--", *CLI_FILES],
+                          capture_output=True, text=True)
+    lines = _nowindow.run(["git", "-C", REPO, "diff", "-U0", "--no-renames", spec, "--", WORKFLOW],
+                          capture_output=True, text=True)
     if names.returncode != 0 or lines.returncode != 0:
         return None
     moved = [ln for ln in lines.stdout.splitlines() if ln[:1] in "+-" and ln[:3] not in ("+++", "---")]
