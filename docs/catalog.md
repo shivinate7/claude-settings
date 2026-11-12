@@ -52,7 +52,7 @@ Model and effort come from the model table (decision `agent-model-cap`, the mode
 | `hooks/ci_wake.py` | hook | PostToolUse | Bash\|PowerShell\|mcp__github__update_pull_request | - | no model | n/a | After the shell ready command `gh pr ready <N>` (Bash or PowerShell), or an `mcp__github__update_pull_request` call with `draft` false, waits for CI on that PR head. Then wakes the session with one line: green, red, cancelled or unknown, with the names of failing jobs. |
 | `hooks/sim_boot_record.py` | hook | PostToolUse | Bash\|mcp__Claude_Code_iOS_Simulator__control | - | no model | n/a | After such a call, appends each simulator that the call took from Shutdown to Booted to the boot record. After a `simctl boot` or an MCP `launch`, first checks each such device. A device that fails the check is stopped and booted once more. |
 | `hooks/refusal_note.py` | hook | PermissionDenied | - | - | no model | n/a | At PermissionDenied, notes each tool the auto-mode classifier refuses, so the Stop guard can make the reply ask the owner about it. Prints nothing. |
-| `hooks/reread_check.py` | hook | PostCompact | - | - | no model | n/a | After compaction, sets the session's flag that its handoff is not read. |
+| `hooks/reread_check.py` | hook | PostCompact | - | - | no model | n/a | After compaction, sets the session's flag that its handoff is not read. A run from an agent (its cwd is `.claude/worktrees/agent-<16 or more hex>` or inside one, or the payload has a valid `agent_id`: precompact_handoff.from_agent) sets nothing: the agent shares the session id of the session that spawned it. |
 
 ## Mods
 

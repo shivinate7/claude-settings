@@ -8,6 +8,17 @@ import os
 import re
 from typing import Any, Optional
 
+# A valid `agent_id` on a hook payload: 1 to 64 of letters, digits, `_` and `-`. The one home: the guard (AGENT_ID) and the
+# handoff hooks (precompact_handoff.from_agent) read it here. A call from an agent carries one; the session's own does not.
+AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def agent_id_of(payload: Any) -> str:
+    """The valid `agent_id` of a hook payload, or '' for a payload with none, an empty, malformed or non-string one."""
+    agent = payload.get("agent_id") if isinstance(payload, dict) else None
+    return agent if isinstance(agent, str) and AGENT_ID.match(agent) else ""
+
+
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 

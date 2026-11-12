@@ -415,6 +415,19 @@ Other tools, in `judge` order:
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
+  handoff-agent-write  deny. A Write, Edit or MultiEdit to any session handoff (as handoff-sections judges it)
+                       from an agent: the payload carries a valid `agent_id` (AGENT_ID). An agent shares the
+                       session id of the session that spawned it, so the handoff hooks name that session's
+                       handoff for it. Refused whatever the file holds, empty or absent included, and
+                       judged before handoff-sections. The reason says the caller is an agent, the file is
+                       the handoff of the session that spawned it, and it must not retry or write it another
+                       way. A call with no valid `agent_id`, another file in the folder and a malformed id
+                       pass. A bandaid: the root fix is the skip in the handoff hooks (the cwd skip for an
+                       agent with a worktree, the `agent_id` skip for the rest); this rule refuses only the
+                       file write. A shell write (`cat >`, `tee`) is not judged (debt
+                       `handoff-agent-shell-write`). An override lifts it. Cost: reads on demand inside this
+                       call, no read at all beyond the payload; no new log, hook, file or process
+                       start. (precompact-handoff, item 16)
   handoff-checked-stamp
                        deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
                        that changes a premise's stamp (the line's text from its last `Checked` or `Re-checked`
@@ -1121,7 +1134,7 @@ SILENT_WRITE_QUIET_REASON = (
 # The record lives under the CLONE's git common directory, not inside any one worktree, so it
 # survives that worktree's removal (`git_common_dir` above). Unmeasured: Windows, and the
 # Write/Edit payload shape; covered by fixture in `test_guard.py`, not by a live probe.
-AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+from shared_names import AGENT_ID, agent_id_of  # noqa: E402,F401  the one home, shared with the handoff hooks (precompact_handoff.from_agent)
 
 
 def agent_home_record_path(where: str, agent_id: str):
@@ -1213,13 +1226,10 @@ HANDOFF_SECTIONS_REASON = (
 )
 
 
-def handoff_sections_result(tool, tool_input, target, cwd):
-    """(before, after): the text a Write, Edit or MultiEdit would leave in a session handoff file, and the
-    text the file holds now (None for a Write, which is judged on its own text). None when the target
-    is not a session handoff (`<config dir>/handoffs/<session id>.md`, the path
-    precompact_handoff.handoff_path builds; `<id>.inbox.md` and any other file there are not) or the
-    result cannot be worked out (an edit whose old text is absent, an unreadable file): the tool fails on
-    its own then, and the rule allows. Reads the target only for an Edit or MultiEdit, once."""
+def session_handoff_path(tool, target, cwd):
+    """The absolute path of `target` when a Write, Edit or MultiEdit names a session handoff
+    (`<config dir>/handoffs/<session id>.md`, the path precompact_handoff.handoff_path builds; `<id>.inbox.md`
+    and any other file there are not), else None. The one path test of the handoff rules."""
     if tool not in ("Write", "Edit", "MultiEdit") or not target.lower().endswith(".md"):
         return None
     path = os.path.expanduser(target)
@@ -1232,6 +1242,26 @@ def handoff_sections_result(tool, tool_input, target, cwd):
         return None
     stem = os.path.basename(path)[:-3]
     if not stem or "." in stem:
+        return None
+    return path
+
+
+HANDOFF_AGENT_WRITE_REASON = (
+    "Rule (handoff-agent-write): you are an agent, and this file is the session handoff of the session that spawned you: "
+    "an agent shares that session's id, so the handoff hooks name it for you. Remedy: do not retry, and do not write it "
+    "another way. Make no handoff of your own. Report in your final message to the session that spawned you instead. "
+    "(decision precompact-handoff, item 16)"
+)
+
+
+def handoff_sections_result(tool, tool_input, target, cwd):
+    """(before, after): the text a Write, Edit or MultiEdit would leave in a session handoff file, and the
+    text the file holds now (None for a Write, which is judged on its own text). None when the target
+    is not a session handoff (session_handoff_path) or the
+    result cannot be worked out (an edit whose old text is absent, an unreadable file): the tool fails on
+    its own then, and the rule allows. Reads the target only for an Edit or MultiEdit, once."""
+    path = session_handoff_path(tool, target, cwd)
+    if path is None:
         return None
     if tool == "Write":
         content = tool_input.get("content")
@@ -5873,8 +5903,7 @@ SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at mos
 
 def scratchpad_agent(payload) -> str:
     """The valid `agent_id` of the call, or '' for the top-level session and a call with no valid id."""
-    agent = payload.get("agent_id") if isinstance(payload, dict) else None
-    return agent if isinstance(agent, str) and AGENT_ID.match(agent) else ""
+    return agent_id_of(payload)
 
 
 def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
@@ -6360,6 +6389,10 @@ def judge(payload) -> None:
         if is_frozen(target, cwd):
             refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
 
+        # 7a0. An agent's write to any session handoff (rule handoff-agent-write): judged before handoff-sections, so
+        # a refusal that tells the agent how to pass the section check is never the one it reads.
+        if scratchpad_agent(payload) and session_handoff_path(tool, target, cwd):
+            refuse(tool, "deny", "handoff-agent-write", HANDOFF_AGENT_WRITE_REASON, target)
         # 7a. A write that leaves a session handoff without a required section (rule handoff-sections).
         # Not in never_lifted: the owner may mean the write.
         handoff_result = handoff_sections_result(tool, tool_input, target, cwd)

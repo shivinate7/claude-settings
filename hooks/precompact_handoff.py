@@ -75,9 +75,13 @@ the desktop app has none.
   SessionStart --reorient with source `clear` or `fork` -- names the handoff of the
   newest pointer for the same project dir (none when that session has no handoff); with no
   pointer, the newest handoff whose PreCompact state `repo` is that dir; with none, says
-  "no handoff". It also names the new session's own handoff. Every reorient then sweeps
-  unusable pointers and stale .dir and .reread records (sweep()).
+  "no handoff". It also names the new session's own handoff. Every reorient except an agent's
+  (skipped, with its sweep: the sweep only deletes) then sweeps unusable pointers and stale .dir and
+  .reread records (sweep()).
   Spec: docs/decisions/precompact-handoff.md, item 8.
+
+  PreCompact and --reorient skip a run from an agent (from_agent(): cwd in an agent's worktree, or a valid
+  `agent_id` on the payload), which shares the session id of the session that spawned it. Item 16.
 
 Compaction check (no mode; hooks/daily_note.py calls it at SessionStart): cc_version_check()
 reads the Claude Code binary at env CLAUDE_CODE_EXECPATH, else `claude` on env PATH through its link,
@@ -353,7 +357,41 @@ def _write_state(session_id, digest_path_, repo_top, ok, failure):
     os.replace(tmp, path)
 
 
+# An agent's worktree folder: `.claude/worktrees/agent-` and 16 or more hex characters, at any depth of the path, so a
+# folder inside one counts. A lane named `agent-handoff-lock-report`, `agent-x` or a short suffix is no agent's.
+_AGENT_WORKTREE = re.compile(r"(?:^|/)\.claude/worktrees/agent-[0-9a-fA-F]{16,}(?:/|$)")
+
+
+def in_agent_worktree(cwd):
+    """True when `cwd` is an agent's worktree or inside one (`.claude/worktrees/agent-<16 or more hex>`). An agent
+    shares the session id of the session that spawned it, so a handoff hook run from an agent's compaction would write
+    that session's digest and state, or tell the agent to rewrite its handoff. The hooks skip such a run (decision
+    precompact-handoff, item 16). An agent with no worktree is caught by from_agent."""
+    if not isinstance(cwd, str) or not cwd:
+        return False
+    return _AGENT_WORKTREE.search(cwd.replace("\\", "/")) is not None
+
+
+def from_agent(payload):
+    """True when the run is an agent's: its cwd is an agent's worktree, or the payload carries a valid `agent_id`
+    (shared_names.agent_id_of, the reader the guard uses). The one test the handoff hooks share, so an agent's
+    compaction never touches the session's handoff, digest or state. Fails open: a payload that is not a dict, or a
+    shared_names that cannot be imported, is no agent's."""
+    if not isinstance(payload, dict):
+        return False
+    if in_agent_worktree(payload.get("cwd")):
+        return True
+    try:
+        from shared_names import agent_id_of
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: cannot import shared_names: %s\n" % e)
+        return False
+    return bool(agent_id_of(payload))
+
+
 def run_precompact(payload):
+    if from_agent(payload):
+        return 0
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     cwd = payload.get("cwd") or os.getcwd()
@@ -806,6 +844,8 @@ def premise_note(path, everyone):
 
 
 def run_reorient(payload):
+    if from_agent(payload):
+        return 0
     try:
         return _run_reorient(payload)
     finally:

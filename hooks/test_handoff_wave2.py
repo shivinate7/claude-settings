@@ -30,7 +30,8 @@ Part 1, hooks/precompact_handoff.py:
                  and prompt. HANDOFF_PY is copied below, verbatim, and is not parsed.
 
 Part 2, hooks/reread_check.py (new file):
-  --post-compact (PostCompact; session_id, trigger, cwd). Sets the session's flag.
+  --post-compact (PostCompact; session_id, trigger, cwd). Sets the session's flag. A cwd under
+                 .claude/worktrees/agent-* sets nothing: an agent shares its parent's session id.
   --pre-read     (PreToolUse, tool Read; session_id, tool_name, tool_input.file_path, cwd).
                  Clears the flag when the path names this session's handoff, in any spelling:
                  full path, forward slashes (Windows only), 8.3 short name (Windows only),
@@ -70,7 +71,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_precompact_handoff import (  # noqa: E402
-    HANDOFF_WITH_PREMISES, ids_in, put, transcript_line, write_transcript)
+    AGENT_ID_SHAPE, AGENT_IDS, CWD_SHAPES, HANDOFF_WITH_PREMISES, RUN_FOLDER, under_agent_worktree, ids_in, put,
+    transcript_line, write_transcript)
 
 PRECOMPACT = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
@@ -221,7 +223,7 @@ class Case(object):
     """A scratch home: config dir, one project dir, and a helper to make more dirs."""
 
     def __init__(self, name):
-        self.root = tempfile.mkdtemp(prefix="wave2_%s_" % name)
+        self.root = tempfile.mkdtemp(prefix="wave2_%s_" % name, dir=RUN_FOLDER)
         self.home = os.path.join(self.root, "home")
         self.cfg = os.path.join(self.home, ".claude")
         os.makedirs(self.cfg, exist_ok=True)
@@ -310,10 +312,11 @@ class Case(object):
         t = time.time() - age
         os.utime(path, (t, t))
 
-    def post_compact(self, sid):
-        return self.run(READ_CHECK, "--post-compact", {
-            "session_id": sid, "hook_event_name": "PostCompact", "trigger": "auto",
-            "cwd": self.proj})
+    def post_compact(self, sid, cwd=None, extra=None):
+        payload = {"session_id": sid, "hook_event_name": "PostCompact", "trigger": "auto",
+                   "cwd": cwd or self.proj}
+        payload.update(extra or {})
+        return self.run(READ_CHECK, "--post-compact", payload)
 
     def read(self, sid, file_path, extra=None):
         payload = {
@@ -728,6 +731,81 @@ def case_agent_read_keeps_flag():
         c.cleanup()
 
 
+def case_agent_post_compact_sets_no_flag():
+    """An agent shares its parent's session id, so an agent's PostCompact, run from its own worktree
+    (.claude/worktrees/agent-*), must not set the parent's re-read flag: the parent would be refused until it reads a
+    handoff it did not write (the handoff lock report, Part 1). The lane PostCompact is the live control, and a worktree
+    that is not an agent's still sets the flag."""
+    c = Case("agent_post")
+    try:
+        lane = c.post_compact("ag-lane")
+        check("agent post-compact: live control, a lane's PostCompact sets its own flag",
+              lane.returncode == 0 and os.path.isfile(c.state("ag-lane.reread")),
+              "rc=%r, no flag at %s" % (lane.returncode, c.state("ag-lane.reread")))
+        c.seed_handoff("ag-1")
+        agent_wt = os.path.join(c.proj, ".claude", "worktrees", "agent-a1634141822b8dc54")
+        os.makedirs(agent_wt, exist_ok=True)
+        check("agent post-compact: scope, the cwd is .claude/worktrees/agent-*",
+              agent_wt.endswith(os.path.join(".claude", "worktrees", "agent-a1634141822b8dc54")), agent_wt)
+        proc = c.post_compact("ag-1", cwd=agent_wt)
+        check("agent post-compact: exits 0", proc.returncode == 0,
+              "rc=%r err=%r" % (proc.returncode, tail(proc.stderr)))
+        check("agent post-compact: the parent's re-read flag is not set", not os.path.isfile(c.state("ag-1.reread")),
+              "the flag is set at %s" % c.state("ag-1.reread"))
+        lane_wt = os.path.join(c.proj, ".claude", "worktrees", "lane-handoff")
+        os.makedirs(lane_wt, exist_ok=True)
+        c.post_compact("ag-wt", cwd=lane_wt)
+        check("agent post-compact: control, a worktree that is not an agent's still sets the flag",
+              os.path.isfile(c.state("ag-wt.reread")), "no flag at %s" % c.state("ag-wt.reread"))
+    finally:
+        c.cleanup()
+
+
+def case_agent_folder_shape_decides_the_flag():
+    """Each row of CWD_SHAPES, the rows the PreCompact file judges. An agent's worktree, or a folder inside one, sets no
+    re-read flag; every other folder sets it. The primary's own PostCompact, last in each row, is the live control."""
+    for label, rel, skipped in CWD_SHAPES:
+        c = Case("shape_post")
+        try:
+            wt = os.path.join(c.proj, rel)
+            os.makedirs(wt, exist_ok=True)
+            check("post-compact cwd shape, %s: scope, the folder is %s" % (
+                label, "an agent's worktree or inside one" if skipped else "not an agent's worktree"),
+                under_agent_worktree(wt) == skipped, wt)
+            c.post_compact("shape-1", cwd=wt)
+            flagged = os.path.isfile(c.state("shape-1.reread"))
+            check("post-compact cwd shape, %s: the re-read flag is %s" % (label, "not set" if skipped else "set"),
+                  flagged == (not skipped), "flag at %s" % c.state("shape-1.reread"))
+            live = c.post_compact("shape-live")
+            check("post-compact cwd shape, %s: live control, the primary's PostCompact sets its flag" % label,
+                  live.returncode == 0 and os.path.isfile(c.state("shape-live.reread")),
+                  "rc=%r err=%r" % (live.returncode, tail(live.stderr)))
+        finally:
+            c.cleanup()
+
+
+def case_agent_id_payload_sets_no_flag():
+    """Each row of AGENT_IDS, on a payload whose cwd is the primary checkout. A valid agent_id sets no re-read flag: an
+    agent with no worktree shares the session's id, so its PostCompact must not refuse the parent. A malformed, empty or
+    non-string id is no agent's and sets the flag. The payload with no agent_id is the live control."""
+    for label, value, skipped in AGENT_IDS:
+        c = Case("id_post")
+        try:
+            valid_shape = isinstance(value, str) and AGENT_ID_SHAPE.match(value) is not None
+            check("post-compact agent_id, %s: scope, the value is %s" % (
+                label, "a valid id" if skipped else "not a valid id"), valid_shape == skipped, repr(value)[:80])
+            proc = c.post_compact("id-1", extra={"agent_id": value})
+            flagged = os.path.isfile(c.state("id-1.reread"))
+            check("post-compact agent_id, %s: the re-read flag is %s" % (label, "not set" if skipped else "set"),
+                  flagged == (not skipped), "rc=%r flag at %s" % (proc.returncode, c.state("id-1.reread")))
+            live = c.post_compact("id-live")
+            check("post-compact agent_id, %s: live control, a payload with no agent_id sets its flag" % label,
+                  live.returncode == 0 and os.path.isfile(c.state("id-live.reread")),
+                  "rc=%r err=%r" % (live.returncode, tail(live.stderr)))
+        finally:
+            c.cleanup()
+
+
 def case_stop_hook_active_passes():
     """stop_hook_active true passes, so a block cannot loop. Its twin, the same flagged
     state without the flag, must block."""
@@ -1075,6 +1153,9 @@ def main() -> int:
     case_read_of_handoff_clears_flag()
     case_read_of_other_file_keeps_flag()
     case_agent_read_keeps_flag()
+    case_agent_post_compact_sets_no_flag()
+    case_agent_folder_shape_decides_the_flag()
+    case_agent_id_payload_sets_no_flag()
     case_stop_hook_active_passes()
     case_stop_no_flag_passes()
     case_sibling_import_failure_exits_zero()
@@ -1093,4 +1174,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)
