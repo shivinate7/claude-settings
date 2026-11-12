@@ -1053,16 +1053,39 @@ def _feeds_data(header: str, scripts: bool) -> bool:
     return fed
 
 
-def python_runs_body(raw: str, header: str) -> bool:
-    """True when python, and no other interpreter, runs the heredoc body that `header` opens: it is fed to
-    python (`python3 - <<'EOF'`), or it is written to a file that only a bare python word runs. An unknown
-    runner, a wrapper (`env python3 f`) or `./f` is not python, so the body stays in view."""
+_BACKGROUND_AMP = re.compile(r"(?<![>&])&(?![&>])")
+
+
+def _own_stage(header: str, nth: int) -> str:
+    """The stage of a header line that holds its `nth` heredoc (0-based), or "" when the line holds fewer.
+    A stage is a segment cut by split_segments, then on a lone `&`: `python3 -V && cat > f.pl <<'EOF'` has the
+    stage `cat > f.pl <<'EOF'`, and a second heredoc on the line has a stage of its own."""
+    seen = 0
+    for segment in split_segments(header):
+        for stage in _BACKGROUND_AMP.split(segment):
+            seen += len(heredoc_heads(stage)[0])
+            if seen > nth:
+                return stage
+    return ""
+
+
+def python_runs_body(raw: str, header: str, nth: int = 0) -> bool:
+    """True when python, and no other interpreter, runs the heredoc body that `header` opens as its `nth`
+    heredoc (0-based among those on the line, modulo their count: two lines may share one text). Only the
+    body's own stage of the header is judged: it is fed to python (`python3 - <<'EOF'`), or it is written to
+    a file that only a bare python word runs. A python word in another stage of the line, or beside a second
+    heredoc, makes nothing python. A wrapper (`env python3 f`), `./f` or an unrecognised runner word is not
+    python, so the body stays in view."""
     header = _without_message_values(header)
-    if _PYTHON_HEADER(header):
-        return not _OTHER_HEADER(header)
+    heads = len(heredoc_heads(header)[0])
+    stage = _own_stage(header, nth % heads) if heads else ""
+    if not stage:
+        return False   # the body's stage is unknown: keep it in view
+    if _PYTHON_HEADER(stage):
+        return not _OTHER_HEADER(stage)
     text = _without_message_values(_drop_heredoc_bodies(raw))
-    return (_runs_written_file(text, [header], runner=_PYTHON_RUNNER)
-            and not _runs_written_file(text, [header], runner=_OTHER_RUNNER))
+    return (_runs_written_file(text, [stage], runner=_PYTHON_RUNNER)
+            and not _runs_written_file(text, [stage], runner=_OTHER_RUNNER))
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
