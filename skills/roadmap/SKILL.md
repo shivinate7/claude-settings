@@ -295,6 +295,13 @@ After each build the roadmap build script prints the upkeep list for the triage 
 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
   a summary line. It exits 1, with no summary line, when every entry is unknown;
+- `session board` (plan R54, step coordinator-session-board): each non-archived session of this repo with a
+  `cs-build:` tag other than `cs-build:coordinator` that needs an act. Its `status_bucket` sets the flag: blocked reads
+  `waiting for action`, completed or review ready read `done`, failed reads `failed`, and working reads `silent` when
+  its `updated_at` is more than 60 minutes old (`SILENT_MINUTES`). A recent working session is not listed. Each entry
+  reads `<session id> (<flag>; <cs-step ids or ->; PR #N or no PR)`, the PR being the lowest open pull on a step's head
+  ref. The row is one `unknown (<why>)` entry when the live read is unknown, no candidate row has a bucket name, or a
+  working row has no `updated_at` with a time zone. Cost: reads the same live file, adds no process, file or timer;
 - `Step:` trailers that name no step;
 - `open step waits on a closed unmerged PR`: an open step whose title, why or note waits on PR #N. A wait is a phrase in `WAIT_ON_PULL_PHRASES` in `build.py`. The word `PR` may sit before `#N`. A `#N` followed by `closed` or `merged` is history, not a wait. The row lists the step when `landedPulls` has a row for #N with `merged` false. It skips #N when `landedPulls` has a `merged` true row for #N, or when #N is an open pull. It also skips #N when the head of its `merged` false row is on main (`head_on_main`, as for the landed rows). A PR closed before the 14-day `landedPulls` window is not seen. Each entry is `<step id> (#N)`. The row reads `unknown (the live file has no landedPulls list)` when the live file has no `landedPulls` key. A live read that is unknown, such as no `--live` file, makes the row unknown too. An empty `landedPulls` list reads none. The fix is to name the step slug it waits on in the step's `blockedBy` list (owner, 2026-11-10 13:10 CST);
 - `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` The instruction is in the Triage bullet of the operating model (skill `project-ops`). A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
