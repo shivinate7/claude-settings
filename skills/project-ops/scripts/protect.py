@@ -4,7 +4,7 @@
     python3 protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main] [--confirm]
 
 The one check is the all-jobs-passed rollup (decision same-check-kinds), the constant REQUIRED_CHECK; any other --check name is refused.
-The ruleset is the form of owner ruling r (2026-11-11 16:43 CST, bypass 16:49 CST; decision main-branch-protection): active, on the named branch,
+The ruleset follows decision main-branch-protection: active, on the named branch,
 the rollup as its one required check, deletion and force-push blocked, and the repository Admin role as its one bypass actor, on pull requests only.
 It sets no strict policy of its own and no pull-request rule: those are planned, not ruled.
 Without --confirm it only reads the repo's rulesets and prints what it would set. With --confirm it writes: a branch with no ruleset gets one
