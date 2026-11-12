@@ -694,5 +694,24 @@ class NeverCoversSentence(unittest.TestCase):
         self.assertIsNone(never_covers("Allowed, with no bound."))
 
 
+class BatchBuildAndDropIsAllowed(unittest.TestCase):
+    PREFIX = "Batch Build and Drop:"
+
+    def entry(self):
+        entry = allow_entry(self.PREFIX)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % self.PREFIX)
+        return entry
+
+    def test_covers_names_the_three_flags(self):
+        for flag in ("--batch-build", "--batch-drop", "--ready"):
+            self.assertIn(flag, bounds_text(self.entry()), "the entry does not name %s" % flag)
+
+    def test_never_covers_names_each_check_lifting_flag(self):
+        clause = never_covers(self.entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence")
+        for act in ("--confirm", "--base-red-ok", "--undo-check-unknown-ok"):
+            self.assertIn(act, clause, "Never covers does not name %s" % act)
+
+
 if __name__ == "__main__":
     unittest.main()

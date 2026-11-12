@@ -19066,6 +19066,10 @@ class BatchFreeze(CloudSession):
         self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
         self.assertEqual(rc, 0, "the --ready after the drop exited %s: %s" % (rc, out))
 
+    def test_freeze_refusals_cite_the_freeze_decision(self):
+        self.assertIn("decision batch-freeze-lane-set", merge.FREEZE_CITE, "FREEZE_CITE does not cite decision batch-freeze-lane-set")
+        self.assertNotIn("no-merge-during-batch-ci", merge.FREEZE_CITE, "FREEZE_CITE still cites the batch brake's decision")
+
     # Blame by route: a red run names the lane a drop may take off (decision batch-freeze-lane-set). The route is
     # `--batch-build NAME --blame N --run URL`. Each refusal case's first assert is one phrase of the refusal's own text, so its red
     # names the missing refusal and not a parser's error.
