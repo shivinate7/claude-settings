@@ -16252,6 +16252,36 @@ class ReviewGuardImportClosure(unittest.TestCase):
                 self.assertEqual(self.hits_at(root, f"newdir/{n}.py"), [],
                                  f"newdir/{n}.py is a guard change, but hooks/guard.py never imports it (a name in a comment, a string or a docstring is no import)")
 
+    def test_import_closure_does_not_walk_a_test_module_it_imports(self):
+        # hooks/guard.py imports janitor/test_zz.py, a test path, and that test imports newdir/zz_reached.py. The traversal skips a test
+        # path, so newdir/zz_reached.py, reached only through it, is no hit. newdir/zz_direct.py is imported by guard.py itself: it is the
+        # control that shows the closure ran, so the no-hit cases cannot pass on a closure that found nothing.
+        root = self.closure_root("import test_zz\nimport zz_direct\n",
+                                 {"janitor/test_zz.py": "import zz_reached\n", "newdir/zz_reached.py": "X = 1\n", "newdir/zz_direct.py": "X = 1\n"})
+        for rel in ("janitor/test_zz.py", "newdir/zz_reached.py", "newdir/zz_direct.py"):  # scope: the fixture holds each module
+            self.assertTrue(os.path.isfile(os.path.join(root, rel)), f"the fixture has no {rel}")
+        self.assertTrue(hook_guard.is_test_rel("janitor/test_zz.py"), "janitor/test_zz.py is not a test path under hooks/guard.py is_test_rel")  # scope
+        self.assertFalse(hook_guard.is_test_rel("newdir/zz_reached.py"), "newdir/zz_reached.py is a test path under is_test_rel, so it is no non-test module")  # scope
+        self.assertFalse("newdir/zz_reached.py".startswith(review_fn(self, "GUARD_PATHS")), "newdir/zz_reached.py is under a GUARD_PATHS folder, so it is a hit by its path")  # scope
+        self.assertEqual(self.hits_at(root, "newdir/zz_direct.py"), ["newdir/zz_direct.py"], "guard_hits does not count newdir/zz_direct.py, which hooks/guard.py imports itself")  # control
+        self.assertEqual(self.hits_at(root, "janitor/test_zz.py"), [], "janitor/test_zz.py is a guard hit, but a test path is no guard change")
+        self.assertEqual(self.hits_at(root, "newdir/zz_reached.py"), [], "newdir/zz_reached.py is a guard hit: hooks/guard.py reaches it only through the test path janitor/test_zz.py, which the traversal must skip")
+
+    def test_import_closure_derives_a_module_named_by_from_import(self):
+        # Green on the current code. It holds a later change to _imported_names to keep the ImportFrom branch: `from X import` is an import too.
+        root = self.closure_root("from zz_mod import X\n", {"newdir/zz_mod.py": "X = 1\n"})
+        self.assertTrue(os.path.isfile(os.path.join(root, "newdir", "zz_mod.py")), "the fixture has no newdir/zz_mod.py")  # scope
+        self.assertEqual(self.hits_at(root, "newdir/zz_mod.py"), ["newdir/zz_mod.py"],
+                         "guard_hits does not derive newdir/zz_mod.py from `from zz_mod import X` in hooks/guard.py")
+
+    def test_import_closure_reads_an_import_after_a_hash_inside_a_string(self):
+        # Green on the current code. It holds a later scanner to the string rule: a `#` inside a string is no comment, so the import on the
+        # next line still counts.
+        root = self.closure_root('NOTE = "a # b"\nimport zz_real\n', {"newdir/zz_real.py": "X = 1\n"})
+        self.assertTrue(os.path.isfile(os.path.join(root, "newdir", "zz_real.py")), "the fixture has no newdir/zz_real.py")  # scope
+        self.assertEqual(self.hits_at(root, "newdir/zz_real.py"), ["newdir/zz_real.py"],
+                         'guard_hits misses newdir/zz_real.py: `import zz_real` follows NOTE = "a # b" in hooks/guard.py, and a # inside a string hides no import')
+
     def test_import_closure_stops_on_a_guard_file_that_does_not_parse(self):
         broken = "def broken(:\n"
         with self.assertRaises(SyntaxError):  # scope: the fixture does not parse, so the stop is for the read
