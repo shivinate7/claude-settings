@@ -27,6 +27,10 @@ root. The suite itself spawns guard.py once per case, which is where the time go
 Run:
     python hooks/mutate_guard.py
 
+FAMILY MODE: `python hooks/mutate_guard.py --family <rule>` runs only the mutants whose label starts with
+`<rule>:` (for example `resume-finished-reviewer`), and sets GUARD_FAMILY to that name so each suite runs only that
+family's cases (hooks/test_guard.py). A name no mutant carries is an error, never a pass with nothing run.
+
 REPORT MODE (step c95): `python hooks/mutate_guard.py --report [--limit N] [--jobs N] [--only SUBSTR]`
 scores other verdict-deciding files with mechanical mutants (hooks/mutate_shared.py `score_target`)
 and prints, per file, mutants made, killed, kill rate and the suites that killed none. It reads on
@@ -3433,7 +3437,8 @@ MUTATIONS = [
      'trust_transcript if isinstance(trust_transcript, str) else "", False)',
      "guard", "builder spawn (payload with agent_id) is not judged by this rule"),
     # ---- resume-finished-reviewer (rule roles-resume-by-name): the arms of resume_finished_hit in hooks/guard_merge.py and
-    # its call in hooks/guard.py, then the arms of the finish reader agent_state in lint/_transcript.py (target "transcript").
+    # its call in hooks/guard.py, then the arms of the finish reader agent_state and the Workflow match workflow_agent in
+    # lint/_transcript.py (target "transcript").
     ("resume-finished-reviewer: the first spawn with the name decides the state, not the latest",
      'state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)',
      'state = reader.agent_state(records, named[0].get("id"), TASK_NOTIFICATION_TAG)',
@@ -3478,16 +3483,37 @@ MUTATIONS = [
      'if use["input"].get("name") == target or agents.get(use.get("id")) == target]',
      'if agents.get(use.get("id")) == target]',
      "guard", "named by its spawn name"),
-    ("resume-finished-reviewer: an agent's own send is judged",
-     '    if agent or tool != RESUME_TOOL or not isinstance(target, str)',
-     '    if tool != RESUME_TOOL or not isinstance(target, str)',
-     "guard", "an agent's own send (a payload with agent_id) is not judged by this rule"),
-    ("resume-finished-reviewer: the caller never passes the agent_id",
-     '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")),\n'
-     '        lambda role: role_isolation_pin',
-     '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", False,\n'
-     '        lambda role: role_isolation_pin',
-     "guard", "an agent's own send (a payload with agent_id) is not judged by this rule"),
+    ("resume-finished-reviewer: an agent's own send is not judged",
+     '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",\n'
+     '        lambda role: role_isolation_pin(pointer_checkout(), role))',
+     '        tool, tool_input, "" if payload.get("agent_id") else trust_transcript if isinstance(trust_transcript, str) else "",\n'
+     '        lambda role: role_isolation_pin(pointer_checkout(), role))',
+     "guard", "an agent's send to a finished reviewer the parent spawned is refused"),
+    ("resume-finished-reviewer: every send is taken as an agent's own, so the rule skips it",
+     '        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",\n'
+     '        lambda role: role_isolation_pin(pointer_checkout(), role))',
+     '        tool, tool_input, "" if isinstance(payload, dict) else trust_transcript if isinstance(trust_transcript, str) else "",\n'
+     '        lambda role: role_isolation_pin(pointer_checkout(), role))',
+     "guard", "a finished background reviewer, named by its agent id, is refused"),
+    # The Workflow arms: the lookup of a name no spawn holds (guard_merge._workflow_resume_hit), the role of a finished agent
+    # with no meta file, its spawnedWithWorktree flag, and workflow_agent's match by label and its running state
+    # (lint/_transcript.py).
+    ("resume-finished-reviewer: a Workflow agent is not looked up when no spawn holds its name",
+     '        if not named:\n            return _workflow_resume_hit(reader, tool, transcript, target, isolation_pin)',
+     '        if not named:\n            return "", "", "", ""',
+     "guard", "a main-session send to a finished Workflow reviewer is refused"),
+    ("resume-finished-reviewer: a finished Workflow agent with no meta file passes, so its unknown role is not asked",
+     '    role = agent_type or "agent"\n    return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""',
+     '    role = agent_type or "agent"\n    return "", "", "", ""',
+     "guard", "a finished Workflow agent with no meta file asks: its role is unknown"),
+    ("resume-finished-reviewer: a Workflow agent's spawnedWithWorktree flag is ignored, so only its role's pin counts",
+     '    worktree = meta_worktree or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))',
+     '    worktree = False or bool(agent_type and _resume_worktree({}, agent_type, isolation_pin))',
+     "guard", "a main-session send to a finished Workflow agent spawned with a worktree is refused"),
+    ("resume-finished-reviewer: a finished Workflow agent with a worktree flag and no agent type is not refused",
+     '    if state == reader.FINISHED and (agent_type or worktree):',
+     '    if state == reader.FINISHED and agent_type:',
+     "guard", "a finished Workflow agent with a worktree flag and no agentType is refused as an agent"),
     ("resume-finished-reviewer: a state the read cannot place is let through",
      '    if state == reader.UNKNOWN:',
      '    if False:',
@@ -4442,6 +4468,15 @@ def main() -> int:
         return known_defects_main(sys.argv[1:])
     if "--tests-for" in sys.argv[1:]:
         return tests_for_main(sys.argv[1:])
+    mutations = MUTATIONS
+    if "--family" in sys.argv[1:]:
+        at = sys.argv.index("--family") + 1
+        family = sys.argv[at] if at < len(sys.argv) else ""
+        mutations = [entry for entry in MUTATIONS if entry[0].startswith(family + ":")]
+        if not mutations:
+            print("ERROR no mutation is labelled %r: a family run would pass with nothing run" % (family + ":"))
+            return 1
+        os.environ["GUARD_FAMILY"] = family  # each suite runs only this family's cases, in the mutant's own process
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
@@ -4459,7 +4494,7 @@ def main() -> int:
     # each mutant, case-folded the way Windows reads names, instead of trusting the fix alone.
 
     seen_paths = {}
-    for index, entry in enumerate(MUTATIONS):
+    for index, entry in enumerate(mutations):
         label, old, _new, target, required, _only_on = mutation_parts(entry)
         if target not in TARGETS:
             print("ERROR unknown mutation target %r: %s" % (target, label))
@@ -4530,7 +4565,7 @@ def main() -> int:
 
     try:
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry),
+            mutations, lambda entry: run_mutant(sources, work, entry),
             controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3])
     finally:
         shutil.rmtree(work, ignore_errors=True)
