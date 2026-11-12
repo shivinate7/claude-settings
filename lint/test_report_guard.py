@@ -5123,6 +5123,30 @@ class PromiseNeedsMechanismTests(unittest.TestCase):
         # Catches: a fenced block read as prose.
         self.assert_allowed("```\nFrom now on, in my handoff.\n```")
 
+    def test_pr_red_a_quoted_handoff_word_names_the_home(self):
+        # Catches: the quoted word "handoff" is stripped before the handoff check, so the promise passes.
+        line = 'From now on every wake exports; the "handoff" holds it.'
+        self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_red_a_promise_after_a_stray_fence_is_judged(self):
+        # Catches: a ``` that never closes hides every line after it, so the promise passes.
+        line = "From now on every wake exports; the handoff holds it."
+        self.assert_blocked("```\n" + line, "Promise guard", line)
+
+    def test_pr_green_a_report_of_handoff_text_passes(self):
+        # Catches: a report of a handoff's text read as a promise made in this session.
+        self.assert_allowed("The handoff file said from now on the page is exported.")
+
+    def test_pr_red_a_lone_apostrophe_is_judged_like_its_plain_twin(self):
+        # Catches: the apostrophe in "Don't" opens a quoted span, so the promise passes.
+        rows = [
+            "Don't worry; from now on the handoff holds it.",
+            "Dont worry; from now on the handoff holds it.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, "Promise guard", line)
+
 
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
