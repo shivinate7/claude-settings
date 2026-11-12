@@ -965,6 +965,19 @@ SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
+def message_asks(rec):
+    """True when an incoming message holds a "?" outside quotes, code spans, fenced blocks and blockquoted
+    lines (the lane ack: such a reply is an answer, not an ack). A "?" inside a URL does not count."""
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content
+                            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
+    if not isinstance(content, str):
+        return False
+    kept = "\n".join(line for line in FENCE_RE.sub(" ", content).splitlines() if not line.lstrip().startswith(">"))
+    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+
+
 def _reply_text(rec):
     """The text of a main-session assistant record, else None."""
     if rec.get("type") != "assistant" or rec.get("isSidechain"):
@@ -1188,7 +1201,7 @@ def _turn_acts(records, turn, acks):
     message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
     cut = len(records) - len(turn)
     if cut and peer_sender(records[cut - 1]) in acks:
-        idx = last_incoming_index(records, acks)
+        idx = last_incoming_index(records, acks, message_asks)
         turn = records if idx is None else records[idx + 1:]
     uses = [u for r in turn if not r.get("isSidechain") for u in tool_uses(r)]
     return uses, [send_targets(u) for u in uses]
@@ -3214,7 +3227,7 @@ def main():
             # A try backs a claim only in this turn: after the last message, a peer's included. A peer's reply to a send of
             # this turn is an ack and starts no turn, as in the question check.
             acks = {sender: {sender} | PARENT_TARGETS for sender in map(peer_sender, records) if sender}
-            idx = last_incoming_index(records, acks)
+            idx = last_incoming_index(records, acks, message_asks)
             ack_turn = records if idx is None else records[idx + 1:]
             cannot = cannot_problem(ack_turn, text, cannot_refused)
         except Exception as exc:
