@@ -5,13 +5,14 @@ lint/layout.json holds the kinds. A repo adds its own kinds in its extras file (
 extra kind may not replace a layout kind. The mark that the repo has rolled out to the layout is
 its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
-("waiting-page", "waiting-page-colour", "waiting-page-icon", "kind", "caution", "visibility",
+("waiting-page", "waiting-page-colour", "waiting-page-icon", "page-writer", "kind", "caution", "visibility",
 "devices", "shared-resources", "roadmap", "record-branch", "artifacts") read whenever the file exists (`has_extras()`). The
 "artifacts" key is the registry of the claude.ai artifacts the repo holds (`artifacts()`, decision waiting-data-in-repo).
 The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page), the fallback after
 the registry entry whose role is "waiting-page";
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
-branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). The "record-branch" key
+branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colour.py). "page-writer" is the session id
+of the page's writer (`page_writer_key()`, read by the pick guard in lint/report_guard.py). The "record-branch" key
 names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
 `set_waiting_page()` writes the "waiting-page" key once, for triage; it never writes "rolled-out".
 
@@ -22,13 +23,16 @@ repo's GitHub name, rolled out or not, and that repo's extras file may repeat it
 Cause: each repo moves its own files in its own roll-out (owner, Oct 17). The last roll-out deletes
 "legacy", "legacy-repos", `legacy()`, `legacy_repos()`, `unmoved()`, `candidates()` and the branches in `path()`.
 
-Standard library only, and safe to import: it reads files only when a function is called.
+Safe to import: it reads files only when a function is called. It needs the standard library and
+hooks/git_reads.py, which `repo_name` imports on first use.
 """
 import json
 import ntpath
 import os
 import posixpath
 import re
+import subprocess
+import sys
 
 LAYOUT_FILE = "lint/layout.json"  # relative to the claude-settings root; hooks/guard.py holds the same literal
 LAYOUT_PATH = os.path.join(os.path.dirname(os.path.realpath(__file__)), os.path.basename(LAYOUT_FILE))
@@ -45,8 +49,16 @@ class BranchNameError(LayoutError):
 def _read(path):
     try:
         with open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
-    except (OSError, ValueError) as err:
+            return _parse(handle.read(), path)
+    except OSError as err:
+        raise LayoutError("cannot read %s: %s" % (path, err)) from err
+
+
+def _parse(text, path):
+    """The extras or layout text as a dict. `path` names the source in an error."""
+    try:
+        data = json.loads(text)
+    except ValueError as err:
         raise LayoutError("cannot read %s: %s" % (path, err)) from err
     if not isinstance(data, dict) or not isinstance(data.get("kinds"), dict):
         raise LayoutError("%s: no \"kinds\" object" % path)
@@ -102,8 +114,29 @@ def legacy(name):
     return layout().get("legacy", {}).get(found, found)
 
 
-# github.com in https, ssh and scp form, and the /git/<owner>/<name> path of a cloud session's git proxy.
-GITHUB = re.compile(r"(?:^|[/@])github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/*$|/git/([^/\s]+/[^/\s]+?)(?:\.git)?/*$")
+# An origin repo_name may read: github.com in https, ssh and scp form, a port after the host allowed, or the
+# /git/<owner>/<name> path of a cloud session's git proxy. The path is exactly owner/name, `.git` and trailing
+# slashes optional; git_reads.origin_slug reads the owner/name.
+GITHUB = re.compile(
+    r"(?:^|[/@])github\.com(?::\d+)?[:/]+[^/\s]+/[^/\s]+?(?:\.git)?/*$|/git/[^/\s]+/[^/\s]+?(?:\.git)?/*$")
+
+
+def _origin_slug(url):
+    """git_reads.origin_slug, the one origin parser; imported on first use so this module stays safe to import."""
+    hooks = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks")
+    if hooks not in sys.path:
+        sys.path.append(hooks)
+    from git_reads import origin_slug
+    return origin_slug(url)
+
+
+def _nowindow_run(*args, **kwargs):
+    """hooks/_nowindow.run, the one route that starts a process with no console window; imported on first use."""
+    hooks = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "hooks")
+    if hooks not in sys.path:
+        sys.path.append(hooks)
+    from _nowindow import run
+    return run(*args, **kwargs)
 
 
 def _common_dir(root):
@@ -140,8 +173,9 @@ def repo_name(root):
         if line.startswith("["):
             section = line
         elif section == '[remote "origin"]' and re.match(r"url\s*=", line):
-            hit = GITHUB.search(line.split("=", 1)[1].strip())
-            return (hit.group(1) or hit.group(2)).lower() if hit else None
+            url = line.split("=", 1)[1].strip()
+            slug = _origin_slug(url) if GITHUB.search(url) else None
+            return slug.lower() if slug else None
     return None
 
 
@@ -245,13 +279,17 @@ def artifacts(root):
     """[{id, url, role, account, collections, export}] from the "artifacts" key of `root`'s extras file, in order; []
     for a repo with no extras file or no key. `collections` and `export` are filled in: the waiting-page role exports
     the five waiting collections to the waiting-data folder of the record branch, any other role needs its own
-    `collections` and exports to `artifacts/<id>/`. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
+    `collections` and exports to `artifacts/<id>/`. A page-only entry (any other role, `"collections": []`) exports its page
+    and files and no database; an empty list is refused on the waiting-page role, and a missing key on any other. An entry with `"export": false` (never the waiting-page role) is held and never exported: it needs
     no collections and reads with `export` False and `collections` []. LayoutError, naming the entry by its id, for an email as account, a
     repeated id, an id over 32 characters, a url that is no artifact link, a second waiting-page role or an unsafe path."""
-    found = _repo_keys(root).get(ARTIFACTS)
+    return _registry(root, _repo_keys(root).get(ARTIFACTS), _extras(root))
+
+
+def _registry(root, found, where):
+    """artifacts(root) for the "artifacts" value `found`, read from `where` (a path, or a ref and path in an error)."""
     if found is None:
         return []
-    where = _extras(root)
     if not isinstance(found, list):
         raise LayoutError("%s: %s is not a list" % (where, ARTIFACTS))
     seen, out = set(), []
@@ -278,7 +316,7 @@ def artifacts(root):
             raise LayoutError("%s: %s (id %s) is the waiting page and cannot be held with export false" % (where, label, entry_id))
         if "collections" in item:
             names = item["collections"]
-            if not isinstance(names, list) or not names or len(set(names)) != len(names) \
+            if not isinstance(names, list) or (not names and role == WAITING_ROLE) or len(set(names)) != len(names) \
                     or not all(isinstance(n, str) and COLLECTION.fullmatch(n) for n in names):
                 raise LayoutError("%s: %s (id %s) collections is not a list of distinct collection names" % (where, label, entry_id))
         elif no_export:
@@ -302,19 +340,53 @@ def artifacts(root):
     return out
 
 
-def waiting_page(root):
-    """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
-    "waiting-page", else the old "waiting-page" key, from its extras file, mark or not.
-    "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
-    if not has_extras(root):
-        return "unknown"
-    for entry in artifacts(root):
+GIT_SHOW_TIMEOUT = 10  # seconds one `git show` may run
+
+
+def _default_branch_extras(root):
+    """The extras file of `root` as read from the repo's default branch, (dict, "<ref>:<path>"), else None. For a
+    checkout that holds no extras file of its own, such as a worktree on the record branch. It reads origin/HEAD's
+    branch, else origin/main, from the ref alone: no checkout moves and no fetch runs. None for no extras path, no
+    such ref, a git error or a timeout, and for a file that does not parse.
+    Cost: at most two `git show` processes per call (the second only when origin/HEAD does not resolve), and
+    only when the checkout holds no extras file. No file is written."""
+    where = layout().get("extras")
+    if not where:
+        return None
+    for ref in ("origin/HEAD", "origin/main"):
+        try:
+            done = _nowindow_run(["git", "-C", root, "show", "%s:%s" % (ref, where)], capture_output=True,
+                                 stdin=subprocess.DEVNULL, timeout=GIT_SHOW_TIMEOUT)
+            if done.returncode == 0:
+                return _parse(done.stdout.decode("utf-8"), "%s:%s" % (ref, where)), "%s:%s" % (ref, where)
+        except (OSError, ValueError, subprocess.SubprocessError, LayoutError, ImportError):
+            continue
+    return None
+
+
+def _page_in(root, keys, where):
+    """The waiting page URL held by the extras dict `keys` (read from `where`), else "unknown"."""
+    for entry in _registry(root, keys.get(ARTIFACTS), where):
         if entry["role"] == WAITING_ROLE:
             return entry["url"]
-    found = _read(_extras(root)).get(WAITING_PAGE)
-    if found is None:
+    found = keys.get(WAITING_PAGE)
+    return "unknown" if found is None else _artifact_link(found, where)
+
+
+def waiting_page(root):
+    """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
+    "waiting-page", else the old "waiting-page" key, from its extras file, mark or not. A checkout with no extras
+    file reads it from the default branch's (_default_branch_extras); its own file always wins.
+    "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
+    if has_extras(root):
+        return _page_in(root, _read(_extras(root)), _extras(root))
+    held = _default_branch_extras(root)
+    if held is None:
         return "unknown"
-    return _artifact_link(found, _extras(root))
+    try:
+        return _page_in(root, *held)
+    except LayoutError:
+        return "unknown"  # a ref's file that does not hold a page is no page, never an error
 
 
 def set_waiting_page(root, url):
@@ -365,6 +437,18 @@ def record_branch(root):
 
 WAITING_PAGE_COLOUR = "waiting-page-colour"  # the extras key: the page's colour, #rrggbb
 WAITING_PAGE_ICON = "waiting-page-icon"  # the extras key: the page's icon file, a path inside the repo
+PAGE_WRITER_KEY = "page-writer"  # the extras key: the session id of the page's writer
+PARENT_TARGETS = frozenset({"@parent", "parent"})  # send targets that name the parent, never a session id
+
+
+def page_writer_key(root):
+    """The session id of the waiting page's writer from the extras file of `root`; None when the key is missing,
+    null, not a string, blank, padded with whitespace or a parent alias (PARENT_TARGETS). A session id is a
+    claim, not checked past that."""
+    found = _repo_keys(root).get(PAGE_WRITER_KEY)
+    if not isinstance(found, str) or not found or found != found.strip() or found in PARENT_TARGETS:
+        return None
+    return found
 
 
 def waiting_page_colour(root):

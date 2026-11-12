@@ -25,7 +25,7 @@ chat `Gain:` and `Lose:` in the option's description. Only a line at a line star
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
-`gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
+`gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
 Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
@@ -52,6 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
+from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of the session id shape
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the one home of the gh logins
 
 PASS = ("", "")
@@ -187,6 +188,9 @@ DEPARTS_REASON = ("A question to the owner says how the work departs from main, 
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+# The hint that departs_hit adds to the placeholder miss. A Stop refusal (lint/report_guard.py) shows the miss
+# without it, since the owner reads that refusal (decision guard-remedy-not-to-owner).
+PLACEHOLDER_HINT = ": write the real text"
 
 
 def departs_sides(rest):
@@ -214,7 +218,7 @@ def departs_hit(text) -> str:
             return "Departs from line with an empty side"
         added = PORT_NEW_THING.fullmatch(change)
         if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
-            return "Departs from line with a side that is only a placeholder: write the real text"
+            return "Departs from line with a side that is only a placeholder" + PLACEHOLDER_HINT
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
@@ -441,24 +445,46 @@ def _flat_text(value) -> str:
     return ""
 
 
-# A clause whose subject is the session ("The session merges it after your pick.") and that names
+# A clause whose subject is the session ("The session merges it after your pick.", "Claude merges it ...") and that names
 # no `you` and no owner who acts ("the owner clicks Approve", "Shivam approves it"): the session makes
 # that press, so the owner presses nothing. Only that clause is excused. A press in another clause
 # stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
 # act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
 # press of the page's own button ("after he hits Send") ask the owner for nothing.
-SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
-_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+SESSION_PRESS = re.compile(r"^\s*(?:(?:the|a|this)\s+session|claude)\b", re.I)
+# A session clause that asks someone for something ("Claude asks the owner for a click on Merge"), or names a
+# press that is not past ("after your click on Merge", "after the owner's press"), hands the press on, so it is
+# never excused. "as he asked" and "after he clicked Approve" are past acts and ask for nothing.
+SESSION_HANDS_ON = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting|tell|tells|telling|remind|reminds"
+                          r"|reminding|click|clicks|clicking|press|presses|pressing|tap|taps|tapping)\b", re.I)
+# SESSION_PRESS_OWN is the session's own press verb right after its subject ("The session clicks Merge"): it is
+# no hand-on, so it is cut before SESSION_HANDS_ON reads the clause. "after your click" still hands on.
+SESSION_PRESS_OWN = re.compile(r"^(\s*(?:(?:the|a|this)\s+session|claude)(?:\s+(?:then|also|\w+ly))*)"
+                               r"\s+(?:clicks|presses|taps)\b", re.I)
+# "and approves" stays in its clause: "the owner reviews and approves it" is one owner act, not two clauses.
+# A bare "and approve" is an order to the owner, so it still starts a clause.
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|but|so|or)\b"
+                           r"|\band\b(?!\s+approv(?:es|ing)\b)", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
 _CLAUSE_JOIN = "; "
 OWNER_YOU = re.compile(r"\byou\b", re.I)
-OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
-# The act is the verb the name is subject of: a modal or an -ly word may come between, so "Shivam will
-# approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
-OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|\w+ly))*\s+"
+OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
+# The act is the verb the name is subject of: a modal, "to", "just", "please" or an -ly word may come
+# between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
+# Approve" (the button's name, after a past act) does not.
+# "the owner's merge" and "the owner's approval" are presses not yet made, as "the owner's click" is, unless the
+# approval is already in ("the owner's approval is in"). "merge" is a press only as the last word of its phrase:
+# a noun after it ("the owner's merge commit", "merge queue", "merge button") names a thing, not his act.
+# "has to", "needs to" and "reviews and" stand before the act as a modal does. A bare "has" does not: "the owner
+# has merge rights" names no act, and "the owner has hit Merge" is a past one.
+OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please"
+                       r"|(?:has|have|needs?)\s+to|\w+ly|\w+s\s+and))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
-                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
+                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)"
+                       r"|['\u2019]s\s+(?:merge(?=\s*(?:[^\w\s]|$)|\s+(?:on|in|at|of|by|for|from|with|before|after"
+                       r"|first|and|or|then|so|but|once|when)\b)"
+                       r"|approval(?!\s+(?:is|was|has|are|came|comes|arrives?)\b)))\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
@@ -476,10 +502,11 @@ def _owner_press_text(label, how) -> tuple:
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
     session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
-               and not _owner_acts(c)]
+               and not SESSION_HANDS_ON.search(SESSION_PRESS_OWN.sub(r"\1", c, count=1)) and not _owner_acts(c)]
     if not session:
         return text, text
-    done = " ".join(session).lower()
+    # The session's own click ("The session clicks Merge") excuses no "Click" in the label: that asks the owner.
+    done = " ".join(SESSION_PRESS_OWN.sub(r"\1", c, count=1) for c in session).lower()
     verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
              for m in PRESS_VERB.finditer(label)]
     label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
@@ -497,7 +524,7 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
         return True
-    urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    urls = [l["url"] for l in (links if isinstance(links, list) else []) if isinstance(l, dict) and isinstance(l.get("url"), str)]
     if not urls:
         return False
     return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
@@ -787,32 +814,88 @@ def gh_login_hit(data) -> str:
 # (incident in the record): a waiting-page task handed the owner a job a session on his computer then
 # did. A task carries a "Why yours:" line naming the check that showed no session could do it.
 WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
+WHY_YOURS_LABEL = re.compile(r"^[ \t]*Why yours\b", re.I | re.M)
 TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
                "act, ask a session on the owner's computer first (list_computer_folders, then "
                "request_computer_folder). Then add a line to context that starts \"Why yours: "
                "<the check that showed no session could do it>\".")
 
 
-def task_check_hit(op: str, data) -> str:
-    """The matched text when this write of a waiting-page task has no Why yours line. An update that
-    carries no `context` cannot change the line and passes, as does one with no `kind`."""
-    if not isinstance(data, dict) or data.get("kind") != "task":
+WHY_RULE = "task-why-cited"
+WHY_CITED_REASON = ("A Why yours line that says a session cannot do the act must cite what shows it. End the line with "
+                    "\"(route <id>)\", an id from the route rows file whose row on this surface says refused or asks, or "
+                    "with \"(measured <YYYY-MM-DD>, <the check and its result>)\". A row that says the act works, an "
+                    "id no row holds, and a measurement with no date do not count. The page reads no refusals file, so "
+                    "a tool name in backticks is no cite. (decision claims-carry-backing, part (v), rule task-why-cited)")
+# lint/report_guard.py why_yours_verdict kinds that refuse on the page, with the cause the refusal's `matched` carries.
+# "unknown" (a file or row that did not read) and "unread" never refuse: a read that could not run is not a finding.
+WHY_CAUSES = {"none": "no cite", "undated": "undated measured", "works": "works row", "dead": "unknown id"}
+
+
+def _report_guard():
+    """lint/report_guard.py, loaded here and not at import, as hooks/reply_judge.py loads it."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import report_guard
+    return report_guard
+
+
+def why_cited_hit(text: str, fragments: bool = False) -> str:
+    """The cause when a Why yours line of `text` gives a capability reason its cite does not back, else "". The page
+    accepts a route cite and a dated measured cite, and reads no refusals file. A line with no route cite never reads
+    the rows file. With `fragments`, each other line of `text` has its cite tokens judged on their own: a str_replace
+    that swaps only a cite carries no Why yours line, and `new_str` must still hold a cite that backs."""
+    lines = text.splitlines()
+    labelled = [line for line in lines if WHY_YOURS_LINE.match(line)]
+    # A plain substring gate, so report_guard (which holds the cite regexes) loads only for a line that may hold a cite.
+    # A Based on line is the form's own premise line: "Based on (measured): ..." names a kind, not a dated cite.
+    loose = [line for line in lines if fragments and not WHY_YOURS_LINE.match(line) and not BASED_LABEL.match(line)
+             and ("(route" in line.casefold() or "(measured" in line.casefold())]
+    if not (labelled or loose):
         return ""
-    if (op == "set" or "context" in data) and not WHY_YOURS_LINE.search(str(data.get("context") or "")):
-        return "task with no Why yours line"
+    guard = _report_guard()
+    for line in labelled:
+        cause = WHY_CAUSES.get(guard.why_yours_verdict(None, line.strip())[0])
+        if cause:
+            return cause
+    for line in loose:
+        cause = WHY_CAUSES.get(guard.cite_tokens_verdict(line.strip())[0])
+        if cause:
+            return cause
     return ""
 
 
-def task_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Why yours line. It carries no
-    `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it
-    judges a context edit that touches the line, whatever the item's kind."""
+def task_check_hit(op: str, data):
+    """(rule, matched) when this write of a waiting-page task has no Why yours line, or a line whose capability reason
+    its cite does not back. An update that carries no `context` cannot change the line and passes, as does one with
+    no `kind`."""
+    if not isinstance(data, dict) or data.get("kind") != "task":
+        return PASS
+    if not (op == "set" or "context" in data):
+        return PASS
+    context = str(data.get("context") or "")
+    if not WHY_YOURS_LINE.search(context):
+        return "task-names-check", "task with no Why yours line"
+    cause = why_cited_hit(context)
+    return (WHY_RULE, cause) if cause else PASS
+
+
+def task_str_replace_hit(entry):
+    """(rule, matched) when a str_replace on `context` removes the Why yours line or its label, or adds one whose
+    capability reason its cite does not back. It carries no `data`, so it is read from old_str and new_str; the
+    guard cannot see the stored kind, so it judges a context edit that touches the line, whatever the item's kind.
+    An edit that removes only the reason after the label passes: the stored line is unseen, so old_str is no
+    different from any prose."""
     if entry.get("field") != "context":
-        return ""
+        return PASS
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
-        return "context edit that removes the Why yours line"
-    return ""
+        return "task-names-check", "context edit that removes the Why yours line"
+    if len(WHY_YOURS_LABEL.findall(old)) > len(WHY_YOURS_LABEL.findall(new)):
+        return "task-names-check", "context edit that removes the Why yours label"
+    cause = why_cited_hit(new, fragments=True)
+    return (WHY_RULE, cause) if cause else PASS
 
 
 # ------------------------------------------------------------------ a page decision states the form
@@ -884,16 +967,19 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry, cwd=""):
-    """(rule, matched) for one write of a waiting item that a rule refuses, else ("", "")."""
+def item_hit(op, entry, cwd="", session_id=None):
+    """(rule, matched) for one write of a waiting item that a rule refuses, else ("", ""). `session_id` is the
+    writer's, for the cross-repo check."""
     data = _write_data(entry, cwd)
     hit = item_field_hit(op, entry, data)
     if hit:
         return "item-field-rendered", hit
     if op == "str_replace":
+        if entry.get("field") in CROSS_REPO_FIELDS:
+            return CROSS_REPO_RULE, CROSS_REPO_EDIT_REASON
         hit = task_str_replace_hit(entry)
-        if hit:
-            return "task-names-check", hit
+        if hit[0]:
+            return hit
         if entry.get("field") == "command":
             # The stored command is unseen: gh_edit_hit judges new_str, less an edit that only changes
             # a gh command old_str held.
@@ -915,6 +1001,10 @@ def item_hit(op, entry, cwd=""):
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
+    page_repo = _page_repo(cwd)
+    hit = cross_repo_hit(op, data, page_repo, session_id) if page_repo else None
+    if hit:
+        return CROSS_REPO_RULE, hit
     hit = widens_pick_hit(data)
     if hit:
         return "uniform-pick", hit
@@ -928,8 +1018,8 @@ def item_hit(op, entry, cwd=""):
     if hit:
         return "gh-login-switch", hit
     hit = task_check_hit(op, data)
-    if hit:
-        return "task-names-check", hit
+    if hit[0]:
+        return hit
     hit = decision_form_hit(op, data)
     if hit[0]:
         return hit
@@ -1000,7 +1090,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
     return waiting_page_root(tool_input, cwd) is not None
 
 
-def page_item_hit(tool_input, cwd=""):
+def page_item_hit(tool_input, cwd="", session_id=None):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
     this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
@@ -1018,7 +1108,7 @@ def page_item_hit(tool_input, cwd=""):
         # write, and refuses only a key none. No writes return, so no other check or model review follows.
         return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry, cwd)
+        hit = item_hit(op, entry, cwd, session_id)
         if hit[0]:
             return hit, writes
     return PASS, writes
@@ -1062,14 +1152,15 @@ def _judged_fragment(field):
     return field in ("context", "options") or str(field).startswith("options.")
 
 
-def judged_item_writes(writes):
+def judged_item_writes(writes, cwd=""):
     """The writes of a page item that the model review reads. A set or update is read as
     {"op", "doc_id", "data"} when it is not closed and either writes a decision (an update with no kind is
     read, as decision_form_hit cannot see the stored kind) that carries `options` or `context`, or writes a
     task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
     `steps`, since steps are task-only. A str_replace on `context` or `options` (a subfield too) is
     read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
-    item is unseen."""
+    item is unseen. A write that names a `file_path` is read from it, a relative path against `cwd` (the
+    payload's cwd, as page_item_hit reads it), so the review sees the data the guard judged."""
     judged = []
     for op, entry in writes:
         if op == "str_replace":
@@ -1077,7 +1168,7 @@ def judged_item_writes(writes):
                 judged.append({"op": op, "doc_id": entry.get("doc_id"), "field": entry.get("field"),
                                "new_str": entry["new_str"]})
             continue
-        data = _write_data(entry)
+        data = _write_data(entry, cwd)
         if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
             continue
         if data.get("kind") == "task" or data.get("steps"):
@@ -1149,10 +1240,11 @@ def key_named_hit(texts) -> str:
 NONE_KEY_HIT = "option keyed none"
 
 
-def _open_decision(data) -> bool:
-    """True for the data of an open decision. A task, a note and a closed item are not judged. The one filter
-    of option_letter_hit and keyed_options_hit."""
-    return isinstance(data, dict) and data.get("kind", "decision") == "decision" and data.get("status") != "closed"
+def _open_decision(data, kinds=("decision",)) -> bool:
+    """True for the data of an open item of one of `kinds` (a decision by default). A missing kind is a decision.
+    Any status but closed is open. A task, a note and a closed item are not judged by default. The one filter
+    of option_letter_hit, keyed_options_hit and cross_repo_hit (kinds decision and task)."""
+    return isinstance(data, dict) and data.get("kind", "decision") in kinds and data.get("status") != "closed"
 
 
 def _keyed_none(option) -> bool:
@@ -1259,18 +1351,32 @@ def _item_fields(path):
     return fields if isinstance(fields, list) and fields and all(isinstance(x, str) for x in fields) else None
 
 
+# A field the page lists and draws, but only the page writes: the owner's Mark read sets `dismissed` with update (step ask-phase-out).
+# A session's write that names it is refused, so no session hides an item the owner has not read. The page draws the field
+# already, so the refusal gives its own reason, not the generic one that says to draw it.
+PAGE_ONLY_ITEM_FIELDS = ("dismissed",)
+PAGE_ONLY_MARK = " (the page's Mark read writes it)"
+PAGE_ONLY_REASON = ("Only the page's Mark read writes dismissed. The owner's press sets it, and Mark unread clears it. "
+                    "A session write never names it, on any route: leave it out of the write. "
+                    "(decision item-field-rendered, a waiting item names only fields the page draws)")
+
+
 def item_field_hit(op, entry, data) -> str:
     """The matched text when this write of a waiting item names a top-level field outside the page's
     itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
     field in `field`. A page with no readable block, or an empty one, reads as unknown, and the write passes."""
     fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
-    if fields is None:
-        return ""
     if op == "str_replace":
         field = entry.get("field")
         top = field.split(".", 1)[0] if isinstance(field, str) else ""
-        return "str_replace on " + top if top and top not in fields else ""
-    if not isinstance(data, dict):
+        if top in PAGE_ONLY_ITEM_FIELDS:
+            return "str_replace on " + top + PAGE_ONLY_MARK
+        return "str_replace on " + top if fields is not None and top and top not in fields else ""
+    if isinstance(data, dict):
+        for key in data:
+            if key in PAGE_ONLY_ITEM_FIELDS:
+                return "field " + str(key) + PAGE_ONLY_MARK
+    if fields is None or not isinstance(data, dict):
         return ""
     for key, value in data.items():
         if key in fields or (op == "update" and isinstance(value, dict) and value.get("__delete__") is True):
@@ -1326,12 +1432,76 @@ def _chat_question_hit(question, options):
     return (DEPARTS_RULE, miss) if miss else PASS
 
 
+# ------------------------------------------------------------------ a decision on another repo is checked with that repo
+#
+# docs/decisions/cross-repo-question-checked.md, rule `question-checked-with-repo`, built against a named incident
+# (incident in the record): triage filed another repo's design questions on this repo's page, ones the owner had
+# already ruled on. An open decision or task names its `repo` (owner/name). A repo other than the page's needs
+# `checked_with`, the session id of that repo's session that said the owner has not ruled, never the item's own owner.
+# The check keys on fields, never on words (decision predicate-is-the-act).
+CROSS_REPO_RULE = "question-checked-with-repo"
+CROSS_REPO_REASON = ("An open decision or task on the waiting page names its `repo` (owner/name). A repo other than "
+                     "the page's own needs `checked_with`: the session id of that repo's triage, coordinator or "
+                     "owner's-computer session that said the owner has not ruled. "
+                     "(decision cross-repo-question-checked, a question on another repo is checked with that repo)")
+_WAITING_PAGE_DIR = os.path.join(HERE, "..", "skills", "waiting-page")
+
+
+def _page_repo(cwd):
+    """`owner/name` of the origin of the checkout at cwd, lowercased, else None (no cwd, no checkout, no origin).
+    One read of git's config file, no process."""
+    root = _git_root_of(cwd) if cwd else None
+    return _layout().repo_name(root) if root else None
+
+
+CROSS_REPO_FIELDS = ("repo", "checked_with")
+CROSS_REPO_EDIT_REASON = ("A str_replace on `repo` or `checked_with` changes the cross-repo check, which a "
+                          "str_replace cannot show. Send an update that carries both `repo` and `checked_with`.")
+CROSS_REPO_UPDATE_REASON = ("An update that carries `checked_with` and no `repo` cannot be judged: the stored `repo` "
+                            "is unseen. Send an update that carries both `repo` and `checked_with`.")
+
+
+def cross_repo_hit(op, data, page_repo, session_id=None):
+    """The reason when this write of an open decision or task names no repo, a repo that is not owner/name, a repo
+    off the page's own without a session-shaped `checked_with`, or a `checked_with` that is the session in its
+    `owner` or the writer's own `session_id`; else None. `repo` is required whether or not the page's repo is
+    known; with it unknown only the compare is skipped. An update is judged only when it carries `repo`, and one
+    that carries `checked_with` without `repo` is refused; a str_replace (item_hit judges its field) and a closed
+    item pass. `session_id` is the writer's session record id (session_<x>), None for a local session."""
+    if op not in ("set", "update") or not _open_decision(data, ("decision", "task")):
+        return None
+    if op == "update" and "repo" not in data:
+        return CROSS_REPO_UPDATE_REASON if "checked_with" in data else None
+    if _WAITING_PAGE_DIR not in sys.path:
+        sys.path.append(_WAITING_PAGE_DIR)
+    from stale_pages import REPO_NAME
+    repo = data.get("repo")
+    own = "Add `repo`: \"%s\" for a question on this page's own repo, or the repo the question is about." % page_repo \
+        if page_repo else "Add `repo` (owner/name): the repo the question is about."
+    if not repo:
+        return "`repo` is missing. " + own
+    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and not repo.lower().endswith(".git")):
+        return "`repo` is not owner/name. " + own
+    if not page_repo or repo.lower() == page_repo.lower():
+        return None
+    checked = data.get("checked_with")
+    if not (isinstance(checked, str) and SESSION_ID.fullmatch(checked)):
+        return ("`repo` %s is not this page's repo, and `checked_with` is missing or not a session id. Ask that "
+                "repo's triage, coordinator or owner's-computer session whether the owner has ruled, then write its "
+                "session id in `checked_with`." % repo)
+    if checked in str(data.get("owner") or "") or (session_id and checked == session_id):
+        return ("`checked_with` is the session that files this item. Write the session id of the %s session that "
+                "checked, not the one that files the item." % repo)
+    return None
+
+
 # ------------------------------------------------------------------ the reasons, one table per surface
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
-                "task-names-check": TASK_REASON,
+                "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
+                "item-field-page-only": PAGE_ONLY_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "

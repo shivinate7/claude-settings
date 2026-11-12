@@ -3,7 +3,9 @@
 STALE_PAGES_UNDER_TEST names the command to run (default: stale_pages.py beside this file), so the
 same cases run red against a checkout that lacks it.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -779,14 +781,23 @@ class Stale(unittest.TestCase):
 
     def items_file(self, items):
         """The items as a JSON list: the first shape --items takes."""
-        path = os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="items-"), "items.json")
-        return write_text(path, json.dumps(items))
+        return self.list_file(items, "items")
 
-    def items_folder(self, items):
-        """The items as the folder `ArtifactData list` saves: one <id>.json per item, and the .complete marker it leaves."""
-        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix="items-")
-        for item in items:
-            write_text(os.path.join(folder, item["id"] + ".json"), json.dumps(item))
+    def list_file(self, docs, name):
+        """`docs` as a JSON list in <name>.json, in a folder of its own: the list shape --items and --answers take."""
+        path = os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix=name + "-"), name + ".json")
+        return write_text(path, json.dumps(docs))
+
+    def items_folder(self, items, keys=None):
+        """The items as the folder `ArtifactData list` saves: one <key>.json per item, and the .complete marker it leaves.
+        The key is the item's id, unless `keys` names one per item, for an item with no id field."""
+        return self.docs_folder({(keys[i] if keys else item["id"]): item for i, item in enumerate(items)}, "items")
+
+    def docs_folder(self, docs, name):
+        """The folder `ArtifactData list` saves: one <doc id>.json per entry of `docs` ({doc id: data}), and the .complete marker it leaves."""
+        folder = tempfile.mkdtemp(dir=self.tmp.name, prefix=name + "-")
+        for doc_id, data in docs.items():
+            write_text(os.path.join(folder, doc_id + ".json"), json.dumps(data))
         write_text(os.path.join(folder, ".complete"), "")
         return folder
 
@@ -795,8 +806,9 @@ class Stale(unittest.TestCase):
         return (write_text(os.path.join(self.fetched, "current.html"), PAGE),
                 write_text(os.path.join(self.fetched, "behind.html"), set_body(ALTERED, STALE_BODY)))
 
-    def items_run(self, page, items, env):
-        return self.page_run(page, "--main", TEMPLATE, "--items", items, env=env)
+    def items_run(self, page, items, env, answers=None):
+        extra = [] if answers is None else ["--answers", answers]
+        return self.page_run(page, "--main", TEMPLATE, "--items", items, *extra, env=env)
 
     def page_line(self, r):
         """The page's verdict line: the first stdout line."""
@@ -1089,6 +1101,382 @@ class Stale(unittest.TestCase):
                                  "the lane line for item 154 with %s is not the unknown line:\n%s" % (label, r.stdout + r.stderr))
                 self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with %s" % label)
 
+    def entry_key_forms(self):
+        """Two forms of an item with no `n` and no `id`: a waits item (gh) and a lane item (no gh call). Each is a builder of the item."""
+        return (("waits item", lambda: wait_item(154, {"repo": REPO, "run": RUN})),
+                ("lane item", lambda: self.lane_item(154, waits=None)))
+
+    # The doc key is the item id (roadmap step page-item-id-check).
+    def test_a_wait_line_for_an_item_with_no_n_and_no_id_names_its_entry_key(self):
+        """The entry key is the item's id, so a wait line names it when the item has no `n` and no `id` field. Red on the old
+        code, which names the item ? from the missing fields. Both forms: a `waits` item (gh) and a lane item (no gh call)."""
+        current, _ = self.current_and_behind()
+        for label, make in self.entry_key_forms():
+            with self.subTest(label):
+                env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+                item = make()
+                del item["n"], item["id"]
+                r = self.items_run(current, self.items_folder([item], keys=["entry-key-154"]), env)
+                self.assert_page_word(r, "current", 0)
+                lines = r.stdout.splitlines()[1:]
+                self.assertEqual(len(lines), 1, "want one wait line for the item, got %d:\n%s" % (len(lines), r.stdout + r.stderr))
+                self.assertIn("item entry-key-154", lines[0], "the wait line is not labelled by its entry key:\n" + lines[0])
+
+    def test_a_wait_line_for_a_list_row_with_no_n_and_no_id_names_its_entry_key(self):
+        """A --items list file holds the rows ArtifactData list returns, {"id", "data"}. The entry key is the item's id, so a wait
+        line names the item in `data` by its key when that item has no `n` and no `id` field. Red on the old code, which reads
+        the row itself as the item: it finds no waits and no lane, so it prints nothing."""
+        current, _ = self.current_and_behind()
+        for label, make in self.entry_key_forms():
+            with self.subTest(label):
+                env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+                item = make()
+                del item["n"], item["id"]
+                r = self.items_run(current, self.items_file([{"id": "entry-key-154", "data": item}]), env)
+                self.assert_page_word(r, "current", 0)
+                lines = r.stdout.splitlines()[1:]
+                self.assertEqual(len(lines), 1, "want one wait line for the row, got %d:\n%s" % (len(lines), r.stdout + r.stderr))
+                self.assertIn("item entry-key-154", lines[0], "the wait line is not labelled by its entry key:\n" + lines[0])
+                self.assertNotIn("item ?", r.stdout, "a wait line names the item ?:\n" + r.stdout)
+
+    def test_a_wait_line_names_the_entry_key_when_the_id_field_differs(self):
+        """The entry key is the item's id, so a wait line names the item by its key when the item's own `id` field names another
+        item. Both shapes: a folder doc, and a list row {"id", "data"}. Both forms: a `waits` item (gh) and a lane item (no gh call).
+        Red on the merged code, which names the item by that field: `item other-id`, not `item entry-key-154`."""
+        current, _ = self.current_and_behind()
+        shapes = (("folder doc", lambda item: self.items_folder([item], keys=["entry-key-154"])),
+                  ("list row", lambda item: self.items_file([{"id": "entry-key-154", "data": item}])))
+        for shape, arg in shapes:
+            for label, make in self.entry_key_forms():
+                with self.subTest(shape=shape, form=label):
+                    env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+                    item = make()
+                    del item["n"]
+                    item["id"] = "other-id"
+                    r = self.items_run(current, arg(item), env)
+                    self.assert_page_word(r, "current", 0)
+                    lines = r.stdout.splitlines()[1:]
+                    self.assertEqual(len(lines), 1, "want one wait line for the item, got %d:\n%s" % (len(lines), r.stdout + r.stderr))
+                    self.assertIn("item entry-key-154", lines[0], "the wait line is not labelled by its entry key:\n" + lines[0])
+
+    # Single-page mode with --answers <file or folder>, with --items: one kept-answer line per answer kept on a closed item.
+    # Each do-not-flag case also holds the incident item (item 356), so the run's own incident line shows the answers were
+    # read before the negative is checked. An open item, an arbiter ruling and a park answer are legitimate states: never named.
+
+    def shaped(self, items, answers, as_folder):
+        """(--items arg, --answers arg) in one shape: a list file each, or a folder each. `answers` is (doc id, data) pairs. The list
+        file holds each doc's data alone, as a list gives it; the folder names each doc by its id."""
+        if as_folder:
+            return self.items_folder(items), self.docs_folder(dict(answers), "answers")
+        return self.items_file(items), self.list_file([data for _, data in answers], "answers")
+
+    def paired_run(self, extra_items, extra_answers, as_folder):
+        """A run with the incident item and its kept answer, plus `extra_items` and `extra_answers` ((doc id, data) pairs)."""
+        current, _ = self.current_and_behind()
+        items, answers = self.shaped([INCIDENT, *extra_items], [(INCIDENT_ID, INCIDENT_ANSWER), *extra_answers], as_folder)
+        return self.items_run(current, items, {}, answers=answers)
+
+    def assert_kept_line(self, r, n, item_id, want=None):
+        """Exactly one kept-answer line names item `n` (id `item_id`), and it starts with `want`, the line the flag prints by default.
+        Returns that line."""
+        want = kept_line(n, item_id) if want is None else want
+        named = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: item %d (%s)" % (n, item_id))]
+        self.assertEqual(len(named), 1, "want one kept-answer line for item %d (%s), got %d:\n%s"
+                         % (n, item_id, len(named), r.stdout + r.stderr))
+        self.assertTrue(named[0].startswith(want), "the kept-answer line for item %d differs:\n%s" % (n, named[0]))
+        return named[0]
+
+    def assert_not_named(self, r, item_id, case):
+        """The run read the incident's answer first (the scope), and no kept-answer line names `item_id`, which is `case`."""
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        named = [line for line in kept_lines(r.stdout) if item_id in line]
+        self.assertEqual(named, [], "%s is named as a kept answer:\n%s" % (case, r.stdout + r.stderr))
+
+    def test_a_kept_answer_on_a_closed_item_is_named_in_both_shapes(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items, answers = self.shaped([INCIDENT], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder)
+                r = self.items_run(current, items, {}, answers=answers)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assert_page_word(r, "current", 0)
+
+    def test_a_closed_item_with_a_last_answer_and_a_kept_answer_is_named(self):
+        # Route and close, step 2, deletes the answer when it closes the item. A kept answer on a closed item is a missed delete,
+        # whether or not the close also wrote lastAnswer.
+        current, _ = self.current_and_behind()
+        item = decision_item(INCIDENT_N, INCIDENT_ID, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items, answers = self.shaped([item], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder)
+                r = self.items_run(current, items, {}, answers=answers)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assert_page_word(r, "current", 0)
+
+    def assert_not_named_in_both_shapes(self, extra_items, extra_answers, item_id, case):
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file", case=case):
+                r = self.paired_run(extra_items, extra_answers, as_folder)
+                self.assert_not_named(r, item_id, case)
+
+    def test_an_open_item_with_a_kept_answer_is_not_named(self):
+        self.assert_not_named_in_both_shapes([decision_item(357, "open-answer", status="open")],
+                                             [("open-answer", answer_for("open-answer", 357))],
+                                             "open-answer", "an open item (status open) with a kept answer")
+
+    def test_an_item_with_no_status_key_and_a_kept_answer_is_not_named(self):
+        self.assert_not_named_in_both_shapes([decision_item(358, "no-status-answer", status=None)],
+                                             [("no-status-answer", answer_for("no-status-answer", 358))],
+                                             "no-status-answer", "an item with no status key and a kept answer")
+
+    def test_an_open_busy_lane_item_with_a_last_answer_and_a_kept_answer_is_not_named(self):
+        item = decision_item(359, "lane-answer", status="open", lane=LANE, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        self.assert_not_named_in_both_shapes([item], [("lane-answer", answer_for("lane-answer", 359))],
+                                             "lane-answer", "an open busy-lane item with a last answer and a kept answer")
+
+    def test_a_closed_arbiter_ruling_with_an_overturn_answer_is_not_named(self):
+        self.assert_not_named_in_both_shapes([decision_item(360, "ruling-answer", arbiter=True, pick="a")],
+                                             [("ruling-answer", answer_for("ruling-answer", 360, choice="overturn", note="reopen"))],
+                                             "ruling-answer", "a closed arbiter ruling with an overturn answer")
+
+    def test_a_park_line_answer_under_park_dot_id_on_a_closed_item_is_not_named(self):
+        # The list shape holds no key, so the park line's `id` equals the closed item's id: only its `parked` field keeps it unnamed.
+        park = {"parked": True, "id": "parked-entry", "act": "unpark", "ref": "Round 2: the parked line", "note": "back to work", "at": ANSWER_AT}
+        self.assert_not_named_in_both_shapes([decision_item(361, "parked-entry")], [("park.parked-entry", park)],
+                                             "parked-entry", "a park.<id> answer on a closed item")
+
+    def test_an_item_park_answer_on_a_closed_item_is_not_named(self):
+        item = decision_item(362, "parked-item", lastAnswer={"act": "park", "note": "later", "at": ANSWER_AT})
+        park = {"item": "parked-item", "n": 362, "act": "park", "note": "later", "at": ANSWER_AT}
+        self.assert_not_named_in_both_shapes([item], [("parked-item", park)], "parked-item", "an item park answer on a closed item")
+
+    def test_an_answer_with_no_matching_item_is_not_named(self):
+        self.assert_not_named_in_both_shapes([], [("orphan-answer", answer_for("orphan-answer", 363))],
+                                             "orphan-answer", "an answer with no matching item")
+
+    def test_the_kept_answer_line_comes_after_the_wait_and_lane_lines(self):
+        current, _ = self.current_and_behind()
+        env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+        items, answers = self.shaped([INCIDENT, wait_item(154, {"repo": REPO, "run": RUN}), self.lane_item(155)],
+                                     [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder=False)
+        r = self.items_run(current, items, env, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 4, "want the verdict, the wait line, the lane line and the kept-answer line:\n" + r.stdout + r.stderr)
+        self.assertTrue(lines[1].startswith("wait: item 154 ") and lines[2].startswith("wait: item 155 "),
+                        "the wait and lane lines are not right after the verdict line:\n" + r.stdout)
+        self.assert_page_word(r, "current", 0)
+
+    def test_a_behind_page_keeps_exit_1_and_still_prints_the_kept_answer_line(self):
+        _, behind = self.current_and_behind()
+        items, answers = self.shaped([INCIDENT], [(INCIDENT_ID, INCIDENT_ANSWER)], as_folder=False)
+        r = self.items_run(behind, items, {}, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        self.assert_page_word(r, "behind", 1)
+
+    def test_without_answers_the_output_is_the_verdict_line_alone(self):
+        # Control: the answer is kept on disk, but the run is not given --answers, so it must print no kept-answer line.
+        current, _ = self.current_and_behind()
+        self.list_file([INCIDENT_ANSWER], "answers")
+        r = self.items_run(current, self.items_file([INCIDENT]), {})
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(r.stdout.splitlines(), [self.page_line(r)], "a run without --answers printed lines past the verdict:\n" + r.stdout)
+
+    def test_full_size_kept_answers_name_only_the_closed_items_in_order(self):
+        current, _ = self.current_and_behind()
+        items, answers, want = [], [], []
+        for i in range(40):  # closed, answer kept: named, in item order
+            item_id = "incident-%03d" % i
+            items.append(decision_item(1000 + i, item_id))
+            answers.append((item_id, answer_for(item_id, 1000 + i)))
+            want.append(kept_line(1000 + i, item_id))
+        for i in range(40):  # open, answer kept: not named
+            item_id = "open-%03d" % i
+            items.append(decision_item(1100 + i, item_id, status="open"))
+            answers.append((item_id, answer_for(item_id, 1100 + i)))
+        for i in range(40):  # arbiter ruling, overturn kept: not named
+            item_id = "ruling-%03d" % i
+            items.append(decision_item(1200 + i, item_id, arbiter=True))
+            answers.append((item_id, answer_for(item_id, 1200 + i, choice="overturn")))
+        for i in range(40):  # closed, no answer: not named
+            items.append(decision_item(1300 + i, "quiet-%03d" % i))
+        self.assertEqual(len(items), 160)
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items_arg, answers_arg = self.shaped(items, answers, as_folder)
+                r = self.items_run(current, items_arg, {}, answers=answers_arg)
+                got = kept_lines(r.stdout)
+                self.assertEqual(len(got), 40, "want 40 kept-answer lines, one per closed item with a kept answer, got %d:\n%s"
+                                 % (len(got), r.stdout + r.stderr))
+                for line, prefix in zip(got, want):
+                    self.assertTrue(line.startswith(prefix), "a kept-answer line is not the one for its item, in item order:\n" + line)
+                self.assert_page_word(r, "current", 0)
+
+    def test_an_empty_answers_list_or_folder_prints_no_kept_answer_line(self):
+        current, _ = self.current_and_behind()
+        items = self.items_file([INCIDENT])  # closed, no answer on file
+        cases = (("empty list file", self.list_file([], "answers")), ("folder with only the marker", self.docs_folder({}, "answers")))
+        for label, answers in cases:
+            with self.subTest(label):
+                r = self.items_run(current, items, {}, answers=answers)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(kept_lines(r.stdout), [], "an empty --answers printed a kept-answer line:\n" + r.stdout)
+
+    def test_an_unreadable_answers_file_prints_one_unknown_line_and_keeps_the_exit_code(self):
+        current, _ = self.current_and_behind()
+        items = self.items_file([INCIDENT])
+        cases = (("malformed JSON", "[{"), ("a JSON object, not a list", "{}"))
+        for label, text in cases:
+            with self.subTest(label):
+                path = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="answers-"), "answers.json"), text)
+                r = self.items_run(current, items, {}, answers=path)
+                unknown = [line for line in r.stdout.splitlines()[1:] if "unknown" in line]
+                self.assertEqual(len(unknown), 1, "an unreadable --answers file prints no single unknown line:\n" + r.stdout + r.stderr)
+                self.assertNotIn("Traceback", r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 0)
+
+    def test_an_items_folder_with_no_complete_marker_prints_one_unknown_kept_answer_line_and_no_item_line(self):
+        # The items list may be cut short, so a closed status in it is not proof: one unknown line, and no item line.
+        current, _ = self.current_and_behind()
+        items = self.docs_folder({INCIDENT_ID: INCIDENT}, "items")
+        os.remove(os.path.join(items, ".complete"))
+        answer_shapes = (("list file", self.list_file([INCIDENT_ANSWER], "answers")),
+                         ("folder of <id>.json files", self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")))
+        for label, answers in answer_shapes:
+            with self.subTest(label):
+                r = self.items_run(current, items, {}, answers=answers)
+                unknown = [line for line in kept_lines(r.stdout) if line.startswith("kept-answer: unknown")]
+                self.assertEqual(len(unknown), 1, "want one kept-answer: unknown line for an items folder with no marker, got %d:\n%s"
+                                 % (len(unknown), r.stdout + r.stderr))
+                self.assertIn("the items folder", unknown[0], "the unknown line does not name the items folder:\n" + unknown[0])
+                named = [line for line in kept_lines(r.stdout) if not line.startswith("kept-answer: unknown")]
+                self.assertEqual(named, [], "an items folder with no marker still names an item:\n" + r.stdout)
+                self.assert_page_word(r, "current", 0)
+
+    def test_pin_an_answers_folder_with_no_complete_marker_prints_one_unknown_kept_answer_line(self):
+        # Pin: an answers folder with no marker may be cut short, so it reads as one unknown kept-answer line and names no item.
+        current, _ = self.current_and_behind()
+        items = self.items_file([INCIDENT])
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        os.remove(os.path.join(answers, ".complete"))
+        r = self.items_run(current, items, {}, answers=answers)
+        kept = kept_lines(r.stdout)
+        self.assertEqual(len(kept), 1, "want exactly one kept-answer line for an answers folder with no marker, got %d:\n%s"
+                         % (len(kept), r.stdout + r.stderr))
+        self.assertTrue(kept[0].startswith("kept-answer: unknown"), "the one kept-answer line is not the unknown line:\n" + kept[0])
+        self.assertIn("the answers folder", kept[0], "the unknown line does not name the answers folder:\n" + kept[0])
+        self.assert_page_word(r, "current", 0)
+
+    def test_the_unknown_kept_answer_line_names_the_folder_with_no_marker(self):
+        # The unknown line says which folder may be cut short: "items" for an items folder, "answers" for an answers folder.
+        current, _ = self.current_and_behind()
+        items = self.docs_folder({INCIDENT_ID: INCIDENT}, "items")
+        os.remove(os.path.join(items, ".complete"))
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        os.remove(os.path.join(answers, ".complete"))
+        cases = (("items folder with no marker", items, self.list_file([INCIDENT_ANSWER], "answers"), "items"),
+                 ("answers folder with no marker", self.items_file([INCIDENT]), answers, "answers"))
+        for label, items_arg, answers_arg, folder in cases:
+            with self.subTest(label):
+                r = self.items_run(current, items_arg, {}, answers=answers_arg)
+                self.assert_page_word(r, "current", 0)
+                unknown = kept_lines(r.stdout)
+                self.assertEqual(len(unknown), 1, "want one kept-answer line:\n" + r.stdout + r.stderr)
+                self.assertIn("the %s folder" % folder, unknown[0],
+                              "the unknown line does not name the %s folder:\n%s" % (folder, unknown[0]))
+
+    def test_an_items_folder_doc_with_no_id_field_is_matched_by_its_file_name_and_still_flagged(self):
+        # export_page.docs_in keys each folder doc by its file name without .json, so the file name is the doc id.
+        current, _ = self.current_and_behind()
+        no_id = {key: value for key, value in INCIDENT.items() if key != "id"}
+        items = self.docs_folder({INCIDENT_ID: no_id}, "items")
+        answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
+        r = self.items_run(current, items, {}, answers=answers)
+        self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+        self.assert_page_word(r, "current", 0)
+
+    # A closed item with `waits` and a kept answer: a page answer is kept during a wait, a chat answer then closes the item, and no
+    # wait line ever ends it (wait lines cover open items only, SKILL.md "Route and close"). It gets one line, which says to delete
+    # answers/<id> only when its wait has ended.
+
+    def assert_waits_kept_line(self, r, n, item_id):
+        """Exactly one kept-answer line names closed item `n` (id `item_id`) with waits, and it starts with the waits line. A line
+        that says to delete answers/<id> also says when its wait has ended."""
+        line = self.assert_kept_line(r, n, item_id, want=waits_kept_line(n, item_id))
+        if "delete" in line:
+            self.assertIn("when its wait", line, "the line says to delete answers/%s before its wait has ended:\n%s" % (item_id, line))
+
+    def test_a_closed_item_with_waits_and_a_kept_answer_gets_one_waits_line_in_both_shapes(self):
+        current, _ = self.current_and_behind()
+        for label, waits in (("a run", {"repo": REPO, "run": RUN}), ("a PR", {"repo": REPO, "pr": PR}), ("a malformed value", "soon")):
+            for as_folder in (False, True):
+                with self.subTest(label, folder=as_folder):
+                    waited = decision_item(364, "waits-kept", waits=waits)
+                    answer = ("waits-kept", answer_for("waits-kept", 364))
+                    items, answers = self.shaped([INCIDENT, waited], [(INCIDENT_ID, INCIDENT_ANSWER), answer], as_folder)
+                    r = self.items_run(current, items, {}, answers=answers)
+                    self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)  # the scope: the run read the answers before the subject is checked
+                    self.assert_waits_kept_line(r, 364, "waits-kept")
+                    self.assert_page_word(r, "current", 0)
+
+    def test_full_size_closed_waits_items_get_one_line_each_only_when_their_answer_is_kept(self):
+        current, _ = self.current_and_behind()
+        items, answers, want = [], [], []
+        for i in range(40):  # closed with waits, answer kept: one line each, in item order
+            item_id, n = "waits-kept-%03d" % i, 1400 + i
+            items.append(decision_item(n, item_id, waits={"repo": REPO, "run": RUN} if i % 2 else {"repo": REPO, "pr": PR}))
+            answers.append((item_id, answer_for(item_id, n)))
+            want.append(waits_kept_line(n, item_id))
+        for i in range(40):  # closed with waits, no answer: no line
+            items.append(decision_item(1500 + i, "waits-quiet-%03d" % i, waits={"repo": REPO, "run": RUN}))
+        self.assertEqual(len(items), 80)
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                env, folder = self.gh_env({})
+                items_arg, answers_arg = self.shaped(items, answers, as_folder)
+                r = self.items_run(current, items_arg, env, answers=answers_arg)
+                got = kept_lines(r.stdout)
+                self.assertEqual(len(got), 40, "want 40 kept-answer lines, one per closed item with waits and a kept answer, got %d:\n%s"
+                                 % (len(got), r.stdout + r.stderr))
+                for line, prefix in zip(got, want):
+                    self.assertTrue(line.startswith(prefix), "a kept-answer line is not the waits line for its item, in item order:\n" + line)
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed item")
+
+    def test_a_list_of_id_and_data_entries_names_the_incident_in_both_lists(self):
+        # The shape parked_mode reads and the store's list returns: one {"id", "data"} entry per doc. The list of bare data objects
+        # is the control beside it: a pin that it keeps working.
+        current, _ = self.current_and_behind()
+        shapes = (("entries", [{"id": INCIDENT_ID, "data": INCIDENT}], [{"id": INCIDENT_ID, "data": INCIDENT_ANSWER}]),
+                  ("bare data", [INCIDENT], [INCIDENT_ANSWER]))
+        for label, items_docs, answer_docs in shapes:
+            with self.subTest(label):
+                items = self.list_file(items_docs, "items")
+                answers = self.list_file(answer_docs, "answers")
+                r = self.items_run(current, items, {}, answers=answers)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assert_page_word(r, "current", 0)
+
+    def test_items_with_answers_starts_no_more_gh_processes_than_items_alone(self):
+        # Cost: --answers reads files only. The run that prints the closed-with-waits line starts no gh process beyond the ones
+        # --items alone starts for the same items.
+        current, _ = self.current_and_behind()
+        items = [wait_item(154, {"repo": REPO, "run": RUN}), wait_item(155, {"repo": REPO, "pr": PR}),
+                 decision_item(INCIDENT_N, INCIDENT_ID), decision_item(365, "waits-kept", waits={"repo": REPO, "run": RUN})]
+        answers = [(INCIDENT_ID, INCIDENT_ANSWER), ("waits-kept", answer_for("waits-kept", 365))]
+        gh_answers = {RUN_ARGV: RUN_DONE, PR_ARGV: PR_OPEN}
+        env, alone_folder = self.gh_env(gh_answers)
+        r_alone = self.items_run(current, self.items_file(items), env)
+        self.assert_page_word(r_alone, "current", 0)
+        env, both_folder = self.gh_env(gh_answers)
+        items_arg, answers_arg = self.shaped(items, answers, as_folder=False)
+        r_both = self.items_run(current, items_arg, env, answers=answers_arg)
+        self.assert_waits_kept_line(r_both, 365, "waits-kept")  # the scope: the path whose gh calls are counted prints its line
+        self.assert_page_word(r_both, "current", 0)
+        alone, both = self.gh_calls(alone_folder), self.gh_calls(both_folder)
+        self.assertGreaterEqual(len(alone), 2, "the items-alone run did not start the gh processes its open waits need: %s" % alone)
+        self.assertLessEqual(len(both), len(alone), "--answers started more gh processes than --items alone:\n%s" % both)
+
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
@@ -1151,6 +1539,47 @@ def lane_line_unknown(n):
     return "wait: item %d (lane %s): waiting (answered at unknown)" % (n, LANE)
 
 
+# Fixtures for the --answers cases. An answer doc names its item in `item` (the list shape has no doc id), and a park line
+# names its entry in `id`. A line is the one the flag prints for a kept answer on a closed item.
+ANSWER_AT, ITEM_ADDED = "2026-11-07T19:41:50.035Z", "2026-11-07T19:33:00Z"
+
+
+def decision_item(n, item_id, status="closed", **extra):
+    """A decision item as the page holds it: `status` (None: no status key), and the `extra` fields added."""
+    item = {"id": item_id, "n": n, "kind": "decision", "added": ITEM_ADDED, "options": [{"key": "a"}, {"key": "b"}]}
+    if status is not None:
+        item["status"] = status
+    item.update(extra)
+    return item
+
+
+def answer_for(item_id, n, **extra):
+    """The answer doc the page writes at answers/<item id>: a choice and a note, with the `extra` fields replacing any."""
+    doc = {"item": item_id, "n": n, "choice": "a", "at": ANSWER_AT, "note": "x"}
+    doc.update(extra)
+    return doc
+
+
+def kept_line(n, item_id):
+    """The line the flag prints for a kept answer on closed item `n` (id `item_id`). A remedy may follow it."""
+    return "kept-answer: item %d (%s) is closed and answers/%s is kept" % (n, item_id, item_id)
+
+
+def waits_kept_line(n, item_id):
+    """The line the flag prints for a kept answer on closed item `n` (id `item_id`) that still has `waits`. A remedy may follow it."""
+    return "kept-answer: item %d (%s) is closed with waits and answers/%s is kept" % (n, item_id, item_id)
+
+
+def kept_lines(out):
+    """The lines of `out` that start as a kept-answer line does."""
+    return [line for line in out.splitlines() if line.startswith("kept-answer:")]
+
+
+INCIDENT_N, INCIDENT_ID = 356, "round3-fail-holds"  # the incident: a closed decision whose answer was kept
+INCIDENT = decision_item(INCIDENT_N, INCIDENT_ID)
+INCIDENT_ANSWER = answer_for(INCIDENT_ID, INCIDENT_N)
+
+
 def load_stale_pages():
     """stale_pages.py as a module, loaded from CMD, so the unit checks run the function the script runs."""
     if HERE not in sys.path:
@@ -1194,8 +1623,11 @@ PARKED_W = {"id": "windows-live-checks", "ref": "Step windows-live-checks, the W
 PARKED_GONE = {"id": "no-such-item", "ref": "Step no-such-item, a line whose item is gone", "note": "Gone."}
 
 
-def item_entry(item_id, status):
-    return {"id": item_id, "data": {"id": item_id, "kind": "decision", "status": status, "n": 10, "title": "Windows live checks"}}
+def item_entry(item_id, status, **extra):
+    """An item doc. `extra` sets or overrides its data fields."""
+    data = {"id": item_id, "kind": "decision", "status": status, "n": 10, "title": "Windows live checks"}
+    data.update(extra)
+    return {"id": item_id, "data": data}
 
 
 def park_answer_entry(item_id, at):
@@ -1212,45 +1644,40 @@ def pick_answer_entry(item_id, at):
     return {"id": item_id, "data": {"item": item_id, "n": 27, "at": at, "choice": "a", "note": ""}}
 
 
+def without_field(entry, key):
+    """The same entry with no `key` field."""
+    del entry["data"][key]
+    return entry
+
+
 def without_at(entry):
     """The same entry with no `at` field."""
-    del entry["data"]["at"]
-    return entry
+    return without_field(entry, "at")
 
 
 def output_lines(out):
     return [line for line in out.splitlines() if line.strip()]
 
 
-class ParkedStale(unittest.TestCase):
-    """The --parked mode. Each case writes its own three files, then runs the script on them."""
+class FolderCase(unittest.TestCase):
+    """A folder of saved store files, one folder per case. The store modes share this base: the run-folder temp, the file writer, the unknown check and the tree."""
+    FOLDER = "folder"
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
-        self.folder = os.path.join(self.tmp.name, "parked")
+        self.folder = os.path.join(self.tmp.name, self.FOLDER)
         os.mkdir(self.folder)
 
-    def store(self, meta=None, items=(), answers=()):
-        """Writes the three files the mode reads, each from its entries."""
-        self.store_raw(meta, list(items), list(answers))
+    def write_store(self, files):
+        """Writes each file (name -> value) as JSON exactly as given: a name left out is a file that is not there."""
+        for name, value in files.items():
+            write_text(os.path.join(self.folder, name + ".json"), json.dumps(value))
 
-    def store_raw(self, meta=None, items=None, answers=None):
-        """Writes the three files exactly as given (a file left out is empty), so a case can hand the mode a value of the wrong shape."""
-        meta = {"writer": "triage", "parked": []} if meta is None else meta
-        items = [] if items is None else items
-        answers = [] if answers is None else answers
-        write_text(os.path.join(self.folder, "meta.json"), json.dumps(meta))
-        write_text(os.path.join(self.folder, "items.json"), json.dumps(items))
-        write_text(os.path.join(self.folder, "answers.json"), json.dumps(answers))
-
-    def run_parked(self, now=NOW, codes=(0, 1)):
-        """Runs the mode on the folder. Stale.run_script is the one runner of CMD in this file; it reads no state of its case.
-        Without the mode, the script runs its batch mode on the folder, so that output is named as the cause."""
-        r = Stale.run_script(self, "--parked", self.folder, "--now", now)
-        self.assertNotIn("waiting pages:", r.stdout + r.stderr, "the --parked mode did not run: stale_pages.py ran its batch mode")
-        self.assertIn(r.returncode, codes, "the --parked mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
-        return r.returncode, r.stdout
+    def clear_store(self):
+        """Empties the folder, so a case with several subtests starts each one from no files."""
+        shutil.rmtree(self.folder)
+        os.mkdir(self.folder)
 
     def assert_unknown(self, rc, out, *names):
         """The run exits 2 and prints an unknown line naming each of `names`: never a clean or a stale line for the same cause."""
@@ -1261,14 +1688,6 @@ class ParkedStale(unittest.TestCase):
         for name in names:
             self.assertTrue(any(name in line for line in unknown), "the unknown line does not name %s: %r" % (name, unknown))
 
-    def assert_unknown_key(self, entry, key):
-        """A park answer with no readable `at` is unknown and names its key. It is not named old."""
-        self.store(answers=[entry])
-        rc, out = self.run_parked(codes=(0, 1, 2))
-        self.assert_unknown(rc, out, key)
-        self.assertEqual([line for line in output_lines(out) if line.startswith("park-answer-old")], [],
-                         "a park answer with no readable at was named old, not unknown: " + out)
-
     def tree(self):
         """Every file under the test folder, as {relative path: bytes}."""
         out = {}
@@ -1278,6 +1697,38 @@ class ParkedStale(unittest.TestCase):
                 with open(path, "rb") as f:
                     out[os.path.relpath(path, self.tmp.name)] = f.read()
         return out
+
+
+class ParkedStale(FolderCase):
+    """The --parked mode. Each case writes its own three files, then runs the script on them."""
+    FOLDER = "parked"
+
+    def store(self, meta=None, items=(), answers=()):
+        """Writes the three files the mode reads, each from its entries."""
+        self.store_raw(meta, list(items), list(answers))
+
+    def store_raw(self, meta=None, items=None, answers=None):
+        """Writes the three files exactly as given (a file left out is empty), so a case can hand the mode a value of the wrong shape."""
+        meta = {"writer": "triage", "parked": []} if meta is None else meta
+        items = [] if items is None else items
+        answers = [] if answers is None else answers
+        self.write_store({"meta": meta, "items": items, "answers": answers})
+
+    def run_parked(self, now=NOW, codes=(0, 1)):
+        """Runs the mode on the folder. Stale.run_script is the one runner of CMD in this file; it reads no state of its case.
+        Without the mode, the script runs its batch mode on the folder, so that output is named as the cause."""
+        r = Stale.run_script(self, "--parked", self.folder, "--now", now)
+        self.assertNotIn("waiting pages:", r.stdout + r.stderr, "the --parked mode did not run: stale_pages.py ran its batch mode")
+        self.assertIn(r.returncode, codes, "the --parked mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
+        return r.returncode, r.stdout
+
+    def assert_unknown_key(self, entry, key):
+        """A park answer with no readable `at` is unknown and names its key. It is not named old."""
+        self.store(answers=[entry])
+        rc, out = self.run_parked(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, key)
+        self.assertEqual([line for line in output_lines(out) if line.startswith("park-answer-old")], [],
+                         "a park answer with no readable at was named old, not unknown: " + out)
 
     def test_an_open_item_under_a_parked_entry_is_named_and_the_mode_exits_1(self):
         self.store(meta={"writer": "triage", "parked": [PARKED_W]}, items=[item_entry("windows-live-checks", "open")])
@@ -1372,6 +1823,302 @@ class ParkedStale(unittest.TestCase):
         self.assertEqual(r.stderr, "", "the --parked mode wrote to stderr, so it needs a process it does not own: " + r.stderr)
         self.assertEqual(output_lines(r.stdout), ["parked-open windows-live-checks"], "the mode did not read its three files")
         self.assertEqual(self.tree(), before, "the --parked mode wrote or removed a file")
+
+
+# --unread: the on-demand pass over the answers the writer has not read back (waiting-page SKILL.md). It reads four saved
+# files in one folder and writes none. Each list file holds [{"id", "data"}] entries, the shape an ArtifactData list returns.
+#   meta.json      {"writer": ..., "woke": "<ISO time>"}   the meta/page data, an object; `woke` is the writer's previous wake
+#   items.json     [{"id": "<item id>", "data": {"status": "open" | "closed", "n": <number>, "owner": ..., ...}}, ...]
+#   answers.json   [{"id": "<item id>", "data": {"item", "n", "at", ...}}, ...]   an item's answer, under its item's id
+#   receipts.json  [{"id": "<answer id>", "data": {"read": "<ISO time>", "filed": "<ISO time>"}}, ...]
+# An answer is listed when it is an item answer (not park.<id>, not parked, not act park), its item exists (open, or closed
+# with the answer kept), its `at` is before `woke`, and no receipt for it has a `read` at or after `at`. With no `woke`
+# (absent or null), every answer with no such receipt is listed. One line per listed answer, in answers.json order, then
+# exit 1: `answer-unread <id> (item <n>, owner <owner>, answered <at>, before wake <woke>)`, with `before wake: none recorded`
+# as the last field when there is no woke, and `?` for a missing n or owner. With none, `unread: clean` and exit 0. A file
+# missing or of the wrong shape, an unreadable `woke`, an unreadable `at`, or an unreadable `read` of a receipt that is
+# compared prints `unknown: <what>` and exits 2: the mode never calls such a thing clean or listed. Receipt times are ISO
+# UTC with a trailing Z by the skill's rule (SKILL.md, the receipts entry); the fixtures use that form.
+# The mode reads no clock: what it lists depends on the saved files alone.
+WOKE = "2026-11-05T13:10:00Z"
+EARLY = "2026-11-05T02:40:00Z"  # long before WOKE: the incident shape, an answer that stayed unread that long
+UNREAD_LINE = re.compile(r"answer-unread \S+ \(|unread: clean$|unknown: ")  # the mode's own line shapes
+
+
+def good_files(meta=None):
+    """The four files of a store with nothing to list and the wake WOKE. A shape case changes one of them."""
+    return {"meta": {"writer": "triage", "woke": WOKE} if meta is None else meta, "items": [], "answers": [], "receipts": []}
+
+
+def unread_line(item_id, n, owner, at, woke=WOKE):
+    """The line the mode prints for a listed answer. A `woke` of None is the no-wake form."""
+    before = "before wake %s" % woke if woke else "before wake: none recorded"
+    return "answer-unread %s (item %s, owner %s, answered %s, %s)" % (item_id, n, owner, at, before)
+
+
+def receipt_entry(item_id, **fields):
+    """A receipt, under the id of the answer it reads back."""
+    return {"id": item_id, "data": fields}
+
+
+def parked_data_answer(item_id, at):
+    """An item's answer under its own key that carries parked: true and no act: the third form a park answer takes."""
+    return {"id": item_id, "data": {"parked": True, "item": item_id, "n": 27, "at": at, "note": "Later."}}
+
+
+class UnreadStale(FolderCase):
+    """The --unread mode. Each case writes its own four files, then runs the script on them."""
+    FOLDER = "unread"
+
+    def store(self, meta=None, items=(), answers=(), receipts=()):
+        """Writes the four files the mode reads. The meta carries the wake WOKE unless `meta` is given."""
+        files = good_files(meta)
+        files.update(items=list(items), answers=list(answers), receipts=list(receipts))
+        self.write_store(files)
+
+    def assert_mode_lines(self, out, detail=""):
+        """The output is the mode's own lines. Without the mode, the script runs its batch mode, whose output is not these lines."""
+        lines = output_lines(out)
+        self.assertTrue(lines and all(UNREAD_LINE.match(line) for line in lines),
+                        "the --unread mode did not run: its output is not its lines: %r; %s" % (out, detail))
+
+    def assert_no_listed_line(self, out, why):
+        self.assertEqual([line for line in output_lines(out) if line.startswith("answer-unread")], [], "%s: %s" % (why, out))
+
+    def run_unread(self, codes=(0, 1)):
+        """Runs the mode on the folder through Stale.run_script, the one runner of CMD in this file."""
+        r = Stale.run_script(self, "--unread", self.folder)
+        self.assert_mode_lines(r.stdout, r.stderr)
+        self.assertIn(r.returncode, codes, "the --unread mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
+        return r.returncode, r.stdout
+
+    def run_main(self, *argv):
+        """main(argv) in this process, with stdout captured. Each process start is refused and recorded, at the start itself, so
+        `starts` lists every one the run asked for. Returns (exit code, stdout, starts, error); error is the exception text when
+        the run raised instead of answering, else ""."""
+        stale = load_stale_pages()
+        starts = []
+
+        def refuse(*args, **kwargs):
+            starts.append(args[0] if args else kwargs.get("args"))
+            raise OSError("process start refused")
+
+        out, code, error = io.StringIO(), None, ""
+        with mock.patch.object(subprocess, "Popen", side_effect=refuse), mock.patch.object(os, "system", side_effect=refuse), \
+                contextlib.redirect_stdout(out):
+            try:
+                code = stale.main(list(argv))
+            except SystemExit as err:
+                code = err.code
+            except Exception as err:  # a run that raised answered nothing; the caller names it
+                error = repr(err)
+        return code, out.getvalue(), starts, error
+
+    def test_an_answer_long_before_the_wake_with_no_receipt_is_listed_with_its_exact_line_and_exits_1(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "the old answer with no receipt was not listed: " + out)
+
+    def test_an_answer_one_second_before_the_wake_is_listed(self):
+        at = "2026-11-05T13:09:59Z"
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", at)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", at)]), "an answer one second before the wake was not listed: " + out)
+
+    def test_an_answer_at_the_wake_or_after_it_is_not_listed(self):
+        self.store(items=[item_entry("at-wake", "open"), item_entry("after-wake", "open")],
+                   answers=[pick_answer_entry("at-wake", WOKE), pick_answer_entry("after-wake", "2026-11-05T13:10:01Z")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an answer at or after the wake was listed: " + out)
+
+    def test_a_receipt_read_at_or_after_the_answer_clears_it(self):
+        self.store(items=[item_entry("same-time", "open"), item_entry("read-later", "open")],
+                   answers=[pick_answer_entry("same-time", EARLY), pick_answer_entry("read-later", EARLY)],
+                   receipts=[receipt_entry("same-time", read=EARLY), receipt_entry("read-later", read="2026-11-05T13:00:00Z")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a receipt read at or after the answer did not clear it: " + out)
+
+    def test_a_receipt_read_before_the_answer_does_not_clear_it(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", read="2026-11-05T02:00:00Z")])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "a receipt read before the answer cleared it: " + out)
+
+    def test_a_receipt_with_only_filed_does_not_clear_it(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", filed="2026-11-05T02:50:00Z")])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "a receipt with only filed cleared the answer: " + out)
+
+    # The store keeps one receipt per id (receipts/<id>), so two receipts for one answer never occur there: these two cases
+    # pin the code only. The code reads every receipt of an answer and clears it on any read at or after the answer. Both
+    # orders are pinned, since a check that reads only the last receipt in the list passes one order and fails the other.
+    def test_a_receipt_read_before_the_answer_beside_one_read_after_it_clears_it(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", read="2026-11-05T02:00:00Z"), receipt_entry("colour-pick", read="2026-11-05T13:00:00Z")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
+                         "a receipt read before the answer, beside one read after it, kept the answer unread: " + out)
+
+    def test_a_receipt_read_after_the_answer_beside_one_read_before_it_clears_it(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", read="2026-11-05T13:00:00Z"), receipt_entry("colour-pick", read="2026-11-05T02:00:00Z")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]),
+                         "a receipt read after the answer, beside one read before it, kept the answer unread: " + out)
+
+    def test_with_no_wake_every_answer_with_no_receipt_read_back_is_listed(self):
+        items = [item_entry("recent", "open", n=1, owner="ops"), item_entry("old", "open", n=2, owner="ops"), item_entry("read", "open", n=3, owner="ops")]
+        answers = [pick_answer_entry("recent", "2026-11-05T13:09:00Z"), pick_answer_entry("old", EARLY), pick_answer_entry("read", EARLY)]
+        receipts = [receipt_entry("read", read=EARLY)]
+        expected = [unread_line("recent", 1, "ops", "2026-11-05T13:09:00Z", woke=None), unread_line("old", 2, "ops", EARLY, woke=None)]
+        for meta in ({"writer": "triage"}, {"writer": "triage", "woke": None}):
+            with self.subTest(meta=meta):
+                self.store(meta=meta, items=items, answers=answers, receipts=receipts)
+                rc, out = self.run_unread()
+                self.assertEqual((rc, output_lines(out)), (1, expected), "with no wake, the answers with no receipt were not all listed: " + out)
+
+    def test_a_park_answer_is_never_listed_under_any_of_its_three_forms(self):
+        self.store(items=[item_entry("colour-pick", "open"), item_entry("parked-entry", "open"), item_entry("ci-cap-raise", "open")],
+                   answers=[park_answer_entry("colour-pick", EARLY), parked_data_answer("parked-entry", EARLY), item_answer_entry("ci-cap-raise", EARLY)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a park answer was listed as unread: " + out)
+
+    def test_an_answer_for_a_missing_item_is_skipped(self):
+        self.store(answers=[pick_answer_entry("ghost-item", EARLY)])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an answer with no item was listed: " + out)
+
+    def test_a_closed_item_with_its_answer_kept_is_listed(self):
+        self.store(items=[item_entry("colour-pick", "closed", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "a closed item's kept answer was not listed: " + out)
+
+    def test_a_missing_n_or_owner_prints_a_question_mark(self):
+        item = without_field(without_field(item_entry("colour-pick", "open", n=143, owner="ops"), "n"), "owner")
+        self.store(items=[item], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("colour-pick", "?", "?", EARLY)]), "a missing n or owner did not print ?: " + out)
+
+    def test_listed_answers_print_in_answers_order(self):
+        self.store(items=[item_entry("bee", "open", n=2, owner="ops"), item_entry("ay", "open", n=1, owner="ops")],
+                   answers=[pick_answer_entry("bee", EARLY), pick_answer_entry("ay", EARLY)])
+        rc, out = self.run_unread()
+        self.assertEqual((rc, output_lines(out)), (1, [unread_line("bee", 2, "ops", EARLY), unread_line("ay", 1, "ops", EARLY)]),
+                         "the listed answers were not in answers.json order: " + out)
+
+    def test_a_full_store_lists_each_unread_answer_and_no_other(self):
+        count = 120  # a full page of answers, every third one read back
+        items = [item_entry("item-%03d" % i, "open", n=i, owner="ops") for i in range(count)]
+        answers = [pick_answer_entry("item-%03d" % i, EARLY) for i in range(count)]
+        receipts = [receipt_entry("item-%03d" % i, read=EARLY) for i in range(0, count, 3)]
+        self.store(items=items, answers=answers, receipts=receipts)
+        rc, out = self.run_unread()
+        expected = [unread_line("item-%03d" % i, i, "ops", EARLY) for i in range(count) if i % 3]
+        self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each unread answer, in order: " + out[:300])
+
+    def test_an_empty_store_is_clean(self):
+        self.store()
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "an empty store was not clean: " + out)
+
+    def test_a_receipt_with_an_unreadable_read_is_unknown_when_its_answer_is_compared(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("colour-pick", read="not-a-time")])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "colour-pick")
+        self.assert_no_listed_line(out, "an answer whose receipt has no readable read was listed beside its unknown")
+
+    def test_a_receipt_with_an_unreadable_read_is_not_read_for_a_skipped_answer(self):
+        self.store(items=[item_entry("colour-pick", "open")],
+                   answers=[pick_answer_entry("ghost-item", EARLY), park_answer_entry("colour-pick", EARLY)],
+                   receipts=[receipt_entry("ghost-item", read="not-a-time"), receipt_entry("park.colour-pick", read="not-a-time")])
+        rc, out = self.run_unread(codes=(0,))
+        self.assertEqual((rc, output_lines(out)), (0, ["unread: clean"]), "a receipt of a skipped answer was read as unknown: " + out)
+
+    def test_an_answer_with_an_unreadable_at_is_unknown_and_names_its_id(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[pick_answer_entry("colour-pick", "not-a-time")])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "colour-pick")
+        self.assert_no_listed_line(out, "an answer with an unreadable at was listed")
+
+    def test_a_listed_answer_beside_an_answer_with_an_unreadable_at_prints_both_lines_and_exits_2(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops"), item_entry("bad-time", "open")],
+                   answers=[pick_answer_entry("colour-pick", EARLY), pick_answer_entry("bad-time", "not-a-time")])
+        rc, out = self.run_unread(codes=(2,))
+        self.assert_unknown(rc, out, "bad-time")
+        self.assertEqual([line for line in output_lines(out) if line.startswith("answer-unread")], [unread_line("colour-pick", 143, "ops", EARLY)],
+                         "the listed answer was not printed beside the unknown line: " + out)
+
+    def test_an_answer_with_no_at_is_unknown_and_names_its_id(self):
+        self.store(items=[item_entry("colour-pick", "open")], answers=[without_at(pick_answer_entry("colour-pick", EARLY))])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "colour-pick")
+        self.assert_no_listed_line(out, "an answer with no at was listed")
+
+    def test_an_unreadable_woke_is_unknown_and_exits_2(self):
+        self.store(meta={"writer": "triage", "woke": "not-a-time"}, items=[item_entry("colour-pick", "open")],
+                   answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread(codes=(0, 1, 2))
+        self.assert_unknown(rc, out, "woke")
+        self.assert_no_listed_line(out, "an answer was listed against an unreadable woke")
+
+    def test_a_missing_file_is_unknown_and_exits_2(self):
+        for name in ("meta", "items", "answers", "receipts"):
+            with self.subTest(missing=name):
+                self.clear_store()
+                files = good_files()
+                del files[name]
+                self.write_store(files)
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assert_unknown(rc, out, name + ".json")
+
+    def test_a_file_that_is_not_json_is_unknown_and_exits_2(self):
+        for name in ("meta", "items", "answers", "receipts"):
+            with self.subTest(unreadable=name):
+                self.clear_store()
+                self.write_store(good_files())
+                write_text(os.path.join(self.folder, name + ".json"), "{ not json")
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assert_unknown(rc, out, name + ".json")
+
+    def test_a_file_of_the_wrong_shape_is_unknown_and_exits_2(self):
+        wrong = {"meta": ["woke", WOKE], "items": {}, "answers": {}, "receipts": {}}
+        for name, value in wrong.items():
+            with self.subTest(shape=name):
+                self.clear_store()
+                files = good_files()
+                files[name] = value
+                self.write_store(files)
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assert_unknown(rc, out, name + ".json")
+
+    def test_the_mode_writes_no_file(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        before = self.tree()
+        self.run_unread(codes=(1,))
+        self.assertEqual(self.tree(), before, "the --unread mode wrote or removed a file")
+
+    def test_the_mode_starts_no_process_in_process(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        _, out, starts, error = self.run_main("--unread", self.folder)
+        self.assert_mode_lines(out, error)
+        self.assertEqual(starts, [], "the --unread mode asked for a process: %r" % starts)
+
+    def test_the_mode_runs_with_no_path_so_it_starts_no_git(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        # No PATH: a git or gh start would fail, so a clean run shows the mode starts none.
+        r = subprocess.run([sys.executable, CMD, "--unread", self.folder], capture_output=True, text=True, timeout=30,
+                           env={"PATH": "", "PYTHONDONTWRITEBYTECODE": "1", "HOME": self.tmp.name})
+        self.assert_mode_lines(r.stdout, r.stderr)
+        self.assertEqual((r.returncode, r.stderr), (1, ""), "the --unread mode failed with no PATH, or wrote to stderr: " + r.stderr)
+        self.assertEqual(output_lines(r.stdout), [unread_line("colour-pick", 143, "ops", EARLY)], "the mode did not read its files with no PATH: " + r.stdout)
+
+    def test_main_sends_unread_to_its_mode(self):
+        self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
+        code, out, _, error = self.run_main("--unread", self.folder)
+        self.assert_mode_lines(out, error)
+        self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
 
 
 if __name__ == "__main__":

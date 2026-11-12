@@ -19,9 +19,12 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | Entry | Covers | Record |
 |---|---|---|
 | "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
+| "Own Branch Lease Push" (`settings.json` `autoMode.allow`) | A lease push to the session's own lane branch, after this session pushed that branch earlier. Its "refspec form" entry allows the same push typed as `origin <src>:<branch>`. Two forms only: `--force-with-lease --force-if-includes origin <branch>`, or a lease pinned to the sha this session last pushed. Never a bare force, a `+refspec`, a delete, or the default branch | this record |
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration PR that the visible conversation names as such: the batch's or a lone lane's, named by the coordinator or batch runner, or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, including the session that started this one (its parent or coordinator). A message that asks for no act is covered. A message that asks is limited to acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
+| "Relayed Merge Yes" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:coordinator` named when it relayed the owner's yes to merge it, under every merge check | this record |
+| "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
 | `mcp__claude-code-remote__send_message` (`settings.json` `permissions.allow`) | Any `send_message` call. No bound is checked (see Send message allow rule) | this record |
@@ -58,6 +61,22 @@ Left to the coordinator: pull request 1372's blanket `permissions.allow` line fo
 
 Owner, 2026-11-03 15:58 CST, typed in the lane session merge-go-message-allow: `narrow the merge carve-out in the "Owner Session Message" entry of settings.json autoMode.allow, so a coordinator may send its own batch runner a merge go under standing-merge-grant`. Incident: at 15:48 CST the classifier refused a coordinator's `send_message` that gave its own batch runner a merge go, as "Merge Without Review". The entry's merge refusal predates `standing-merge-grant` (owner, 2026-11-01 21:34 CST). The carve-out covers only that merge go. A merge ask to any other session, or from a session that is not a coordinator, stays refused.
 
+### Batch Runner Merge
+
+Owner, 2026-11-07 13:27 CST, typed in lane session relayed-yes-allow: `go runner-merge-allow: allow batch-runner merges under the coordinator's standing grant`. Earlier ask: Queue item 149 b (owner, 2026-11-01 22:16 CST), which auto mode did not count as typed words. Incident: auto mode refused runner 8's merges until the owner typed his grant in its chat (2026-11-01 22:23 CST, roadmap step runner-merge-allow). The entry covers only a merge the coordinator named in a merge go to its own batch runner (decision `standing-merge-grant`). It lifts no merge check, and never covers a flag that lifts one (`--base-red-ok`, `--undo-check-unknown-ok`). The merge go must come from a session tagged `cs-build:coordinator`.
+
+Coordinator, 2026-11-08 12:55 CST: in a session that recorded the batch-runner role, the merge tool refuses `merge <pr> --confirm` with no `--head`. The batch runner merges the head its CI ran on. The coordinator names that head in every merge go.
+
+Departs from: main, which lets `--confirm` through with no `--head`. Now a session that recorded the batch-runner role must pass `--head`.
+
+The entry now quotes the `--head <sha>` form: `~/.claude/bin/merge <pr> --confirm --head <sha>`.
+
+### Relayed Merge Yes
+
+Owner, 2026-11-07 13:10 CST, coordinator-reported: a yes the coordinator passes on is enough. Owner, 13:19 CST, typed in lane session relayed-yes-allow: `add the relayed-yes grant to .claude/CLAUDE.md and an autoMode.allow entry for merges on a coordinator-relayed owner yes`. Incident: at 13:05 CST the classifier refused batch runner 8's `merge 1421 --confirm` on an owner yes the coordinator relayed. The entry covers that merge only, by a session tagged `cs-build:batch-runner`, since a lane and the coordinator never merge (decision `standing-merge-grant`). It lifts no merge check, and never covers a flag that lifts one (`--base-red-ok`, `--undo-check-unknown-ok`). It never covers another act, a pull request the relay did not name, or a relay from a session not tagged `cs-build:coordinator`. A relayed yes binds to the pull request's head when the coordinator relays it (coordinator brief, 2026-11-07 13:55 CST). The relay names the head sha, and the batch runner merges with `--head <sha>`. So a push after the yes needs a new yes. A commit the merge tool itself pushes on top of that head, its record-claim commit or the revert of that claim, keeps the yes (lane ruling, 2026-11-08 12:53 CST). Gap: `merge/cloud_allow.json` allows `merge <pr> --confirm` with or without `--head` before auto mode judges it, so in the cloud the head binding rests on the batch runner adding `--head` from the relay. Narrowing that rule would change every merge under the standing grant, which the owner has not ruled. Measured 2026-11-08: runner 8 typed the full path, `~/.claude/bin/merge 1421 --confirm`, followed by a redirect and a `;` chain. Gap: whether the classifier reads the relay message is unmeasured.
+
+Gap update (coordinator, 2026-11-08 12:55 CST): in a session that recorded the batch-runner role, the merge tool now refuses `merge <pr> --confirm` with no `--head`. For such a session, the head binding no longer rests on the batch runner adding `--head` from the relay. The Gap above remains true outside such sessions.
+
 ### Archived Branch Delete
 
 The entry tells the classifier that a branch delete loses nothing in two cases:
@@ -73,13 +92,34 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 - Check: the test reads the remedy's commands from the guard constant and fails until the entry quotes each one.
 - Gap: the classifier sees commands, not their output. A failed archive push followed by a delete is still allowed by this entry. The guard's own remote-contains test still refuses the local `git branch -D` then.
 
+### Own Branch Lease Push
+
+Owner grant, typed in lane lease-push-c-and-d, 2026-11-07 13:28 CST: `go: add the "Own Branch Lease Push" entry to settings.json autoMode.allow, as drafted in lane lease-push-c-and-d`.
+
+The owner's pull request #2350 (branch allow-lease-push-refspec, merge e53fad223) put this entry on main. It also added "Own Branch Lease Push, refspec form": the same two forms typed with a source, `origin <src>:<branch>`, where `<src>` is a local branch, `HEAD` or a commit sha. Its Never covers adds a `+` before either ref and an empty `<src>` (a delete).
+
+A lease push to a lane's own branch loses nothing the lane did not write. It is allowed only when this session pushed the same branch to the same remote earlier, and the push is one of:
+
+- `git push --force-with-lease --force-if-includes origin <branch>`
+- `git push --force-with-lease=<branch>:<sha> origin <branch>`, where `<sha>` is the tip this session last pushed.
+
+It can be undone: the old tip stays on the pull request's timeline, and in the reflog of the clone that pushed it.
+
+It never covers a bare `--force` or `-f`, a `+refspec`, or a lease with neither `--force-if-includes` nor a named sha. Nor the default branch, an `archive/` ref, `roadmap` or `merge-lock`. Nor a branch this session did not push earlier, `--mirror`, `--all`, or a delete.
+
+Why: the force-push guard's remedy (`PUSH_REASON` in `hooks/guard_push_delete.py`) names `--force-with-lease --force-if-includes`. The classifier's built-in "Git Destructive" rule still refused that form. Pull request #1255 (part d of the lease push roadmap step, `lease-push-c-and-d`) made the Red-run trailer check's remedy name no force push. This entry is part c.
+
+- Risk: named incident. The entry quotes 9 lease-push refusals and 8 replacement pull requests, 2026-11-02 to 2026-11-04, from the roadmap step. A survey of `docs/debts/notes.md` on main (lane relayed-yes-allow, 2026-11-07 13:38 CST) counts 11 refused lease pushes in that span, of both forms. The entry keeps 9, the text the owner granted. Incident home: note `classifier-refuses-lease-push`. Owner's answer on the owner's waiting page, item 257, 2026-11-05 07:44 CST: "shouldn't it be c and d".
+- Check: `hooks/test_auto_mode_allow.py` pins this entry and its refspec form. It exists once and quotes both push forms and the guard remedy from `PUSH_REASON`. Its Covers text binds the sha to the tip this session last pushed. Its "Never covers" sentence names each refused act, including a lease with neither `--force-if-includes` nor a named sha.
+- Gap: the classifier sees the command, not whether this session pushed the branch earlier. The guard still refuses a bare force.
+
 ### Marking a lone lane's PR ready
 
 Owner, 2026-11-01 19:19 CST, typed in the pr-acts-grant lane session: `when an operation is occuring solo and/or there is only one "outcome" PR (ie it's not going into an integration branch) then of course they can be marked ready`.
 
 - The entry now covers two cases, each named in the visible conversation:
   - The batch's integration PR, or a lone lane's PR, named so by the coordinator or batch runner. Skill `ci-hygiene` (CI upkeep), step 8 (Batch lanes), treats a lone lane as its own integration PR.
-  - The one PR of a solo or one-lane session that no coordinator started, named so by that session.
+  - The one PR of a lane that no coordinator started, named so by that session.
 - A lane PR that joins a batch stays draft. Only the batch's integration PR goes ready.
 - The merge itself is not in this entry (see the standing merge grant record).
 

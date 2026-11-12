@@ -6,8 +6,13 @@ a `uses:` step, an `if:` or env expression the runner cannot read, and a pull-re
 None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each step gets from --base, unset with none.
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
+PinnedHarness: --pinned runs a remote claude-settings harness from the tree at its pinned sha, never the local copy.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
+Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
+unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
+ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the cpu count up to 4), keeps the printed
+lines and each step's log lines in workflow order, and treats an install step as a barrier. Overlap is proven by rendezvous.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -26,6 +31,8 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+sys.path.append(os.path.join(HERE, "..", "hooks"))  # append: the pin note's names (hooks/pin_note.py)
+from pin_note import ENV as PIN_NOTE_ENV  # noqa: E402  the one home of the pin note's variable (hooks/pin_note.py)
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -35,6 +42,7 @@ STALL_WATCH = os.path.join(HERE, "..", "hooks", "stall_watch.py")
 ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_AUTHOR_NAME="t",
                            GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 ENV.pop("VERDICT_LOG", None)
+ENV.pop("CI_JOB_LINT_WORKERS", None)
 
 
 def workflow(*steps):
@@ -70,17 +78,18 @@ class Job(unittest.TestCase):
         subprocess.run(["git", "init", "-q", "-b", "main", self.root], check=True, env=ENV)
         self.log = os.path.join(self.root, "verdict.log")
 
-    def job_call(self, *steps, args=(), env=None, script=CI_JOB):
-        """argv and env of one run of the job: its workflow is written into the throwaway repo."""
+    def job_call(self, *steps, args=(), env=None, script=CI_JOB, launch=()):
+        """argv and env of one run of the job: its workflow is written into the throwaway repo. launch: python's own flags
+        before the script, such as `-c` with a launcher's code."""
         path = os.path.join(self.root, "wf.yml")
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(workflow(*steps))
         env = {**ENV, "VERDICT_LOG": self.log, **{k: v for k, v in os.environ.items() if k == "VERDICT_HEARTBEAT"},
                **(env or {})}
-        return [sys.executable, script, "lane", "--workflow", path, *args], env
+        return [sys.executable, *launch, script, "lane", "--workflow", path, *args], env
 
-    def run_job(self, *steps, args=(), env=None, script=CI_JOB):
-        argv, env = self.job_call(*steps, args=args, env=env, script=script)
+    def run_job(self, *steps, args=(), env=None, script=CI_JOB, launch=()):
+        argv, env = self.job_call(*steps, args=args, env=env, script=script, launch=launch)
         done = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=env, timeout=120)
         lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
         return done.returncode, lines, done.stdout + done.stderr
@@ -88,6 +97,18 @@ class Job(unittest.TestCase):
     def verdicts(self, lines):
         return [ln.split()[0] if not ln.startswith("not run locally") else "not run locally" for ln in lines
                 if not NOT_RUN.match(ln) and not SUMMARY.match(ln)]  # a --lint run's not-run and summary lines are no verdict
+
+    def seen_after(self, *steps, args=(), env=None):
+        """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job. ci-job relays
+        no step output, so a step writes the value it sees to seen.txt."""
+        path = os.path.join(self.root, "seen.txt")
+        if os.path.exists(path):
+            os.remove(path)
+        rc, lines, out = self.run_job(*steps, args=args, env=env)
+        if not os.path.exists(path):
+            return self.verdicts(lines), "(no seen.txt: the step did not run)", out
+        with open(path, encoding="utf-8") as f:
+            return self.verdicts(lines), f.read(), out
 
 
 class Steps(Job):
@@ -386,7 +407,8 @@ class LintBase(Job):
         subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
 
     def lane_adds_narration(self, origin=True):
-        for rel in ("lint/check_comment_narration.py", "hooks/_nowindow.py", "actions/code-check/standard.json"):
+        for rel in ("lint/check_comment_narration.py", "lint/layout.py", "lint/layout.json", "hooks/_nowindow.py",
+                    "lint/code_check_standard.json"):
             os.makedirs(os.path.join(self.root, os.path.dirname(rel)), exist_ok=True)
             shutil.copy(os.path.join(HERE, "..", rel), os.path.join(self.root, rel))
         self.git("add", ".")
@@ -424,6 +446,14 @@ class LintBase(Job):
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
         self.assertNotIn("default", out)
 
+    def test_a_pull_request_lint_step_with_no_base_and_no_origin_main_reads_unknown_not_skipped(self):
+        self.lane_adds_narration(origin=False)
+        _, lines, out = plan_lint(self.root, workflow(self.NARRATION), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), ["Comment narration check"], out)  # the scope: a pull-request run would run this lint step
+        rc, lines, out = self.run_job(self.NARRATION, args=("--lint",))
+        self.assertEqual(by_step(lines).get("Comment narration check"), "unknown", out)  # the exit code is no proof: the no-base line gives 2 too
+        self.assertEqual(rc, 2, out)
+
 
 class GithubBaseRef(Job):
     """A pull-request run sets GITHUB_BASE_REF in each step's env, as the Actions runner does: the base without its
@@ -431,17 +461,6 @@ class GithubBaseRef(Job):
     ci-job relays no step output, so each step writes the value it sees to seen.txt. `<unset>` is no ref name."""
 
     SEEN = "printf '%s' \"${GITHUB_BASE_REF-<unset>}\" > seen.txt"
-
-    def seen_after(self, *steps, args=(), env=None):
-        """(verdicts, the value the step wrote or a note that it wrote none, output) of one run of the job."""
-        path = os.path.join(self.root, "seen.txt")
-        if os.path.exists(path):
-            os.remove(path)
-        rc, lines, out = self.run_job(*steps, args=args, env=env)
-        if not os.path.exists(path):
-            return self.verdicts(lines), "(no seen.txt: the step did not run)", out
-        with open(path, encoding="utf-8") as f:
-            return self.verdicts(lines), f.read(), out
 
     def test_a_pull_request_run_sets_github_base_ref_to_the_base_without_its_remote(self):
         verdicts, seen, out = self.seen_after(step("seen", self.SEEN), args=("--base", "origin/main"))
@@ -472,6 +491,18 @@ class GithubBaseRef(Job):
         verdicts, seen, out = self.seen_after(step("seen", "python3 lint/seen_base_ref.py"),
                                               args=("--lint", "--base", "origin/main"))
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
+
+
+class PinNoteEnv(Job):
+    """ci-job sets the pin note's variable on its ste-lint step only (decision action-pins-follow-sessions). A caller that
+    exports it must not reach any other step: ci-job strips it from each step's env. The step writes what it sees to seen.txt."""
+
+    SEEN = "printf '%s' \"${" + PIN_NOTE_ENV + "-<unset>}\" > seen.txt"
+
+    def test_a_caller_export_of_the_pin_note_variable_never_reaches_another_step(self):
+        verdicts, seen, out = self.seen_after(step("seen", self.SEEN), env={PIN_NOTE_ENV: "1"})
+        self.assertEqual(verdicts, ["PASS"], out)
+        self.assertEqual(seen, "<unset>", "a step that is not ste-lint saw the pin note variable: " + out)
 
 
 def mapped(parent, body):
@@ -589,6 +620,46 @@ def run_as_yaml_reads_it(step):
     return None, None
 
 
+class RunHeaderComments(Job):
+    """A comment after a run: block header (`run: | # why`) is no part of the script. run_body reads the body, and
+    bin/ci-job runs that body, so the step passes or fails on its own lines. A `#` inside a body is script text."""
+
+    def raw_step(self, header, *body):
+        return "      - name: hdr\n        run: %s\n" % header + "".join("          %s\n" % ln for ln in body) + "\n"
+
+    def test_run_body_drops_the_comment_after_a_literal_header(self):
+        self.assertEqual(run_body(self.raw_step("| # why", "true")), "true\n",
+                         "run: | # why: the comment after the header was read as the script")
+
+    def test_a_literal_header_comment_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # why: the step's body is a passing command, but the header comment failed it\n" + out)
+
+    def test_a_folded_header_comment_does_not_pass_a_failing_body(self):
+        # On main the comment makes the shell read `>- # why` as a redirect: no body runs, and the step PASSes.
+        rc, lines, out = self.run_job(self.raw_step(">- # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: >- # why: the header comment hid a body that exits 3, so the step did not FAIL\n" + out)
+
+    def test_a_lone_quote_in_a_header_comment_is_text_and_the_step_passes(self):
+        rc, lines, out = self.run_job(self.raw_step("| # don't stop", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: | # don't stop: a lone quote in the header comment failed the step\n" + out)
+
+    # Controls: each passes on main and must still hold.
+    def test_a_failing_body_under_a_header_comment_still_fails(self):
+        rc, lines, out = self.run_job(self.raw_step("| # why", "exit 3"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]),
+                         "run: | # why: a body that exits 3 must still FAIL under a header comment\n" + out)
+
+    def test_a_hash_inside_a_block_body_is_script_text(self):
+        rc, lines, out = self.run_job(self.raw_step("|", "echo '# kept' > kept.txt",
+                                                    "test \"$(cat kept.txt)\" = '# kept'"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]),
+                         "run: |: a # inside a body line was cut as a comment\n" + out)
+
+
 class RunBodiesOfWorkflows(unittest.TestCase):
     """run_body reads each run: block of the repo's workflows as YAML reads it. The reading is written out in
     run_as_yaml_reads_it, from the YAML definition, so a change to run_body's text for a real workflow fails here."""
@@ -627,9 +698,15 @@ class RealChecks(unittest.TestCase):
         self.assertFalse(multi[0].startswith("skipped"), multi[0])
 
 
+def launcher(patch):
+    """A `python3 -c` launcher: the code in `patch` runs first, then ci-job runs in this process with the argv it was given."""
+    return patch + "\nimport runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')\n"
+
+
 # Runs ci-job with tool lookup stubbed to find every command, so a plan reads the same with or without pipx installed.
-FIND_EVERY_TOOL = ("import runpy, shutil, sys; shutil.which = lambda cmd, *a, **k: '/stub/' + cmd; "
-                   "sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+FIND_EVERY_TOOL = launcher("import shutil; shutil.which = lambda cmd, *a, **k: '/stub/' + cmd")
+# Runs ci-job with os.symlink refused, as Windows does without the symlink privilege.
+REFUSE_SYMLINKS = launcher("import os\ndef refused(*a, **k):\n    raise OSError(1, 'symlink refused: no symlink privilege')\nos.symlink = refused")
 
 
 def plan_job(*args, cwd):
@@ -824,7 +901,7 @@ class InstallSteps(Job):
             step("Install deps", "npm ci"),
             step("Lint check", self.LINT, **{"if": "${{ github.event_name == 'pull_request' }}"}),
             args=("--lint",), env=env)
-        self.assertEqual(by_step(lines).get("Lint check"), "skipped", out)
+        self.assertEqual(by_step(lines).get("Lint check"), "unknown", out)
         self.assertFalse(os.path.exists(os.path.join(self.root, "installed.marker")),
                          "the install ran though no lint step after it runs\n" + out)
 
@@ -873,6 +950,355 @@ class NotRunLines(Job):
                                       step("Python lint", "python3 lint/check_fails.py"), args=("--lint",))
         self.assertEqual((rc, by_step(lines)), (1, {"Checkout": "not run", "Make lint-py": "not run",
                                                     "Python lint": "FAIL"}), out)
+
+    NO_LINT = (DEGEN[0], DEGEN[1], DEGEN[3], DEGEN[4])  # DEGEN without its one lint step
+
+    def test_a_lint_run_that_picks_no_lint_step_is_unknown_and_exits_two(self):
+        _, lines, out = plan_lint(self.root, workflow(*self.NO_LINT), extra=("--base", "origin/main"))
+        self.assertEqual(selected(lines), [], out)  # the scope: the job holds no lint step for --lint to pick
+        rc, lines, out = self.run_job(*self.NO_LINT, args=("--lint", "--base", "origin/main"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertEqual(rc, 2, out)
+
+    def test_a_lint_step_that_runs_only_off_a_pull_request_reads_skipped_and_the_run_exits_zero(self):  # the control
+        push_only = step("Push-only lint", "python3 lint/check_clean.py", **{"if": "${{ github.event_name != 'pull_request' }}"})
+        rc, lines, out = self.run_job(push_only, step("Python lint", "python3 lint/check_clean.py"),
+                                      args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, by_step(lines)), (0, {"Push-only lint": "skipped", "Python lint": "PASS"}), out)
+
+
+RV = '''import os
+
+
+def arrive(name):
+    open(name, "w").close()
+
+
+def wait_for(*names):
+    """Waits, with no bound, until every named file exists: the marker is the only exit."""
+    yield_cpu = getattr(os, "sched_yield", lambda: None)
+    while not all(os.path.exists(n) for n in names):
+        yield_cpu()
+'''
+
+
+def meet(mine, *others):
+    """Lint body: announce `mine`, then wait, with no bound, for each of `others` to announce."""
+    names = ", ".join("'arrived-%s'" % o for o in others)
+    return "rv.arrive('arrived-%s')\nrv.wait_for(%s)\n" % (mine, names)
+
+
+def done(name):
+    """Lint body: announce that `name` is finished, as its last act."""
+    return "rv.arrive('done-%s')\n" % name
+
+
+def cpus(n):
+    """ci-job's launch with os.cpu_count() reporting `n`, None included."""
+    return ("-c", launcher("import os\nos.cpu_count = lambda: %r" % (n,)))
+
+
+def normal(lines):
+    """Each output line with its shell and script, its seconds and its log path fixed, one space between words."""
+    out = []
+    for ln in lines:
+        ln = re.sub(r"\S*bash -e \S+\.sh", "SHELL", ln)
+        ln = re.sub(r"\(\d+\.\d+s\)", "(N)", ln)
+        ln = re.sub(r"log=\S+", "log=L", ln)
+        out.append(re.sub(r"\s+", " ", ln))
+    return out
+
+
+class ParallelLint(Job):
+    """--lint runs its lint CI steps at once, up to a worker count: CI_JOB_LINT_WORKERS when that is a positive int, else
+    min(os.cpu_count(), 4), at least 1 (the cpu cases patch os.cpu_count). Steps prove they overlap by rendezvous on marker
+    files. No wait has a bound, no count and no clock: each ends only on its marker. So a wrong build (serial, or a cap
+    that lets too many run) blocks instead of failing, and the CI job's own timeout reds it. Verdict lines, the summary
+    and each lint step's log lines keep workflow order. An install CI step is a barrier. Plain runs, --step and --plan
+    stay serial."""
+
+    INSTALL = "touch installed.marker\n"
+    L3_CHECKS = ("if not os.path.exists('installed.marker'):\n"
+                 "    print('install not finished when this lint step started')\n    sys.exit(1)\n"
+                 "print('install finished before this lint step started')\n")
+
+    def setUp(self):
+        super().setUp()
+        os.makedirs(os.path.join(self.root, "lint"))
+        with open(os.path.join(self.root, "lint", "rv.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(RV)
+
+    def script(self, name, body):
+        """A lint script under lint/, its imports first."""
+        with open(os.path.join(self.root, "lint", name + ".py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("import os, rv, sys\n" + body)
+
+    def lint(self, name, body):
+        """A lint CI step with its own script: its whole run: is `python3 lint/<name>.py`."""
+        self.script(name, body)
+        return step(name, "python3 lint/%s.py" % name)
+
+    def rendezvous_steps(self, names):
+        """One lint CI step per name; each waits for every other name, then announces it is done."""
+        return [self.lint(n, meet(n, *[m for m in names if m != n]) + done(n)) for n in names]
+
+    def check_all_pass(self, names, **kw):
+        rc, lines, out = self.run_lint(*self.rendezvous_steps(names), **kw)
+        self.assertEqual(list(by_step(lines).items()), [(n, "PASS") for n in names], out)
+        self.assertEqual(rc, 0, out)
+
+    def check_cap(self, names, **kw):
+        """Under the cap every name passes. The last name starts only after a worker has finished, and a finished name has
+        written its done marker, so the last name finds one. Run all at once, the last name may find none and read FAIL.
+        No marker can hold a finished name back, so that red is a race, not a forced one."""
+        group, last = names[:-1], names[-1]
+        steps = [self.lint(g, meet(g, *[m for m in group if m != g]) + done(g)) for g in group]
+        freed = " or ".join("os.path.exists('done-%s')" % g for g in group)
+        steps.append(self.lint(last, "if not (%s):\n    print('no worker had finished when %s started: the cap did not hold')\n"
+                                     "    sys.exit(1)\n" % (freed, last) + meet(last, *group) + done(last)))
+        rc, lines, out = self.run_lint(*steps, **kw)
+        self.assertEqual(list(by_step(lines).items()), [(n, "PASS") for n in names], out)
+        self.assertEqual(rc, 0, out)
+
+    def fresh_run(self):
+        """Removes the last run's files, so a second run in one case starts with no marker of the first."""
+        for name in os.listdir(self.root):
+            if name not in (".git", "lint"):
+                path = os.path.join(self.root, name)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+        for name in os.listdir(os.path.join(self.root, "lint")):
+            path = os.path.join(self.root, "lint", name)
+            if name != "rv.py":
+                if os.path.isdir(path):  # a step's __pycache__ when bytecode is written
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+
+    def read(self, rel):
+        try:
+            with open(os.path.join(self.root, rel), encoding="utf-8", errors="replace") as f:
+                return f.read()
+        except OSError:
+            return "(no %s)" % rel
+
+    def run_lint(self, *steps, workers=None, args=("--lint", "--base", "origin/main"), launch=(), env=None):
+        """(rc, stdout lines, output). The lines are ci-job's stdout as printed, log= included (run_job strips it). The
+        output adds stderr and the run's verdict log, so a failure names the cause the step itself kept. self.err_lines
+        holds ci-job's stderr lines, its `start:` lines included. No timeout: a wrong build blocks."""
+        extra = {"CI_JOB_LINT_WORKERS": str(workers)} if workers is not None else {}
+        argv, run_env = self.job_call(*steps, args=args, env={**extra, **(env or {})}, launch=launch)
+        proc = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, env=run_env)
+        self.err_lines = proc.stderr.splitlines()
+        return proc.returncode, proc.stdout.splitlines(), \
+            proc.stdout + proc.stderr + "\n--- verdict log ---\n" + self.read("verdict.log")
+
+    def test_two_workers_run_a_pair_at_once(self):
+        self.check_all_pass(["a", "b"], workers=2)
+
+    def test_with_two_cpus_the_default_runs_a_pair_at_once(self):
+        self.check_all_pass(["a", "b"], launch=cpus(2))
+
+    def test_two_workers_never_run_three_at_once(self):
+        self.check_cap(["a", "b", "c"], workers=2)
+
+    def test_with_two_cpus_the_default_never_runs_three_at_once(self):
+        self.check_cap(["a", "b", "c"], launch=cpus(2))
+
+    def test_a_worker_count_of_four_runs_four_steps_at_once_even_on_a_two_cpu_machine(self):
+        self.check_all_pass(["w1", "w2", "w3", "w4"], workers=4, launch=cpus(2))
+
+    def test_with_eight_cpus_the_default_runs_four_at_once(self):
+        self.check_all_pass(["w1", "w2", "w3", "w4"], launch=cpus(8))
+
+    def test_with_eight_cpus_the_default_never_runs_five_at_once(self):
+        self.check_cap(["w1", "w2", "w3", "w4", "w5"], launch=cpus(8))
+
+    def test_an_invalid_worker_count_falls_back_to_the_default(self):
+        for value in ("0", "abc"):
+            self.fresh_run()
+            rc, lines, out = self.run_lint(*self.rendezvous_steps(["a", "b"]), workers=value, launch=cpus(4))
+            self.assertEqual(list(by_step(lines).items()), [("a", "PASS"), ("b", "PASS")],
+                             "CI_JOB_LINT_WORKERS=%s did not fall back to the default worker count:\n%s" % (value, out))
+            self.assertEqual(rc, 0, out)
+
+    def test_verdict_lines_and_summary_keep_workflow_order_whatever_order_steps_finish(self):
+        steps = (self.lint("first", "rv.wait_for('done-third')\n"),
+                 self.lint("second", "print('second')\n"),
+                 self.lint("third", done("third")))
+        rc, lines, out = self.run_lint(*steps, workers=3)
+        self.assertEqual(list(by_step(lines).items()), [("first", "PASS"), ("second", "PASS"), ("third", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual((lines[-2], lines[-1][:4]), ("summary: ran 3 of 3 steps", "log="), out)
+
+    def test_the_log_keeps_each_step_output_in_workflow_order(self):
+        # alpha, first in workflow order, waits for beta's done marker. A log appended in finish order usually puts beta's
+        # output first, since beta's exit and alpha's exit race after their markers: the marker orders the writes, not the exits.
+        steps = (self.lint("alpha", "rv.wait_for('done-beta')\nprint('ALPHA-OUTPUT')\n"),
+                 self.lint("beta", "print('BETA-OUTPUT')\n" + done("beta")),
+                 self.lint("gamma", "print('GAMMA-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=3)
+        self.assertEqual(list(by_step(lines).items()), [("alpha", "PASS"), ("beta", "PASS"), ("gamma", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        log = self.read("verdict.log")
+        self.assertTrue(0 <= log.find("ALPHA-OUTPUT") < log.find("BETA-OUTPUT") < log.find("GAMMA-OUTPUT"),
+                        "the log does not keep the step order:\n" + out)
+
+    def test_a_step_that_fails_fast_does_not_stop_the_others_and_the_log_is_the_run_log(self):
+        steps = (self.lint("f", "print('F-OUTPUT')\nsys.exit(1)\n"),
+                 self.lint("p1", meet("p1", "p2") + "print('P1-OUTPUT')\n" + done("p1")),
+                 self.lint("p2", meet("p2", "p1") + "print('P2-OUTPUT')\n" + done("p2")),
+                 self.lint("u", "print('U-OUTPUT')\nsys.exit(127)\n"))
+        rc, lines, out = self.run_lint(*steps, workers=4)
+        self.assertEqual(list(by_step(lines).items()), [("f", "FAIL"), ("p1", "PASS"), ("p2", "PASS"), ("u", "unknown")], out)
+        self.assertEqual(rc, 1, out)
+        f_line = next(ln for ln in lines if ln.startswith("FAIL") and " f: " in ln)
+        self.assertIn("log=%s" % self.log, f_line, "a parallel step's line does not name the run's log:\n" + out)
+        self.assertEqual(lines[-1], "log=%s" % self.log, "the run's log= line is not the run's log:\n" + out)
+        log = self.read("verdict.log")
+        self.assertEqual(log.count("=== verdict run"), 4, "the run's log does not hold each step's own lines:\n" + log)
+        self.assertTrue(all(tok in log for tok in ("F-OUTPUT", "P1-OUTPUT", "P2-OUTPUT", "U-OUTPUT")),
+                        "the run's log is missing a step's output:\n" + log)
+
+    def test_a_log_that_cannot_join_the_run_log_is_named_on_stderr_and_kept(self):
+        # VERDICT_LOG is a directory, so no CI step's copy can join it. Each verdict and the exit code stay as they are; ci-job
+        # names each kept log on stderr, and each kept log holds its own CI step's output.
+        os.makedirs(self.log)
+        steps = (self.lint("one", "print('ONE-OUTPUT')\n"), self.lint("two", "print('TWO-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("one", "PASS"), ("two", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        kept = {}
+        for ln in self.err_lines:
+            m = re.match(r"ci-job: could not add the log of CI step (\S+) to the run's log; its output is kept in (.+)$", ln)
+            if m:
+                kept[m.group(1)] = m.group(2)
+        self.assertEqual(sorted(kept), ["one", "two"], "a failed copy is not named on stderr:\n" + out)
+        for name, token in (("one", "ONE-OUTPUT"), ("two", "TWO-OUTPUT")):
+            path = kept[name]
+            self.addCleanup(shutil.rmtree, os.path.dirname(path), True)
+            self.assertTrue(os.path.exists(path), "the kept log named for %s is missing: %s\n%s" % (name, path, out))
+            with open(path, encoding="utf-8", errors="replace") as f:
+                self.assertIn(token, f.read(), "the kept log for %s does not hold its output\n%s" % (name, out))
+
+    def test_an_unknown_step_alone_exits_two_while_the_others_pass(self):
+        steps = (self.lint("u", "print('U-OUTPUT')\nsys.exit(127)\n"),) + tuple(self.rendezvous_steps(["p1", "p2"]))
+        rc, lines, out = self.run_lint(*steps, workers=4)
+        self.assertEqual(list(by_step(lines).items()), [("u", "unknown"), ("p1", "PASS"), ("p2", "PASS")], out)
+        self.assertEqual(rc, 2, out)
+
+    def test_a_failing_neighbours_runner_marker_is_not_read_by_a_passing_parallel_step(self):
+        steps = (self.lint("noisy", "rv.wait_for('arrived-clean')\nprint('** TEST FAILED **')\n"
+                                    "rv.arrive('printed-noisy')\nsys.exit(1)\n"),
+                 self.lint("clean", "rv.arrive('arrived-clean')\nrv.wait_for('printed-noisy')\nprint('CLEAN-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("noisy", "FAIL"), ("clean", "PASS")], out)
+        self.assertEqual(rc, 1, out)
+
+    def test_a_step_that_exits_127_is_unknown_and_its_neighbour_passes(self):
+        steps = (self.lint("missing", meet("missing", "clean") + "rv.arrive('printed-missing')\nsys.exit(127)\n"),
+                 self.lint("clean", "rv.arrive('arrived-clean')\nrv.wait_for('arrived-missing', 'printed-missing')\n"
+                                    "print('CLEAN-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("missing", "unknown"), ("clean", "PASS")], out)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("tool missing", next(ln for ln in lines if ln.startswith("unknown")), out)
+
+    def test_a_command_missing_at_run_time_is_unknown_and_its_neighbour_passes(self):
+        # plan checks only a line's first word, so the argument's command substitution reaches the shell at run time:
+        # the shell prints its real `command not found` line into this step's own log, and the python still exits 0.
+        self.script("gate", "rv.arrive('arrived-miss')\nrv.wait_for('arrived-clean')\nrv.arrive('gate-ok')\n")
+        self.script("miss", "rv.arrive('printed-miss')\n")
+        steps = (step("miss", 'python3 lint/miss.py "$(python3 lint/gate.py)" $(no-such-tool-c69 --x)'),
+                 self.lint("clean", "rv.arrive('arrived-clean')\nrv.wait_for('printed-miss')\n"
+                                    "if not os.path.exists('gate-ok'):\n    sys.exit(1)\n"
+                                    "print('CLEAN-OUTPUT')\n"))
+        rc, lines, out = self.run_lint(*steps, workers=2)
+        self.assertEqual(list(by_step(lines).items()), [("miss", "unknown"), ("clean", "PASS")], out)
+        self.assertEqual(rc, 2, out)
+        self.assertIn("no-such-tool-c69", next(ln for ln in lines if ln.startswith("unknown")), out)
+
+    def install_steps(self, install_body, l3_body):
+        """Two lint CI steps that must overlap, then an install CI step, then a lint CI step that reads what it made."""
+        env = InstallSteps.stub_path(self, npm=install_body)  # the npm stub: InstallSteps holds the one home
+        steps = (self.lint("l1", meet("l1", "l2")), self.lint("l2", meet("l2", "l1")),
+                 step("Install deps", "npm ci"), self.lint("l3", l3_body))
+        _, plan_lines, plan_out = plan_lint(self.root, workflow(*steps), extra=("--base", "origin/main"))
+        self.assertEqual(would_run(plan_lines), ["Install deps", "l1", "l2", "l3"], plan_out)
+        return self.run_lint(*steps, workers=4, env=env)
+
+    def test_lint_steps_before_an_install_run_together_and_the_later_ones_wait_for_it(self):
+        rc, lines, out = self.install_steps(self.INSTALL, self.L3_CHECKS)
+        self.assertEqual(list(by_step(lines).items()),
+                         [("l1", "PASS"), ("l2", "PASS"), ("Install deps", "PASS"), ("l3", "PASS")], out)
+        self.assertEqual(rc, 0, out)
+        # Order of the start lines: the install CI step starts before the lint CI step after it. A build with no barrier
+        # starts that lint step as soon as the run begins, before the install CI step starts.
+        order = [ln for ln in self.err_lines if ln in ("start: Install deps", "start: l3")]
+        self.assertEqual(order, ["start: Install deps", "start: l3"],
+                         "the lint CI step after the install started before the install:\n" + out)
+
+    def test_a_failed_install_leaves_the_later_lint_steps_unknown_and_the_earlier_ones_pass(self):
+        rc, lines, out = self.install_steps('echo "npm: stub install failed" >&2\nexit 1',
+                                            "rv.arrive('l3-ran')\nprint('l3 ran')\n")
+        self.assertEqual(list(by_step(lines).items()),
+                         [("l1", "PASS"), ("l2", "PASS"), ("Install deps", "unknown"), ("l3", "unknown")], out)
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "l3-ran")), "a lint step ran after its install failed:\n" + out)
+
+    # Controls: each stays serial, and each passes on the serial code it already has.
+
+    def test_workers_one_keeps_the_serial_lines_and_the_serial_start_order(self):
+        err_path = os.path.join(self.root, "stderr.txt")
+        seen = ("err = open(os.environ['ERR_FILE'], encoding='utf-8').read()\n"
+                "open('seen-one.txt', 'w').write('one:%s two:%s' % ('start: one' in err, 'start: two' in err))\n")
+        steps = (self.lint("one", seen + "print('one')\n"), self.lint("two", "print('two')\nsys.exit(1)\n"),
+                 self.lint("three", "print('three')\n"))
+        argv, env = self.job_call(*steps, args=("--lint", "--base", "origin/main"),
+                                  env={"CI_JOB_LINT_WORKERS": "1", "ERR_FILE": err_path})
+        with open(err_path, "w", encoding="utf-8") as err:
+            proc = subprocess.run(argv, cwd=self.root, stdout=subprocess.PIPE, stderr=err, text=True, env=env)
+        self.assertEqual(normal(proc.stdout.splitlines()),
+                         ["PASS one: PASS SHELL (N)", "FAIL two: FAIL SHELL rc=1 (N) log=L",
+                          "PASS three: PASS SHELL (N)", "summary: ran 3 of 3 steps", "log=L"], proc.stdout)
+        self.assertEqual(self.read("seen-one.txt"), "one:True two:False", "the second step's start line was out before the first ran")
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+
+    def serial_probe(self, args):
+        """Runs two steps, the first a probe. The probe writes whether the second step's start line was already on stderr
+        when it began: a serial run has not started the second step yet. Returns (stdout lines, rc, the probe's answer)."""
+        err_path = os.path.join(self.root, "stderr.txt")
+        probe = ("err = open(os.environ['ERR_FILE'], encoding='utf-8').read()\n"
+                 "open('seen-b.txt', 'w').write(str('start: b' in err))\n")
+        steps = (self.lint("a", probe + "print('a')\n"), self.lint("b", "print('b')\n"))
+        argv, env = self.job_call(*steps, args=args, env={"CI_JOB_LINT_WORKERS": "4", "ERR_FILE": err_path})
+        with open(err_path, "w", encoding="utf-8") as err:
+            proc = subprocess.run(argv, cwd=self.root, stdout=subprocess.PIPE, stderr=err, text=True, env=env)
+        return proc.stdout.splitlines(), proc.returncode, self.read("seen-b.txt"), proc.stdout
+
+    def test_a_run_without_lint_keeps_its_steps_serial(self):
+        lines, rc, seen, out = self.serial_probe(args=())
+        self.assertEqual((list(by_step(lines).items()), seen), ([("a", "PASS"), ("b", "PASS")], "False"), out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_step_run_keeps_its_steps_serial(self):
+        lines, rc, seen, out = self.serial_probe(args=("--step", "a", "--step", "b"))
+        self.assertEqual((list(by_step(lines).items()), seen), ([("a", "PASS"), ("b", "PASS")], "False"), out)
+        self.assertEqual(rc, 0, out)
+
+    def test_plan_under_lint_runs_nothing_and_lists_the_steps_in_order(self):
+        steps = self.rendezvous_steps(["a", "b"]) + [self.lint("c", "print('c')\n")]
+        code, lines, out = plan_lint(self.root, workflow(*steps))
+        self.assertEqual((code, selected(lines)), (0, ["a", "b", "c"]), out)
+        self.assertEqual([n for n in os.listdir(self.root) if n.startswith(("arrived", "done", "printed"))], [], out)
+
+    def test_with_no_cpu_count_the_steps_still_run(self):
+        rc, lines, out = self.run_lint(self.lint("x1", "print('x1')\n"), self.lint("x2", "print('x2')\n"),
+                                       self.lint("x3", "print('x3')\n"), launch=cpus(None))
+        self.assertEqual(list(by_step(lines).items()), [("x1", "PASS"), ("x2", "PASS"), ("x3", "PASS")], out)
+        self.assertEqual(rc, 0, out)
 
 
 class Progress(Job):
@@ -975,11 +1401,15 @@ class LintTools(Job):
 
     def setUp(self):
         super().setUp()
-        # CI's checkout has actions/code-check and the root ruff.toml that sets its ruff rules. A local uses: runs the
-        # repo under test's own copy. The base carries both (lane commits them), so the diff under test has neither.
+        # CI's checkout has actions/code-check, the table it reads from lint/, and the root ruff.toml that sets its ruff
+        # rules. A local uses: runs the repo under test's own copy. The base carries all three (lane commits them), so
+        # the diff under test has none of them.
         shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"),
                         os.path.join(self.root, "actions", "code-check"))
         shutil.copytree(os.path.join(CHECKOUT, "actions", "zizmor"), os.path.join(self.root, "actions", "zizmor"))
+        os.makedirs(os.path.join(self.root, "lint"))
+        shutil.copyfile(os.path.join(CHECKOUT, "lint", "code_check_standard.json"),
+                        os.path.join(self.root, "lint", "code_check_standard.json"))
         shutil.copyfile(os.path.join(CHECKOUT, "ruff.toml"), os.path.join(self.root, "ruff.toml"))
 
     def git(self, *a):
@@ -1109,10 +1539,10 @@ class LintTools(Job):
 @functools.lru_cache(maxsize=None)
 def pipx_runs_pinned_ruff():
     """True when pipx can run code_check's pinned ruff. The probe is `pipx run ruff==<pin> --version`, the pin read from
-    standard.json. pipx caches the tool, so only a first run downloads it. A probe over 60 s counts as no."""
+    code_check_standard.json. pipx caches the tool, so only a first run downloads it. A probe over 60 s counts as no."""
     if not shutil.which("pipx"):
         return False
-    with open(os.path.join(CHECKOUT, "actions", "code-check", "standard.json"), encoding="utf-8") as f:
+    with open(os.path.join(CHECKOUT, "lint", "code_check_standard.json"), encoding="utf-8") as f:
         pin = json.load(f)["tools"]["ruff"]
     try:
         return subprocess.run(["pipx", "run", "ruff==" + pin, "--version"], capture_output=True,
@@ -1140,12 +1570,12 @@ class CodeCheckFromCopiedInstall(Job):
     IN_REPO = ("bin/ci-job", "bin/verdict", "hooks/*.py", "lint/workflow_steps.py", "ruff.toml")
 
     def install(self, claude_md_checkout):
-        """A copied install: ci-job and verdict as plain files, hooks/ and lint/ beside them, and a global rules file
-        whose @-line names claude_md_checkout. Returns the copied ci-job and the config dir."""
+        """A copied install: ci-job, verdict and ste-changed as plain files, hooks/ and lint/ beside them, and a global rules
+        file whose @-line names claude_md_checkout. Returns the copied ci-job and the config dir."""
         cfg = os.path.join(self.root, "cfg")
         os.makedirs(os.path.join(cfg, "bin"))
-        for name in ("ci-job", "verdict"):
-            shutil.copyfile(os.path.join(HERE, "..", "bin", name), os.path.join(cfg, "bin", name))
+        for name in ("ci-job", "verdict", "ste-changed"):
+            shutil.copy2(os.path.join(HERE, "..", "bin", name), os.path.join(cfg, "bin", name))  # copy2: ste-changed runs as a program
         for name in ("hooks", "lint"):
             shutil.copytree(os.path.join(CHECKOUT, name), os.path.join(cfg, name),
                             ignore=shutil.ignore_patterns("__pycache__"))
@@ -1237,6 +1667,331 @@ class ZizmorBranches(Job):
         rc, lines, out = self.run_job(self.REMOTE, args=self.LINT, script=ci_job, env=env)
         self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), out)
         self.assertIn("no run.sh: looked for", lines[0], out)
+
+
+HARNESS = '''import os, sys
+# Stands in for actions/code-check/code_check.py: its verdict is the rule that the tree's lint/rule.txt names.
+root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
+with open(os.path.join(root, "lint", "rule.txt"), encoding="utf-8") as f:
+    rule = f.read().strip()
+print("fixture harness: " + rule)
+sys.exit(0 if rule == "lenient" else 1)
+'''
+UNFETCHABLE = "3c5a9e0b7d1f4824a6e9c0d5b7f1a2e4c8d6b9f0"  # 40 hex, in no clone of the fixture
+ZIZMOR_LENIENT = "echo 'fixture zizmor: lenient'\nexit 0\n"  # stands in for actions/zizmor/run.sh, which runs pipx
+ZIZMOR_STRICT = "echo 'fixture zizmor: strict'\nexit 1\n"
+
+
+def git_in(repo, *args):
+    """One git call in `repo`, its output stripped. LintTools.git drives only the throwaway repo, so the source repo uses this."""
+    return subprocess.run(["git", "-C", repo, *args], check=True, env=ENV, capture_output=True, text=True).stdout.strip()
+
+
+def write_lf(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+class PinnedHarness(Job):
+    """--pinned: a remote claude-settings uses: pinned to a 40-hex sha runs that action's harness from a tree exported at
+    that sha, never the local copy. The source repo is the pointer checkout: commit A (the lenient rule), commit B (HEAD, the
+    strict rule) and commit N (B with no harness). The copied ci-job's local copy holds the strict rule, as a checkout at HEAD
+    does. Without the flag the local copy runs as before. A branch ref keeps the local copy under the flag too. The zizmor
+    run.sh follows the same pattern: A and B hold one, N holds none. A pinned tree that holds a symlink still exports where
+    os.symlink is refused."""
+
+    git = LintTools.git  # the throwaway child repo's git, one home (LintTools)
+    lane = LintTools.lane
+    install = CodeCheckFromCopiedInstall.install  # the copied install: this class calls it, it does not copy it
+    pipx_env = ZizmorBranches.pipx_env  # the stub pipx the zizmor branch needs: one home (ZizmorBranches)
+    LINT = ("--step", "Code check", "--base", "origin/main")
+
+    def setUp(self):
+        super().setUp()
+        self.lane({"a.py": 'print("fine")\n'})
+        self.source = tempfile.mkdtemp(prefix="claude-settings-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.source, True)
+        git_in(self.source, "init", "-q", "-b", "main")
+        write_lf(os.path.join(self.source, "actions", "code-check", "code_check.py"), HARNESS)
+        write_lf(os.path.join(self.source, "actions", "zizmor", "run.sh"), ZIZMOR_LENIENT)
+        write_lf(os.path.join(self.source, "lint", "rule.txt"), "lenient\n")
+        git_in(self.source, "add", "-A")
+        git_in(self.source, "commit", "-qm", "lenient")
+        self.pin_a = git_in(self.source, "rev-parse", "HEAD")
+        write_lf(os.path.join(self.source, "lint", "rule.txt"), "strict\n")
+        write_lf(os.path.join(self.source, "actions", "zizmor", "run.sh"), ZIZMOR_STRICT)
+        git_in(self.source, "commit", "-qam", "strict")
+        git_in(self.source, "checkout", "-qb", "no-harness")
+        git_in(self.source, "rm", "-q", "actions/code-check/code_check.py", "actions/zizmor/run.sh")
+        git_in(self.source, "commit", "-qm", "no harness")
+        self.pin_n = git_in(self.source, "rev-parse", "HEAD")
+        git_in(self.source, "checkout", "-q", "main")
+        self.ci_job, self.cfg = self.install(self.source)
+        write_lf(os.path.join(self.cfg, "actions", "code-check", "code_check.py"), HARNESS)  # the local copy: strict
+        write_lf(os.path.join(self.cfg, "actions", "zizmor", "run.sh"), ZIZMOR_STRICT)  # the local copy: strict
+        write_lf(os.path.join(self.cfg, "lint", "rule.txt"), "strict\n")
+        self.assertEqual(git_in(self.source, "show", "%s:lint/rule.txt" % self.pin_a), "lenient")  # the fixture's pin is lenient
+        self.logs = tempfile.mkdtemp(prefix="logs-", dir=RUN_FOLDER)  # one log per run, outside the child repo
+        self.addCleanup(shutil.rmtree, self.logs, True)
+
+    def run_step(self, steps, *args, env=None, log=None, launch=()):
+        """One run of `steps` (step texts) through the copied install, with its own log. -> (rc, verdict lines, output and log)."""
+        log = log or self.log
+        rc, lines, out = self.run_job(steps, args=args, script=self.ci_job, launch=launch,
+                                      env={"CLAUDE_CONFIG_DIR": self.cfg, "VERDICT_LOG": log, **(env or {})})
+        text = ""
+        if os.path.exists(log):  # no step ran under a usage error, so no log exists then
+            with open(log, encoding="utf-8") as f:
+                text = f.read()
+        return rc, lines, out + text
+
+    def both_runs(self, steps, *args):
+        """The run without --pinned, then the run with it: each (rc, verdict lines, output and log)."""
+        without = self.run_step(steps, *args, log=os.path.join(self.logs, "without.log"))
+        pinned = self.run_step(steps, *args, "--pinned", log=os.path.join(self.logs, "pinned.log"))
+        return without, pinned
+
+    def run_pinned(self, ref, *flags, env=None):
+        """One run of the step pinned to `ref` (a sha or a branch name). -> (rc, verdict lines, the output and the log)."""
+        return self.run_step(self.code_step(ref), *self.LINT, *flags, env=env)
+
+    @staticmethod
+    def code_step(ref):
+        return step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % ref)
+
+    @staticmethod
+    def zizmor_step(ref):
+        return step(ZIZMOR, uses="shivinate7/claude-settings/actions/zizmor@%s" % ref, **{"with": {"paths": ".github/ actions/"}})
+
+    def add_ste_lint(self):
+        """Two commits on the source's main, each holding this checkout's ste-lint files. The first is the pin. The second
+        changes lint/ste_lint.py, one of the files CI runs for ste-lint (bin/ste-changed's LINT_FILES). -> the pin's sha.
+        The files are copied from this checkout at run time, as CodeCheckFromCopiedInstall copies them: bin/ste-changed
+        imports and runs them, and no copy is kept in the repo."""
+        for rel in ("bin/ste-changed", "actions/ste-lint", "lint", "hooks"):
+            src, dst = os.path.join(CHECKOUT, rel), os.path.join(self.source, rel)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", "test_*"))
+            else:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(src, dst)  # copy2 keeps the mode: the pinned tree runs bin/ste-changed as a program
+        git_in(self.source, "add", "-A")
+        git_in(self.source, "commit", "-qm", "ste-lint files")
+        pin = git_in(self.source, "rev-parse", "HEAD")
+        with open(os.path.join(self.source, "lint", "ste_lint.py"), "a", encoding="utf-8", newline="\n") as f:
+            f.write("\n# a line the pinned copy does not have\n")
+        git_in(self.source, "commit", "-qam", "change ste_lint.py")
+        return pin
+
+    def symlink_pin(self):
+        """A commit on the lenient harness that holds AGENTS.md as a symlink to CLAUDE.md, as the real repo does. git makes
+        the symlink as an index entry, so no filesystem symlink is created: the fixture builds where symlinks are refused too.
+        -> the pin's sha."""
+        git_in(self.source, "checkout", "-qb", "symlinked", self.pin_a)
+        write_lf(os.path.join(self.source, "CLAUDE.md"), "rules\n")
+        git_in(self.source, "add", "CLAUDE.md")
+        blob = subprocess.run(["git", "-C", self.source, "hash-object", "-w", "--stdin"], input="CLAUDE.md", check=True,
+                              env=ENV, capture_output=True, text=True).stdout.strip()
+        git_in(self.source, "update-index", "--add", "--cacheinfo", "120000,%s,AGENTS.md" % blob)
+        git_in(self.source, "commit", "-qm", "AGENTS.md is a symlink to CLAUDE.md")
+        sha = git_in(self.source, "rev-parse", "HEAD")
+        self.assertEqual(git_in(self.source, "ls-tree", sha, "AGENTS.md").split()[0], "120000",
+                         "precondition: the pinned commit does not hold AGENTS.md as a symlink")
+        return sha
+
+    def pin_child(self, action, sha):
+        """The child's checks workflow pins `action` at `sha`. bin/ste-changed reads each pin from the linted repo's workflows."""
+        write_lf(os.path.join(self.root, ".github", "workflows", "checks.yml"),
+                 "jobs:\n  checks:\n    steps:\n      - uses: shivinate7/claude-settings/actions/%s@%s\n" % (action, sha))
+
+    def write_child_code_check(self):
+        """The child repo's own code-check action, which a local uses: runs in place."""
+        write_lf(os.path.join(self.root, "actions", "code-check", "code_check.py"), "print('child harness')\n")
+
+    @staticmethod
+    def git_stub(root):
+        """A stub git first on PATH that logs each `git archive` and `git fetch` call, then runs the real git. A line for an
+        archive is `archive <n>`: n is how many export folders the run's TMPDIR held when the archive ran. -> (the env that
+        puts the stub first, the path of its call log). A shell script, so posix only."""
+        bin_dir = tempfile.mkdtemp(prefix="gitstub-", dir=root)
+        calls = os.path.join(bin_dir, "calls.txt")
+        script = ('#!/bin/sh\n'
+                  'case "$1" in\n'
+                  '  archive) echo "archive $(ls "${TMPDIR:-/tmp}" | grep -c \'^ci-job-pin-\')" >> "%s" ;;\n'
+                  '  fetch) echo "fetch" >> "%s" ;;\n'
+                  'esac\n'
+                  'exec "%s" "$@"\n') % (calls, calls, shutil.which("git"))
+        with open(os.path.join(bin_dir, "git"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(script)
+        os.chmod(os.path.join(bin_dir, "git"), 0o755)
+        return {"PATH": os.pathsep.join([bin_dir, os.environ.get("PATH", "")])}, calls
+
+    @staticmethod
+    def stub_calls(calls, kind=""):
+        """The lines the git stub logged that start with `kind` ("archive" or "fetch"; "" for every line). [] when none."""
+        if not os.path.exists(calls):
+            return []
+        with open(calls, encoding="utf-8") as f:
+            return [ln for ln in f.read().splitlines() if ln.startswith(kind)]
+
+    def test_a_pinned_sha_runs_the_harness_at_that_commit(self):
+        rc, lines, text = self.run_pinned(self.pin_a, "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the step under --pinned did not PASS\n" + text)
+        self.assertIn("fixture harness: lenient", text, "the local strict copy ran, not the harness at the pin\n" + text)
+
+    def test_without_the_flag_the_local_copy_runs_as_before(self):  # the control
+        rc, lines, text = self.run_pinned(self.pin_a)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "the local copy did not FAIL without --pinned\n" + text)
+        self.assertIn("fixture harness: strict", text, "the local copy did not run without --pinned\n" + text)
+
+    def test_a_sha_no_clone_holds_reads_unknown_and_the_local_copy_never_runs(self):
+        rc, lines, text = self.run_pinned(UNFETCHABLE, "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "an unfetchable pin did not read unknown\n" + text)
+        self.assertIn("pin", lines[0], "the unknown line does not name the pin\n" + text)
+        self.assertIn("lane", lines[0], "the unknown line does not give the lane that moves the pin\n" + text)
+        self.assertNotIn("fixture harness", text, "the local copy ran for a sha it could not fetch\n" + text)
+
+    def test_a_tree_at_the_pin_without_the_harness_reads_unknown(self):
+        rc, lines, text = self.run_pinned(self.pin_n, "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a pin whose tree lacks the harness did not read unknown\n" + text)
+        self.assertIn("code_check.py", lines[0], "the unknown line does not name the harness it could not find\n" + text)
+        self.assertNotIn("fixture harness", text, "the local copy ran for a pin whose tree lacks the harness\n" + text)
+
+    def test_a_pinned_tree_with_a_symlink_still_runs_where_symlinks_are_refused(self):
+        """A pin whose tree holds a symlink exports, and its harness runs, where os.symlink is refused: the harness does not
+        need the symlink member."""
+        pin = self.symlink_pin()
+        rc, lines, text = self.run_step(self.code_step(pin), *self.LINT, "--pinned", launch=("-c", REFUSE_SYMLINKS))
+        self.assertNotIn("git archive of", "\n".join(lines), "the export of a pin with a symlink failed where symlinks are refused\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned code-check did not PASS where symlinks are refused\n" + text)
+        self.assertIn("fixture harness: lenient", text, "the harness at the pin did not run where symlinks are refused\n" + text)
+
+    def test_a_pinned_tree_with_a_symlink_runs_where_symlinks_work(self):
+        """Control: the same pin with symlinks allowed passes, so the fixture alone is no failure."""
+        pin = self.symlink_pin()
+        rc, lines, text = self.run_pinned(pin, "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned code-check with a symlink in its tree did not PASS\n" + text)
+        self.assertIn("fixture harness: lenient", text, "the harness at the pin did not run with a symlink in its tree\n" + text)
+
+    def test_a_stale_ste_lint_pin_under_the_flag_fails_as_it_does_without_it(self):
+        pin = self.add_ste_lint()
+        self.pin_child("ste-lint", pin)
+        ste = step("STE lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % pin)
+        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(ste, "--step", "STE lint", "--base", "origin/main")
+        drift = [ln for ln in text0.splitlines() if ln.startswith("ste-changed: CI pins ste-lint at %s" % pin[:7])]
+        self.assertEqual(len(drift), 1, "precondition: without the flag no drift line names the stale pin\n" + text0)
+        self.assertEqual((rc0, self.verdicts(lines0)), (1, ["FAIL"]), "precondition: without the flag a stale pin is not FAIL\n" + text0)
+        self.assertIn(drift[0], text.splitlines(), "under --pinned the stale pin's drift line is not the one without the flag\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (rc0, ["FAIL"]), "under --pinned a stale ste-lint pin did not FAIL as without the flag\n" + text)
+
+    def test_a_zizmor_pin_runs_its_own_run_sh_and_not_the_local_copy(self):
+        rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--step", ZIZMOR, "--pinned", env=self.pipx_env())
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "the pinned zizmor step did not PASS\n" + text)
+        self.assertIn("fixture zizmor: lenient", text, "the local strict run.sh ran, not the one at the pin\n" + text)
+
+    def test_without_the_flag_the_local_zizmor_run_sh_runs(self):  # the control
+        rc, lines, text = self.run_step(self.zizmor_step(self.pin_a), "--step", ZIZMOR, env=self.pipx_env())
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "without the flag the local strict run.sh did not FAIL\n" + text)
+        self.assertIn("fixture zizmor: strict", text, "without the flag the local run.sh did not run\n" + text)
+
+    def test_a_pinned_tree_with_no_zizmor_run_sh_reads_unknown_and_names_the_file(self):
+        rc, lines, text = self.run_step(self.zizmor_step(self.pin_n), "--step", ZIZMOR, "--pinned", env=self.pipx_env())
+        self.assertEqual((rc, self.verdicts(lines)), (2, ["unknown"]), "a pin whose tree has no zizmor run.sh did not read unknown\n" + text)
+        self.assertIn("actions/zizmor/run.sh", lines[0], "the unknown line does not name the file it could not find\n" + text)
+        self.assertNotIn("fixture zizmor", text, "the local copy ran for a pin whose tree has no run.sh\n" + text)
+
+    def test_a_sha_the_clone_lacks_is_fetched_from_its_origin_and_its_harness_runs(self):
+        home = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, home, True)
+        bare, work = os.path.join(home, "origin.git"), os.path.join(home, "work")
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, env=ENV)
+        subprocess.run(["git", "init", "-q", "-b", "main", work], check=True, env=ENV)
+        write_lf(os.path.join(work, "actions", "code-check", "code_check.py"), HARNESS)
+        write_lf(os.path.join(work, "lint", "rule.txt"), "lenient\n")
+        git_in(work, "add", "-A")
+        git_in(work, "commit", "-qm", "held by origin only")
+        sha = git_in(work, "rev-parse", "HEAD")
+        git_in(work, "push", bare, "HEAD:refs/heads/fixed")
+        git_in(self.source, "remote", "add", "origin", bare)
+        held = subprocess.run(["git", "-C", self.source, "cat-file", "-e", sha + "^{commit}"], env=ENV, capture_output=True)
+        self.assertNotEqual(held.returncode, 0, "precondition: the clone already holds the sha, so no fetch is tested")
+        rc, lines, text = self.run_pinned(sha, "--pinned")
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "a sha the clone lacks was not fetched from its origin and run\n" + text)
+        self.assertIn("fixture harness: lenient", text, "the harness run was not the one at the fetched sha\n" + text)
+
+    def test_lint_under_the_flag_runs_as_without_it_and_the_pin_does_not_apply(self):
+        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step(self.pin_a), "--lint", "--base", "origin/main")
+        self.assertIn("Code check", by_step(lines0), "scope: --lint did not select the code-check step\n" + text0)
+        self.assertEqual(rc, rc0, "under --pinned --lint exits differently from --lint\n" + text)
+        self.assertEqual(by_step(lines), by_step(lines0), "under --pinned --lint reads a step differently from --lint\n" + text)
+        self.assertIn("fixture harness: strict", text, "--lint ran the harness at the pin, not the local copy\n" + text)
+
+    def test_plan_under_the_flag_prints_as_without_it(self):
+        """Control: a pin the clone holds plans the same with or without the flag, so a --plan that fetched would still pass
+        here. The unfetchable-pin case after it is the one that tells them apart."""
+        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step(self.pin_a), "--plan", "--step", "Code check", "--base", "origin/main")
+        self.assertEqual(by_step(lines0).get("Code check"), "would run", "scope: the plan does not reach the code-check step\n" + text0)
+        self.assertEqual((rc, lines), (rc0, lines0), "under --pinned --plan prints differently from --plan\n" + text)
+
+    @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
+    def test_plan_under_the_flag_with_an_unfetchable_pin_says_would_run_and_never_fetches(self):
+        """Control: a plan under --pinned plans the local copy and runs no git fetch or archive, even for a sha no clone
+        holds. A plan that fetched would read unknown here."""
+        env, calls = self.git_stub(RUN_FOLDER)
+        _, lines, text = self.run_pinned(UNFETCHABLE, "--plan", "--pinned", env=env)
+        self.assertIn("Code check", by_step(lines), "scope: the plan does not reach the code-check step\n" + text)
+        self.assertEqual(by_step(lines)["Code check"], "would run", "under --plan --pinned an unfetchable pin does not plan the local copy\n" + text)
+        self.assertEqual(self.stub_calls(calls), [], "under --plan --pinned git fetched or archived the pin\n" + text)
+
+    def assert_local_uses_runs_the_repo_copy(self, uses):
+        """A local uses: runs the repo under test's own code_check.py, with or without the flag, never a pinned tree."""
+        self.write_child_code_check()
+        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(step("Code check", uses=uses), *self.LINT)
+        self.assertIn("child harness", text0, "scope: without the flag the local uses did not run the repo's own copy\n" + text0)
+        self.assertEqual((rc, self.verdicts(lines)), (rc0, self.verdicts(lines0)), "under --pinned a local uses: reads differently\n" + text)
+        self.assertNotIn("fixture harness", text, "under --pinned a local uses: ran a harness from a pinned tree or the local copy\n" + text)
+
+    def test_a_local_dollar_uses_under_the_flag_runs_the_repos_own_copy(self):
+        self.assert_local_uses_runs_the_repo_copy("$/actions/code-check")
+
+    def test_a_local_dot_uses_under_the_flag_runs_the_repos_own_copy(self):
+        self.assert_local_uses_runs_the_repo_copy("./actions/code-check")
+
+    def test_a_branch_ref_under_the_flag_keeps_the_local_copy(self):
+        """Control: the run without --pinned is the scope check and must run the local copy. The run with --pinned must
+        read the same, FAIL included, since a branch ref never takes the pinned tree."""
+        (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step("main"), *self.LINT)
+        self.assertIn("fixture harness: strict", text0, "scope: without the flag the branch ref did not run the local copy\n" + text0)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), "under --pinned a branch ref did not FAIL on the local copy\n" + text)
+        self.assertEqual((rc, self.verdicts(lines)), (rc0, self.verdicts(lines0)), "under --pinned a branch ref reads differently\n" + text)
+        self.assertIn("fixture harness: strict", text, "under --pinned a branch ref did not keep the local copy\n" + text)
+
+    @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
+    def test_the_export_is_deleted_after_a_pass_and_after_an_unknown(self):
+        tmp = tempfile.mkdtemp(prefix="tmp-", dir=RUN_FOLDER)  # TMPDIR for the run: each export is made here
+        self.addCleanup(shutil.rmtree, tmp, True)
+        env, calls = self.git_stub(RUN_FOLDER)
+        env["TMPDIR"] = tmp
+        rc, lines, text = self.run_step(self.code_step(self.pin_a), *self.LINT, "--pinned", env=env)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), "precondition: the pinned pass did not run\n" + text)
+        self.assertEqual(self.stub_calls(calls, "archive"), ["archive 1"], "precondition: the pass did not export into TMPDIR\n" + text)
+        self.assertEqual([n for n in os.listdir(tmp) if n.startswith("ci-job-pin-")], [], "an export was left behind after a pass\n" + text)
+        rc, lines, text = self.run_step(self.code_step(self.pin_n), *self.LINT, "--pinned", env=env)
+        self.assertEqual(self.verdicts(lines), ["unknown"], "precondition: the pin with no harness did not read unknown\n" + text)
+        self.assertEqual(self.stub_calls(calls, "archive"), ["archive 1", "archive 1"], "precondition: the unknown did not export into TMPDIR\n" + text)
+        self.assertEqual([n for n in os.listdir(tmp) if n.startswith("ci-job-pin-")], [], "an export was left behind after an unknown\n" + text)
+
+    @unittest.skipUnless(os.name == "posix", "the git stub is a shell script")
+    def test_two_steps_pinned_at_one_sha_export_it_once(self):
+        env, calls = self.git_stub(RUN_FOLDER)
+        steps = step("Code check", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a) + \
+            step("Code check again", uses="shivinate7/claude-settings/actions/code-check@%s" % self.pin_a)
+        rc, lines, text = self.run_step(steps, "--step", "Code check", "--step", "Code check again", "--base", "origin/main",
+                                        "--pinned", env=env)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), "the two pinned steps did not both PASS\n" + text)
+        exports = self.stub_calls(calls, "archive")
+        self.assertEqual(len(exports), 1, "two steps at one sha made %d exports, not one\n%s" % (len(exports), text))
 
 
 @unittest.skipUnless(os.name == "posix", "the stall watch and the process-group check are posix only")
