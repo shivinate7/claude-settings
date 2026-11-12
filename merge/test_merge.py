@@ -12651,7 +12651,7 @@ class RedMainBrake(Env):
             self.assertIn("#2790", again, "the first-attempt text promises a pull-request blame on a red re-run, and the red re-run names no pull request")
 
     # The walk from the breaking run takes only runs of its own workflow file and event group (breaking_line's filter). A run of another group between
-    # two push runs is neither blamed nor a stop. Green on the head; each case is red under the mutant named in its commit's trailer.
+    # two push runs is neither blamed nor a stop: a schedule or another workflow's run says nothing about which push merge broke main.
     def test_a_red_schedule_run_of_the_same_file_between_push_runs_neither_breaks_nor_extends_the_walk(self):
         # mutants: the group filter `if False:`, and the path-only filter `r["path"] != key[0]`, which keeps a schedule run of the same file
         runs = [self.merge_run(906, "failure", 2650, run_attempt=2), main_run(905, "failure", event="schedule", sha=self.sha_of(905)), self.merge_run(904, "success", 2649)]
