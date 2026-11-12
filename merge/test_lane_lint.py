@@ -860,34 +860,34 @@ class LaneLint(LaneFixture):
         self.host = ReviewHost([tm.batch_pull(7, self.head("feat"), head_ref="feat")], {}, comments=comments)
         return self.host
 
-    def review_record_line(self, out):
+    def review_log_line(self, out):
         """The one `Review record` step line of a lane lint's output."""
         lines = [line for line in out.splitlines() if "Review record" in line]
         self.assertEqual(len(lines), 1, "the lane lint does not print one Review record step line:\n" + out)
         return lines[0]
 
-    def test_a_newest_record_with_text_after_its_ci_line_fails_the_review_record_step_and_refuses_the_lint(self):
+    def test_a_newest_record_with_text_after_its_ci_line_fails_the_review_log_step_and_refuses_the_lint(self):
         head = self.head("feat")
         bad = len(tm.record_text(head=head).splitlines()) + 1  # the line after the CI line
         self.review_host([tm.review_comment(1, 7, tm.record_text(head=head) + "Lane note.\n")])
         self.use_ci_job(PASSING, 0)
         rc, out = self.run_lane("--lane-lint", "7")
         self.assertNotEqual(rc, 0, "the lane lint passed a newest record that does not parse:\n" + out)
-        line = self.review_record_line(out)
+        line = self.review_log_line(out)
         self.assertIn("FAIL", line, out)
         self.assertIn(f"line {bad}: Lane note.", line, "the Review record FAIL does not name the bad line:\n" + out)
 
-    def test_a_marker_less_body_with_record_fields_fails_the_review_record_step(self):
+    def test_a_marker_less_body_with_record_fields_fails_the_review_log_step(self):
         body = tm.record_text(head=self.head("feat")).split("\n", 1)[1]  # the marker line cut off: PR: #7 is line 1
         self.review_host([tm.review_comment(1, 7, body)])
         self.use_ci_job(PASSING, 0)
         rc, out = self.run_lane("--lane-lint", "7")
         self.assertNotEqual(rc, 0, "the lane lint passed a record whose marker line is cut off:\n" + out)
-        line = self.review_record_line(out)
+        line = self.review_log_line(out)
         self.assertIn("FAIL", line, out)
         self.assertIn("line 1: PR: #7", line, "the Review record FAIL does not name line 1:\n" + out)
 
-    def test_a_review_record_fail_posts_no_lane_lint_pass_comment(self):
+    def test_a_review_log_fail_posts_no_lane_lint_pass_comment(self):
         # the join and --reviewed read a posted PASS as ready, so a FAIL of the record step must post none
         self.review_host([tm.review_comment(1, 7, tm.record_text(head=self.head("feat")) + "Lane note.\n")])
         self.use_ci_job(PASSING, 0)
@@ -895,20 +895,20 @@ class LaneLint(LaneFixture):
         self.assertEqual(self.host.posted, [], "a Review record FAIL still posted the lane-lint PASS comment:\n" + out)
         self.assertNotEqual(rc, 0, out)
 
-    def test_a_review_record_fail_is_not_lifted_by_lint_unknown_ok(self):
+    def test_a_review_log_fail_is_not_lifted_by_lint_unknown_ok(self):
         # an unknown lint step that --lint-unknown-ok lifts does not lift a Review record FAIL: no flag lifts it
         self.review_host([tm.review_comment(1, 7, tm.record_text(head=self.head("feat")) + "Lane note.\n")])
         self.use_ci_job(UNKNOWN, 2)
         rc, out = self.run_lane("--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
         self.assertNotEqual(rc, 0, "--lint-unknown-ok lifted a Review record FAIL:\n" + out)
-        self.assertIn("FAIL", self.review_record_line(out), out)
+        self.assertIn("FAIL", self.review_log_line(out), out)
 
     def test_a_missing_record_prints_a_note_and_the_lint_passes(self):
         self.review_host([])
         self.use_ci_job(PASSING, 0)
         rc, out = self.lint_run("--lane-lint", "7")
         self.assertEqual(rc, 0, out)
-        line = self.review_record_line(out)
+        line = self.review_log_line(out)
         self.assertIn("note", line, "a missing record prints no note:\n" + out)
         self.assertNotIn("FAIL", line, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
@@ -920,7 +920,7 @@ class LaneLint(LaneFixture):
         self.use_ci_job(PASSING, 0)
         rc, out = self.lint_run("--lane-lint", "7")
         self.assertEqual(rc, 0, out)
-        line = self.review_record_line(out)
+        line = self.review_log_line(out)
         self.assertIn("note", line, "a record at an older head prints no note:\n" + out)
         self.assertIn(head[:9], line, "the note does not name the live head:\n" + out)
         self.assertNotIn("FAIL", line, out)
@@ -932,7 +932,7 @@ class LaneLint(LaneFixture):
         self.use_ci_job(PASSING, 0)
         rc, out = self.run_lane("--lane-lint", "7")
         self.assertNotEqual(rc, 0, "the lane lint passed a bad record for an older head:\n" + out)
-        line = self.review_record_line(out)
+        line = self.review_log_line(out)
         sentence = (f"It names {tm.REVIEW_OLD_HEAD[:9]}, not the live head {head[:9]}. Review the live head in a new round, "
                     "then post a new record for it (`merge 7 --review-record`).")
         self.assertIn(sentence, line, "the Review record FAIL does not name the old head and the new round:\n" + out)
@@ -944,10 +944,10 @@ class LaneLint(LaneFixture):
         self.use_ci_job(PASSING, 0)
         rc, out = self.run_lane("--lane-lint", "7")
         self.assertNotEqual(rc, 0, "the lane lint passed a bad record at the live head:\n" + out)
-        line = self.review_record_line(out)
+        line = self.review_log_line(out)
         self.assertIn("Post a corrected record", line, "a bad record at the live head does not ask for a corrected record:\n" + out)
 
-    def test_an_older_bad_record_then_a_newest_good_one_passes_the_review_record_step(self):  # control: the newest record decides
+    def test_an_older_bad_record_then_a_newest_good_one_passes_the_review_log_step(self):  # control: the newest record decides
         head = self.head("feat")
         self.review_host([tm.review_comment(1, 7, tm.record_text(head=head) + "Lane note.\n"), tm.review_comment(2, 7, tm.record_text(head=head))])
         self.use_ci_job(PASSING, 0)
@@ -956,7 +956,7 @@ class LaneLint(LaneFixture):
         self.assertEqual(len(pass_lines(out)), 1, out)
         self.assertFalse([line for line in out.splitlines() if "Review record" in line and "FAIL" in line], out)
 
-    def test_a_good_record_at_the_live_head_then_a_lane_lint_comment_passes_the_review_record_step(self):  # control: the lint comment is no record
+    def test_a_good_record_at_the_live_head_then_a_lane_lint_comment_passes_the_review_log_step(self):  # control: the lint comment is no record
         head = self.head("feat")
         self.review_host([tm.review_comment(1, 7, tm.record_text(head=head)), tm.lint_comment(2, head)])
         self.use_ci_job(PASSING, 0)
@@ -974,7 +974,7 @@ class LaneLint(LaneFixture):
         reads = [fields for rel, fields in self.host.list_calls if rel == "issues/comments"]
         self.assertEqual(len(reads), 1, "a PR target read the comment list %d times, want once" % len(reads))
 
-    def test_a_ref_target_prints_no_review_record_step_and_reads_no_comment_list(self):  # control
+    def test_a_ref_target_prints_no_review_log_step_and_reads_no_comment_list(self):  # control
         head = self.head("feat")
         self.review_host([tm.review_comment(1, 7, tm.record_text(head=tm.REVIEW_OLD_HEAD))])
         self.use_ci_job(PASSING, 0)

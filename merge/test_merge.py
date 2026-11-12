@@ -14868,7 +14868,7 @@ class ReviewFixFlag(ReviewEnv):
                 self.assertEqual(rc, 0, f"a fix check naming {model} was refused:\n" + out + err)
                 self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
 
-    def test_a_fix_check_refusal_names_the_remedy_when_the_earlier_record_has_text_after_its_ci_line(self):
+    def test_a_fix_verifier_refusal_names_the_remedy_when_the_earlier_record_has_text_after_its_ci_line(self):
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS) + "Lane note.\n"
         host = self.record_host(review_comment(1, 7, earlier), head=self.head())
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=host)
@@ -14878,13 +14878,13 @@ class ReviewFixFlag(ReviewEnv):
         self.assertIsNotNone(rule, "merge.py names no REVIEW_RULE_STEP, so the refusal has no one sentence")
         self.assertIn(rule, err, "the --fix-check refusal's remedy is not REVIEW_RULE_STEP:\n" + err)
 
-    def test_a_fix_check_refusal_names_the_comment_and_line_of_an_earlier_record_for_another_pr(self):
+    def test_a_fix_verifier_refusal_names_the_comment_and_line_of_an_earlier_record_for_another_pr(self):
         host = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, n=9)), head=self.head())
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=host)
         self.assertEqual(rc, 2, "the fix check after an earlier record for PR #9 was not refused:\n" + out + err)
         self.assertIn("comment 1, line 2: PR: #9", err, "the refusal does not name the comment and line of the record for another PR:\n" + err)
 
-    def test_a_fix_check_refusal_names_no_remedy_when_the_bad_line_is_elsewhere(self):  # control
+    def test_a_fix_verifier_refusal_names_no_remedy_when_the_bad_line_is_elsewhere(self):  # control
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus")
         host = self.record_host(review_comment(1, 7, earlier), head=self.head())
         rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=host)
@@ -15444,10 +15444,10 @@ class ReviewedList(ReviewEnv):
         self.assertIsNotNone(rule, "merge.py names no REVIEW_RULE_STEP, so the remedy has no one sentence")
         self.assertIn(rule, line, "the remedy beside the bad line is not REVIEW_RULE_STEP:\n" + out)
 
-    def test_a_note_after_the_ci_line_names_the_review_record_remedy(self):
+    def test_a_note_after_the_ci_line_names_the_review_log_remedy(self):
         self.assert_remedy_beside_bad_line("Lane note.\n" + REVIEW_FOOTER)
 
-    def test_a_finding_paragraph_after_the_ci_line_names_the_review_record_remedy(self):
+    def test_a_finding_paragraph_after_the_ci_line_names_the_review_log_remedy(self):
         self.assert_remedy_beside_bad_line("Finding: the guard misses a case.\n")
 
     def test_a_bad_line_elsewhere_names_no_remedy(self):  # control: the first failing line is the Kind line
