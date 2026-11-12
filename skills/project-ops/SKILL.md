@@ -63,6 +63,7 @@ that triage or the batch runner writes for its successor.
    `templates/pull_request_template.md` to that path. Put it in by a pull request on the repo's default
    branch, never on the record branch. The template holds the two PR-body lines the merge tool reads:
    `Retire-run:` (a debt close with no runnable check) and `Drops-lines:` (lines dropped on purpose).
+   The file sits twice on purpose: GitHub reads only the copy under `.github/`, and this skill ships the copy under `templates/`.
    If the file exists, leave it, and report whether it holds both lines.
 8. **Report** the record branch, the files written, the protection set, each placeholder the owner must still fill, and whether the PR template was added or already present.
 
