@@ -14572,15 +14572,17 @@ class ReviewEnv(Env):
         on_stack = {(feat, "feat-base"): "identical", (feat, "main"): "diverged"}
         return types.SimpleNamespace(**names, parents=parents, trees=trees, on_main=on_main, on_stack=on_stack)
 
-    def reviewed_host(self, fx, head, base="main", comments=None, more=(), compares=None):
+    def reviewed_host(self, fx, head, base="main", comments=None, more=(), compares=None, pull=None):
         """Pull request 7 at `head` on base `base`, with the repo's commits, trees and compares as `fx` gives them. The record is a PASS on fx.fixed
         with no fix line, and a lane-lint PASS names `head`: a done record reads done only with that lint at the live head (decision
         lanes-run-no-full-ci-job). Both are the defaults, unless `comments` is given. `more` holds the other open pull requests, as batch_pull gives them.
-        `compares` replaces fx.on_main, for a case that reads a compare of another base."""
+        `compares` replaces fx.on_main, for a case that reads a compare of another base. `pull` replaces pull request 7's row, for a case that
+        reads the draft's age (aged_pull gives it)."""
         if comments is None:
             comments = [review_comment(1, 7, record_text(head=fx.fixed, rounds=REVIEW_PASS)), lint_of(7, head)]
         compares = fx.on_main if compares is None else compares
-        return PullsHost([batch_pull(7, head, base=base), *more], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=compares)
+        first = batch_pull(7, head, base=base) if pull is None else pull
+        return PullsHost([first, *more], {}, comments=comments, commits=fx.parents, trees=fx.trees, compares=compares)
 
     def reviewed_line(self, host, head, state, msg):
         """-> the output of `merge --reviewed`, after one check: pull request 7's line names `head` and reads `state`."""
@@ -16613,6 +16615,31 @@ class ReviewedSendBack(ReviewEnv):
         lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], comments, commits=KNOWN_STALE)
         assert_off_the_list(self, lines, 7)
         send_back_line(self, lines, 7, f"stale: the record is for head {REVIEW_OLD_HEAD[:9]}")
+
+    def test_a_draft_over_12_hours_whose_survival_read_fails_is_not_sent_back_as_stale(self):
+        # The live head's commit read is a 404, so the clean-merge walk raises. The record may still survive, so its line must say the survival is unknown.
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD))]
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], comments)
+        out = "\n".join(lines)
+        self.assertRegex(out, r"#7\b", "the read names no #7:\n" + out)
+        self.assertFalse(any(l.startswith(f"{merge.REVIEW_SEND_BACK}#7 ") for l in lines),
+                         "a draft whose survival read failed was sent back as a known stale record:\n" + out)
+        self.assertIn(REVIEW_HEAD, self.host.commit_reads, "the survival read did not run, so the case tests nothing")
+        self.assertIn(merge.REVIEW_SURVIVAL_UNKNOWN, list_line(self, out, 7), "the line of #7 does not say the survival is unknown:\n" + out)
+
+    def test_a_draft_over_12_hours_whose_record_survives_a_clean_merge_of_main_is_not_sent_back(self):
+        # The control beside the case above: the same draft, with the commit read working, reads done at the clean merge.
+        fx = self.real_commits()
+        host = self.reviewed_host(fx, fx.clean, pull=aged_pull(7, fx.clean, 13 * SEND_BACK_HOUR))
+        host.cwd = self.co  # merge_state runs git in the checkout that holds the real commits
+        lines = read_at(host, SEND_BACK_NOW)
+        out = "\n".join(lines)
+        self.assertRegex(out, r"#7\b", "the read names no #7:\n" + out)
+        self.assertFalse(any(l.startswith(f"{merge.REVIEW_SEND_BACK}#7 ") for l in lines),
+                         "a draft whose record survives clean merges of main was sent back:\n" + out)
+        self.assertIn(fx.clean, host.commit_reads, "the walk did not read the live head, so the case tests nothing")
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {fx.clean[:9]} done: .*the head is the reviewed head plus clean merges of main; CI draft, no run$",
+                         "the line of #7 does not read done at the clean merge:\n" + out)
 
     def test_a_record_with_prose_after_its_ci_line_is_sent_back_naming_the_ci_line(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS) + "A note after the CI line.\n")]
