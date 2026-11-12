@@ -450,7 +450,8 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_reads_of(PR)
         self.assert_blocked(out)
         self.assertIn(why, out["reason"], f"the refusal does not carry review_state's why {why!r}: {out['reason']}")
-        self.assertNotIn("has no review record", out["reason"], "the refusal says there is no review record, but the record is posted")
+        self.assertIn("Review-log guard: this reply claims a review PASS for PR #%d" % PR, out["reason"], out)
+        self.assertNotIn("has no review log", out["reason"], "the refusal says there is no review log, but the log is posted")
         self.assertNotIn("--review-record", out["reason"], "the refusal tells the lane to post a record that is already posted")
         self.assertNotIn("post the record", out["reason"], "the refusal tells the lane to post a record that is already posted")
 
@@ -483,7 +484,8 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assert_blocked(out)
-        self.assertIn("has no review record", out["reason"], out)
+        self.assertIn("Review-log guard: this reply claims a review PASS for PR #12", out["reason"], out)
+        self.assertIn("has no review log", out["reason"], out)
         self.assertIn("merge 12 --review-record", out["reason"], out)
 
     def test_lane_pass_naming_no_pr_blocks_and_asks_for_the_pr(self):
@@ -493,6 +495,8 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report("OTHER: round 2 PASS on commit 1234abc.")))
         self.assert_blocked(out)
         self.assertRegex(out["reason"], r"(?i)\bPR\b|pull request", out)
+        self.assertIn("Review-log guard: a line of this reply claims", out["reason"], out)  # the label names the log, not the record
+        self.assertIn("give it a review log for its live head", out["reason"], out)
         self.assertNotRegex(out["reason"], r"merge \d+ --review-record", out)  # no number nobody gave
 
     def test_lane_pass_with_a_lone_apostrophe_still_blocks(self):
@@ -609,7 +613,7 @@ class ReviewRecordTests(unittest.TestCase):
                 self.serve()
                 out = self.stop(self.lane_turn(report(CLAIM)), block=(module,))
                 self.assertNotEqual((out or {}).get("decision"), "block", out)
-                self.assertIn("Review-record guard: UNKNOWN", (out or {}).get("systemMessage", ""), out)
+                self.assertIn("Review-log guard: UNKNOWN", (out or {}).get("systemMessage", ""), out)
 
     def test_newest_record_that_does_not_parse_is_named_unparsed_not_missing(self):
         # Catches: a newest record that does not parse (a note line after its CI line) refused with the no-record wording,
@@ -624,7 +628,8 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIn("PR #2189", reason, "the refusal does not name PR #2189: %r" % reason)
         self.assertRegex(reason, r"(?i)does not parse", "the refusal does not say the newest record does not parse: %r" % reason)
         self.assertRegex(reason, r"(?i)CI line", "the refusal does not name the CI line as the cause: %r" % reason)
-        self.assertNotIn("has no review record for its live head", reason,
+        self.assertIn("the newest review log on that PR does not parse", reason, "the refusal does not name the log that does not parse: %r" % reason)
+        self.assertNotIn("has no review log for its live head", reason,
                          "the refusal says no record exists, though the newest record exists: %r" % reason)
         self.assert_unparsed_remedy(reason, INCIDENT_PR)
 
@@ -641,7 +646,8 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIn("PR #12", reason, "the refusal does not name PR #12: %r" % reason)
         self.assertRegex(reason, r"(?i)does not parse", "the refusal does not say the newest record does not parse: %r" % reason)
         self.assertNotRegex(reason, r"(?i)CI line", "the refusal names the CI line as the cause of a bad Kind line: %r" % reason)
-        self.assertNotIn("has no review record for its live head", reason,
+        self.assertIn("the newest review log on that PR does not parse", reason, "the refusal does not name the log that does not parse: %r" % reason)
+        self.assertNotIn("has no review log for its live head", reason,
                          "the refusal says no record exists, though the newest record exists: %r" % reason)
         self.assert_unparsed_remedy(reason, PR)
 
@@ -651,7 +657,8 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assert_blocked(out)
-        self.assertIn("has no review record for its live head", out["reason"], out)
+        self.assertIn("Review-log guard: this reply claims a review PASS for PR #12", out["reason"], out)
+        self.assertIn("has no review log for its live head", out["reason"], out)
         self.assertNotIn("does not parse", out["reason"], out)
 
     # Passed: a record for the live head, and the reads that find it.
