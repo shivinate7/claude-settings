@@ -1384,8 +1384,9 @@ jobs:
     # Faster slow kills cut the local run 710 s to 651 s (4 jobs). Batch 7's lanes add mutants. On main, the coordinator
     # measured lane PR 1163 alone at 946 s locally (+236 s) and lane PR 1157 at 768 s (+58 s). If those add up and the
     # speed-ups carry over, the set nears 945 s locally, about 16 min. A cap-cut step has no upper bound.
-    # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving. The cap
-    # is a stopgap (ci-job-caps) until the split (debt mutate-guard-split, shards); the next green run gives the figure.
+    # Batch 68 run 42608474160 was cancelled at the 25 min cap with 616 of 694 mutants killed and none surviving, as one job.
+    # The mutants now run in two shards, this job (MUTATE_SHARD 1/2) and checks-mutate-guard-2 (2/2), which share one cap.
+    # No sharded run is measured yet, so the cap stays 75: the next green run gives the per-shard figure to re-cap from.
     # Now 75, above the 3600 s suite cap in hooks/mutate_guard.py, so the suite cap fires first (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
     timeout-minutes: 75
     steps:
@@ -1400,8 +1401,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Guard mutation test
+      - name: Guard mutation test (shard 1 of 2)
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          MUTATE_SHARD: 1/2
         run: python3 hooks/mutate_guard.py
 
       # The progress beat of hooks/test_guard.py (decision stall-watch). Runs in this job, not in the guard suite, which runs in the
@@ -1412,6 +1415,31 @@ jobs:
         if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
         timeout-minutes: 5 # provisional: no CI run yet; 101 s measured locally
         run: python3 hooks/test_guard_beat.py
+
+  # The guard mutation test, shard 2 of 2: the same steps and scope flag as checks-mutate-guard, which runs shard 1 and the
+  # progress beat suite. hooks/mutate_guard.py holds the shard switch (MUTATE_SHARD): each mutant runs in exactly one shard.
+  checks-mutate-guard-2:
+    runs-on: ubuntu-latest
+    needs: scope
+    # Shares checks-mutate-guard's cap (75, interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps), which carries the figures.
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
+      - name: Guard mutation test (shard 2 of 2)
+        if: ${{ needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request' }}
+        env:
+          MUTATE_SHARD: 2/2
+        run: python3 hooks/mutate_guard.py
 
   # The mutation report of a batch (decision mutation-report-scores-suites, owner item mutation-ci-job, 2026-11-05). It runs on
   # a pull request from a `batch-` branch (the scope flag mutation_report, set from the head ref) and on workflow_dispatch.
@@ -1938,6 +1966,7 @@ jobs:
       - checks-macos-b
       - checks-windows
       - checks-mutate-guard
+      - checks-mutate-guard-2
       - mutation-report
       - checks-windows-guard
       - checks-windows-merge
@@ -1974,6 +2003,7 @@ jobs:
       - checks-macos-b
       - checks-windows
       - checks-mutate-guard
+      - checks-mutate-guard-2
       - mutation-report
       - checks-windows-guard
       - checks-windows-guard-2
