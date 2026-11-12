@@ -26,7 +26,7 @@
   "multi": {"meaning": "The owner ticks any number of options."},
   "ranked": {"meaning": "The owner also orders the ticked options."},
   "steps": {"meaning": "A task's list of strings.", "rules": ["command-in-item", "option-letter-keys", "press-link", "rework-off-page"]},
-  "links": {"meaning": "A task's list of `{label, url}`. A step that presses in a web app needs one.", "rules": ["press-link"]},
+  "links": {"meaning": "A list of `{label, url}`, on a task or on an option. A step or option that presses in a web app needs one.", "rules": ["press-link"]},
   "command": {"meaning": "A task's `{powershell, mac}`, two strings, shown in a closed disclosure with a Copy button.", "rules": ["command-in-item", "gh-login-switch"]},
   "minutes": {"meaning": "A task's time."},
   "reply": {"meaning": "What the session says back to a comment or a note."},
@@ -37,5 +37,5 @@
   "repo": {"meaning": "`owner/name`: the repo the question is about. Required on every open decision and task.", "rules": ["question-checked-with-repo"]},
   "checked_with": {"meaning": "The session id that said the owner has not ruled on it. Required when `repo` is not this page's repo.", "rules": ["question-checked-with-repo"]},
   "closed": {"meaning": "ISO UTC time, trailing `Z`, the item closed. Written in the same `update` as `status: \"closed\"`."},
-  "dismissed": {"meaning": "ISO time, or `null`: the owner's read mark. Only the page writes it.", "rules": ["item-field-page-only"]}
+  "dismissed": {"meaning": "ISO time, or `null`: the owner's read mark. Only the page writes it; a session write is refused."}
 }

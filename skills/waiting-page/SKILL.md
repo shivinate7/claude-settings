@@ -83,7 +83,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   | `multi` |  | The owner ticks any number of options. |
   | `ranked` |  | The owner also orders the ticked options. |
   | `steps` | `command-in-item`, `option-letter-keys`, `press-link`, `rework-off-page` | A task's list of strings. |
-  | `links` | `press-link` | A task's list of `{label, url}`. A step that presses in a web app needs one. |
+  | `links` | `press-link` | A list of `{label, url}`, on a task or on an option. A step or option that presses in a web app needs one. |
   | `command` | `command-in-item`, `gh-login-switch` | A task's `{powershell, mac}`, two strings, shown in a closed disclosure with a Copy button. |
   | `minutes` |  | A task's time. |
   | `reply` |  | What the session says back to a comment or a note. |
@@ -94,7 +94,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   | `repo` | `question-checked-with-repo` | `owner/name`: the repo the question is about. Required on every open decision and task. |
   | `checked_with` | `question-checked-with-repo` | The session id that said the owner has not ruled on it. Required when `repo` is not this page's repo. |
   | `closed` |  | ISO UTC time, trailing `Z`, the item closed. Written in the same `update` as `status: "closed"`. |
-  | `dismissed` | `item-field-page-only` | ISO time, or `null`: the owner's read mark. Only the page writes it. |
+  | `dismissed` |  | ISO time, or `null`: the owner's read mark. Only the page writes it; a session write is refused. |
   <!-- /gen -->
 
   - An update carries again every stored field that a guard judges together with the field it sets, because the guard cannot see the stored fields.
@@ -103,6 +103,8 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     - `context` on a decision also carries all of the question form's lines, and `stands: true` when the pick stands.
     - `context` on a task carries `kind: task`.
     - An update to a port item carries `port: true`.
+    - An update of `checked_with` carries `repo`, and a `repo` update on a closed item carries `status: "closed"`.
+    - An update of `designs` or `options` carries the other.
   - The page derives the tier from these fields. Never write a tier.
     - `holds` (one plain sentence: what is stopped until the answer) puts the item in Blocking.
     - `by` (an ISO deadline) puts an item with no `holds` in Upcoming.
