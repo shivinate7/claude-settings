@@ -1,0 +1,14 @@
+{
+ "id": "ci-job-caps-line-count",
+ "title": "Decision ci-job-caps states the measured line count, 37064, not 37017",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "docs/decisions/ci-job-caps.md line 60 says 37017 lines; lane batch62-unbacked-lines re-measured 37064 at a00301efe (PR #2618).",
+ "source": "coordinator 23:10 CST Nov 11, from lane batch62-unbacked-lines",
+ "note": "Prose. The coordinator starts its lane from this step.",
+ "updatedAt": "2026-11-11T23:10:00-06:00"
+}
