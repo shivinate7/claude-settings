@@ -513,7 +513,13 @@ test("unknown keys on the config and on a route are not refused", async (t) => {
 // The full-page layout every touch and fine shot shares: the hero's green to 850, the bar's yellow to 900,
 // then the spacer in the pointer's colour.
 const TOUCH_SHOTS = {
-  routes: [{ name: "touch", path: "/touch.html" }, { name: "short", path: "/content.html" }],
+  routes: [
+    { name: "touch", path: "/touch.html" },
+    { name: "short", path: "/content.html" },
+    // A route with steps or localStorage runs in its own context, and that context must keep touch too.
+    { name: "stepped", path: "/touch.html", steps: [{ wait: "#hero" }] },
+    { name: "seeded", path: "/touch.html", localStorage: { k: "one" } },
+  ],
   sizes: [390, 1023, 1024, 1440], themes: ["light"],
 };
 let touchShots;
@@ -595,6 +601,31 @@ test("a page shorter than one viewport: the full-page PNG is one viewport tall, 
   const px = await pixels(b, path.join(r.dir, "short-390-light.png"));
   assert.equal(px.width, 390, "scope: the shot is at 390");
   assert.equal(px.height, 900, "the full-page PNG of a short page is not the viewport height");
+});
+
+// A route with steps or localStorage runs in its own context. Its full-page shot must be coarse too.
+test("a 390 px route with steps is coarse in its full-page shot, as a route without steps is", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  assert.ok(r.pngs.includes("stepped-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "stepped-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  assert.equal(px.column, "G@0 Y@850 R@900", `the route's own context has no touch: its spacer is not the coarse colour (runs ${px.column})`);
+});
+
+test("a 390 px route with localStorage is coarse in its full-page shot, as a route without it is", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  assert.ok(r.pngs.includes("seeded-390-light.png"), r.out);
+  const px = await pixels(b, path.join(r.dir, "seeded-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  assert.equal(px.column, "G@0 Y@850 R@900", `the route's own context has no touch: its spacer is not the coarse colour (runs ${px.column})`);
 });
 
 // ---- Touch stitch: each way a tile can land wrong in a touch full-page shot ----
