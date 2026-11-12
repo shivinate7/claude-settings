@@ -3985,8 +3985,8 @@ AFTER_31 = "2026-10-13 10:35 CDT (UTC-05:00)"  # 31 minutes after EARLY_HEADER
 BEFORE_30 = "2026-10-13 09:34 CDT (UTC-05:00)"  # exactly 30 minutes before EARLY_HEADER
 AFTER_30 = "2026-10-13 10:34 CDT (UTC-05:00)"  # exactly 30 minutes after EARLY_HEADER
 NEAR_HEADER = "2026-10-13 10:20 CDT (UTC-05:00)"  # 16 minutes after EARLY_HEADER
-# Across the night the clocks went back (2026-11-01, CDT to CST). The window reads each stamp's own offset, so
-# real time decides it, and the clock faces, which these stamps also show, do not.
+# Mixed-offset stamps: a CDT and a CST stamp on one night of a clock change. The window reads each stamp's own
+# offset, so real time decides it, and the clock faces these stamps also show do not.
 MIXED_CDT_LATE = "2026-11-01 01:55 CDT (UTC-05:00)"  # 06:55 UTC: 25 real minutes before MIXED_CST, 35 on the faces
 MIXED_CST = "2026-11-01 01:20 CST (UTC-06:00)"  # 07:20 UTC
 MIXED_CDT_EARLY = "2026-11-01 01:10 CDT (UTC-05:00)"  # 06:10 UTC: 70 real minutes before MIXED_CST, 10 on the faces
