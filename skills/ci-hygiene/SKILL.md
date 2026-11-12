@@ -134,6 +134,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `batch-freeze-lane-set`). Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
    (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
    gets no fix lane until the owner decides.
+   When the batch runner drops a lane whose PR body holds a `Replaces #N` line, it deletes that line from the body: in a cloud session, `update_pull_request` with the new body; in a local session, `gh api -X PATCH repos/OWNER/REPO/pulls/N -f body=...`. `freeze_rewrite` (in `merge/merge.py`) rewrites only the runner's own block and keeps the text outside it, so a drop leaves the line in place. Deleting it lets the replaced PR reopen while the dropped PR is still open.
    No merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
