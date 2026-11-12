@@ -4054,8 +4054,9 @@ def case_standing_grant_without_a_once_item_keeps_today_reason():
     check("standing control, no once: item: the reason is today's, pinned", want in out, out)
 
 
-# A one-shot grant can name a set bounded to this batch. "every open" is a standing scope word, so the bound is what
-# makes the set task-scope. The bounded grant is wanted accepted; the same grant without the bound stays refused.
+# A bound in the words ("in this batch", "you make") does not lift the standing bar: the guard reads no bound, and the
+# decision names "any open" as a standing word. Whether a bound should lift the bar is open for the owner, so these
+# cases pin today's refusal.
 BATCH_TEXT = "approved, merge every open PR in this batch"
 BATCH_ONCE_HOME = "- fb-0958-1 [note] -> once:merge-batch-prs"
 MEASURED_TEXT = "approved, merge PR 12. Clean up every test PR."  # the sentence the lane measured
@@ -4071,14 +4072,14 @@ BOUNDED_STANDING_TEXTS = (  # a batch bound on one scope does not clear a standi
 )
 
 
-def case_one_shot_grant_bounded_to_this_batch_passes():
-    """A one-shot grant whose act names a set bounded to this batch is task-scope, not standing, so its once: home
-    passes. Red today: "every open" is a standing scope word, so the home is barred and the message is refused with
-    "has no home"."""
+def case_batch_bound_does_not_lift_the_standing_bar():
+    """A batch bound does not lift the standing bar: the batch-bounded merge is refused its once: home, as the unbounded
+    set is. The reason names the standing word."""
     mod = guard_module()
-    check("batch one-shot: the message is a grant", mod.is_grant(BATCH_TEXT), BATCH_TEXT)
+    check("batch bound: the message is a grant", mod.is_grant(BATCH_TEXT), BATCH_TEXT)
     out = mod.problems(mod.parse(render_block(BATCH_TEXT, items=(BATCH_ONCE_HOME,))), "")
-    check("batch one-shot: its once: home passes, not refused", not any("has no home" in s for s in out), out)
+    check("batch bound: its once: home is barred, the bound lifts nothing",
+          any("has no home" in s and "bars a once:" in s for s in out), out)
 
 
 def case_measured_one_shot_sentence_passes_control():
@@ -4110,14 +4111,26 @@ def case_batch_bound_does_not_clear_a_standing_word_elsewhere():
               any("has no home" in s for s in out), out)
 
 
-# The lane brief that refused a once: home (lane mailbox-wake-routes). Only its two sentences below are known; the rest
-# of the brief is not. A bounded clean-up sentence holds no standing word, so it does not bar the home. A bare "every PR"
-# stays refused, so a bound is what the wanted accept turns on.
+# The lane brief that refused a once: home (lane mailbox-wake-routes), in full. Its one owner grant, "start it", covers one
+# helper session, and the once: item names that session. The refusal comes from "any PR" in "Hand in any PR to the batch
+# runner": a task instruction to the lane, not an approval to act on every PR.
+FB1338_BRIEF = (
+    "Grant: owner 13:37 CST Nov 12, relayed by the retrospective, to \"start mailbox-wake-routes; it needs one extra cloud session to post test comments\": \"ya yes start it\". Covers one short-lived helper session that only posts test comments for the measure; you archive it when done.",
+    "",
+    "Role: lane. Branch slug: mailbox-wake-routes. A measurement, not a build.",
+    "Task: measure how a mailbox update wakes an idle session. Read the step: `git fetch origin roadmap:refs/remotes/origin/roadmap` then `git show origin/roadmap:roadmap/data/steps/mailbox-wake-routes.json`. Routes: (a) doorbell send_message \"check your mail\"; (b) a long-lived PR per session in shivinate7/session-mailbox, each message also a comment, receiver uses subscribe_pr_activity; (c) GitHub webhook to a session's watch_url. Attach each other repo you touch with add_repo (push access for a public repo).",
+    "Helper: start at most one helper cloud session (Sonnet, medium, tags cs-build:lane, cs-repo:shivinate7/claude-settings, cs-topic:mailbox-wake-routes) whose only job is posting the test messages and comments. Archive it when the measure ends (get_session first, then archive_session in a later message). Clean up every test PR, comment and branch you make.",
+    "Lane mailbox-all-messages (git mailbox for cloud-to-cloud) runs in parallel; do not build its work. Send it nothing mid-task; your result goes to triage.",
+    "",
+    "Done check: one measured wake per route (time from send to the receiver's turn start, with the event seen), or \"unmeasured\" with the reason. Write the result into the step note via triage and into decision session-messages as a docs PR if the lane changes it. Hand in any PR to the batch runner (tag cs-build:batch-runner); questions to triage (tag cs-build:triage). If you cannot reach either, send to your parent.",
+    "The owner never reads this session. Send each override line a refusal prints, each owner act and each question to the coordinator in the same turn, with the exact line. Never wait on the owner here.",
+    "Report cap 15 lines.",
+)
 REPRO_ITEM = ("- fb-1338-1 [note] -> once:start helper session for mailbox-wake-routes "
               "(one short-lived cloud session, archive when done)")
-REPRO_BRIEF = "Clean up every test PR, comment and branch you make.\nNever wait on the owner here."
-# The shortest refusing sentence: "approved" is a grant word, "merge" an act word, "every PR" a standing word.
-REPRO_BOUNDED_GRANT = "approved, merge every PR you make."
+REPRO_BRIEF = "Clean up every test PR, comment and branch you make.\nNever wait on the owner here."  # two sentences of the brief
+TASK_PHRASE_SENTENCE = "approved. Hand in any PR."  # the shortest sentence that refuses: a grant word and a task phrase
+MERGE_ANY_PR_SENTENCE = "approved. Merge any PR."  # the same scope with a merge act: a standing approval
 STANDING_WORDINGS = (  # real standing wordings: each keeps its once: home barred
     "approved, merge every PR.",
     "approved, merge every open PR.",
@@ -4126,19 +4139,45 @@ STANDING_WORDINGS = (  # real standing wordings: each keeps its once: home barre
 )
 
 
-def case_one_shot_brief_bounded_to_its_own_work_passes():
-    """Red today: a one-shot approval for the lane's own PRs, with the repro item. "every PR" is a standing word, so the
-    once: home is barred and the message is refused. Wanted: accepted, since "you make" bounds the set to this lane's
-    work."""
+def case_you_make_bound_does_not_lift_the_standing_bar():
+    """A "you make" bound does not lift the standing bar: "approved, merge every PR you make" is refused its once: home,
+    as "every PR" alone is. The reason names the standing word."""
     mod = guard_module()
-    text = REPRO_BOUNDED_GRANT + "\n" + REPRO_BRIEF
-    out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
-    check("repro brief, bounded one-shot approval: its once: home is not barred by 'every PR'",
+    out = mod.problems(mod.parse(render_block("approved, merge every PR you make.", items=(REPRO_ITEM,))), "")
+    check("you-make bound: its once: home is barred, the bound lifts nothing",
+          any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
+def case_one_shot_brief_in_full_with_a_task_phrase_passes():
+    """Red today: the lane brief in full, with its one-shot grant and its once: home. "Hand in any PR to the batch runner"
+    is a task instruction, not a standing approval, so the home passes. The guard bars it on "any PR" and refuses with
+    "has no home"."""
+    mod = guard_module()
+    out = mod.problems(mod.parse(render_block("\n".join(FB1338_BRIEF), items=(REPRO_ITEM,))), "")
+    check("lane brief in full, one-shot grant with its once: home: not refused for 'any PR' in a task line",
           not any("has no home" in s for s in out), out)
 
 
+def case_shortest_task_phrase_sentence_passes():
+    """Red today: the shortest sentence that refuses, "approved. Hand in any PR.", holds a grant word and a task phrase,
+    and no approval to merge any PR. Its once: home passes."""
+    mod = guard_module()
+    out = mod.problems(mod.parse(render_block(TASK_PHRASE_SENTENCE, items=(REPRO_ITEM,))), "")
+    check("task-phrase sentence, one-shot grant with its once: home: not refused",
+          not any("has no home" in s for s in out), out)
+
+
+def case_merge_any_pr_keeps_its_once_bar_beside_the_task_phrase():
+    """Green control, refusing on the head: the same scope word with a merge act is a standing approval, so its once: home
+    stays barred. It is the minimal pair of the task-phrase sentence."""
+    mod = guard_module()
+    out = mod.problems(mod.parse(render_block(MERGE_ANY_PR_SENTENCE, items=(REPRO_ITEM,))), "")
+    check("merge any PR, one-shot grant with its once: home: barred",
+          any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
 def case_repro_brief_sentences_alone_pass_control():
-    """Green control, passing on the head: the repro item with the two known brief sentences and no grant word is not a
+    """Green control, passing on the head: the repro item with the two brief sentences and no grant word is not a
     grant, so nothing refuses it."""
     mod = guard_module()
     out = mod.problems(mod.parse(render_block(REPRO_BRIEF, items=(REPRO_ITEM,))), "")
@@ -4630,11 +4669,14 @@ CASES = (
     case_standing_grant_reason_names_the_once_bar,
     case_one_shot_grant_reason_offers_the_once_home,
     case_standing_grant_without_a_once_item_keeps_today_reason,
-    case_one_shot_grant_bounded_to_this_batch_passes,
+    case_batch_bound_does_not_lift_the_standing_bar,
     case_measured_one_shot_sentence_passes_control,
     case_unbounded_standing_scope_still_refuses_a_once_home,
     case_batch_bound_does_not_clear_a_standing_word_elsewhere,
-    case_one_shot_brief_bounded_to_its_own_work_passes,
+    case_you_make_bound_does_not_lift_the_standing_bar,
+    case_one_shot_brief_in_full_with_a_task_phrase_passes,
+    case_shortest_task_phrase_sentence_passes,
+    case_merge_any_pr_keeps_its_once_bar_beside_the_task_phrase,
     case_repro_brief_sentences_alone_pass_control,
     case_one_shot_brief_with_clean_up_and_never_wait_passes_control,
     case_real_standing_wordings_stay_refused_with_a_once_home,
