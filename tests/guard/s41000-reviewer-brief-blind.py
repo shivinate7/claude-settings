@@ -166,6 +166,11 @@ rbb_refuse("reviewer-brief-blind: refused: known limit until a word rule is rule
 # drops Next from the label set would fail it.
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: result and a Next: line, a builder's report",
            "Check the floor fix.\nDone: the floor fix is in.\nNext: merge it.\nFiles: hooks/guard.py.")
+# The refuter twin of the known limit above. The refuter role takes the same brief check, so the same limit holds for it.
+rbb_refuse("reviewer-brief-blind: refused: known limit until a word rule is ruled: a refuter brief with "
+           "Done: when and Next: lines that describe the task",
+           "Argue the floor fix in hooks/guard.py.\nDone: when the floor reads the role before the model, and the section's "
+           "cases pass.\nNext: list each finding as file, line and claim.\nFiles: hooks/guard.py.", role=REFUTER, model="sonnet")
 
 # The empty state: a reviewer brief with no text holds no report, so it passes.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
