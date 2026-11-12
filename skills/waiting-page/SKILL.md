@@ -118,7 +118,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
       A `pick` that does not fit the kind of item is not shown: no star. A list `pick` on a pick-one item is one such pick.
     - `differs` is a list from `picture`, `how`, `gain`, `lose`: the parts that set this option apart from the others. The page marks each named part with a bar, a "≠" and hidden words "Sets this option apart", and adds one line under the options: "≠ marks what sets an option apart." It drops a named text part whose text equals that part in every other option, a `picture` on an option with no picture, and any other name. Name few parts, and only true ones. With no `differs`, the option shows no mark.
   - A decision carries the question form of rule `style-question-form`. The lines go in `context`, and each option has a non-empty
-    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with a `pick` also carries the line "Against the pick (sonnet): <case>" (guard rule `question-challenged`). A decision with
+    `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with a `pick` also carries the line "Against the pick (sonnet): <case>" (guard rule `question-challenged`); the page draws that line as its own block under the options. A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
     the guard cannot see the stored fields. An update that carries `kind: decision`, `pick` and `context` also carries the Against line,
@@ -306,7 +306,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      how, gain and lose, and the pick. Leave out `why` and your own reasoning, so it argues from the same facts the owner has.
      Ask for the strongest case against the pick in under 80 words. Copy it into `context` as one line:
      `Against the pick (sonnet): <the case>`. The writer refuses a decision with a pick and no such line (guard rule
-     `question-challenged`). It checks that the line is there and well formed, not that the agent was blind. A port item and
+     `question-challenged`). It checks that the line is there and well formed, not that the agent was blind. The page takes the line out of the context and draws it as its own block under the options. A port item and
      a closed item need none (decision `question-form`, which holds the other exemptions).
    - On a port or redesign, write only a departure: set `port: true`, add the "Departs from:" line to `context`,
      and leave `holds` out. The work goes on with the existing app's behaviour meanwhile.
