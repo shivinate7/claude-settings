@@ -1714,7 +1714,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
 # The brief's names live in shared_names (stdlib only), so hooks/call_judge.py reads them without this module.
 from shared_names import BRIEF_TOOL, LANE_BRIEF_MARKER  # noqa: E402,F401
-from shared_names import BRIEF_LINE as _BRIEF_LINE, BRIEF_MARKER_LINE as _BRIEF_MARKER_LINE  # noqa: E402
+from shared_names import BRIEF_LINE as _BRIEF_LINE, BRIEF_MARKER_LINE as _BRIEF_MARKER_LINE, MARKDOWN_LEAD as _MARKDOWN_LEAD  # noqa: E402
 TOPIC_TAG_PREFIX = TOPIC_TAG
 BRIEF_NO_RECORD_REASON = (
     "this session's transcript holds no get_session or create_session record of the target, so the guard "

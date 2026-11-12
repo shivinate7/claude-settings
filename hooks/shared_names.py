@@ -176,9 +176,9 @@ def route_flags_path(session_id: object) -> Optional[str]:
 # `Lane brief: <step>. Topic: <topic>.`. BRIEF_MARKER_LINE matches the marker; BRIEF_LINE also names the step and topic.
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
 LANE_BRIEF_MARKER = "Lane brief:"
-_MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
-BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
+MARKDOWN_LEAD = r"[#*_>\s]*"  # a brief may open with markdown: a heading, bold, a quote
+BRIEF_MARKER_LINE = re.compile(MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), re.IGNORECASE)
 BRIEF_LINE = re.compile(
-    _MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER)
+    MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER)
     + r"[\s*_]*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?",
     re.IGNORECASE)
