@@ -196,30 +196,37 @@ def load_standard():
         raise Unread("%s: cannot read: %s" % (os.path.normpath(STANDARD), e))
 
 
-def shebang_word(path):
+def shebang_word(path, old_rev=None):
     """The interpreter a file's shebang names, version digits dropped, or None (the rule of code_check.interpreter).
-    Raises Unread when the file cannot be read: an unread file has no language and must not read as clean."""
+    Raises Unread when the file cannot be read: an unread file has no language and must not read as clean.
+
+    A path gone from the tree, with `old_rev` given, is a file the diff deletes or renames away, so its shebang is
+    read from git at `old_rev`. A path still on disk is read from disk, so a dangling symlink stays unread."""
     if os.path.isdir(path):  # a submodule path is no file to read
         return None
-    try:
-        with open(path, "rb") as f:
-            first = f.readline(200).decode("utf-8", "replace").strip()
-    except OSError as e:
-        raise Unread("%s: cannot read: %s" % (path, e))
+    if old_rev and not os.path.lexists(path):
+        first = git("show", "%s:%s" % (old_rev, path)).split("\n", 1)[0][:200].strip()
+    else:
+        try:
+            with open(path, "rb") as f:
+                first = f.readline(200).decode("utf-8", "replace").strip()
+        except OSError as e:
+            raise Unread("%s: cannot read: %s" % (path, e))
     if not first.startswith("#!"):
         return None
     words = [w for w in first[2:].split() if not w.startswith("-") and os.path.basename(w) != "env"]
     return re.sub(r"[\d.]+$", "", os.path.basename(words[0])) if words else None
 
 
-def language_of(path, std):
-    """The language row name for a path, or None when it is not a scanned language."""
+def language_of(path, std, old_rev=None):
+    """The language row name for a path, or None when it is not a scanned language. `old_rev` is the revision
+    that holds the old content of a path the diff deletes (shebang_word)."""
     base = os.path.basename(path)
     ext = os.path.splitext(base)[1].lower() or (base.lower() if base.startswith(".") else "")
     rows = std["languages"]
     if ext:
         return next((n for n in SCANNED if ext in rows.get(n, {}).get("extensions", [])), None)
-    word = shebang_word(path)
+    word = shebang_word(path, old_rev)
     return next((n for n in SCANNED if word and word in rows.get(n, {}).get("shebangs", [])), None)
 
 
@@ -230,11 +237,12 @@ def added_lines(base, std, exclude=()):
     diff deletes, with the same text, from a scanned path is a move and not added (diff_moves). A move into an
     untracked file has no diff, so it is no move: that file is not in the diff and stays unchecked here."""
 
-    def scanned(path):
-        return not path.startswith(exclude) and language_of(path, std) is not None
-
     git("rev-parse", "--verify", "--quiet", base + "^{commit}")
     fork = git("merge-base", base, "HEAD").strip()
+
+    def scanned(path):  # an old path; the file is gone from the tree when the diff deletes it, so read it from the fork
+        return not path.startswith(exclude) and language_of(path, std, fork) is not None
+
     diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork)
     left = diff_moves.deleted_texts(diff, scanned)
     added, path, header, line = {}, None, False, 0
