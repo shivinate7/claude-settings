@@ -572,7 +572,7 @@ NOW_CENTRAL_ISO = "~/.claude/bin/now-central --iso"  # the remedy a blank or unp
 MTC_BLANK_CARRIES = (NOW_CENTRAL_ISO,)               # the reason of each refusal below names the remedy
 
 
-# Refused: an `added` of an empty string in items. The triage incident wrote blank times this way.
+# Refused: an `added` of an empty string in items is a blank time, and the reason names the remedy.
 mtc_set("an added of an empty string in items is refused: a blank time", "deny",
         {"id": "silent-undo-edit-pass", "added": ""}, carries=MTC_BLANK_CARRIES)
 # Refused: an `added` of spaces only is blank too.
@@ -673,5 +673,36 @@ mtc_write("a roadmap step Edit that changes note and leaves updatedAt out of its
 # Passes: a Write to a path that is not a step file, holding a blank updatedAt. The rule judges step files only.
 mtc_write("a Write to a non-step path holding a blank updatedAt is allowed: the rule judges step files only", "allow",
           "Write", file_path=MTC_NOT_STEP, content='{"id": "silent-undo-edit-pass", "updatedAt": ""}\n')
+
+# Refused: a numeric updatedAt, epoch milliseconds, is no ISO time. A quoted value is judged; a bare number was not.
+mtc_write("a roadmap step Write whose updatedAt is a number, epoch milliseconds, is refused: a number is no ISO time",
+          "deny", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "updatedAt": 1762980840000}\n', carries=MTC_BLANK_CARRIES)
+# Refused: a key-less Edit that replaces a time with an empty string. The value the write lands is blank.
+mtc_write("a key-less roadmap step Edit that replaces a time with an empty string is refused: the value lands blank",
+          "deny", "Edit", file_path=MTC_STEP, old_string="2026-11-12T07:50:00-06:00", new_string="",
+          carries=MTC_BLANK_CARRIES)
+# Refused: a key-less Edit that writes the prose time 2026-11-12 07:50 CST in place of an ISO time.
+mtc_write("a key-less roadmap step Edit that writes the prose time 2026-11-12 07:50 CST is refused: it does not parse as ISO",
+          "deny", "Edit", file_path=MTC_STEP, old_string="2026-11-12T07:50:00-06:00",
+          new_string="2026-11-12 07:50 CST", carries=MTC_BLANK_CARRIES)
+# Refused: the first write names its collection as a list the guard cannot place. The second write sets items with
+# added 2099, far past the clock, and must still be judged, so the list must not hide it.
+mtc_write("an ArtifactData batch whose first write names its collection as a list is refused on its second write, added 2099",
+          "deny", "ArtifactData", url=MTC_ITEM_URL, action="batch", writes=[
+              {"op": "set", "collection": ["items"], "doc_id": "silent-undo-edit-pass",
+               "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"}},
+              {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-next",
+               "data": {"id": "silent-undo-edit-next", "added": "2099-01-01T00:00:00Z"}}])
+
+# Passes: asks `filed` says where an answer went, in plain words. It is no ISO time, and this rule leaves it out.
+mtc_set("an update that sets filed in asks to plain words is allowed: an asks filed is plain words", "allow",
+        {"filed": "sent to the rules page"}, action="update", collection="asks", doc_id="ask-silentundo1")
+# Passes: items `dismissed` is the owner's read mark. It is no field this rule judges, so null passes.
+mtc_set("an update that sets dismissed to null in items is allowed: dismissed is no field this rule judges", "allow",
+        {"dismissed": None}, action="update")
+# Passes: items `closed` is no field this rule judges, so an empty value passes.
+mtc_set("an update that blanks closed in items is allowed: closed is no field this rule judges", "allow",
+        {"closed": ""}, action="update")
 
 # =========================================================================== 5i. SendMessage to a cloud session
