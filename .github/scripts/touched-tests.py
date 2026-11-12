@@ -69,6 +69,7 @@ RUNNER_SCRIPTS = {
 # The suites checks.yml runs in shard jobs or under a step cap of its own (glob -> reason).
 HEAVY = {
     "hooks/test_guard.py": "heavy: runs in the batch's shard jobs (GUARD_SHARD)",
+    "tests/guard/*": "heavy: section files of hooks/test_guard.py, which runs in the batch's shard jobs (GUARD_SHARD)",
     "merge/test_merge.py": "heavy: runs in the batch's shard jobs (MERGE_SHARD)",
     "janitor/test_sweep.py": "heavy: runs in the batch's checks-windows-sweep job",
     "hooks/test_install_src.sh": "heavy: runs in the batch's shell-macos job under its own step cap",
@@ -76,8 +77,8 @@ HEAVY = {
 
 # Suites that need a browser or a tool this workflow does not install (glob -> reason).
 NEEDS_SETUP = {
-    "*/tests/page.test.mjs": "needs Playwright and Chromium; runs in checks-shoot on Linux only",
-    "skills/waiting-page/tests/test_check_designs.mjs": "needs Playwright and Chromium; runs in checks-shoot on Linux only",
+    "*/tests/page.test.mjs": "needs Playwright and Chromium; runs in checks-shoot (roadmap) or checks-waiting-page (waiting page) on Linux only",
+    "skills/waiting-page/tests/test_check_designs.mjs": "needs Playwright and Chromium; runs in checks-waiting-page on Linux only",
     "lint/test_shoot.mjs": "needs Playwright and Chromium; runs in checks-shoot on Linux only",
     "lint/test_ios_ship.sh": "needs macOS tooling (bin/ios-ship); runs in shell-macos only",
     "lint/test_sim_test.sh": "needs macOS tooling (bin/sim-test); runs in shell-macos only",
@@ -113,7 +114,8 @@ def reason(path, table):
 
 def candidates(path, tracked):
     """The test files `path` selects, from the tracked paths at HEAD."""
-    if is_test(path):
+    # A file that a HEAVY glob names is selected even when its name is no test name (a section file), so the log skips it with its reason.
+    if is_test(path) or reason(path, HEAVY):
         return {path}
     found = set()
     directory, _, name = path.rpartition("/")

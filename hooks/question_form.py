@@ -1152,14 +1152,15 @@ def _judged_fragment(field):
     return field in ("context", "options") or str(field).startswith("options.")
 
 
-def judged_item_writes(writes):
+def judged_item_writes(writes, cwd=""):
     """The writes of a page item that the model review reads. A set or update is read as
     {"op", "doc_id", "data"} when it is not closed and either writes a decision (an update with no kind is
     read, as decision_form_hit cannot see the stored kind) that carries `options` or `context`, or writes a
     task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
     `steps`, since steps are task-only. A str_replace on `context` or `options` (a subfield too) is
     read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
-    item is unseen."""
+    item is unseen. A write that names a `file_path` is read from it, a relative path against `cwd` (the
+    payload's cwd, as page_item_hit reads it), so the review sees the data the guard judged."""
     judged = []
     for op, entry in writes:
         if op == "str_replace":
@@ -1167,7 +1168,7 @@ def judged_item_writes(writes):
                 judged.append({"op": op, "doc_id": entry.get("doc_id"), "field": entry.get("field"),
                                "new_str": entry["new_str"]})
             continue
-        data = _write_data(entry)
+        data = _write_data(entry, cwd)
         if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
             continue
         if data.get("kind") == "task" or data.get("steps"):
@@ -1350,18 +1351,32 @@ def _item_fields(path):
     return fields if isinstance(fields, list) and fields and all(isinstance(x, str) for x in fields) else None
 
 
+# A field the page lists and draws, but only the page writes: the owner's Mark read sets `dismissed` with update (step ask-phase-out).
+# A session's write that names it is refused, so no session hides an item the owner has not read. The page draws the field
+# already, so the refusal gives its own reason, not the generic one that says to draw it.
+PAGE_ONLY_ITEM_FIELDS = ("dismissed",)
+PAGE_ONLY_MARK = " (the page's Mark read writes it)"
+PAGE_ONLY_REASON = ("Only the page's Mark read writes dismissed. The owner's press sets it, and Mark unread clears it. "
+                    "A session write never names it, on any route: leave it out of the write. "
+                    "(decision item-field-rendered, a waiting item names only fields the page draws)")
+
+
 def item_field_hit(op, entry, data) -> str:
     """The matched text when this write of a waiting item names a top-level field outside the page's
     itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
     field in `field`. A page with no readable block, or an empty one, reads as unknown, and the write passes."""
     fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
-    if fields is None:
-        return ""
     if op == "str_replace":
         field = entry.get("field")
         top = field.split(".", 1)[0] if isinstance(field, str) else ""
-        return "str_replace on " + top if top and top not in fields else ""
-    if not isinstance(data, dict):
+        if top in PAGE_ONLY_ITEM_FIELDS:
+            return "str_replace on " + top + PAGE_ONLY_MARK
+        return "str_replace on " + top if fields is not None and top and top not in fields else ""
+    if isinstance(data, dict):
+        for key in data:
+            if key in PAGE_ONLY_ITEM_FIELDS:
+                return "field " + str(key) + PAGE_ONLY_MARK
+    if fields is None or not isinstance(data, dict):
         return ""
     for key, value in data.items():
         if key in fields or (op == "update" and isinstance(value, dict) and value.get("__delete__") is True):
@@ -1486,6 +1501,7 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
                 "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
+                "item-field-page-only": PAGE_ONLY_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "

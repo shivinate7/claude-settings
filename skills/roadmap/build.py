@@ -21,7 +21,9 @@ artifact. It also writes window.ROADMAP_BUILD: the commit each panel read, or "u
 
 Live work (step o8, option a) comes from --live FILE: the project threads and the open pull requests
 and branches, which the publisher reads with its own tools just before the build. This script cannot
-reach either itself, so it only checks the file's shape and bakes it in.
+reach either itself, so it only checks the file's shape and bakes it in. A step has landed by a `Step:` trailer on
+main (landed_marks) or by a row in the file's optional `landedPulls` list (pull_landed_marks): the closed pull requests
+of the last 14 days with their head ref, head sha and merged flag, which the publisher fills from GitHub.
 
 After it runs, this script prints an upkeep list for the triage thread (step c55): open-step notes over
 NOTE_WORDS words; in phases that hold an active step, open steps untouched for STALE_DAYS days and
@@ -176,6 +178,7 @@ ENDED_BUCKETS = SESSION_BUCKETS[3:5]
 ITEM_DONE_STATUSES = ("closed",)
 # A live file with no items list: the open items are unknown, so the lanes to archive read unknown.
 ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
+THREADS_MISSING_WHY = "unknown (the live file has no threads list)"
 IDLE_LANES_LINE = "lanes to archive"
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
 FUTURE_MINUTES = 5
@@ -426,6 +429,51 @@ def landed_marks(repo, ref, branch, steps):
     return {k: v for k, v in marks.items() if v}, strays, None
 
 
+HEAD_SHA = re.compile(r"[0-9a-fA-F]{7,64}")
+
+
+def head_on_main(repo, ref, head, seen=None):
+    """True when the commit `head` (a 7-64 hex sha) is an ancestor of `ref`. A bad sha, no ref or a failed git read is
+    False, so nothing reads as landed that git did not prove. `seen` caches the git answer per sha."""
+    if not isinstance(head, str) or not HEAD_SHA.fullmatch(head) or not ref:
+        return False
+    seen = {} if seen is None else seen
+    if head not in seen:
+        seen[head] = git(repo, "merge-base", "--is-ancestor", head, ref) is not None
+    return seen[head]
+
+
+def pull_landed_marks(repo, ref, steps, work):
+    """{open step: ["#N", ...]} from the live file's landedPulls rows (closed pulls the publisher read from GitHub).
+
+    A row marks step S when its branch is S or lane/S (lane_head_refs), S is a known step that is not done, and the
+    pull is merged (JSON true, merged into main: the row has no base field) or its head sha is an ancestor of `ref`.
+    A closed pull that was never merged and whose head is off main marks nothing: its work did not land. With no
+    `ref` nothing marks, as landed_marks marks nothing then."""
+    rows = (work or {}).get("landedPulls") or []
+    if not steps or not rows or not ref:
+        return {}
+    by_branch = {name: sid for sid, d in steps.items() if d.get("status") != "done" for name in lane_head_refs(sid)}
+    marks, seen = {}, {}
+    for row in sorted(rows, key=lambda r: r["number"]):
+        sid = by_branch.get(row["branch"])
+        if sid is None or not (row.get("merged") is True or head_on_main(repo, ref, row.get("head"), seen)):
+            continue
+        if "#%d" % row["number"] not in marks.setdefault(sid, []):
+            marks[sid].append("#%d" % row["number"])
+    return {k: v for k, v in marks.items() if v}
+
+
+def add_marks(marks, more):
+    """A new dict: `marks` with `more` ({step: [mark]}) merged in, each mark listed once per step."""
+    out = {k: list(v) for k, v in marks.items()}
+    for sid, found in more.items():
+        for mark in found:
+            if mark not in out.setdefault(sid, []):
+                out[sid].append(mark)
+    return out
+
+
 def homes(repo):
     """{kind: (path, why)}: each HOMES kind's folder in the checkout, or None and why it is unknown."""
     try:
@@ -599,11 +647,13 @@ def health(repo, extra, where, slug, branch):
 def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
-    Shape: {"readAt": ISO, "threads": [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+    Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
     "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
-    A file with no threads or pulls list reads unknown, so a dropped key never shows as "none". An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
+    A file with no pulls list reads unknown, so a dropped key never shows as "none". A file with no threads list stays
+    valid: `threads` is None and `threadsWhy` says why, so only the thread count reads unknown (never zero) and `strays`
+    holds that reason. An entry with the wrong shape is counted in `skipped`, never dropped silently. A step a thread
     names that is not an open step is listed in `strays`. One list of lane rows (not archived, carrying this repo's
     cs-repo tag) feeds liveness: `sessionSteps` holds their step ids and `laneTags` their topic and build tags, for an
     item's lane; `liveSteps` holds the step ids of those rows not ended (ENDED_BUCKETS), for a step's lane and a
@@ -618,6 +668,12 @@ def live_work(path, steps, slug=None):
     Two more optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
     enum name; missing reads as not completed) and a pulls row's `head` (the head commit sha). `laneSessions` holds the
     kept session rows, or None. Old files without them read as before.
+    One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool}], the closed
+    pull requests of the last 14 days (head ref, head sha, GitHub's merged flag). The publisher (triage) fills it from
+    GitHub: a merged lane branch is gone from the open pulls and may leave no Step trailer on main. `landedPulls` holds
+    the kept rows, which pull_landed_marks reads. A row that is not an object, whose number is not an int, whose
+    branch is not text or whose `merged` is present and not a JSON bool is counted in `skipped`; a value that is not a
+    list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -632,9 +688,9 @@ def live_work(path, steps, slug=None):
         datetime.datetime.fromisoformat(read.replace("Z", "+00:00"))
     except (AttributeError, ValueError):
         read = "unknown (the live file's readAt is not an ISO time: %r)" % (read,)
-    missing = [key for key in ("threads", "pulls") if not isinstance(raw.get(key), list)]
-    if missing:
-        return {"read": "unknown (the live file has no %s list)" % " or ".join(missing)}
+    if not isinstance(raw.get("pulls"), list):
+        return {"read": "unknown (the live file has no pulls list)"}
+    has_threads = isinstance(raw.get("threads"), list)
     skipped, strays = [], []
 
     def keep(kind, rows, ok):
@@ -649,7 +705,7 @@ def live_work(path, steps, slug=None):
         return good
 
     text = lambda row, key: isinstance(row.get(key), str) and row[key].strip()
-    threads = keep("thread", raw.get("threads", []), lambda r: text(r, "title") and r.get("state") in STATES
+    threads = keep("thread", raw["threads"] if has_threads else [], lambda r: text(r, "title") and r.get("state") in STATES
                    and (r.get("step") is None or isinstance(r["step"], str)))
     before_pulls = len(skipped)
     pulls = keep("pull", raw.get("pulls", []),
@@ -657,6 +713,14 @@ def live_work(path, steps, slug=None):
                  and (r.get("branch") is None or isinstance(r["branch"], str)))
     pulls_skipped = len(skipped) - before_pulls
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
+    if not has_threads:
+        strays = [THREADS_MISSING_WHY]  # a count of 0 would read as "no thread names a stray step"
+    before_landed = len(skipped)
+    # `merged` is the JSON true or false the publisher read from GitHub; text such as "true" is a wrong shape, not a guess.
+    landed_pulls = keep("landedPull", raw["landedPulls"], lambda r: type(r.get("number")) is int
+                        and isinstance(r.get("branch"), str)
+                        and ("merged" not in r or isinstance(r["merged"], bool))) if "landedPulls" in raw else None
+    landed_skipped = len(skipped) - before_landed
     for row in threads:
         sid = row.get("step") or None
         if sid and steps is None:
@@ -707,6 +771,10 @@ def live_work(path, steps, slug=None):
     if pulls_skipped:
         why.append("unknown (%d pull rows skipped)" % pulls_skipped)
         pull_why = pull_why or why[-1]
+    if landed_skipped:
+        # A dropped row could be the one that proves a step landed, so the stale and pull readings go unknown.
+        why.append("unknown (%d landedPulls rows skipped)" % landed_skipped)
+        pull_why = pull_why or why[-1]
     stale_why = why[0] if why else None
     page_items, items_why = None, None
     if read_why:
@@ -722,10 +790,12 @@ def live_work(path, steps, slug=None):
         # a publisher that does not send `lane` reads unknown in stalled_items, never "no lane".
         page_items = [dict({"n": r["n"], "status": r["status"], "home": r["home"]},
                            **{k: r[k] for k in ("lane", "owner") if k in r}) for r in raw["items"]]
-    return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
+    return {"read": read, "threads": threads if has_threads else None,
+            "threadsWhy": None if has_threads else THREADS_MISSING_WHY, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
-            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions}
+            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions,
+            "landedPulls": landed_pulls}
 
 
 def live_age_minutes(read):
@@ -852,12 +922,13 @@ def main(argv=None):
     info = build_info(repo, source, why)
     ref = main_ref(repo, args.main_branch)
     marks, strays, unread = landed_marks(repo, ref, args.main_branch, data["steps"] if data else {})
-    info["landed"] = marks
     extra, where = extras(repo, source)
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
     info["live"] = live_work(args.live, data["steps"] if data else None, slug)
+    marks = add_marks(marks, pull_landed_marks(repo, ref, data["steps"] if data else None, info["live"]))
+    info["landed"] = marks
     info["stalled"] = (stalled(data["steps"], marks, info["live"]) if data else
                        {"why": "unknown (steps unknown)", "steps": None, "paused": [], "badPause": [],
                         "items": None, "itemsWhy": "unknown (steps unknown)"})
@@ -886,7 +957,7 @@ def main(argv=None):
     for sid, mid, why in unread_files:
         print("%s: %s %s (%s)" % (MOCKUP_UNREAD_LINE, sid, mid, why))
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
-           slug, repo, args.main_branch, unread)
+           slug, repo, args.main_branch, unread, ref)
     lines = stalled_lines(info["stalled"])
     if lines:
         print("\n".join(lines))
@@ -1129,6 +1200,40 @@ def stale_drafts(work):
         elif (read - at).total_seconds() > STALE_DRAFT_HOURS * 3600:
             out.append("#%d (%s)" % (p["number"], p.get("branch") or p["title"]))
     return out
+
+
+# The words that say a step waits on pull request #N. One list, so a placement check can share it.
+WAIT_ON_PULL_PHRASES = ("after", "once", "until", "when", "blocked on", "stacked on", "stacks on", "stack on",
+                        "built on", "wait on", "waits on", "wait for", "waits for", "waiting on", "waiting for",
+                        "lands with")
+# `PR ` may sit before #N. A match followed by closed or merged is history ("continues here after #46 closed"), not a wait.
+WAIT_ON_PULL = re.compile(r"\b(?:%s)\s+(?:PR\s+)?#(\d+)\b(?!\s+(?:closed|merged)\b)"
+                          % "|".join(r"\s+".join(map(re.escape, ph.split())) for ph in WAIT_ON_PULL_PHRASES), re.I)
+
+
+def waits_on_closed_pulls(open_, work, repo=None, ref=None):
+    """Entries `step (#N)` for each open step whose title, why or note waits on a pull request #N that the live file
+    shows closed and not merged (a landedPulls row with merged false, and no pulls row or merged row for N), or one
+    unknown entry (also when the live file has no landedPulls key). A merged-false row whose head is an ancestor of
+    `ref` (head_on_main) is skipped: its work landed, as pull_landed_marks reads it. With no `ref` none is skipped.
+    The live file holds only the closed pulls the publisher reads, so a PR closed earlier is not seen."""
+    why = pair_why(work)
+    if why:
+        return [why]
+    if work["landedPulls"] is None:
+        return ["unknown (the live file has no landedPulls list)"]
+    dead = {r["number"] for r in work["landedPulls"] if r.get("merged") is False}
+    dead -= {r["number"] for r in work["landedPulls"] if r.get("merged") is True}
+    dead -= {p["number"] for p in work["pulls"]}
+    waits = []
+    for k, d in open_:
+        text = " ".join(str(d.get(f) or "") for f in ("title", "why", "note"))
+        waits.append((k, {int(m) for m in WAIT_ON_PULL.findall(text)} & dead))
+    waited = set().union(*(ns for _, ns in waits)) if waits else set()
+    seen = {}
+    dead -= {r["number"] for r in work["landedPulls"]
+             if r["number"] in waited and head_on_main(repo, ref, r.get("head"), seen)}
+    return ["%s (#%d)" % (k, n) for k, ns in waits for n in sorted(ns & dead)]
 
 
 def lane_live(work, lane, item=False):
@@ -1457,13 +1562,8 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     landed_heads = {}
 
     def head_landed(pull):
-        # Only a draft releases a lane (the archive guard's rule); a ready pull always holds it. A failed git read is not landed.
-        head = pull.get("head")
-        if pull.get("draft") is not True or not isinstance(head, str) or not re.fullmatch(r"[0-9a-fA-F]{7,64}", head) or not ref:
-            return False
-        if head not in landed_heads:
-            landed_heads[head] = git(repo, "merge-base", "--is-ancestor", head, ref) is not None
-        return landed_heads[head]
+        # Only a draft releases a lane (the archive guard's rule); a ready pull always holds it.
+        return pull.get("draft") is True and head_on_main(repo, ref, pull.get("head"), landed_heads)
 
     open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
     # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
@@ -1506,13 +1606,16 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     if source is None:
         return ["unknown (%s)" % why]
     steps = load(source)["steps"]
-    marks, _strays, unread = landed_marks(repo, main_ref(repo, main_branch), main_branch, steps)
+    ref = main_ref(repo, main_branch)
+    marks, _strays, unread = landed_marks(repo, ref, main_branch, steps)
     extra, _where = extras(repo, source)
     slug = github_slug(repo, extra)
-    return idle_lanes(live_work(live, steps, slug), steps, marks, slug, repo, main_branch, unread)
+    work = live_work(live, steps, slug)
+    marks = add_marks(marks, pull_landed_marks(repo, ref, steps, work))
+    return idle_lanes(work, steps, marks, slug, repo, main_branch, unread)
 
 
-def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None):
+def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
     live = {d.get("phase") for _, d in open_ if d.get("status") == "active"}
@@ -1558,6 +1661,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", [])),
+            ("open step waits on a closed unmerged PR", waits_on_closed_pulls(open_, work, repo, ref)),
             ("done without check", done_without_check(steps))]
     print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
     for label, v in rows:

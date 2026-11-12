@@ -21,10 +21,11 @@ Choices pinned here:
 - Scope: only a "Why yours" line is judged. An Input Needed item with no such label is not touched.
 - The refusal names itself "Hand-off guard", opens with its owner line, and cites the record that holds its remedy.
   It ends with the output rule id, not the waiting-page rule.
-- A capability reason ("can't", "cannot", "refuse", "refuses", "refused", "unable to", "denied", "forbidden", "no
-  access", "isn't" or "not allowed", "isn't" or "not permitted", "unavailable", "403", "blocked", "not available")
-  passes with a route cite whose row is refused or asks, a refusal of this session, or "(measured <date>, <check and
-  result>)". A measured premise with no date is refused, and the refusal names the missing date.
+- A capability reason ("can't", "cannot", "refuse", "refuses", "refused", "rejected", "unable to", "could not",
+  "couldn't", "denied", "forbidden", "no access", "isn't" or "not allowed", "isn't" or "not permitted", "unavailable",
+  "403", "401", "blocked", "not available") passes with a route cite whose row is refused or asks, a refusal of this
+  session, or "(measured <date>, <check and result>)". A measured premise with no date is refused, and the refusal
+  names the missing date.
 - "blocked" or "not available" followed by "until" is a dependency, not a capability. With no other verb it passes.
 - A choice, login or safety-kept reason ("your choice", "your call", "needs your login", "sign in as you", "a safety
   rule ... stays yours", "the safety rules keep") needs no cite, even with a capability verb on the line.
@@ -108,6 +109,40 @@ WIDENED_LINES = (
     "Why yours: the push tool is unavailable, since the trailer needs the owner.",
     "Why yours: the remote returned 403, since the trailer needs the owner.",
     "Why yours: I refuse to push from here, since the trailer needs the owner.",
+    # The widened words, one per line, so a red names its word alone: "could not", "couldn't" (straight and curly
+    # apostrophe), "rejected" and "401".
+    "Why yours: I could not push from here, since the trailer needs the owner.",
+    "Why yours: I couldn't push from here, since the trailer needs the owner.",
+    "Why yours: I couldn’t push from here, since the trailer needs the owner.",
+    "Why yours: the push was rejected, since the trailer needs the owner.",
+    "Why yours: the remote returned 401, since the trailer needs the owner.",
+    # The reject forms, one per line: "rejects", "reject" and "rejecting" are red on the old commit. "being rejected"
+    # holds "rejected", which the old commit already reads, so it is refused there too: a control, not a red.
+    "Why yours: the remote rejects the push, since the trailer needs the owner.",
+    "Why yours: the remote may reject the push, since the trailer needs the owner.",
+    "Why yours: the remote is rejecting the push, since the trailer needs the owner.",
+    "Why yours: the push is being rejected, since the trailer needs the owner.",
+)
+# A choice reason that holds a widened word. The choice phrase exempts the line, so each passes whatever the widened words read.
+CHOICE_NEW_LINES = (
+    "Why yours: it is your call, and I couldn't decide for you.",
+    "Why yours: it is your call, and I couldn’t decide for you.",
+    "Why yours: it is your choice whether to retry, since the push was rejected.",
+    "Why yours: the remote returned 401, and the safety rules keep the retry for you.",
+)
+# A cited reason that holds a widened word. The cite backs it, so each passes the hand-off check. A
+# "could not" line is left out: the cannot-claim check reads it as a claim, so it is no green control here.
+CITED_NEW_LINES = (
+    "Why yours: the remote returned 401 to the push (route %s)." % ROUTE_ID,
+    "Why yours: the push was rejected (route %s)." % ROUTE_ID,
+    "Why yours: the push was rejected (measured 2026-11-06, check_red_run exited 1).",
+)
+# Text a widened form must not catch. `\b401\b` matches only a whole number, so these pass. Left out:
+# "401(k)" and "401-page", which `\b401\b` matches, so no regex tells them from a status; "could not tell" and
+# "rejected option", the same, since a word cannot tell its use.
+NEAR_MISS_401 = (
+    "Why yours: the lane on build 4012 needs the owner, since the trailer names it.",
+    "Why yours: the 401k export needs the owner, since the trailer names it.",
 )
 UNTIL_LINES = (
     "Why yours: the push is blocked until the CI run ends, since the trailer needs the owner.",
@@ -574,6 +609,39 @@ class HandOffTests(unittest.TestCase):
                         self.assert_refused(out, "a capability verb with no cite (%r, %s, landed %s)"
                                             % (line, shape, landed))
 
+    def test_hd_green_a_widened_verb_in_a_choice_line_passes(self):
+        # Catches: a choice line that holds a widened word refused for the word, with no cite to give.
+        self.write_rows(ROWS)
+        for line in CHOICE_NEW_LINES:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(line=line, shape=shape, landed=landed):
+                        out = self.stop(make(line), landed=landed)
+                        self.assert_passes(out, "a choice line with a widened word (%r, %s, landed %s)"
+                                           % (line, shape, landed))
+
+    def test_hd_green_a_widened_verb_with_a_cite_passes(self):
+        # Catches: a widened word whose reason holds a route cite to a refused row, or a dated measured cite, refused
+        # anyway.
+        self.write_rows(ROWS)
+        for line in CITED_NEW_LINES:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(line=line, shape=shape, landed=landed):
+                        out = self.stop(make(line), landed=landed)
+                        self.assert_passes(out, "a cited reason with a widened word (%r, %s, landed %s)"
+                                           % (line, shape, landed))
+
+    def test_hd_green_a_401_inside_a_longer_token_is_no_capability(self):
+        # Catches: "401" matched inside a longer number or word (4012, 401k) and read as a status, refused for no cite.
+        self.write_rows(ROWS)
+        for line in NEAR_MISS_401:
+            for shape, make in SHAPES.items():
+                for landed in (False, True):
+                    with self.subTest(line=line, shape=shape, landed=landed):
+                        out = self.stop(make(line), landed=landed)
+                        self.assert_passes(out, "a near miss of 401 (%r, %s, landed %s)" % (line, shape, landed))
+
     def test_hd_red_a_blocked_or_unavailable_until_is_a_dependency(self):
         # Catches: "blocked until" or "not available until", a wait on another act, refused as a capability.
         self.write_rows(ROWS)
@@ -659,16 +727,17 @@ class HandOffTests(unittest.TestCase):
                 self.assertRegex((out or {}).get("systemMessage", ""), CATCH_NOTE,
                                  "the hand-off check's exception was not reported as UNKNOWN (landed %s)" % landed)
 
-    # ---- cost: no file read beyond today's, unless a hand-off line is present
+    # ---- cost: no file read beyond today's and the stamp in hooks/guard.py, unless a hand-off line is present
 
-    def test_hd_cost_a_reply_with_no_hand_off_opens_only_the_transcript(self):
+    def test_hd_cost_a_reply_with_no_hand_off_opens_only_transcript_and_guard_py(self):
         # Catches: the hand-off check reading the rows file or the refusals file on every Stop.
         reply = report(prose=(NOT_HAND_OFF,))
         with mock.patch.dict(os.environ, {ROUTE_ROWS_ENV: self.rows}):
             out, opened, transcript = self.guard_opens(reply)
         self.assertEqual(out, "", "a reply with no hand-off was judged: %s" % out)
-        self.assertEqual(set(opened), {transcript},
-                         "a reply with no hand-off opened: %s" % sorted(set(opened) - {transcript}))
+        expected = {transcript, trg.GUARD_PY}
+        self.assertEqual(set(opened), expected,
+                         "a reply with no hand-off opened: %s" % sorted(set(opened) - expected))
 
 
 if __name__ == "__main__":

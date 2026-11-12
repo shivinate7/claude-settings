@@ -44,12 +44,6 @@
         "reason": "No hook reads the owner's request and judges which shape (solo, one lane or coordinator) fits it, or checks that the session said its pick in one line first."
       }
     },
-    "roles-solo-builds-short-edit-list": {
-      "mechanism": {
-        "kind": "unmechanized",
-        "reason": "Nothing counts the edits in a request or sees whether parts could run in parallel, so no check can tell a solo job from a one-lane or coordinator job."
-      }
-    },
     "roles-solo-reviews-logic-diffs-only": {
       "mechanism": {
         "kind": "unmechanized",
@@ -221,6 +215,13 @@
         "test": "merge/test_merge.py::GhHalf.test_red_required_check_reverts_the_claim_and_merges_nothing"
       }
     },
+    "gh-write-cloud": {
+      "mechanism": {
+        "kind": "guard",
+        "ref": "gh-write-cloud"
+      },
+      "test": "hooks/test_guard.py::gh-write-cloud: a pull request opened without --draft is refused in a cloud session"
+    },
     "git-ci-wait-checks-in": {
       "mechanism": {
         "kind": "unmechanized",
@@ -359,7 +360,7 @@
       "mechanism": {
         "kind": "guard",
         "ref": "check-tail",
-        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint` or `merge --review-record` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes). A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
+        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint`, `merge --review-record` or `merge --release-check` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes), and it reads the check through `uv run`, a versioned python such as `python3.11`, and an `env` or python wrapper. A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
       },
       "test": "hooks/test_guard.py::check-tail: the incident line, backgrounded, is refused"
     },
@@ -484,10 +485,16 @@
     },
     "output-tracking-turn-one-line": {
       "mechanism": {
+        "kind": "judgment",
+        "reason": "One line on a turn that lands nothing is a content judgment. No check can tell a tracking turn from a turn with something to report."
+      }
+    },
+    "output-landing-turn-ends-with-report": {
+      "mechanism": {
         "kind": "check",
         "ref": "lint/report_guard.py",
         "test": "lint/test_report_guard.py::ReportGuardTests.test_67_every_github_landing_tool_with_no_report_blocks",
-        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The test cited proves the push_files tool; Bash pushes are proved by test_61_sudo_git_push_blocks and test_64_git_dash_c_push_blocks in lint/test_report_guard.py. The tracking-only case, one line on a turn that lands nothing, stays a content judgment."
+        "reason": "The check covers the landing case: a turn that lands a commit, push, merge or opened PR is not a tracking turn and ends with the report. The test cited proves the push_files tool; Bash pushes are proved by test_61_sudo_git_push_blocks and test_64_git_dash_c_push_blocks in lint/test_report_guard.py."
       }
     },
     "output-never-echo-agent-report": {
@@ -713,10 +720,10 @@
         "reason": "Whether a question was a status question, and whether the reply took the report shape, is a content judgment. No check reads that."
       }
     },
-    "style-wrong-tier-one-line": {
+    "style-wrong-session-one-line": {
       "mechanism": {
         "kind": "judgment",
-        "reason": "Whether the owner named the wrong tier, or brought work that belongs to another tier, is a content judgment. No check reads that."
+        "reason": "Whether the owner named the wrong session, or brought work that belongs to another session, is a content judgment. No check reads that."
       }
     },
     "style-offer-override-line": {

@@ -59,6 +59,8 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
+- A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
+  question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
 """
 import atexit
 import json
@@ -907,6 +909,96 @@ def case_page_reads_and_other_collections_skip_question_form():
           "question_form" in r.imports, detail(r))
 
 
+# ------------------------------------------------------------------ a relative file_path (ArtifactData)
+#
+# An items write can name its data by a file_path, with no data. question_form._write_data reads that file against the
+# payload's cwd, and item_hit does. judged_item_writes must read it the same way, or the write never reaches the model
+# review, so item 8 (the past-ruling check) never sees it. Each file name below is unique and absent from the cwd the
+# hook runs in (run_hook inherits this test run's cwd), so a read that finds the file can only come from the join to the
+# payload's cwd. The item's text shares words with the APPS ruling, so the past-ruling search lists that record.
+def apps_refusal():
+    """The model's refusal, which cites the APPS record: a listed candidate, so the past-ruling refusal runs."""
+    return json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+
+
+def relative_item_repo():
+    """The repo whose one decision record is the APPS ruling. Its waiting page is PAGE_URL."""
+    return make_repo("relative-file", decisions={APPS_SLUG: APPS_RULING})
+
+
+def apps_item():
+    """A waiting-page decision on the apps question: it passes item_hit, and its text lists the APPS record."""
+    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE))
+    options = [
+        {"key": "a", "label": "Keep the apps", "gain": "Calls into the repo stay straightforward. " + PAGE_MARK,
+         "lose": "An unused app keeps its access."},
+        {"key": "b", "label": "Remove the apps", "gain": "Fewer apps can write to the repo.",
+         "lose": "Each call into the repo needs a manual step."}]
+    return good_page_item(title="Keep the GitHub apps' access?", context=context, options=options)
+
+
+def write_item_file(path, item):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(item, f)
+
+
+def relative_name_precondition(repo, name):
+    """Scope before subject: the file is at the payload cwd, and no file of that name is at the hook's cwd."""
+    check("relative item %s: the file is at the payload cwd" % name, os.path.isfile(os.path.join(repo, name)), repo)
+    check("relative item %s: no file of that name at the hook's cwd, so only a join to the payload cwd finds it" % name,
+          not os.path.exists(name), os.getcwd())
+
+
+def case_page_relative_file_path_reaches_the_review():
+    # A relative file_path must be read against the payload cwd. Read without it, the file is not found and the
+    # write is dropped: the hook exits 0 with no model call, so the APPS ruling is never checked.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo, name = relative_item_repo(), "relative-item-deny.json"
+    write_item_file(os.path.join(repo, name), apps_item())
+    relative_name_precondition(repo, name)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "file_path": name}, repo)
+    check("relative item: the form check reads the file at the payload cwd and passes it", got == ("", ""), got)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=name), answer=apps_refusal())
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("relative item: the write reaches one model review", len(r.calls) == 1, detail(r))
+    check("relative item: the model sees the item read from the file", PAGE_MARK in prompt, prompt[:160])
+    check("relative item: the APPS record and its ruling reach the prompt",
+          APPS_SLUG in prompt and APPS_RULING in prompt, prompt[:160])
+    rule = question_form.PAST_RULING_RULE
+    check("relative item: the past-ruling refusal is denied under rule %s, with one deny line" % rule,
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith(rule + ": ")
+          and r.log.count("\tdeny\t%s\t" % rule) == 1, detail(r))
+
+
+def case_page_relative_file_path_passing_item_passes():
+    # The negative: the same shape, and the model says ok. Only the one-call check tells a pass from a skip,
+    # because a skipped write also exits 0 with no output.
+    repo, name = relative_item_repo(), "relative-item-pass.json"
+    write_item_file(os.path.join(repo, name), apps_item())
+    relative_name_precondition(repo, name)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=name), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("relative item, ok: the write reaches one model review", len(r.calls) == 1 and PAGE_MARK in prompt, detail(r))
+    check("relative item, ok: exit 0, no output, no deny",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_page_absolute_file_path_is_judged():
+    # The control: an absolute file_path is read on main too, so this case is green before and after the fix.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo = relative_item_repo()
+    path = os.path.join(repo, "absolute-item-deny.json")
+    write_item_file(path, apps_item())
+    check("absolute item: the file is at its absolute path", os.path.isabs(path) and os.path.isfile(path), path)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=path), answer=apps_refusal())
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    rule = question_form.PAST_RULING_RULE
+    check("absolute item: the write reaches one model review", len(r.calls) == 1 and PAGE_MARK in prompt, detail(r))
+    check("absolute item: the past-ruling refusal is denied under rule %s" % rule,
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith(rule + ": "),
+          detail(r))
+
+
 # ------------------------------------------------------------------ a re-ask of an answered item (ruled Nov 1 17:44 CST)
 #
 # An owner's "none of these" note that gives a direction closes the item and becomes a step, so a write that asks
@@ -1618,7 +1710,9 @@ def main():
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
-                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal):
+                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
+                 case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
+                 case_page_absolute_file_path_is_judged):
         try:
             case()
         except Exception as exc:

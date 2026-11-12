@@ -25,7 +25,9 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   limits the already granted act to messages that ask.
 - One "Relayed Grant:" entry quotes page_grant.py's COMMAND and COUNTED_LINE, read from the
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
-  relayed-grant-read-from-page).
+  relayed-grant-read-from-page). Its Covers text names the one settings change: a label that names
+  `settings.json` and the entry by its exact title or key, one entry per grant. Its "Never covers wins"
+  sentence follows the Never covers sentence and settles any clash with Covers.
 - One "Own Branch Lease Push:" entry quotes the lease push with a named sha and the guard remedy's
   command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
   the branch was pushed earlier in this session, and binds the sha to the tip this session last
@@ -40,11 +42,12 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
   Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
   cs-build:batch-runner (decision `auto-mode-owner-acts`).
-- One "Batch Runner Merge:" entry quotes the same derived merge command in its Covers text. Its
-  Covers text names the coordinator that sends the merge go (cs-build:coordinator), the batch runner
-  (cs-build:batch-runner), `merge go`, and the pull request the merge go names. Its Never covers
-  names each act in BATCH_MERGE_REFUSED, the reason flags, and a merge go from a session not tagged
-  cs-build:coordinator (decision `auto-mode-owner-acts`).
+- One "Batch Runner Merge:" entry quotes the same derived merge command with the head flag
+  (`--head <sha>`) in its Covers text. Its Covers text names the coordinator that sends the merge go
+  (cs-build:coordinator), the batch runner (cs-build:batch-runner), `merge go`, and the pull request
+  the merge go names. Its Never covers names each act in BATCH_MERGE_REFUSED, the reason flags, a
+  merge with no `--head`, and a merge go from a session not tagged cs-build:coordinator (decision
+  `auto-mode-owner-acts`).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -100,14 +103,28 @@ MERGE_GO_SCOPE = (("sender tag cs-build:coordinator", "`cs-build:coordinator` ma
                   ("standing-merge-grant", "standing-merge-grant"), ("merge go", "merge go"),
                   ("named PR", "for a named PR"))
 # Each act the Relayed Grant entry's "Never covers" sentence must name (decision relayed-grant-read-from-page).
+# One settings change is covered only when its label names the file and entry, so a settings change without
+# that naming stays refused, and so do the entry's own change, hooks, env, and an autoMode.allow entry the label
+# does not name.
 RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page comment", "a page comment"),
                    ("lastAnswer", "lastAnswer"), ("reply", "reply"),
                    ("answer for another item", "an answer for another item"), ("choice none", "choice none"),
                    ("task answer", "any task answer"), ("time with no zone", "time has no zone"),
                    ("older than added", "an answer older than the item's added"),
                    ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
-                   ("permissions", "permissions"), ("settings", "settings"), ("overrides", "overrides"),
+                   ("permissions", "permissions"), ("overrides", "overrides"),
+                   ("settings change without file and entry",
+                    "a settings change whose label does not name the file and entry"),
+                   ("Relayed Grant entry itself", "a change to the Relayed Grant entry itself"),
+                   ("a change to hooks", "a change to hooks"), ("a change to env", r"a change to env\b"),
+                   ("an autoMode.allow entry the label does not name",
+                    r"an autoMode\.allow entry the label does not name"),
                    ("no counted line", "no `counted` line in this session"))
+# Each term the Relayed Grant entry's Covers text names for its one settings change.
+RELAYED_SETTINGS_COVERS = (("one settings change", "one settings change"),
+                           ("label names the settings file and entry", r"label.*?settings file.*?entry"),
+                           ("settings.json", r"settings\.json"), ("exact title or key", r"\bexact\b"),
+                           ("one entry per grant", "one entry"))
 # Each act the Relayed Merge Yes entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
 RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
                          ("not tagged cs-build:coordinator", "not tagged `cs-build:coordinator`"),
@@ -219,8 +236,9 @@ def allow_entry(prefix):
 
 
 def never_covers_match(entry):
-    """The 'Never covers' match of an entry (any case), its sentence ending at a period, or None."""
-    return re.search(r"never covers[^.]*", entry or "", re.I)
+    """The 'Never covers' match of an entry (any case), its sentence ending at a period that ends a sentence, or None.
+    A period inside a name such as `autoMode.allow` does not end it."""
+    return re.search(r"never covers(?:(?!\.(?:\s|$)).)*", entry or "", re.I)
 
 
 def never_covers(entry):
@@ -291,11 +309,30 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         self.assertIn("`%s`" % page_grant.COMMAND, entry, "entry must quote page_grant.COMMAND in full")
         self.assertIn("`%s`" % page_grant.COUNTED_LINE, entry, "entry must quote page_grant.COUNTED_LINE")
 
+    def test_counted_line_template_names_the_label(self):
+        self.assertIn("label=<label>", page_grant.COUNTED_LINE,
+                      "page_grant.COUNTED_LINE does not name the picked option's label")
+
     def test_never_covers_names_each_refused_act(self):
         clause = never_covers(allow_entry(RELAYED))
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
-        missing = unnamed_terms(clause, RELAYED_REFUSED)
-        self.assertFalse(missing, "Never covers does not name %r" % missing)
+        for name, pattern in RELAYED_REFUSED:
+            with self.subTest(act=name):
+                self.assertRegex(clause, "(?i)" + pattern, "Never covers does not name %r" % name)
+
+    def test_never_covers_wins_over_covers(self):
+        entry = allow_entry(RELAYED)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % RELAYED)
+        found = never_covers_match(entry)
+        self.assertIsNotNone(found, "need a 'Never covers' sentence in the Relayed Grant entry")
+        self.assertIn("Never covers wins", entry[found.end():],
+                      "the entry does not say 'Never covers wins' after its Never covers sentence")
+
+    def test_covers_names_the_one_settings_change(self):
+        covers = entry_part(self, RELAYED)
+        for name, pattern in RELAYED_SETTINGS_COVERS:
+            with self.subTest(term=name):
+                self.assertRegex(covers, "(?i)" + pattern, "Covers text does not name %r" % name)
 
 
 class RelayedMergeYesIsAllowed(unittest.TestCase):
@@ -385,10 +422,11 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
 
     def test_entry_quotes_the_merge_command(self):
         entry = self.batch_merge_entry()
-        command = merge_command()
+        command, flag = merge_command(), head_flag()
         self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
-        self.assertIn("`%s`" % command, bounds_text(entry),
-                      "Covers text must quote the merge command in backticks")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
+        self.assertIn("`%s %s <sha>`" % (command, flag), bounds_text(entry),
+                      "Covers text must quote the merge command with the head flag and <sha> for the head the CI ran on")
 
     def test_covers_names_the_batch_runner_tag(self):
         entry = self.batch_merge_entry()
@@ -426,6 +464,14 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
         missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
         self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+
+    def test_never_covers_names_a_merge_with_no_head_flag(self):
+        clause = never_covers(self.batch_merge_entry())
+        flag = head_flag()
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
+        self.assertIsNotNone(flag, "merge/merge.py must add exactly one argparse flag typed head_arg, the head the CI ran on")
+        self.assertIn("a merge with no `%s`" % flag, clause,
+                      "Never covers does not name a merge with no `%s`" % flag)
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
@@ -639,6 +685,10 @@ class NeverCoversSentence(unittest.TestCase):
 
     def test_sentence_ends_at_its_period(self):
         self.assertEqual(never_covers("Never covers a merge. Other text."), "Never covers a merge")
+
+    def test_dotted_name_does_not_end_the_sentence(self):
+        self.assertEqual(never_covers("Never covers a change to another autoMode.allow entry. Other."),
+                         "Never covers a change to another autoMode.allow entry")
 
     def test_none_without_a_clause(self):
         self.assertIsNone(never_covers("Allowed, with no bound."))

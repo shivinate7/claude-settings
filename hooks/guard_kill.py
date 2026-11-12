@@ -26,6 +26,7 @@ from guard_core import (
     resolve_command, segment_tokens, split_segments,
 )
 from guard_env import substitution_commands
+import own_session  # the one home of the agent transcript folder
 
 
 # ------------------------------------------------------------------ a machine-wide kill
@@ -317,8 +318,7 @@ def in_own_agent_worktree(pid: int, transcript: str) -> bool:
         return False   # left-behind only: a pid whose parent is alive stays foreign
     cwd = _pid_cwd(pid)
     found = AGENT_WORKTREE_RE.search((cwd or "").replace("\\", "/"))
-    return bool(found) and os.path.isfile(
-        os.path.join(transcript[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % found.group(1)))
+    return bool(found) and os.path.isfile(own_session.agent_transcript_path(transcript, found.group(1)))
 
 
 def _kill_pids(tokens):
@@ -652,7 +652,8 @@ DETACHED_LAUNCH_REASON = (
 # `bash -c` or `eval`, a write of the assignment into a file, or a PowerShell `$env:VAR = v`,
 # `Set-Item env:VAR` or `SetEnvironmentVariable`. A read, a grep, and `unset` set nothing. The name
 # is folded to upper case in every form. Shell words come from `segment_tokens`, assignments from
-# `ASSIGNMENT`, and the file write from `_VAR_TOKEN`: no parser of its own.
+# `ASSIGNMENT`, and the file write from `_REDIRECT_TO_PROFILE` and `_assigned_var`: no parser of
+# its own.
 # KNOWN LIMITS: `cross-env` is refused. Not covered: `timeout N env`, `setx`, a PowerShell block,
 # a `<<<` here-string, a CI yaml `env:` key, and `node -e` or `python -c`.
 PLAYWRIGHT_VAR = "PLAYWRIGHT_BROWSERS_PATH"
@@ -1013,7 +1014,7 @@ PLAYWRIGHT_PATH_REASON = (
     "One is a stale `__dirlock` in the Playwright cache, left by an install that stopped "
     "halfway. The other is an install that hangs while it unpacks under Node 26.11 with "
     "Playwright 1.58. "
-    "Remedy: run `pgrep -fl playwright` to confirm that no install is running, then remove the "
+    "Remedy: run `pgrep -f playwright` (it prints pids only) to confirm that no install is running, then remove the "
     "stale `__dirlock`. If the install still hangs, run it under Node 22 with `npx -y node@22 "
     "node_modules/playwright/cli.js install`, which unpacks in under a second."
 )

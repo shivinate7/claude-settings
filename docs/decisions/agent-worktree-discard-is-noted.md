@@ -79,7 +79,7 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
 ## Path reset and work-tree discards
 
 Verdicts by tree: shared | hand-made | agent-owned. Pinned by the path reset ruling block in
-`hooks/test_guard.py` (title: THE PATH RESET AND DISCARD RULING). A `deny | ask | allow, noted` row
+`tests/guard/` (family `shared-tree`, block titled THE PATH RESET AND DISCARD RULING). A `deny | ask | allow, noted` row
 holds only over uncommitted work. A clean tree allows, as the rows
 `subject: a hard reset in a clean tree takes nothing` and
 `subject: restoring the whole clean tree changes nothing` show.

@@ -41,14 +41,14 @@ holds a qualifying act (`questions-reach-page`: every question goes to the page 
 turn it is asked, no clock). The turn is every record after the last
 incoming message, a peer's included; the ack of a send this turn made to the writer or the parent
 starts no turn. Owner-facing session: a send to
-the page writer (the `writer` in the newest meta/page read), or an ArtifactData set, update or batch under
+the page writer (the `writer` in the newest meta/page read, else the repo's extras key `page-writer`), or an ArtifactData set, update or batch under
 collection items to this repo's page; the question box (main session) counts only in a repo with no page. Lane (own get_session record tagged cs-build:lane, or with a
 parent): a send to @parent, the parent id or the writer; @parent counts only in a lane. A promise or a page link passes nothing. A
 repo with no waiting page gets a systemMessage and no block, unless the session is a lane. This check
 does not wait for a git write: the reply's labels are what it reads. Cost: no file written. Reads: the
 transcript this hook already holds. Only on a turn that asks with no send to the writer: the
 own-record import (hooks/own_session.py) and one more transcript read, in a session with a remote id. A lane
-reads no layout; an owner-facing turn with no counted send reads it once (`decisions-reach-a-clickable-pick`).
+reads no layout; an owner-facing turn with no counted send reads the extras file for the writer key first, when the transcript has no meta/page read, then for the page; a send to the key writer returns after the first read (`decisions-reach-a-clickable-pick`).
 A reply that holds Input Needed or a prose line ending in `?` also gets the past-ruling check (one Sonnet call, rule
 `past-ruling`, or the Unvetted remedy) and the option-key check (rule `question-keys`), both from hooks/question_form.py.
 The same pick must carry a valid "Departs from:" line in that Input Needed item (`question-departs`, judged by
@@ -145,14 +145,16 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
-the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
-PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
-record) and never the live head. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
+the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
+the one read `merge --reviewed` makes: a record survives clean merges of main, and a clean-merge read that cannot run keeps it stale, so it still blocks. A claim with no
+PR on its line is refused and asks for the PR. With no record for the live head, the remedy names the act (`merge <pr> --review-record ...`, then post the
+record) and never the live head; a record live_review_state reads open or held is refused with that state and its why, and no post act. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
 remedy as a missing record, with the post as a new comment), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
-process kept or timer. A stop_hook_active rewrite is not checked.
+process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
+commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
 """
 import bisect
 import datetime
@@ -164,12 +166,72 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
 
-sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+HOOKS_DIR = os.path.join(HERE, "..", "hooks")
+_STAMP = re.compile(rb'^INSTALL_ID = "([^"]+)"', re.MULTILINE)
+# The stamp sits near byte 30000 of the 320 KB hooks/guard.py; the cap leaves room for the file to grow.
+_STAMP_HEAD_BYTES = 64 * 1024
+_hooks_dirs_answer = None  # hooks_dirs() sets it on its first call
+
+
+def hooks_dirs():
+    """The hooks folders to import helpers from, first to last. The installer stamps hooks/guard.py with
+    `INSTALL_ID = "<id>"` and lands guard.py, the guard_*.py files, shared_names, git_reads, question_form, own_session
+    and precompact_handoff in hooks/guard.d/<id>/ (install.sh land_guard_set). A stamp with that folder present puts it
+    before the flat one. A module the folder lacks falls through to the flat one. No stamp (the repo copy), an
+    unreadable file or no folder gives the flat folder alone.
+
+    The stamp is matched in the first 64 KB of bytes, never an import and never a strict decode, so a stray non-UTF-8
+    byte in guard.py cannot stop this module importing. The answer is kept in a module global, so a run reads guard.py
+    once however many lazy helper imports ask. A run as the script starts from a fresh module, so each hook run reads
+    it once. question_form imports this module a second time, as a fresh module whose global starts empty; an install
+    lands between processes, not inside one. So an import (not a run as the script) that finds shared_names already
+    loaded from the flat folder or a guard.d folder takes that folder as the answer and skips the read."""
+    global _hooks_dirs_answer
+    if _hooks_dirs_answer is None:
+        loaded = _loaded_hooks_dir() if __name__ != "__main__" else None
+        _hooks_dirs_answer = loaded if loaded is not None else _find_hooks_dirs()
+    return list(_hooks_dirs_answer)
+
+
+def _loaded_hooks_dir():
+    """The answer a shared_names already in sys.modules gives: its own folder, or None when it came from elsewhere."""
+    origin = getattr(sys.modules.get("shared_names"), "__file__", None)
+    if not origin:
+        return None
+    folder = os.path.dirname(os.path.realpath(origin))
+    flat = os.path.realpath(HOOKS_DIR)
+    if folder == flat:
+        return [flat]
+    if os.path.dirname(os.path.dirname(folder)) == flat and os.path.basename(os.path.dirname(folder)) == "guard.d":
+        return [folder, flat]
+    return None
+
+
+def _find_hooks_dirs():
+    try:
+        with open(os.path.join(HOOKS_DIR, "guard.py"), "rb") as handle:
+            stamp = _STAMP.search(handle.read(_STAMP_HEAD_BYTES))
+    except OSError:
+        stamp = None
+    if stamp:
+        folder = os.path.join(HOOKS_DIR, "guard.d", stamp.group(1).decode("ascii", "replace"))
+        if os.path.isdir(folder):
+            return [folder, HOOKS_DIR]
+    return [HOOKS_DIR]
+
+
+def _hooks_on_path():
+    """Put hooks_dirs() at the front of sys.path, in order: the one call every lazy helper import makes."""
+    for folder in reversed(hooks_dirs()):
+        sys.path.insert(0, folder)
+
+
+_hooks_on_path()
 from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -187,7 +249,7 @@ guard = None
 
 def _load_guard():
     global guard
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     try:
         import guard as loaded
     except ImportError:
@@ -825,7 +887,7 @@ LANE_REFUSAL = owner_line(
     "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
     "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
-PARENT_TARGETS = {"@parent", "parent"}
+PARENT_TARGETS = set(layout.PARENT_TARGETS)
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
 # quote, double or single, opens and closes only at a non-word edge, so a lone quote or an apostrophe
@@ -1040,7 +1102,7 @@ def departs_problem(text):
     # hooks/question_form.py is the one home of the predicate: the chat box, the waiting page and this
     # report all call it. lint/ and hooks/ sit side by side, in the repo and under ~/.claude. It loads only
     # for a turn that offers a pick, and an import error fails this one check open (the callers catch it).
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     miss = question_form.departs_hit(input_needed_section(text))
     if not miss:
@@ -1136,12 +1198,17 @@ def question_problem(records, turn, text, hook):
     """(refusal, note) for a reply whose Input Needed item asks the owner a question (a pick or a "?"
     sentence), judged on `turn`, the records after the last incoming message (questions-reach-page). The
     ack of a send this turn made to the writer or the parent starts no turn.
-    Owner-facing: a send to the page writer, or an items write to this repo's page. The question box counts
+    Owner-facing: a send to the page writer, or an items write to this repo's page. The writer is the newest
+    meta/page read's; with no such read at all, the layout's `page-writer` (its ack starts no turn either).
+    The key's writer counts only for a send whose own result shows delivery (`delivered_tool_use_ids`); a send
+    with no result, a failed result or a non-delivered one does not. A transcript writer counts on the send alone.
+    A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
     Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
-    turn with no counted send reads it once."""
+    turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
+    has no meta/page read, then for the page (`layout.waiting_page`); a send to the key writer returns after the first read."""
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
@@ -1149,7 +1216,7 @@ def question_problem(records, turn, text, hook):
     uses, sends = _turn_acts(records, turn, acks)
     if writer and any(writer in t for t in sends):
         return "", ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
     lane, parent = _own_lane_read(hook.get("transcript_path"), own_id) if own_id else (False, None)
@@ -1160,6 +1227,15 @@ def question_problem(records, turn, text, hook):
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
+    if not writer and root and not page_read_ran(records):
+        writer = layout.page_writer_key(root)
+        if writer:
+            acks[writer] = {writer}
+            uses, sends = _turn_acts(records, turn, acks)
+            # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
+            delivered = delivered_tool_use_ids(records)
+            if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
+                return "", ""
     page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
@@ -1288,7 +1364,7 @@ def rewrite_stamp_problem(text, human_ts, cwd):
                  if REWRITE_RE.search(s) and _claims_a_rewrite(s)]
     if not sentences:
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     from datetime import datetime, timezone
     root = repo_root(cwd)
     if not root:
@@ -1372,7 +1448,8 @@ def tool_use_sources(transcript_path):
         return None
     agent = _tool_use_ids(r for r in records if r.get("isSidechain"))
     orchestrator = _tool_use_ids(r for r in records if not r.get("isSidechain"))
-    folder = os.path.splitext(transcript_path)[0] + os.sep + "subagents"
+    import own_session  # the one home of the agent transcript folder
+    folder = own_session.agent_transcript_dir(transcript_path)
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith(".jsonl"))
     except OSError:
@@ -1432,7 +1509,7 @@ def pending_refusals(hook, text):
     a raised file that cannot be written only means the repeat blocks once more.
     Spec: docs/decisions/refusals-reach-the-owner.md."""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
@@ -1494,7 +1571,7 @@ def _shown_flags(hook, flags):
     if not flags:
         return []
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.route_flags_path(hook.get("session_id"))
         if path is None:
@@ -1524,7 +1601,7 @@ def refusal_route_flags(hook):
     route row contradicts, once each per session. Read before pending_refusals settles the file. This is the
     named reader of those flags, so a flag is never written unread: it shows them and never refuses on one."""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         import shared_names
         path = shared_names.refusals_path(hook.get("session_id"))
         if path is None or not os.path.exists(path):
@@ -1552,7 +1629,7 @@ def success_route_flags(hook, after):
         answered = {b.get("tool_use_id") for r in after for b in tool_results(r)}
         calls = [(u.get("name"), u.get("input")) for r in after for u in tool_uses(r)
                  if u.get("id") in answered and u.get("id") not in failed]
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         if not calls:  # a turn with no successful call reads no rows file
             return []
         import route_match
@@ -1575,13 +1652,25 @@ def success_route_flags(hook, after):
 ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
 MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
 MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
+def _forms_re(forms):
+    return r"\b(?:%s)\b" % "|".join(_clause.form_pattern(form) for form in forms)
+
+
+# The capability words both readers share: the three _clause.CANT_FORMS (the start of _clause.CANNOT_FORMS), refused,
+# denied, forbidden, no access, not allowed or permitted, unavailable, the 403 token, and blocked or not available.
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
-# The hand-off cite reads the three _clause.CANT_FORMS, the start of the cannot-claim phrases (_clause.CANNOT_FORMS).
-CAPABILITY_RE = re.compile(
-    r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b"
-    % "|".join(_clause.form_pattern(form) for form in _clause.CANT_FORMS)
-    + r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b403\b"
-    r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
+_CAPABILITY_CORE = _forms_re(_clause.CANT_FORMS) + (
+    r"|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b"
+    r"|\bunavailable\b|\b403\b|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)")
+# The words only the hand-off cite reads: the two _clause.COULD_NOT_FORMS, the reject forms, and the 401 token.
+_CAPABILITY_CITE_ONLY = _forms_re(_clause.COULD_NOT_FORMS) + r"|\breject(?:s|ed|ing)?\b|\b401\b"
+# The hand-off cite reads both pieces: the five forms (CANT_FORMS and COULD_NOT_FORMS), the reject forms, the 401 or 403
+# token, and the other core words.
+CAPABILITY_RE = re.compile(_CAPABILITY_CORE + "|" + _CAPABILITY_CITE_ONLY, re.I)
+# cannot_lines leaves a Why yours line to the hand-off guard when it reads one of the core words. A line whose only
+# capability word is a could-not form, a reject form or 401 stays in the cannot-claim check, which asks for the check that
+# failed.
+CAPABILITY_SKIP_RE = re.compile(_CAPABILITY_CORE, re.I)
 CHOICE_RE = re.compile(
     r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"
     r"|\bthe safety rules keep\b", re.I)
@@ -1615,7 +1704,7 @@ def _cited_refusal(hook, line):
     """True when the Why yours `line` names a tool in this session's refusals file, False when it does not, None when
     the file did not read (it cannot be opened, is not UTF-8, or a line in it is not JSON) and names none. The file is
     read here, before pending_refusals settles it: a reply that names the tool under Input Needed clears its row."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import shared_names
     path = shared_names.refusals_path(hook.get("session_id"))
     if path is None or not os.path.exists(path):
@@ -1647,7 +1736,7 @@ def _route_verdict(ids):
     """(kind, text) for the route ids a Why yours line cites: kind "ok", "works" (a row says the act is doable),
     "dead" (no row holds the id), or "unknown" (the file or the row's outcome on this surface did not read). Reads the
     rows file once, through hooks/route_match.py. A row of another surface says nothing here, so it reads unknown."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import route_match
     rows = route_match.read_rows()
     if rows is None:
@@ -2116,7 +2205,7 @@ def cannot_lines(text):
         if CANNOT_UNVETTED_RE.match(raw) or not CANNOT_RE.search(_mask(body)):
             continue
         if hand_off is None:
-            hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_RE.search(line)}
+            hand_off = {line for line in hand_off_lines(text) if CHOICE_RE.search(line) or CAPABILITY_SKIP_RE.search(line)}
         if raw in hand_off:
             continue
         mask = _mask(body)
@@ -2344,7 +2433,7 @@ def failed_tries(records, refused=(), recovered=None):
 def refused_tools(hook):
     """The tool names in this session's refusals file, () when it holds none. Raises on a file that cannot be read.
     Called before pending_refusals settles the file away."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import shared_names
     path = shared_names.refusals_path(hook.get("session_id"))
     if path is None or not os.path.exists(path):
@@ -2481,6 +2570,7 @@ REVIEW_HISTORY_RE = re.compile(
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
+REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply, under the Stop hook's 80 s timeout (settings.json); the question and relay checks run outside this budget
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
     "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
@@ -2489,6 +2579,11 @@ REVIEW_NO_RECORD = (
     "Review-record guard: this reply claims a review PASS for PR #%d, and that PR has no review record for its live head. "
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
     "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
+)
+# The record for the live head is posted, but merge's review_state reads it open or held: name that state and its why.
+REVIEW_NOT_DONE = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, but merge reads its review record for the live head "
+    "as %s: %s. Review is not done, so no PASS claim yet. Report the review state as it stands."
 )
 REVIEW_UNPARSED = (
     "Review-record guard: this reply claims a review PASS for PR #%d, and the newest review record on that PR does not parse, "
@@ -2523,11 +2618,21 @@ def review_claims(text):
     return claims
 
 
-def _gh_json(args, cwd):
-    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer."""
+def _time_left(end):
+    """Seconds left of the whole-check budget that ends at `end`, or raises: no time left is a read that could not run."""
+    import time
+    left = end - time.monotonic()
+    if left <= 0:
+        raise TimeoutError("the review check's time budget is spent")
+    return left
+
+
+def _gh_json(args, cwd, end):
+    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer. The read ends at REVIEW_READ_TIMEOUT or
+    at `end`, the end of the whole check's budget, whichever is first."""
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
     run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
-                        timeout=REVIEW_READ_TIMEOUT)
+                        timeout=min(REVIEW_READ_TIMEOUT, _time_left(end)))
     if run.returncode:
         raise RuntimeError("gh api exited %d" % run.returncode)
     return json.loads(run.stdout)
@@ -2553,12 +2658,15 @@ def _text_after_ci_line(body, merge_mod):
 def review_record_problem(hook, text):
     """(refusal, note) for a lane reply that claims a review PASS. A reply with no claim, or a session that is not a lane,
     reads nothing. A claim with no PR is refused. Else two REST reads (the PR's live head, its issue comments); the newest
-    review record must name the PR, and merge's review_state must call it done for the live head. A read that could not
-    run, or a merge tool that could not load, is a note with UNKNOWN, never a block."""
+    review log must name the PR, and merge's live_review_state must call it done for the live head (_live_state). A read
+    of the PR or its comments that could not run, or a merge tool that could not load, is a note with UNKNOWN, never a block.
+    A clean-merge read that could not run keeps a stale record stale, so it blocks, with a note that says so."""
     claims = review_claims(text)
     if not claims:
         return "", ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import time
+    end = time.monotonic() + REVIEW_CHECK_BUDGET  # one budget for every claimed PR and every read, so the hook ends under its timeout
+    _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
     if not own_id or not _own_lane_read(hook.get("transcript_path"), own_id)[0]:
@@ -2573,9 +2681,9 @@ def review_record_problem(hook, text):
             if merge_mod is None:
                 raise ImportError("merge/merge.py not found")
             cwd = hook.get("cwd")
-            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)["head"]["sha"]
+            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd, end)["head"]["sha"]
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
-                              "--paginate", "--slurp"], cwd)
+                              "--paginate", "--slurp"], cwd, end)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
             rec, body = _newest_record(n, comments, merge_mod)
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
@@ -2584,9 +2692,29 @@ def review_record_problem(hook, text):
         if rec is None and body is not None:
             cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
             reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
-        elif not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
+        elif not rec or rec["n"] != n:
             reasons.append(REVIEW_NO_RECORD % (n, n, n))
+        else:
+            state, why = _live_state(merge_mod, rec, live, cwd, end)
+            if state in ("open", "held"):
+                reasons.append(REVIEW_NOT_DONE % (n, state, why))
+            elif state != "done":
+                reasons.append(REVIEW_NO_RECORD % (n, n, n))
+            if getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", None) and merge_mod.REVIEW_SURVIVAL_UNKNOWN in why:
+                notes.append("Review-record guard: PR #%d reads stale: %s." % (n, why))
     return " ".join(reasons), " ".join(notes)
+
+
+def _live_state(merge_mod, rec, live, cwd, end):
+    """(state, why) of `rec` for the live head, from merge/merge.py live_review_state: the one read `merge --reviewed` makes, so the guard and
+    the list agree on a record that survives clean merges of main. Its reads share the time left of the whole check's budget (`end`). Any error reads as stale, so
+    a record this check cannot prove done still blocks, as a stale record did before the clean-merge read."""
+    try:
+        with merge_mod.shared_deadline(_time_left(end)):
+            host = merge_mod.Host(cwd=cwd or None)
+            return merge_mod.live_review_state(host, rec, live, host.base)  # a fresh Host: its base is main, as `merge --reviewed` reads it
+    except Exception as err:  # never a pass: the record is not proven done
+        return "stale", "%s: %s" % (getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", "the clean-merge read is unknown"), type(err).__name__)
 
 
 def refusal_reason(tools, hold=""):
@@ -2597,11 +2725,14 @@ def refusal_reason(tools, hold=""):
     names = ", ".join("`%s`" % tool for tool in tools)
     return (held + " " if held else "") + owner_line(
         "Refusal guard (decision refusals-reach-the-owner)",
-        "the auto-mode classifier refused %s this session, and the reply does not raise it with the owner" % names)
+        "the auto-mode classifier refused %s this session, and the reply does not raise it with the owner. "
+        "A refused tool clears when the reply names it in backticks under Input Needed, "
+        "or writes \"`<tool_name>`: refusal was right\". "
+        "An MCP tool counts by its full name, with or without backticks" % names)
 
 
 def _marker_path(hook):
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import local_time
     return local_time.report_marker_path(hook.get("session_id"))
 
@@ -2719,7 +2850,7 @@ def has_input_needed(text):
     if "input needed" not in text.casefold():
         return False
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         from reply_judge import has_input_needed as home
         return home(text)
     except Exception:
@@ -2735,7 +2866,7 @@ def asked_text(text):
     questions = prose_questions(text)
     if not questions:
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form  # the one home of the Unvetted line
     # An Unvetted marker after the question's own sentence, on its line, goes on a line of its own.
     questions = [UNVETTED_AFTER_SENTENCE.sub(r"\1\n", q) for q in questions]
@@ -2746,14 +2877,14 @@ def asked_text(text):
 def cannot_run(asked, why):
     """The Unvetted refusal for a check that could not run, or '' when the asked text carries its own
     `Unvetted:` line. The marker is read only here, so it never skips a check that can run."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
 def past_ruling_problem(asked, cwd):
     """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
@@ -2818,7 +2949,7 @@ def question_keys_problem(after, text):
     """The refusal text when two questions share an option key (question_form.key_overlap), else ''."""
     if "input needed" not in text.casefold():
         return ""
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    _hooks_on_path()
     import question_form
     clash = question_form.key_overlap(text, earlier_replies(after, text))
     return KEYS_REASON % clash if clash else ""
@@ -2946,7 +3077,7 @@ def triage_hold(hook, records, active):
         entries = stalled_entries(records)
         if not entries:
             return ""
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         from guard_merge import _own_tier_proved
         if not _own_tier_proved(hook.get("transcript_path"), HOLD_TIER):
             return ""
@@ -3017,7 +3148,7 @@ def main():
     reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
     hand_off, hand_note = "", ""
     try:
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        _hooks_on_path()
         hand_off, hand_note = hand_off_problem(hook, reply)
     except Exception as err:  # a read that could not run is UNKNOWN, never clear
         hand_note = "Hand-off guard: UNKNOWN, the check did not run (%s)." % type(err).__name__

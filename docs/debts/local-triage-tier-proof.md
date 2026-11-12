@@ -6,7 +6,7 @@
 
 **Where.** `hooks/guard.py` rule `roadmap-one-writer` (one writer for the roadmap branch). Roadmap step `local-triage-tier-proof` (local triage tier proof). For the local lane: `override.remote_session_id` in `hooks/override.py`, read by `orchestrator_merge_write_hit` in `hooks/guard.py`.
 
-**Decision.** `session-tiers` (the session shapes). For the local lane: `builders-cannot-edit-tests` (the merge route).
+**Decision.** `session-tiers` (session roles). For the local lane: `builders-cannot-edit-tests` (the merge route).
 
 **Retire.** A local triage session on a Mac and on a Windows PC proves its tier, and its roadmap push passes. A guard test shows the push refused before the fix and passed after it, on both platforms. Any other session's roadmap push stays refused. A local lane session's merge write of a conflicted product file is refused on both platforms.
 

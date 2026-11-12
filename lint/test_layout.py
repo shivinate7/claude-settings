@@ -1019,6 +1019,67 @@ class WaitingPageBranding(Tree):
                     self.layout.waiting_page_icon(self.tree)
 
 
+class PageWriterKey(Tree):
+    """A repo's extras file names the session id of its waiting page's writer ("page-writer"). The Stop
+    check reads it when the transcript holds no meta/page read (report_guard.py question_problem)."""
+    SESSION = "session_013NEJL1nAsHBKJTpeHV1sJN"
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def test_the_key_reads_its_session_id(self):
+        # Catches: the "page-writer" key not read, or read as another value.
+        self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": self.SESSION}))
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+        self.assertEqual(self.layout.page_writer_key(self.tree), self.SESSION)
+
+    def test_no_extras_file_or_no_key_is_none(self):
+        # Catches: a repo with no writer key read as having a writer, with or without an extras file.
+        self.assertIsNone(self.layout.page_writer_key(self.tree), "a repo with no extras file has a writer")
+        self.put(EXTRAS, json.dumps({"kinds": {}, "waiting-page": "https://claude.ai/artifact/abc123"}))
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+        self.assertIsNone(self.layout.page_writer_key(self.tree), "a repo with no writer key has a writer")
+
+    def test_null_empty_or_not_a_string_is_none(self):
+        # Catches: a key holding no session id read as a writer id, so a send to any id would pass the Stop check.
+        for bad in (None, "", 5, ["session_013NEJL1nAsHBKJTpeHV1sJN"], {"id": "session_013NEJL1nAsHBKJTpeHV1sJN"}):
+            with self.subTest(bad=bad):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": bad}))
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "a key that holds no session id has a writer")
+
+    def test_whitespace_only_key_is_none(self):
+        # Catches: a key of spaces, tabs or newlines read as a writer id, so a send that names no session passes the Stop check.
+        for blank in ("   ", "\t", " \n "):
+            with self.subTest(blank=blank):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": blank}))
+                self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "a whitespace-only key has a writer")
+
+    def test_padded_key_is_none(self):
+        # Catches: a session id with spaces or a newline around it read untrimmed, so no send to the real id matches it.
+        for padded in (" " + self.SESSION + " ", self.SESSION + "\n", "\t" + self.SESSION):
+            with self.subTest(padded=padded):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": padded}))
+                self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "a padded key has a writer")
+
+    def test_send_alias_key_is_none(self):
+        # Catches: "parent" and "@parent", the send aliases, read as a session id, so a send to the alias names a writer.
+        for alias in ("parent", "@parent"):
+            with self.subTest(alias=alias):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": alias}))
+                self.assertTrue(os.path.isfile(os.path.join(self.tree, *EXTRAS.split("/"))), "scope: the checkout holds the extras file")
+                self.assertIsNone(self.layout.page_writer_key(self.tree), "a send alias has a writer")
+
+    def test_a_normal_session_id_still_reads(self):
+        # Catches: the blank, padded and alias rules refusing a normal session id, so a real writer is lost.
+        for sid in ("session_01ABC", self.SESSION):
+            with self.subTest(sid=sid):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "page-writer": sid}))
+                self.assertEqual(self.layout.page_writer_key(self.tree), sid)
+
+
 class RolledOutMark(Tree):
     """An extras file alone is not the mark: "rolled-out": true is (waiting page item 29 (a), the rolled-out mark is its own key).
     Keys that are not about folder placement read whenever the file exists."""
@@ -1302,6 +1363,7 @@ class ConstantCheck(Tree):
         tracked_tree.copy_tracked(self.tree, "lint", "actions")  # the lint readers, the actions and the stamp examples
         os.makedirs(os.path.join(self.tree, "hooks"))  # the check parses hooks/ text and imports none of it
         shutil.copyfile(os.path.join(REPO, "hooks", "guard.py"), os.path.join(self.tree, "hooks", "guard.py"))
+        shutil.copyfile(os.path.join(REPO, "hooks", "git_reads.py"), os.path.join(self.tree, "hooks", "git_reads.py"))
         for name in ("layout.py", "layout.json", "check_layout.py"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
 
@@ -1398,6 +1460,12 @@ class ConstantCheck(Tree):
         self.edit("hooks/guard.py", 'RECORD_LAYOUT_FILE = os.path.join("lint", "layout.json")',
                   'RECORD_LAYOUT_FILE = os.path.join("lint", "check_record_slugs.py")')
         self.assert_red("RECORD_LAYOUT_FILE")
+
+    def test_extras_literal_that_drifts_from_the_layout_is_red(self):
+        # hooks/git_reads.py repeats the layout's "extras" path so a lane reads one file; the check pins it like RECORD_LAYOUT_FILE.
+        self.edit("hooks/git_reads.py", 'LAYOUT_EXTRAS = (".claude", "layout-extras.json")',
+                  'LAYOUT_EXTRAS = (".claude", "extras.json")')
+        self.assert_red("LAYOUT_EXTRAS")
 
     def test_action_default_that_names_a_folder_is_red(self):
         self.edit("actions/ruling-kind/action.yml", 'default: ""', "default: decisions")
@@ -1497,7 +1565,7 @@ SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asse
 class MockupHomes(Tree):
     """The one mockup home of a repo is its design folder: a mockup is a repo path under it, and git holds it. The
     machine-home form ~/Developer/<repo name>-imports is refused. Two readers:
-    mockup_homes(root, home=None) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
+    mockup_homes(root) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
     file in the design folder and a sentence for any other file. The home is passed in, so no case reads or writes
     the real home. A missing name fails by name (not built yet)."""
 

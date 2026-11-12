@@ -15,8 +15,10 @@
 5. The install makes the pinned checkout when it is missing. Where the OS refuses symlinks, the install copies instead.
 6. When the step cannot move or install, it fails loudly. It prints one line that says the install did not run and names what to
    do. It exits non-zero, so the merge tool reports FAILED. The merge stays. A merge run from a worktree made before this
-   change cannot find the script, so the tool reports FAILED. When the local main does not move, the install runs from the old
-   main and the tool reports the failed move and exits non-zero (owner ruling, undated).
+   change cannot find the script, so the tool reports FAILED. The installer fetches origin's main and fast-forwards local main to
+   it (owner ruling 2026-11-11 14:19 CST: 'the installer fetches and uses origin's main'). A local main that holds commits origin
+   lacks, including unrelated history, is refused: one 'install not run' stderr line, exit 1, nothing installs, the pin does not
+   move. Only a failed or impossible fetch (offline, no origin remote) warns and installs local main, as before.
 
 Open: the SessionStart refresh lock has no test. A refresh child that outlives 10 minutes can remove a
 newer start's lock (debt `refresh-lock-untested`).

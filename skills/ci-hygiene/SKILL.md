@@ -60,15 +60,17 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
-   each lane head before the build starts, once per lane. A red lane does not join. Before it marks the integration PR
-   ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
-   head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
+   each lane head before the build starts, once per lane. A red lane does not join. Before it marks
+   the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
+   on the batch head, after the draft step's page push. A ref target posts no comment, so it cannot
+   satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
+   merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
    freezes at its build). A release or a drop that arrives after that goes to the next batch. It never
-   triggers a rebuild. The one change after the freeze is the drop of a red run's blamed lane, with any
-   lane that depends on it. Build the batch as a draft,
+   triggers a rebuild. The one change after the freeze is the drop of a blamed lane, with any
+   lane that depends on it. A lane is blamed when a red run of the batch head names it. Build the batch as a draft,
    run the batch-head lane lint, then mark the integration PR ready, with no rebuild between
    (decision `draft-until-reviewed`). A draft run skips every job, so never rebuild a draft batch
    only to close it. The
@@ -76,8 +78,15 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the running batch may merge (decision `no-merge-during-batch-ci`, the contains rule). A drop
    changes the running batch's head, so the brake refuses that merge until the next batch is built
    on the new head.
-   The merge tool will enforce the freeze (step `batch-freeze-lane-set-enforce`, not built yet). Until
-   it lands, the batch runner holds the freeze by hand.
+   The merge tool enforces the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
+   builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. A changed set is
+   refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then the ready
+   checks, then records the head that passed. When the head moved since the last lint, it lints again. It does not mark the PR ready:
+   the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of the lint or of a ready check
+   stores the lanes it names (`Blamed:`). For a red CI run, `merge --batch-build NAME --blame PR --run <run URL>` stores the blame. It
+   refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
+   `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
+   to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
@@ -91,7 +100,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    lanes is two names, so read each lane's diff before you drop either. Example: the failing job
    reads `lint/foo.py`. Lane A's own search lists `lint/foo.py` and lane B's lists nothing. Blame A.
    (At 17:10 CST on Nov 8 two searches printed together, so the runner blamed lane B for lane A's
-   red.) Drop that lane and any lane that depends on it. Rebuild the branch from main without them. Never
+   red.) Store the blame with `merge --batch-build NAME --blame PR --run <run URL>`. Then drop that lane and any lane that depends on it. Rebuild the branch from main without them. Never
    revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
    file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
    reason to drop the lane.
@@ -112,13 +121,14 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
    refused, except a small move.
    "No conflicts" does not prove the lanes work together. A green integration run does not prove that
-   no line was lost either. Run `lint/check_silent_undo.py` before the merge.
+   no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
    Batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
-   pr-ready-mcp-cloud); it sends no wake, so wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
+   pr-ready-mcp-cloud); the same CI-wake notice is meant to follow (decision `ci-wait-reads-run-status`; unmeasured in cloud), so
+   also wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
    Monitor tool (decision `agents-wait-with-monitor`, agents wait with the Monitor tool). See

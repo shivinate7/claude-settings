@@ -82,6 +82,15 @@ def _shared():
     return importlib.import_module("shared_names")
 
 
+def _printed_line():
+    """The line local_time prints: the time line, then NOW_CENTRAL_POINTER on that same line. The
+    constant is read from local_time, never copied (building-allow-list-is-the-constant)."""
+    pointer = getattr(importlib.import_module("local_time"), "NOW_CENTRAL_POINTER", None)
+    if not isinstance(pointer, str):
+        raise AssertionError("local_time has no NOW_CENTRAL_POINTER string, so the printed line is not pinned")
+    return TIME_LINE.rstrip("\n") + pointer + "\n"
+
+
 def case_module_exists():
     path = os.path.join(HERE, "shared_names.py")
     return os.path.isfile(path), "hooks/shared_names.py is %s" % (
@@ -243,16 +252,18 @@ def case_local_time_output_unchanged():
         s1 = os.path.exists(os.path.join(cfg, "handoffs", "s1.inbox.md"))
         override = _run_local_time(cfg, "override", "s3").stdout
     want_inbox = "### 2026-07-04 10:30 CDT (UTC-05:00)\n```\nfb real note\n```\n"
-    want_override = TIME_LINE + ("Override: the next refused act goes through, once. "
-                                 "It ends at 10:40 CDT if unused.\n")
-    ok = (outs == [TIME_LINE] * 4 and saved == want_inbox and not s1 and override == want_override)
+    printed = _printed_line()
+    want_override = printed + ("Override: the next refused act goes through, once. "
+                               "It ends at 10:40 CDT if unused.\n")
+    ok = (outs == [printed] * 4 and saved == want_inbox and not s1 and override == want_override)
     return ok, "stdouts ok=%s, s2 inbox ok=%s, tagged prompts saved nothing=%s, override ok=%s" % (
-        outs == [TIME_LINE] * 4, saved == want_inbox, not s1, override == want_override)
+        outs == [printed] * 4, saved == want_inbox, not s1, override == want_override)
 
 
 def case_local_time_fails_open_on_bad_shared_names():
     """A missing or stale shared_names.py (no MACHINE_TAGS) must not stop the time line or an
     override grant: the install can land local_time.py before its sibling."""
+    printed = _printed_line()
     bad = []
     for label in ("absent", "stale"):
         with tempfile.TemporaryDirectory() as scratch:
@@ -270,7 +281,7 @@ def case_local_time_fails_open_on_bad_shared_names():
             done = subprocess.run([sys.executable, os.path.join(hooks, "local_time.py")],
                                   input=json.dumps({"session_id": "s1", "prompt": "override"}),
                                   capture_output=True, text=True, env=env)
-            if not (done.returncode == 0 and done.stdout.startswith(TIME_LINE)
+            if not (done.returncode == 0 and done.stdout.startswith(printed)
                     and "Override:" in done.stdout):
                 bad.append("%s: rc=%s stdout=%r" % (label, done.returncode, done.stdout[:60]))
     return not bad, "bad states: %s" % (bad or "none")

@@ -68,6 +68,18 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        agent-worktree-discard-is-noted)
   pointer-head         deny. A command that moves HEAD off `main` in the pointer checkout.
                        A move to `main` passes.
+  two-worktrees-one-branch
+                       deny. A `checkout -B` or `switch -C` of a branch another worktree of the clone holds, a
+                       forced `worktree add` of one, or `checkout` or `switch` with
+                       `--ignore-other-worktrees` and any branch. The worktree list is read only for these forms,
+                       and a read that fails refuses. An override lifts it.
+  pointer-edit         deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
+                       pointer checkout's own files. The pointer's `.git`, a linked worktree under
+                       `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
+                       missing pointer and the read tools pass. A shell write is not judged. The
+                       reason names the EnterWorktree tool. An override lifts a direct pointer path. A
+                       config-dir spelling of a pointer file is frozen (never_lifted calls is_frozen
+                       per target), so no override lifts it, as with frozen-path. It spawns no git.
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -114,21 +126,50 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
-  push-main            ask. A non-forced push whose destination is literally main or master,
-                       `--all` included, to a network remote. A remote the shell has not expanded
-                       counts as one. The remote's HEAD is not read. A dry run passes.
+  push-all-main        deny. A non-forced `--all`, `--branches` or glob refspec (`refs/heads/*:refs/heads/*`)
+                       to a network remote that may update main or master there: local main or master
+                       exists and `refs/remotes/<remote>/<name>` is missing or differs from it. A
+                       matching ref is trusted, and the remote is never contacted. It never asks. The
+                       same verdict from a main, lane, detached or agent checkout, except `--all` from
+                       an agent checkout, which is push-agent-branch's. It also refuses while a local
+                       branch named like an agent worktree exists that the push sends (every branch for
+                       `--all` and `--branches`; for a glob, the branches its source side matches, under
+                       any target name), whether or not main would update. Its remedy is a push of
+                       named branches. A dry run and a local path pass.
+  push-main            ask. A non-forced push whose destination is literally main or master, to a
+                       network remote: `main` alone, and `main` with a lane-named branch. An
+                       agent-named destination in the same push is push-agent-branch's, which refuses.
+                       A remote the shell has not expanded counts as one. The remote's HEAD is not
+                       read. A dry run passes.
   push-stray-branch    ask. An implied push (bare, `HEAD`, `@`, or a colon-less refspec naming the
                        current branch) that writes a name other than the branch's upstream. It is silent
                        when the clone holds `refs/remotes/<remote>/<name>`. It asks only with an
                        upstream on the pushed remote that is not main or master.
-  push-agent-branch    ask. A non-forced push whose destination branch name is an agent-worktree name
+  push-agent-branch    deny. A non-forced push whose destination branch name is an agent-worktree name
                        (agent-<hex>, claude/agent-<hex>, worktree-agent-<hex>, 8+ hex), with or without
-                       -u. No upstream is needed. A delete, a mirror and a dry run pass.
+                       -u. No upstream is needed. It holds when `main` comes first in the same push
+                       (`main HEAD:agent-<hex>`, `main agent-<hex>`), from any checkout. It also holds
+                       for `--all` or `--branches` from an agent checkout, to a network remote, because
+                       that push sends the agent branch too. A delete, a mirror and a dry run pass.
   env-file             deny. Any read or write of an environment file.
+  process-args         deny. A command that prints other processes' full arguments, which can hold a
+                       secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
+                       `ps -x`, `pgrep -a` or `-l` with `-f`, `pstree -a`, `top -c`, a command or `<`
+                       redirect that reads `/proc/<pid|glob|$var>/cmdline`, and a PowerShell or `wmic`
+                       read that selects `CommandLine`. Pid and name forms pass. Read from the parsed
+                       command words, also inside wrappers, `bash -c` and `$(...)`, so quoted text and a
+                       heredoc body pass. (process-args-guard)
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
+  merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
+                       --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
+                       the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
+                       session's own newest get_session record names (`repo_tag_names`), or when a
+                       set_session_tags follows that record. No record, an unreadable checkout or unparseable
+                       flags is a refusal. --lane-lint is not judged. Outside the cloud nothing is judged.
+                       (merge-confirm-repo)
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
@@ -149,21 +190,54 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        an open or merged pull request's head. An `archive/<branch>` copy holding the tip covers. No record of the target, a lane with no cs-step or cs-repo
                        tag, and a read that fails (gh missing too) are refusals. A target with no lane tag passes.
                        An override lifts it.
-  lane-one-topic      deny. A send_message whose first non-blank line starts with the marker
+  lane-one-topic      deny. A send_message whose first non-blank line, or the first after a leading `Grant:` line
+                       (shared_names.LANE_GRANT_MARKER), starts with the marker
                        `Lane brief: <step>. Topic: <topic>.` (guard_merge.LANE_BRIEF_MARKER), when the target's newest
                        record (get_session, or the create_session that made it, read from the transcript) is tagged
                        cs-build:lane and its cs-topic tag differs from the brief's Topic, or the brief names none. A lane
                        with no cs-topic is judged by its cs-step tags: the brief's step must be one. The marker matches
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
-                       its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
+                       its record, and a marker brief with no record of the target, are refusals. A `Grant:` line before the marker
+                       that holds a `<` or no letter or digit is a refusal. A lane `create_session` whose prompt has the marker
+                       line is judged the same way against its own tags, with no transcript read. A message without the marker reads no transcript. An
                        override lifts it.
+  message-time-matches-clock
+                       deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 4 words,
+                       then `,` or `:` or a dash spaced on both sides, an optional date, then `H:MM` or `HH:MM`, an
+                       optional `:SS`, and `CST` or `CDT` in any case, after optional markdown lead characters. The
+                       refusal fires when the zone name is not the clock's own (local_time's DST rule), whatever the
+                       minutes; when a dated stamp is more than 1 minute ahead of the clock (local_time.clock); or
+                       when an undated stamp is 2 to 60 minutes ahead, as a signed minute-of-day offset mod 1440. An
+                       undated stamp more than 60 minutes ahead reads as a quote from an earlier day, and passes; so
+                       does a stamp behind. The reason steers to your own label and prints the real time. No
+                       transcript or process; a missing clock module passes the message. A dated limit of 1 minute ahead also judges
+                       three written values, each an ISO instant with an offset: `added` in an ArtifactData set,
+                       update or batch write to collection items (inline, through `file_path`, one local file read
+                       only for an items write with no inline data, or as a str_replace's new text or time
+                       fragment); in roadmap/data/steps/<name>.json, `updatedAt` in a Write and every instant in an
+                       Edit's or MultiEdit's new text; the last literal `updatedAt` in a Bash command, single- or double-quoted, read as text. The reason prints the time in Central and ISO. One clock read only when
+                       a judged value is present. An override lifts it.
+  agent-no-remote-tools
+                       deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
+                       tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
+                       scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
+                       An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
+                       ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
+                       or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
+                       explicit GET and the merge tool pass. A local session skips it. An override lifts it.
+  records-page-ready   deny. Marking a pull request ready (MCP update_pull_request with draft false, or the gh ready
+                       command without --undo) while its head's records page is stale, or when that read cannot run, in
+                       a repo that uses the merge tool. A base that is not the default branch, a head holding a
+                       Record-claim, a head behind the base, and a current page pass. (records-index-at-merge)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
-                       A merge's own page at MERGE_HEAD, on the base's first-parent line, passes.
+                       A merge's own page at MERGE_HEAD passes: MERGE_HEAD is on the base's first-parent
+                       line, or the lane is stacked on a base that main has not merged.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
                        line in one file's added lines, read with `git diff --check`: the index, or the working
@@ -175,6 +249,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        could not judge, when that commit covers a triplet already in the tree or the chain
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
+  octopus-push         deny. A `git push` whose range (the pushed ref, else HEAD, less every ref of the pushed
+                       remote, else origin) adds a merge commit of more than two parents; a merge that a
+                       ref of the pushed remote already holds passes. A dry run and a destination named main or master are
+                       left out; push-main asks about the latter. A remote named by a URL or a path
+                       counts every remote's refs. Cost: one `git rev-list` per pushed ref, and one `git
+                       config` more per pushed ref for such a remote. (octopus-push-refused)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -226,6 +306,14 @@ Other tools, in `judge` order:
                        `.git`, a target outside the clone, reads and non-writing shell pass. A git
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
+  scratchpad-owner     deny. A call with a valid `agent_id` that runs a file in this session's scratchpad, or
+                       writes over one, that another agent wrote. Each such write records its agent in a
+                       sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
+                       command word; a write is a Write-family target or a shell write target. A first
+                       write, the agent's own file, a file that no longer exists, a call with no `agent_id` (its
+                       write deletes the file's record) and a read pass. A refused write leaves the record with the first
+                       writer; an override that lifts it moves the record. The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
+                       (scratchpad-owner)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
                        pin and no default model is set. An Explore whose brief's first line
@@ -271,8 +359,11 @@ Other tools, in `judge` order:
                        `Add a case:` before the span; a span with never, do not, don't or no in its own clause
                        (no `;`, `.` or `,` between) within 4 words before it. Prose with no span is not read. Any
                        role. An override lifts it. (brief-destructive-git)
-  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
-                       not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
+  lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose `effort` field is not
+                       exactly `medium` (LANE_EFFORT), or whose prompt's first non-blank line does not
+                       start `Grant: ` (LANE_GRANT_MARKER) with the owner's words after it: a letter or digit, and no `<`
+                       (shared_names.grant_line_holds_words). The prompt is
+                       the whole brief, the Grant line first. A lane tag is
                        any tag that, stripped and casefolded, is `cs-build:lane`; `tags` may be a
                        string. A call with no lane tag passes. An override lifts it.
                        `session_home_keep` skips this tool. (agent-model-cap)
@@ -285,12 +376,22 @@ Other tools, in `judge` order:
                        the host is never read. With no readable repo, any tag `cs-repo:<owner>/<name>`
                        passes. The deny reason names the tag to add.
                        Runs after lane-effort-pin. An override lifts it. (agent-model-cap, session-tiers)
+  lane-start-settings  deny. A `create_session` call with a lane tag (as for lane-effort-pin) whose input has no
+                       `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
+                       stripped, counts as missing. A call with no lane tag passes. The deny reason names both
+                       fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
                        `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
                        calls. The transcript is read only at full. A cloud session skips it. An override lifts it.
                        (machine-load-brake)
+  workflow-args-shape-check
+                       deny. A Workflow call whose `args` is, or holds as an array item or object value (one
+                       level down), a placeholder: the whole value is an all-caps word with an underscore
+                       (`FACT_CLOSE_PLACEHOLDER`, `PR_NUMBER`) or a `__X__` word. A sentence that holds one, a
+                       short all-caps word, no args and empty args pass. A bare env var name as the whole value
+                       is refused too; an override lifts it for a real one. (workflow-args-shape-check)
   merge-checks, draft-pr, impeccable-review-only
                        deny. The MCP merge, pull request and Skill forms of the rules above.
   simulator-boot-bypass
@@ -329,6 +430,23 @@ Other tools, in `judge` order:
                        An override lifts it. Cost: reads on demand inside this call, one small read of the
                        prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
                        (precompact-handoff, item 14)
+  handoff-checked-stamp
+                       deny. A Write, Edit or MultiEdit to a session handoff (as handoff-sections judges it)
+                       that changes a premise's stamp (the line's text from its last `Checked` or `Re-checked`
+                       word, so a respelled, dropped or new stamp is a change), unless the session's transcript
+                       backs it. A premise is judged by its kind before the write; a new line by its own kind.
+                       Evidence: a successful, read-type, main-session tool_use after the last
+                       `compact_boundary` (none: the whole transcript) whose input holds a token of the
+                       premise's `Source:` (a path, a 7+ hex hash, a backticked command, a record slug); with
+                       no token, any one read-type call. No evidence: a Write or Edit of any file, an Agent
+                       call, a send or PR-write tool, a call that failed, any agent record (isSidechain or
+                       agent_id), and the handoff itself. An unchanged stamp, `Checked never`, a `ruling`
+                       premise and a handoff with no premise lines pass. The reason gives one remedy line per
+                       unbacked premise, naming its token or "any read". No transcript_path, an unreadable
+                       transcript, handoff or prompt, and a failed import allow. An override lifts it. Cost:
+                       reads on demand inside this call, the transcript once and only when a stamp changed,
+                       one more small read of the prompt, and for a Write the handoff on disk; no new log,
+                       hook, file or process start. (precompact-handoff, item 15)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -394,7 +512,7 @@ if sys.path[:1] != [_HERE]:
 # The rule families in import order: each one imports only guard_core and the families before it.
 _FAMILY_MODULES = ("guard_branch_worktree", "guard_shared_tree", "guard_pointer",
                    "guard_push_delete", "guard_merge", "guard_frozen", "guard_env",
-                   "guard_kill", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
+                   "guard_kill", "guard_argv", "guard_stream", "guard_rm_var", "guard_mask_script", "guard_wsl")
 # guard.py and each guard_*.py the installer copies carry `INSTALL_ID = "<id>"`, one value per install
 # run, stamped at copy time in place of the whole commented placeholder line below. A file with no such line is a placeholder
 # (the repo copy, or an old file from before the stamp). A set of all placeholders matches, which is the
@@ -436,7 +554,7 @@ while True:
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, nested_script, norm,
-            _segment_cd_target, _strip_heredoc_bodies_unconditionally,
+            _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
             segment_tokens, split_segments, strip_heredoc_bodies,
@@ -447,34 +565,38 @@ while True:
             BRANCH_DELETE_DENY_REASON, WORKTREE_PRUNE_ASK_REASON, WORKTREE_REMOVE_DENY_REASON,
             worktree_remove_forced,
         )
+        from guard_branch_worktree import TWO_WORKTREES_REFUSE_REASON, two_worktrees_hit
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
+            scratchpad_clear_writer, scratchpad_record_writer, scratchpad_writer_of,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_head_hit,
+            POINTER_EDIT_REASON, POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_edit_hit, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_AGENT_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
+            PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
+            rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, _push_calls, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit, interpreter_may_write,
-            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
+            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -489,6 +611,8 @@ while True:
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
             lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
+        _loading = "guard_argv"
+        from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
@@ -1143,15 +1267,18 @@ def handoff_sections_result(tool, tool_input, target, cwd):
     return before, text
 
 
-def handoff_sections_hit(tool, tool_input, target, cwd):
+def handoff_sections_hit(tool, tool_input, target, cwd, result=False):
     """The required handoff sections a write to a session handoff would drop, as one text, else "". The
     list is the prompt's marker, read by precompact_handoff.missing_sections, which fails open: an unread
     prompt or marker gives none. A Write is refused for any name its text lacks. An Edit or MultiEdit is
     refused only for a name the result lacks and the file holds now: it drops nothing from a handoff that
     already lacked the name. The prompt is read once per call, and both texts are judged against that read.
-    A failed import allows."""
-    result = handoff_sections_result(tool, tool_input, target, cwd)
-    if result is None:
+    A failed import or a `result` that is not a (before, after) pair of texts allows. `result` is
+    handoff_sections_result's value when the caller has it already."""
+    if result is False:
+        result = handoff_sections_result(tool, tool_input, target, cwd)
+    if result is None or not (isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], str)
+                              and (result[0] is None or isinstance(result[0], str))):
         return ""
     try:
         from precompact_handoff import missing_sections, required_sections
@@ -1166,20 +1293,65 @@ def handoff_sections_hit(tool, tool_input, target, cwd):
     return ", ".join(gone)
 
 
+HANDOFF_STAMP_REASON = (
+    "Rule (handoff-checked-stamp): this write restamps the Checked value of a premise in the session handoff, and "
+    "this session's own transcript holds no check of it since its last compact boundary. A stamp says you checked "
+    "the premise. Remedy: check each premise below, then repeat the call, or write `Checked never` on it.\n%s\n"
+    "(decision precompact-handoff, item 15)"
+)
+
+
+def handoff_stamp_hit(tool, tool_input, target, cwd, transcript, result):
+    """(remedy lines, ids) for the premises that a write to a session handoff restamps with no evidence in the
+    session's transcript, else None. A premise's before kind judges it, a stamp spelled other than `Checked <value>`
+    counts, and only a read-type call that did not fail backs a token (precompact_handoff.backed_premises).
+    `result` is handoff_sections_result's (before, after), None for no handoff. A Write has no before, so the handoff on disk is its before (a missing file holds none). Premise parsing and the
+    transcript scan are precompact_handoff's. The transcript is read once, and only when a stamp changed. Fails open:
+    no transcript_path, an unreadable transcript, handoff or prompt, a prompt with no premises name, a failed import."""
+    if result is None or not isinstance(transcript, str) or not transcript:
+        return None
+    try:
+        import precompact_handoff
+        name = precompact_handoff.premises_section()
+        if not name:
+            return None
+        before, after = result
+        path = os.path.expanduser(target)
+        path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+        if before is None:
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    before = handle.read()
+            except FileNotFoundError:
+                before = ""
+        need = precompact_handoff.stamp_changes(before, after, name)
+        backed = precompact_handoff.backed_premises(transcript, need, path) if need else None
+    except Exception:
+        return None
+    if backed is None:
+        return None
+    unbacked = [(pid, tokens) for pid, tokens in need if pid not in backed]
+    if not unbacked:
+        return None
+    lines = ["  %s: %s." % (pid, "read or run " + " or ".join(tokens[:3]) if tokens else "any read")
+             for pid, tokens in unbacked]
+    return "\n".join(lines), ", ".join(pid for pid, _tokens in unbacked)
+
+
 OTHER_CHECKOUT_REASON = (
     "Rule (other checkout): this write lands in another checkout of this clone, not the one this "
     "session stands in. "
     "Remedy: write only inside your own checkout, or report the change to the session that owns "
-    "the other one. To remove a whole worktree, use `git worktree remove`, or leave it to the "
-    "janitor sweep."
+    "the other one. To work in a checkout you own, call the EnterWorktree tool with `path` set to "
+    "it. To remove a whole worktree, use `git worktree remove`, or leave it to the janitor sweep."
 )
 
 OTHER_CHECKOUT_CD_DETAIL = "cd into another checkout: "
 OTHER_CHECKOUT_CD_REASON = (
     "Rule (other checkout): this command changes directory into another checkout of this clone, "
     "not the one this session stands in. "
-    "Remedy: stay in your own checkout. To read another one, use `git -C <dir>` or a path, never "
-    "`cd`."
+    "Remedy: stay in your own checkout. To work in a checkout you own, call the EnterWorktree tool "
+    "with `path` set to it. To read another one, use `git -C <dir>` or a path."
 )
 
 OTHER_CLONE_DETAIL = "write into another clone: "
@@ -2404,9 +2576,10 @@ def merge_tree(root: str, ours: str, theirs: str):
 
 def merge_route_paths(conflicts):
     """The paths a test-author owns in a merge that left `conflicts` (decision builders-cannot-edit-tests).
-    The route needs a test path among the conflicts, and covers product paths only: a workflow, test
-    config or manifest keeps its own content check (`role_offences`), so it is no product path."""
-    if not any(is_test_rel(path) for path in conflicts):
+    The route needs a test path or a mutation test (`AUTHOR_MUTATION_TESTS`) among the conflicts, and covers
+    product paths only: a workflow, test config or manifest keeps its own content check (`role_offences`),
+    so it is no product path."""
+    if not any(is_test_rel(path) or is_mutation_test_rel(path) for path in conflicts):
         return []
     return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]
 
@@ -2780,22 +2953,34 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
-# The one home of the claude-code-remote server name. lint/check_agent_models.py reads it from here.
-REMOTE_SERVER = "mcp__claude-code-remote"
-CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
+from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
+    CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
+)
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
-from shared_names import COORDINATOR_TAG, LANE_TAG  # noqa: E402  the one home of the tier tags, shared with lint/report_guard.py
+AGENT_NO_REMOTE_REASON = (
+    "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
+    "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
+    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "(decision lanes-start-as-agents, an agent is not a lane)"
+)
+from shared_names import COORDINATOR_TAG, LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the tier tags and the Grant reader, shared with lint/report_guard.py and guard_merge
 LANE_EFFORT_REASON = (
-    "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
-    "prompt. Start the lane with that prompt, then send the brief by send_message (decision agent-model-cap)."
-    % LANE_EFFORT
+    "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
+    "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
+    "effort field, and put the Grant line first in the prompt (decision agent-model-cap)." % LANE_EFFORT
 )
 # A template: %s is the tag the call must carry, `cs-repo:` plus the checkout's repo, or `cs-repo:<owner>/<name>`
 # when no repo reads.
 LANE_REPO_TAG_REASON = (
-    "A lane session carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "
+    "A lane carries the full `cs-repo` tag of the checkout that starts it. Add `%s` to the lane's "  # glossary-ok: session-tiers is the decision's file name, and Tier tags its heading
     "tags. A roll-out lane carries this repo's tag beside its target's (decision session-tiers, Tier tags)."
+)
+# A lane start names the model and the repo it works in. The reason names both fields and says why.
+LANE_START_SETTINGS_REASON = (
+    "A lane's start names `model` and `source_url`. With no repo a lane has nothing to work in; with no "
+    "model it starts on the coordinator's model, not the model its row in decision agent-model-cap names. Pass "
+    "`model` (the model that row names) and `source_url` (the repo) on create_session."
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
@@ -2804,6 +2989,10 @@ HAIKU_ROLES = ("Explore", "claude-code-guide", "test-author", "reviewer", "recor
 MODEL_FLOOR_REASON = (
     "Sonnet is the floor for this role. Start the agent or session with model sonnet, "
     "or name no model and let the default apply."
+)
+# A lane start may not drop the model (rule lane-start-settings), so its remedy names both required inputs.
+LANE_MODEL_FLOOR_REASON = (
+    "Sonnet is the floor for a lane. Start the lane with model sonnet and the source_url of its repo."
 )
 AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
@@ -2926,19 +3115,21 @@ def floor_hit(tool: str, tool_input) -> str:
 
 
 def lane_effort_hit(tool: str, tool_input) -> str:
-    """The prompt of a create_session call that tags a lane and is not the effort command exactly, or "".
-    A slash command runs only as the whole prompt, so the compare is exact: no strip. A lane tag is any
-    tag that, stripped and casefolded, is LANE_TAG; `tags` may be one string. A call with no lane tag
-    is not judged. A missing prompt is not the command."""
-    tags = tool_input.get("tags")
-    if tool != CREATE_SESSION_TOOL:
+    """What breaks the lane start of a create_session call that tags a lane, or "": the effort field when it
+    is not exactly LANE_EFFORT, else the prompt's first non-blank line when it is not a Grant line
+    (LANE_GRANT_MARKER, then the owner's words: grant_line_holds_words). A lane tag is any tag that, stripped and casefolded, is
+    LANE_TAG; `tags` may be one string. A call with no lane tag is not judged. A missing prompt has no
+    Grant line."""
+    if not is_lane_create_session(tool, tool_input):
         return ""
-    if isinstance(tags, str):
-        tags = [tags]
-    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
-        return ""
+    effort = tool_input.get("effort")
+    if effort != LANE_EFFORT:
+        return "effort: " + str(effort if effort else "(none)")
     prompt = tool_input.get("prompt")
-    return "" if prompt == "/effort " + LANE_EFFORT else str(prompt or "(no prompt)")
+    first = next((ln.strip() for ln in prompt.splitlines() if ln.strip()), "") if isinstance(prompt, str) else ""
+    if grant_line_holds_words(first):
+        return ""
+    return "prompt: " + (first[:80] or "(none)")
 
 
 def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
@@ -2946,13 +3137,9 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
     ("", None). The repo is git_reads.github_repo of cwd, the one reading the roadmap build shares: the extras' "github"
     key first, then the origin's path. A lane tag is judged as in lane_effort_hit. With no readable repo, any full
     `cs-repo:<owner>/<name>` tag passes. One read of the repo feeds both the verdict and the deny reason."""
-    tags = tool_input.get("tags")
-    if tool != CREATE_SESSION_TOOL:
+    if not is_lane_create_session(tool, tool_input):
         return "", None
-    if isinstance(tags, str):
-        tags = [tags]
-    if not isinstance(tags, list) or not any(isinstance(t, str) and t.strip().casefold() == LANE_TAG for t in tags):
-        return "", None
+    tags = lane_tags(tool_input)
     repo = git_reads.github_repo(cwd) if isinstance(cwd, str) and cwd and os.path.isdir(cwd) else None
     # A tag is read as the roadmap reads it (repo_tag_names): exact prefix, no strip, owner/name without case.
     for tag in tags:
@@ -2961,6 +3148,17 @@ def lane_repo_tag_hit(tool: str, tool_input, cwd: str):
         if not repo and isinstance(tag, str) and tag.startswith(REPO_TAG) and FULL_REPO_TAG.fullmatch(tag[len(REPO_TAG):]):
             return "", None
     return ", ".join(str(t) for t in tags), repo
+
+
+def lane_start_settings_hit(tool: str, tool_input) -> str:
+    """The settings a lane `create_session` call leaves out, as "model", "source_url" or "model, source_url", or "".
+    A lane tag is judged as in lane_effort_hit. A value counts as missing when it is not text or is empty once
+    stripped. A call with no lane tag is not judged."""
+    if not is_lane_create_session(tool, tool_input):
+        return ""
+    missing = [k for k in ("model", "source_url")
+               if not (isinstance(tool_input.get(k), str) and tool_input[k].strip())]
+    return ", ".join(missing)
 
 
 # A builder's third-round marker is the `Round N of 3` line. The old `Try N of 3` line still counts until
@@ -3903,7 +4101,7 @@ def running_agent_hit(payload, tool: str) -> tuple:
     return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
 
 
-LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane session: end your turn now and send this "
+LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane: end your turn now and send this "
                             "reading to your parent with send_message to @parent, which frees space or waits for the "
                             "load to drop. " + LOAD_LANE_CITE)
 
@@ -4113,6 +4311,15 @@ def settle_ask(tool: str, raw: str) -> None:
     refuse(tool, "ask", rule, reason, matched)
 
 
+def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> None:
+    """Rule records-page-ready, the one refuse() for both forms of the ready mark: a shell call (judge_shell) and the MCP
+    update_pull_request (judge). Marking a pull request ready while its head holds a stale records page, or while that page
+    cannot be read, is refused. A call that marks nothing ready starts no process."""
+    hit = ready_page_hit(tool, tool_input, command, where)
+    if hit:
+        refuse(tool, "deny", "records-page-ready", hit[0], hit[1])
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
                 background: bool = False, description: str = "", payload=None) -> None:
@@ -4228,6 +4435,23 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = pointer_head_hit(segment, head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
+
+    # 1b2. A checkout, switch or forced worktree add that takes a branch another worktree holds.
+    # Each segment is judged in the tree it runs in: its own `git -C` or `--git-dir`, else the cwd as
+    # earlier `cd` segments left it. Placed after the pointer rule and before the silent-write rule;
+    # the worktree list is read only for a call of the refused forms.
+    here = cwd
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        words = segment_tokens(segment)
+        moved = _segment_cd_target(words) if words else None
+        if moved is not None:
+            here = _absolute(moved, here)
+            continue
+        matched = two_worktrees_hit(segment, head_root(segment, here))
+        if matched:
+            refuse(tool, "deny", "two-worktrees-one-branch", TWO_WORKTREES_REFUSE_REASON, matched)
 
     # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
     # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the
@@ -4419,26 +4643,47 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif verdict:
                 refuse(tool, verdict, "force-push", PUSH_REASON, "git push " + " ".join(args))
             elif not read_verb("push", args):
-                # A non-forced push that writes main or master (rule push-main), an agent-worktree
-                # branch name (rule push-agent-branch), or an implied destination off the branch's
-                # upstream (rule push-stray-branch). A dry run writes nothing.
+                # A non-forced push of every branch that may update main or master, or sends a local agent-named
+                # branch (rule push-all-main, refuses), one
+                # that writes main or master by name (rule push-main, asks), an agent-worktree
+                # branch name (rule push-agent-branch, refuses), or an implied destination off the branch's
+                # upstream (rule push-stray-branch, asks). A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
                                 "push to the default branch")
+                elif kind == "all":
+                    refuse(tool, "deny", "push-all-main", PUSH_ALL_REASON, "git push " + " ".join(args))
+                elif kind == "all-agent":
+                    refuse(tool, "deny", "push-all-main", PUSH_ALL_AGENT_REASON, "git push " + " ".join(args))
                 elif kind == "agent":
-                    ask_command("push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args),
-                                "push to an agent-worktree branch")
+                    refuse(tool, "deny", "push-agent-branch", PUSH_AGENT_REASON, "git push " + " ".join(args))
                 elif kind == "stray":
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
-    refusal, logged = env_refusal(stripped)
+    refusal, logged = env_refusal(strip_heredoc_bodies(raw, per_body=True))   # a data body drops, a script body stays
     if not refusal:
         refusal, logged = env_heredoc_refusal(raw)
     if refusal:
         refuse(tool, "deny", "env-file", refusal + ". " + ENV_ADVICE, logged)
+
+    # 5b. A gh write in a cloud session (rule gh-write-cloud): the GitHub MCP tools and the merge tool write there.
+    # It runs before steps 6 and 6b so a cloud pr merge or pr create gets the MCP remedy, not one that names the
+    # refused form.
+    if is_cloud():
+        for text, _in_message in _substitutions(stripped)[0]:
+            for seg in split_segments(text):
+                label = gh_write_of(seg) if seg.strip() else ""
+                if label:
+                    refuse(tool, "deny", "gh-write-cloud", GH_WRITE_CLOUD_REASON, "gh " + label)
+
+    # 5c. A command that prints other processes' full arguments (rule process-args). Judged per
+    # command word from the parsed segments, so quoted text and a heredoc body never fire it.
+    matched = process_args_hit(raw, stripped)
+    if matched:
+        refuse(tool, "deny", "process-args", PROCESS_ARGS_REASON, matched)
 
     # 6. A merge outside the merge tool, while the head has a check pending or red, or the read
     # could not run. Judged per segment from the command word, so quoted text never fires it.
@@ -4459,6 +4704,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 
+    # 6a1. A cloud `merge --confirm` in a checkout whose repo the own get_session record does not name (rule merge-confirm-repo).
+    matched = repo_proof_hit(stripped, cwd, transcript)
+    if matched:
+        refuse(tool, "deny", "merge-confirm-repo", REPO_REASON, matched)
+
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one
     # transcript read only when the push reaches the record branch.
@@ -4476,6 +4726,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "records-page", RECORDS_PAGE_REASON, matched)
 
+    # 6c1. A pull request marked ready while its head holds a stale records page (rule records-page-ready).
+    refuse_ready_page(tool, {}, raw, cite_where)
+
     # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
     # Cost: per judged commit, one `git rev-parse --show-toplevel --verify -q HEAD` (one more for an add in
     # another folder) and one `git diff --check`; none for an add alone, or a command with no commit or push.
@@ -4485,8 +4738,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                           CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
-    # 7. A frozen path.
-    matched = frozen_shell_hit(stripped, cwd)
+    # 6c3. A push whose range adds a merge of more than two parents (rule octopus-push).
+    # Cost: one `git rev-list` per pushed ref, plus one `git config` for a remote named by a URL or a path;
+    # none for a dry run, a main or master destination, or a command with no push.
+    matched = octopus_push_hit(stripped, cwd, read_verb)
+    if matched:
+        refuse(tool, "deny", "octopus-push", OCTOPUS_PUSH_REASON.format(sha=matched), matched)
+
+    # 7. A frozen path. The command is read as a shell reads it: a script's own strings are text, and its
+    # shell spots are lines of their own (`shell_write_hit`).
+    matched = shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
 
@@ -4503,13 +4764,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "builder-test-edit", BUILDER_TEST_REASON, matched)
 
-    # 8. The agent model cap. The PATH comes from the stripped command, the same machinery the
-    # frozen path uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes.
+    # 8. The agent model cap. The PATH comes from `shell_write_hit`, the same reader the frozen path
+    # uses, so a redirect, a `tee`, a `sed -i` and a heredoc header all read as writes, while the text
+    # a python, node, perl or ruby script holds counts only at its shell spots (os.system, subprocess).
     # The CONTENT comes from the RAW command, because a heredoc body is the content being written
     # and rule 1 strips it. A command that writes a settings file and names the cap variable
     # somewhere else on the line is asked too: an over-trigger of one prompt, inside a scope this
     # narrow, beats a bypass by a second segment.
-    matched = _shell_write_hit(stripped, cwd, is_settings_file)
+    matched = shell_write_hit(raw, cwd, is_settings_file)
     if matched:
         change = cap_change(raw)
         if change:
@@ -4638,49 +4900,33 @@ def page_stale_hit(tool_input, cwd):
 # file the last allowed publish stamped (stale_pages.PUBLISHED). The checker runs the page's own code, so the
 # sentence a miss quotes is the page's. A miss denies. Unknown (no node, no stamp, the file gone, the checker
 # unable to render, a run past its cap) allows and logs one `noted` line. A write with no picture starts no node.
-CHECK_DESIGNS = "check_designs.mjs"
-CHECK_DESIGNS_CAP = 25  # seconds for one run; the checker caps itself at 20
 # One deadline for every pictured item of one call, under the 60 s hook timeout. A run never outlasts what is left of it.
 PAGE_ITEM_DESIGN_BATCH_SECONDS = 45
 _design_deadline = [None]  # time.monotonic() of the deadline of the call being judged; read by _run_check_designs
 PAGE_ITEM_DESIGN_FIX = " (decision page-item-design, a waiting item's design picture is checked when the item is written). Republish the design (the waiting-page skill, \"Add a design\"), then write the item again."
 
 
+def _page_check_module():
+    """skills/waiting-page/page_check.py, the one home of the picture check, or None when it is not found."""
+    folder = _waiting_page_folder("page_check.py")
+    if folder is None:
+        return None
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    return importlib.import_module("page_check")
+
+
 def _run_check_designs(page_file, item):
     """(code, text) from the checker on `item` (a dict) against `page_file`: code 0 pass, 1 miss with the page's
-    sentence as text, 3 unknown with the reason as text. The one seam that starts node."""
-    import shutil
-    import subprocess  # TimeoutExpired only; the child starts through _nowindow
-    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
-    import tempfile
-    node = shutil.which("node")
-    folder = _waiting_page_folder(CHECK_DESIGNS)
-    if node is None or folder is None:
-        return 3, "node is not installed" if node is None else CHECK_DESIGNS + " not found"
-    cap = CHECK_DESIGNS_CAP
+    sentence as text, 3 unknown with the reason as text. The seam of the guard; skills/waiting-page/page_check.py
+    is the one home that starts node, and this call only sets the cap from the call's deadline."""
+    page_check = _page_check_module()
+    if page_check is None:
+        return 3, "page_check.py not found"
+    cap = page_check.CHECK_DESIGNS_CAP
     if _design_deadline[0] is not None:
         cap = max(1.0, min(cap, _design_deadline[0] - time.monotonic()))
-    with tempfile.TemporaryDirectory() as scratch:
-        item_file = os.path.join(scratch, "item.json")
-        with open(item_file, "w", encoding="utf-8") as handle:
-            json.dump(item, handle)
-        try:
-            run = _nowindow.run([node, os.path.join(folder, CHECK_DESIGNS), "--page", page_file, "--item", item_file],
-                                capture_output=True, text=True, timeout=cap)
-        except subprocess.TimeoutExpired:
-            return 3, "no answer in %d s" % cap
-        except OSError as err:
-            return 3, str(err.strerror or err)
-    lines = run.stdout.strip().splitlines()
-    try:
-        problem = json.loads(lines[-1]).get("problem") if lines else None
-    except ValueError:
-        return 3, "no answer line; exit %d" % run.returncode
-    if run.returncode == 1 and isinstance(problem, str) and problem:
-        return 1, problem
-    if run.returncode == 0:
-        return 0, ""
-    return 3, (run.stderr.strip().splitlines() or ["exit %d" % run.returncode])[-1]
+    return page_check.run_check_designs(page_file, item, cap)
 
 
 # ------------------------------------------------------------------ a design names its file, in a mockup home
@@ -4740,25 +4986,36 @@ def page_design_hit(writes, tool_input, cwd):
         record(DATA_TOOL, "noted", "page-item-design",
                "unknown: " + ("no published page stamped" if not page_file else "the stamped page file is gone"))
         return None
-    deadline = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
-    _design_deadline[0] = deadline
     try:
-        for done, (doc_id, data) in enumerate(pictured):
-            if time.monotonic() >= deadline:
-                record(DATA_TOOL, "noted", "page-item-design",
-                       "unknown: the %d s budget of this call is spent, %d item(s) not checked"
-                       % (PAGE_ITEM_DESIGN_BATCH_SECONDS, len(pictured) - done))
-                return None
-            try:
-                code, text = _run_check_designs(page_file, dict(data, id=data.get("id") or doc_id or "item"))
-            except Exception as err:
-                code, text = 3, type(err).__name__ + ": " + str(err)
-            if code == 1:
-                return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
-            if code != 0:
-                record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+        page_check = _page_check_module()
+    except Exception as err:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
+        return None
+    if page_check is None:
+        record(DATA_TOOL, "noted", "page-item-design", "unknown: page_check.py not found")
+        return None
+
+    def run_one(entry):
+        doc_id, data = entry
+        try:
+            return _run_check_designs(page_file, dict(data, id=doc_id or data.get("id") or "item"))
+        except Exception as err:
+            return 3, type(err).__name__ + ": " + str(err)
+
+    _design_deadline[0] = time.monotonic() + PAGE_ITEM_DESIGN_BATCH_SECONDS
+    try:
+        results, left = page_check.run_within_budget(pictured, PAGE_ITEM_DESIGN_BATCH_SECONDS, run_one, stop_on_miss=True)
     finally:
         _design_deadline[0] = None
+    for (doc_id, data), code, text in results:
+        if code == 1:
+            return text + PAGE_ITEM_DESIGN_FIX, "item " + str(doc_id or data.get("id") or "?")
+        if code != 0:
+            record(DATA_TOOL, "noted", "page-item-design", "unknown: " + cap_safe(text, 100))
+    if left:
+        record(DATA_TOOL, "noted", "page-item-design",
+               "unknown: the %d s budget of this call is spent, %d item(s) not checked"
+               % (PAGE_ITEM_DESIGN_BATCH_SECONDS, left))
     return None
 
 
@@ -4851,6 +5108,8 @@ def impeccable_shell_hit(segment: str) -> str:
     if index >= len(tokens) or impeccable_name(tokens[index]) != "impeccable":
         return ""
     rest = tokens[index + 1:]
+    while rest and rest[0].startswith("-"):   # leading flags and the `--` that ends them
+        rest = rest[1:]
     if rest[:1] == ["detect"] or rest[:2] == ["hooks", "status"]:
         return ""
     return segment.strip()[:100]
@@ -5681,6 +5940,142 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
+# ------------------------------------------------------------------ another agent's scratchpad script
+#
+# Rule scratchpad-owner (decision scratchpad-owner). Every agent of a session shares the session's
+# scratchpad, so one agent can run a script another agent left there. A call from an agent that writes a
+# file in the scratchpad records the agent as its writer (`scratchpad_record_writer`); a shell call from an
+# agent that runs a scratchpad file another agent recorded is refused, and so is a write over such a file. A call
+# with no `agent_id`, a file with no record, an agent's own file and a read pass. The text gate (`SCRATCHPAD_WORD`) keeps a call that names no scratchpad from
+# touching the disk: a path that reaches the scratchpad by a symlink is the ceiling, and passes.
+SCRATCHPAD_WORD = "scratchpad"
+SCRATCHPAD_OWNER_REASON = (
+    "Rule (scratchpad-owner): this script was written by another agent of this session, and running it "
+    "runs code you have not read. "
+    "Remedy: read the file, write your own copy of the script under a fresh file name, and run that copy. "
+    "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
+)
+SCRATCHPAD_OVERWRITE_REASON = (
+    "Rule (scratchpad-owner): this file was written by another agent of this session, and writing over it "
+    "destroys work that agent may still need. "
+    "Remedy: write your own file under a fresh file name of your own. "
+    "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
+)
+# Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
+SCRATCHPAD_REMOVERS = ("rm", "mv")
+SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
+
+
+def scratchpad_agent(payload) -> str:
+    """The valid `agent_id` of the call, or '' for the top-level session and a call with no valid id."""
+    agent = payload.get("agent_id") if isinstance(payload, dict) else None
+    return agent if isinstance(agent, str) and AGENT_ID.match(agent) else ""
+
+
+def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
+    """(agent, session, the scratchpad files this call writes, those of them a remover verb names): the Write
+    family's targets and the shell write targets `_shell_write_hit` reads. `agent` is '' for a call with no
+    `agent_id`. Only a call that names a scratchpad reaches the disk; any other call gets no files."""
+    agent, session = scratchpad_agent(payload), session_id_of(payload)
+    files, removed = [], set()
+    if not session:
+        return agent, session, files, removed
+    try:
+        if tool in WRITE_TOOLS:
+            for target in write_targets(tool_input):
+                full = target if os.path.isabs(target) else os.path.join(cwd, target)
+                if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session):
+                    files.append(full)
+        elif tool in SHELL_TOOLS:
+            command = str(tool_input.get("command", "") or "")
+            if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
+                return agent, session, files, removed
+            command, found = strip_heredoc_bodies(command), {}
+
+            def in_scratchpad(word, at, verb):
+                full = shell_abs(word, at)
+                if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
+                    found[word] = (full, verb in SCRATCHPAD_REMOVERS)
+                    return True
+                return False
+
+            for _ in range(SCRATCHPAD_WRITE_PASSES):   # the reader names one hit a pass: exclude each as it is listed
+                hit = _shell_write_hit(command, cwd, in_scratchpad, follow_cd=True, predicate_command=True)
+                if not hit:
+                    break
+                files.append(found[hit][0])
+                if found[hit][1]:
+                    removed.add(found[hit][0])
+    except Exception:
+        pass   # a file that cannot be read is not judged and not recorded, never a failed call
+    return agent, session, files, removed
+
+
+def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
+    """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
+    file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
+    writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
+    override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file and a file
+    that no longer exists pass (`scratchpad_writer_of`). Run once the call's other rules passed."""
+    agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
+    if not agent:
+        for full in files:
+            scratchpad_clear_writer(full, session)
+        return
+    taken = ""
+    for full in files:
+        writer = scratchpad_writer_of(full, session)
+        if writer and writer != agent and not taken:
+            taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+
+    def record_writers():
+        for full in files:
+            if full not in removed:
+                scratchpad_record_writer(full, session, agent)
+
+    if taken:
+        # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
+        refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON, taken, on_lift=record_writers)
+    record_writers()
+
+
+def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
+    """Rule scratchpad-owner: the log detail when an agent's shell call runs a scratchpad file that another
+    agent of the session wrote, else ''. A run is an interpreter or runner word (`_RUNNER`) with the file as
+    its first plain argument, or the file as the command word. A `cd` ahead of the run names the folder a
+    relative path is read from (`dir_before_segment`). Quoted text, comments and heredoc bodies hold no
+    run: the segments come from `split_segments` over the heredoc-stripped command, its variables read
+    as `_shell_write_hit` reads them (`_resolve_vars`)."""
+    agent, session = scratchpad_agent(payload), session_id_of(payload)
+    command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""
+    if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):
+        return ""
+    ends = []
+    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        word = tokens[index]
+        if _RUNNER(basename(word)):
+            args = list(tokens[index + 1:])
+            at = workflow_script_index(args)   # past the interpreter's flags and their values
+            # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
+            script = args[at] if at is not None and "-" not in args[:at] else ""
+        else:
+            script = word if "/" in word else ""
+        if not script:
+            continue
+        full = shell_abs(script, dir_before_segment(segments, number, cwd, ends))
+        if not full or SCRATCHPAD_WORD not in full or not under_session_scratchpad(full, session):
+            continue
+        writer = scratchpad_writer_of(full, session)
+        if writer and writer != agent:
+            return "agent %s runs a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+    return ""
+
+
 def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
@@ -5695,9 +6090,9 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
     if tool in SHELL_TOOLS:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
-        return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
+        return bool(git_env_command_hit(raw, stripped) or shell_write_hit(raw, cwd, is_frozen, _holds_frozen)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
-                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
+                    or (shell_write_hit(raw, cwd, is_settings_file) and cap_change(raw))
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd, tool)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
@@ -5705,6 +6100,40 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
                 or (is_settings_file(target, cwd) and cap_change_parts(write_content_parts(tool_input)))):
             return True
     return False
+
+
+# A Workflow call whose args hold a placeholder (rule workflow-args-shape-check). Mistake: a call that ran with a placeholder
+# such as "FACT_CLOSE_PLACEHOLDER" or "__FILL__" as args gave agents nothing to check. The whole value must be the
+# placeholder, so a sentence that names one passes. A bare env var name as a whole value ("MAILBOX_REPO") reads as a
+# placeholder and is refused: that is a false alarm only when the owner means a real value, and the owner's override
+# covers it (decision guard-guards-mistakes-only). The args are structured values, so no quote or comment case applies.
+WORKFLOW_ARGS_CAPS = re.compile(r"[A-Z0-9_]*[A-Z][A-Z0-9_]*")
+WORKFLOW_ARGS_DUNDER = re.compile(r"__\w+__")
+WORKFLOW_ARGS_REASON = ("The Workflow call's args hold the placeholder `%s`, so its agents would check nothing. "
+                        "Replace it with the real value, then start the Workflow again. "
+                        "(decision workflow-args-shape-check, a Workflow call never runs on placeholder args)")
+
+
+def workflow_args_placeholder(value) -> bool:
+    """True when `value` is a string that is, whole, an all-caps word with an underscore or a __X__ word."""
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return bool(text and ((WORKFLOW_ARGS_CAPS.fullmatch(text) and "_" in text) or WORKFLOW_ARGS_DUNDER.fullmatch(text)))
+
+
+def workflow_args_hit(tool: str, tool_input: dict) -> str:
+    """The first placeholder in a Workflow call's args, or "". Reads args, and each array item or object value."""
+    if tool != "Workflow":
+        return ""
+    args = tool_input.get("args")
+    if isinstance(args, list):
+        values = args
+    elif isinstance(args, dict):
+        values = list(args.values())
+    else:
+        values = [args]
+    return next((v.strip() for v in values if workflow_args_placeholder(v)), "")
 
 
 def judge(payload) -> None:
@@ -5754,12 +6183,53 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
+    # 0, pointer-edit. A write into the pointer checkout's own files is live for every session. An override lifts it
+    # when the target is a direct pointer path. never_lifted calls is_frozen per target, so a config-dir spelling of a
+    # pointer file is not liftable, as with frozen-path.
+    pointer_hit = pointer_edit_hit(write_targets(tool_input), cwd) if tool in WRITE_TOOLS else ""
+    if pointer_hit:
+        refuse(tool, "deny", "pointer-edit", POINTER_EDIT_REASON, "write target in the pointer checkout: " + pointer_hit)
+
+    # 0, workflow-args-shape-check. A Workflow call whose args are a placeholder. An override lifts it: the owner may mean the value.
+    placeholder = workflow_args_hit(tool, tool_input)
+    if placeholder:
+        refuse(tool, "deny", "workflow-args-shape-check", WORKFLOW_ARGS_REASON % placeholder.replace("`", "'")[:120],
+               placeholder[:120])
+
+    # 8a. The rules that own an outward claude-code-remote call judge it before agent-no-remote-tools (8b), so an agent's call to
+    # one of these tools gets the specific remedy. Each reads only its own tools, so none reorders with the spawn rules below.
+    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
+    trust_transcript = payload.get("transcript_path")
+    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
+    if matched:
+        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
+
+    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
+    archive_agent = payload.get("agent_id")
+    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
+                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
+    if archived:
+        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
+
+    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
+    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if briefed:
+        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
+    # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
+    # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
+    # agent's create_session is refused here. An override lifts it.
+    if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
+        refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
     floor_model = floor_hit(tool, tool_input)
     if floor_model:
-        refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
+        refuse(tool, "deny", "agent-model-floor",
+               LANE_MODEL_FLOOR_REASON if is_lane_create_session(tool, tool_input) else MODEL_FLOOR_REASON,
+               floor_model)
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
@@ -5767,17 +6237,24 @@ def judge(payload) -> None:
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model")))
 
-    # 9b2. The lane effort pin: a lane session starts with the effort command as its whole prompt. An
-    # override lifts it: it is not in never_lifted, because the owner may mean another start prompt.
+    # 9b2. The lane effort pin: a lane starts with the effort field at medium and the whole brief as its
+    # prompt, the owner's Grant line first. An override lifts it: it is not in never_lifted, because the owner
+    # may mean another start.
     lane_prompt = lane_effort_hit(tool, tool_input)
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
 
     # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
     # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
-    lane_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
-    if lane_tags:
-        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), lane_tags)
+    repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
+    if repo_tag_hit_tags:
+        refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags)
+
+    # 9b2c. The lane start settings: a lane session names its model and its source_url. After the repo tag. An
+    # override lifts it.
+    lane_missing = lane_start_settings_hit(tool, tool_input)
+    if lane_missing:
+        refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
@@ -5831,33 +6308,29 @@ def judge(payload) -> None:
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
 
+    # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
+    if tool == "mcp__github__update_pull_request":
+        refuse_ready_page(tool, tool_input, "", cwd)
+
     # The MCP create tool carries its own `draft` field.
     if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
-
-    # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
-    trust_transcript = payload.get("transcript_path")
-    matched = trust_card_hit(tool, trust_transcript if isinstance(trust_transcript, str) else "")
-    if matched:
-        refuse(tool, "deny", "trust-card-in-build", TRUST_REASON, matched)
-
-    # An archive of a lane whose records pull request is still open, or whose record is unread (rule lane-closes-after-records).
-    archive_agent = payload.get("agent_id")
-    archived = archive_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "",
-                           archive_agent if isinstance(archive_agent, str) and AGENT_ID.match(archive_agent) else None)
-    if archived:
-        refuse(tool, "deny", "lane-closes-after-records", archived[1], archived[0])
-
-    # A lane brief for a topic the target lane does not hold (rule lane-one-topic).
-    briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
-    if briefed:
-        refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
     if tool == "SendMessage":
         target = tool_input.get("to")
         if isinstance(target, str) and target.startswith("session_"):
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
+
+    # A send_message whose header stamp is off the clock (rule message-time-matches-clock).
+    stamped = stamp_hit(tool, tool_input)
+    if stamped:
+        refuse(tool, "deny", "message-time-matches-clock", stamped[1], stamped[0])
+
+    # A written time off the clock: `added` in items, a step's `updatedAt`, a literal `updatedAt` in a command.
+    written = written_time_hit(tool, tool_input, cwd)
+    if written:
+        refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
@@ -5896,6 +6369,8 @@ def judge(payload) -> None:
         if rule == "question-departs":
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
         if rule == "item-field-rendered":
+            if str(matched).endswith(question_form.PAGE_ONLY_MARK):
+                refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-page-only"], matched)
             refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-rendered"], matched)
         if rule == "question-checked-with-repo":
             refuse(tool, "deny", "question-checked-with-repo", question_form.PAGE_REASONS["question-checked-with-repo"], matched)
@@ -5934,6 +6409,11 @@ def judge(payload) -> None:
                     remedies.setdefault(n[0], remedy)
             if names:
                 sim_boot_refusal(tool, names, remedies)
+            # After the denies above: the shell call runs another agent's scratchpad script.
+            owned = scratchpad_owner_hit(payload, tool, tool_input, cwd)
+            if owned:
+                refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OWNER_REASON, owned)
+            scratchpad_owner_write(payload, tool, tool_input, cwd)   # the call passed: refuse an overwrite, else record the writer
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
@@ -5985,9 +6465,14 @@ def judge(payload) -> None:
 
         # 7a. A write that leaves a session handoff without a required section (rule handoff-sections).
         # Not in never_lifted: the owner may mean the write.
-        dropped = handoff_sections_hit(tool, tool_input, target, cwd)
+        handoff_result = handoff_sections_result(tool, tool_input, target, cwd)
+        dropped = handoff_sections_hit(tool, tool_input, target, cwd, handoff_result)
         if dropped:
             refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
+        # 7a'. A write that restamps a premise's Checked value with no evidence (rule handoff-checked-stamp).
+        stamped = handoff_stamp_hit(tool, tool_input, target, cwd, payload.get("transcript_path"), handoff_result)
+        if stamped:
+            refuse(tool, "deny", "handoff-checked-stamp", HANDOFF_STAMP_REASON % stamped[0], stamped[1])
     for target in targets:
         # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
         if is_project_config(target, cwd):
@@ -6004,6 +6489,7 @@ def judge(payload) -> None:
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))
+    scratchpad_owner_write(payload, tool, tool_input, cwd)   # every refusal above passed: refuse an overwrite, else record the writer
 
 
 def write_targets(tool_input: dict) -> list:
