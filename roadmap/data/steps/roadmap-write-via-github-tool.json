@@ -1,0 +1,14 @@
+{
+ "id": "roadmap-write-via-github-tool",
+ "title": "The record branch's one-writer guard also refuses a lane's write made through the GitHub file tools",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane archive-flow wrote step archive-batch-check to the roadmap branch through the GitHub MCP file tool (b10482fb2, 10:30 CST Nov 12), around the one-writer rule; the guard reads only git pushes.",
+ "source": "coordinator 10:30 CST Nov 12",
+ "note": "Guard, code. Harm: two writers on the record branch race, and the write skips the roadmap.html build (b10482fb2 changed the step file only). Ready, no lane.",
+ "updatedAt": "2026-11-12T10:31:00-06:00"
+}
