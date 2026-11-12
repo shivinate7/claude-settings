@@ -312,15 +312,14 @@ def _write_data(entry, cwd=""):
 # (a str or any key in a list `pick`). Widening is judged by scope: a change that applies the same way
 # to every repo is not widening. In the chat box the mark is the words below in an option's label or
 # description, and such an option's label does not carry (Recommended). Read at the same ArtifactData call.
-WIDENS_TEXT = ("Goes against your ruling: a repo should change to fit the shared tool, rather than the tool "
-               "change to fit a repo")
+WIDENS_GUIDELINE = "a repo should change to fit the shared tool, rather than the tool change to fit a repo"
+WIDENS_TEXT = "Goes against your ruling: " + WIDENS_GUIDELINE
 WIDENS_REASON = ("A pick should not name an option that widens what a shared tool accepts: the owner ruled that "
-                 "a repo should change to fit the shared tool, rather than the tool change to fit a repo. Make "
-                 "the pick an option where the repo changes to match the shared format, or leave pick out.")
-CHAT_WIDENS_REASON = ("A recommended option should not widen what a shared tool accepts: the owner ruled that a "
-                      "repo should change to fit the shared tool, rather than the tool change to fit a repo. "
-                      "Recommend an option where the repo changes to match the shared format, and give the "
-                      "widening option no (Recommended) label.")
+                 + WIDENS_GUIDELINE + ". Make the pick an option where the repo changes to match the shared "
+                 "format, or leave pick out.")
+CHAT_WIDENS_REASON = ("A recommended option should not widen what a shared tool accepts: the owner ruled that "
+                      + WIDENS_GUIDELINE + ". Recommend an option where the repo changes to match the shared "
+                      "format, and give the widening option no (Recommended) label.")
 # Older sessions still write these words in chat; the mark keeps matching them. No card, rule text or
 # reason carries them.
 LEGACY_WIDENS_TEXTS = ("Goes against your uniform ruling (t18)",
