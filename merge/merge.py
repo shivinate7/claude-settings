@@ -116,7 +116,8 @@
                           batch) and its one integration PR, opened as a draft. The lane heads read now are the freeze:
                           they go in the pull request body between two marker lines. A second build of NAME is allowed only for that same
                           set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
-                          and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
+                          and nothing is pushed or edited. A first build of two or more lanes refuses a lane whose diff changes a guard or
+                          check (guard_hits; a test path is no guard change) and names its one-lane build; a rerun and --ready skip this. Runs no lane lint and no ready check, waits for no CI, takes no lock.
                           A cloud run needs the batch-runner role.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
                           lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
@@ -4838,6 +4839,14 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
             raise Stop(f"--on {on}: {on} has no open pull request that holds a frozen block, so it is not a running batch. {FREEZE_CITE}")
     found = found or h.batch_pr(branch)
     if found is None:
+        if len(numbers) > 1:  # a first build only: on a rerun or --ready the batch exists, and a refusal would strand it
+            guards = {n: hits for n in numbers if (hits := guard_hits([p for p, _, _ in h.pr_files(n, infos[n].get("changed_files"))]))}
+            if guards:
+                raise Stop(f"a lane that changes a guard or check builds alone, so batch {name} is not built:\n"
+                           + "\n".join(f"#{n} changes {', '.join(hits)}" for n, hits in sorted(guards.items()))
+                           + "\nBuild each of those lanes alone, one batch per lane:\n"
+                           + "\n".join(f"  merge --batch-build {name} {n}" for n in sorted(guards))
+                           + f"\nNothing was pushed or created. {FREEZE_CITE}")
         start = fetch_branch(root, on or base, FREEZE_CITE)
         for n in numbers:
             if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
