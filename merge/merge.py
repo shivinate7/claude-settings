@@ -3065,11 +3065,15 @@ def guard_commits_after_review(root, base, head, review_head):
 
 def unreviewed_guard_fails(root, host, n, info, base, head):
     """-> the FAIL lines of lane lint for pull request `n`: one per guard or check commit on the lane past the head its newest review record names (decision pr-review-record).
-    A record that names the commit, or a later head, clears it. A pull request with no review record, or none that parses, has none to measure against, so it gets no line here."""
-    rows = host.review_records(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
-    recs = [r for r in (parse_review(body) for body, *_ in rows) if r]
-    if not recs:
+    A record that names the commit, or a later head, clears it. A pull request with no review record has none to measure against, so it gets no line here.
+    Records that exist but none of which parses are a Stop: a guard commit could hide behind a malformed record, and an unreadable measure is no pass."""
+    bodies = host.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(n, [])
+    if not bodies:
         return []
+    recs = [r for r in (parse_review(body) for body in bodies) if r]
+    if not recs:
+        raise Stop(f"the lint of {head[:9]} is unknown, not a pass: #{n} has {len(bodies)} review record comment(s) and none parses, so the commits after the last review cannot be measured. "
+                   f"Post a review record that parses. {REVIEW_CITE}")
     review_head = recs[-1]["head"]
     return [f"{sha[:9]} changes {', '.join(paths)} after the last review record, which names {review_head[:9]}. Ask for a review that names it. {REVIEW_CITE}"
             for sha, paths in guard_commits_after_review(root, base, head, review_head)]
