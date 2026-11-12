@@ -426,8 +426,8 @@ body.sheet-open { overflow: hidden; }
 .tabs .tl { display: flex; gap: 4px; }
 .tabs .cnt:empty { display: none; }
 .tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
-/* Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
-@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+/* Four tabs (Designs too) fit a 390 phone on one row: the label is 15px and each count box holds two digits. Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
+@media (max-width: 400px) { .tabs a { padding-inline: 5px; gap: 3px; font-size: 15px; } .tabs .cnt { min-width: 2.5ch; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
 .tabs #qCount:empty { display: inline-block; }
 .svwrap { container-type: inline-size; padding-block: 18px 40px; }
 .sv { display: grid; gap: 16px; min-width: 0; }
@@ -986,7 +986,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .hv .cov details { font-size: 14px; color: var(--muted); }
 .hv .cov summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
 .hv .cov .left { display: grid; gap: 6px; margin: 0 0 8px; }
-.hv .cov .left div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 8px; }
+.hv .cov .left div { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 8px; }
+.hv .cov .left div > span:first-child { white-space: nowrap; }
 .hv .cov .left code, .hv .ht code { font: 12.5px/1.5 var(--mono); overflow-wrap: anywhere; }
 .hv .cov .left code { color: var(--ink); }
 .hv .cov pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -3938,7 +3939,7 @@ function row(r) {
   return `<tr role="row" id="hr${esc(r.n)}"><td role="cell" class="gc">${mark(CLS[r.grade] || "unm")}<span class="sr">${esc(WORD[r.grade] || "Not measured")}</span></td>`
     + `<th role="rowheader" scope="row" class="wh">${esc(r.sees)}${r.quiet ? EYE + '<span class="sr">, fails with no record</span>' : ""}</th>`
     + `<td role="cell" class="why">${esc(r.why)}</td>`
-    + `<td role="cell" class="mk">${GEAR}<span>${(r.mk || []).map((m) => `<code>${esc(m)}</code>`).join(", ")}</span></td>`
+    + `<td role="cell" class="mk">${GEAR}<span>${(r.mk || []).length ? r.mk.map((m) => `<code>${esc(m)}</code>`).join(", ") : esc(typeof r.noPart === "string" && r.noPart ? r.noPart : "No part is named for this row.")}</span></td>`
     + `<td role="cell" class="gold">${TARGET}<span>${r.gold ? esc(r.gold) : "Not written yet."}</span></td></tr>`;
 }
 function table() {
@@ -3951,19 +3952,25 @@ function coverage() {
     <details><summary>What the build said</summary><pre>${esc(reason(H.coverageWhy || "no reason given"))}</pre></details></div>`;
   const left = Object.keys(KIND).map((k) => [k, (c.left && c.left[k]) || []]);
   const n = left.reduce((s, [, xs]) => s + xs.length, 0);
-  return `<div class="cov" id="healthCover"><p class="ln">The rows name <b>${esc(c.named)}</b> of <b>${esc(c.total)}</b> hooks, checks and skills.</p>`
+  // The build lists each kind that has a part; a build without the list names the kinds the left-over list carries.
+  const kinds = (Array.isArray(c.kinds) ? c.kinds : Object.keys(KIND).filter((k) => c.left && k in c.left)).map((k) => KIND[k].toLowerCase()).filter(Boolean);
+  const names = kinds.length > 1 ? kinds.slice(0, -1).join(", ") + " and " + kinds[kinds.length - 1] : kinds[0] || "parts";
+  return `<div class="cov" id="healthCover"><p class="ln">The rows name <b>${esc(c.named)}</b> of <b>${esc(c.total)}</b> ${esc(names)}.</p>`
     + (n ? `<details><summary>Named by no row: ${n}</summary><div class="left">${left.filter(([, xs]) => xs.length).map(([k, xs]) => `<div><span>${KIND[k]} ${xs.length}</span><span>${xs.map((x) => `<code>${esc(base(x))}</code>`).join(", ")}</span></div>`).join("")}</div></details>` : "")
     + "</div>";
 }
 function top() {
   const count = (g) => rows.filter((r) => r.grade === g).length;
-  const read = H.read ? `Graded at ${esc(H.read)}` : '<span class="unk">Graded at an unknown time</span>';
+  // The map's read text is "main abc1234, Nov 11": the date leads the line, the commit sits in the disclosure. Any other shape shows whole, never a made-up time.
+  const m = /^(\S+)\s+([0-9a-f]{7,40}),\s*(.+)$/.exec(String(H.read || "").trim());
+  const read = H.read ? `Measured ${esc(m ? m[3] : H.read)}` : '<span class="unk">Measured at an unknown time</span>';
+  const from = m ? `<li>From ${esc(m[1])} at <code>${esc(m[2])}</code>.</li>` : "";
   return `<section class="hv-top" aria-labelledby="hvH"><h2 id="hvH">How well each part works</h2>
     <p class="intro">Each row is one thing you see when you work. Its mark says how well it works now. The last column says what good looks like, so each row shows its gap. Those targets are proposals, not agreed yet.</p>
     <ul class="gkey" aria-label="Grades">${GRADES.map(([g, c, w]) => { const k = count(g); return `<li${k ? "" : ' class="zero"'}>${mark(c)}<span>${w}</span><b>${k}</b></li>`; }).join("")}</ul>
     <p class="ikey" aria-hidden="true"><span>${GEAR}What makes it happen</span><span>${TARGET}What good looks like</span></p>
     ${coverage()}
-    <details class="readat" id="healthRead"><summary>${read}</summary><ul><li>The grades and the lines under them are as the health map held them then.</li><li>The build counts the parts the rows name each time it builds, and takes no other reading.</li></ul></details></section>`;
+    <details class="readat" id="healthRead"><summary>${read}</summary><ul>${from}<li>The grades and the lines under them are as the health map held them then.</li><li>The build counts the parts the rows name each time it builds, and takes no other reading.</li></ul></details></section>`;
 }
 function quiet() {
   const q = rows.filter((r) => r.quiet);
@@ -3971,17 +3978,23 @@ function quiet() {
   return `<section class="quiet" aria-labelledby="qH"><h3 id="qH">${EYE}Fails with no record: ${q.length}</h3><p>When these checks break, nothing says so.</p>
     <ul>${q.map((r) => `<li><a href="#hr${esc(r.n)}">${esc(r.sees)}</a></li>`).join("")}</ul></section>`;
 }
+// A map file that is not there is a repo with no health map yet. A map that is there and does not read is a broken one. The build's reason says which (the OS names a missing file).
+const MAP_FILE = "docs/health-map.json", missingMap = /No such file or directory/.test(String(H.why || ""));
 function noMap() {
+  const lead = missingMap ? "This page holds no health map yet, so no row can be graded." : "This page cannot read the health map, so no row can be graded.";
+  const verb = missingMap ? "build" : "fix";
   return `<section class="box nob"><h3><span class="rg unk hrg" aria-hidden="true"></span>Health: unknown</h3>
-    <p>This page cannot read the health map, so no row can be graded. Your questions are not affected.</p>
+    <p>${lead} Your questions are not affected.</p>
     <details><summary>What the build said</summary><pre>${esc(reason(H.why || "no reason given"))}</pre></details>
-    <button type="button" class="btn alt" id="hAsk">Copy the ask to fix the health map</button>
-    <textarea id="hAskText" rows="4" readonly hidden aria-label="The ask to fix the health map"></textarea></section>`;
+    <button type="button" class="btn alt" id="hAsk">Copy the ask to ${verb} the health map</button>
+    <textarea id="hAskText" rows="4" readonly hidden aria-label="The ask to ${verb} the health map"></textarea></section>`;
 }
-// The ask names the repo as the page does (meta/page identity); with none, "this repo".
+// The ask names the repo as the page does (meta/page identity); with none, "this repo". It names the file once and gives the cause once:
+// the build's reason leads with the file name and ends with the path, so both are cut before the cause is added.
 const askText = () => {
   const id = (typeof state !== "undefined" && state.meta && state.meta.identity) || {}, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
-  return "Fix the health map for " + (name || "this repo") + ": the page build could not read docs/health-map.json (" + reason(H.why || "no reason given") + "). Then have the page writer put the rebuilt roadmap block on this repo's waiting page.";
+  const cause = reason(H.why || "no reason given").replace(/^(?:docs\/)?health-map\.json (?:does not read: |is not valid json: )?/, "").replace(/:\s*'[^']*health-map\.json'\s*$/, "").trim() || "no reason given";
+  return (missingMap ? "Build the health map for " : "Fix the health map for ") + (name || "this repo") + ": " + MAP_FILE + (missingMap ? " is not there" : " does not read") + " (" + cause + "). Then have the page writer put the rebuilt roadmap block on this repo's waiting page.";
 };
 $("hView").innerHTML = rows ? `<div class="hv">${top()}${quiet()}${table()}</div>` : noMap();
 const ask = $("hAsk");

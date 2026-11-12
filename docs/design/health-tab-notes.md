@@ -38,13 +38,13 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
      under 560 px; they wrap to two rows (`.views`, page.html; the "Reference" cut rule under 340 px).
      Status and Health would show two read times. The mockup drops Health's own stamp in this option.
    - Departs from: page.html `#tabs` (two tabs and the Designs button).
-2. One name for "Health". Pick: the Health card in the Records view moves to the Health tab, and
-   Records keeps the record kinds only. Owner grant: yes (it changes the roadmap skill's "Records and
-   health" section). Gain: one thing has the name (`ux-one-plain-name`). Its three lines (repo map,
-   compliance scores, session board) are sources of rows 17 and 18. Loss: Records loses a card.
-   Departs from: page.html `renderRec` ("Health" card) and `skills/roadmap/build.py` `health()`.
-   The mockup does not draw where the three lines land. Pick for the builder: under the read-time
-   disclosure.
+2. One name for "Health". The build keeps the Records Health card (repo map, compliance scores, session
+   board) and the Health tab shares the name; Records loses nothing. Coordinator ruling, 2026-11-12
+   11:36 CST. The first pick moved the card to the tab, so Records kept the record kinds only. Its
+   three lines are sources of rows 17 and 18. Gain: no change to the roadmap skill's "Records and
+   health" section. Loss: two places carry the word "Health" (`ux-one-plain-name`). Departs from the
+   mockup: it does not draw the card. Stays as is: page.html `renderRec` ("Health" card) and
+   `skills/roadmap/build.py` `health()`.
 3. The tab shows only when the build holds a health map, as Designs shows only with a design
    (`ux-control-earns-place`). Another repo with no map gets no Health tab. claude-settings with an
    unread map shows the tab and `#s=nomap`, never an empty table (`ux-unknown-is-not-empty`).
@@ -76,20 +76,21 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
 8. "What makes it happen" shows hook, check and skill names in mono, open, not behind a disclosure.
    Gain: the owner wants to learn what he built, and the names are that answer. Loss: machine text on
    the screen. Departs from: `ux-machine-text-hidden` (guidance).
-9. The exhaustive line. "The rows name 38 of 57 hooks, checks and skills." A closed disclosure lists
-   the 19 named by no row, by kind. "Every part" means: the unique hooks in `docs/catalog.md` (judges
-   included), the check scripts `checks.yml` runs, and the skills in `skills/`. Helpers
-   (`guard_core.py`, `_*.py`) and `test_*` files are left out. The mockup computes the count from two
-   constants, so the figure cannot drift from its list. The build must do the same from
-   `lint/hook_catalog.py`'s list (`building-one-home-per-capability`). With the list unread, the line
-   says "Coverage: unknown" with a grey dashed ring (`#s=unknown`). Question: count the 5 mods too?
+9. The exhaustive line. "The rows name 38 of 57 hooks, checks, skills, janitor scripts and merge
+   scripts." A closed disclosure lists the parts named by no row, by kind. The count comes from
+   `lint/check_health_map.py` `find_parts`, the check's own list (`building-one-home-per-capability`):
+   the hooks, the check scripts, the skills, and the scripts in `janitor/` and `merge/`. Helpers
+   (`guard_core.py`, `_*.py`) and `test_*` files are left out. The build names each kind that has a
+   part in the sentence. With the list unread, the line says "Coverage: unknown" with a grey dashed
+   ring (`#s=unknown`). Question: count the 5 mods too?
 10. Fails with no record. A band above the table names the 4 rows whose check breaks with no word
     (rows 3, 5, 11, 20), each a link to its row. An eye with a slash marks those rows. Gain: the
     draft's blind spot gets its own place. Loss: one more band above the table.
-11. Order. Pick: grouped by stage (questions and answers, getting work merged, sessions at work,
-    guards and rules, seeing it and keeping it clean). Gain: the table reads as how the work flows,
-    which serves "what have I built". Loss: it moves rows from the draft's order (4, 5, 14 and 6
-    change place). Option `#s=flat` keeps the draft's order with no groups.
+11. Order. The build keeps the Records Health card and sorts the rows flat, worst first (broken, has
+    issues, not measured, healthy), in the draft's order inside a grade. No stage groups. Coordinator
+    ruling, 2026-11-12 11:36 CST. The first pick grouped rows by stage; option `#s=flat` drew the flat
+    list. Gain: the worst rows come first, and 14 of 20 rows are amber, so the order inside amber is
+    the draft's. Loss: the table does not read as how the work flows.
 12. Copy. The draft's shorthand turns into short sentences: "159/14" reads "159 changes in 7 days; 14
     were fixes". Ids are dropped or glossed: a message id becomes "one message", a decision name
     becomes "by your ruling", and a lane or step id is dropped. Times are US Central, 24-hour, CST in
@@ -106,7 +107,7 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
 
 - Fixed: the view option showed two read times. Health's own stamp is dropped there.
 - Fixed: the coverage sentence was a flex row, so "38 of 57" had wide gaps. It is plain text now.
-- Open: 14 of 20 rows are amber, so amber does not rank them. A worst-first sort is not drawn.
+- Open: 14 of 20 rows are amber, so amber does not rank them. The build sorts worst first (item 11).
 - Open: on a 390 phone the 20 cards make a long page. Folding each card to its name and why is not drawn.
 - The detector found nothing. It reads markup, and the screen here is built by script, so a clean
   result is no evidence.
@@ -116,4 +117,4 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
 - Items 1, 2 and 6: `Owner grant: yes`.
 - Item 4: should the page's unknown ring turn grey on every tab?
 - Item 9: should the count include mods?
-- Critique: should rows sort worst first within a group, and should phone cards fold?
+- Critique: should phone cards fold?

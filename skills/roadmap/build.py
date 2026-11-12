@@ -649,6 +649,7 @@ HEALTH_MAP_REL = check_health_map.MAP_REL
 # Worst first on the page: a broken row comes before one with issues, one not measured, and a healthy one.
 HEALTH_ORDER = ("red", "amber", "grey", "green")
 HEALTH_KINDS = ("hook", "check", "skill")
+PART_KINDS = HEALTH_KINDS + ("janitor", "merge")  # the order check_health_map.find_parts lists them in
 
 
 def part_name(glob):
@@ -660,10 +661,13 @@ def part_name(glob):
 def health_map(repo):
     """window.ROADMAP_BUILD.healthMap: the graded rows of docs/health-map.json, worst first, and the coverage line, or
     why unknown. None when the repo holds neither the map nor lint/check_health_map.py: it keeps no health map, so the
-    page draws no Health tab. Shape: {"read", "rows": [{"n", "grade", "sees", "why", "gold", "quiet", "mk"}] | None,
-    "counts": {grade: n}, "coverage": {"total", "named", "left": {kind: [path]}} | None, "why": None | "unknown (...)",
-    "coverageWhy"}. In "left" the hook, check and skill keys are always there; janitor and merge appear only when a part is left. A map that does not read gives rows None and why; a parts list that does not read gives coverage None
-    and coverageWhy. Neither is ever 0 or clear. Cost: reads the map file and lists the part folders of the checkout once."""
+    page draws no Health tab. Shape: {"read", "rows": [{"n", "grade", "sees", "why", "gold", "quiet", "mk", "noPart"}] | None,
+    "counts": {grade: n}, "coverage": {"total", "named", "left": {kind: [path]}, "kinds": [kind]} | None,
+    "why": None | "unknown (...)", "coverageWhy"}. "noPart" is the map's no_part reason (else None): the page shows it
+    where the part names would be. "kinds" lists each kind that has a part, so the page names them all. In "left" the
+    hook, check and skill keys are always there; janitor and merge appear only when a part is left. A map that does not
+    read gives rows None and why; a parts list that does not read gives coverage None and coverageWhy. Neither is ever
+    0 or clear. Cost: reads the map file and lists the part folders of the checkout once."""
     path = repo / HEALTH_MAP_REL
     if not path.exists() and not (repo / "lint" / "check_health_map.py").exists():
         return None
@@ -675,7 +679,8 @@ def health_map(repo):
     rows = sorted(doc["rows"], key=lambda r: HEALTH_ORDER.index(r["grade"]))  # stable: draft order holds inside a grade
     out = [{"n": r["n"], "grade": r["grade"], "sees": r["sees"], "why": r["why"],
             "gold": r["gold"] if isinstance(r.get("gold"), str) and r["gold"] else None,
-            "quiet": r.get("quiet") is True, "mk": [part_name(g) for g in r["covers"]]} for r in rows]
+            "quiet": r.get("quiet") is True, "mk": [part_name(g) for g in r["covers"]],
+            "noPart": r["no_part"] if isinstance(r.get("no_part"), str) and r["no_part"] else None} for r in rows]
     coverage, coverage_why = None, None
     try:
         parts = check_health_map.find_parts(str(repo))
@@ -685,7 +690,8 @@ def health_map(repo):
         for part in parts:
             if not check_health_map.covered(part, doc["rows"]):
                 left.setdefault(part[0], []).append(part[1])  # janitor and merge keys appear only when a part is left
-        coverage = {"total": len(parts), "named": len(parts) - sum(len(v) for v in left.values()), "left": left}
+        coverage = {"total": len(parts), "named": len(parts) - sum(len(v) for v in left.values()), "left": left,
+                    "kinds": [k for k in PART_KINDS if any(p[0] == k for p in parts)]}
     except check_health_map.Unknown as e:
         coverage_why = "unknown (%s)" % e
     read = doc.get("read")
