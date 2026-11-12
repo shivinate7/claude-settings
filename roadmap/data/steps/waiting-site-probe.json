@@ -1,14 +1,14 @@
 {
  "id": "waiting-site-probe",
  "title": "Probe route B: the owner's own small site that holds a GitHub token",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL36SyvxXY1LhyCuaRc",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner ruling R28 (one store for page data, git first) and owner 12:10 CST: \"Custom connectors are not allowed -- so we can do route B\".",
  "source": "coordinator 12:28 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store rewritten to route B on #2829, owner 12:10 CST)",
- "note": "Owner-yes acts, each its own yes when the step starts: the Cloudflare account (the owner has one: decision github-apps-keep-access says Cloudflare serves joyous through its worker), a GitHub token mint, a test deploy and an access gate. No custom domain or paid plan. The lane holds until the coordinator starts it.",
- "updatedAt": "2026-11-12T12:29:13-06:00"
+ "note": "Owner-yes acts, each its own yes when the step starts: the Cloudflare account (the owner has one: decision github-apps-keep-access says Cloudflare serves joyous through its worker), a GitHub token mint, a test deploy and an access gate. No custom domain or paid plan. The lane holds until the coordinator starts it. Owner 12:29 CST Nov 12: \"use my existing cloudflare setup that should be saved i believe -- or we can use neon/render too if that's useful\". A token in the page is ruled out (step prose-tending-contract, owner 11:55 CST: a token never goes in a page; a server holds it). The probe measures the server only: the owner's Cloudflare Worker first (no Cloudflare creds in the cloud env, checked 12:29 CST), Render as fallback (RENDER_API_KEY is in the cloud env). No deploy or token mint in the probe. Lane started 12:30 CST.",
+ "updatedAt": "2026-11-12T12:31:11-06:00"
 }
