@@ -40,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from workflow_steps import CHECKS_SUITE_JOBS, gating_text, job_block, run_body, step_blocks, step_env, step_key  # noqa: E402  the one home of the step parser
 CHECKS = os.environ.get("CHECKS_YML") or os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
+LANE_YML = os.environ.get("LANE_TOUCHED_YML") or os.path.join(HERE, "..", ".github", "workflows", "lane-touched-tests.yml")
 MIN_JOBS = 3
 
 # The run commands of the old single `checks-windows` job. Edit here only on purpose.
@@ -2493,6 +2494,40 @@ FALLBACK = ["macos-latest"]
 # The whole runs-on of each macOS job: the fork guard comes first, so a fork PR takes macos-latest whatever the pick says.
 RUNS_ON = ("${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)"
            " && fromJSON('[\"macos-latest\"]') || fromJSON(needs.scope.outputs.mac_runner) }}")
+# The env values the pick step passes to mac-runner.py, whole, as checks.yml writes them.
+MAC_PICK_ENV = {
+    "EVENT": "${{ github.event_name }}",
+    "HEAD_REF": "${{ github.head_ref }}",
+    "HEAD_REPO": "${{ github.event.pull_request.head.repo.full_name }}",
+    "REPO": "${{ github.repository }}",
+    "RUNNER_TOKEN": "${{ secrets.MAC_RUNNER_READ_TOKEN }}",
+}
+# The env values the skip step passes to batch-macos-skip.py, whole, as lane-touched-tests.yml writes them.
+SKIP_ENV = {
+    "GH_TOKEN": "${{ github.token }}",
+    "REPO": "${{ github.repository }}",
+    "MATRIX": "${{ steps.select.outputs.matrix }}",
+    "ANY": "${{ steps.select.outputs.any }}",
+}
+
+
+def step_env_of(case, path, job, step_id):
+    """The env of the one step `step_id` in `job` of the workflow at `path`. The job and the step are asserted first, so a
+    missing one fails by name before any value is read."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    block = job_block(text, job)
+    case.assertIsNotNone(block, f"{path} has no {job} job")
+    steps = [s for s in step_blocks(block) if step_key(s, "id") == step_id]
+    case.assertEqual(len(steps), 1, f"job {job} in {path} has {len(steps)} steps with id {step_id}, not one")
+    return step_env(steps[0])
+
+
+def assert_env(case, env, want, where):
+    """Each key of `want` holds exactly its value in `env`. One subtest per key, so a failure names its key."""
+    for key, value in want.items():
+        with case.subTest(key=key):
+            case.assertEqual(env.get(key), value, f"{where}: {key} is {env.get(key)!r}, not {value!r}")
 
 
 def run_script(name, env):
@@ -2583,7 +2618,11 @@ class MacRunnerPick(unittest.TestCase):
             scope = job_block(f.read(), "scope")
         self.assertIn("mac_runner: ${{ steps.mac.outputs.mac_runner }}", scope)
         self.assertIn("python3 .github/scripts/mac-runner.py", scope)
-        self.assertIn("RUNNER_TOKEN: ${{ secrets.", scope)
+        self.assertIn("RUNNER_TOKEN: ${{ secrets.MAC_RUNNER_READ_TOKEN }}", scope)
+
+    def test_the_mac_step_passes_each_value_the_pick_reads(self):
+        env = step_env_of(self, CHECKS, "scope", "mac")
+        assert_env(self, env, MAC_PICK_ENV, "checks.yml scope job, step mac")
 
 
 class TouchedMacosSkip(unittest.TestCase):
@@ -2648,13 +2687,17 @@ class TouchedMacosSkip(unittest.TestCase):
         self.assertEqual([e["os"] for e in json.loads(out["matrix"])["include"]], ["windows-latest"])
 
     def test_the_workflow_runs_the_skip_after_the_selector_and_reads_actions(self):
-        with open(os.path.join(ROOT, ".github", "workflows", "lane-touched-tests.yml"), encoding="utf-8") as f:
+        with open(LANE_YML, encoding="utf-8") as f:
             text = f.read()
         touched = job_block(text, "touched")
         self.assertIn("actions: read", touched)
         self.assertLess(touched.index("touched-tests.py"), touched.index("batch-macos-skip.py"))
         self.assertIn("matrix: ${{ steps.skip.outputs.matrix }}", touched)
         self.assertIn("any: ${{ steps.skip.outputs.any }}", touched)
+
+    def test_the_skip_step_passes_the_token_repo_and_selector_outputs(self):
+        env = step_env_of(self, LANE_YML, "touched", "skip")
+        assert_env(self, env, SKIP_ENV, "lane-touched-tests.yml touched job, step skip")
 
 
 
