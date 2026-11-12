@@ -23,8 +23,8 @@ writes, so a session cannot grant itself an override. It is valid only while now
     - The gates are the Opus ask's, one helper (_owner_ask): payload `source`, a notice start, pasted and notice blocks
       cut, a fired-task block, a promptSource `system` record, a cloud session's seed prompt.
     - No judge call and no new grant for: no whole word `override` outside code spans (a pasted refusal line from
-      offer() holds it only inside them), a NEGATIONS word or `off` within NEGATION_SPAN words of it, a `?`, two
-      lengths, a decimal or compound length, or the whole word `opus` (the Opus route owns it).
+      offer() holds it only inside them), a NEGATIONS word or `off` within NEGATION_SPAN words of it, two lengths,
+      or a decimal or compound length. A `?` and the word `opus` rule nothing out: the judge decides (owner R12).
     - One length sets the time: `15m`, `15 minutes`, or a bare number right after a first word `override` (minutes).
       None: a one-act override. A judge yes for a first-word `override` with a reason and no length stays main's
       one-act override.
@@ -37,18 +37,24 @@ writes, so a session cannot grant itself an override. It is valid only while now
   length (`1.5h`, `1h30m`) grants nothing. `override off <word>` grants nothing. A grant needs the owner's typed words
   (_keyword_typed): payload `source` absent or the owner's, and the prompt's own transcript record no harness turn
   and no peer or task-notification origin. Each grant prints one receipt line (local_time.override_line).
+  A one-act override also ends at the owner's next typed prompt that grants nothing (end_once). A harness prompt, a
+  timed override and an Opus override do not end it, and a typed Opus grant does not either.
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
-"until": ISO-8601 UTC, "role": null, one role, or a sorted list of 2 or more roles}. It lives beside the override, so the two never
+"until": ISO-8601 UTC, or null for no end (the session's end or `opus off`), "role": null, one role, or a sorted
+list of 2 or more roles}. It lives beside the override, so the two never
 replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
 rule's settings-write ask, and it reaches agents.
   `opus 2h`, `opus 15m`: every Opus spawn until the end. The unit is required: `opus 4` may name a
          model. `opus builders 2h` (or `builder`): only spawns of that role, from OPUS_ROLES.
-  `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing.
+  `opus off` ends it. The same whole-prompt rule holds: any other text after `opus` grants nothing. A grant needs the
+         owner's typed words, the override keyword's own gate (_keyword_typed; owner Q1). `opus off` needs none: it
+         only narrows.
   A plain ask (`send opus judges`, `use opus reviewers for 30m`) writes the same file when a model judges the
   prompt to be the owner's own present request (grant_opus_ask, call_judge.opus_ask). Cost: one model call for an
   owner prompt that carries the whole word `opus` and takes the plain path, plus one scope call (call_judge.opus_scope)
   only when that call says yes, the ask names no role and the transcript tail holds an earlier owner prompt; none
-  for any other prompt. The yes/no call fails closed: an error or an odd answer grants nothing. The plain path's rules:
+  for any other prompt. A prompt with the words `opus` and `override` may also reach the override ask
+  (grant_override_ask) after an Opus no, so it can cost two judge calls. The yes/no call fails closed: an error or an odd answer grants nothing. The plain path's rules:
     - Strip every MACHINE_TAGS or NOTICE_FRAMES block anywhere, and a pasted block, first. An unclosed block, and a
       `[SYSTEM NOTIFICATION` line, run to the end.
     - In a cloud session (env CLAUDE_CODE_REMOTE_SESSION_ID set), a prompt with no earlier owner turn in the
@@ -70,7 +76,7 @@ rule's settings-write ask, and it reaches agents.
       and narrowed after it, so a process killed in the read (the hook's timeout) leaves every role, with no
       `opus-grant` line.
     - Two or more lengths, a decimal (`1.5h`) or a compound (`1h30m`): no grant. One length sets the time: `<n>m`, `<n>h`, or spelled: hour(s), hr(s),
-      min(s), minute(s). None: DEFAULT_ASK_LENGTH.
+      min(s), minute(s). None: no end, "until" is null: it lasts until the session ends or `opus off`.
 A step grant also lifts that ask, and nothing else: the owner's grant that triage writes on the lane's
 roadmap step (decision agent-model-cap). take() reads it only on an Opus spawn refusal that no Opus override
 lifted, from the local ref origin/roadmap in the call's cwd, never fetched: one git grep for the lane id,
@@ -149,7 +155,6 @@ FIRED_TASK = re.compile(r"<system-reminder>\s*This task fired at ")  # a fired s
 COMMAND_RECORDS = ("<local-command-caveat>", "<command-name>", "<command-message>", "<local-command-stdout>")
 SEED_READ_MAX = 1 << 20  # bytes of the transcript the seed check reads, from the top
 KEYWORD_REST = re.compile(r"\s*off(?![\w-])", re.I)
-DEFAULT_ASK_LENGTH = ("2", "h")
 SCOPE_CONTEXT_PROMPTS, SCOPE_CONTEXT_CHARS = 10, 2000  # the newest earlier prompts the scope read sees, and the cut of each
 OPUS_RULE = "agent-model-cap"  # the one rule an Opus override lifts, and only its spawn refusal
 # The roles an Opus spawn can ask for: the agents/ roles and the built-in ones, less Plan, which runs Opus by standing
@@ -238,9 +243,10 @@ def opus_role(word):
     return None
 
 
-def _grant_opus(session_id, rest, at):
-    """`opus <n>[m|h]`, `opus <role> <n>[m|h]` or `opus off` as the whole prompt. Returns ("opus",
-    until, role) for a new override, ("opus-off", None) when one was removed, else None."""
+def _grant_opus(session_id, rest, at, typed):
+    """`opus <n>[m|h]`, `opus <role> <n>[m|h]` or `opus off` as the whole prompt. A grant needs `typed()` true (the
+    owner's words, _keyword_typed); `off` needs none. Returns ("opus", until, role) for a new override,
+    ("opus-off", None) when one was removed, else None."""
     path = _path(session_id, "opus")
     words = rest.split()
     if path is None or not words or (rest[:1] and not rest[:1].isspace()):
@@ -256,21 +262,23 @@ def _grant_opus(session_id, rest, at):
     length = OPUS_LENGTH.fullmatch(words[-1])
     if not length or len(words) > 2 or (len(words) == 2 and role is None):
         return None  # ambiguous: grants nothing
+    if not typed():
+        return None
     return _write_opus(session_id, path, at, length.groups(), role)
 
 
 def _write_opus(session_id, path, at, length, role, said=None, log=True):
     """Write the Opus override file for `length` = (number, unit) from `at` and log it: the one home of the file's
-    shape, for the keyword grant and the plain ask. `role` is None, one role, or a sorted list of 2 or more roles.
-    `said` is the owner's words, for the log; `log` False writes the file and no log line. Returns ("opus", until,
-    role)."""
-    number, unit = length
-    until = _length_end(at, number, unit)
-    stamp = until.astimezone(timezone.utc).isoformat()
+    shape, for the keyword grant and the plain ask. `length` None means no end: "until" is null and the `until`
+    returned is None. `role` is None, one role, or a sorted list of 2 or more roles. `said` is the owner's words, for
+    the log; `log` False writes the file and no log line. Returns ("opus", until, role)."""
+    until = _length_end(at, *length) if length else None
+    stamp = until.astimezone(timezone.utc).isoformat() if until else None
     _write(path, {"kind": "opus", "until": stamp, "role": role})
     if not log:
         return "opus", until, role
-    detail = "%s until %s" % (", ".join(role) if isinstance(role, list) else role or "every role", stamp)
+    detail = "%s until %s" % (", ".join(role) if isinstance(role, list) else role or "every role",
+                              stamp or "session end")
     if said:
         detail += ": " + said[:LOG_REASON_MAX].encode("utf-8", "replace").decode("utf-8")
     _log(session_id, "opus-grant", detail)
@@ -309,7 +317,7 @@ def _near_negation(names, at, negations):
 
 
 def _ask_scope(text):
-    """(length, roles) a plain ask names, or None when the words are unclear: two lengths, a decimal or compound
+    """(length, roles) a plain ask names (length None: no end), or None when the words are unclear: two lengths, a decimal or compound
     length, a role with a negation within NEGATION_SPAN words before or after it, or two role words joined by
     anything but a plain list (PLAIN_LIST). `roles` is the sorted list of the roles it names, empty when it names
     none."""
@@ -329,7 +337,7 @@ def _ask_scope(text):
             return None
         roles.add(role)
         last_end = matches[at].end()
-    return (lengths[0] if lengths else DEFAULT_ASK_LENGTH), sorted(roles)
+    return (lengths[0] if lengths else None), sorted(roles)
 
 
 def _file_role(roles):
@@ -570,8 +578,8 @@ def _fast_length(reason):
 
 def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
-    new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
-    else None: the prompt is not a word. The keyword route (decision owner-override):
+    new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word
+    (its grant needs _keyword_typed too), else None: the prompt is not a word. The keyword route (decision owner-override):
       `override`, or `override <reason>`: a one-act override, the reason logged.
       `override <length>`, with any words after a length with a unit, or a bare number as the whole rest (_fast_length):
         a timed override. This is the fast path: no model call. A second length, a decimal or a compound length:
@@ -582,7 +590,7 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     judges it; grant_override_ask calls again with `defer` False for main's result."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
-        return _grant_opus(session_id, opus.group(1), at)
+        return _grant_opus(session_id, opus.group(1), at, lambda: _keyword_typed(prompt, source, transcript))
     said = PROMPT.match(prompt) if isinstance(prompt, str) else None
     path = _path(session_id)
     if not said or path is None:
@@ -613,6 +621,31 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     return kind, until
 
 
+def end_once(session_id, prompt, at, transcript=None, source=None):
+    """Remove the session's pending one-act override for an owner prompt that granted nothing: a one-act override ends
+    when spent, on `override off`, or here (owner, item 601). The caller runs it only for a prompt no grant route took.
+    Not removed: a timed override, an Opus override, an override past its end, and any override when the prompt is a
+    harness turn (_keyword_typed: payload `source`, a queued or peer origin). Cost: one open of the override file, and
+    one tail read only when a one-act override is pending; no timer, no process. Returns True when it removed one."""
+    path = _path(session_id)
+    if path is None or not isinstance(prompt, str):
+        return False
+    try:
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+        if data["kind"] != "once" or at >= datetime.fromisoformat(data["until"]):
+            return False
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False  # no file, an unreadable one, a naive time: take() reads it as it did
+    if not _keyword_typed(prompt, source, transcript):
+        return False
+    try:
+        os.remove(path)
+    except OSError:
+        return False
+    return True
+
+
 def _outside_code(text):
     """`text` with each backtick code span (a fenced block, an unclosed fence to the end, or an inline span) replaced by a
     space: a word inside one is quoted, never the owner's own."""
@@ -621,10 +654,11 @@ def _outside_code(text):
 
 def _override_wanted(text):
     """True when the plain override ask may go to the judge on its words alone: the whole word `override` outside code
-    spans with no NEGATIONS word or `off` within NEGATION_SPAN words of it, no `?`, and no whole word `opus`."""
+    spans with no NEGATIONS word or `off` within NEGATION_SPAN words of it. A `?` or the word `opus` is no gate: the
+    judge decides."""
     clean = _outside_code(text)
     starts = {m.start() for m in OVERRIDE_WORD.finditer(clean)}
-    if not starts or "?" in text or OPUS_WORD.search(text):
+    if not starts:
         return False
     words = list(ROLE_WORDS.finditer(clean))
     names = [m.group().lower() for m in words]
@@ -741,9 +775,11 @@ def _take_opus(session_id, spawn_role, at):
     try:
         with open(path, "rb") as handle:
             data = json.loads(handle.read().decode("utf-8"))
-        until, role = datetime.fromisoformat(data["until"]), data["role"]
+        until = None if data["until"] is None else datetime.fromisoformat(data["until"])  # null: no end
+        role = data["role"]
         roles = role if isinstance(role, list) else [role]  # null, one role, or a list of roles
-        if (data["kind"] != "opus" or until.tzinfo is None or (isinstance(role, list) and not role)
+        if (data["kind"] != "opus" or (until is not None and until.tzinfo is None)
+                or (isinstance(role, list) and not role)
                 or any(r is not None and (not isinstance(r, str) or opus_role(r) != r) for r in roles)):
             return OPUS_UNREAD
     except FileNotFoundError:
@@ -752,7 +788,7 @@ def _take_opus(session_id, spawn_role, at):
         return OPUS_UNREAD
     if isinstance(role, list) and str(spawn_role).lower() in role:
         role = str(spawn_role).lower()  # a list that names the spawn's role covers it as that one role
-    if at >= until or (role is not None and role != str(spawn_role).lower()):
+    if (until is not None and at >= until) or (role is not None and role != str(spawn_role).lower()):
         return None
     return OPUS_LIFTED
 
