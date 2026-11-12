@@ -641,8 +641,8 @@ jobs:
   checks-merge-install:
     runs-on: ubuntu-latest
     needs: scope
-    # 75 (interim, stopgap, owner 12:11 CST Nov 10; was 30; decision ci-job-caps). Newest 30 push runs on main (to run 43164094808):
-    # 29 green, median 21.2, slowest green 26.7 min (run 43148329817); run 43164094808 ended at the old cap, 30.2 min, cancelled.
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 30 push runs on main (to run 43164094808):
+    # 29 green, median 21.6, slowest green 26.7 min (run 43148329817); run 43164094808 ended at the old cap, 30.2 min, cancelled.
     # Slow steps: the install.sh checkout-detection suite (own cap below) and the Merge tool git-half fixture suite, 689 s (run 43164094808). The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
     steps:
@@ -699,7 +699,7 @@ jobs:
 
       - name: install.sh checkout-detection suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        # Own cap, 30 (interim, stopgap, owner 12:11 CST Nov 10; was 15; decision ci-job-caps). Green max 10.6 min (636 s, run 43148329817). Run 43164094808 attempt 1 ran this step 888 s (14.8 min) and the old job cap cut it there, so 14.8 is a floor. 30 min is about twice that floor.
+        # Own cap, 30 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Green max 10.6 min (636 s, run 43148329817). Run 43164094808 attempt 1 ran this step 888 s (14.8 min) and the old job cap cut it there, so 14.8 is a floor. 30 min is about twice that floor.
         timeout-minutes: 30
         run: sh hooks/test_install_src.sh
 
