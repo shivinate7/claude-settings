@@ -162,16 +162,19 @@ class CommitHash:
     other word before the id leaves it flagged, so "fixed in", "see" and "cut at" still hit."""
     HEX = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b")
     # The marker is the last thing before the id, past an optional quote or backtick and an optional comma.
-    EXAMPLE = re.compile(r"(?:\be\.g\.|\bi\.e\.|\bsuch\s+as|\bfor\s+(?:example|instance)|\blike)[\s,:(]*[`'\"]?$", re.I)
-    # One earlier id of such a list, with its closing quote and the separator to the next id.
-    LISTED = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}[`'\"]?(?:\s*,\s*(?:or\s+|and\s+)?|\s+(?:or|and)\s+)[`'\"]?$", re.I)
+    # Each marker match ends where an id may start, so one pass over the line finds every marker end.
+    EXAMPLE = re.compile(r"(?:\be\.g\.|\bi\.e\.|\bsuch\s+as|\bfor\s+(?:example|instance)|\blike)[\s,:(]*[`'\"]?")
+    # The text between one id of such a list and the next: its closing quote, the separator, an opening quote.
+    JOIN = re.compile(r"[`'\"]?(?:\s*,\s*(?:or\s+|and\s+)?|\s+(?:or|and)\s+)[`'\"]?")
 
     def finditer(self, text):
+        marker_ends = {e.end() for e in self.EXAMPLE.finditer(text)}
+        prior = None  # the end of the id just before, when that id is skipped as an example
         for m in self.HEX.finditer(text):
-            before = text[:m.start()]
-            while (prior := self.LISTED.search(before)):
-                before = before[:prior.start()]
-            if not self.EXAMPLE.search(before):
+            if m.start() in marker_ends or (prior is not None and self.JOIN.fullmatch(text, prior, m.start())):
+                prior = m.end()
+            else:
+                prior = None
                 yield m
 
 
