@@ -1,0 +1,13 @@
+{
+  "id": "lane-title-slug",
+  "title": "A lane session's title opens with \"Lane <branch slug>:\"",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "lane": null,
+  "blockedBy": [],
+  "why": "Lane sessions in the owner's sidebar have free titles in some repos, so he cannot tell which branch a lane runs.",
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "source": "Retrospective 21:18 CST Nov 11, from the owner's 21:17 CST sidebar screenshot",
+  "note": "Seen: degen's local lanes read \"Lane small-screen-fixes: 519, 520\"; home's read \"Thermostat fan settings (Resideo)\", with no slug. Both run the same claude-settings. On main 2684959d6 no rule, template or guard sets a lane session's title; guard.py:1880 only refuses a session-number lane name, and rule git-slug-then-claim-number says to name a lane by its branch slug. Ask: (1) the lane start text in skill project-ops gives one title form, \"Lane <branch slug>: <task>\"; (2) the guard refuses a lane start (mcp__ccd_session__start_session, or create_session with tag cs-build:lane) whose title does not open with \"Lane <slug>:\". Proof: a red test on today's code with a free-titled lane start; a titled one passes. Changes a guard's verdict: a lane with full review. Code, not prose. Waits for the fan-out (owner 13:51).",
+  "updatedAt": "2026-11-11T21:19:00-06:00"
+}
