@@ -211,11 +211,17 @@ def departs_sides(rest):
     return rest.strip(), "", ""
 
 
+# The words that make a bare main side a restatement ("main stays"). "none", "nothing" and "n/a" say what main
+# has, so a bare "main has none" is not one.
+BARE_RESTATEMENT = re.compile(r"(?<![\w/-])(?:stays|keeps|unchanged|no changes?)(?![\w/-])", re.I)
+
+
 def bare_restatement(main):
-    """The no-change word when a sentence-form main side is only a bare subject (up to two words, no comma)
-    and that word ("main stays"), else "". A word inside a longer clause describes main and passes."""
+    """The restating word when a sentence-form main side is only a bare subject (up to two words, no comma)
+    and that word ("main stays"), else "". A word inside a longer clause describes main and passes, and so do
+    absence words (none, nothing, n/a)."""
     main = main.strip().rstrip(".!?").strip()
-    for word in NO_CHANGE.finditer(main):
+    for word in BARE_RESTATEMENT.finditer(main):
         if word.end() == len(main) and "," not in main[:word.start()] and len(main[:word.start()].split()) <= 2:
             return word.group(0)
     return ""
