@@ -174,6 +174,11 @@ class UnknownText(str):
     finding."""
 
 
+class UnreadText(UnknownText):
+    """An UnknownText for an input the check could not read, such as a .py that does not parse. Unlike a limit of the
+    check, it is red when env CI is set (decision ci-unknown-is-red)."""
+
+
 class BaseUnknown(Unknown):
     """The base of the range does not resolve, as in a shallow clone. Not a finding."""
 
@@ -800,12 +805,13 @@ class ValueReader:
         whole = state.rng.tree is not None  # every tracked page is read: an untouched line is read too
         messages = []
 
-        def cannot_read(why, finding):
-            """A cite this reader cannot judge: a finding on an added line, unknown on any line of a whole read."""
+        def cannot_read(why, finding, unread=False):
+            """A cite this reader cannot judge: a finding on an added line, unknown on any line of a whole read. An
+            `unread` one is a file that did not parse, red under env CI; the rest are limits of the check."""
             if added and finding:
                 messages.append(why)
             elif added or whole:
-                messages.append(UnknownText(why))
+                messages.append((UnreadText if unread else UnknownText)(why))
 
         for path, symbol, literal in value_cites(text):
             if not path.endswith(".py"):
@@ -824,7 +830,10 @@ class ValueReader:
                 continue
             head = self.value(state, "head", path, symbol)
             if head is None:  # the file does not parse, or the name holds no literal: neither can be compared
-                cannot_read("%s %s holds no literal at head, so the cite is not checked" % (path, symbol), False)
+                if tree is None:
+                    cannot_read("%s does not parse at head, so the cite of %s is not checked" % (path, symbol), False, True)
+                else:
+                    cannot_read("%s %s holds no literal at head, so the cite is not checked" % (path, symbol), False)
                 continue
             base = self.value(state, "base", path, symbol) if path in state.rng.py_files else head
             quotes_base = base not in (None, GONE) and same_value(lit, base[0])
@@ -1320,7 +1329,11 @@ def find_stale(rng):
                 if reader.code not in off:
                     for message in reader.line(state, line, claimed):
                         if getattr(reader, "unknown", False) or isinstance(message, UnknownText):
-                            entry = Limit("%s:%d: %s" % (md, number, message))
+                            # A reader that is built not to read a file (JavaScript, shell) or a value that is no literal
+                            # states a Limit; an UnreadText is a file that could not be read, red when env CI is set.
+                            unread = isinstance(message, UnreadText)
+                            entry = "%s:%d: %s" % (md, number, message)
+                            entry = entry if unread else Limit(entry)
                             if entry not in rng.unknowns:  # two readers may say the same unknown
                                 rng.unknowns.append(entry)
                         else:
