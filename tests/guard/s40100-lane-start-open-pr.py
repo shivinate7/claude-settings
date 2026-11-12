@@ -12,11 +12,12 @@ FAMILY = "rule9"  # the lane start cases keep rule 9's family, as the lane cases
 # number. Any failure of the read (no gh, a non-zero exit, a timeout, bad JSON, no repo) passes and prints one stderr
 # line that names the rule id `lane-start-open-pr`.
 #
-# THE SEAM. The gh read goes through `subprocess.run`, which hooks/_nowindow.run calls at call time. The stub below
+# THE SEAM. The gh read goes through `subprocess.Popen`, which hooks/_nowindow.Popen calls at call time. The stub below
 # is layered over LB_PROBE (s39497), which runs the guard in-process and reports its children, sleeps and file writes.
-# The stub answers a gh argv from the case's `gh` spec, records each call's argv and timeout, and raises for a missing
-# gh or a timeout. A gh child started another way (a Popen) raises, so that case fails loudly, not on GitHub.
-# No builder function name is patched, so a crash cannot pass for a red.
+# The stub answers a gh argv from the case's `gh` spec: the child's pipes (communicate, bytes unless the call asks for
+# text), its returncode, and the timeout the call passed. It records each argv and timeout, and raises for a missing
+# gh or a timeout as the OS would. Any other child is the real Popen. No builder function name is patched, so a crash
+# cannot pass for a red.
 #
 # CHECK ORDER (P7): the scope comes first. A judged case asserts its gh calls, then the decision, then the reason
 # fragments, then the warning. Each failure message names one cause.
@@ -124,7 +125,7 @@ spec = json.loads(sys.argv[3])
 with open(spec["gh_file"], encoding="utf-8") as handle:
     gh = json.load(handle)
 calls = []
-real_run = subprocess.run
+real_popen = subprocess.Popen
 real_which = shutil.which
 
 
@@ -132,24 +133,55 @@ def is_gh(argv):
     return isinstance(argv, (list, tuple)) and bool(argv) and os.path.basename(str(argv[0])) in ("gh", "gh.exe")
 
 
-class GhSeamPopen(subprocess.Popen):
-    def __init__(self, *args, **kwargs):
-        if is_gh(args[0] if args else kwargs.get("args")):
-            raise RuntimeError("gh started outside the subprocess.run seam")
-        super().__init__(*args, **kwargs)
+class FakeGhChild:
+    """The gh child a Popen call starts under the stub. Its pipes answer from the case's gh spec as a real child's
+    would: communicate returns bytes unless the call asked for text, and it sets returncode."""
+
+    def __init__(self, argv, text):
+        if gh["mode"] == "missing":
+            raise FileNotFoundError(2, "No such file or directory", "gh")
+        self.args = argv
+        self.text = text
+        self.record = {"argv": [str(a) for a in argv], "timeout": None}
+        calls.append(self.record)
+        self.returncode = None
+        self.pid = 0
+        self.stdin = self.stdout = self.stderr = None
+
+    def communicate(self, input=None, timeout=None):
+        self.record["timeout"] = timeout
+        if gh["mode"] == "timeout":
+            raise subprocess.TimeoutExpired(self.args, timeout)
+        self.returncode = 1 if gh["mode"] == "exit" else 0
+        out, err = gh.get("stdout", ""), gh.get("stderr", "")
+        return (out, err) if self.text else (out.encode("utf-8"), err.encode("utf-8"))
+
+    def kill(self):
+        self.returncode = -9
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def poll(self):
+        return self.returncode
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
-def gh_run(*args, **kwargs):
-    argv = args[0] if args else kwargs.get("args")
-    if not is_gh(argv):
-        return real_run(*args, **kwargs)
-    calls.append({"argv": [str(a) for a in argv], "timeout": kwargs.get("timeout")})
-    if gh["mode"] == "missing":
-        raise FileNotFoundError(2, "No such file or directory", "gh")
-    if gh["mode"] == "timeout":
-        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
-    return subprocess.CompletedProcess(argv, 1 if gh["mode"] == "exit" else 0,
-                                       stdout=gh.get("stdout", ""), stderr=gh.get("stderr", ""))
+class GhSeamPopen(real_popen):
+    """subprocess.Popen with each gh child answered by FakeGhChild. Python skips __init__ when __new__ returns an
+    object of another type, so a gh call never reaches the real Popen. Any other child is the real one."""
+
+    def __new__(cls, *args, **kwargs):
+        argv = args[0] if args else kwargs.get("args")
+        if is_gh(argv):
+            text = any(kwargs.get(k) for k in ("text", "universal_newlines", "encoding", "errors"))
+            return FakeGhChild(argv, text)
+        return super().__new__(cls)
 
 
 def which(name, *args, **kwargs):
@@ -159,7 +191,6 @@ def which(name, *args, **kwargs):
 
 
 subprocess.Popen = GhSeamPopen
-subprocess.run = gh_run
 shutil.which = which
 try:
     with open(spec["probe"], encoding="utf-8") as handle:
