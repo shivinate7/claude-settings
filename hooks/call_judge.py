@@ -54,6 +54,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -138,7 +139,8 @@ PAST_RULING_ITEM = (
     "a re-ask the ruling allows is fine. A measured challenge passes too (rule outcomes-stale-decision-protocol): "
     "a question that names the record and quotes its sentence, gives a measure of what the sentence claims or the "
     "word \"unmeasured\", says what outcome the ruling protected and what protects that outcome now, and proposes a "
-    "fix. Refuse a re-ask that brings no new measure or fact and offers no such challenge. "
+    "fix. A new fact alone is not a pass: a question passes only as a challenge with those four parts. "
+    "Refuse a re-ask that brings no new measure or fact and offers no such challenge. "
     "A challenge only asks; it never grants anything. "
     "This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
@@ -350,9 +352,21 @@ def how_to_challenge(rule):
     return " " + CHALLENGE_HOW if rule == question_form.PAST_RULING_RULE else ""
 
 
+GIVE_UP = re.compile(r"withdraw|drop the question|take the question back|\b(?:do not|don't|never|not)\s+(?:re-?ask|ask|send)\b",
+                     re.I)
+FORM_ITEM = re.compile(r"^\W*item\s*[1-7]\b", re.I)  # a reason that opens on a form item, never item 8
+
+
+def without_give_up(reason):
+    """The reason minus any sentence that tells the session to withdraw or not re-ask: CHALLENGE_HOW is the remedy."""
+    return " ".join(s for s in re.split(r"(?<=[.!?])\s+", reason) if not GIVE_UP.search(s))
+
+
 def refuse(payload, tool, args, rule, reason):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
     reason = reason.strip()
+    if how_to_challenge(rule):
+        reason = without_give_up(reason)
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
@@ -456,6 +470,8 @@ def main():
         reason = verdict.get("reason")
         reason = reason if isinstance(reason, str) and reason.strip() else fallback
         cite = question_form.ruling_cite(reason, ids) if units else ""
+        if cite == "cited" and FORM_ITEM.match(reason):  # a form item naming a shown record keeps its own rule id
+            cite = ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
         return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)

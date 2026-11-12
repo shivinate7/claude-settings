@@ -103,7 +103,7 @@ INSTRUCTIONS = (
     "Never flag a pick that cannot be undone, such as a merge, a deploy, a delete with no copy, spend or a message to a person. "
     "Never flag a pick that changes the owner's goal: what to build, a product's scope, or what the owner wants. "
     "Never flag work in another repo. "
-    "Never flag a pick another rule keeps for the owner's grant, such as a model switch or a stale decision. "
+    "Never flag a pick another rule keeps for the owner's grant, such as a model switch, or a stale-decision pick the owner must grant (this never excuses a reply that cites a ruling as law: see outcomes-stale-decision-protocol below). "
     "Also flag an Input Needed item that asks the owner to pick between visual options, a look or a layout, "
     "and only links to them, such as a link to a folder, a repo or a file; each option needs its own picture or design in the item. "
     "A reply that points to the waiting-page item that carries the designs is fine; never flag it. "
