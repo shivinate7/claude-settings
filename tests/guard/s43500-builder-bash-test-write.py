@@ -102,6 +102,106 @@ def _bbtw_merge_conflict(w):
 
 BBTW_MERGE = diff_repo("bbtw-merge", _bbtw_merge_conflict)
 
+# ---------------------------------------------------------------- the stopped states (rule builder-bash-test-write-merging)
+# A merge, a rebase or a cherry-pick that stops on a product conflict brings the other side's files into the worktree,
+# so `git status` lists them as changed. The check reads the state file in the worktree's git dir (a file read, no git
+# call). With a stop in progress and no unmerged test path, it allows the call and logs builder-bash-test-write-merging,
+# noted, and the merge-aware commit and stop check judges the change. An unmerged test path still blocks.
+BBTW_MERGING = "builder-bash-test-write-merging"
+BBTW_SRC = "src/app.py"            # a product file both sides rewrite, so bringing the other side in conflicts on it
+BBTW_INCOMING = "tests/test_n.py"  # the test file the other side adds, which comes in clean
+BBTW_TEST_A = "tests/test_a.py"    # the test file both sides rewrite in the unmerged-test controls
+PRODUCT_OTHER = {BBTW_SRC: "x = 2\n", BBTW_INCOMING: "def test_n():\n    assert 1\n"}
+PRODUCT_WORK = {BBTW_SRC: "x = 3\n"}
+PRODUCT_WANT = (("A ", BBTW_INCOMING), ("UU", BBTW_SRC))
+MANY_OTHER = {BBTW_SRC: "x = 2\n"}   # the full-size state: the other side adds 64 test files
+MANY_OTHER.update((rel, "def test_incident():\n    assert 1\n") for rel in BBTW_MANY_FILES)
+MANY_WANT = (("A ", BBTW_MANY_FILES[0]), ("A ", BBTW_MANY_FILES[-1]), ("UU", BBTW_SRC))
+MIXED_OTHER = {BBTW_SRC: "x = 2\n", BBTW_TEST_A: "def test_a():\n    assert 2\n"}
+MIXED_WORK = {BBTW_SRC: "x = 3\n", BBTW_TEST_A: "def test_a():\n    assert 3\n"}
+MIXED_WANT = (("UU", BBTW_SRC), ("UU", BBTW_TEST_A))
+TEST_OTHER = {BBTW_TEST_A: "def test_a():\n    assert 2\n"}
+TEST_WORK = {BBTW_TEST_A: "def test_a():\n    assert 3\n"}
+TEST_WANT = (("UU", BBTW_TEST_A),)
+ONLY_OTHER = {BBTW_SRC: "x = 2\n"}   # the empty test state: no test path changes at all
+ONLY_WANT = (("UU", BBTW_SRC),)
+
+
+def _bbtw_run(where, *args):
+    """A git call that builds a stop. A call that fails stops the run: the state a case needs was never made."""
+    done = run_vcs(where, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in %r: %s" % (where, done.stderr.strip()))
+    return done
+
+
+def _bbtw_side_commits(where, other, work):
+    """Branch `other` commits the files `other` maps. Then `work`, the worktree's branch, commits the files `work` maps.
+    Both sides rewrite the same lines of a file, so bringing `other` in by merge, rebase or cherry-pick conflicts."""
+    _bbtw_run(where, "checkout", "-q", "-b", "other")
+    for rel, text in other.items():
+        write(os.path.join(where, rel), text)
+    _bbtw_run(where, "add", "-A")
+    _bbtw_run(where, *IDENT, "commit", "-q", "-m", "other side")
+    _bbtw_run(where, "checkout", "-q", "work")
+    for rel, text in work.items():
+        write(os.path.join(where, rel), text)
+    _bbtw_run(where, "add", "-A")
+    _bbtw_run(where, *IDENT, "commit", "-q", "-m", "work side")
+
+
+def _bbtw_state_scope(where, state, want):
+    """P7: the worktree is in `state` (a file or folder in its git dir, found with git), and git status of it holds
+    each (code, path) in `want`. '' when both hold, else the one failure note. Read before any case judges the stop.
+    _bbtw_merge_scope stays as the read of the existing merge case."""
+    gitdir = run_vcs(where, "rev-parse", "--git-dir")
+    if gitdir.returncode != 0:
+        return "the fixture is not a repository: git rev-parse fails"
+    if not os.path.exists(os.path.join(where, gitdir.stdout.strip(), state)):
+        return "the fixture holds no %s in progress: none in its git dir" % state
+    status = run_vcs(where, "status", "--porcelain", "--untracked-files=all")
+    lines = status.stdout.splitlines()
+    for code, path in want:
+        if not any(line[:2] == code and line[3:] == path for line in lines):
+            return "the fixture does not hold %s %s: git status reads %r" % (code, path, status.stdout.strip()[:120])
+    return ""
+
+
+def _bbtw_stop_build(state, op, other, work, want, first=None):
+    """A diff_repo change: the two sides are committed, `first` is checked out when given, and `op` (the git args that
+    bring `other` in) must stop on a conflict. The stop is checked with git here, before any case reads it."""
+    def build(where):
+        _bbtw_side_commits(where, other, work)
+        if first:
+            _bbtw_run(where, "checkout", "-q", first)
+        if run_vcs(where, *IDENT, *op).returncode == 0:
+            sys.exit("fixture setup failed: git %s in %r did not stop on a conflict" % (" ".join(op), where))
+        note = _bbtw_state_scope(where, state, want)
+        if note:
+            sys.exit("fixture setup failed: " + note)
+    return build
+
+
+# A merge, a rebase (rebase-merge and rebase-apply) and a cherry-pick each stop in the worktree's own git dir.
+BBTW_MERGE_PRODUCT = diff_repo("bbtw-merge-product", _bbtw_stop_build(
+    "MERGE_HEAD", ("merge", "--no-edit", "other"), PRODUCT_OTHER, PRODUCT_WORK, PRODUCT_WANT))
+BBTW_MERGE_MANY = diff_repo("bbtw-merge-many", _bbtw_stop_build(
+    "MERGE_HEAD", ("merge", "--no-edit", "other"), MANY_OTHER, PRODUCT_WORK, MANY_WANT))
+BBTW_REBASE_PRODUCT = diff_repo("bbtw-rebase-product", _bbtw_stop_build(
+    "rebase-merge", ("rebase", "work"), PRODUCT_OTHER, PRODUCT_WORK, PRODUCT_WANT, first="other"))
+BBTW_REBASE_APPLY = diff_repo("bbtw-rebase-apply", _bbtw_stop_build(
+    "rebase-apply", ("rebase", "--apply", "work"), PRODUCT_OTHER, PRODUCT_WORK, PRODUCT_WANT, first="other"))
+BBTW_PICK_PRODUCT = diff_repo("bbtw-pick-product", _bbtw_stop_build(
+    "CHERRY_PICK_HEAD", ("cherry-pick", "other"), PRODUCT_OTHER, PRODUCT_WORK, PRODUCT_WANT))
+BBTW_MERGE_MIXED = diff_repo("bbtw-merge-mixed", _bbtw_stop_build(
+    "MERGE_HEAD", ("merge", "--no-edit", "other"), MIXED_OTHER, MIXED_WORK, MIXED_WANT))
+BBTW_REBASE_TEST = diff_repo("bbtw-rebase-test", _bbtw_stop_build(
+    "rebase-merge", ("rebase", "work"), TEST_OTHER, TEST_WORK, TEST_WANT, first="other"))
+BBTW_PICK_TEST = diff_repo("bbtw-pick-test", _bbtw_stop_build(
+    "CHERRY_PICK_HEAD", ("cherry-pick", "other"), TEST_OTHER, TEST_WORK, TEST_WANT))
+BBTW_MERGE_PRODUCT_ONLY = diff_repo("bbtw-merge-product-only", _bbtw_stop_build(
+    "MERGE_HEAD", ("merge", "--no-edit", "other"), ONLY_OTHER, PRODUCT_WORK, ONLY_WANT))
+
 # A git stand-in that answers every call but a status read. It is POSIX only, so its cases skip on Windows.
 BBTW_NO_ANSWER_BIN = os.path.join(ROOT, "bbtw-no-answer")
 BBTW_NO_ANSWER_PATH = BBTW_NO_ANSWER_BIN + os.pathsep + os.environ.get("PATH", "")
@@ -166,6 +266,21 @@ bbtw_add("builder-bash-test-write: a builder's call that leaves a non-ASCII-name
          "deny", BBTW_UNICODE, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("test_caf",))
 bbtw_add("builder-bash-test-write: a builder's block says to stop and report when it cannot undo the test change",
          "deny", BBTW_UNTRACKED, rule=BBTW_RULE, carries=BBTW_STOP, lacks=("tests/foo.py",))
+
+# The stopped states. An unmerged test path still blocks in each. The reason names the merge-abort step only in a
+# merge, the one state `git merge --abort` ends. A block outside a merge, or in a rebase or cherry-pick, does not name it.
+# The five cases below are CONTROLS: each passes on the old code too. They pin what the new check must keep (the block
+# on an unmerged test path, in each state) and the negative pins on the merge-abort step (the reason names it only in a merge).
+bbtw_add("builder-bash-test-write: a builder's call in a merge with a product conflict and an unmerged test path is blocked, and names the merge-abort step",
+         "deny", BBTW_MERGE_MIXED, rule=BBTW_RULE, carries=BBTW_UNDO + (BBTW_MERGE_ABORT,), lacks=(BBTW_TEST_A,))
+bbtw_add("builder-bash-test-write: a builder's call in a rebase with an unmerged test path is blocked, and does not name the merge-abort step",
+         "deny", BBTW_REBASE_TEST, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=(BBTW_MERGE_ABORT, BBTW_TEST_A))
+bbtw_add("builder-bash-test-write: a builder's call in a cherry-pick with an unmerged test path is blocked, and does not name the merge-abort step",
+         "deny", BBTW_PICK_TEST, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=(BBTW_MERGE_ABORT, BBTW_TEST_A))
+bbtw_add("builder-bash-test-write: a builder's call that rewrites a tracked test outside any merge is blocked, and does not name the merge-abort step",
+         "deny", BBTW_MODIFIED, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=(BBTW_MERGE_ABORT, BBTW_TEST_A))
+bbtw_add("builder-bash-test-write: a builder's call in a merge with only a product conflict is allowed silently, with no merge-abort step",
+         "allow", BBTW_MERGE_PRODUCT_ONLY, silent=True)
 
 
 # ---------------------------------------------------------------- checks the log and the git spy (LOG_CHECKS)
@@ -452,6 +567,52 @@ def bbtw_merge_abort_case():
     return True, "a block in a merge with a test conflict names the merge-abort step"
 
 
+def _bbtw_merging_noted(tag, where, what):
+    """A builder's call in a stop that holds an incoming test path and no unmerged test path: allowed, silently, and
+    logged builder-bash-test-write-merging as noted, so the merge-aware commit and stop check judges the change.
+    The stop was checked with git when its fixture was built (_bbtw_stop_build)."""
+    materialize(where)
+    got, reason, folder, _names = _bbtw_judge(tag, _bbtw_raw(where))
+    if got != "allow":
+        return False, "a builder's call in %s with an incoming test is %s, want allow: %s" % (what, got, reason[:90])
+    if reason:
+        return False, "an allow in %s printed a reason, want silence: %s" % (what, reason[:90])
+    rows = _bbtw_rows(folder, BBTW_MERGING)
+    if len(rows) != 1 or rows[0][2] != "noted":
+        return False, "want one noted %s line in guard.log, got %r" % (BBTW_MERGING, rows)
+    return True, "a builder's call in %s with an incoming test is allowed and logged %s, noted" % (what, BBTW_MERGING)
+
+
+def bbtw_merging_merge_case():
+    return _bbtw_merging_noted("merging-merge", BBTW_MERGE_PRODUCT, "a merge")
+
+
+def bbtw_merging_many_case():
+    return _bbtw_merging_noted("merging-many", BBTW_MERGE_MANY, "a merge that brings 64 test files")
+
+
+def bbtw_merging_rebase_case():
+    return _bbtw_merging_noted("merging-rebase", BBTW_REBASE_PRODUCT, "a rebase (rebase-merge)")
+
+
+def bbtw_merging_rebase_apply_case():
+    return _bbtw_merging_noted("merging-rebase-apply", BBTW_REBASE_APPLY, "a rebase (rebase-apply)")
+
+
+def bbtw_merging_pick_case():
+    return _bbtw_merging_noted("merging-pick", BBTW_PICK_PRODUCT, "a cherry-pick")
+
+
+def bbtw_status_once_merge_case():
+    """CONTROL, green on the old code: a builder call in a merge reads git status once and makes no other git call.
+    The new stop read is a file read, so this pins that it adds no git call."""
+    materialize(BBTW_MERGE_PRODUCT)
+    _got, _reason, _folder, names = _bbtw_judge("cost-merge", _bbtw_raw(BBTW_MERGE_PRODUCT), count_git=True)
+    if names != ["status"]:
+        return False, "git ran %r in a builder call in a merge, want one status and no other call" % names
+    return True, "one git status, and no other git call, in a builder call in a merge"
+
+
 BBTW_CHECKS = (
     ("builder-bash-test-write: a block writes one deny line for the rule to guard.log", bbtw_deny_line_case),
     ("builder-bash-test-write: a call git cannot read because it is no repository logs builder-bash-test-write-unread, noted",
@@ -474,10 +635,22 @@ BBTW_CHECKS = (
      bbtw_new_folder_case),
     ("builder-bash-test-write: a builder's call in a merge with a test conflict names the merge-abort step",
      bbtw_merge_abort_case),
+    ("builder-bash-test-write: a builder call in a merge that stops on a product conflict, with an incoming test, "
+     "is allowed and logs builder-bash-test-write-merging, noted", bbtw_merging_merge_case),
+    ("builder-bash-test-write: a builder call in a merge that brings 64 test files and stops on a product conflict "
+     "is allowed and logs builder-bash-test-write-merging, noted", bbtw_merging_many_case),
+    ("builder-bash-test-write: a builder call in a rebase (rebase-merge) that stops on a product conflict, with an "
+     "incoming test, is allowed and logs builder-bash-test-write-merging, noted", bbtw_merging_rebase_case),
+    ("builder-bash-test-write: a builder call in a rebase (rebase-apply) that stops on a product conflict, with an "
+     "incoming test, is allowed and logs builder-bash-test-write-merging, noted", bbtw_merging_rebase_apply_case),
+    ("builder-bash-test-write: a builder call in a cherry-pick that stops on a product conflict, with an incoming "
+     "test, is allowed and logs builder-bash-test-write-merging, noted", bbtw_merging_pick_case),
+    ("builder-bash-test-write: a builder call in a merge reads git status once and makes no other git call",
+     bbtw_status_once_merge_case),
 )
 # A git stand-in is POSIX only. A gate runs the settings line under sh, which Windows cannot run here.
 BBTW_STAND_IN_CHECKS = (bbtw_unread_git_fails_case, bbtw_status_once_test_case, bbtw_status_once_product_case,
-                        bbtw_no_git_author_case, bbtw_no_git_main_case)
+                        bbtw_no_git_author_case, bbtw_no_git_main_case, bbtw_status_once_merge_case)
 BBTW_GATE_CHECKS = (bbtw_gate_passes_case, bbtw_gate_stops_case)
 for _label, _check in BBTW_CHECKS:
     LOG_FAMILY[_label] = FAMILY
