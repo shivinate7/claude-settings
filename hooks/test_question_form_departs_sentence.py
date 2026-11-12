@@ -8,12 +8,14 @@ the change side. Both sides must be non-empty, the placeholder and no-change che
 forms keep winning when a dash is present.
 
 Restatements in the sentence form ("main stays. It is fine.", "main. Same behaviour.") are refused on the chat box and
-a waiting-page decision, and one is refused on the Input Needed pick. An abbreviation ("e.g.", "i.e.") does not end a
-sentence.
+a waiting-page decision, and one is refused on the Input Needed pick. A bare main side of up to two words is a
+restatement only with "stays", "keeps", "unchanged" or "no change" ("main has none. A button is added." passes, as
+"none", "nothing" and "n/a" say what main has). An abbreviation ("e.g.", "i.e.") does not end a sentence.
+A port's sentence-form line is refused with the dash-form message, even when its main side names `<file>:<symbol>`.
+The dash form with that same main side passes.
 Green controls, beside them: a no-change word inside a clause that names a thing on main, the dash forms, the
-shapes that stay refused (no dash and no sentence end, an empty side, a no-change word, a placeholder) and a port
-item, which still needs `<file>:<symbol>` on main. The restatement and abbreviation cases fail on a build without
-the rule; the controls pass on both.
+shapes that stay refused (no dash and no sentence end, an empty side, a no-change word, a placeholder). The
+restatement, bare-word and abbreviation cases fail on a build without the rule; the controls pass on both.
 
 Run it from the repository root:
 
@@ -90,16 +92,38 @@ REFUSED_SHAPES = [
 # A port item's line: "main, where X. Y." names no <file>:<symbol> on main, so port_item_hit still refuses it.
 PORT_SENTENCE = "Departs from: main, where the stamp check runs. The change: it moves to the lint job."
 # Restatements the sentence form must refuse. The rule that separates them from the controls below: the first
-# sentence is the main side, and a no-change word restates main when it is the whole main side (a bare subject and
-# the word, as in "main stays.") or when the change side says so ("Same behaviour.", "Behaves the same."). A word
-# inside a clause that names a thing on main ("where the guard stays on until a cull") describes main, and the
-# change side after it names the change, so that line passes.
+# sentence is the main side, and a no-change word restates main when it is the whole main side (a bare subject of up
+# to two words and one of "stays", "keeps", "unchanged" or "no change", as in "main stays.") or when the change side
+# says so ("Same behaviour.", "Behaves the same."). A word inside a clause that names a thing on main ("where the
+# guard stays on until a cull") describes main, and the change side after it names the change, so that line passes.
 RESTATEMENTS = [
     ("the main side is only 'main stays', and the change side says it is fine",
      "Departs from: main stays. It is fine."),
+    ("the main side is only 'main keeps', and the change side says it is fine",
+     "Departs from: main keeps. It is fine."),
+    ("the main side is only 'main unchanged', and the change side says it is fine",
+     "Departs from: main unchanged. It is fine."),
+    ("the main side is only 'main no change', and the change side says it is fine",
+     "Departs from: main no change. It is fine."),
     ("the change side says same behaviour", "Departs from: main. Same behaviour."),
     ("the change side says behaves the same", "Departs from: main. Behaves the same."),
 ]
+# Sentence-form lines whose bare main side holds "none", "nothing" or "n/a". Those words say what main has, not that
+# nothing changes, so the change side is the change and each line passes.
+BARE_WORD_PASS_LINES = [
+    ("a bare subject with none, and a button added",
+     "Departs from: main has none. A button is added."),
+    ("a Sorting subject with none, and the list sorted by date",
+     "Departs from: Sorting: none. Sorted by date."),
+    ("n/a, and a limit added",
+     "Departs from: n/a. We add a limit."),
+    ("nothing, and a limit added",
+     "Departs from: Nothing. Adds a limit."),
+]
+# A port's sentence-form line is refused even when its main side names <file>:<symbol>. The dash form with the same
+# main side is accepted.
+PORT_FILE_SENTENCE = "Departs from: hooks/guard.py:run. Adds a limit."
+PORT_FILE_DASH = "Departs from: hooks/guard.py:run — adds a limit"
 # An abbreviation is not a sentence end: "e.g." and "i.e." sit inside the main side, and the line splits at the
 # sentence end after "in place" or "runs first".
 ABBREVIATION_LINES = [
@@ -224,13 +248,46 @@ def case_port_sentence_form_still_refused():
           "port_item_hit passed it")
 
 
+def case_bare_no_change_words_pass():
+    for name, body in BARE_WORD_PASS_LINES:
+        miss = question_form.departs_hit(body)
+        check("%s: departs_hit passes the line" % name, miss == "", "departs_hit refused it: %s" % miss)
+        tqf.dp_chat("%s passes on the chat box" % name, body, None)
+        tqf.dp_page("%s passes on a waiting-page decision" % name, body, None)
+
+
+def case_port_sentence_with_file_symbol_is_refused_with_dash_message():
+    rest = question_form.DEPARTS_LINE.findall(PORT_FILE_SENTENCE)
+    check("port scope: the text holds one Departs from line that splits as a sentence on hooks/guard.py:run",
+          len(rest) == 1 and question_form.departs_sides(rest[0]) == ("hooks/guard.py:run", "Adds a limit.", "sentence"),
+          "sides %r" % (rest,))
+    miss = question_form.port_departs_miss(PORT_FILE_SENTENCE)
+    check("port: a sentence-form line that names hooks/guard.py:run is refused by port_departs_miss", bool(miss),
+          "port_departs_miss passed it")
+    if miss:
+        check("port: the refusal says a port needs the dash form", "a port needs the dash form" in miss,
+              "message was %r" % miss)
+
+
+def case_port_dash_form_with_file_symbol_passes():
+    rest = question_form.DEPARTS_LINE.findall(PORT_FILE_DASH)
+    check("port scope: the text holds one Departs from line that splits at the dash on hooks/guard.py:run",
+          len(rest) == 1 and question_form.departs_sides(rest[0]) == ("hooks/guard.py:run", "adds a limit", "dash"),
+          "sides %r" % (rest,))
+    miss = question_form.port_departs_miss(PORT_FILE_DASH)
+    check("port: the dash form hooks/guard.py:run — adds a limit passes port_departs_miss", miss == "",
+          "port_departs_miss refused it: %r" % (miss,))
+
+
 def main():
     for case in (case_sentence_lines_pass_the_predicate, case_audit_lines_pass_on_the_chat_box_and_page,
                  case_report_pick_with_audit_line_passes, case_dash_forms_with_sentence_ends_pass,
                  case_refused_shapes_stay_refused, case_port_sentence_form_still_refused,
                  case_restatements_are_refused_on_chat_and_page,
                  case_abbreviation_and_control_lines_pass_on_chat_and_page,
-                 case_report_pick_with_abbreviation_line_passes, case_report_pick_with_restatement_is_refused):
+                 case_report_pick_with_abbreviation_line_passes, case_report_pick_with_restatement_is_refused,
+                 case_bare_no_change_words_pass, case_port_sentence_with_file_symbol_is_refused_with_dash_message,
+                 case_port_dash_form_with_file_symbol_passes):
         try:
             case()
         except Exception as exc:
