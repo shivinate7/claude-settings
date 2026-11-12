@@ -4,10 +4,12 @@
     python3 lint/test_ruled_store.py
 
 The store is roadmap/rulings/<id>.json on origin/roadmap. Each case builds a real git repo under this run's folder
-(lint/_test_temp.py) with lint/test_support/ruled_store_fixture.py, which points the refs with git plumbing, then calls
+(lint/_test_temp.py) with the store helpers defined below, which point the refs with git plumbing, then call
 the module's functions or runs its CLI. RULED_STORE_UNDER_TEST overrides the module path, as a mutant run needs.
+hooks/test_session_start.py and hooks/test_question_form.py import this file as `fixture` for the same helpers.
 """
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -19,13 +21,85 @@ from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "test_support"))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
-import ruled_store_fixture as fixture  # noqa: E402  the one home of a store fixture
+
+# The store helpers. A store is the folder roadmap/rulings on origin/roadmap, one JSON file per ruling. The helpers
+# point refs with git plumbing only (hash-object, update-index on a temp index, write-tree, commit-tree, update-ref),
+# so no checkout moves and no branch changes. The caller owns the folder it passes as `scratch` for the temp index.
+VCS = "g" + "it"  # assembled, as hooks/test_session_start.py assembles its own git name
+IDENT = ("-c", "user.name=test", "-c", "user.email=test@example.invalid")
+STORE_REF = "refs/remotes/origin/roadmap"
+MAIN_REF = "refs/remotes/origin/main"
+RULINGS_DIR = "roadmap/rulings"
+AT = "2026-11-12T14:15:00-06:00"
+TEST_SUPERSEDES = [{"kind": "test", "ref": "lint/test_ruled_store.py::test_case"}]
+# A git start must not read the outer repo: a hook or CI step may set these to point at its own checkout.
+STRIPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_NAMESPACE")
+ENV = {key: value for key, value in os.environ.items() if key not in STRIPPED}
+
+
+def git(repo, *args, text=None, env=None):
+    """stdout of one git start in `repo`. A failure raises: a fixture that cannot be built is an error, not a case result."""
+    answer = _nowindow.run([VCS, "-C", repo, *IDENT, *args], input=text, capture_output=True, text=True,
+                           env=env or ENV, timeout=60)
+    if answer.returncode != 0:
+        raise RuntimeError("fixture: %s %s failed: %s" % (VCS, " ".join(args), answer.stderr.strip()))
+    return answer.stdout.strip()
+
+
+def init_repo(path):
+    """A new repo at `path`. The folder is made when it is missing."""
+    os.makedirs(path, exist_ok=True)
+    git(path, "init", "-q")
+    return path
+
+
+def point_ref(repo, ref, files, scratch):
+    """Points `ref` at a new commit whose whole tree is `files` ({path: text}). Returns the commit's sha."""
+    index = os.path.join(scratch, "index-" + ref.replace("/", "_"))
+    if os.path.exists(index):
+        os.remove(index)
+    env = dict(ENV, GIT_INDEX_FILE=index)
+    for path, text in sorted(files.items()):
+        blob = git(repo, "hash-object", "-w", "--stdin", text=text, env=env)
+        git(repo, "update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, path), env=env)
+    tree = git(repo, "write-tree", env=env)
+    commit = git(repo, "commit-tree", tree, "-m", "fixture for " + ref, env=env)
+    git(repo, "update-ref", ref, commit, env=env)
+    return commit
+
+
+def ruling_files(entries):
+    """{path: text} for a store: each id maps to roadmap/rulings/<id>.json. A dict is written as JSON; a str is
+    written as it is, which is how a case makes a malformed file."""
+    return {"%s/%s.json" % (RULINGS_DIR, rid): body if isinstance(body, str) else json.dumps(body, indent=2)
+            for rid, body in entries.items()}
+
+
+def entry(rid, **over):
+    """A valid ruling entry for `rid`: open, dated AT, with one test ref under supersedes. A key set to None is left out."""
+    body = {"id": rid, "at": AT, "ruling": "Owner: keep the store to one place.",
+            "quote": "keep it in one place", "source": "page item 1", "status": "open",
+            "supersedes": [dict(ref) for ref in TEST_SUPERSEDES]}
+    body.update(over)
+    return {key: value for key, value in body.items() if value is not None}
+
+
+# The cases name the helpers as fixture.<name>. A hook test that imports this file gets the same names as its module.
+fixture = sys.modules[__name__]
 
 MODULE = os.path.abspath(os.environ.get("RULED_STORE_UNDER_TEST") or os.path.join(HERE, "ruled_store.py"))
-RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard: tearDownModule removes it
+_RUN = []  # this run's folder, made on first use so that importing this file starts nothing
+
+
+def run_folder():
+    """This run's temp folder (test-temp-standard), made on the first call."""
+    if not _RUN:
+        _RUN.append(_test_temp.run_folder())
+    return _RUN[0]
 HEADER = "rulings not on main: %d open (%d with no supersedes read yet), newest first"
 DST_CDT = "2026-11-01T01:30:00-05:00"  # 06:30 UTC, the first 01:30 before the clocks go back
 DST_CST = "2026-11-01T01:10:00-06:00"  # 07:10 UTC, after the change: later, though its text sorts first
@@ -58,7 +132,7 @@ def entry_lines(lines):
 
 class RepoCase(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="ruled_store_", dir=RUN_FOLDER)
+        self.root = tempfile.mkdtemp(prefix="ruled_store_", dir=run_folder())
         self.addCleanup(shutil.rmtree, self.root, True)
 
     def make_repo(self, name, store=None, main=None):
@@ -624,7 +698,8 @@ class CostAndCliTests(RepoCase):
 
 
 def tearDownModule():
-    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+    for folder in _RUN:
+        shutil.rmtree(folder, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 if __name__ == "__main__":

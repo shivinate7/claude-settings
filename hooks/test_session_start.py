@@ -25,8 +25,7 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lin
 RUN_FOLDER = _test_temp.run_folder()
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies the repo's lint folder into the pointer clone (testing/tracked_tree.py)
-sys.path.insert(0, os.path.join(HERE, "..", "lint", "test_support"))
-import ruled_store_fixture as fixture  # noqa: E402  the one home of a ruled-store fixture
+import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
 SESSION = "session-start-cases"  # the session id every run_hook payload names
 VCS = "g" + "it"  # assembled so this file cannot itself look like the command it tests
 IDENT = ["-c", "user.email=session-start-cases@example.invalid", "-c", "user.name=session-start-cases"]

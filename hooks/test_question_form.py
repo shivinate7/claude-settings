@@ -80,8 +80,8 @@ check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
 import guard_pointer  # noqa: E402  the claude-settings pointer, patched by the ruled-store cases
-sys.path.insert(0, os.path.join(REPO, "lint", "test_support"))
-import ruled_store_fixture as fixture  # noqa: E402  the one home of a ruled-store fixture
+sys.path.insert(0, os.path.join(REPO, "lint"))
+import test_ruled_store as fixture  # noqa: E402  the one home of a ruled-store fixture (lint/test_ruled_store.py)
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
 import route_match  # noqa: E402  the rows-file reader; the task-why cases count its reads
 import test_refusal_note as hook_base  # noqa: E402  the route-row fixture (one home), with its own run folder
