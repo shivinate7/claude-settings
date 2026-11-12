@@ -1974,6 +1974,22 @@ add("report-sha-missing: a main session's hand-back is not judged",
 add("report-sha-missing: a hand-back in a folder with no git repo is allowed",
     "allow", tool=HANDBACK, cwd=NOGIT, agent_id="rev1", agent_type="reviewer",
     message="Done at 8c1f0e2a7 here.")
+# A sha followed by one of . , ; : ) ] that ends the text or is followed by whitespace is judged. A mark followed
+# by a non-space character means the token touches it, so it is not judged.
+add("report-sha-missing: a made-up sha followed by a period that ends the text is judged",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Fixed in 8c1f0e2a7.", carries=("8c1f0e2a7",))
+add("report-sha-missing: a made-up sha followed by ; : ) ] or , and then a space is judged",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Open: 9c3e1a0b7; 2d5f8e1c4) and 7b0a3d9e6: 4f1c8a2e5] and 5e8b2c0f3, still open.",
+    carries=("9c3e1a0b7", "2d5f8e1c4", "7b0a3d9e6", "4f1c8a2e5", "5e8b2c0f3"))
+add("report-sha-missing: a period before a non-space character, as in a file name, is not judged",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Edited a1b2c3d.py on the lane.")
+# A double-quoted span ends at the line end: the quote on the first line does not hide the second line.
+add("report-sha-missing: a double-quoted span ends at the line end, so a made-up sha on the next line is judged",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message='He wrote "see the lane.\nFixed in 3f8e0a5d2c7 on the lane.', carries=("3f8e0a5d2c7",))
 
 
 # --- the cases that need a real sha, read at run time: log checks, so the fixtures are built by the check.
