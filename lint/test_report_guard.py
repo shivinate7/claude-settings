@@ -5220,6 +5220,59 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
 
+    def test_pe_red_ref_in_a_later_clause_after_a_pronoun_is_refused(self):
+        # A later clause that opens with a pronoun and a verb, then the ref, takes the
+        # failure word from the earlier clause.
+        rows = [
+            # Catches: the carry branch matches the ref only at the clause start, so "it does on <sha> too" passes.
+            "The lint fails, and it does on 32b5f8b8e too.",
+            # Catches: the same, behind "as it".
+            "The test fails, as it does on 32b5f8b8e too.",
+            # Catches: the same, with "main" for the sha.
+            "The lint fails, and it does on main too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_red_split_claim_across_sentences_is_refused(self):
+        # A failure in one sentence and "it is pre-existing" in the next is one claim.
+        rows = [
+            # Catches: the failure check reads one sentence, so "It is pre-existing." holds no failure word and passes.
+            "One job failed. It is pre-existing.",
+            # Catches: the same, with the claim after a second sentence's failure word.
+            "The lint is red. This is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_green_later_clause_ref_and_split_claim_with_a_run_or_a_negator_pass(self):
+        # Control for the two red tests above: a named run, a negator, or no failure anywhere stays allowed.
+        rows = [
+            "The lint fails, and it does on main at 32b5f8b8e too.",
+            "The lint fails, and it does not on 32b5f8b8e too.",
+            "One job failed. It is pre-existing on main at 32b5f8b8e.",
+            "One job failed. I have not shown it is pre-existing.",
+            "The guard is new. It is pre-existing code.",
+            "Nothing failed. It is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_yet_that_before_a_bare_noun_is_a_hedge_not_a_claim(self):
+        # "that" after "yet" before a bare noun is a complementizer, not a subject.
+        rows = [
+            # Catches: "yet" opens a clause before "that failures", so "can't" never reaches the claim after it.
+            "I can't say yet that failures are pre-existing.",
+            # Catches: the same, before "that main also fails".
+            "I have not proven yet that main also fails on 32b5f8b8e.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
     # Red: a yet hedge, an as clause, a plain-verb as, a glued period and a dotted name. One test per line.
 
     def test_pe_red_yet_before_say_is_a_hedge_not_a_claim(self):

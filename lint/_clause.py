@@ -285,11 +285,17 @@ def opens_with_joiner(text):
 _SUBJECT_WORDS = _PRONOUNS + DETERMINERS
 
 
+def _bare_noun(word):
+    """True when `word` after "that" is a plural noun (failures, errors) or a base name (main, master, origin): no
+    determiner stands before it, so "that" is a complementizer ("yet that failures are"), not "that test fails"."""
+    return word in ("main", "master", "origin") or (word.endswith("s") and not word.endswith("ss") and len(word) > 3)
+
+
 def _opens_with_subject(tokens):
     """True when `tokens` open with a pronoun or a determiner. "that" counts only when no pronoun or determiner follows it:
     "that test fails" opens with a subject, "that the failure is" opens with a complementizer."""
     if tokens[:1] == ["that"]:
-        return len(tokens) > 1 and tokens[1] not in _SUBJECT_WORDS
+        return len(tokens) > 1 and tokens[1] not in _SUBJECT_WORDS and not _bare_noun(tokens[1])
     return bool(tokens) and tokens[0] in _SUBJECT_WORDS
 
 

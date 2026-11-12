@@ -468,6 +468,17 @@ class LeadOpensClauseTests(unittest.TestCase):
         self.assertFalse(clause.lead_opens_clause("yet", " sure whether the failure is pre-existing"),
                          "lead_opens_clause: yet + sure opens a clause")
 
+    def test_yet_before_that_and_a_bare_noun_is_an_adverb(self):
+        # Catches: "yet" before "that failures" opens a clause, since a bare noun after "that" reads as a subject.
+        for after in (" that failures are pre-existing", " that main also fails on 32b5f8b8e", " that errors exist"):
+            with self.subTest(after=after):
+                self.assertFalse(clause.lead_opens_clause("yet", after), "lead_opens_clause: yet + that + noun opens a clause")
+
+    def test_yet_before_that_and_a_singular_noun_still_opens_a_clause(self):
+        # Control: "that test fails" keeps "that" as a demonstrative subject, so "yet" joins two clauses.
+        self.assertTrue(clause.lead_opens_clause("yet", " that test fails"),
+                        "lead_opens_clause: yet + that test stopped opening a clause")
+
     def test_yet_before_that_is_an_adverb(self):
         # Catches: "yet" before "that" opens a clause, so "no" never reaches the claim after it.
         self.assertFalse(clause.lead_opens_clause("yet", " that the failure is pre-existing"),
