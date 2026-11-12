@@ -191,7 +191,7 @@ class FakeHost:
             raise self.batch_error
         return list(self.batch)
 
-    def head_state(self, n):
+    def head_state(self, n, sha=None):  # the real Host.head_state takes the head's sha too
         return self.state
 
     def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
@@ -560,36 +560,35 @@ class Flow(Env):
 
     def test_head_red_claims_nothing_pushes_nothing_and_frees_the_lock(self):
         before = self.refs()
+        self.host.state = "red: checks: fail"  # the head reads red before any wait
         self.host.seq = [(False, "a check is red: checks: fail")]
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: checks: fail", out)
         self.assertEqual(self.refs(), before)  # no claim push, and the lock ref is gone
-        self.assertEqual(len(self.host.waits), 1)
+        self.assertEqual(self.host.waits, [], "a red head was waited on under the lock: %s" % (self.host.waits,))
 
-    def test_head_pending_then_green_claims_after_the_wait(self):
-        rc, out = self.run_merge("7", "--confirm")  # the fake wait returns green: one wait on the head, one on the claim
+    def test_head_green_claims_and_merges_with_no_wait(self):
+        rc, out = self.run_merge("7", "--confirm")  # the head is green: its claim and its merge follow with no wait under the lock
         self.assertEqual(rc, 0, out)
-        (s1, p1), (s2, p2) = self.host.waits
-        self.assertIsNone(p1)  # the first wait is on the head as it stands, before any push
-        self.assertNotEqual(s1, s2)
-        self.assertEqual(p2, s1)
+        self.assertEqual(self.host.waits, [], "a green head or its claim was waited on under the lock: %s" % (self.host.waits,))
         self.assertEqual(self.claims(), 1)
 
     def test_head_pending_then_red_claims_nothing(self):
         before = self.refs()
+        self.host.state = "red: checks: fail"  # the head reads red: refused before any claim
         self.host.seq = [(False, "a check is red: checks: fail https://x")]  # the wait saw pending, then red
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertEqual(self.refs(), before)
         self.assertEqual(self.claims(), 0)
 
-    def test_nothing_to_claim_waits_once(self):
+    def test_nothing_to_claim_takes_no_wait(self):
         self.leave_no_pending_record()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("nothing to claim", out)
-        self.assertEqual(len(self.host.waits), 1)
+        self.assertEqual(self.host.waits, [], "a green head with nothing to claim was waited on under the lock: %s" % (self.host.waits,))
 
     @windows_slice
     def test_full_merge_claims_pushes_merges_syncs_cleans(self):
@@ -2071,6 +2070,106 @@ class SmallBaseMove(Env):
         self.assertFalse(ok, why)
         self.assertNotIsInstance(why, merge.UnreadText, why)
         self.assertIn("does not merge cleanly", why)
+
+class PerLaneMerge(Env):
+    """Per-lane merge (rule M3): a head that is green on its own base and merges cleanly with main's tip merges. No small-move suite run,
+    and no CI wait under the lock: confirm merges only a head that is already green. Each case names its cause in its first assert."""
+
+    FIRST = "---\nid: D-001\nslug: first\ntitle: First\n---\nbody\n"  # the seed's docs/decisions/first.md
+
+    def push_on(self, branch, text, msg):
+        """Commit `text` to docs/decisions/first.md on `branch` from the second clone, and push it."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
+        put(os.path.join(self.other, "docs/decisions/first.md"), text)
+        sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-q", "-m", msg)
+        sh(self.other, "git", "push", "-q", "origin", branch)
+
+    def feat_edits_the_title(self):
+        self.push_on("feat", self.FIRST.replace("title: First", "title: Feat"), "feat: title")
+
+    def main_edits_the_body(self):
+        self.push_on("main", self.FIRST.replace("body\n", "body on main\n"), "main: body")
+
+    def test_a_green_head_behind_main_by_a_clean_merge_of_a_shared_path_merges_with_no_wait(self):
+        self.feat_edits_the_title()  # the head changes first.md's title
+        self.main_edits_the_body()  # main changes first.md's body: a shared path, two hunks, a clean merge
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)  # scope first: the merge landed
+        self.assertIn("merged as", out)
+        self.assertEqual(self.host.waits, [], "the head or its claim was waited on under the lock: %s" % (self.host.waits,))
+
+    def test_a_green_head_behind_main_by_a_move_in_other_paths_merges_with_no_wait(self):
+        self.main_moves()  # main gains elsewhere.txt, a path no lane touches
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)  # scope first: the merge landed
+        self.assertIn("merged as", out)
+        self.assertEqual(self.host.waits, [], "the head or its claim was waited on under the lock: %s" % (self.host.waits,))
+
+    def test_a_conflicting_head_is_refused_and_nothing_is_claimed_or_merged(self):
+        self.feat_edits_the_title()
+        self.push_on("main", self.FIRST.replace("title: First", "title: Main"), "main: title")  # the same line: the head will not merge
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("merged as", out)
+        self.assertEqual(self.refs(), before)  # no claim push, no merge
+        self.assertFalse(getattr(self.host, "merged", False))
+
+    def test_a_head_that_is_not_green_is_refused_before_any_wait_and_nothing_is_claimed(self):
+        self.host.state = "pending: checks: running"  # the head's checks have not reported: confirm refuses it, with no wait
+        self.host.checks = (None, "a required check is pending")
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.host.waits, [], "the head was waited on under the lock: %s" % (self.host.waits,))
+        self.assertEqual(self.refs(), before)  # no claim push
+        self.assertFalse(getattr(self.host, "merged", False))
+
+    def test_confirm_holds_no_lock_across_a_ci_wait(self):
+        held, seen = [False], []
+        acquire, release = self.lock.acquire, self.lock.release
+        def watched_acquire(b, ttl):
+            token = acquire(b, ttl)
+            held[0] = True
+            return token
+        def watched_release(b, token):
+            held[0] = False
+            return release(b, token)
+        self.lock.acquire, self.lock.release = watched_acquire, watched_release
+        wait = self.host.wait_checks
+        def watched_wait(n, sha, d, prior=None):
+            seen.append(held[0])  # whether the merge lock is held as this wait begins
+            return wait(n, sha, d, prior)
+        self.host.wait_checks = watched_wait
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)  # scope first: the merge landed, so each wait the run made is in seen
+        self.assertIn("merged as", out)
+        self.assertEqual([h for h in seen if h], [], "%d CI wait(s) ran with the merge lock held" % sum(1 for h in seen if h))
+
+    def test_batch_build_is_an_unknown_flag(self):
+        rc, out, err = self.run_args("--batch-build", "x", "7")
+        self.assertIn("unrecognized arguments", err, "--batch-build is still accepted as a flag: rc %s\n%s%s" % (rc, out, err))
+        self.assertIn("--batch-build", err)
+
+    def test_batch_drop_is_an_unknown_flag(self):
+        rc, out, err = self.run_args("--batch-drop", "x", "7")
+        self.assertIn("unrecognized arguments", err, "--batch-drop is still accepted as a flag: rc %s\n%s%s" % (rc, out, err))
+        self.assertIn("--batch-drop", err)
+
+    def test_a_draft_with_a_red_head_is_not_marked_ready(self):
+        self.host.draft = True
+        self.host.state = "red: checks: fail"  # a head that will not merge never goes ready
+        self.host.checks = (False, "a check is red: checks: fail")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(self.host.readies, [], "a draft with a red head was marked ready: %s" % out)
+
+    def test_a_draft_that_will_not_merge_is_not_marked_ready(self):
+        self.feat_edits_the_title()
+        self.push_on("main", self.FIRST.replace("title: First", "title: Main"), "main: title")  # a conflict: the head will not merge
+        self.host.draft = True
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(self.host.readies, [], "a draft that will not merge was marked ready: %s" % out)
 
 class CutBranch(Env):
     def local_branch(self, extra):
@@ -12877,17 +12976,13 @@ class BatchRunningReads(unittest.TestCase):
 class BatchBrake(Env):
     """confirm reads the other ready pull requests before anything is pushed, and again before the PUT. preview prints the read."""
 
-    def test_confirm_refuses_while_another_ready_pr_has_a_required_check_pending(self):
-        self.host.batch = [BATCH_BLOCKER]
-        before = self.refs()
+    def test_confirm_merges_while_another_ready_pr_has_a_required_check_pending(self):
+        self.host.batch = [BATCH_BLOCKER]  # the brake is gone: another ready PR's pending check does not hold this merge
         rc, out = self.run_merge("1", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("#2", out)
-        self.assertIn("CI-done comment", out)
-        self.assertEqual(self.host.batch_calls, [(1, "main")])
-        self.assertEqual(self.refs(), before)  # nothing pushed: no claim, and the lock is released
-        self.assertEqual(self.host.waits, [])
-        self.assertFalse(getattr(self.host, "merged", False))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("merged as", out)
+        self.assertEqual(self.host.waits, [], "the head was waited on under the lock: %s" % (self.host.waits,))
+        self.assertTrue(getattr(self.host, "merged", False))
 
     def test_confirm_proceeds_when_no_other_pr_blocks(self):
         rc, out = self.run_merge("1", "--confirm")
@@ -12895,19 +12990,16 @@ class BatchBrake(Env):
         self.assertIn((1, "main"), self.host.batch_calls)  # the brake was read, not assumed clear
         self.assertTrue(getattr(self.host, "merged", False))
 
-    def test_a_batch_that_goes_ready_during_the_head_wait_refuses_the_put(self):
+    def test_a_batch_that_goes_ready_during_the_head_wait_does_not_refuse_the_put(self):
         host, wait = self.host, self.host.wait_checks
         def wait_then_ready(n, sha, d, prior=None):
             ok = wait(n, sha, d, prior)
-            host.batch = [BATCH_BLOCKER]  # the other pull request goes ready while this head is waited on
+            host.batch = [BATCH_BLOCKER]  # another pull request goes ready during a wait: the brake is gone, so the PUT goes
             return ok
         host.wait_checks = wait_then_ready
         rc, out = self.run_merge("1", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("#2", out)
-        self.assertIn("CI-done comment", out)
-        self.assertFalse(getattr(host, "merged", False))  # the PUT is never made
-        self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))  # the claim is reverted, as for a refused PUT
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(host, "merged", False))
         self.assertFalse(self.lock_ref())
 
     def test_an_unreadable_pulls_list_refuses_confirm(self):
@@ -20690,22 +20782,20 @@ class TouchesRead(Env):
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
-        # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
+        # A run that holds the lock in its merge call for a minute, for a signal to reach. It prints READY once it holds the lock.
         class Sleep(FakeHost):
-            def wait_checks(self, n, sha, d, prior=None):
+            def merge(self, n, method, sha):
                 print("READY", flush=True)
                 time.sleep(60)
-                return True, ""
+                return None, "slept"
         install_model_guard()
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
-        # A run that dies without cleanup: os._exit at the wait, so no `finally` runs.
+        # A run that dies without cleanup: os._exit at the merge call after the claim push, so no `finally` runs.
         class Die(FakeHost):
-            def wait_checks(self, n, sha, d, prior=None):
-                if prior is not None:  # the wait after the claim push; the head's own wait comes first
-                    os._exit(9)
-                return True, ""
+            def merge(self, n, method, sha):
+                os._exit(9)
         install_model_guard()
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
