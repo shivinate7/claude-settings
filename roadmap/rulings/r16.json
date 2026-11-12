@@ -1,0 +1,11 @@
+{
+ "id": "r16",
+ "at": "2026-11-10T16:22:00-06:00",
+ "ruling": "- **R16. A mistake is filed as a missing guard, by a hook.** Owner 16:22 CST Nov 10: \"i thought i've already set something really high up in claude.md or elsewhere that sessions/agents should never assume an error is their own and instead should strongly be raised awareness that any error they make might be a strong INDICATOR that a guard/something-0mechanical should be in place?\"; 16:25 CST: \"yes agreed-- that or we create a hook taht looks for this kind of prose when the session says it so taht way the HOOK/judge files it not the session itself\". Rule building-mistake-names-its-guard opens: \"Read a mistake first as a missing guard or check, never as a fault to own: the way we work should make accidents hard.\" The report gives `Cause:` (what made it easy) and `Guard:` (built, queued or debt). A Stop hook spots a mistake told in a reply and its judge files the missing guard to triage, so the session does not file it itself. It runs inside the existing Stop hook; no new process. Cause that led here: the feedback-log hook writes a message heading without telling the session, so it wrote a second one twice (step inbox-dup-heading-merge). Home: CLAUDE.md building-mistake-names-its-guard; decision guard-remedy-not-to-owner.",
+ "owner_words": "i thought i've already set something really high up in claude.md or elsewhere that sessions/agents should never assume an error is their own and instead should strongly be raised awareness that any error they make might be a strong INDICATOR that a guard/something-0mechanical should be in place?; yes agreed-- that or we create a hook taht looks for this kind of prose when the session says it so taht way the HOOK/judge files it not the session itself; Read a mistake first as a missing guard or check, never as a fault to own: the way we work should make accidents hard.",
+ "source": "plans/restart-plan.md@restart-plan, R16",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "A mistake is filed as a missing guard, by a hook."
+}

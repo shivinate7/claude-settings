@@ -1,0 +1,12 @@
+{
+ "id": "ow-30-q-max-past-rates-a",
+ "at": "2026-11-12T14:17:00-06:00",
+ "ruling": "R57, 14:17 CST (plan 79eb441): doorbell route a, a background mail-wait; the retrospective builds it (\"q2: ya C\"). Home: decision session-messages; step mail-doorbell-wait.",
+ "owner_words": "q2: ya C",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 30",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true,
+ "see": "r57"
+}

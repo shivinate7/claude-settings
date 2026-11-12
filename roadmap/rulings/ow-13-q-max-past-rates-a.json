@@ -1,0 +1,11 @@
+{
+ "id": "ow-13-q-max-past-rates-a",
+ "at": "2026-11-12T12:40:00-06:00",
+ "ruling": "12:40 CST, in chat, relayed by the coordinator: page item 593 pick a: \"the artifact is never operated upon by two accounts at the same time ... so as long as the artifact/data gets exported in a timely enough matter (not real time) it's morerso okay ... if ... the setup with all the lanes + triage is causing some sorta internal lag, then we should still be open to the switchr otue\". The page database is the one store; git gets a timely export as backup. Home: decision waiting-page-one-store (lane page-data-one-store, #2829). Route B steps parked as the fallback; item 592 closed as moot.",
+ "owner_words": "the artifact is never operated upon by two accounts at the same time ... so as long as the artifact/data gets exported in a timely enough matter (not real time) it's morerso okay ... if ... the setup with all the lanes + triage is causing some sorta internal lag, then we should still be open to the switchr otue",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 13",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true
+}

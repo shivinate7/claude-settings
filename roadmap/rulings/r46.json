@@ -1,0 +1,11 @@
+{
+ "id": "r46",
+ "at": "2026-11-12T09:41:00-06:00",
+ "ruling": "- **R46. Who archives finished sessions.** Owner 09:41 CST Nov 12 asked who archives a session that opens no PR: \"should coordinator just be responsible for all with batch runner getting a subset?\" Read 09:39 CST: since the respawn, 1 of 64 lanes is archived and 31 sit idle and completed. Owner 09:42 CST: \"on archivals option A is best\". Whoever starts a session archives it. The batch runner archives PR lanes after each merge, for the coordinator. The coordinator archives each other finished session it started at its next wake, once it has read the report. Home: decision session-tiers, Archiving scope. Owner 09:47 CST: \"on archivals option A is best -- with not only the tag of archive ready but it should also kinda show where it's leaving its handoff so it's referenceable if needed right\". A lane ends with a four-point check (work landed or handed off, no unpushed branch, handoff written, no owner question waiting). It commits its handoff to the record branch at roadmap/outbox/<slug>-handoff.md, then tags itself archive-ready. The starter archives tagged lanes, and can read any handoff by slug later (step lane-tags-archive-ready, folded with handoff-lands-tracked-first).",
+ "owner_words": "should coordinator just be responsible for all with batch runner getting a subset?; on archivals option A is best; on archivals option A is best -- with not only the tag of archive ready but it should also kinda show where it's leaving its handoff so it's referenceable if needed right",
+ "source": "plans/restart-plan.md@restart-plan, R46",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "Who archives finished sessions."
+}

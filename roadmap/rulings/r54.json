@@ -1,0 +1,11 @@
+{
+ "id": "r54",
+ "at": "2026-11-12T13:11:00-06:00",
+ "ruling": "- **R54. Triage keeps the list of the sessions the coordinator starts.** Owner 13:11 CST Nov 12: \"does the coordinator know to keep a running list of all the sesisons it spawns in its handoff or elsewhere until they're archived ...\" Read 13:14 CST: no such list or check exists; 53 idle and 2 waiting sessions among the newest 100. Owner 13:15 CST: \"i think a+b (and kept in sync) is best\". Owner 13:19 CST, on an end-of-turn read: \"i'm not sure i agree with taht strategy\". Read 13:19 CST: one page of the list is about 64,000 characters, and triage's roadmap build already reads every page at each publish. Owner 13:20 CST picked a, \"this is good, it can be an active nudger / checker against coordinator too right\". 1. At each publish and each batch merge, the roadmap build lists each session the coordinator started that is not archived and is silent, waiting for action, or done. 2. Triage writes that list, with each session's step and PR, to the record branch. 3. Triage sends the coordinator each flagged line. The coordinator's next report names an act for each one: archive, nudge, or a reason to wait. 4. No read at the end of each turn. Home: decision session-tiers (step:coordinator-session-board).",
+ "owner_words": "does the coordinator know to keep a running list of all the sesisons it spawns in its handoff or elsewhere until they're archived ...; i think a+b (and kept in sync) is best; i'm not sure i agree with taht strategy; this is good, it can be an active nudger / checker against coordinator too right",
+ "source": "plans/restart-plan.md@restart-plan, R54",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "Triage keeps the list of the sessions the coordinator starts."
+}

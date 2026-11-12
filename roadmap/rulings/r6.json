@@ -1,0 +1,11 @@
+{
+ "id": "r6",
+ "at": "2026-11-10T15:22:00-06:00",
+ "ruling": "- **R6. Triage's outbox is read against main.** Owner 15:22 CST Nov 10: \"yes but it's tbd if an outbox is the right spot right? but for rn it only make senses that it is read\". A check, run when triage reports status, lists each owner ruling in the outbox and whether its home on main holds its words. Whether the outbox stays the place for rulings is open. Home: decision owner-feedback-inbox.",
+ "owner_words": "yes but it's tbd if an outbox is the right spot right? but for rn it only make senses that it is read",
+ "source": "plans/restart-plan.md@restart-plan, R6",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "Triage's outbox is read against main."
+}

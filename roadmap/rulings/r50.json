@@ -1,0 +1,11 @@
+{
+ "id": "r50",
+ "at": "2026-11-12T12:13:00-06:00",
+ "ruling": "- **R50. A red job wakes the batch runner at once.** Owner 12:13 CST Nov 12: \"Is it possible to just rerun the jobs that went red on teh second try, or anyways everything would rerun? If latter, then it should fail fast no?\" Read: batch 104 (#2814) went red at 11:55 CST in its checks job, and no one was woken while two jobs ran on. A drop makes a new head, so every job reruns. Red builds carry about 2 bad lanes (147 drops over 74 builds, last 15 batch merges). Owner 12:14 CST: \"ah ok C is good go for it\". 1. Each required job that fails posts the red-run notice as it fails, so the batch runner starts the drop and fix at once. 2. The other jobs run on and name any second bad lane. 3. The new head's run supersedes the old one. 4. R4's lint-first cancel stays. Steps: lane-lint-once-fail-fast (R4), and one new step for the wake.",
+ "owner_words": "Is it possible to just rerun the jobs that went red on teh second try, or anyways everything would rerun? If latter, then it should fail fast no?; ah ok C is good go for it",
+ "source": "plans/restart-plan.md@restart-plan, R50",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "A red job wakes the batch runner at once."
+}

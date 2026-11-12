@@ -1,0 +1,11 @@
+{
+ "id": "ow-28-q-max-past-rates-a",
+ "at": "2026-11-12T14:14:00-06:00",
+ "ruling": "14:14 CST (via coordinator, relayed by retrospective): \"b: keep mail only ... the doorbell was supposed to be via a whole other route that's translatable anywhere\"; the trust-card route is rejected; the retrospective designs the doorbell. Home: decision session-messages; step mailbox-doorbell.",
+ "owner_words": "b: keep mail only ... the doorbell was supposed to be via a whole other route that's translatable anywhere",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 28",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true
+}

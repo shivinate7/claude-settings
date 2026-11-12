@@ -1,0 +1,11 @@
+{
+ "id": "r56",
+ "at": "2026-11-12T13:45:00-06:00",
+ "ruling": "- **R56. A silent lane on a step others wait on gets one nudge.** Owner 13:45 CST Nov 12 asked whether the coordinator should message every session it started. Read: a broadcast wakes each session, and lane contexts run 141k-342k tokens. Owner 13:46 CST: \"maybe if there's steps clearly being waited on in the roadmap and a lane was spawned and we havent heard from them those get a targetted nudge?\" 1. At each R54 read, triage flags a lane whose step another step's blockedBy names, or whose step is on R55's express list. 2. It flags that lane only when it has sent no report or message since the last R54 read. 3. The coordinator sends each flagged lane one line: reply if you are stuck and nobody picked it up. 4. No broadcast to every session. Home: decision session-tiers (step:coordinator-session-board).",
+ "owner_words": "maybe if there's steps clearly being waited on in the roadmap and a lane was spawned and we havent heard from them those get a targetted nudge?",
+ "source": "plans/restart-plan.md@restart-plan, R56",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "A silent lane on a step others wait on gets one nudge."
+}

@@ -1,0 +1,11 @@
+{
+ "id": "r57",
+ "at": "2026-11-12T14:14:00-06:00",
+ "ruling": "- **R57. The mail doorbell is a background mail-wait.** Owner 14:14 CST Nov 12: \"keep mail only\"; the doorbell must be \"a whole other route that's translataable anywhere\". Owner 14:17 CST picked a: an idle session runs one background command that exits when its mailbox address gets mail, so Claude Code wakes the session the same way on cloud, Mac and Windows. The 3.15 ruling allows it: a waiting process is fine when its record shows it costs less than it saves. Its record states the process count, the read interval and the reads per hour, and a test proves them. Owner 14:17 CST picked c: the retrospective starts one Sonnet lane for it and sees it through, an exception to its talk-only role for this lane alone. Home: decision session-messages.",
+ "owner_words": "keep mail only; a whole other route that's translataable anywhere",
+ "source": "plans/restart-plan.md@restart-plan, R57",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "The mail doorbell is a background mail-wait."
+}

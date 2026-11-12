@@ -1,0 +1,11 @@
+{
+ "id": "r51",
+ "at": "2026-11-12T12:33:00-06:00",
+ "ruling": "- **R51. A pick reads its ruling before it is sent.** Owner 12:33 CST Nov 12, relayed by the coordinator: \"it's weird that ure making half-baked calls\". Read 12:34 CST: five coordinator misses today; three went out as send_message picks, which no check reads; the coordinator took 100 inbound events in 3.5 min, 18 of them peer messages. Owner 12:35 CST: \"sure approved\". 1. A coordinator send_message that states a pick or hold cites a ruling (plan R-number, decision or page item), or says \"no ruling found: <search>\". Before the send, the past-ruling judge reads that ruling against the pick (step:pick-ack-past-ruling, joined to the lane of step:past-ruling-on-send). 2. A pick that never reached the page is caught (step:step-pick-claims-match-page, ranked up). 3. Lanes send hand-ins to the batch runner and questions to triage, so the coordinator gets only the picks lanes need. The inbound rate is read again after one batch, before any role split. 4. A step slug that does not exist is caught (step:send-message-refs-resolve).",
+ "owner_words": "it's weird that ure making half-baked calls; sure approved; no ruling found: <search>",
+ "source": "plans/restart-plan.md@restart-plan, R51",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "A pick reads its ruling before it is sent."
+}

@@ -1,0 +1,11 @@
+{
+ "id": "r8",
+ "at": "2026-11-10T15:44:00-06:00",
+ "ruling": "- **R8.** Owner 15:44 CST Nov 10: \"on #1 -- A seems best\". The role table in decision agent-model-cap is the only home for each role's and round's model and effort. The spawn guard requires or fills in the row's model and effort (today it only permits them, guard.py:3783-3788, so a spawn with no model runs reviewer.md's Haiku). The merge tool checks the model that ran, not the log's text. Agent files, brief markers and checks read the table. Each model ruling lands in one lane that changes the table and every reader together. Cause: rulings 279 d, 439 and 444 a reached main 12-57 h late and in pieces; 359 a, 359 b, 289 and 295 a are not on main. Home: decision agent-model-cap.",
+ "owner_words": "on #1 -- A seems best",
+ "source": "plans/restart-plan.md@restart-plan, R8",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": ""
+}

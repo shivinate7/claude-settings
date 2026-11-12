@@ -1,0 +1,11 @@
+{
+ "id": "ow-32-q-max-past-rates-a",
+ "at": "2026-11-12T14:20:00-06:00",
+ "ruling": "14:20 CST: typed yes in the coordinator for the 632/633 records lane (item 638).",
+ "owner_words": "",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 32",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true
+}

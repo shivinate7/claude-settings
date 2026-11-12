@@ -1,0 +1,11 @@
+{
+ "id": "r49",
+ "at": "2026-11-12T11:59:00-06:00",
+ "ruling": "- **R49. The mailbox default is on for cloud and Windows.** Owner, page item 556 pick a, 11:59 CST Nov 12: \"windows as well now that windows works -- we're just waiting on mac i believe\". Read: the owner's Windows run at 11:42 CST stored 1 of 1 after the fix (lane mail-send-no-file). 1. Cloud installs and Windows installs set MAILBOX_REPO to shivinate7/session-mailbox. 2. The Mac follows its check. 3. These are the typed words decision session-messages needs. Step: session-mailbox-followups.",
+ "owner_words": "windows as well now that windows works -- we're just waiting on mac i believe",
+ "source": "plans/restart-plan.md@restart-plan, R49",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "The mailbox default is on for cloud and Windows."
+}

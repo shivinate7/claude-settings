@@ -1,0 +1,11 @@
+{
+ "id": "r4",
+ "at": "2026-11-10T14:54:00-06:00",
+ "ruling": "- **R4.** Owner 14:54 CST Nov 10: \"is there no truly fast way that retains accuracy?\"; 14:56 CST: \"yes D is approved\". Keep the lane lint run at hand-off (inside each lane, in parallel). Drop the runs at join and on the batch head. Batch CI runs lint first and cancels the rest of the run at once when lint goes red; the red files name the lane to drop. A builder first confirms that CI cancels on first failure and that each red lint maps to one lane. Home: decision lanes-run-no-full-ci-job, rewritten in place.",
+ "owner_words": "is there no truly fast way that retains accuracy?; yes D is approved",
+ "source": "plans/restart-plan.md@restart-plan, R4",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": ""
+}

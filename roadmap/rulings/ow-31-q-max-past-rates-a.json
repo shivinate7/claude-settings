@@ -1,0 +1,12 @@
+{
+ "id": "ow-31-q-max-past-rates-a",
+ "at": "2026-11-12T14:19:00-06:00",
+ "ruling": "R58, 14:19 CST (plan 0a36899): batch macOS jobs on his MacBook (label claude-settings-mac, GitHub fallback, no fork PR); drafts skip macOS while a batch runs. Home: decision no-merge-during-batch-ci; step ci-batch-mac-runner.",
+ "owner_words": "",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 31",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true,
+ "see": "r58"
+}

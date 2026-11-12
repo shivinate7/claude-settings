@@ -1,0 +1,11 @@
+{
+ "id": "r2",
+ "at": "2026-11-10T14:07:00-06:00",
+ "ruling": "- **R2.** Owner 14:07 CST Nov 10: \"i agree speed maximization is a good idea\". The merge tool runs no check of its own that can refuse a green batch. It reads CI's verdict, the PR-body lines (R15), and whether the batch is current with main. The Retire check moves into CI. Cause: batch #2551 green in CI at 11:15 CST, refused at merge 11:50 CST by the Retire check's 600 s local limit; one full CI run lost. Home: decision debt-close-runs-retire; step retire-check-whole-suite; merge.readyChecks in decision lanes-run-no-full-ci-job.",
+ "owner_words": "i agree speed maximization is a good idea",
+ "source": "plans/restart-plan.md@restart-plan, R2",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": ""
+}

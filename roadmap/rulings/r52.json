@@ -1,0 +1,11 @@
+{
+ "id": "r52",
+ "at": "2026-11-12T13:07:00-06:00",
+ "ruling": "- **R52. The batch runner runs Sonnet 5.5 at medium effort.** Owner 13:07 CST Nov 12: \"i just changed the batch runner for child repos and us to sonnet 5.5 at medium effort if no issues arise form it that can be its default\". This ends his 13:52 CST Nov 11 hold for the batch runner only; the coordinator and triage stay on Opus. 1. Each batch runner, in claude-settings and in the child repos, runs claude-sonnet-5-5 at medium effort. 2. It becomes the default when its batches show no wrong drop, no wrong merge and no stalled batch against the Opus runs before it. 3. The model table gets a row for the batch runner, the coordinator and triage, each with its reason. Home: decision agent-model-cap (step:model-table-one-home).",
+ "owner_words": "i just changed the batch runner for child repos and us to sonnet 5.5 at medium effort if no issues arise form it that can be its default",
+ "source": "plans/restart-plan.md@restart-plan, R52",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "The batch runner runs Sonnet 5.5 at medium effort."
+}

@@ -1,0 +1,11 @@
+{
+ "id": "ow-10-q-max-past-rates-a",
+ "at": "2026-11-12T12:10:00-06:00",
+ "ruling": "12:10 CST, relayed by the coordinator: \"Custom connectors are not allowed -- so we can do route B\". Page item 558 closed; decision waiting-page-one-store moves to route B (lane page-data-one-store); steps page-git-connector-probe and page-one-store-answers folded.",
+ "owner_words": "Custom connectors are not allowed -- so we can do route B",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 10",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true
+}

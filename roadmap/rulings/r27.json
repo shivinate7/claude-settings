@@ -1,0 +1,11 @@
+{
+ "id": "r27",
+ "at": "2026-11-11T10:16:00-06:00",
+ "ruling": "- **R27. The feedback log tends itself.** Owner 10:16 CST Nov 11: \"this should've been a trigger for something that should've been mechanizable remember, we can't have sesisons fualting themselves for something that could bve cvorrected?\" and \"it seems like basically this was a good idea but it's execution was a little half baked in that it's never cleaned up after or tended to?\". Case: the Stop check asked this session to keep 17 settled items in its handoff. Its remedy named only \"put them in the handoff\", never \"mark [closed]\". So the session copied ids to pass the check. Measured 10:17 CST in this session's log: 126 items, 57 rulings and 9 standing items still open, none closed by a tool. 1. A ruling or task item closes itself when its home holds it on main. The Stop check already proves the home; it marks the line [closed] in the same rewrite that marks repeats. 2. Each refusal of the check names [closed] as a way out, beside the handoff (R24). 3. The compaction reminder lists only items that still need work. 4. Owner words that reach a session by the question box or by relay are saved like a typed message. Home: decision owner-feedback-inbox. Runs with R16, which files a told mistake as a missing guard.",
+ "owner_words": "this should've been a trigger for something that should've been mechanizable remember, we can't have sesisons fualting themselves for something that could bve cvorrected?; it seems like basically this was a good idea but it's execution was a little half baked in that it's never cleaned up after or tended to?; put them in the handoff; mark [closed]",
+ "source": "plans/restart-plan.md@restart-plan, R27",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "The feedback log tends itself."
+}

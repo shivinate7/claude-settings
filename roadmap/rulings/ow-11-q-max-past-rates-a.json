@@ -1,0 +1,11 @@
+{
+ "id": "ow-11-q-max-past-rates-a",
+ "at": "2026-11-12T12:14:00-06:00",
+ "ruling": "12:14 CST, in chat, relayed by the retrospective: \"ah ok C is good go for it\": page item 559 pick c, each failing required job wakes the batch runner as it fails, no cancel; R4's lint-first cancel stays. Step red-job-wakes-runner; plan R50.",
+ "owner_words": "ah ok C is good go for it",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 11",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true
+}

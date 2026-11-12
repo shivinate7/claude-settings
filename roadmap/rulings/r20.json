@@ -1,0 +1,11 @@
+{
+ "id": "r20",
+ "at": "2026-11-10T17:17:00-06:00",
+ "ruling": "- **R20. A pass claim needs a verdict line.** Owner 17:17 CST Nov 10, quoting a session: \"I told you several earlier lane lint runs \"passed\". They did not. Every run exited 1, and I misread my own echo exit code as the lint's\"; 18:36 CST: \"yes\". Rule tokens-run-through-verdict is enforced by nothing on main (only quoted in a guard_stream.py remedy). (1) A \"passed\", \"green\" or \"clean\" claim in a report or a message to a parent cites a verdict line from this session's verdict log. The report guard refuses an uncited claim, remedy \"run it through verdict\". (2) Lint, ci-job, tests and the merge tool's release check run only through `verdict`; a bare run is refused with that form. Both run inside existing guards; no new process. Home: CLAUDE.md tokens-run-through-verdict; decision guard-remedy-not-to-owner.",
+ "owner_words": "I told you several earlier lane lint runs ; . They did not. Every run exited 1, and I misread my own echo exit code as the lint's; . Rule tokens-run-through-verdict is enforced by nothing on main (only quoted in a guard_stream.py remedy). (1) A ;  claim in a report or a message to a parent cites a verdict line from this session's verdict log. The report guard refuses an uncited claim, remedy ",
+ "source": "plans/restart-plan.md@restart-plan, R20",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "A pass claim needs a verdict line."
+}

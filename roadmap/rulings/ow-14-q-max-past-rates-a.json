@@ -1,0 +1,11 @@
+{
+ "id": "ow-14-q-max-past-rates-a",
+ "at": "2026-11-12T12:35:00-06:00",
+ "ruling": "12:33 and 12:35 CST, relayed by the coordinator and the retrospective: \"it's weird that ure making half-baked calls\", then \"sure approved\" on the retrospective's diagnosis. Plan R51, \"A pick reads its ruling before it is sent\", home plans/restart-plan.md on branch restart-plan (a2b2c8b52): a coordinator pick cites a ruling or \"no ruling found: <search>\" (step pick-ack-past-ruling); a pick that never reached the page is caught (step-pick-claims-match-page); lanes send hand-ins to the batch runner and questions to triage, so the coordinator gets only picks; a step slug that does not exist is caught (send-message-refs-resolve).",
+ "owner_words": "it's weird that ure making half-baked calls; sure approved; A pick reads its ruling before it is sent; no ruling found: <search>",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 14",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true
+}

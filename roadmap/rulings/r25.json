@@ -1,0 +1,11 @@
+{
+ "id": "r25",
+ "at": "2026-11-11T09:20:00-06:00",
+ "ruling": "- **R25. Stage 4 runs with stage 3.** Owner 09:20 CST Nov 11: \"with stage 3, but i think we should in the planning stage itself maybe define how batches will be built\". Stage 4's lanes start with the rest of stage 3, once 3.0 lands. How batches are built is settled before stage 3 starts (R26, item 3.4).",
+ "owner_words": "with stage 3, but i think we should in the planning stage itself maybe define how batches will be built",
+ "source": "plans/restart-plan.md@restart-plan, R25",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "Stage 4 runs with stage 3."
+}

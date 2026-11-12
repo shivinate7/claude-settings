@@ -1,0 +1,10 @@
+{
+ "id": "ow-19-q-max-past-rates-a",
+ "at": "2026-11-10T13:26:00-06:00",
+ "ruling": "13:26 CST, page save: 611 a and 612 a (accepted picks). 594 none, \"is this still relevant?\": moot, #2845 passed round 3 and its later commit is notes-only. 613 b, \"message retrospecitve -- this was long since already established\": item withdrawn, R9 (Nov 10) already rules it.",
+ "owner_words": "is this still relevant?; message retrospecitve -- this was long since already established",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 19",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main"
+}

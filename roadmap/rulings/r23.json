@@ -1,0 +1,11 @@
+{
+ "id": "r23",
+ "at": "2026-11-10T19:23:00-06:00",
+ "ruling": "- **R23. The drain ends at the named queue.** Owner 19:23 CST Nov 10 picked \"Named queue\". Outcome: with 682 open and 95 merged since 00:00 CST (GitHub search, coordinator, 2026-11-10 19:23 CST), draining all of them would hold the plan for about a week. 1. The drain ends when the named queue lands: batch 74b (#2574), batch 75, and the coordinator's next-to-release list at 19:23 CST (#2563, #2566, the ten former #2563 waiters, #2575, #2542). #1805 left the queue for item 3.6 (owner 09:12 CST Nov 11). 2. Triage sorts the other open PRs (662 at 23:51 CST, coordinator) against this plan. It closes a PR whose purpose a ruling here replaces, with its branch kept so it can reopen. The rest wait as stage 3 input. 3. Stage 2 starts as soon as #2575 is on main, without waiting for the sort. Freeze exception, owner 16:02 CST: \"i see yes fix it then\". One lane makes the settings.json guard matcher route the GitHub MCP write tools to guard.py (hole H1, under R11 below), with a test that every tool the guard judges is reached by the matcher.",
+ "owner_words": "Named queue; i see yes fix it then",
+ "source": "plans/restart-plan.md@restart-plan, R23",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "The drain ends at the named queue."
+}

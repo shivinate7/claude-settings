@@ -1,0 +1,11 @@
+{
+ "id": "r10",
+ "at": "2026-11-10T15:44:00-06:00",
+ "ruling": "- **R10.** Owner 15:44 CST Nov 10: \"i never want my hook to have one spew out the whole thing again after -- as i fixed long ago in how the done deviations inputneeded hook works, that should be viewed as a best practice for other hooks that make you regurgitate output again\". guard-remedy-not-to-owner:177 already says \"post only the corrected lines ... Never send the report again\", but no refusal text says it. Each Stop-hook refusal ends with that line. Home: decision guard-remedy-not-to-owner. Recurred 12:41 CST Nov 11: the report-shape refusal led this session to post its whole report again. Owner 12:42 CST: \"i really dislike when the hook makes my sesison repeat everyhting and add an edit in to the output, i really want that each of these hooks/guards only adds the necessary additional text\".",
+ "owner_words": "i never want my hook to have one spew out the whole thing again after -- as i fixed long ago in how the done deviations inputneeded hook works, that should be viewed as a best practice for other hooks that make you regurgitate output again; post only the corrected lines ... Never send the report again; i really dislike when the hook makes my sesison repeat everyhting and add an edit in to the output, i really want that each of these hooks/guards only adds the necessary additional text",
+ "source": "plans/restart-plan.md@restart-plan, R10",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": ""
+}

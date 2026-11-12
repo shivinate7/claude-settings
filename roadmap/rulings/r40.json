@@ -1,0 +1,11 @@
+{
+ "id": "r40",
+ "at": "2026-11-11T13:05:00-06:00",
+ "ruling": "- **R40. Compaction trigger tested higher.** Read 13:05 CST Nov 11 (decision precompact-handoff, item 2): the cloud sets CLAUDE_AUTOCOMPACT_PCT_OVERRIDE per session, 80 here, so compaction starts at 384K of a 480K window; one session ran at 92. Owner 13:21 CST: \"compaction: A\". After the fresh start, a lane sets 92 in the settings env and reads one new session's trigger with get_session. If our value wins, it holds everywhere; if not, the record says so. Home: decision precompact-handoff.",
+ "owner_words": "compaction: A",
+ "source": "plans/restart-plan.md@restart-plan, R40",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "Compaction trigger tested higher."
+}

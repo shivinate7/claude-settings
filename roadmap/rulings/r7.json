@@ -1,0 +1,11 @@
+{
+ "id": "r7",
+ "at": "2026-11-10T14:12:00-06:00",
+ "ruling": "- **R7.** Owner 14:12 CST Nov 10: \"if we develop some sorta express pass for the entirety of prose to be fast to review i'd be open to considering that\"; 15:22 CST: \"this is very key yes\". A PR whose owner quotes match the feedback log word for word skips the review round that decision docs-only-prs-skip-review (item 205 b, 2026-11-04) gives a record filing an owner ruling. First user: the follow-up plan PR. Home: decision docs-only-prs-skip-review, rewritten in place.",
+ "owner_words": "if we develop some sorta express pass for the entirety of prose to be fast to review i'd be open to considering that; this is very key yes",
+ "source": "plans/restart-plan.md@restart-plan, R7",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": ""
+}

@@ -1,0 +1,11 @@
+{
+ "id": "ow-04-r42-part-2-the-mer",
+ "at": "2026-11-12T09:46:00-06:00",
+ "ruling": "Q4, 09:46 CST (\"g is fine\"): a revert is an ordinary lane PR merged with --base-red-ok; no `merge --revert`",
+ "owner_words": "g is fine",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 4",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true
+}

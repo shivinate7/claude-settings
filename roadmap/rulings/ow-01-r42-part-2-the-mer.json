@@ -1,0 +1,11 @@
+{
+ "id": "ow-01-r42-part-2-the-mer",
+ "at": "2026-11-12T09:42:00-06:00",
+ "ruling": "Q1, 09:42 CST: option a. All repos, the child repos too, switch to per-lane merge together; each child repo",
+ "owner_words": "",
+ "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 1",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "at_estimated": true
+}

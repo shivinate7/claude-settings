@@ -1,0 +1,11 @@
+{
+ "id": "r14",
+ "at": "2026-11-10T16:22:00-06:00",
+ "ruling": "- **R14. A fix to a session's own notes prints nothing.** Owner 16:22 CST Nov 10: \"fixed my notes question: yes\". A Stop-hook refusal about a session's own notes (feedback log, handoff) is fixed with no line to the owner, since the reply did not change; guard.log still records it. A builder first confirms a Stop can end with no text. Step notes-fix-no-owner-line. Home: decision guard-remedy-not-to-owner.",
+ "owner_words": "fixed my notes question: yes",
+ "source": "plans/restart-plan.md@restart-plan, R14",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "A fix to a session's own notes prints nothing."
+}

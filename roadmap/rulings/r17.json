@@ -1,0 +1,11 @@
+{
+ "id": "r17",
+ "at": "2026-11-10T16:25:00-06:00",
+ "ruling": "- **R17. A repo with no CI gets a starter CI, not an exemption.** Owner 16:25 CST Nov 10: \"repos that have no CI need to get an easy exemption so that they can still call claude-settings but basically things that need CI don't pertain to them -- how can that become a thing?\"; 16:36 CST: \"this is approved and sounds better than allowing no ci\". Keeps decision same-check-kinds (owner item 87, 2026-10-30: every repo runs the same kinds of checks, as many as its size needs). Skill project-ops writes a starter CI to any repo without one: quick checks on what the repo holds (links resolve, scripts parse, JSON parses) inside the shared all-jobs-passed rollup. When the merge tool or lane lint refuses for no CI, the refusal names that one step as the fix. Folds in roadmap step c33 (repo home, the one repo with no CI on Oct 22). Cost: one workflow file per such repo and a short CI run per PR. Home: decision same-check-kinds; skill project-ops.",
+ "owner_words": "repos that have no CI need to get an easy exemption so that they can still call claude-settings but basically things that need CI don't pertain to them -- how can that become a thing?; this is approved and sounds better than allowing no ci",
+ "source": "plans/restart-plan.md@restart-plan, R17",
+ "status": "open",
+ "supersedes": [],
+ "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "title": "A repo with no CI gets a starter CI, not an exemption."
+}
