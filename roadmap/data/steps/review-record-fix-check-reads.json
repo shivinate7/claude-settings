@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Incidents (coordinator 13:59 CST Nov 12): the records on #2860 and #2904 were unreadable by --reviewed.",
  "source": "coordinator 13:59 CST Nov 12 (pick)",
- "note": "R55 express (merge flow). The lane also takes step review-record-usage-line. Lane id: the session tagged cs-topic:review-record-fix-check-reads; set when it shows.",
- "updatedAt": "2026-11-12T14:02:37-06:00"
+ "note": "R55 express (merge flow). The lane also takes step review-record-usage-line. Lane id: the session tagged cs-topic:review-record-fix-check-reads; set when it shows. Owner act item 631 (14:05 CST Nov 12): runner 10's express build of #2860 and the cancel of #2814's run were refused by the auto-mode check at 13:24 CST; the owner types his yes in runner 10.",
+ "updatedAt": "2026-11-12T14:06:49-06:00"
 }

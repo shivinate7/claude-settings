@@ -4,8 +4,8 @@
   "note": "Scope added (owner ask ask-mw8gfqzlws, coordinator fold 17:20 CST Nov 8): one `git fetch --prune origin` at session start, with a timeout, reading unknown on failure. Read at 17:23 CST on main 2ac382cc6: hooks/session_start.sh already fetches through bounded_fetch (2 s bound, CLAUDE_SETTINGS_FETCH_TIMEOUT), but only when the session sits on the default branch, so a lane on its own branch never fetches; that matches the Banchi case (local origin/main 78398f4, GitHub 40483e3). Extend bounded_fetch, its one home, rather than add a second hook. The ask also wants: report (never move) a local main that differs from origin/main, report how far the current branch is behind, about 20 s timeout, no checkout/restore/reset/stash, no change to existing guards; red cases: stale origin/main on a non-default branch gets the new sha, and an offline session still starts. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzp1xjTHtzDvmMRpKj.md on archive/session-handoffs-2026-11-10). Closed 13:47 CST Nov 12: already on origin/main via 6581fafdb (PR #2493 merged into batch 72); hooks/session_start.sh compares each grant file with origin/main (block headed \"Step grants-read-from-main\"). Found by triage's sizing read, checked by triage.",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "done",
+  "lane": "grants-stale-on-windows",
+  "status": "doing",
   "order": 841,
-  "updatedAt": "2026-11-12T13:47:51-06:00"
+  "updatedAt": "2026-11-12T14:06:49-06:00"
 }
