@@ -1,6 +1,6 @@
 name: CI alarm
 description: >
-  Opens (or comments on) one issue when the newest completed run of any workflow on a branch is
+  Opens (or comments on) one issue when the newest run of any workflow on a branch is
   red, judged per workflow and per event group (events.json: push and dispatch together, schedule
   apart). A failed run with a red job is cleared across groups only by a newer green run of the other
   group that is its group's newest and passed every job of the failed run (exact names), so a green nightly that ran
