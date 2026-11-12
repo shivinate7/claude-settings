@@ -413,9 +413,10 @@ class CommandLineTests(unittest.TestCase):
                          % result.returncode)
 
     def test_live_store_with_a_stale_fixable_item_exits_0_and_marks_it(self):
-        tree = make_tree({"probe": entry("home-held", close="mark")})
+        # Ruling B: marking happens at a closing point (stop), never at merge-check.
+        tree = make_tree({"probe": entry("home-held", close="mark", runs_from=("stop",))})
         root = make_git_repo({"lint/held.py": "x\n", "docs/todo.md": TODO_STALE})
-        result = run_cli(tree, root)
+        result = run_cli(tree, root, point="stop")
         self.assertEqual(result.returncode, 0, "a stale item close can fix exited %d, not 0" % result.returncode)
         with open(os.path.join(root, "docs", "todo.md"), encoding="utf-8") as f:
             self.assertEqual(f.read(), TODO_HELD + "- A2 gone. Home: lint/gone.py [closed]\n",
@@ -492,14 +493,170 @@ class CostTests(unittest.TestCase):
 
     def test_a_changed_verdict_is_written(self):
         # The control for the case above: a snapshot that cannot see a write would pass that case for nothing.
-        tree = make_tree({"probe": entry("home-held", close="mark")})
+        # Ruling B: the write is seen at a closing point (stop), never at merge-check.
+        tree = make_tree({"probe": entry("home-held", close="mark", runs_from=("stop",))})
         root = make_git_repo({"lint/held.py": "x\n", "docs/todo.md": TODO_STALE})
         fix_mtimes(root)
         before = snapshot(root)
-        result = run_cli(tree, root)
+        result = run_cli(tree, root, point="stop")
         self.assertEqual(result.returncode, 0, "scope: the fixable run exited %d, not 0" % result.returncode)
         self.assertTrue(changed(before, snapshot(root)),
                         "a stale fixable item was not written: the no-write case proves nothing")
+
+
+# ---- Round 1 rulings A-E. Each case below is red on the runner at lint/tending.py as it stands, except the
+# ---- controls, which pass on it and hold a rule's positive side. -----------------------------------------------
+
+def probe_tree(close="mark", runs_from=("merge-check",), still_true="home-held"):
+    """A tree whose only contract entry is the live store `probe`, over docs/todo.md."""
+    return make_tree({"probe": entry(still_true, close=close, runs_from=runs_from)})
+
+
+def stale_repo():
+    """A git repo whose docs/todo.md holds one stale item (A2): its home is not tracked on any ref."""
+    return make_git_repo({"lint/held.py": "x\n", "docs/todo.md": TODO_STALE})
+
+
+def hook_module(name):
+    """A hooks/ module by name: the resolver the runner must agree with (ruling E)."""
+    folder = os.path.join(ROOT, "hooks")
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    return __import__(name)
+
+
+class MissingOrUnreadableStoreTests(unittest.TestCase):
+    """Ruling A: a live store whose file is missing fails the point and names the store and the file. A file
+    that cannot be read is one `unknown <store>: <why>` line, and the exit stays 0."""
+
+    def test_live_store_with_no_file_exits_1(self):
+        root = make_git_repo({"lint/held.py": "x\n"})  # no docs/todo.md
+        result = run_cli(probe_tree(close="none"), root)
+        self.assertEqual(result.returncode, 1, "a live store whose file is missing exited %d, not 1" % result.returncode)
+
+    def test_live_store_with_no_file_names_the_store_and_the_file(self):
+        root = make_git_repo({"lint/held.py": "x\n"})
+        result = run_cli(probe_tree(close="none"), root)
+        named = [line for line in result.stdout.splitlines()
+                 if "FAIL" in line and "probe" in line and "docs/todo.md" in line]
+        self.assertTrue(named, "no FAIL line names store probe and file docs/todo.md: %r" % result.stdout)
+
+    def test_non_utf8_store_file_is_one_unknown_line_and_exit_0(self):
+        root = make_git_repo({"lint/held.py": "x\n", "docs/todo.md": TODO_HELD})
+        with open(os.path.join(root, "docs", "todo.md"), "wb") as f:
+            f.write(b"- A1 held. Home: lint/held.py\n\xff\xfe\n")
+        result = run_cli(probe_tree(close="none"), root)
+        self.assertEqual(result.returncode, 0, "a non-UTF-8 store exited %d, not 0" % result.returncode)
+        unknown = [line for line in result.stdout.splitlines() if "unknown probe:" in line]
+        self.assertEqual(len(unknown), 1, "a non-UTF-8 store gave %d `unknown probe:` line(s), not 1: %r"
+                         % (len(unknown), result.stdout))
+
+
+class MergeCheckWritesNothingTests(unittest.TestCase):
+    """Ruling B: at merge-check nothing is written. A stale item that close would mark fails the point with a
+    `stale <id>` line, and the store file stays byte-identical. Closing happens at stop, compact and triage-status."""
+
+    def test_merge_check_exits_1_on_a_stale_mark_item(self):
+        result = run_cli(probe_tree(close="mark"), stale_repo())
+        self.assertEqual(result.returncode, 1, "merge-check on a stale mark item exited %d, not 1" % result.returncode)
+
+    def test_merge_check_names_the_stale_id_on_a_stale_line(self):
+        result = run_cli(probe_tree(close="mark"), stale_repo())
+        self.assertTrue(any("stale A2" in line for line in result.stdout.splitlines()),
+                        "no `stale A2` line at merge-check: %r" % result.stdout)
+
+    def test_merge_check_leaves_the_store_file_byte_identical(self):
+        root = stale_repo()
+        path = os.path.join(root, "docs", "todo.md")
+        with open(path, "rb") as f:
+            before = f.read()
+        run_cli(probe_tree(close="mark"), root)
+        with open(path, "rb") as f:
+            after = f.read()
+        self.assertEqual(after, before, "merge-check rewrote docs/todo.md")
+
+    def test_stop_compact_and_triage_status_close_the_stale_item(self):
+        # A control: the closing points already close. Each point gets its own store, so the point alone decides.
+        for point in ("stop", "compact", "triage-status"):
+            with self.subTest(point=point):
+                root = stale_repo()
+                result = run_cli(probe_tree(close="mark", runs_from=(point,)), root, point=point)
+                self.assertEqual(result.returncode, 0, "%s on a stale mark item exited %d, not 0"
+                                 % (point, result.returncode))
+                with open(os.path.join(root, "docs", "todo.md"), encoding="utf-8") as f:
+                    self.assertIn("A2 gone. Home: lint/gone.py [closed]", f.read(), "%s did not close A2" % point)
+
+
+class CloseMarksOnlyItsOwnStaleLineTests(unittest.TestCase):
+    """Ruling C: close marks a line by its own verdict, never every line that shares its id."""
+
+    def test_repeated_id_closes_only_its_stale_line(self):
+        root = make_git_repo({"docs/todo.md": "- D1 until 2020-01-01\n- D1 until 2099-01-01\n"})
+        result = run_cli(probe_tree(close="mark", still_true="until-date", runs_from=("stop",)), root, point="stop")
+        self.assertEqual(result.returncode, 0, "scope: the stop run exited %d, not 0" % result.returncode)
+        with open(os.path.join(root, "docs", "todo.md"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "- D1 until 2020-01-01 [closed]\n- D1 until 2099-01-01\n",
+                             "close marked a line whose own verdict is not stale")
+
+
+class UnknownShapeTests(unittest.TestCase):
+    """Ruling D: a live-store line that starts like an item but that the item regex does not match is reported
+    as `unknown <store>: shape`, never passed over in silence."""
+
+    def test_item_shaped_line_the_regex_misses_is_reported_as_unknown_shape(self):
+        root = make_git_repo({"docs/todo.md": "- U1 wait. until 2999-12-31\n* D3 until 2020-01-01\n"})
+        result = run_cli(probe_tree(close="none", still_true="until-date"), root)
+        self.assertTrue(any("unknown probe: shape" in line for line in result.stdout.splitlines()),
+                        "a `* D3` line in a live store passed in silence: %r" % result.stdout)
+
+    def test_a_store_of_plain_items_prints_no_shape_line(self):
+        # A control: a clean store prints nothing about shape.
+        root = make_git_repo({"docs/todo.md": "- U1 wait. until 2999-12-31\n"})
+        result = run_cli(probe_tree(close="none", still_true="until-date"), root)
+        self.assertFalse(any("shape" in line for line in result.stdout.splitlines()),
+                         "a clean store printed a shape line: %r" % result.stdout)
+
+
+class ResolverAgreementTests(unittest.TestCase):
+    """Ruling E: a home is judged as the repo's resolver judges it. A step home is the file hooks/feedback_guard.py
+    STEP_PATH names, resolved by hooks/ruling_home.py value_resolves. A `Home:` value is the whole value, as
+    ruling_home.check_file reads it. The runner's verdict must equal the resolver's on the same inputs."""
+
+    def test_step_home_agrees_with_the_resolver_when_the_step_file_is_committed(self):
+        feedback, ruling = hook_module("feedback_guard"), hook_module("ruling_home")
+        root = make_git_repo({"lint/held.py": "x\n", "roadmap/data/steps/alpha.json": "{}\n"})
+        self.assertTrue(ruling.value_resolves(feedback.STEP_PATH % "alpha", root),
+                        "scope: the resolver does not hold the committed step file")
+        expected = "true" if ruling.value_resolves(feedback.STEP_PATH % "alpha", root) else "stale"
+        got = verdicts_of(load_runner(), entry("home-held"), "- S1 a step. Home: step:alpha\n", root)
+        self.assertEqual(got.get("S1"), expected, "step:alpha: the runner says %r, the resolver says %r"
+                         % (got.get("S1"), expected))
+
+    def test_step_home_agrees_with_the_resolver_when_the_step_file_is_absent(self):
+        feedback, ruling = hook_module("feedback_guard"), hook_module("ruling_home")
+        root = make_git_repo({"lint/held.py": "x\n"})
+        expected = "true" if ruling.value_resolves(feedback.STEP_PATH % "alpha", root) else "stale"
+        self.assertEqual(expected, "stale", "scope: the resolver holds a step file that was never committed")
+        got = verdicts_of(load_runner(), entry("home-held"), "- S2 a step. Home: step:alpha\n", root)
+        self.assertEqual(got.get("S2"), expected, "step:alpha with no file: the runner says %r, the resolver says %r"
+                         % (got.get("S2"), expected))
+
+    def test_parenthetical_home_agrees_with_the_resolver_on_the_whole_value(self):
+        ruling = hook_module("ruling_home")
+        root = make_git_repo({"lint/held.py": "x\n", "docs/x.md": "# x\n"})
+        self.assertTrue(ruling.value_resolves("docs/x.md", root), "scope: the resolver does not hold docs/x.md")
+        expected = "true" if ruling.value_resolves("docs/x.md (note)", root) else "stale"
+        got = verdicts_of(load_runner(), entry("home-held"), "- H1 a note. Home: docs/x.md (note)\n", root)
+        self.assertEqual(got.get("H1"), expected, "`Home: docs/x.md (note)`: the runner says %r, the resolver says %r"
+                         % (got.get("H1"), expected))
+
+    def test_plain_home_agrees_with_the_resolver(self):
+        # A control: a bare path that resolves reads true on both.
+        ruling = hook_module("ruling_home")
+        root = make_git_repo({"lint/held.py": "x\n", "docs/x.md": "# x\n"})
+        self.assertTrue(ruling.value_resolves("docs/x.md", root), "scope: the resolver does not hold docs/x.md")
+        got = verdicts_of(load_runner(), entry("home-held"), "- H2 a note. Home: docs/x.md\n", root)
+        self.assertEqual(got, {"H2": "true"}, "a bare path the resolver holds read as %r" % got)
 
 
 if __name__ == "__main__":
