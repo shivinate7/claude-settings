@@ -9721,6 +9721,23 @@ test("Health tab: parts no row names are counted and listed by kind", async (t) 
   assert.doesNotMatch(left, /Checks/, "a kind with no parts is listed");
 });
 
+test("Health tab: parts in janitor/ and merge/ are counted and listed as Janitor scripts and Merge scripts", async (t) => {
+  const coverage = { total: 3, named: 1, left: { hook: [], check: [], skill: [], janitor: ["janitor/sweep.py"], merge: ["merge/launch.py"] } };
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage }) }) });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  await page.click("#healthTab");
+  const cover = page.locator("#healthCover");
+  assert.equal(await cover.locator("summary").count(), 1, "no Named by no row line: the janitor and merge parts are not counted");
+  assert.match(await cover.locator("summary").textContent(), /Named by no row: 2/, "the summary count is wrong");
+  assert.equal(await cover.locator(".left").count(), 1, "the uncovered parts are not listed");
+  const text = await cover.locator(".left").textContent();
+  assert.match(text, /Janitor scripts 1/, "the janitor kind has no label");
+  assert.match(text, /sweep\.py/, "the janitor part is not listed");
+  assert.match(text, /Merge scripts 1/, "the merge kind has no label");
+  assert.match(text, /launch\.py/, "the merge part is not listed");
+});
+
 test("Health tab: a build with no healthMap key draws no Health tab", async (t) => {
   const page = await open(t, { pageHtml: withBuild({}) });
   if (!page) return;
