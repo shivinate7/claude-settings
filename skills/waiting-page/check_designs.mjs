@@ -129,7 +129,7 @@ try {
     for (let i = 0; i < got.pics.length; i++) {
       const m = drawn[i];
       if (!m) await unknownAfter("option " + got.pics[i].letter + " has a design but the card holds no picture box");
-      // MIN_PIC is the page's width floor for a picture it shrinks. It is read here as a height floor, for a picture scaled
+      // MIN_PIC is a width constant in page.html that fitFrame no longer uses. It is read here as a height floor, for a picture scaled
       // below SHRUNK only: a picture drawn near its natural size is as its design made it, however small.
       if (m.scale < SHRUNK && m.h < got.min) {
         await finish(1, { problem: "The picture of option " + got.pics[i].letter + " is drawn " + Math.round(m.h) + " px tall at phone width, below the " + got.min

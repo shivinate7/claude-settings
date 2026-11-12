@@ -391,7 +391,7 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .dfitwrap { position: relative; width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .dfitwrap .dframe.dfit { position: absolute; top: 0; left: 0; max-width: none; border: 0; border-radius: 0; transform-origin: 0 0; }
 .dfitwrap.inert .dframe { pointer-events: none; }
-/* A card picture taller than its 480px box scrolls inside it (fitFrame, maxH). The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
+/* A card picture whose whole height is over the phone-height limit (F + 1 in fitFrame) scrolls inside its 480px box; any other draws whole. The pill sits on the wrap's #fff gutter and the white mockup frame in both themes, so the cue keeps one pair: 17.3:1. */
 :root { --pic-cue: #161b22; --on-pic-cue: #ffffff; }
 .dfitwrap .dsizer { display: block; position: relative; overflow: hidden; }
 .dfitwrap .dtop, .dfitwrap .dcue { display: none; }
@@ -1481,7 +1481,7 @@ function optPic(it, o, dif) {
   if (!has && !it.look) return h("span", { class: "opic" });
   if (!has) return h("p", { class: "stake due dwarn", role: "status" }, glyph("due"), h("span", {}, "No picture for this option. Ask the session for one design per option."));
   const open = (e) => { e.preventDefault(); e.stopPropagation(); openViewer(it, o); };
-  const pic = fitFrame(mine[0].slug, o.label, true, mine[0].focus, 1, mine[0].size, mine[0].drawn, null, stateOf(mine[0]), 480);
+  const pic = fitFrame(mine[0].slug, o.label, true, mine[0].focus, 2, mine[0].size, mine[0].drawn, null, stateOf(mine[0]), 480);
   // A press on the scrollbar is no press on the picture. The click that follows it, wherever a drag ends, opens nothing and picks nothing.
   const onBar = (e) => { const r = pic.getBoundingClientRect(); return pic.classList.contains("scroll") && e.clientX >= r.left + pic.clientLeft + pic.clientWidth && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; };
   pic.addEventListener("pointerdown", (e) => {
@@ -2998,8 +2998,8 @@ function withState(html, state) {
 }
 const allDesigns = () => state.items.filter((it) => !isAnswered(it)).flatMap((it) => designsOf(it).map((d) => ({ ...d, it })));
 // A mockup is drawn FIT_W wide, as a phone is, and scaled to the width it has. It reports its own height, so none of it is cut.
-const MIN_PIC = 120; // a capped picture is never narrower than this, however tall the mockup
-const PHONE_H = 844; // a picture that scrolls draws as wide as a FIT_W x PHONE_H phone picture gets in its box
+const MIN_PIC = 120; // check_designs.mjs and the write guard read this as a number; fitFrame no longer floors a width with it
+const PHONE_H = 844; // F, the tallest a picture draws whole, is the height of a FIT_W x PHONE_H phone picture at the card's width, and at least maxH
 const FIT_W = 390;
 let FITS = [];
 // Sizes the mockups reported, by slug plus focus. They are kept in this browser, so the next load reserves the height before the mockup loads.
@@ -3023,37 +3023,51 @@ function fitFrame(slug, title, inert, focus, maxScale, size, drawn, head, state,
   let po;
   const fit = () => {
     if (head) head();
-    const c = FIT[key], ww = maxH ? (wrap.parentElement ? Math.max(wrap.parentElement.clientWidth - 2, 1) : Infinity) : wrap.clientWidth || DW; // a capped picture sizes to its card; before it is placed, to its own cap
+    const c = FIT[key], ww = maxH ? Infinity : wrap.clientWidth || DW;
     const box = focus ? (c && c.f) || (size ? { x: 0, y: 0, w: size.w, h: size.h } : null) : null;
     const ht = c ? c.h : (!focus && size ? size.h : 200);
-    const bw = box ? Math.max(box.w, 1) : DW;
-    let sc = Math.min(maxScale || 1, ww / bw, maxH ? Math.max(maxH / Math.max(box ? box.h : ht, 1), MIN_PIC / bw) : Infinity);
-    // A box more than 4 times as tall as it is wide would pass maxH. It keeps its scale and scrolls in a maxH box. A pass of 1px or less counts as fitting.
-    const scroll = !!maxH && Math.ceil(Math.max(box ? box.h : ht, 1) * sc) > maxH + 1;
-    if (maxH) wrap.classList.toggle("scroll", scroll);
-    const g = scroll && wrap.isConnected ? Math.max(wrap.offsetWidth - wrap.clientWidth - 2, 0) : 0; // the scrollbar's gutter, plus any border past 1px; the box grows by it so the scrollbar takes none of the picture's width
-    // At the floor scale a tall picture is too narrow to read, so it widens to a phone picture's width. The column is floored, as clientWidth rounds up and the box would pass it.
-    const room = scroll && wrap.parentElement ? Math.max(Math.floor(wrap.parentElement.getBoundingClientRect().width) - 2 - g, 1) : Infinity;
-    if (scroll) sc = Math.min(maxScale || 1, room / bw, maxH * FIT_W / PHONE_H / bw);
-    const pw = Math.min(Math.ceil(bw * sc), room); // ceil can pass the room by 1px from float error
+    const bh = Math.max(box ? box.h : ht, 1), bw = box ? Math.max(box.w, 1) : DW;
+    let sc = Math.min(maxScale || 1, ww / bw), scroll = false, g = 0, pw = 0;
     if (maxH) {
-      wrap.style.width = pw + 2 + g + "px";
-      sizer.style.width = pw + "px"; sizer.style.height = Math.ceil((box ? box.h : ht) * sc) + "px";
+      // A capped picture is the card's column wide, at most maxScale x its own width. The column is floored, as clientWidth rounds up and the box would pass it.
+      // Out of the page, or in a hidden part of it, the column is unknown: the box reserves the picture at its own drawn width, and stays pending. render() fits a pending box once its card is in the page, in the same task, so the first frame is the placed size. A resize observer is too late for that: it runs after the frame's animation callbacks.
+      const pc = wrap.isConnected && wrap.parentElement ? Math.floor(wrap.parentElement.getBoundingClientRect().width) : 0;
+      me.pending = pc <= 0;
+      const col = pc > 0 ? pc : DW + 2, room0 = Math.max(col - 2, 1);
+      sc = Math.min(maxScale || 1, room0 / bw);
+      // It draws whole while it is no taller than a FIT_W x PHONE_H phone picture at that width (and no shorter than maxH). A taller one scrolls. A pass of 1px or less counts as fitting.
+      const F = Math.max(maxH, Math.ceil(room0 * PHONE_H / FIT_W));
+      scroll = Math.ceil(bh * sc) > F + 1;
+      wrap.classList.toggle("scroll", scroll);
+      if (scroll) {
+        g = wrap.isConnected ? Math.max(wrap.offsetWidth - wrap.clientWidth - 2, 0) : 0; // the scrollbar's gutter, plus any border past 1px; the box grows by it so the scrollbar takes none of the picture's width
+        const room = Math.max(room0 - g, 1), narrow = Math.min(maxScale || 1, room / bw);
+        // The gutter can make a picture that just passed fit in the box's height (F is no help: a phone's height scales with the width, as the picture does). Then it draws whole at the narrowed scale, so it is no taller than maxH + 1, with no scrollbar and no cue.
+        sc = narrow;
+        if (Math.ceil(bh * narrow) <= maxH + 1) { scroll = false; wrap.classList.remove("scroll"); g = 0; }
+      }
+      pw = Math.min(Math.ceil(bw * sc), room0 - (scroll ? g : 0)); // ceil can pass the room by 1px from float error
       const o = wrap.closest(".opic"); if (o) picHint(o, scroll);
-      if (!po && wrap.parentElement && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
+      if (!po && !me.pending && window.ResizeObserver) { po = new ResizeObserver(fit); po.observe(wrap.parentElement); }
+      // The width and height come from the column. bh is the declared height until the mockup reports its own, so the first paint is the height it settles to.
+      sizer.style.width = pw + "px"; sizer.style.height = Math.ceil(bh * sc) + "px";
+      wrap.style.width = pw + 2 + g + "px";
+      wrap.style.height = (scroll ? maxH : Math.ceil(bh * sc)) + "px";
     }
     f.style.height = ht + "px";
     f.style.transform = (box ? "translate(" + -box.x * sc + "px," + -box.y * sc + "px) " : "") + "scale(" + sc + ")";
-    if (scroll) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = maxH + "px"; }
-    else if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.min(maxH || Infinity, Math.ceil((box ? box.h : ht) * sc)) + "px"; }
-    else {
-      // Declared size only: the height follows the width by aspect ratio, so the first paint is already the right height.
-      const dw = focus ? size.w : DW;
-      wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.min(maxH || Infinity, Math.ceil(size.h * (maxScale || 1))) + "px";
+    if (!maxH) {
+      if (c || !size) { wrap.style.aspectRatio = ""; wrap.style.maxHeight = ""; wrap.style.height = Math.ceil(bh * sc) + "px"; }
+      else {
+        // Declared size only: the height follows the width by aspect ratio, so the first paint is already the right height.
+        const dw = focus ? size.w : DW;
+        wrap.style.height = ""; wrap.style.aspectRatio = dw + " / " + size.h; wrap.style.maxHeight = Math.ceil(size.h * (maxScale || 1)) + "px";
+      }
     }
     if (scroll) picEdges(wrap);
   };
-  FITS.push({ f, key, fit });
+  const me = { f, key, fit, pending: false };
+  FITS.push(me);
   if (window.ResizeObserver) { const ro = new ResizeObserver(fit); ro.observe(wrap); if (head) ro.observe($("dTitle")); }
   fit(); return wrap;
 }
@@ -3164,6 +3178,7 @@ document.addEventListener("keydown", (e) => {
 function render() {
   renderList(); renderRail(); renderBar(); renderSent(); releaseSent();
   FITS = FITS.filter((x) => x.f.isConnected); // frames of rebuilt cards are gone from the page
+  FITS.forEach((x) => { if (x.pending) x.fit(); }); // a picture built out of the page fits to its column now, before the first frame
   const nd = allDesigns().length;
   $("dCount").textContent = nd || ""; $("tabD").hidden = !state.items.some((i) => designsOf(i).length);
   // The count box has a fixed width, so a count that grows moves no tab. It stays empty until the items load.

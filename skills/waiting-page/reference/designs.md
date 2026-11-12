@@ -21,8 +21,8 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    `python3 ~/.claude/lint/layout.py devices <repo root>` prints. Where it prints `unknown` or no
    size, draw at the page's default width (`FIT_W` in `page.html`; read it once with
    `grep -n 'const FIT_W' <skill folder>/page.html`) and leave `drawn` unset. Set `drawn` whenever
-   you draw at another width. The page scales it to the card. A picture taller
-   than the card's 480px box scrolls inside the box. The full mockup stays one tap away ("Open full size").
+   you draw at another width. The page grows it to the card's width, at most 2x. It draws whole up to the larger of 480px
+   and the height of a 390 × 844 phone picture at that width, plus 1px. A taller picture scrolls in the card's 480px box. The full mockup stays one tap away ("Open full size").
 2. Put a "Sample" banner at the top of each mockup: it says that no figure on it is real. Label
    what exists with a dashed "Today: <part>" and what the option adds with a dashed "New: <part>".
    Put the whole mockup in one HTML string. Write `<` as `\u003c`.
@@ -36,7 +36,7 @@ The guard runs `check_designs.mjs` on the published page at each item write that
      such as `side-session-notes`, or a link is refused: an account switch loses it (guard rule `mockup-home`, decision `mockup-home`).
    - A design may carry `focus`, a selector of an element inside the mockup. The option card then
      shows that element, scaled to fit the card, so the part being decided is in frame.
-     Without `focus` the card shows the whole mockup. Either way the picture is scaled to fit the card, at most 480px high and never narrower than 120px. A picture more than 1px over that stays 480px high and scrolls in its box, and opens at the top of what the card shows. It draws as wide as a 390 × 844 phone picture (221.8px), or as the card's column less its border and scrollbar if that is less. A picture 1px over draws 480px high, and up to 3px of its bottom edge is hidden. Set `focus` on each design to the element
+     Without `focus` the card shows the whole mockup. Either way the picture grows to the card's column less its border, at most 2x its own width. It draws whole while its height at that width is at most F plus 1px. F is the height of a 390 × 844 phone picture at that width, and never less than 480px. A taller picture draws 480px high and scrolls in its box, and opens at the top of what the card shows. A picture that scrolls at the column's width gives up its scrollbar's gutter. At that narrower width, if its height is at most 481px (480 plus 1px), it draws whole with no scrollbar. Otherwise it scrolls at that width. A scrolling picture is as wide as the column less its border and scrollbar, or 2x its own width when that is less. Examples: a 390 × 600 design in a 358px column never scrolls and draws 356 × 548. A 390 × 980 design in a 202px column with a 10px gutter draws whole at 190 × 478. A 390 × 900 design in a 202px column has a phone height of 433 at 200px wide, but F is 480, so it draws whole at 200 × 462. Set `focus` on each design to the element
      being decided, such as the late-package row with its buttons.
    - A design may carry `size` (`{w, h}`, the size in mockup pixels of what the card shows: the
      focused element, else the whole mockup). The card reserves that height before the mockup loads,

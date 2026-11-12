@@ -7,14 +7,14 @@ Mockups: `c193-receipt.html`, `c193-rail.html`, `c193-pics.html`, `c193-sent.htm
    - Chips: 206 × 32 (today 30), gap 4, padding-inline 8. `.no` has min-width 2ch and tabular-nums. `.nt` ends in an ellipsis; the mockup measured scrollWidth > clientWidth.
    - Dashed frame: 206 wide, padding 4, gap 4, radius 12 (today 2, 3, 10). Chips inside are 196 × 32.
    - At 960px and narrower: a chip is 48 × 32 inside and outside a frame (today 44 × 28 inside).
-3. Option pictures (`optPic`, `fitFrame`). Scale: sc = min(1, W / w, 480 / h), where w × h is 390 × 844 or the focus box. The picture is at most 221.8 × 480, centred. `.opic` is a grid with gap 8. View is 44px high (today 40).
-   - In the 1160px column: `.in` content is 1128, the list is 860, and the options row is 805. Three options are 261.7px wide each and two are 397.5px. The picture is 221.8 × 480 in each. At 2200 the sizes are the same as at 1280.
-   - At 390: the option card is 319px wide, and the picture is 221.8 × 480.
-   - Narrowest case: three options reach three columns at a 1065px page. The cards are then 230px wide, and the picture is 200 × 433.
-   - Scope: the cap applies only to `optPic`'s call (inert, maxScale 1). It does not apply to `designPreview` or to the viewer (`stageFrame`, maxScale 2).
-   - In `fit()`, set the wrap's width to w × sc in JS and centre it. Do this in both branches, the measured one and the declared-size one, so the first paint already has the capped size.
+3. Option pictures (`optPic`, `fitFrame`). Scale: sc = min(2, W / w), where W = floor(column) − 2 and w is the mockup's width (390) or the focus box's width. `.opic` is a grid with gap 8. View is 44px high (today 40).
+   - In the 1160px column: `.in` content is 1128, the list is 860, and the options row is 805. Three options are 261.7px wide each and two are 397.5px. The picture sizes are in the picture notes, section 5 (decision `page-pic-fills-card`, an option picture fills its card). At 2200 the sizes are the same as at 1280.
+   - At 390: the option card is 319px wide. Its picture size is in the picture notes, section 5.
+   - Narrowest case: three options reach three columns at a 1065px page. The cards are then 230px wide. The picture size there is unknown: the picture notes do not measure 1065.
+   - Scope: `optPic`'s call only (maxScale 2, maxH 480). The viewer (`stageFrame`, maxScale 2) and the front preview (`designPreview`) are unchanged.
+   - In `fit()`, set the wrap's width to the picture's width plus its border in JS, and CSS centres it (`justify-self: center`). A box out of the page, or in a hidden part of it, has no column yet: it takes the picture's drawn width and stays pending. `render()` places a pending box once its card is in the page, in the same task, so the first frame is the placed size. Decision `page-pic-fills-card` (docs/decisions/page-pic-fills-card.md).
    - The mockup checks that each picture stays inside its card and ends above `.head`.
-   - Option A (pick): the 480px cap. Option B: the picture fills the card, at 231.7 × 501 (three options), 367.5 × 795 (two options) and 289 × 625 (at 390). B is easier to read, but two options are 800px high.
+   - The picture fills the card's width, at most 2x. It draws whole while its drawn height is at most F + 1, where F = max(480, ceil(W × 844 / 390)). Taller, it draws 480 high and scrolls. Rule: decision `page-pic-fills-card`, owner 2026-11-09 21:26 CST.
 4. Sent bar (`renderSent`). Move `.sent-list` into a new `.sent-what` block, under the sent line.
    - `.sent .in`: flex-wrap, padding-block 16, gap 12/16. `.sent-head` gap 16. `.sent-what` gap 8. `.sent-list` gap 8. Each `li` is 28 high with padding-inline 12. `.row` gap 8, margin-inline-start auto.
    - Bar `.in`: padding-block 12, gap 8/12 (today 10, 8/10).
