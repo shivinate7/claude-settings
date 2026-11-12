@@ -14,6 +14,8 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
+                          The batch runner's join (cloud) needs a lane-lint PASS at the head, unless the all-jobs-passed rollup is green on that exact head:
+                          then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -4037,12 +4039,25 @@ def live_review_state(h, rec, live, main):
     state, why = review_state(rec, rec["head"])
     return state, why + "; the head is the reviewed head plus clean merges of main"
 
+def rollup_green(h, n, head):
+    """True only when every ROLLUP_JOB row on `head` is a pass. No row, any other bucket, or a failed read is False, so the caller keeps its own check."""
+    try:
+        rows = h.checks(n, warn=False, sha=head).get(ROLLUP_JOB) or []
+    except Stop:
+        return False
+    return bool(rows) and all(bucket == "pass" for bucket, _ in rows)
+
 def lint_check(h, n, info, root, cfgrel):
     """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
     review record uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
     is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
     linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
-    the join's own claim push, resumed, moves the head by exactly that."""
+    the join's own claim push, resumed, moves the head by exactly that.
+    The lint is skipped when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the merge takes: CI proved that head (rule
+    roles-each-layer-proves-once). A rollup that is absent, red, pending or skipped, green only on another sha, or unreadable keeps the need above."""
+    if rollup_green(h, n, info["head"]):
+        say(f"merge: lane lint skipped for #{n}: {ROLLUP_JOB} is green on {info['head'][:9]}, so CI already proved this head.")
+        return
     try:
         lints = h.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
     except Stop as e:
