@@ -17,6 +17,10 @@ was written has no zone: `when` is its naked time and `at` is None, never assume
 --between START END (aware ISO 8601 times) prints the rows whose `at` falls in [START, END], and the
 count of old lines that could fall in it under some zone, for the batch pace read (window()).
 --rule narrows --between to one rule id (the pace read uses load-brake).
+--rule past-ruling-run, without --between, reads the line report_guard writes once per past-ruling model call
+(a Stop that asks the owner): decision measured, matched `ms= chars= candidates= outcome=`. It prints the
+window's count, median ms, max ms, max chars and timeouts, one `label: value` line each, over --days.
+This is the reader of that line. Cost: one line per Stop that asks the owner, one append, no new process.
 In a cloud session (CLAUDE_CODE_REMOTE=true) that read prints `n/a (cloud)` and no count.
 The brake guards the owner's own machine."""
 import argparse
@@ -37,6 +41,8 @@ FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first l
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
 BRAKE_RULE = "load-brake"
+PAST_RULING_RULE = "past-ruling-run"
+PAST_RULING_FIELD = re.compile(r"(ms|chars|outcome)=(\S+)")
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
 MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
@@ -186,6 +192,25 @@ def render(s, by_session=False, ids=None):
     return "\n".join(out)
 
 
+def past_ruling_summary(lines, days, now):
+    """The summary of the past-ruling-run lines whose date is in the last `days` calendar dates (all when None)."""
+    first = None if days is None else (now.date() - timedelta(days=days - 1)).isoformat()
+    ms, chars, timeouts = [], [], 0
+    for raw in lines:
+        row = parse_line(raw)
+        if row is None or row.rule != PAST_RULING_RULE or (first and row.when.date().isoformat() < first):
+            continue
+        fields = dict(PAST_RULING_FIELD.findall(row.matched))
+        if fields.get("ms", "").isdigit() and fields.get("chars", "").isdigit():
+            ms.append(int(fields["ms"]))
+            chars.append(int(fields["chars"]))
+            timeouts += fields.get("outcome") == "timeout"
+    ms.sort()
+    return "\n".join(["count: %d" % len(ms), "median ms: %d" % (ms[(len(ms) - 1) // 2] if ms else 0),
+                      "max ms: %d" % (ms[-1] if ms else 0), "max chars: %d" % max(chars, default=0),
+                      "timeouts: %d" % timeouts])
+
+
 def days_arg(text):
     if text == "all":
         return None
@@ -210,7 +235,7 @@ def main(argv):
     ap.add_argument("--by-session", action="store_true", help="add counts per session")
     ap.add_argument("--between", nargs=2, metavar=("START", "END"), type=datetime.fromisoformat,
                     help="print the rows inside this window (aware ISO 8601 times) and the old-line unknown count")
-    ap.add_argument("--rule", help="with --between: keep one rule id")
+    ap.add_argument("--rule", help="with --between: keep one rule id; past-ruling-run alone prints that rule's summary")
     args = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):  # absent when stdout is redirected to StringIO
         sys.stdout.reconfigure(errors="replace")
@@ -230,6 +255,9 @@ def main(argv):
                 rows, unknown = window(handle, args.between[0], args.between[1], args.rule)
                 print("\n".join(row.line for row in rows))
                 print("unknown (old lines with no zone that could fall inside): %d" % unknown)
+                return 0
+            if args.rule == PAST_RULING_RULE:
+                print(past_ruling_summary(handle, args.days, datetime.now()))
                 return 0
             print(render(summarize(handle, args.days, datetime.now(), args.session), args.by_session, ids))
     except FileNotFoundError:

@@ -162,6 +162,7 @@ import json
 import os
 import re
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -2882,6 +2883,19 @@ def cannot_run(asked, why):
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
+def record_past_ruling_run(started, chars, candidates, outcome):
+    """One guard.log line per past-ruling model call: its time, prompt size and outcome, never the asked text.
+    Read by lint/guard_log_report.py --rule past-ruling-run. A write that fails never changes the verdict."""
+    try:
+        if guard is None:
+            _load_guard()
+        if guard is not None:
+            guard.guard_core.record("Stop", "measured", "past-ruling-run", "ms=%d chars=%d candidates=%d outcome=%s" % (
+                (time.monotonic() - started) * 1000, chars, candidates, outcome))
+    except Exception:
+        pass
+
+
 def past_ruling_problem(asked, cwd):
     """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
     _hooks_on_path()
@@ -2898,9 +2912,13 @@ def past_ruling_problem(asked, cwd):
               "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
               "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
               + question_form.candidates_block(candidates, unknown))
+    started = time.monotonic()
     verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
                                                  timeout=call_judge.PAST_RULING_TIMEOUT,
                                                  shape=call_judge.OK_SHAPE, effort=None)
+    outcome = ("timeout" if error == decision_watch.MODEL_TIMEOUT_ERROR else "error") if error else (
+        "ok" if verdict.get("ok") is not False else "refused")
+    record_past_ruling_run(started, len(prompt), len(candidates), outcome)
     if error:
         return cannot_run(asked, " ".join(str(error).split()))
     if verdict.get("ok") is not False:
