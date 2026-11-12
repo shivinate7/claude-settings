@@ -2404,8 +2404,9 @@ def coord_refusal(c):
 
 
 def owner_handoff(section, rest=None):
-    """A handoff with Goal and Next steps around the owner section. section None leaves the heading out."""
-    lines = ["## Goal", "- Ship the owner's ask. Source: the owner message of 2026-11-08.", ""]
+    """A complete handoff (handoff_text, every section but Next steps) with the owner section before
+    Next steps, so only the owner check can block it. section None leaves the heading out."""
+    lines = [handoff_text(omit=("Next steps",)).rstrip("\n"), ""]
     if section is not None:
         lines += [OWNER_HEADING, section, ""]
     lines += ["## Next steps", rest or "- Check the batch once the owner answers.", ""]
