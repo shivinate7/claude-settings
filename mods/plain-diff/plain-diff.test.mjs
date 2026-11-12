@@ -42,6 +42,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { register as registerHooks } from 'node:module'
 import * as lib from './hooks/lib.mjs'
+import { mock } from 'node:test'
 
 const r1 = []
 async function test(name, fn) {
@@ -556,14 +557,24 @@ await test('R2-4 register: a secret-shaped turn note is not shown; the row says 
   assert.ok(rows.includes('No note'), rows)
 })
 
-// R2-5 limiter honesty: a hung call is freed by the limiter's timeout, so a later call is admitted.
-await test('R2-5 makeLimiter timeoutMs: a hung call is freed, so a later run is admitted and the hung run gives null', async () => {
-  const L = need('makeLimiter')(1, { timeoutMs: 20 })
-  const hung = L.run('a', () => new Promise(() => {}))
-  assert.equal(await L.run('b', async () => 'B'), null) // still busy at once
-  await new Promise(r => setTimeout(r, 60))
-  assert.equal(await L.run('c', async () => 'C'), 'C')
-  assert.equal(await Promise.race([hung, new Promise(r => setTimeout(() => r('still hung'), 100))]), null)
+// R2-5 limiter honesty: a hung call holds its slot to its timeoutMs bound, then frees it for a later call.
+await test('R2-5 makeLimiter timeoutMs: a hung call holds its slot to the 20 ms bound, then a later run is admitted', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] }) // an injected clock: the bound fires only when the test ticks it
+  try {
+    const L = need('makeLimiter')(1, { timeoutMs: 20 })
+    const hung = L.run('a', () => new Promise(() => {}))
+    assert.equal(await L.run('b', async () => 'B'), null) // still busy at once
+    mock.timers.tick(19)
+    await new Promise(r => setImmediate(r)) // a bound that fired early frees its slot in microtasks: flush them so the probe sees it
+    assert.equal(await L.run('c', async () => 'C'), null, 'the slot was freed before its 20 ms bound')
+    mock.timers.tick(1)
+    // A macrotask boundary ends the wait: a hung run that gives null at its bound has settled in microtasks by then.
+    assert.equal(await Promise.race([hung, new Promise(r => setImmediate(() => r('still hung')))]), null,
+      'the hung run did not give null at its 20 ms bound')
+    assert.equal(await L.run('d', async () => 'D'), 'D', 'a later run was not admitted after the bound')
+  } finally {
+    mock.timers.reset()
+  }
 })
 
 // R2-6 control characters in notes: ESC, BEL, bidi overrides removed from turn and model notes.
