@@ -8,7 +8,7 @@ the transcript the guard has already read. These cases pin what the draft holds:
 - a Recovered draft names only the sources the transcript after the compaction shows: git, page, digest;
 - a source counts only when its call's result came back without is_error, paired by tool_use_id;
 - a call with no result at all is no source either: the transcript shows no read that came back;
-- a sub-agent's call (isSidechain true) is no source: the session did not read what the sub-agent read;
+- an agent's call (isSidechain true) is no source: the session did not read what the agent read;
 - with no source read after the compaction, the Recovered draft is `Recovered: none`;
 - a draft pasted back into the report unchanged passes the guard;
 - a missing Handoff gave line drafts a placeholder, never `Handoff gave: none`, since the hook cannot know the facts;
@@ -119,7 +119,7 @@ def results_in(records):
 
 
 def sidechain(records):
-    """The same records marked as a sub-agent's: isSidechain true on each."""
+    """The same records marked as an agent's: isSidechain true on each."""
     return [dict(rec, isSidechain=True) for rec in records]
 
 
@@ -312,7 +312,7 @@ class UnansweredSourceTests(unittest.TestCase):
 
 
 class SidechainSourceTests(unittest.TestCase):
-    """A sub-agent's call is no source for the carry line: the session did not read what the sub-agent read."""
+    """An agent's call is no source for the carry line: the session did not read what the agent read."""
 
     def test_a_sidechain_call_after_the_compaction_drafts_no_source(self):
         cases = {
@@ -323,21 +323,21 @@ class SidechainSourceTests(unittest.TestCase):
         for label, (middle, want) in cases.items():
             with self.subTest(case=label):
                 # Control, green on the code before the change: the same call in the main session drafts its source, so
-                # the sub-agent case below fails for the sidechain alone.
+                # the agent case below fails for the sidechain alone.
                 control = drafted(RG.recovered_problem(compacted(*middle), REPORT), "Recovered:")
                 self.assertEqual(draft_sources(control), want,
                                  "the main-session draft for %s is %r, not one naming %r" % (label, control, want))
                 records = compacted(*sidechain(middle))
                 self.assertTrue(compacts(records), "the transcript holds no compaction for %s" % label)
-                # Scope first: the call is in the transcript, and it is marked as a sub-agent's.
+                # Scope first: the call is in the transcript, and it is marked as an agent's.
                 self.assertTrue(calls_in(records), "the transcript holds no call for %s" % label)
                 self.assertTrue(all(rec.get("isSidechain") for rec in records[3:]),
-                                "the call for %s is not marked as a sub-agent's" % label)
+                                "the call for %s is not marked as an agent's" % label)
                 draft = drafted(RG.recovered_problem(records, REPORT), "Recovered:")
-                # Catches: a sub-agent's call counted as a source the session read.
+                # Catches: an agent's call counted as a source the session read.
                 self.assertEqual(draft, "Recovered: none",
                                  "the Recovered draft for %s is %r, not Recovered: none, "
-                                 "though a sub-agent made the call" % (label, draft))
+                                 "though an agent made the call" % (label, draft))
 
 
 class DraftControlTests(unittest.TestCase):
