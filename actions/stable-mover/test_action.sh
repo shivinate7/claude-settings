@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Red run: the stable mover moves stable to a green main head, and leaves stable alone on a failed
-# run and on a head that does not descend from stable. The contract the mover (actions/stable-mover/run.sh)
+# run, on a head that does not descend from stable, and on a head behind stable (exit 0). The contract the mover (actions/stable-mover/run.sh)
 # is built to: run in a checkout whose origin is the fixture, with HEAD_SHA (the green head) and
 # RUN_CONCLUSION (the run's conclusion). It pushes HEAD_SHA to refs/heads/stable, fast-forward only.
 set -u
@@ -31,6 +31,8 @@ base=$(commit f base) || { echo "FAIL - fixture: seed commit failed"; exit 1; }
 green=$(commit f green) || { echo "FAIL - fixture: seed commit failed"; exit 1; }
 git -C "$seed" checkout -q -b side "$base" || { echo "FAIL - fixture: seed branch failed"; exit 1; }
 diverged=$(commit g diverged) || { echo "FAIL - fixture: seed commit failed"; exit 1; }
+git -C "$seed" checkout -q -b ahead "$green" || { echo "FAIL - fixture: seed branch failed"; exit 1; }
+ahead=$(commit f ahead) || { echo "FAIL - fixture: seed commit failed"; exit 1; }
 
 origin_sha() { # origin_sha <origin dir> <branch>: the sha the fixture origin holds for the branch, or none
   git --git-dir="$1" rev-parse -q --verify "refs/heads/$2" 2>/dev/null || echo none
@@ -49,8 +51,10 @@ scenario() {
   git clone -q "$origin" "$ws" || { echo "FAIL - fixture $1: clone of the origin failed"; exit 1; }
 }
 # run_mover <checkout> <head> <conclusion>: runs the mover as the workflow does. Only the stable ref is read after it.
+# It leaves the mover's exit code in mover_rc.
 run_mover() {
   (cd "$1" && HEAD_SHA="$2" RUN_CONCLUSION="$3" bash "$mover") >"$work/mover.log" 2>&1
+  mover_rc=$?
 }
 
 scenario success "$base"
@@ -76,6 +80,17 @@ run_mover "$ws" "$green" success
 got=$(origin_sha "$origin" stable)
 if [ "$got" = "$diverged" ]; then ok "a head that does not descend from stable is refused"
 else fail "non-descendant: stable moved to a head that does not descend from it (stable at $got, wanted $diverged)"; fi
+
+# A green head behind stable (an out-of-order green run): stable stays where it is, and the mover exits 0.
+scenario behind "$ahead"
+control "a green run behind stable: the fixture stable is the ahead commit" "$(origin_sha "$origin" stable)" "$ahead"
+control "a green run behind stable: the fixture main is the green head" "$(origin_sha "$origin" main)" "$green"
+run_mover "$ws" "$green" success
+got=$(origin_sha "$origin" stable)
+if [ "$got" = "$ahead" ]; then ok "a green run behind stable leaves stable where it is"
+else fail "behind stable: stable moved backwards on a green run (stable at $got, wanted $ahead)"; fi
+if [ "$mover_rc" -eq 0 ]; then ok "a green run behind stable exits 0"
+else fail "behind stable: the mover exited $mover_rc, wanted 0"; fi
 
 if [ "$fails" -eq 0 ]; then echo "stable-mover: all cases pass"; exit 0; fi
 echo "stable-mover: $fails failed"
