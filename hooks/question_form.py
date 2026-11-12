@@ -35,8 +35,9 @@ or empty `Departs from:` line (a bullet or bold label is read), a line with no s
 "—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
 nothing changes (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
-The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
-position's letter, and a label that opens with a letter tag names that letter) and `rework-off-page` (an open item never says it is being reworked).
+The page writer's last three rules run after the form: `option-letter-keys` (an option's key is its
+position's letter, and a label that opens with a letter tag names that letter), `option-letters-frozen` (an option keeps the
+key, id and label it was shown with, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
 `option-labels-match-chat` runs in hooks/guard.py after all of those, because it reads the session's transcript, which item_hit never sees:
 page_label_hit(writes, transcript_path) -> (rule, matched). A chat question cites its item ("Page item: <id>") and writes "a) <text>" per
 option; a write of that item whose label for a letter differs from the chat's text for it is refused (chat_page_label_hit).
