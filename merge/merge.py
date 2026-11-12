@@ -3227,8 +3227,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     Then cross_measure checks a PR's head against the lane's other open PRs and `with_prs`: an unknown there is a Stop too.
     A FAIL above (the base conflict, a clash that counts) or an unknown stops before the ci-job run, as one refusal that lists every FAIL block; the ci-job never runs beside it.
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
-    A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
-    A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
+    A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line. A head with no workflow file is the exception: it is a Stop that no reason lifts.
+    A lint that ran no lint CI step, on a head that has workflows, is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
     A head whose diff touches a mutation test file runs the mutation test at the hand-off lint. The batch runner's pre-join lint (`pre_join`, a recorded

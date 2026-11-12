@@ -4,7 +4,7 @@
     python3 quick_checks.py links|scripts|json
 
 Run in the checkout root. `links`: each relative link in a tracked markdown file resolves to a file or folder. `scripts`: each tracked
-Python file compiles and each shell file passes `bash -n`. `json`: each tracked JSON file parses; a file with a name that tools read as
+Python file compiles and each shell file passes `bash -n`; a file with no extension counts when its first line is a `#!` of bash, sh or python. `json`: each tracked JSON file parses; a file with a name that tools read as
 JSON with comments (JSONC_NAMES) may hold `//` and `/* */` comments. Exit 0 when every file of its kind
 passes (none is a pass), 1 when one fails, 2 on a usage error. Each failing file is named on its own `FAIL <path>: <why>` line.
 """
@@ -102,8 +102,34 @@ def check_links(path, data):
     return [p for p in (link_problem(path, t) for t in targets) if p]
 
 
+def shebang_language(first_line):
+    """-> "python" or "bash" for a first line (bytes) that is a `#!` of python or of bash or sh, `env` form included, else None."""
+    if not first_line.startswith(b"#!"):
+        return None
+    words = first_line[2:].decode("utf-8", "replace").split()
+    if words and os.path.basename(words[0]) == "env":
+        words = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
+    name = os.path.basename(words[0]) if words else ""
+    if name in ("bash", "sh"):
+        return "bash"
+    return "python" if re.fullmatch(r"python[0-9.]*", name) else None
+
+
+def is_script(path):
+    """A file the scripts check takes: a listed extension, else no extension and a `#!` first line of python, bash or sh. Reads one line."""
+    if path.lower().endswith(SCRIPT_SUFFIXES):
+        return True
+    if os.path.splitext(path)[1]:
+        return False
+    try:
+        with open(path, "rb") as f:
+            return shebang_language(f.readline(512)) is not None
+    except OSError:
+        return False
+
+
 def check_scripts(path, data):
-    if path.endswith(".py"):
+    if path.endswith(".py") or (not os.path.splitext(path)[1] and shebang_language(data.split(b"\n", 1)[0]) == "python"):
         try:
             ast.parse(data, filename=path)
         except (SyntaxError, ValueError) as e:  # ValueError: a null byte
@@ -154,17 +180,19 @@ def check_json(path, data):
     return []
 
 
-KINDS = {"links": ((".md", ".markdown"), check_links), "scripts": ((".py", ".sh", ".bash"), check_scripts), "json": ((".json",), check_json)}
+SCRIPT_SUFFIXES = (".py", ".sh", ".bash")
+KINDS = {"links": (lambda p: p.lower().endswith((".md", ".markdown")), check_links), "scripts": (is_script, check_scripts),
+         "json": (lambda p: p.lower().endswith(".json"), check_json)}
 
 
 def main(argv):
     if len(argv) != 2 or argv[1] not in MODES:
         print("usage: quick_checks.py %s" % "|".join(MODES), file=sys.stderr)
         return 2
-    suffixes, check = KINDS[argv[1]]
+    takes, check = KINDS[argv[1]]
     failed = checked = 0
     for path in tracked_files():
-        if not path.lower().endswith(suffixes):
+        if not takes(path):
             continue
         checked += 1
         with open(path, "rb") as f:
