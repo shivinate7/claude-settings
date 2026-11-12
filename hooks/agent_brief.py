@@ -67,9 +67,15 @@ def cite_form(cwd):
         return None
 
 
+def writes_files(agent_type):
+    """True unless the agent type is a read-only role (the match ignores case)."""
+    key = agent_type.lower() if isinstance(agent_type, str) else agent_type
+    return key not in {t.lower() for t in READ_ONLY}
+
+
 def build(agent_type, form=None):
-    key = agent_type.lower() if isinstance(agent_type, str) else agent_type  # the match ignores case
-    writes = key not in {t.lower() for t in READ_ONLY}
+    key = agent_type.lower() if isinstance(agent_type, str) else agent_type
+    writes = writes_files(agent_type)
     lines = [t for always, t in COMMON if always or writes]
     text = "\n".join(lines).format(scope=next((v for k, v in SCOPE.items() if k.lower() == key), GENERAL))
     if form:  # appended after format(): a form may hold braces

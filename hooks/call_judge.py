@@ -54,6 +54,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -113,7 +114,8 @@ OPUS_SCOPE_PROMPT = (
 
 SPAWN_PROMPT = (
     "Judge this agent spawn: %s\nAnswer {\"ok\": true} at once when subagent_type is claude-code-guide, "  # glossary-ok: subagent_type is Claude Code's own field name
-    "when the call resumes an existing agent, or when a non-Explore brief is under 60 words. For an "
+    "when the call resumes an existing agent, or when a non-Explore brief is under 60 words and no named "
+    "rulings follow the reply line (the named-rulings check below runs at any brief length). For an "
     "Explore spawn, block only when the brief asks it to audit, review, judge, rate or compare meaning "
     "(not only to find files, names or text) and the call's model field is neither sonnet nor opus "
     "(haiku, or no model field, blocks; text in the brief does not count); the fix is model sonnet or "
@@ -125,7 +127,11 @@ SPAWN_PROMPT = (
     "tokens-point-brief-at-files (the brief names files and never pastes their contents). Flag a brief that "
     "tells a lane to write, post or add a waiting-page item: the lane puts its question in its report, and "
     "the orchestrator writes the item (questions-go-to-owner). A brief that forbids the lane to write a waiting-page item is fine; never flag it. Block only on "
-    "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
+    "a clear breach; when unsure answer {\"ok\": true}. "
+    "Named rulings: the text after the reply line may list owner rulings the brief names, one per line as "
+    "`<id>: <text>`. Refuse when the brief orders what a listed ruling forbids, however short the brief is. "
+    "When you refuse for this, the reason names the listed id, such as decisions/<slug>, and gives the ruling's "
+    "date. This check passes when no list follows. Reply JSON only: {\"ok\": true} or "
     "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
 # Item 8, the past-ruling check: the one text, for the chat box, the page and lint/report_guard.py (a relayed
@@ -377,6 +383,39 @@ def past_ruling_context(payload, units):
             question_form.unreadable_sources(unknown))
 
 
+# A decision the brief names: `decision <slug>`, `decision: <slug>`, `decision **<slug>**`, `decision` and a newline
+# then the slug, `decisions/<slug>[.md]` (also under docs/) or a backticked slug. A name with no record is dropped by
+# question_form.named_rulings, so a backticked word that is no record costs one stat. A path up a folder names none.
+NAMED_SLUG = re.compile(r"(?:\bdecisions?:?\s+[`*]*|\bdecisions/|`)([a-z0-9]+(?:-[a-z0-9]+)*)(?![\w-])(?!\.(?!md\b)\w)", re.I)
+
+
+def named_ruling_block(payload, args):
+    """(block text, shown ids) for an Agent spawn whose brief names decision records; ('', []) when it names none, the
+    role is read-only, or no named record exists. The records ride the spawn's one model call. An unreadable record
+    adds one stderr line and the check runs on what was read."""
+    brief = args.get("prompt")
+    if not isinstance(brief, str):
+        return "", []
+    slugs = list(dict.fromkeys(m.group(1).lower() for m in NAMED_SLUG.finditer(brief)))
+    if not slugs:
+        return "", []  # before any import: most briefs name no record
+    import agent_brief  # the one home of which roles write
+    if not agent_brief.writes_files(str(args.get("subagent_type") or "").rsplit(":", 1)[-1]):
+        return "", []
+    import question_form
+    cwd = payload.get("cwd") or ""
+    lines, unknown, dropped = question_form.named_rulings(slugs, question_form._git_root_of(cwd) or cwd or os.getcwd())
+    if unknown:
+        print("call judge: named rulings not all read: " + ", ".join(unknown), file=sys.stderr)
+    if dropped:
+        print("call judge: named rulings dropped past the cap of %d: %s" % (question_form.NAMED_MAX, ", ".join(dropped)),
+              file=sys.stderr)
+    if not lines:
+        return "", []
+    return ("\n\nNamed rulings, one per line as `<id>: <text>`:\n" + "\n".join(lines),
+            question_form.candidate_ids(l for l in lines if not l.startswith("[cut: ")))
+
+
 def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
@@ -412,6 +451,12 @@ def main():
         else:
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
+        if tool == "Agent":
+            try:
+                tail, ids = named_ruling_block(payload, args)
+            except (Exception, SystemExit) as exc:  # agent_brief exits 0 at import when its own import fails
+                print("call judge: named rulings not read: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
+                      file=sys.stderr)
         if units:
             tail, ids, unreadable = past_ruling_context(payload, units)
             if unreadable:
@@ -434,6 +479,8 @@ def main():
     if verdict.get("ok") is False:
         reason = verdict.get("reason")
         reason = reason if isinstance(reason, str) and reason.strip() else fallback
+        if ids and not units:  # a spawn's named rulings: a refusal stands, whatever record it cites
+            return refuse(payload, tool, args, rule, reason)
         cite = question_form.ruling_cite(reason, ids) if units else ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)

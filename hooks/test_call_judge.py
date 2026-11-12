@@ -61,6 +61,16 @@ Interface the hook must match:
   line, `past-ruling search unknown:`, and never says clear.
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
+- Named rulings (brief-reads-owner-rulings): an Agent spawn to a writing role (not READ_ONLY in hooks/agent_brief.py) whose
+  brief names a decision (`decision <slug>`, `decisions/<slug>` or a backticked slug) gets that record's `## The ruling`
+  section after the spawn prompt's reply line, as the block "Named rulings, one per line as `<id>: <text>`", in the same
+  one model call. The record is read from the payload's cwd, then from the claude-settings checkout, at most 8 records of
+  1500 characters each. A named slug with no file adds nothing. An unreadable record fails open with one stderr line. A
+  refusal is a refusal whether or not its cited record was shown: a bogus cite is no reason to allow. A ruling over the
+  cap ends with a `[cut: N chars more, read docs/decisions/<slug>.md]` line. A ninth named record is dropped with one
+  stderr line that names it. The named forms are `docs/decisions/<slug>.md`, `decisions/<slug>.md`, `decision: <slug>`,
+  `decision **<slug>**`, a newline after `decision`, and `decision <slug>`, `decisions/<slug>` or a backticked slug. The
+  cases are in the section "named rulings".
 """
 import atexit
 import json
@@ -119,8 +129,9 @@ def git(repo, *args):
                           capture_output=True, text=True, env=GIT_ENV, check=True)
 
 
-def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
+def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL, bodies=None):
     """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown.
+    `bodies` maps a slug to a whole decision record, written as it is (a record with more than a ruling section).
     A name is cached, so a second call must name the same page: a different one would silently get the first repo."""
     if name in REPOS:
         if REPO_PAGES[name] != page:
@@ -134,12 +145,15 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
     REPO_PAGES[name] = page
     git(repo, "init", "-q")
     git(repo, "commit", "-q", "--allow-empty", "-m", "init")
-    if decisions:
+    if decisions or bodies:
         folder = os.path.join(repo, "docs", "decisions")
         os.makedirs(folder)
-        for slug, ruling in decisions.items():
+        for slug, ruling in (decisions or {}).items():
             with open(os.path.join(folder, slug + ".md"), "w", encoding="utf-8") as f:
                 f.write("# %s\n\n## The ruling\n\n%s\n" % (slug, ruling))
+        for slug, body in (bodies or {}).items():
+            with open(os.path.join(folder, slug + ".md"), "w", encoding="utf-8") as f:
+                f.write(body)
         git(repo, "add", "docs")
         git(repo, "commit", "-q", "-m", "decision records")
     if debts:
@@ -313,7 +327,7 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, pointer=None):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -323,6 +337,9 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
         f.write(STUB_SITE)
     if pass_ is not None:  # (session id, override file body): what the owner's prompt would write
         write_pass(cfg, *pass_)
+    if pointer is not None:  # the claude-settings checkout the global rules point at (guard_pointer.pointer_checkout)
+        with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8") as f:
+            f.write("@%s/CLAUDE.md\n" % pointer)
     env = {k: v for k, v in os.environ.items() if not k.startswith("CJ_")}
     env.update({"CLAUDE_CONFIG_DIR": cfg, "PYTHONPATH": STUB_DIR, "CJ_LOADED_DIR": base,
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
@@ -333,13 +350,15 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
     return Run(proc, base)
 
 
-def spawn_input(kind="Explore", model="haiku", session=SID_A, agent=None, brief=None):
+def spawn_input(kind="Explore", model="haiku", session=SID_A, agent=None, brief=None, cwd=None):
     tool_input = {"subagent_type": kind, "description": "check", "prompt": brief or ("Audit the module. " + MARK)}
     if model:
         tool_input["model"] = model
     payload = {"session_id": session, "tool_name": "Agent", "tool_input": tool_input}
     if agent:
         payload["agent_id"] = agent
+    if cwd:  # the harness sends the spawn's cwd; a named ruling is read from it
+        payload["cwd"] = cwd
     return json.dumps(payload)
 
 
@@ -1687,6 +1706,333 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ named rulings (brief-reads-owner-rulings)
+#
+# A spawn to a writing role whose brief names a decision (`decision <slug>`, `decisions/<slug>` or a backticked slug)
+# gets that record's `## The ruling` section after the spawn prompt's reply line, as the block NAMED_HEADER, in the same
+# one model call. The record is read from the payload's cwd, then the claude-settings checkout. A read-only role gets no
+# block. The rulings are synthetic, each with its own marker, so no case reads a real record. A case checks only the text
+# the hook appends after today's spawn prompt (tail_after_spawn), never the spawn prompt's own words.
+NAMED_HEADER = "Named rulings, one per line as `<id>: <text>`"
+NAMED_SLUG = "draft-until-reviewed"
+NAMED_RULING = "A PR stays a draft until a reviewer has read it, marker NAMEDRULING-5b7a, dated 2026-10-27."
+NAMED_LINE = "decisions/%s: %s" % (NAMED_SLUG, NAMED_RULING)
+NAMED_BRIEF = "Build the screen. Follow decision draft-until-reviewed and keep the PR a draft. " + MARK
+NO_FILE_SLUG = "no-such-ruling-4f2a"  # in no checkout
+OTHER_SLUG = "other-ruling"  # in the fixture repo; no brief names it, so a cite of it is a record not shown
+OTHER_RULING = "OTHERRULING-8e1d: a different ruling, dated 2026-09-02."
+UNREADABLE_SLUG = "unreadable-ruling"
+SECTION_SLUG = "section-ruling"
+SECTION_BODY = ("# section-ruling\n\n## Why\n\nWHYMARK-4b1c is the reason, not the ruling.\n\n## The ruling\n\n"
+                "RULINGMARK-9e2a: the ruling itself.\n\n## Notes\n\nNOTESMARK-6f0d is a later note.\n")
+LONG_SLUG = "long-ruling"
+# The cap is 1500 characters. MIDMARK sits near 1000, inside it; TAILMARK sits near 1760, past it. The margins keep the
+# cases off the exact boundary.
+LONG_RULING = "word " * 200 + "MIDMARK-3d0f " + "word " * 150 + "TAILMARK-7a64"
+CAP_SLUGS = ["cap-ruling-%d" % n for n in range(1, 11)]  # ten records: the nine-record case takes the first nine
+WAITING_LINE = "Then write a waiting-page item with the owner's question, so the owner sees it."
+SETTINGS_SLUG = "settings-ruling"
+SETTINGS_RULING = "SETTINGSRULING-1c9e: read from the claude-settings checkout, dated 2026-08-14."
+NAMED_DECISIONS = {NAMED_SLUG: NAMED_RULING, OTHER_SLUG: OTHER_RULING, LONG_SLUG: LONG_RULING}
+NAMED_DECISIONS.update((slug, "CAPMARK-%s: a short ruling." % slug) for slug in CAP_SLUGS)
+NAMED_REPO = make_repo("named-rulings", decisions=NAMED_DECISIONS, bodies={SECTION_SLUG: SECTION_BODY})
+UNREADABLE_REPO = make_repo("unreadable-rulings", decisions={UNREADABLE_SLUG: "A ruling the reader cannot decode."})
+# Bytes that are not UTF-8, so a strict read fails. chmod would not do it: a session running as root reads any file.
+with open(os.path.join(UNREADABLE_REPO, "docs", "decisions", UNREADABLE_SLUG + ".md"), "wb") as _f:
+    _f.write(b"# unreadable-ruling\n\n## The ruling\n\n\xff\xfe not text\n")
+SETTINGS_REPO = make_repo("named-settings", decisions={SETTINGS_SLUG: SETTINGS_RULING})
+
+
+def tool_input_of(spawn):
+    """The tool_input of one spawn_input JSON, as the hook reads it."""
+    return json.loads(spawn)["tool_input"]
+
+
+def sent_prompt(run):
+    """The prompt of a run's one model call, or '' when no call was made."""
+    return run.calls[0]["prompt"] if run.calls else ""
+
+
+def spawn_prompt_of(tool_input):
+    """Today's spawn prompt for this call, read from call_judge at test time: what the hook sends with no block."""
+    return load_file_module(HOOK, "call_judge_text").SPAWN_PROMPT % json.dumps(tool_input, ensure_ascii=False)
+
+
+def tail_after_spawn(prompt, tool_input):
+    """What the prompt adds after today's spawn prompt, or None when the prompt does not begin with it."""
+    head = spawn_prompt_of(tool_input)
+    return prompt[len(head):] if prompt.startswith(head) else None
+
+
+def named_lines(tail):
+    """The stripped lines after NAMED_HEADER in `tail`; [] when the block is absent."""
+    if NAMED_HEADER not in tail:
+        return []
+    return [line.strip() for line in tail.split(NAMED_HEADER, 1)[1].splitlines() if line.strip()]
+
+
+def case_named_ruling_is_appended_after_the_reply_line():
+    # Case 1: a writing brief names the record in each form the rule reads, and the hook appends its ruling line after
+    # the spawn prompt's reply line. The stub answers ok, so the prompt is the only thing read.
+    forms = (("decision <slug>", "Follow decision %s and keep the PR a draft. " % NAMED_SLUG),
+             ("decisions/<slug>", "Follow decisions/%s and keep the PR a draft. " % NAMED_SLUG),
+             ("a backticked slug", "Follow `%s` and keep the PR a draft. " % NAMED_SLUG))
+    for label, text in forms:
+        spawn = spawn_input(kind="builder", model="sonnet", brief=text + MARK, cwd=NAMED_REPO)
+        r = run_hook(spawn, answer=ALLOW)
+        tail = tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or ""
+        check("named ruling: a brief naming the record as %s gets its ruling line in the prompt" % label,
+              NAMED_LINE in named_lines(tail), detail(r))
+    spawn = spawn_input(kind="builder", model="sonnet", brief=NAMED_BRIEF, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=ALLOW)
+    tail = tail_after_spawn(sent_prompt(r), tool_input_of(spawn))
+    check("named ruling: the block follows the spawn prompt's reply line, which the prompt begins with",
+          tail is not None and NAMED_HEADER in tail, detail(r))
+
+
+def case_brief_naming_no_decision_gets_no_block():
+    # Case 2, the empty state: no decision named, so one model call, and today's prompt with no block.
+    spawn = spawn_input(kind="builder", model="sonnet", brief="Build the screen as the brief says. " + MARK,
+                        cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=ALLOW)
+    check("no named decision: one model call, and its prompt is today's spawn prompt with no block",
+          len(r.calls) == 1 and sent_prompt(r) == spawn_prompt_of(tool_input_of(spawn))
+          and NAMED_HEADER not in sent_prompt(r), detail(r))
+
+
+def case_named_slug_with_no_file_adds_nothing():
+    # Case 3: a named slug that no checkout holds adds no block and no error.
+    brief = "Build the change. Follow decision %s and keep the PR a draft. %s" % (NO_FILE_SLUG, MARK)
+    spawn = spawn_input(kind="builder", model="sonnet", brief=brief, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=ALLOW)
+    check("named slug with no file: one model call, and its prompt is today's spawn prompt with no block",
+          len(r.calls) == 1 and sent_prompt(r) == spawn_prompt_of(tool_input_of(spawn)), detail(r))
+    check("named slug with no file: the hook prints no error line and exits 0",
+          r.code == 0 and r.out == "" and "failed open" not in r.err and "Traceback" not in r.err, detail(r))
+
+
+def case_refusal_citing_the_shown_record_is_refused():
+    # Case 4: the verdict cites the named record, which the prompt shows, so the refusal goes through refuse() as
+    # spawn-judge. The spawn prompt says what a refusal names: decisions/<slug> and the ruling's date.
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s: the brief orders the PR ready before review, which the "
+                                                "ruling forbids (dated 2026-10-27)." % NAMED_SLUG})
+    spawn = spawn_input(kind="builder", model="sonnet", brief=NAMED_BRIEF, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=refuse)
+    tail = tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or ""
+    check("named refusal: the record the verdict cites is in the prompt the verdict was reached on",
+          NAMED_LINE in named_lines(tail), detail(r))
+    sentences = re.split(r"[.\n]", sent_prompt(r).lower())
+    check("named refusal: the spawn prompt says a refusal names decisions/<slug> and the ruling's date",
+          any(all(w in s for w in ("decisions/", "date", "ruling")) for s in sentences), sent_prompt(r)[:160])
+    d = r.deny() or {}
+    check("named refusal: a verdict citing the shown record is refused through refuse(), rule spawn-judge",
+          r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("spawn-judge: ")
+          and ("decisions/%s" % NAMED_SLUG) in r.reason() and r.log.count("\tdeny\tspawn-judge\t") == 1, detail(r))
+
+
+def case_verdict_citing_an_unshown_record_is_refused():
+    # Case 5: a refusal reason is honoured whether or not it cites a shown record. OTHER_SLUG is in the fixture repo, but
+    # no brief names it, so the cite is a record not shown, and a bogus cite is no reason to allow the spawn.
+    answer = json.dumps({"ok": False, "reason": "decisions/%s: the brief breaks this ruling." % OTHER_SLUG})
+    spawn = spawn_input(kind="builder", model="sonnet", brief=NAMED_BRIEF, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=answer)
+    d = r.deny() or {}
+    check("unshown cite: a verdict citing a record that was not shown is a refusal, not an allow",
+          r.code == 0 and d.get("permissionDecision") == "deny", detail(r))
+    check("unshown cite: the refusal is a plain spawn-judge refusal that holds the reason",
+          r.reason().startswith("spawn-judge: ") and ("decisions/%s" % OTHER_SLUG) in r.reason(), detail(r))
+    check("unshown cite: guard.log holds one spawn-judge deny line",
+          r.log.count("\tdeny\tspawn-judge\t") == 1, detail(r))
+    check("unshown cite: no fail-open line on stderr", "failed open" not in r.err, detail(r))
+
+
+def case_read_only_role_gets_no_block():
+    # Case 6: the scope first (P7). reviewer is read-only in agent_brief and builder is not, so the two runs below
+    # probe the split the rule reads: a reviewer's brief gets today's prompt, a builder's the named ruling line.
+    agent_brief = load_file_module(os.path.join(HERE, "agent_brief.py"), "agent_brief_probe")
+    read_only = {role.lower() for role in getattr(agent_brief, "READ_ONLY", ())}
+    check("read-only role: the scope holds, reviewer is read-only and builder is not (agent_brief READ_ONLY)",
+          "reviewer" in read_only and "builder" not in read_only, sorted(read_only))
+    reviewer = spawn_input(kind="reviewer", model="sonnet", brief=NAMED_BRIEF, cwd=NAMED_REPO)
+    r = run_hook(reviewer, answer=ALLOW)
+    check("read-only role: a reviewer brief naming a decision gets no block, and its prompt is today's spawn prompt",
+          len(r.calls) == 1 and sent_prompt(r) == spawn_prompt_of(tool_input_of(reviewer)), detail(r))
+    builder = spawn_input(kind="builder", model="sonnet", brief=NAMED_BRIEF, cwd=NAMED_REPO)
+    r = run_hook(builder, answer=ALLOW)
+    check("read-only role: the same brief from a builder gets the named ruling line",
+          NAMED_LINE in named_lines(tail_after_spawn(sent_prompt(r), tool_input_of(builder)) or ""), detail(r))
+
+
+def case_unreadable_record_fails_open():
+    # Case 7: a record the reader cannot decode. The precondition checks that the fixture is unreadable on any account,
+    # then the spawn is allowed with one stderr line that names the record.
+    path = os.path.join(UNREADABLE_REPO, "docs", "decisions", UNREADABLE_SLUG + ".md")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            handle.read()
+        decodes = True
+    except UnicodeDecodeError:
+        decodes = False
+    check("unreadable record: the fixture does not decode as UTF-8, so a strict read fails", not decodes, path)
+    brief = "Build the change. Follow decision %s and keep the PR a draft. %s" % (UNREADABLE_SLUG, MARK)
+    r = run_hook(spawn_input(kind="builder", model="sonnet", brief=brief, cwd=UNREADABLE_REPO), answer=ALLOW)
+    check("unreadable record: the spawn is allowed, exit 0, no deny", r.code == 0 and r.deny() is None, detail(r))
+    lines = [line for line in r.err.splitlines() if line.strip()]
+    check("unreadable record: one stderr line names the record", len(lines) == 1 and UNREADABLE_SLUG in lines[0],
+          detail(r))
+
+
+def case_nine_named_records_show_eight():
+    # Case 8, the full state: nine named records, and the block holds eight of them.
+    brief = "Build the change. " + "; ".join("decision %s" % slug for slug in CAP_SLUGS[:9]) + " " + MARK
+    spawn = spawn_input(kind="builder", model="sonnet", brief=brief, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=ALLOW)
+    lines = named_lines(tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or "")
+    shown = [line for line in lines if line.startswith("decisions/cap-ruling-")]
+    check("cap: nine named records show eight lines in the block", len(shown) == 8, detail(r))
+
+
+def case_named_ruling_rides_the_one_call():
+    # Case 9: the named ruling costs no second call; the one call carries it.
+    spawn = spawn_input(kind="builder", model="sonnet", brief=NAMED_BRIEF, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=ALLOW)
+    check("one call: a brief that names a ruling makes exactly one model call", len(r.calls) == 1, detail(r))
+    check("one call: that one call carries the named ruling line",
+          NAMED_LINE in named_lines(tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or ""), detail(r))
+
+
+def case_named_record_shows_its_ruling_section_capped():
+    # Case 10: a record shows its `## The ruling` section only, and its ruling text up to 1500 characters.
+    brief = "Build the change. Follow decision %s and decision %s %s" % (SECTION_SLUG, LONG_SLUG, MARK)
+    spawn = spawn_input(kind="builder", model="sonnet", brief=brief, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=ALLOW)
+    text = "\n".join(named_lines(tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or ""))
+    check("ruling section: the block shows the record's ## The ruling text", "RULINGMARK-9e2a" in text, detail(r))
+    check("ruling section: the block leaves out the record's other sections",
+          "WHYMARK-4b1c" not in text and "NOTESMARK-6f0d" not in text and "## The ruling" not in text, detail(r))
+    check("ruling cap: the block keeps the ruling text up to about 1000 characters", "MIDMARK-3d0f" in text, detail(r))
+    check("ruling cap: the block leaves out the ruling text past 1500 characters", "TAILMARK-7a64" not in text, detail(r))
+
+
+def case_claude_settings_record_is_read_when_cwd_lacks_it():
+    # Case 11: the record is in the claude-settings checkout the global rules point at, and the cwd has no docs/decisions.
+    brief = "Build the change. Follow decision %s and keep the PR a draft. %s" % (SETTINGS_SLUG, MARK)
+    spawn = spawn_input(kind="builder", model="sonnet", brief=brief, cwd=PAGE_REPO)
+    r = run_hook(spawn, answer=ALLOW, pointer=SETTINGS_REPO)
+    check("claude-settings record: a record the cwd lacks is read from the claude-settings checkout",
+          "decisions/%s: %s" % (SETTINGS_SLUG, SETTINGS_RULING) in named_lines(
+              tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or ""), detail(r))
+
+
+def ruling_text_of(lines, slug):
+    """The text after `decisions/<slug>: ` on the block's line for that record, or None when no line holds it."""
+    prefix = "decisions/%s: " % slug
+    found = [line[len(prefix):] for line in lines if line.startswith(prefix)]
+    return found[0] if len(found) == 1 else None
+
+
+def case_waiting_page_line_with_unshown_cite_is_refused():
+    # Case 12, F1: the brief names draft-until-reviewed and tells a lane to write a waiting-page item. The verdict cites
+    # questions-go-to-owner, which the brief does not name, so the cite is a record not shown. It is still a refusal.
+    brief = NAMED_BRIEF + " " + WAITING_LINE
+    answer = json.dumps({"ok": False, "reason": "decisions/questions-go-to-owner: the lane writes a waiting-page item, "
+                                                 "which the questions rule gives to the orchestrator."})
+    spawn = spawn_input(kind="builder", model="sonnet", brief=brief, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=answer)
+    tail = tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or ""
+    check("waiting-page brief: the draft-until-reviewed line is in the prompt the verdict was reached on",
+          NAMED_LINE in named_lines(tail), detail(r))
+    d = r.deny() or {}
+    check("waiting-page brief: a verdict citing questions-go-to-owner, not shown, is a refusal",
+          r.code == 0 and d.get("permissionDecision") == "deny", detail(r))
+    check("waiting-page brief: the refusal is a plain spawn-judge refusal that holds the cited record",
+          r.reason().startswith("spawn-judge: ") and "decisions/questions-go-to-owner" in r.reason(), detail(r))
+
+
+def case_roles_brief_reason_with_shown_ruling_is_refused():
+    # Case 13, F1 control: a reason that names a rule, not a record, is still a refusal while a named ruling is shown.
+    answer = json.dumps({"ok": False, "reason": "roles-brief-contents: the brief pastes the file's contents, which the "
+                                                 "brief rule forbids."})
+    spawn = spawn_input(kind="builder", model="sonnet", brief=NAMED_BRIEF, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=answer)
+    d = r.deny() or {}
+    check("rule-named refusal: a reason naming roles-brief-contents, with a named ruling shown, is still refused",
+          r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("spawn-judge: ")
+          and "roles-brief-contents" in r.reason(), detail(r))
+
+
+def case_named_forms_name_the_record():
+    # Case 14, F3: each form a brief may use to name the record gets its ruling line. Each form is its own run, so a
+    # failure names the form that was missed.
+    forms = (("docs/decisions/<slug>.md", "Follow docs/decisions/%s.md and keep the PR a draft. "),
+             ("decisions/<slug>.md", "Follow decisions/%s.md and keep the PR a draft. "),
+             ("decision: <slug>", "Follow decision: %s and keep the PR a draft. "),
+             ("decision **<slug>**", "Follow decision **%s** and keep the PR a draft. "),
+             ("decision, then a newline, then <slug>", "Follow decision\n%s and keep the PR a draft. "))
+    for label, text in forms:
+        spawn = spawn_input(kind="builder", model="sonnet", brief=(text % NAMED_SLUG) + MARK, cwd=NAMED_REPO)
+        r = run_hook(spawn, answer=ALLOW)
+        tail = tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or ""
+        check("named form: a brief naming the record as %s gets its ruling line in the prompt" % label,
+              NAMED_LINE in named_lines(tail), detail(r))
+
+
+def case_path_up_a_folder_names_no_record():
+    # Case 15, F3 control: a path that climbs out of the decisions folder names no record, so one model call with no block.
+    brief = ("Read ../%s and `../%s` and decisions/../%s, then keep the PR a draft. %s"
+             % (NAMED_SLUG, NAMED_SLUG, NAMED_SLUG, MARK))
+    spawn = spawn_input(kind="builder", model="sonnet", brief=brief, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=ALLOW)
+    check("path up a folder: no record is named, so one model call and today's prompt with no block",
+          len(r.calls) == 1 and sent_prompt(r) == spawn_prompt_of(tool_input_of(spawn)), detail(r))
+
+
+def case_long_ruling_cut_carries_a_marker_line():
+    # Case 16, F2: a ruling over the 1500-character cap is cut, and the cut shows. The marker is a line of its own, and it
+    # names the characters left out. SECTION_SLUG is under the cap, so its line carries no marker.
+    brief = "Build the change. Follow decision %s and decision %s, and keep the PR a draft. %s" % (
+        LONG_SLUG, SECTION_SLUG, MARK)
+    spawn = spawn_input(kind="builder", model="sonnet", brief=brief, cwd=NAMED_REPO)
+    r = run_hook(spawn, answer=ALLOW)
+    lines = named_lines(tail_after_spawn(sent_prompt(r), tool_input_of(spawn)) or "")
+    shown = ruling_text_of(lines, LONG_SLUG)
+    short = ruling_text_of(lines, SECTION_SLUG)
+    check("ruling cut: the long ruling has one line in the block", shown is not None, detail(r))
+    check("ruling cut: a ruling under the cap has its line and no marker",
+          short is not None and "[cut:" not in short, detail(r))
+    marker = re.compile(r"\[cut: (\d+) chars more, read docs/decisions/%s\.md\]" % re.escape(LONG_SLUG))
+    marks = [m for m in (marker.fullmatch(line) for line in lines) if m]
+    check("ruling cut: one marker line follows the cut ruling", len(marks) == 1, detail(r))
+    whole = len(" ".join(LONG_RULING.split()))
+    check("ruling cut: the marker counts the characters left out of the shown text",
+          shown is not None and len(marks) == 1 and int(marks[0].group(1)) == whole - len(shown), detail(r))
+
+
+def case_ninth_named_record_is_named_on_one_stderr_line():
+    # Case 17, F4: eight named records print no stderr line. The ninth is dropped, and one stderr line names it, and
+    # only it.
+    eight = "Build the change. " + "; ".join("decision %s" % slug for slug in CAP_SLUGS[:8]) + " " + MARK
+    r = run_hook(spawn_input(kind="builder", model="sonnet", brief=eight, cwd=NAMED_REPO), answer=ALLOW)
+    check("dropped record: eight named records print no stderr line", r.err.strip() == "", detail(r))
+    nine = "Build the change. " + "; ".join("decision %s" % slug for slug in CAP_SLUGS[:9]) + " " + MARK
+    r = run_hook(spawn_input(kind="builder", model="sonnet", brief=nine, cwd=NAMED_REPO), answer=ALLOW)
+    lines = [line for line in r.err.splitlines() if line.strip()]
+    check("dropped record: the ninth named record prints exactly one stderr line", len(lines) == 1, detail(r))
+    named = set(re.findall(r"cap-ruling-\d+", lines[0])) if len(lines) == 1 else set()
+    check("dropped record: that line names the dropped slug and no shown slug", named == {"cap-ruling-9"}, detail(r))
+
+
+def case_ten_named_records_name_both_dropped_on_one_line():
+    # Case 18, F4: two dropped records share one stderr line, which names both.
+    brief = "Build the change. " + "; ".join("decision %s" % slug for slug in CAP_SLUGS) + " " + MARK
+    r = run_hook(spawn_input(kind="builder", model="sonnet", brief=brief, cwd=NAMED_REPO), answer=ALLOW)
+    lines = [line for line in r.err.splitlines() if line.strip()]
+    check("dropped records: ten named records print exactly one stderr line", len(lines) == 1, detail(r))
+    named = set(re.findall(r"cap-ruling-\d+", lines[0])) if len(lines) == 1 else set()
+    check("dropped records: that line names both dropped slugs and no shown slug",
+          named == {"cap-ruling-9", "cap-ruling-10"}, detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1712,7 +2058,17 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged,
+                 case_named_ruling_is_appended_after_the_reply_line, case_brief_naming_no_decision_gets_no_block,
+                 case_named_slug_with_no_file_adds_nothing, case_refusal_citing_the_shown_record_is_refused,
+                 case_verdict_citing_an_unshown_record_is_refused, case_read_only_role_gets_no_block,
+                 case_unreadable_record_fails_open, case_nine_named_records_show_eight,
+                 case_named_ruling_rides_the_one_call, case_named_record_shows_its_ruling_section_capped,
+                 case_claude_settings_record_is_read_when_cwd_lacks_it,
+                 case_waiting_page_line_with_unshown_cite_is_refused, case_roles_brief_reason_with_shown_ruling_is_refused,
+                 case_named_forms_name_the_record, case_path_up_a_folder_names_no_record,
+                 case_long_ruling_cut_carries_a_marker_line, case_ninth_named_record_is_named_on_one_stderr_line,
+                 case_ten_named_records_name_both_dropped_on_one_line):
         try:
             case()
         except Exception as exc:
