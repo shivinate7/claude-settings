@@ -4,6 +4,11 @@
   "home": "roadmap/rulings/r55.json part 1; decision no-merge-during-batch-ci",
   "id": "express-shared-batch",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T23:09:00Z",
+    "choice": "a",
+    "note": "owner chat 17:09 CST, relayed by the retrospective"
+  },
   "n": 663,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator 16:26 CST Nov 12; express PRs #2916, #2671, #2990, #2969",
+  "reply": "Closed 17:09 CST: you picked a in chat; stored as ruling R65. Ready express lanes now share one express batch, still ahead of every other lane.",
   "repo": "shivinate7/claude-settings",
   "short": "Express fixes: one batch or one each",
-  "status": "open",
+  "status": "closed",
   "title": "May merge and CI fixes that are ready at the same time share one express batch?",
   "why": "Your merge-fix ruling sends each fix alone; only you can change it."
 }

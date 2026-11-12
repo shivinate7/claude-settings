@@ -1,0 +1,20 @@
+{
+ "id": "r65",
+ "at": "2026-11-12T17:09:00-06:00",
+ "ruling": "- **R65. Ready express lanes share one express batch.** Read 16:52 CST: five express lanes queued to run alone, one after another (#2916, #2671, #2990, #2969, #2986), about 4 h of CI at 48 min a run (batch 107, one run). Owner 17:09 CST, page item 663, pick a. This replaces R55 part 1's \"its own batch\": express lanes ready at the same time go to main in one batch, still ahead of every other lane. A red lane drops out and reruns, as in a normal batch. R55 parts 2-4 stand.",
+ "quote": "a (recommended): rea",
+ "source": "plans/restart-plan.md@restart-plan 76ccaacf8, R65; owner chat 17:09 CST on page item 663, relayed by the retrospective 17:09 CST",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "ruling",
+   "ref": "R55 part 1: each express lane goes to main as its own batch"
+  },
+  {
+   "kind": "decision",
+   "ref": "no-merge-during-batch-ci: an express lane runs as its own batch"
+  }
+ ],
+ "title": "Ready express lanes share one express batch.",
+ "step": "busy-file-stacked-batches"
+}
