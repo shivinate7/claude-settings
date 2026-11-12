@@ -92,8 +92,8 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
-# The one sentence every merge refusal carries to a session with no merge role (decisions session-tiers and standing-merge-grant;
-# owner G2 and G10, 2026-11-10 14:23 and 14:33 CST). hooks/guard_merge.py and merge/merge.py both print it.
+# The one sentence every merge refusal carries to a session with no merge role (decisions session-tiers and
+# standing-merge-grant). It lives here so hooks/guard_merge.py and merge/merge.py print the same string.
 OWNER_LANE_ASK = "A lane the owner started merges its own PR; any other session asks a batch runner"
 # A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
 # lane-effort-pin and lane-one-topic).
