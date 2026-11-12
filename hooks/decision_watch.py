@@ -768,15 +768,28 @@ def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
 
 # ------------------------------------------------------------------ transcript lookup
 
+def _cwd_folders(cwd):
+    """The project folder names the app may give a cwd: each character outside A-Za-z0-9 as "-",
+    folded once per code point and once per UTF-16 unit. They differ only for a character outside
+    the Basic Multilingual Plane (two dashes in the second). The repo does not record which fold the
+    app uses, so both are tried."""
+    if not isinstance(cwd, str) or not cwd:
+        return []
+    plain = re.sub(r"[^A-Za-z0-9]", "-", cwd)
+    units = "".join(c if re.fullmatch(r"[A-Za-z0-9]", c) else ("--" if ord(c) > 0xFFFF else "-") for c in cwd)
+    return list(dict.fromkeys([plain, units]))
+
+
 def find_transcript(hook):
     """Return the transcript path to read, or None when none is found. The given `transcript_path`
-    wins when it exists. Otherwise look by session id, the way the app files a transcript:
-    <config dir>/projects/<cwd, each character outside A-Za-z0-9 as "-">/<session id>.jsonl, then any
-    project folder under it holding <session id>.jsonl (the app shortens a long folder name).
-    This is `deriveStop` in mods/decision-watch/hooks/register.mjs in the script's own language:
-    the mod cannot be imported here, and it passes its own derived path as the given one, so this
-    runs only when that path fails too (decision `decision-watch-finds-transcript`). Cost: one
-    path test per config dir, and one directory listing of `projects` per config dir."""
+    wins when it exists. Otherwise look by session id under each config dir (this run's, and
+    `DW_REAL_CONFIG_DIR` under the mod): <config dir>/projects/<folder>/<session id>.jsonl for each
+    folder name `_cwd_folders` gives the cwd, then any project folder under `projects` holding
+    <session id>.jsonl (the app shortens a long folder name, and the scan also covers either fold).
+    The mod hands this script its own derived path (`deriveStop` in mods/decision-watch/hooks/register.mjs)
+    even when that path misses, so this is the one place that looks by session id (decision
+    `decision-watch-finds-transcript`). Cost: one path test per folder name per config dir, and one
+    directory listing of `projects` per config dir."""
     given = hook.get("transcript_path")
     if given and isinstance(given, str) and os.path.exists(given):
         return given
@@ -785,7 +798,7 @@ def find_transcript(hook):
     if not session_id or not isinstance(session_id, str) or session_id in (".", "..") or re.search(r"[\\/\x00]", session_id):
         return None
     cwd = hook.get("cwd")
-    folder = re.sub(r"[^A-Za-z0-9]", "-", cwd) if isinstance(cwd, str) else ""
+    folders = _cwd_folders(cwd)
     dirs = []
     try:
         dirs.append(guard.config_dir())
@@ -797,7 +810,7 @@ def find_transcript(hook):
     name = session_id + ".jsonl"
     for cfg in dict.fromkeys(dirs):
         projects = os.path.join(cfg, "projects")
-        if folder:
+        for folder in folders:
             derived = os.path.join(projects, folder, name)
             if os.path.isfile(derived):
                 return derived

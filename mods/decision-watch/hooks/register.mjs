@@ -6,7 +6,8 @@
 // turn.complete returns next(e) after at most SEEN_WAIT_MS (500 ms), for the "STOP seen" line. The lookup and
 //               the judging run in the background, one judge at a time. An agent turn (agentId set) is skipped,
 //               and so is a turn with isAborted or a reason other than "answer" (a SKIP line is logged). A turn whose
-//               transcript is not found logs a SKIP line and shows one UNKNOWN notice per session. The
+//               derived transcript path misses still goes to the script, which looks for the transcript by session
+//               id and says the one UNKNOWN per session when it finds none (decision decision-watch-finds-transcript). The
 //               app's sec-default mod reroutes every classic.* event past user mods, so a classic.Stop
 //               handler never ran; turn.* events pass. The event carries no transcript path, so the judge
 //               finds it the way /dw does (deriveStop), from the session id read on each turn.
@@ -23,13 +24,10 @@
 
 let lastStop; // the last Stop-shaped input built from a main-loop turn, for /dw
 let busy = false; // true while a background judge runs
-const noTranscriptShown = new Set(); // session ids already told that no transcript was found: one notice per session
 let foundPy; // the python path pickPython found, kept for the module's life; cleared when a run with it is rejected
 
 // The prefix of every UNKNOWN this mod makes itself; python's own UNKNOWN text comes through as printed.
 const UNKNOWN = "Decision watch: UNKNOWN, ";
-// The words python's UNKNOWN_PREFIX adds after UNKNOWN (hooks/decision_watch.py). This notice reads like python's own.
-const COULD_NOT_VERIFY = "could not verify this turn against recorded decisions/guards/settings. ";
 // The mark on a config notice toast. It never matches a FLAG or UNKNOWN verdict.
 const NOTICE = "Decision watch notice: ";
 const NOTHING = "nothing to say (no protected change, no model call)";
@@ -52,7 +50,7 @@ export function register(on) {
       let stop = lastStop;
       if (!stop) {
         const d = await deriveStop($);
-        if (!d.found) throw new Error("no turn seen yet and no transcript found for this session");
+        // A derived path that misses still goes to the script, which looks by session id.
         stop = d.stop;
       }
       lines.push(`stop input: session ${stop.session_id}`);
@@ -83,15 +81,8 @@ export function register(on) {
           return;
         }
         await log($, `STOP seen ${d.stop.session_id}`);
-        if (!d.found) {
-          void log($, `SKIP no transcript ${d.stop.session_id} | ${d.stop.transcript_path}`);
-          // Once per session (decision decision-watch-finds-transcript). The SKIP line above stays on every turn.
-          if (!noTranscriptShown.has(d.stop.session_id)) {
-            noTranscriptShown.add(d.stop.session_id);
-            await toast($, d.stop, `${UNKNOWN}${COULD_NOT_VERIFY}No transcript found for session ${d.stop.session_id} (tried: ${d.stop.transcript_path}), so this turn was not judged.`);
-          }
-          return;
-        }
+        // The scan by session id lives in the script only (decision decision-watch-finds-transcript), so a miss is handed on.
+        if (!d.found) void log($, `derived transcript path missed, the script looks by session id ${d.stop.session_id} | ${d.stop.transcript_path}`);
         lastStop = d.stop;
         if (busy) {
           void log($, `SKIP busy ${d.stop.session_id}`);
