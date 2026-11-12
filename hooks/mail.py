@@ -304,8 +304,8 @@ def read_listing(path):
 
 
 def held(env):
-    """True on a held platform unless the caller sets MAILBOX_HOLD_OFF."""
-    return sys.platform in HELD_PLATFORMS and not env.get(HOLD_OFF)
+    """True on a held platform unless the caller sets MAILBOX_HOLD_OFF=1."""
+    return sys.platform in HELD_PLATFORMS and env.get(HOLD_OFF) != "1"
 
 
 def turn_start_lines(payload, env):

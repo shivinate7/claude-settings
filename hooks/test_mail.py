@@ -1131,6 +1131,13 @@ class MacHold(MailCase):
         self.assertEqual(code, 2, "a held Mac read exited %r, not 2: %r %r" % (code, out, err))
         self.assertNotIn(mid, out, "a held Mac read listed the message: %r" % out)
 
+    def test_only_one_lifts_the_hold(self):
+        for value in ("0", "false", ""):
+            with self.subTest(value=value), mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+                self.assertTrue(MAIL_MODULE.held({"MAILBOX_HOLD_OFF": value}), "MAILBOX_HOLD_OFF=%r lifted the hold" % value)
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            self.assertFalse(MAIL_MODULE.held({"MAILBOX_HOLD_OFF": "1"}), "MAILBOX_HOLD_OFF=1 did not lift the hold")
+
     def test_mac_send_runs_with_the_hold_off(self):
         mid, store, reader = self.seeded_reader(hold_off=True)
         tip = store.tip()

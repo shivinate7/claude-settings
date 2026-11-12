@@ -11,7 +11,7 @@ Next step: the Mac round trip (the owner's check card). A Windows round trip pas
 measurement. A session with an address reads mail at turn start. A failed read prints "mail unknown: <reason>". A session
 with no address, or a store with no mail ref, prints nothing. A Mac gets nothing from the default until its round trip passes
 (page item 556 a; batch runner 10 relaying the coordinator, 12:56 CST Nov 12: `HELD_PLATFORMS` in `hooks/mail.py`). Its turn start
-prints nothing and `mail` exits 2. The owner's check card sets `MAILBOX_HOLD_OFF=1` for the one command, so it still runs there.
+prints nothing and `mail` exits 2. The owner's check card must set `MAILBOX_HOLD_OFF=1` for the one command, so it still runs there.
 The 20-message trial (step 5) is still open.
 
 ## Ruling

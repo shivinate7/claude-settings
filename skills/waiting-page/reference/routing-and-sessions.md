@@ -52,7 +52,7 @@ Decision `session-messages` (messages between sessions) sets this.
 - Addresses: a cloud session is `cloud/session_<id>`. Its env holds `cse_<id>`, the same id. A local session has its own folder `pc/<host-slug>/<owner>-<repo>/<session id>` and the repo folder `pc/<host-slug>/<owner>-<repo>`. A turn-start line gives the `--addr` to read or take a message with.
 - A message starts with this line: `Msg <id> from <addr> to <addr> kind request|inform|reply re <id or -> try <n>`. The next line is `Reply-to: <addr>`, then a blank line and the body. `<id>` is 12 lowercase hex characters. `re` names the message it answers, or `-`.
 - At turn start, each open message gets one `mail:` line with its `mail read` and `mail take` commands. Act on a message only after `mail take` exits 0. `mail unknown: <reason>` means the check failed (for example `timeout` or `auth`). It never means no mail.
-- Exit codes: 0 ok; 1 not sent, not taken, "taken by another", or "mail unknown"; 2 bad use or `MAILBOX_REPO` not set.
+- Exit codes: 0 ok; 1 not sent, not taken, "taken by another", or "mail unknown"; 2 bad use, `MAILBOX_REPO` not set, or the platform held (a Mac, until its round trip passes; `MAILBOX_HOLD_OFF=1` lifts it for one command).
 - The reply is the ack. An `inform` needs no reply. Send no separate ack: each local `SendMessage` spends the peer guard and the desktop cap.
 - One `request` and one `reply` per exchange.
 - A push race keeps the id and raises `try` by one, inside one `mail send`. A new `mail send` is a new id. A `SendMessage` resend keeps the request id and raises `try` by one, so the peer guard's 30 s same-text check does not drop it. A second `mail take` is refused, so the receiver acts on an id once.
