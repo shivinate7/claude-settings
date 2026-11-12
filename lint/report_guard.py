@@ -162,7 +162,8 @@ must have its slug in Done as a whole word (`step:<slug>` or the bare slug; a lo
 count). The turn's commits are those on HEAD and not on origin/main with an author time at or after the turn's
 start, the stamp of its last human message. Time finds them, so a quiet `git commit -q` and a redirected one count. A
 line an earlier turn added is never judged again, and an amend or rebase of an earlier commit keeps its author
-time, so it is not judged either. A commit cherry-picked this turn keeps its old author time and is missed: a
+time, so it is not judged either. If a commit edits a notes line and keeps its slug and Fix, the line yields no
+entry, so a typo fix adds no step to Done. A commit cherry-picked this turn keeps its old author time and is missed: a
 fail open. A commit made in another checkout counts only once it is on HEAD.
 A write to the remote through an MCP tool makes no local commit and is out of scope. An unreadable stamp, a git
 failure and an unreadable commit all fail open. A turn with no commit, a checkout with no notes file on disk, and the

@@ -116,8 +116,8 @@ adds to triage's publish, already running: one more list_sessions walk (every pa
 fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
 one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
-the notes already loaded.
-The expired-note lines add one read of the notes file: no git process, file, timer or log.
+the notes already loaded. The expired-note lines add one read of the notes file: no git process, file, timer
+or log.
 The next act (`next_act`) serves the ready steps and the stalled steps. A ready step (status todo or ready, phase now,
 no live lane, no open pull naming it, no valid pause, no open lane-less page item, not landed) prints `ready not
 started: <id> (<age>h)`; one more than READY_AGE_LIMIT_HOURS old also prints `ready over limit: <id> (start lane;
