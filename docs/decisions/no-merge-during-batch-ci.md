@@ -31,17 +31,28 @@ Not counted:
 Limits:
 
 - Pressing GitHub's own Merge button is not refused by a hook.
-- A raw `gh api -X PUT .../pulls/<n>/merge` is not refused by a hook.
-- GitHub auto-merge, turned on with the MCP tool `enable_pr_auto_merge`, is not refused by a hook. Main has the same gap.
-- The guard stops `gh pr merge` and the MCP merge tool. For the rest, the rule binds the owner by the owner's own word.
+- GitHub auto-merge is not covered: the MCP tool `enable_pr_auto_merge` is in no guard matcher and no guard branch. A batch that turns busy after auto-merge is on is missed too, because auto-merge fires later. Left for the owner's grant to cover it.
+- A GraphQL merge, sent with `gh api graphql`, is not refused.
+- A forced push, a push of all branches, or a mirror push that writes main is not braked: these name no single head.
+- A pull-list read that fails on a push to main leaves the existing ask in place: it is not turned into a deny.
+- The merge tool's own refusal offers no `override`: nothing lifts a Stop there.
+- A raw `gh api` merge path the guard cannot read as a number or a plain `$VAR` is not matched: `pulls/${PR:-1}/merge`, `pulls/$(…)/merge`, a backtick number, an absolute URL, and `-X=PUT`. A plain `$PR` or `$REPO` is matched and denied as unknown.
+- The legacy `repos/:owner/:repo/pulls/5/merge` form reads as a repo that cannot resolve, so it is denied as unknown: a false alarm, never a bypass.
+- The variable-path refusal says to wait, but waiting never resolves `$PR`: name the pull request by its number.
+- Each batch read has its own 25 s deadline, so two hung reads in one command add up to about 50 s, near the guard's 60 s hook timeout.
+- For the rest, the rule binds the owner by the owner's own word.
 - A required check with no entry and no workflow run on the other head does not count. So in the seconds after a PR goes ready, before GitHub creates its runs, a merge is not refused.
 - A claim or heal commit at merge changes this PR's head. The running batch does not hold the new head, so the brake refuses again, and the claim is reverted. Build the next batch on this batch's head at ready, after its records step.
+
+Cause of the Nov 8 merges (#2352 and #2350, during the run of #2361): the MCP merge tool had no guard matcher in `settings.json` before commit 625a87260. The form the local session used is unmeasured, because guard.log is not readable from the cloud.
+
+Routes the guard covers: `gh pr merge`, the MCP merge tool `merge_pull_request`, a raw `gh api -X PUT .../pulls/<n>/merge` (also `--method PUT`, and `-R`), and a `git push` that writes main. A push is refused when a ready PR on main is busy and its head does not hold the pushed head. An unreadable pushed head or compare counts as not held (unknown is red). A push of main's own tip moves nothing, and with no busy PR a push keeps its ask. Each refusal names the busy PR and its run, offers the owner's typed `override`, and its Remedy sentence names no act (rule git-remedy-never-names-target). The one reader is `Host.batch_read` in `merge/merge.py`, which calls the merge tool's own `batch_running`.
 
 Why: batch 13's lanes, roadmap steps c182 and c187 (PRs #777 and #778), each conflicted with batch 12 (PR #779). A merge to main under a running batch run moves the base that run tests. This rule is roadmap step c195.
 
 - Risk: named incident, batch 13 against batch 12, Oct 28. Landed 2026-10-28; overlapping batches 2026-11-02.
 - Check: `merge/test_merge.py` classes BatchRunningReads and BatchBrake, and the `hooks/test_guard.py` cases named `merge-batch:`. The overlap cases replay PR #63 merging while PR #65 (head b8416ca, which contains #63's head 476f456c) runs.
-- Cost: one batch read is one read of the open pull list. When another ready PR is on the base, it adds one read of the required checks (none with a pinned list). Each such PR adds three reads (check runs, commit statuses, workflow runs), and each busy one adds up to two compare reads. Per `--confirm`, two batch reads. Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline. No process starts, no file written, no timer.
+- Cost: one batch read is one read of the open pull list. When another ready PR is on the base, it adds one read of the required checks (none with a pinned list). Each such PR adds three reads (check runs, commit statuses, workflow runs), and each busy one adds up to two compare reads. Per `--confirm`, two batch reads. Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline. A raw API merge costs the same as a guarded merge call. A push that writes main adds one `git rev-parse` for the pushed head and one pull-list read, and `gh` resolves the repo with one more `git config` and one `git remote -v`. When a busy PR blocks the push, one more compare read tests whether the pushed head equals main's tip, inside the same deadline. A push to any other branch adds none. No process outlives the call, no file is written, no timer.
 
 Kind: process
 Home: merge/merge.py

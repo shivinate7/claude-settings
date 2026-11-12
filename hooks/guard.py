@@ -149,7 +149,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        heredoc body pass. (process-args-guard)
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
-  merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
+                       A `gh api` PUT to a pull request's merge endpoint is judged the same way. A
+                       non-forced `git push` that writes main or master gets the batch read alone: a
+                       deny in place of push-main's ask while a ready PR on that base runs CI (an
+                       unreadable pushed head counts as not contained, and a failed read stays an ask).
+  merge-role-proof    deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
                        --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
@@ -573,7 +577,7 @@ while True:
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, is_api_merge, merge_call_of, merge_check, merge_check_reason, push_batch_hit, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
@@ -4555,6 +4559,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 # upstream (rule push-stray-branch, asks). A dry run writes nothing.
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
+                    # A push that lands on main while another ready PR's CI runs is a merge by another route (decision
+                    # no-merge-during-batch-ci): denied. Cost: one batch read per refspec that writes main.
+                    busy = push_batch_hit(args, where, overrides)
+                    if busy:
+                        refuse(tool, "deny", "merge-checks", merge_check_reason("batch", busy),
+                               "git push " + " ".join(args) + " batch")
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
                                 "push to the default branch")
                 elif kind == "all":
@@ -4598,7 +4608,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             continue
         verdict, detail = merge_check(merging[0], merging[1], cite_where)
         if verdict != "green":
-            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
+            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),
                    "gh pr merge " + merging[0] + " " + verdict)
         # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
         if cite_where and uses_merge_tool(cite_where):

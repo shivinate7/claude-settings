@@ -1173,12 +1173,13 @@ class Host:
             heads[name] = row
         return heads
 
-    def batch_running(self, n, base, unprotected_counts_all=False, ignore=None, head=None):
+    def batch_running(self, n, base, unprotected_counts_all=False, ignore=None, head=None, unread_not_contained=False):
         """-> one line per other open, ready pull request on `base` whose head has a workflow run not completed, or a required check
         reported and not completed (rule git-no-merge-during-batch-ci), unless that head contains n's head (decision no-merge-during-batch-ci):
         the compare `head...other head` reads `ahead` or `identical`, and so does the compare `base...head` (this head holds the base tip). Both are read only for a busy
         pull request, the second only when the first passes. A failed read raises Stop.
-        `head` is n's head sha; None reads it through pr(n). The run counts because a required job can wait on another job
+        `head` is n's head sha; None reads it through pr(n), and "" is a head that could not be read, which no busy head contains.
+        `unread_not_contained` (the push route): a containment read that fails counts as not contained, instead of raising Stop. The run counts because a required job can wait on another job
         (checks.yml's `checks` needs `scope`), so it has no row yet. A required name with no entry and no running workflow on that head
         does not count: a ready PR whose CI never reports would block every merge. merge.ignoreChecks runs and checks never count. The PR `n` itself, drafts and other bases never count. A failed read raises Stop: unknown is red.
         The required names are a pinned list, else the branch protection. `unprotected_counts_all` (the guard's mode): a base with no
@@ -1201,7 +1202,14 @@ class Host:
             if head is None:
                 head = self.pr(n)["head"]
             # contained only when the busy head holds this head AND this head holds the base tip: else its run never tested the base this merge lands on
-            if not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
+            # an empty head could not be read (a push of a name or sha git cannot resolve): no busy head contains it, so unknown is red
+            try:
+                held = bool(head) and self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)
+            except Stop:
+                if not unread_not_contained:
+                    raise
+                held = False  # a push of a sha GitHub does not have yet fails the compare: no busy head holds it
+            if not held:
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
 
@@ -1227,13 +1235,17 @@ class Host:
 
     def holds_head(self, head, other):
         """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop."""
+        return self.compare_status(head, other, f"whether {other[:9]} holds {head[:9]}") in ("ahead", "identical")
+
+    def compare_status(self, head, other, what=None):
+        """GitHub's compare of head...other: its status word (ahead, identical, behind, diverged). Any failed read raises Stop."""
         c, out = self.api(f"compare/{head}...{other}")
         try:
             if c:
                 raise ValueError(out)
-            return json.loads(out)["status"] in ("ahead", "identical")
+            return json.loads(out)["status"]
         except (ValueError, KeyError, TypeError) as e:
-            raise Stop(f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}: {e}")
+            raise Stop(f"cannot read {what or f'how {other[:9]} compares with {head[:9]}'} {READ_CITE}: {e}")
 
     def commit_read(self, sha):
         """-> (parents, tree) of the commit `sha`: its parent shas in order (first parent first) and its tree sha, None when the read names none.
@@ -1688,6 +1700,29 @@ class Host:
         if blockers:
             return "batch", "; ".join(blockers)
         return "green", ""
+
+    def batch_read(self, base, head, batch_ignore=None):
+        """The batch read alone, for a push to `base` that has no pull request: -> (verdict, detail). batch: another ready PR on `base` is busy and its head
+        does not hold `head` ("" when the pushed head could not be read). green: none is. unknown: a read could not run. One pull list read, under the
+        same shared deadline as head_read, and so is the no-op compare below: inside it Host.gh never retries or waits on a rate limit."""
+        self.base = base  # protection_names reads this base; only pr() sets it otherwise
+        try:
+            with shared_deadline(SH_TIMEOUT):
+                blockers = self.batch_running(0, base, unprotected_counts_all=True, ignore=batch_ignore, head=head or "",
+                                              unread_not_contained=True)
+                if blockers and head:
+                    # A push of the base's own tip moves nothing: no run tests a different base. Any failed read (Stop, a hung gh's
+                    # TimeoutExpired, a missing gh) keeps the blockers: the push is denied, never let through.
+                    try:
+                        if self.compare_status(base, head) == "identical":
+                            return "green", ""
+                    except Exception:
+                        pass
+        except subprocess.TimeoutExpired:
+            return "unknown", "a gh call timed out"
+        except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
+            return "unknown", str(e)
+        return ("batch", "; ".join(blockers)) if blockers else ("green", "")
 
     def block(self, pending, got):
         """Pause for something to change. A check with an Actions run pauses 30 s, else a minute. Neither makes a gh call."""
