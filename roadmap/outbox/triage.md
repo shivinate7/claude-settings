@@ -872,3 +872,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - ended-session-id-sweep: Lane cleared 13:42 CST Nov 12 (retrospective 13:39 CST sweep): lane "-" matches no live session tag and no branch.
 - no-undo-brief-rule-sentence: Lane cleared 13:42 CST Nov 12 (retrospective 13:39 CST sweep): lane "fan-prose-unmapped-3" matches no live session tag and no branch.
 - Name-lane sweep 13:42 CST Nov 12: lane field set from the cs-step tag on 22 steps; close-replaced-at-open, cloud-branch-delete and dead-pr-waits keep doing (branches on origin, no live tag).
+- batch-freeze-lane-set-enforce 13:46 CST Nov 12: Owner 13:40 CST Nov 12 (coordinator chat): also allow --blame --run, --on and --base, superseding the three-flag pick for these flags only. The auto-mode check refused the lane's settings commit at 13:42 CST; owner page item 620 asks his typed yes in the lane. #2882 merges at three flags; the widening rides its own small PR.
+- lane-finds-triage 13:46 CST Nov 12: Coordinator 13:41 CST Nov 12: two lanes this hour could not find triage or the batch runner in their first list_sessions rows; briefs name roles only (R22). The fix names the standing sessions in one place every lane reads (a roster), or filters by the role tag.
+- Coordinator pick 13:41 CST Nov 12: mail-guards-read-send-message blocked by mailbox-wake-routes.

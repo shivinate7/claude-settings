@@ -9,8 +9,8 @@
  "blockedBy": [],
  "why": "Plan R26 part 2 (owner; restart-plan). Owner 13:15 CST Nov 12: \"how do you propose us getting the merge queue faster?\"",
  "source": "retrospective 13:16 CST Nov 12",
- "note": "A lane dropped from two batches in a row leaves the merge queue and goes to a fix lane, so it stops holding later batches. Red first. Plan R55 (owner 13:19 and 13:21 CST Nov 12, restart-plan 4fefc9f, pick d: \"Express lane, and cancel a running batch for it too\"): a reviewed merge-flow lane goes to main as its own batch, ahead of all others; the batch runner cancels a batch run already in CI, and that batch then merges main in. Home: decision no-merge-during-batch-ci; skill ci-hygiene step 8 points to it (retrospective 13:23 CST, plan b152ca6). The owner chose this over the one-batch-in-turn rule. Takes a part of merge-batch-split-and-pipeline (coordinator split 13:36 CST Nov 12); R55 express, top of now (retrospective 13:38: owner 13:36 asked for the next batch to stack mechanically).",
- "updatedAt": "2026-11-12T13:39:34-06:00",
+ "note": "A lane dropped from two batches in a row leaves the merge queue and goes to a fix lane, so it stops holding later batches. Red first. Plan R55 (owner 13:19 and 13:21 CST Nov 12, restart-plan 4fefc9f, pick d: \"Express lane, and cancel a running batch for it too\"): a reviewed merge-flow lane goes to main as its own batch, ahead of all others; the batch runner cancels a batch run already in CI, and that batch then merges main in. Home: decision no-merge-during-batch-ci; skill ci-hygiene step 8 points to it (retrospective 13:23 CST, plan b152ca6). The owner chose this over the one-batch-in-turn rule. Takes a part of merge-batch-split-and-pipeline (coordinator split 13:36 CST Nov 12); R55 express, top of now (retrospective 13:38: owner 13:36 asked for the next batch to stack mechanically). Revised 13:43 CST Nov 12: takes the split-and-rebuild half of merge-batch-split-and-pipeline.",
+ "updatedAt": "2026-11-12T13:46:18-06:00",
  "order": -314,
  "paused": false
 }

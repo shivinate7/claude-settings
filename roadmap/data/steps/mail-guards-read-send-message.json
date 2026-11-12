@@ -1,0 +1,16 @@
+{
+ "id": "mail-guards-read-send-message",
+ "title": "The Stop feedback guard counts a mailbox send as a send, so a session that mails triage or its parent is not blocked",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "mailbox-wake-routes"
+ ],
+ "why": "Lane mailbox-all-messages (PR #2890) 13:41 CST Nov 12: hooks/feedback_guard.py and lint/_transcript.py SEND_TOOLS count only send_message/SendMessage.",
+ "source": "coordinator 13:41 CST Nov 12",
+ "note": "Debt mail-guards-read-send-message is filed in PR #2890. The waiting-page skill's lane-to-parent, answer-unread and park tells still name send_message, pinned by test_skill_park_relay.py; moving them needs this guard change plus the open doorbell pick. Coordinator pick (reversible): blocked by mailbox-wake-routes, whose measure feeds the doorbell pick; it gets a lane after that.",
+ "updatedAt": "2026-11-12T13:46:18-06:00"
+}

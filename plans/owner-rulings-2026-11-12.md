@@ -58,3 +58,4 @@ Relayed by the retrospective.
 - 13:26 CST, page save: 611 a and 612 a (accepted picks). 594 none, "is this still relevant?": moot, #2845 passed round 3 and its later commit is notes-only. 613 b, "message retrospecitve -- this was long since already established": item withdrawn, R9 (Nov 10) already rules it.
 - 13:31 CST, coordinator chat (relayed 13:32): item 615 a: lane guard-false-alarm-cull restarts held family 8b in one fix lane at review round 1, makes the code safe on Python 3.9 and adds a 3.9 test case.
 - 13:37 CST, via retrospective: step mailbox-wake-routes may start one extra cloud session to post test comments, "ya yes start it". Home: decision session-messages.
+- 13:40 CST, coordinator chat: item 619 b, "b: also allow --blame --run, --on and --base. This widens past your pick." Supersedes items 457 a and 458 a for those three flags only. The settings edit waits on his typed yes in lane batch-freeze-lane-set-enforce (item 620).
