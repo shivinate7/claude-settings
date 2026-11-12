@@ -30,6 +30,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 MODULE = os.environ.get("GLOSSARY_UNDER_TEST") or os.path.join(HERE, "check_glossary.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
+import test_rule_homes  # noqa: E402  the files a rule anchor may sit in (lint/test_rule_homes.py)
 
 CLAUDE_MD = "# Rules\n\nOne rule.<!-- rule:one-rule -->\n"
 HEAD = "# Glossary\n\n## Terms\n\n| Term | Meaning | Home | Not |\n|---|---|---|---|\n"
@@ -106,6 +107,17 @@ class GlossaryTests(Fixture):
         code, out = self.run_check("docs/notes.md")
         self.assertEqual(code, 1, out)
         self.assertIn("rule:no-such-rule", out)
+
+    def test_home_rule_in_a_destination_file_resolves(self):
+        code, out = self.run_check("docs/notes.md")  # control: the rows as set up, all homes in CLAUDE.md
+        self.assertEqual(code, 0, out)
+        for n, rel in enumerate(test_rule_homes.DESTINATIONS):
+            slug = "glossary-moved-%d" % n
+            with self.subTest(file=rel):
+                self.put(rel, "# Rules\n\nRule.<!-- rule:%s -->\n" % slug)
+                self.put("GLOSSARY.md", HEAD + ROWS + "| note | A line. | `rule:%s` | — |\n" % slug)
+                code, out = self.run_check("docs/notes.md")
+                self.assertEqual(code, 0, out)
 
     def test_row_with_no_home_fails(self):
         self.put("GLOSSARY.md", HEAD + ROWS + "| note | A line. |  | — |\n")

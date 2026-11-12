@@ -145,6 +145,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 GEN = os.path.join(HERE, "hook_catalog.py")
 INLINE_JSON = os.path.join(HERE, "hook_catalog_inline.json")
+sys.path.insert(0, HERE)
+import test_rule_homes  # noqa: E402  the files a rule anchor may sit in (lint/test_rule_homes.py)
 PAGE = os.path.join(ROOT, "docs", "catalog.md")
 TABLE = os.path.join(ROOT, "docs", "decisions", "agent-model-cap.md")
 COLUMNS = ["Key", "Kind", "Event", "Matcher", "If", "Model", "Effort", "What it does"]
@@ -1149,6 +1151,19 @@ class RecordsPage(Tree):
         # frontmatter, as frontmatter_description reads it.
         self.assert_no_gist({"decisions/fm-closed.md": fm_record("id: 1", tail="\ntitle: body\n"),
                              "decisions/fm-open.md": "---\nid: D-3\ntitle: Never closed\n\nSome prose.\n"})
+
+    def test_a25_a_rule_moved_into_a_destination_file_keeps_its_mandate_row(self):
+        # Control first: a marker in a file that no rule file names (notes/) is no mandate.
+        stray = "# Notes\n\nA stray note.<!-- rule:stray-note-rule -->\n"
+        self.assertNotIn("stray-note-rule", listed(self.rows({"notes/stray.md": stray})).get("Mandates", []))
+        for n, rel in enumerate(test_rule_homes.DESTINATIONS):
+            slug = "moved-mandate-%d" % n
+            with self.subTest(file=rel):
+                text = ("---\nname: moved\ndescription: Moved rule.\n---\n\n# Moved\n\n"
+                        "Ask one question at a time.<!-- rule:%s -->\n" % slug)
+                rows = [(r["gist"], r["link"]) for r in self.rows({rel: text})
+                        if r["section"] == "Mandates" and r["slug"] == slug]
+                self.assertEqual(rows, [("Ask one question at a time.", "../" + rel)])
 
 
 # A lane is named like any branch. Only refs/heads/main is main, so a lane whose name starts with main is still a lane.

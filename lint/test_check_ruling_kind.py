@@ -31,6 +31,7 @@ MODULE = os.environ.get("RULING_KIND_UNDER_TEST") or os.path.join(HERE, "check_r
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 import _test_ruling_kind_fixture as fx  # noqa: E402  the fixture record text (lint/_test_ruling_kind_fixture.py)
+import test_rule_homes  # noqa: E402  the files a rule anchor may sit in (lint/test_rule_homes.py)
 
 PLAN = "plans/build-plan.md"
 L1 = PLAN + "#phase-1-the-sweep"
@@ -379,6 +380,29 @@ class RulingKindTests(unittest.TestCase):
         rc, out = self.lint("--root", os.path.join(self.tree, "caller-root"), REC)
         self.assertEqual(rc, 0, out)
         self.assertNotIn("FAIL", out)
+
+    # A Home may name a rule in any file that rule_audit.RULE_FILES reads, not only the two this check read
+    # before the scope move. The control is a Home in CLAUDE.md, which passes before and after.
+
+    def test_home_rule_in_a_destination_file_resolves(self):
+        self.put(REC, record(PROCESS_OK))
+        self.assert_passes(REC)
+        for n, rel in enumerate(test_rule_homes.DESTINATIONS):
+            slug = "moved-rule-%d" % n
+            with self.subTest(file=rel):
+                self.put(rel, "# Rules\n\nRule text. <!-- rule:%s -->\n" % slug)
+                self.put(REC, record("Kind: process\nHome: rule:%s" % slug))
+                self.assert_passes(REC)
+
+    def test_home_check_reads_the_file_list_of_rule_audit(self):
+        # One home for the list: the check reads the files rule_audit.RULE_FILES names, so a file added to that
+        # list is read here too. The copy of rule_audit in this fixture gets one extra file and nothing else.
+        extra = "docs/extra-rules.md"
+        self.put(extra, "# Extra rules\n\nRule text. <!-- rule:extra-listed-rule -->\n")
+        with open(os.path.join(self.tree, "lint", "rule_audit.py"), "a", encoding="utf-8") as f:
+            f.write('\nRULE_FILES = list(RULE_FILES) + ["%s"]\n' % extra)
+        self.put(REC, record("Kind: process\nHome: rule:extra-listed-rule"))
+        self.assert_passes(REC)
 
 
     # --dir: the records folder the lint checks. The default is decisions/. A repo whose records

@@ -14,6 +14,8 @@
 #    message. It is never a silent green.
 #  - action-only-rule-passes, caller-only-rule-passes, neither-rule-fails: a rule Home resolves
 #    against the action's CLAUDE.md or the caller's, and fails in neither.
+#  - caller-skill-rule-passes, action-skill-rule-passes: a rule Home resolves in a skill file of
+#    either checkout, as rule_audit.RULE_FILES lists it.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/../../lint/_test_git.sh"  # test-run signing opt-out
@@ -117,4 +119,23 @@ printf 'Kind: process\nHome: rule:no-such-rule\n' > "$tmp/rule-none/decisions/ne
 quiet git -C "$tmp/rule-none" add -A
 quiet git -C "$tmp/rule-none" commit -q -m rule-none
 expect 1 neither-rule-fails "$tmp/rule-none" main "Home rule:no-such-rule is not a rule marker" "$actroot/actions/ruling-kind/check.sh"
+# A rule in a skill file (a destination the scope move adds, lint/test_rule_homes.py) resolves on either side. The
+# control is case 2 above: a rule in the caller's CLAUDE.md. The caller's skill file is case 4; the action's is case 5.
+quiet git clone -q "$remote" "$tmp/rule-skill"
+quiet git -C "$tmp/rule-skill" switch -q -c rule-skill
+mkdir -p "$tmp/rule-skill/decisions" "$tmp/rule-skill/skills/waiting-page"
+printf '# Waiting page\n\nAsk one question at a time.<!-- rule:caller-skill-rule -->\n' > "$tmp/rule-skill/skills/waiting-page/SKILL.md"
+printf 'Kind: process\nHome: rule:caller-skill-rule\n' > "$tmp/rule-skill/decisions/caller-skill.md"
+quiet git -C "$tmp/rule-skill" add -A
+quiet git -C "$tmp/rule-skill" commit -q -m rule-skill
+expect 0 caller-skill-rule-passes "$tmp/rule-skill" main "" "$actroot/actions/ruling-kind/check.sh"
+mkdir -p "$actroot/skills/fresh-prose"
+printf '# Fresh prose\n\nRule text. <!-- rule:action-skill-rule -->\n' > "$actroot/skills/fresh-prose/SKILL.md"
+quiet git clone -q "$remote" "$tmp/rule-action-skill"
+quiet git -C "$tmp/rule-action-skill" switch -q -c rule-action-skill
+mkdir -p "$tmp/rule-action-skill/decisions"
+printf 'Kind: process\nHome: rule:action-skill-rule\n' > "$tmp/rule-action-skill/decisions/action-skill.md"
+quiet git -C "$tmp/rule-action-skill" add -A
+quiet git -C "$tmp/rule-action-skill" commit -q -m rule-action-skill
+expect 0 action-skill-rule-passes "$tmp/rule-action-skill" main "" "$actroot/actions/ruling-kind/check.sh"
 exit $bad
