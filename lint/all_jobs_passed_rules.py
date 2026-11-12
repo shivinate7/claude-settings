@@ -172,8 +172,8 @@ def off_problems(text):
         if not shard_base(name):
             problems.append(f"{name} is off all-jobs-passed but is not a shard: its job-level if skips it on a PR")
     for name in needed:
-        if shard_base(name):
-            problems.append(f"shard {name} is in all-jobs-passed's needs: a shard runs only off pull_request")
+        if shard_base(name) and jobs[name]["if"] is not None:
+            problems.append(f"shard {name} is in all-jobs-passed's needs and keeps a job-level if: all-jobs-passed reads its skip as red")
         elif name != "scope" and jobs[name]["if"] is not None:
             problems.append(f"{name} is needed and keeps a job-level if: all-jobs-passed reads its skip as red, "
                             "so its scope condition belongs in its steps")

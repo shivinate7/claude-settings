@@ -145,6 +145,13 @@ class AllJobsPassedJob(unittest.TestCase):
         # Named failure: a job-level if skips a needed job, and all-jobs-passed reads the skip as red.
         self.assertEqual(off_problems(self.text), [])
 
+    def test_a_needed_shard_with_a_job_level_if_is_still_refused(self):
+        # A step-gated shard never skips, so it may sit in needs; a shard that can skip may not.
+        head = "  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
+        self.assertIn(head, self.text)
+        text = self.text.replace(head, head + "    if: ${{ github.event_name == 'pull_request' }}\n")
+        self.assertTrue(any("checks-windows-guard-2" in p for p in off_problems(text)))
+
     def test_scope_skips_only_a_draft_pr(self):
         self.assertEqual(scope_if_problems(self.text), [])
 
