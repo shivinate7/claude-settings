@@ -43,7 +43,7 @@ A reason, "we chose X because Y", cannot be checked by a machine. Write the fact
 reason. A check or a person then compares that fact with the repo. A reason with no named fact
 is not yet on the ladder.
 
-## Superseded text
+## Rewrite, never annotate
 
 When a fact changes, rewrite the claim in place and add no "was X, now Y" line
 (`speak-rewrite-superseded-in-place`). A decision record whose ruling changes is rewritten in
