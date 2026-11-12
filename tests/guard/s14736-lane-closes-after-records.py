@@ -230,6 +230,78 @@ archive_refuse("a source URL ending in .git names its repo: a branch ahead there
 archive_refuse("a sources-only repo whose own read answers 404 is refused, and the reason says the read failed",
                role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_READ_PIN,
                lacks=ARCHIVE_READ_LACKS)
+# The branch phase, out of scope. A repo this session cannot reach answers 404 on its own read, or the cloud proxy answers a
+# compare with its 403 and sentence. The refusal names the scope and the runner, and never retries: a retry cannot pass.
+# Each word is its own string in lacks, since a tuple there is never matched.
+ARCHIVE_SCOPE_LACKS = ("retry", "Retry")
+archive_refuse("a sources-only repo whose own read answers 404 is out of this session's scope: refused, and the reason names the scope and the runner, with no retry and no no-PR text",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_SCOPE_PIN,
+               lacks=ARCHIVE_SCOPE_LACKS + ARCHIVE_NOPR_PIN)
+archive_refuse("a lane whose branch compare in q_max is the cloud proxy's 403 for a repo outside this session's scope is refused, and the reason names the scope and the runner, with no retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403), carries=ARCHIVE_SCOPE_PIN,
+               lacks=ARCHIVE_SCOPE_LACKS + ARCHIVE_NOPR_PIN)
+# The controls. A transient failure in scope still says retry and names neither the scope nor the runner. A 404 on a
+# branch's own tip is missing, not out of scope: it refuses as unreadable, with the read reason.
+TRANSIENT_PIN = ARCHIVE_READ_PIN + (("retry", "Retry"),)
+archive_refuse("a lane whose q_max default branch read is a server error is refused as transient, with retry and no scope",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_REPO500), carries=TRANSIENT_PIN, lacks=ARCHIVE_SCOPE_PIN)
+archive_refuse("a lane whose branch compare in q_max is a server error is refused as transient, with retry and no scope",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE500), carries=TRANSIENT_PIN, lacks=ARCHIVE_SCOPE_PIN)
+archive_refuse("a lane whose branch compare in q_max is a refused connection is refused as transient, with retry and no scope",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NETWORK), carries=TRANSIENT_PIN, lacks=ARCHIVE_SCOPE_PIN)
+archive_refuse("a lane whose branch tip in q_max answers 404 is refused as unreadable, and the reason is not the scope one",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_TIPMISSING), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_SCOPE_PIN + ARCHIVE_READ_LACKS)
+
+
+def archive_stale_tool_case():
+    """A merge tool with neither ScopeStop nor is_scope, whose page read raises, makes archive_hit refuse with the read
+    reason. The scope names are read with getattr, so a stale tool cannot turn a failed read into an allow; an error that
+    escaped archive_hit would send the archive to the guard-wide crash path, which allows it."""
+    guard = _load_guard_module()
+    archive_hit = guard.archive_hit
+    holder = archive_hit.__globals__["_MERGE_MODULE"]
+    reads = []
+
+    class Host:  # the one read archive_hit makes through the tool: pages(), which fails
+        def __init__(self, repo=None):
+            self.repo = repo
+
+        def pages(self, *args, **kwargs):
+            reads.append(self.repo)
+            raise RuntimeError("the read failed")
+
+    class StubTool:  # the merge tool's surface that archive_hit uses, with neither scope name
+        @staticmethod
+        def shared_deadline(seconds):
+            return contextlib.nullcontext()
+
+    StubTool.Host = Host
+    if hasattr(StubTool, "ScopeStop") or hasattr(StubTool, "is_scope"):
+        return False, "the stub has a scope name, so it does not model a merge tool without one"
+    materialize(role_path("archive-lane"))  # the transcripts are written on first use: before the call
+    saved = list(holder)
+    holder[:] = [StubTool]
+    try:
+        if archive_hit.__globals__["merge_module"]() is not StubTool:
+            return False, "merge_module() does not return the stub, so the read is not the stub's"
+        try:
+            hit = archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, role_path("archive-lane"))
+        except Exception as error:
+            return False, "archive_hit raised %s on the failed read, where it should refuse: %s" % (type(error).__name__, error)
+    finally:
+        holder[:] = saved
+    if not reads:
+        return False, "archive_hit made no page read, so the failed read never ran: it returned %r" % (hit,)
+    if hit is None:
+        return False, "archive_hit allowed the archive after the page read failed"
+    read_reason = archive_hit.__globals__["ARCHIVE_READ_REASON"]
+    if not (isinstance(hit, tuple) and len(hit) == 2 and hit[1] == read_reason):
+        return False, "archive_hit refused, but not with the read reason: %r" % (hit,)
+    return True, "after the page read raised, archive_hit refused with the read reason"
+
+
+# The stale-tool check above is registered in section 22192: LOG_CHECKS_EXTRA is defined in section 21304.
 # Shape drift fails closed: a current_branches that is not a map is a shape the read does not know, so it refuses as unreadable.
 archive_refuse("a current_branches that is a list, not a map, is refused, and the reason says the read failed",
                role_path("archive-inc-list"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)

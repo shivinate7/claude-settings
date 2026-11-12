@@ -476,3 +476,8 @@ def own_read_case(fixture, accept):
     return check
 
 
+LOG_CHECKS_EXTRA.append((
+    "lane-closes-after-records: a merge tool without ScopeStop and is_scope refuses a failed archive read with the read reason",
+    archive_stale_tool_case))
+
+
