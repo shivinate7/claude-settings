@@ -377,6 +377,11 @@ class Workflow(unittest.TestCase):
         self.assertRuleFinding(text, "budget", "the delete loop compares against a quoted 300, a copy of the reserve",
                                line_of(text, '-lt "300"'))
 
+    def test_arithmetic_compare_with_the_number_on_the_left_is_flagged(self):
+        text = variant(DELETE_COMPARE, '              if (( 300 > remaining )); then\n')
+        self.assertRuleFinding(text, "budget", "the delete loop compares with (( )) and 300 on the left, a copy of the reserve",
+                               line_of(text, "(( 300 > remaining ))"))
+
     def test_arithmetic_compare_against_the_reserve_is_clean(self):
         # Control: the reserve is read from sweep.py, so no literal is compared.
         self.assertNoRuleFinding(variant(DELETE_COMPARE, '              if (( remaining < reserve )); then\n'), "budget",

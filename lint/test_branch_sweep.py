@@ -28,7 +28,7 @@ Cost model, which the fake follows: each tip read and each DELETE spends one req
 none. Branch k's delete is judged on the budget that stands before its own tip read, so it goes ahead when that budget
 is at least the reserve. The cases model only this route. A read of the X-RateLimit-Remaining header is not modeled.
 A stop prints a line that carries the deletes done and the deletes left as two numbers. The cases match the two
-numbers on one line, the deletes done first, and do not pin the words. A branch whose tip moved is kept, so it is left, not done. An unreadable budget (an HTTP refusal, an empty body, no remaining
+numbers on one line, the deletes done first, and do not pin the words. A branch whose tip moved is kept, so it is left, not done; so is one whose tip read or DELETE fails, and a ref already gone is done. An unreadable budget (an HTTP refusal, an empty body, no remaining
 field, or a non-integer) stops green with a line that says unknown.
 Run: python3 lint/test_branch_sweep.py
 """
@@ -751,6 +751,55 @@ class DeleteStep(unittest.TestCase):
         self.assertEqual(deleted(delete_calls(log)), ["feature/a", "feature/b"],
                          "a budget of RESERVE + 3 with a keep verdict: the DELETE calls were not feature/a and feature/b")
         self.assertTrue(stop_line(done, 2, 1), "a keep verdict: no stop line names 2 deletes done and 1 left")
+
+    def test_failed_delete_is_left_in_the_stop_line(self):
+        # Budget RESERVE + 5 covers three branches. Each DELETE is refused with HTTP 500, so none is done: the stop line
+        # names 0 deletes done and all 7 left.
+        names = ["feature/" + letter for letter in "abcdefg"]
+        done, log, verdict_text = self.run_workflow(names, [], refuse="500", budget=RESERVE + 5)
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(len(delete_calls(log)), 3, "a budget of RESERVE + 5: want 3 DELETE calls, got %d"
+                         % len(delete_calls(log)))
+        self.assertTrue(stop_line(done, 0, 7), "a failed DELETE counted as done: no stop line names 0 deletes done and 7 left")
+
+    def test_failed_tip_read_is_left_in_the_stop_line(self):
+        # Budget RESERVE + 5. The tip read of feature/b fails with HTTP 500, so feature/b is left. feature/a and feature/c
+        # are deleted, then the budget falls below the reserve before feature/d: 2 deletes done, 5 left.
+        names = ["feature/" + letter for letter in "abcdefg"]
+        done, log, verdict_text = self.run_workflow(names, [], tip_reads={"feature/b": "HTTP 500"}, budget=RESERVE + 5)
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), ["feature/a", "feature/c"],
+                         "a tip read that fails with HTTP 500: the DELETE calls were not feature/a and feature/c")
+        self.assertTrue(stop_line(done, 2, 5), "a failed tip read counted as done: no stop line names 2 deletes done and 5 left")
+
+    def test_gone_ref_at_the_tip_read_is_done_in_the_stop_line(self):
+        # Budget RESERVE + 5. The tip read of feature/b says the ref is gone, so feature/b is done with no DELETE. The
+        # three done branches are feature/a, feature/b and feature/c, then the budget stops the run: 3 done, 4 left.
+        names = ["feature/" + letter for letter in "abcdefg"]
+        for status in ("404", "422"):
+            with self.subTest(status=status):
+                done, log, verdict_text = self.run_workflow(names, [], tip_reads={"feature/b": "HTTP " + status},
+                                                            budget=RESERVE + 5)
+                self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+                self.assertEqual(deleted(delete_calls(log)), ["feature/a", "feature/c"],
+                                 "a tip read that says HTTP %s: the DELETE calls were not feature/a and feature/c" % status)
+                self.assertTrue(stop_line(done, 3, 4),
+                                "a gone ref (tip read HTTP %s) not counted as done: no stop line names 3 deletes done and 4 left"
+                                % status)
+
+    def test_gone_ref_at_the_delete_is_done_in_the_stop_line(self):
+        # Budget RESERVE + 5 covers three branches. Each DELETE answers that the ref is gone, so the three are done, and
+        # the budget stops the run before feature/d: 3 done, 4 left.
+        names = ["feature/" + letter for letter in "abcdefg"]
+        for status in ("404", "422"):
+            with self.subTest(status=status):
+                done, log, verdict_text = self.run_workflow(names, [], refuse=status, budget=RESERVE + 5)
+                self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+                self.assertEqual(len(delete_calls(log)), 3, "a budget of RESERVE + 5: want 3 DELETE calls, got %d"
+                                 % len(delete_calls(log)))
+                self.assertTrue(stop_line(done, 3, 4),
+                                "a gone ref (DELETE HTTP %s) not counted as done: no stop line names 3 deletes done and 4 left"
+                                % status)
 
     def test_budget_at_the_reserve_continues(self):
         done, log, verdict_text = self.run_workflow(["feature/a"], [], kept=["feature/k"], budget=RESERVE)
