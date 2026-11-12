@@ -423,12 +423,22 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path.
         self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_tier_line()))
 
-    # decision session-tiers: re-pointed from both tiers to the batch runner alone
-    def test_the_merge_role_sentence_names_only_the_batch_runner_tag(self):
+    # G2 and G10 (owner 2026-11-10 14:23 and 14:33 CST): the merge role sentence names the batch-runner tag and a lane the owner
+    # started, which has no parent_session_id. It never names the coordinator. Re-pointed from the batch-runner tag alone.
+    def test_the_merge_role_sentence_names_the_batch_runner_tag_and_the_owner_started_lane(self):
         role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
         self.assertEqual(len(role), 1, role)
         self.assertIn("cs-build:batch-runner", role[0])
+        self.assertIn("a lane the owner started", role[0], role[0])
+        self.assertIn("no parent_session_id", role[0], role[0])
         self.assertNotIn("coordinator", role[0].lower(), role[0])
+
+    # G2 and G10: the sentence that names who never runs the role command names a lane with a parent, not every lane.
+    def test_the_never_runs_it_sentence_names_a_lane_with_a_parent_not_every_lane(self):
+        told = [s for s in sentences(hook_tier_line()) if "never runs it" in s]
+        self.assertEqual(len(told), 1, told)
+        self.assertIn("parent_session_id", told[0], told[0])
+        self.assertFalse(told[0].startswith("A lane, "), told[0])
 
     # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
     def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):

@@ -12934,6 +12934,9 @@ class BatchBrake(Env):
 
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
+# The remedy a session without a merge role reads (G2 and G10, owner 2026-11-10 14:23 and 14:33 CST): a lane the owner started merges
+# its own PR, and any other session asks a batch runner. The guard's refusals carry the same sentence (tests/guard/s13406-merge.py).
+OWNER_LANE_ASK = "A lane the owner started merges its own PR; any other session asks a batch runner"
 
 class CloudSession(Env):
     """The cloud-session fixture, one home for MergeRoleCheck and StandingGrantSwitch: a run's config dir, a made-up session id, and
@@ -13042,7 +13045,8 @@ class MergeRoleCheck(CloudSession):
         return err
 
     # ---- the constants and the reader
-    # decision session-tiers: only a batch runner merges
+    # G2 and G10 (owner 2026-11-10 14:23 and 14:33 CST): a lane the owner started records the same role as a batch runner, so the
+    # set stays batch-runner alone. The set does not say who may merge: the guard's admission and the scope do (standing-merge-grant).
     def test_the_merge_roles_are_the_batch_runner_only(self):
         self.assertEqual(set(merge.MERGE_ROLES), {"batch-runner"})
 
@@ -13144,6 +13148,9 @@ class MergeRoleCheck(CloudSession):
         # A session without a role must not learn which role to claim: the text names the batch runner only as the one that finds the PR.
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
+        # G2 and G10 (owner 2026-11-10 14:23 and 14:33 CST): a lane the owner started merges its own PR, so the remedy names it, and
+        # no longer sends it to a batch runner it lacks. Re-pointed from the batch-runner-only remedy.
+        self.assertIn(OWNER_LANE_ASK, err)
 
     def test_the_confirm_refusal_names_the_lane_lint_step(self):
         err = self.assert_refused()
@@ -13240,6 +13247,23 @@ class MergeRoleCheck(CloudSession):
     def test_the_role_refusal_names_the_lane_lint_step(self):
         err = self.assert_writer_refused("--role", "lane")
         self.assertIn("merge --lane-lint", err, "the --role refusal does not name merge --lane-lint")
+
+    def test_the_role_refusal_names_the_owner_started_lane_and_the_batch_runner_ask(self):
+        # G2 and G10 (owner 2026-11-10 14:23 and 14:33 CST): the remedy for a tier the writer refuses names the lane the owner started.
+        err = self.assert_writer_refused("--role", "lane")
+        self.assertIn(OWNER_LANE_ASK, err, "the --role refusal does not name the owner-started lane and the batch runner ask")
+
+    # ---- a lane the owner started (G2, G10): it records batch-runner, and the merge checks still stop its confirm
+    def test_a_lane_the_owner_started_is_refused_while_another_ready_pr_has_a_check_pending(self):
+        rc, out, err = self.run_main("--role", "batch-runner")
+        self.assertEqual(rc, 0, out + err)
+        self.host.batch = [BATCH_BLOCKER]
+        refs = self.refs()
+        rc, out, err = self.runner_confirm()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("#2", out + err)
+        self.assertEqual(self.refs(), refs, "the refused confirm pushed a claim or took the lock")
+        self.assertFalse(getattr(self.host, "merged", False), out + err)
 
     def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator to batch-runner
@@ -13424,6 +13448,33 @@ class StandingGrantSwitch(CloudSession):
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator
         rc, out, err = self.runner_confirm()  # decision auto-mode-owner-acts: the runner's confirm names its head
         self.assert_merged(rc, out, err)
+
+    # ---- a lane the owner started (G2 and G10, owner 2026-11-10 14:23 and 14:33 CST): the switch binds it as it binds a runner.
+    # The lane records batch-runner itself, so the grant refusal is what stops its confirm, and the base's value is the one read.
+    def test_false_refuses_the_confirm_of_a_lane_the_owner_started(self):
+        self.grant_config(standingGrant=False)
+        rc, out, err = self.run_main("--role", "batch-runner")
+        self.assertEqual(rc, 0, out + err)
+        self.refused_as("batch-runner")
+
+    def test_the_base_false_refuses_a_lane_the_owner_started_even_when_the_pr_tree_says_true(self):
+        self.grant_config(standingGrant=False)
+        self.put_pr_tree(self.grant_text(standingGrant=True))
+        rc, out, err = self.run_main("--role", "batch-runner")
+        self.assertEqual(rc, 0, out + err)
+        self.refused_as("batch-runner")
+
+
+class RoleTiersAreTheToolsSet(unittest.TestCase):
+    """hooks/guard_merge.py ROLE_TIERS is the tiers the guard admits for `merge --role`. Its one home is merge.py's MERGE_ROLES (rule
+    building-allow-list-is-the-constant), so the guard's list is that object and never a copy of it. This pins the reference, not the
+    value: the value stays batch-runner alone (G2 and G10, owner 2026-11-10 14:23 and 14:33 CST)."""
+
+    def test_the_guard_admits_the_merge_tool_set_object(self):
+        import guard_merge  # noqa: E402  hooks/ is on sys.path (above)
+        tool = guard_merge.merge_module()
+        self.assertIsNotNone(tool, "the guard cannot load the merge tool")
+        self.assertIs(guard_merge.ROLE_TIERS, tool.MERGE_ROLES, "ROLE_TIERS is a copy of MERGE_ROLES, not the constant it names")
 
 
 class RepoDirFlag(RepoDirRuns, Env):

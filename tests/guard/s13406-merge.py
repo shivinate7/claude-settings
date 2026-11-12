@@ -534,10 +534,16 @@ def role_result(tool_id, text):
         {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": text}]}]}})
 
 
-def role_record(tags, session=ROLE_OWN, title="a lane session"):
-    """The text get_session returns: a JSON object whose ccr block holds the record."""
-    return json.dumps({"ccr": {"id": session, "title": title, "tags": list(tags),
-                               "parent_session_id": "session_PARENT01"}})
+def role_record(tags, session=ROLE_OWN, title="a lane session", parent=True, sources=None):
+    """The text get_session returns: a JSON object whose ccr block holds the record. `parent` False leaves out
+    parent_session_id, as a session the owner started has none. `sources` (None: no session_context) is the
+    session_context.sources the record names."""
+    ccr = {"id": session, "title": title, "tags": list(tags)}
+    if parent:
+        ccr["parent_session_id"] = "session_PARENT01"
+    if sources is not None:
+        ccr["session_context"] = {"sources": sources}
+    return json.dumps({"ccr": ccr})
 
 
 def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
@@ -545,10 +551,23 @@ def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
     return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
 
 
-def role_tag_call(tool_id, session=ROLE_OWN):
-    """One paired set_session_tags call that adds a tag to `session`."""
-    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [session], "add": ["cs-build:coordinator"]}),
+def role_tag_call(tool_id, session=ROLE_OWN, add=("cs-build:coordinator",)):
+    """One paired set_session_tags call that adds `add` to `session`."""
+    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [session], "add": list(add)}),
             role_result(tool_id, "ok")]
+
+
+# A lane the owner started (decision session-tiers, Lane the owner starts; G2, owner 2026-11-10 14:23 CST, and G10, 14:33 CST):
+# no parent_session_id, no cs-build:<role> tag, and sources that name the repo it may merge in. It records batch-runner, the existing role word.
+CS_SOURCES = [{"git_repository": {"url": "https://github.com/" + ARCH_REPO_SETTINGS}}]
+OTHER_SOURCES = [{"git_repository": {"url": "https://github.com/shivinate7/mailaudit"}}]
+OWNER_LANE_ASK = "A lane the owner started merges its own PR; any other session asks a batch runner"
+
+
+def lone_call(tool_id, tags, sources=CS_SOURCES, session=ROLE_OWN):
+    """One paired get_session call for a lane the owner started: its record has no parent_session_id."""
+    return [role_use(tool_id, GET_SESSION),
+            role_result(tool_id, role_record(tags, session, "a lane session", parent=False, sources=sources))]
 
 
 # How a read of another session's text comes back: an opening tag with a nonce, a preamble line, the JSON indented
@@ -830,6 +849,23 @@ ROLE_LINES = {
     # The lane in o/r alone, whose record names the branch ARCH_COPY_BRANCH. Its repo is judged by arch_copy's answers.
     "archive-copy-lane": role_call("r0", RUNNER_TAGS) + role_target_raw("t1", role_wrapped(arch_record(
         ARCH_LANE_TAGS, {"": ARCH_COPY_BRANCH}))),
+    # Lanes the owner started (OWNER_LANE_ASK): no parent_session_id. Each shape changes one thing from the admitted one.
+    "lone-lane-repo": lone_call("g1", ["cs-repo:" + ARCH_REPO_SETTINGS]),
+    "lone-untagged": lone_call("g1", []),
+    "lone-repo-o-a": lone_call("g1", ["cs-repo:o/a"]),
+    "lone-other-sources": lone_call("g1", ["cs-repo:o/a"], sources=OTHER_SOURCES),
+    "lone-no-sources": lone_call("g1", ["cs-repo:o/a"], sources=None),
+    "lone-coordinator-tag": lone_call("g1", ["cs-build:coordinator", "cs-repo:" + ARCH_REPO_SETTINGS]),
+    "lone-triage-tag": lone_call("g1", ["cs-build:triage", "cs-repo:" + ARCH_REPO_SETTINGS]),
+    "lone-lane-tag": lone_call("g1", ["cs-build:lane", "cs-repo:" + ARCH_REPO_SETTINGS]),
+    "lone-parent-untagged": [role_use("g1", GET_SESSION),
+                             role_result("g1", role_record(["cs-repo:" + ARCH_REPO_SETTINGS], sources=CS_SOURCES))],
+    "lone-tagged-after": lone_call("g1", []) + role_tag_call("t1", add=["cs-repo:" + ARCH_REPO_SETTINGS]),
+    "lone-tagged-after-other": lone_call("g1", []) + role_tag_call("t1", session=ROLE_OTHER, add=["cs-build:coordinator"]),
+    # A lane tags itself, then reads its record again: the newer read is the one the guard judges.
+    "lone-self-tag-then-read": lone_call("g1", []) + role_tag_call("t1", add=["cs-repo:" + ARCH_REPO_SETTINGS])
+                               + lone_call("g2", ["cs-repo:" + ARCH_REPO_SETTINGS]),
+    "lone-self-tag-no-reread": lone_call("g1", []) + role_tag_call("t1", add=["cs-repo:" + ARCH_REPO_SETTINGS]),
 }
 
 
@@ -872,9 +908,11 @@ role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + "
 role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",
           role_path("coordinator"))
 # A lane is refused, and the reason steers it to hand off: get_session first, then list_sessions for the runner.
+# G2 and G10 (owner 2026-11-10 14:23 and 14:33 CST): a lane with a parent is still refused, and its refusal names the owner-started
+# lane and the batch runner it asks, not a runner it lacks for a lane the owner started. Re-pointed from the batch-runner-only remedy.
 role_refuse("a lane that records batch-runner is refused, and the refusal steers it to hand off",
           MERGE_SHIM + " --role batch-runner", role_path("lane"),
-          carries=("get_session", "list_sessions", "cs-build:batch-runner", "cs-repo", "branch"))
+          carries=("get_session", "list_sessions", "cs-build:batch-runner", "cs-repo", "branch", OWNER_LANE_ASK))
 # Only the own record's tags count. A title, a foreign record, a list, a near miss and a quote do not.
 role_refuse("a lane whose title holds cs-build:batch-runner is refused", MERGE_SHIM + " --role batch-runner",
           role_path("lane-title"))
@@ -888,6 +926,33 @@ role_refuse("a near-miss tag cs-build:batch-runner-old does not allow the runner
           MERGE_SHIM + " --role batch-runner", role_path("near-miss"))
 role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE_SHIM + " --role batch-runner",
           role_path("quoted"))
+# A lane the owner started records batch-runner (G2, owner 2026-11-10 14:23 CST; G10, 14:33 CST). The guard admits it when its own
+# newest record has no parent_session_id, no cs-build:<role> tag, no set_session_tags call after it, and sources that name
+# claude-settings. Each refusal below changes one of those four from the admitted shape.
+role_allow("a lane the owner started records batch-runner: no parent, no cs-build tag, claude-settings sources",
+           MERGE_SHIM + " --role batch-runner", role_path("lone-lane-repo"))
+role_allow("a lane the owner started with no tags at all records batch-runner",
+           MERGE_SHIM + " --role batch-runner", role_path("lone-untagged"))
+role_allow("a lane the owner started that tags itself and reads its record again records batch-runner",
+           MERGE_SHIM + " --role batch-runner", role_path("lone-self-tag-then-read"))
+role_allow("a set_session_tags call on another session leaves a lane the owner started current",
+           MERGE_SHIM + " --role batch-runner", role_path("lone-tagged-after-other"))
+role_refuse("a record with a parent_session_id is refused even with no cs-build tag and claude-settings sources",
+            MERGE_SHIM + " --role batch-runner", role_path("lone-parent-untagged"), carries=OWNER_LANE_ASK)
+role_refuse("a lane the owner started with a cs-build:coordinator tag is refused: the tag decides, not the missing parent",
+            MERGE_SHIM + " --role batch-runner", role_path("lone-coordinator-tag"), carries=OWNER_LANE_ASK)
+role_refuse("a lane the owner started with a cs-build:triage tag is refused", MERGE_SHIM + " --role batch-runner",
+            role_path("lone-triage-tag"), carries=OWNER_LANE_ASK)
+role_refuse("a lane the owner started with a cs-build:lane tag is refused", MERGE_SHIM + " --role batch-runner",
+            role_path("lone-lane-tag"), carries=OWNER_LANE_ASK)
+role_refuse("a lane the owner started that set its own tags after its read is refused: the read is stale",
+            MERGE_SHIM + " --role batch-runner", role_path("lone-tagged-after"), carries=OWNER_LANE_ASK)
+role_refuse("a lane that tags itself and does not read its record again is refused: the tagged read is stale",
+            MERGE_SHIM + " --role batch-runner", role_path("lone-self-tag-no-reread"), carries=OWNER_LANE_ASK)
+role_refuse("a lane the owner started whose sources name another repo is refused: its scope is the sources' repo",
+            MERGE_SHIM + " --role batch-runner", role_path("lone-other-sources"), carries=OWNER_LANE_ASK)
+role_refuse("a lane the owner started whose record names no source is refused: no source names claude-settings",
+            MERGE_SHIM + " --role batch-runner", role_path("lone-no-sources"), carries=OWNER_LANE_ASK)
 # The other command forms, bare and after `cd somewhere &&`, judge as the shim does.
 for _role_prefix in ("", "cd somewhere && "):
     for _role_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):

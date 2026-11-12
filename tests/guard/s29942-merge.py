@@ -140,6 +140,43 @@ repo_case("a -C naming another checkout inside bash -c is denied", "deny",
           f"bash -c '{MERGE_SHIM} -C {REPO_B} 5 --confirm'", LANE_REPO, TX_RUNNER)
 repo_case("a merge in a subshell inside the tagged checkout is allowed", "allow",
           f"({MERGE_SHIM} 5 --confirm)", LANE_REPO, TX_RUNNER)
+# A lane the owner started (G2, owner 2026-11-10 14:23 CST; G10, 14:33 CST) merges only in the repo its own record's sources name:
+# claude-settings. The repo gate reads the cs-repo tags, and a lane can tag itself, so the scope is judged on the sources as well:
+# a merge in another repo is denied even when a tag names that repo. No refusal wording is pinned here.
+LONE_CS = role_path("lone-lane-repo")          # sources and cs-repo tag name claude-settings
+LONE_O_A = role_path("lone-repo-o-a")          # sources name claude-settings, the cs-repo tag names o/a
+LONE_OTHER = role_path("lone-other-sources")   # sources name shivinate7/mailaudit, the cs-repo tag names o/a
+LONE_NO_SOURCES = role_path("lone-no-sources")  # no sources, the cs-repo tag names o/a
+LONE_UNTAGGED = role_path("lone-untagged")     # sources name claude-settings, no tags at all
+LONE_SELF_READ = role_path("lone-self-tag-then-read")
+LONE_SELF_STALE = role_path("lone-self-tag-no-reread")
+
+
+def scope_case(name, expected, command, cwd, transcript, env=CLOUD_ENV):
+    """One case of a lane the owner started. No rule name is pinned, so a refusal of any rule passes."""
+    sh("lone-lane scope: " + name, command, expected, cwd=cwd, transcript=transcript, env=env)
+
+
+scope_case("a lane the owner started whose sources name claude-settings is denied a merge in o/a, though its tag names o/a",
+           "deny", f"{MERGE_SHIM} 5 --confirm", REPO_A, LONE_O_A)
+scope_case("a lane the owner started whose sources name claude-settings is denied a merge in o/a named by flag",
+           "deny", f"{MERGE_SHIM} --repo-dir '{REPO_A}' 5 --confirm", REPO_A, LONE_O_A)
+scope_case("a lane the owner started whose sources name another repo is denied a merge in o/a, though its tag names o/a",
+           "deny", f"{MERGE_SHIM} 5 --confirm", REPO_A, LONE_OTHER)
+scope_case("a lane the owner started whose record names no source is denied a merge in o/a, though its tag names o/a",
+           "deny", f"{MERGE_SHIM} 5 --confirm", REPO_A, LONE_NO_SOURCES)
+scope_case("a lane the owner started whose sources name claude-settings is allowed a merge in claude-settings",
+           "allow", f"{MERGE_SHIM} 5 --confirm", LANE_PROXY, LONE_CS)
+scope_case("a lane the owner started whose sources name claude-settings is allowed a merge in claude-settings named by flag",
+           "allow", f"{MERGE_SHIM} --repo-dir '{LANE_REPO}' 5 --confirm", REPO_A, LONE_CS)
+scope_case("a lane the owner started that tags itself and reads its record again is allowed a merge in claude-settings",
+           "allow", f"{MERGE_SHIM} 5 --confirm", LANE_PROXY, LONE_SELF_READ)
+scope_case("a lane the owner started that tags itself and does not read its record again is denied a merge in claude-settings",
+           "deny", f"{MERGE_SHIM} 5 --confirm", LANE_PROXY, LONE_SELF_STALE)
+# No cs-repo tag at all: merge-confirm-repo denies it, and the remedy names the owner-started lane and the runner it asks (G2, G10).
+sh("merge-confirm-repo: a lane the owner started with no cs-repo tag is denied, and its remedy names the owner-started lane",
+   f"{MERGE_SHIM} 5 --confirm", "deny", rule=REPO_RULE, cwd=LANE_PROXY, transcript=LONE_UNTAGGED, env=CLOUD_ENV,
+   carries=OWNER_LANE_ASK)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir '{REPO_B}' 5", REPO_A, TX_NONE)
