@@ -7,7 +7,7 @@ Mockup: `docs/design/answered-folded.html`. Screen: `skills/waiting-page/page.ht
 `<style>` and adds three rules, each reading `--muted` or `--body` only.
 
 Owner gripe (2026-11-08 12:31 CST): the Answered section shows cards with nothing to see or do. Decided in the brief: the
-section starts closed; it opens on load only when a card inside carries the New reply mark; the rail's Answered head and its
+section starts closed. It opens on load only when a card inside carries the New reply mark. The rail's Answered head and its
 chips already open it on a press.
 
 1. Closed on load (`#s=closed`). `state.answeredOpen` starts false. Gain: the open work ends the list. Loss: one press to
