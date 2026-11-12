@@ -20,10 +20,22 @@ filter (jq) and refuses or accepts each DELETE. Before each DELETE the workflow 
 that read from a map of branch to the response body, or to an "HTTP <status>" refusal. The body holds the checkout's
 tip unless a case moves it, or a case makes it "empty" (no body), "null" (an object with no sha) or "array" (a prefix
 match of two refs). Any other gh call the fake does not know fails loudly.
+The budget cases (coordinator ruling, 2026-11-12 10:02 CST): the delete step reads the request budget with one
+`gh api rate_limit` before its delete loop, and stops green when the budget falls below the reserve. The reserve is the
+constant BUDGET_RESERVE in actions/branch-sweep/sweep.py; RESERVE below is the ruling's 300, and
+test_reserve_home_is_the_ruling_value holds the two equal. The reserve is read from the sweep, never written inline.
+Cost model, which the fake follows: each tip read and each DELETE spends one request, and a rate_limit read spends
+none. Branch k's delete is judged on the budget that stands before its own tip read, so it goes ahead when that budget
+is at least the reserve. The cases model only this route. A read of the X-RateLimit-Remaining header is not modeled.
+A stop prints a line that carries the deletes done and the deletes left as two numbers. The cases match the two
+numbers on one line and do not pin the words. An unreadable budget (an HTTP refusal, an empty body, no remaining
+field, or a non-integer) stops green with a line that says unknown.
 Run: python3 lint/test_branch_sweep.py
 """
+import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -45,11 +57,14 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
 RUN_FOLDER = _test_temp.run_folder()
 
 REPO_PATH = "repos/owner/repo"  # the REPO the run env names
+RESERVE = 300  # the ruling's request reserve; the sweep's BUDGET_RESERVE must equal it (test_reserve_home_is_the_ruling_value)
 
 # Stands in for gh: logs each call. A pulls call prints FAKE_GH_PULLS through the --jq filter the call names.
 # A DELETE is refused with the HTTP status named in FAKE_GH_REFUSE. A tip read (GET git/ref/heads/NAME) answers from
 # FAKE_GH_TIPS, a JSON map of branch to the response body, or to "HTTP <status>" for a refusal. A body goes through
-# the --jq the call names, as gh does, or prints raw without one. Any other call fails loudly.
+# the --jq the call names, as gh does, or prints raw without one. A rate_limit read answers the budget: FAKE_GH_BUDGET is
+# a number that falls by one per tip read and per DELETE (the requests logged so far), or a mode: "HTTP <status>" (a
+# refusal), "empty" (no body), "object" (no remaining field) or "text" (a non-integer remaining). Any other call fails loudly.
 FAKE_GH = """#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_GH_LOG"
 jq_filter() {
@@ -68,6 +83,27 @@ jq_filter() {
 case "$*" in
   *"/pulls?"*)
     jq -r "$(jq_filter "$@")" < "$FAKE_GH_PULLS"
+    exit $? ;;
+  *"rate_limit"*)
+    case "$FAKE_GH_BUDGET" in
+      "HTTP "*)
+        echo "gh: refused ($FAKE_GH_BUDGET)" >&2
+        exit 1 ;;
+    esac
+    spent=$(grep -c -E 'git/ref/heads/|DELETE' "$FAKE_GH_LOG" 2>/dev/null || true)
+    spent=${spent:-0}
+    case "$FAKE_GH_BUDGET" in
+      empty) body="" ;;
+      object) body="{}" ;;
+      text) body='{"rate":{"limit":1000,"remaining":"many"},"resources":{"core":{"limit":1000,"remaining":"many"}}}' ;;
+      *) body=$(printf '{"rate":{"limit":1000,"remaining":%d},"resources":{"core":{"limit":1000,"remaining":%d}}}' $((FAKE_GH_BUDGET - spent)) $((FAKE_GH_BUDGET - spent))) ;;
+    esac
+    filter=$(jq_filter "$@")
+    if [ -n "$filter" ]; then
+      printf '%s' "$body" | jq -r "$filter"
+    else
+      printf '%s\n' "$body"
+    fi
     exit $? ;;
   *DELETE*)
     if [ -n "$FAKE_GH_REFUSE" ]; then
@@ -192,6 +228,30 @@ def log_lines_naming(done, verdict_text, name):
     """The lines a step printed past its verdict echo that name a branch."""
     echoed = set(verdict_text.splitlines())
     return [line for line in (done.stdout + done.stderr).splitlines() if name in line and line not in echoed]
+
+
+def expected_deletes(names, budget, reserve):
+    """How many of names the sweep deletes at this budget. Each branch costs two requests, its tip read and its DELETE,
+    and branch k is judged on the budget that stands before its own tip read, when 2k requests are spent."""
+    if budget < reserve:
+        return 0
+    return min(len(names), (budget - reserve) // 2 + 1)
+
+
+def stop_line(done, deleted_n, left_n):
+    """The line of a step's output that carries both counts, the deletes done and the deletes left. "" when none does."""
+    for line in (done.stdout + done.stderr).splitlines():
+        if re.search(r"\b%d\b" % deleted_n, line) and re.search(r"\b%d\b" % left_n, line):
+            return line
+    return ""
+
+
+def sweep_module():
+    """The sweep's own module, loaded from its file, so a case can read its constants."""
+    spec = importlib.util.spec_from_file_location("branch_sweep", SWEEP)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class Verdicts(unittest.TestCase):
@@ -359,18 +419,22 @@ class DeleteStep(unittest.TestCase):
                 return text
         self.fail("the workflow has no run: block that holds %s" % " and ".join(markers))
 
-    def run_workflow(self, merged, open_prs, refuse=None, tip_reads=None):
+    def run_workflow(self, merged, open_prs, refuse=None, tip_reads=None, kept=(), budget=1000):
         """(CompletedProcess of the delete step, every gh call in order, verdict text) of one run of both steps. The
         open-PR read runs first, as the workflow runs it, on pull requests that are (head, base) pairs in open_prs.
         tip_reads maps a merged branch to what its tip read answers: "moved" (a commit pushed after the checkout),
         "empty" (no body), "null" (an object with no sha), "array" (a prefix match: the branch and a sibling) or
-        "HTTP <status>". A merged branch with no entry answers with its checkout tip."""
+        "HTTP <status>". A merged branch with no entry answers with its checkout tip.
+        kept names branches with no commit on main, so the verdict is keep; their tips answer their checkout tips.
+        budget is what the fake's rate_limit read answers: a number, or a mode (see FAKE_GH)."""
         self.assertIsNotNone(shutil.which("jq"), "jq is not on PATH, so the open-PR read step cannot run")
         repo = Repo(self)
         m1 = repo.commit("main 1")
         repo.branch("main", m1)
         for name in merged:
             repo.branch(name, m1)
+        for name in kept:
+            repo.branch(name, repo.commit("not merged: " + name))
         tracked_tree.copy_tracked(repo.root, "actions/branch-sweep")
         runner = tempfile.mkdtemp(prefix="bsweep-runner-", dir=RUN_FOLDER)
         self.addCleanup(tracked_tree.rm_tree, runner)
@@ -384,7 +448,7 @@ class DeleteStep(unittest.TestCase):
         with open(pulls, "w", encoding="utf-8") as f:
             json.dump([{"head": {"ref": head}, "base": {"ref": base}} for head, base in open_prs], f)
         tips = {}
-        for name in merged:
+        for name in merged + list(kept):
             tips[name] = ref_body(git(repo.root, "rev-parse", "refs/remotes/origin/" + name))
         for name, outcome in (tip_reads or {}).items():
             checkout = git(repo.root, "rev-parse", "refs/remotes/origin/" + name)
@@ -405,7 +469,7 @@ class DeleteStep(unittest.TestCase):
             json.dump(tips, f)
         log = os.path.join(runner, "gh.log")
         env = dict(ENV, GH_TOKEN="t", REPO="owner/repo", DEFAULT_BRANCH="main", RUNNER_TEMP=runner,
-                   FAKE_GH_LOG=log, FAKE_GH_PULLS=pulls, FAKE_GH_TIPS=tips_path,
+                   FAKE_GH_LOG=log, FAKE_GH_PULLS=pulls, FAKE_GH_TIPS=tips_path, FAKE_GH_BUDGET=str(budget),
                    PATH=bin_dir + os.pathsep + ENV["PATH"])
         if refuse:
             env["FAKE_GH_REFUSE"] = refuse
@@ -619,6 +683,62 @@ class DeleteStep(unittest.TestCase):
         self.assertEqual(deletes(verdict_text), [], "scope: the sweep named a delete")
         self.assertEqual([line for line in log if "/git/ref" in line], [], "no delete verdict, yet the step read a tip")
         self.assertEqual(done.returncode, 0, "no delete verdict: the step exited %d" % done.returncode)
+
+    def assert_budget_stop(self, names, budget):
+        """A budget that falls below the reserve partway through: the first expected_deletes() branches are deleted, the
+        step exits 0, and one line carries the deletes done and the deletes left."""
+        want = expected_deletes(names, budget, RESERVE)
+        done, log, verdict_text = self.run_workflow(names, [], budget=budget)
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), names[:want],
+                         "budget %d, reserve %d: want the first %d deletes, got %d"
+                         % (budget, RESERVE, want, len(deleted(delete_calls(log)))))
+        self.assertEqual(done.returncode, 0, "a budget stop: the step exited %d, want 0" % done.returncode)
+        self.assertEqual(annotations(done, "::error::"), [], "a budget stop: the step printed an ::error:: line")
+        self.assertTrue(stop_line(done, want, len(names) - want),
+                        "a budget stop: no line names %d deletes done and %d left" % (want, len(names) - want))
+
+    def test_budget_stop_spends_two_requests_per_branch(self):
+        # A branch costs its tip read and its DELETE. A budget of RESERVE + 5 covers three branches, not six.
+        self.assert_budget_stop(["feature/" + letter for letter in "abcdefg"], RESERVE + 5)
+
+    def test_budget_stop_full_size_sweep(self):
+        names = ["feature/" + chr(97 + i // 26) + chr(97 + i % 26) for i in range(60)]  # about one run's worth of lanes
+        self.assert_budget_stop(names, RESERVE + 61)
+
+    def test_budget_at_the_reserve_continues(self):
+        done, log, verdict_text = self.run_workflow(["feature/a"], [], kept=["feature/k"], budget=RESERVE)
+        self.assertEqual(deletes(verdict_text), ["feature/a"], "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), ["feature/a"],
+                         "a budget of exactly the reserve (%d): the DELETE did not run" % RESERVE)
+        self.assertEqual(done.returncode, 0, "a budget at the reserve: the step exited %d, want 0" % done.returncode)
+        self.assertEqual(annotations(done, "::error::"), [], "a budget at the reserve: the step printed an ::error:: line")
+
+    def test_budget_below_the_reserve_stops_before_any_delete(self):
+        done, log, verdict_text = self.run_workflow(["feature/a"], [], kept=["feature/k"], budget=RESERVE - 1)
+        self.assertEqual(deletes(verdict_text), ["feature/a"], "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), [],
+                         "a budget of %d, one below the reserve: a DELETE ran" % (RESERVE - 1))
+        self.assertEqual(done.returncode, 0, "a budget below the reserve: the step exited %d, want 0" % done.returncode)
+        self.assertEqual(annotations(done, "::error::"), [], "a budget below the reserve: the step printed an ::error:: line")
+
+    def test_unreadable_budget_stops_green_and_says_unknown(self):
+        names = ["feature/a", "feature/b"]
+        for mode in ("HTTP 403", "HTTP 500", "empty", "object", "text"):
+            with self.subTest(mode=mode):
+                done, log, verdict_text = self.run_workflow(names, [], budget=mode)
+                self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+                self.assertEqual(deleted(delete_calls(log)), [], "budget read %s: a DELETE ran" % mode)
+                self.assertEqual(done.returncode, 0, "budget read %s: the step exited %d, want 0" % (mode, done.returncode))
+                self.assertEqual(annotations(done, "::error::"), [], "budget read %s: the step printed an ::error:: line" % mode)
+                lines = (done.stdout + done.stderr).splitlines()
+                self.assertTrue(any("unknown" in line.lower() for line in lines),
+                                "budget read %s: no line says unknown" % mode)
+
+    def test_reserve_home_is_the_ruling_value(self):
+        # The workflow reads the reserve from the sweep's constant. This case holds the one 300, and the constant must equal it.
+        self.assertEqual(getattr(sweep_module(), "BUDGET_RESERVE", None), RESERVE,
+                         "the sweep's BUDGET_RESERVE is missing or is not the ruling's reserve of %d" % RESERVE)
 
 
 def tearDownModule():

@@ -17,6 +17,8 @@ It prints `clean` when the workflow passes, else one line per finding: `<rule>: 
   argv         --open-head takes its value as --open-head=VALUE, so a value that starts with - is not an option
   tip          each DELETE call has a gh api read of its branch's tip earlier in the same loop, with no comment
                or quote around the read; a DELETE in a comment is no call
+  budget       the delete step reads the request budget with gh api rate_limit before its delete loop, and takes the
+               reserve from sweep.py (--budget-reserve), never an inline number; a read in a comment or an echo is no call
 pin, checkout and timeout are ci-hygiene rules (skills/ci-hygiene, steps 7 to 9).
 
 GitHub does not evaluate an expression in a YAML comment. It does evaluate one in a quoted value, a plain value, or a
@@ -76,6 +78,8 @@ jobs:
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          reserve=$(python3 actions/branch-sweep/sweep.py --budget-reserve)
+          remaining=$(gh api rate_limit --jq .resources.core.remaining)
           args=()
           while IFS= read -r head; do
             if [ -n "$head" ]; then
@@ -85,8 +89,13 @@ jobs:
           python3 actions/branch-sweep/sweep.py --repo . --default "$DEFAULT_BRANCH" "${args[@]}" > "$RUNNER_TEMP/verdicts.txt"
           while read -r verb name reason; do
             if [ "$verb" = delete ]; then
+              if [ "$remaining" -lt "$reserve" ]; then
+                echo "budget $remaining below reserve $reserve: stopped"
+                break
+              fi
               tip=$(gh api "repos/$REPO/git/ref/heads/$name" --jq .object.sha)
               gh api -X DELETE "repos/$REPO/git/refs/heads/$name"
+              remaining=$((remaining - 2))
             fi
           done < "$RUNNER_TEMP/verdicts.txt"
 """
@@ -95,6 +104,9 @@ jobs:
 TIP_LINE = '              tip=$(gh api "repos/$REPO/git/ref/heads/$name" --jq .object.sha)\n'
 DELETE_LINE = '              gh api -X DELETE "repos/$REPO/git/refs/heads/$name"\n'
 LOOP_LINE = '          while read -r verb name reason; do\n'
+BUDGET_LINE = '          remaining=$(gh api rate_limit --jq .resources.core.remaining)\n'
+RESERVE_LINE = '          reserve=$(python3 actions/branch-sweep/sweep.py --budget-reserve)\n'
+VERDICT_LOOP_END = '          done < "$RUNNER_TEMP/verdicts.txt"\n'
 
 
 def variant(old, new):
@@ -128,15 +140,17 @@ class Workflow(unittest.TestCase):
         found = [line for line in lines if line.startswith(rule + ": ")]
         self.assertTrue(found, "%s: want a %s finding, got %r" % (msg, rule, lines))
 
-    def assertTipFindingOn(self, text, line_no, msg):
-        """A tip finding on line_no. Scope first: any other rule's finding would make the fixture trip more than the
-        rule under test, so that fails before the subject does."""
+    def assertRuleFinding(self, text, rule, msg, line_no=None):
+        """A finding of one rule, on line_no when one is given. Scope first: any other rule's finding would make the
+        fixture trip more than the rule under test, so that fails before the subject does."""
         lines = self.lint(text)
         findings = [line for line in lines if line != "clean"]
-        self.assertEqual([line for line in findings if not line.startswith("tip: ")], [],
+        self.assertEqual([line for line in findings if not line.startswith(rule + ": ")], [],
                          "%s: scope: the fixture trips another rule" % msg)
-        found = [line for line in findings if line.startswith("tip: line %d: " % line_no)]
-        self.assertTrue(found, "%s: no tip finding on line %d, got %r" % (msg, line_no, lines))
+        where = "" if line_no is None else "line %d: " % line_no
+        found = [line for line in findings if line.startswith(rule + ": " + where)]
+        place = "" if line_no is None else " on line %d" % line_no
+        self.assertTrue(found, "%s: no %s finding%s, got %r" % (msg, rule, place, lines))
 
     def test_contents_write_only_is_clean(self):
         self.assertClean(GOOD, "a workflow that requests only contents is not clean")
@@ -271,7 +285,7 @@ class Workflow(unittest.TestCase):
         # The loop reads the tip of $head, then deletes $name: the read checks a branch the DELETE does not remove.
         text = variant(TIP_LINE, TIP_LINE.replace("$name", "$head"))
         delete_at = text.splitlines().index(DELETE_LINE.rstrip("\n")) + 1
-        self.assertTipFindingOn(text, delete_at, "the loop reads the tip of $head, then deletes $name")
+        self.assertRuleFinding(text, "tip", "the loop reads the tip of $head, then deletes $name", delete_at)
 
     def test_one_line_loop_after_a_block_level_read_is_flagged(self):
         # The block-level read and the DELETE both name $name, so only the one-line loop lacks its own read.
@@ -279,7 +293,7 @@ class Workflow(unittest.TestCase):
         one_line = '          for name in a b; do gh api -X DELETE "repos/$REPO/git/refs/heads/$name"; done\n'
         text = variant(LOOP_LINE, block_read + one_line + LOOP_LINE)
         at = text.splitlines().index(one_line.rstrip("\n")) + 1
-        self.assertTipFindingOn(text, at, "a one-line loop after a block-level read: its DELETE inherits the read")
+        self.assertRuleFinding(text, "tip", "a one-line loop after a block-level read: its DELETE inherits the read", at)
 
     def test_one_line_loop_with_its_own_read_is_clean(self):
         one_line = ('          for name in a b; do tip=$(gh api "repos/$REPO/git/ref/heads/$name" --jq .object.sha); '
@@ -291,6 +305,41 @@ class Workflow(unittest.TestCase):
         text = variant(TIP_LINE + DELETE_LINE,
                        '              # gh api -X DELETE "repos/$REPO/git/refs/heads/$name"\n              echo "$name"\n')
         self.assertClean(text, "a DELETE in a shell comment is no call, so it is no finding")
+
+    def test_missing_budget_read_is_flagged(self):
+        self.assertRuleFinding(variant(BUDGET_LINE, ""), "budget", "no gh api rate_limit read before the delete loop")
+
+    def test_budget_read_after_the_loop_is_flagged(self):
+        text = variant(BUDGET_LINE, "").replace(VERDICT_LOOP_END, VERDICT_LOOP_END + BUDGET_LINE)
+        self.assertRuleFinding(text, "budget", "the budget read comes after the delete loop, so the loop deletes unchecked")
+
+    def test_budget_read_only_in_a_comment_is_flagged(self):
+        self.assertRuleFinding(variant(BUDGET_LINE, "          # " + BUDGET_LINE.lstrip()), "budget",
+                               "a commented-out budget read does not run")
+
+    def test_budget_read_only_in_an_echo_string_is_flagged(self):
+        self.assertRuleFinding(variant(BUDGET_LINE, '          echo "gh api rate_limit"\n'), "budget",
+                               "a read named inside an echo string is text, not a call")
+
+    def test_lone_quote_before_the_budget_read_does_not_hide_it(self):
+        text = variant(BUDGET_LINE, "          echo don't; " + BUDGET_LINE.lstrip())
+        self.assertClean(text, "a lone quote before a real budget read on its line: the read still counts")
+
+    def test_hash_inside_quotes_does_not_hide_the_budget_read(self):
+        text = variant(BUDGET_LINE, '          echo "# not a comment"; ' + BUDGET_LINE.lstrip())
+        self.assertClean(text, "a # inside quotes is text, so the read after it on the same line still counts")
+
+    def test_budget_read_inside_a_multi_line_string_is_flagged(self):
+        text = variant(BUDGET_LINE, "          echo 'start\n" + BUDGET_LINE + "          end'\n")
+        self.assertRuleFinding(text, "budget", "a read inside a single-quoted string that spans lines is text, not a call")
+
+    def test_reserve_written_inline_is_flagged(self):
+        self.assertRuleFinding(variant(RESERVE_LINE, "          reserve=300\n"), "budget",
+                               "the reserve is an inline 300, not read from sweep.py")
+
+    def test_comparison_against_a_literal_is_flagged(self):
+        self.assertRuleFinding(variant('"$remaining" -lt "$reserve"', '"$remaining" -lt 300'), "budget",
+                               "the delete loop compares against a literal, a copy of the reserve")
 
 
 def tearDownModule():
