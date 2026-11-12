@@ -12,6 +12,10 @@ reinstalls once with the recorded installer when the tip moved, or prints one un
 or the record fails. An installer that exits non-zero prints one failure line and is not retried. A restart
 line appears only for a changed path that a new session must read again, and a local diff that cannot run
 prints a restart unknown line.
+After an installer run the hook reads the record again. A record that still names the old sha prints one line that
+the reinstall did not reach the tip, never a reinstall line. The installer gets the record's ref, and a hook input
+that no SessionStart entry fires on. At its timeout the installer gets SIGTERM before SIGKILL, and its child goes
+with it.
 The hook never names `main` itself, and it is wired once, under UserPromptSubmit.
 
 THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source clone at the recorded sha,
@@ -29,6 +33,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import unittest
@@ -51,10 +56,14 @@ REINSTALL = "claude-settings: reinstalled hooks at %s (was %s)"
 UNKNOWN = "claude-settings: install freshness unknown ("
 RESTART = "claude-settings: restart needed for:"
 RESTART_UNKNOWN = "claude-settings: restart check unknown (could not diff %s..%s)"
+NOT_REACHED = "claude-settings: reinstall did not reach %s (record at %s)"
+# A timeout case waits out the installer bound the hook has on the code under test (100 s), so its guard sits above.
+TIMEOUT_GUARD = 130
 GIT_LOCATORS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX")
 HOOK_ENV_DROP = GIT_LOCATORS + ("CLAUDE_CODE_REMOTE", "CLAUDE_CONFIG_DIR", "CLAUDE_SETTINGS_FETCH_TIMEOUT",
-                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT")
+                                "CLAUDE_SETTINGS_REF", "CLAUDE_SETTINGS_REINSTALL_TIMEOUT", "CS_HOOK_INPUT",
+                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT", "STUB_RECORD_SHA")
 HOOK_ONLY = {"hooks/config_watch.py": "pass  # tweak\n"}
 COST_TERMS = (
     ("the process starts", r"(?i)process(?:es)? starts?|python starts?|starts? (?:one|a|1) python"),
@@ -81,19 +90,41 @@ esac
 exec "$GIT_SHIM_REAL" "$@"
 '''
 
-# Stands in for install.sh: counts each run, fetches origin as the real installer does, and writes the
-# install record when STUB_WRITE_RECORD is set. When STUB_EXIT is set it exits with that code first, before
-# the fetch and the record.
+# Stands in for install.sh: counts each run, logs the CLAUDE_SETTINGS_REF and CS_HOOK_INPUT it saw, fetches origin
+# as the real installer does, and writes the install record when STUB_WRITE_RECORD is set. When STUB_EXIT is set it
+# exits with that code first, before the fetch and the record. When STUB_RECORD_SHA is set it writes that sha and
+# exits 0 with no fetch: an installer whose fetch failed while the hook's ls-remote worked.
 STUB = r'''#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd -P)
 printf '%s\n' "$*" >> "$STUB_COUNTER"
+printf 'CLAUDE_SETTINGS_REF=%s\n' "${CLAUDE_SETTINGS_REF-unset}" >> "$STUB_ENV_LOG"
+printf 'CS_HOOK_INPUT=%s\n' "${CS_HOOK_INPUT-unset}" >> "$STUB_ENV_LOG"
 [ -n "$STUB_EXIT" ] && exit "$STUB_EXIT"
-git -C "$here" fetch -q origin || exit 1
-if [ -n "$STUB_WRITE_RECORD" ]; then
-  sha=$(git -C "$here" rev-parse "origin/$STUB_REF") || exit 1
+if [ -n "$STUB_RECORD_SHA" ]; then
+  sha=$STUB_RECORD_SHA
+else
+  git -C "$here" fetch -q origin || exit 1
+  if [ -n "$STUB_WRITE_RECORD" ]; then
+    sha=$(git -C "$here" rev-parse "origin/$STUB_REF") || exit 1
+  fi
+fi
+if [ -n "$STUB_WRITE_RECORD" ] && [ -n "$sha" ]; then
   printf '{"ref": "%s", "sha": "%s", "source": "%s", "installer": "%s/install.sh"}\n' \
     "$STUB_REF" "$sha" "$here" "$here" > "$CLAUDE_CONFIG_DIR/.claude-settings-install.json"
 fi
+'''
+
+# Stands in for an install that holds the install lock when the hook stops it. Its TERM trap waits for the child it
+# started, then writes a "term" mark and releases the lock. The wait ends only once that child has exited, so a
+# "term" mark means the child was signalled too.
+HANG_STUB = r'''#!/bin/sh
+lock="$CLAUDE_CONFIG_DIR/.claude-settings-install.lock"
+( set -C; printf '%s\n' "$$" > "$lock" ) 2>/dev/null || exit 1
+sleep 300 >/dev/null 2>&1 &
+grand=$!
+printf '%s\n' "$grand" > "$STUB_GRAND"
+trap 'wait "$grand" 2>/dev/null; printf "term\n" >> "$STUB_MARK"; rm -f "$lock"; exit 143' TERM
+wait "$grand"
 '''
 
 
@@ -177,6 +208,10 @@ class Fixture:
         self.gitconfig = os.path.join(self.root, "gitconfig")
         self.counter = os.path.join(self.root, "installer-runs.txt")
         self.git_log = os.path.join(self.root, "git-calls.txt")
+        self.env_log = os.path.join(self.root, "installer-env.txt")
+        self.marks = os.path.join(self.root, "installer-marks.txt")
+        self.grand_path = os.path.join(self.root, "installer-child.pid")
+        self.lock_path = os.path.join(self.config, ".claude-settings-install.lock")
         self.record_path = os.path.join(self.config, RECORD)
         self.source = None
         self.ref = "main"
@@ -211,7 +246,8 @@ class Fixture:
                    GIT_COMMITTER_NAME="fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
         return env
 
-    def hook_env(self, cloud=True, ls_remote=None, timeout=None, diff=None, stub_exit=None):
+    def hook_env(self, cloud=True, ls_remote=None, timeout=None, diff=None, stub_exit=None, settings_ref=None,
+                 record_sha=None, reinstall_timeout=None):
         env = dict(os.environ)
         for key in HOOK_ENV_DROP:
             env.pop(key, None)
@@ -219,7 +255,8 @@ class Fixture:
                    PATH=self.shim_dir + os.pathsep + os.environ.get("PATH", ""),
                    GIT_SHIM_REAL=REAL_GIT, GIT_SHIM_LOG=self.git_log,
                    GIT_CONFIG_GLOBAL=self.gitconfig, GIT_CONFIG_NOSYSTEM="1",
-                   STUB_COUNTER=self.counter, STUB_REF=self.ref, STUB_WRITE_RECORD="1")
+                   STUB_COUNTER=self.counter, STUB_REF=self.ref, STUB_WRITE_RECORD="1",
+                   STUB_ENV_LOG=self.env_log, STUB_MARK=self.marks, STUB_GRAND=self.grand_path)
         if cloud:
             env["CLAUDE_CODE_REMOTE"] = "true"
         if ls_remote:
@@ -230,6 +267,12 @@ class Fixture:
             env["GIT_SHIM_DIFF"] = diff
         if stub_exit:
             env["STUB_EXIT"] = stub_exit
+        if settings_ref:
+            env["CLAUDE_SETTINGS_REF"] = settings_ref
+        if record_sha:
+            env["STUB_RECORD_SHA"] = record_sha
+        if reinstall_timeout:
+            env["CLAUDE_SETTINGS_REINSTALL_TIMEOUT"] = reinstall_timeout
         return env
 
     def sha(self, repo, rev):
@@ -278,18 +321,42 @@ class Fixture:
         except (OSError, ValueError, AttributeError):
             return None
 
-    def run_hook(self, **options):
-        open(self.git_log, "w", encoding="utf-8").close()  # each run's git calls start empty
-        try:
-            done = subprocess.run([sys.executable, HOOK], input=PAYLOAD, capture_output=True, text=True,
-                                  cwd=self.home, env=self.hook_env(**options), timeout=HOOK_GUARD)
-        except subprocess.TimeoutExpired:
-            return Run(None, "", "still running after %d s; stopped" % HOOK_GUARD)
-        return Run(done.returncode, done.stdout, done.stderr)
+    def run_hook(self, guard=HOOK_GUARD, **options):
+        """One hook run. The hook gets its own session and writes its output to files, so a stop at `guard`
+        seconds ends the hook and everything it started, and the stop cannot hang on a pipe a child holds."""
+        for path in (self.git_log, self.env_log):
+            open(path, "w", encoding="utf-8").close()  # each run's calls start empty
+        out_path = os.path.join(self.root, "hook-out.txt")
+        err_path = os.path.join(self.root, "hook-err.txt")
+        with open(out_path, "w", encoding="utf-8") as out, open(err_path, "w", encoding="utf-8") as err:
+            proc = subprocess.Popen([sys.executable, HOOK], stdin=subprocess.PIPE, stdout=out, stderr=err,
+                                    cwd=self.home, env=self.hook_env(**options), start_new_session=True, text=True)
+            proc.stdin.write(PAYLOAD)
+            proc.stdin.close()
+            try:
+                rc = proc.wait(timeout=guard)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+                return Run(None, read_text(out_path), "still running after %d s; stopped" % guard)
+        return Run(rc, read_text(out_path), read_text(err_path))
 
-    def run_stub(self):
+    def run_stub(self, **options):
         return subprocess.run([os.path.join(self.source, "install.sh"), "--cloud"], capture_output=True,
-                              text=True, cwd=self.home, env=self.hook_env())
+                              text=True, cwd=self.home, env=self.hook_env(**options))
+
+    def installer_env(self):
+        """The CLAUDE_SETTINGS_REF and CS_HOOK_INPUT the installer saw last, as text; "unset" where it saw none."""
+        seen = {}
+        try:
+            with open(self.env_log, encoding="utf-8") as handle:
+                for line in handle:
+                    key, _, value = line.rstrip("\n").partition("=")
+                    if key:
+                        seen[key] = value
+        except OSError:
+            pass
+        return seen
 
     def git_calls(self):
         """Each git call the last hook run made, as its argv."""
@@ -331,6 +398,39 @@ def current(name, ref="main", branches=()):
     fx.clone()
     fx.write_record(ref, fx.base)
     return fx
+
+
+def read_pid(path):
+    """The pid a stub wrote to `path`, or None."""
+    try:
+        return int(read_text(path).strip())
+    except ValueError:
+        return None
+
+
+def pid_alive(pid):
+    """True while the process runs. A zombie has stopped and waits only to be reaped, so it counts as gone."""
+    done = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
+    state = done.stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+def kill_if_alive(pid):
+    """Cleanup for a case's own child, which a failed case may leave running."""
+    if pid and pid_alive(pid):
+        os.kill(pid, signal.SIGKILL)
+
+
+def session_start_matchers():
+    """The matcher of each SessionStart entry in the repo's settings.json, "" where a group has none."""
+    with open(SETTINGS, encoding="utf-8") as handle:
+        groups = (json.load(handle).get("hooks") or {}).get("SessionStart") or []
+    return [group.get("matcher") or "" for group in groups]
+
+
+def fires(matcher, source):
+    """install.sh's rule: an empty or * matcher fires on any source, any other is an anchored regex on the source."""
+    return matcher in ("", "*") or re.fullmatch("(?:%s)" % matcher, source) is not None
 
 
 class StaleInstall(unittest.TestCase):
@@ -572,6 +672,65 @@ class StaleInstall(unittest.TestCase):
                          "git was given the lane branch name: %r" % fx.git_calls())
 
 
+    # The installer exits 0 but the record still names the old sha: no reinstall line, one line that says so.
+
+    def test_installer_exit_zero_with_the_record_at_the_old_sha_is_not_a_reinstall(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertNotEqual(fx.origin_tip("main"), old, "scope: origin did not move on")
+        run = fx.run_hook(record_sha=old)
+        self.assertEqual(fx.record_sha(), old, "scope: the installer did not leave the record at the old sha")
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "scope: want one installer run, with --cloud")
+        self.assertEqual(run.lines, [NOT_REACHED % (new[:SHORT], old[:SHORT])],
+                         "want one line that the reinstall did not reach the tip; stderr: %s" % run.tail())
+
+    # The installer's environment: the record's ref, and a hook input that no SessionStart entry fires on.
+
+    def test_installer_gets_the_record_ref_even_when_the_hook_env_names_another(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertEqual(fx.ref, "main", "scope: the record does not name main")
+        self.assertEqual(fx.hook_env(settings_ref="other")["CLAUDE_SETTINGS_REF"], "other",
+                         "scope: the hook env does not name another ref")
+        run = fx.run_hook(settings_ref="other")
+        seen = fx.installer_env().get("CLAUDE_SETTINGS_REF")
+        self.assertEqual(seen, "main",
+                         "the installer saw CLAUDE_SETTINGS_REF=%r, want the record's ref main; stderr: %s"
+                         % (seen, run.tail()))
+
+    def test_installer_gets_hook_input_that_fires_no_session_start_entry(self):
+        fx, old, new = behind(self._testMethodName)
+        matchers = session_start_matchers()
+        self.assertTrue(matchers, "scope: settings.json has no SessionStart entries to fire")
+        run = fx.run_hook()
+        raw = fx.installer_env().get("CS_HOOK_INPUT", "unset")
+        try:
+            source = json.loads(raw)["source"]
+        except (ValueError, KeyError, TypeError):
+            source = None
+        self.assertIsInstance(source, str, "the installer got no hook input with a source (CS_HOOK_INPUT is %r): "
+                              "install.sh reads the source as startup, so the startup entries run; stderr: %s"
+                              % (raw, run.tail()))
+        fired = [matcher for matcher in matchers if fires(matcher, source)]
+        self.assertEqual(fired, [], "source %r fires SessionStart entries with matchers %r" % (source, fired))
+
+    # A timeout: the installer gets SIGTERM before SIGKILL, releases its lock, and its child goes with it.
+
+    def test_timeout_sends_term_and_the_installer_releases_its_lock_and_child(self):
+        fx, old, new = behind(self._testMethodName)
+        write_file(os.path.join(fx.source, "install.sh"), HANG_STUB, mode=0o755)
+        self.assertEqual(fx.record_sha(), old, "scope: the record is not the base sha")
+        run = fx.run_hook(guard=TIMEOUT_GUARD, reinstall_timeout="1")
+        grand = read_pid(fx.grand_path)
+        self.addCleanup(kill_if_alive, grand)
+        self.assertIsNotNone(grand, "scope: the installer did not start its child; stderr: %s" % run.tail())
+        self.assertIsNotNone(run.rc, "the hook ran past %d s: the installer was not stopped at its timeout"
+                             % TIMEOUT_GUARD)
+        self.assertIn("term", read_text(fx.marks).split(),
+                      "the installer got no SIGTERM at its timeout (no TERM mark): the hook sent KILL first")
+        self.assertFalse(os.path.exists(fx.lock_path),
+                         "the install lock stayed after the timeout: the installer's TERM handler did not release it")
+        self.assertFalse(pid_alive(grand), "the installer's child survived the timeout: the group was not signalled")
+
+
 class HookFile(unittest.TestCase):
     """Static reads of the hook source and of settings.json. The behaviour cases above prove the rest."""
 
@@ -622,6 +781,22 @@ class Harness(unittest.TestCase):
         self.assertIn(fx.origin_tip("main"), done.stdout, "shim output does not carry the origin tip")
         self.assertEqual(fx.git_calls(), [["ls-remote", fx.origin, "refs/heads/main"]],
                          "shim log does not hold the one call")
+
+
+    def test_control_stub_logs_the_env_it_sees(self):
+        fx, old, new = behind(self._testMethodName)
+        done = fx.run_stub(settings_ref="other")
+        self.assertEqual(done.returncode, 0, "stub installer exited %d: %s" % (done.returncode, done.stderr.strip()))
+        seen = fx.installer_env()
+        self.assertEqual(seen.get("CLAUDE_SETTINGS_REF"), "other", "stub did not log the ref it was given: %r" % seen)
+        self.assertEqual(seen.get("CS_HOOK_INPUT"), "unset", "stub logged a hook input nobody set: %r" % seen)
+
+    def test_control_stub_writes_the_record_sha_it_is_given(self):
+        fx, old, new = behind(self._testMethodName)
+        done = fx.run_stub(record_sha=old)
+        self.assertEqual(done.returncode, 0, "stub installer exited %d: %s" % (done.returncode, done.stderr.strip()))
+        self.assertEqual(fx.record_sha(), old, "stub did not write the sha it was given")
+        self.assertNotEqual(fx.origin_tip("main"), old, "scope: origin did not move on, so the sha is not stale")
 
 
 if __name__ == "__main__":
