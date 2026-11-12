@@ -106,7 +106,8 @@ SCANNED, and writes no page.
 Cost per build: about six git processes, one read of each scanned file, one page written. No
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
-fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
+fields (id, session_status, tags) per session in the live file it already writes. The flagged-sessions row adds
+two more per session (status_bucket, updated_at) and no other read. The page-ruling row adds
 one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
@@ -180,7 +181,7 @@ ITEM_DONE_STATUSES = ("closed",)
 ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
 THREADS_MISSING_WHY = "unknown (the live file has no threads list)"
 IDLE_LANES_LINE = "lanes to archive"
-SESSION_BOARD_LINE = "session board"
+SESSION_BOARD_LINE = "flagged sessions"
 # A working session whose updated_at is older than this is silent (plan R54, step coordinator-session-board).
 SILENT_MINUTES = 60
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
@@ -652,7 +653,7 @@ def live_work(path, steps, slug=None):
 
     Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
-    "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
+    "sessions"?: [{"id", "session_status", "tags"?, "status_bucket"?, "updated_at"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
     A file with no pulls list reads unknown, so a dropped key never shows as "none". A file with no threads list stays
     valid: `threads` is None and `threadsWhy` says why, so only the thread count reads unknown (never zero) and `strays`
@@ -1607,7 +1608,7 @@ BOARD_FLAGS = {SESSION_BUCKETS[1]: "waiting for action", SESSION_BUCKETS[2]: "do
 
 
 def session_board(work, steps, slug, repo):
-    """Entries for each session of this repo that the coordinator started and that needs an act, or one
+    """Entries of the flagged sessions row: each session of this repo that the coordinator started and that needs an act, or one
     `unknown (<why>)` entry, never an empty list when a read could not run. Each entry reads
     `<session id> (<flag>; <steps or ->; <PR #n or no PR>)`, sorted.
 
@@ -1615,9 +1616,9 @@ def session_board(work, steps, slug, repo):
     and is not archived. Its flag comes from its status bucket: blocked reads `waiting for action`, completed and
     review ready read `done`, failed reads `failed`, and working reads `silent` once updated_at is more than
     SILENT_MINUTES old; a recent working session is not listed. The PR is the lowest-numbered open pull on a head
-    ref of one of its steps (lane_head_refs). The board reads only `work`, which the build already holds, so it adds
+    ref of one of its steps (lane_head_refs). The row reads only `work`, which the build already holds, so it adds
     no process, file read or session walk. A row with a missing or wrong-form bucket is skipped as idle_lanes skips
-    it; when no candidate row has a bucket name, or a working row has no zoned updated_at, the whole board reads one
+    it; when no candidate row has a bucket name, or a working row has no zoned updated_at, the whole row reads one
     unknown entry, since a silent session could hide behind the gap."""
     why = live_why(work)
     if why:
