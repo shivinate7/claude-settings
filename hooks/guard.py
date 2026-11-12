@@ -1421,8 +1421,16 @@ CAP_ASK_REASON = (
     "Rule (configuration): this write sets the agent model cap, which the owner's user settings "
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
-    "Approve it only when a model above Sonnet is wanted for this project. "
+    "Approve it only when a model above Sonnet is wanted for this project, or the cap lift's end "
+    "time shown here is the one you want. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
+)
+from shared_names import CAP_DEADLINE_FIELD  # noqa: E402  the one home of the cap-lift deadline's field name, shared with hooks/config_watch.py
+
+# The cap-lift deadline a write sets: the field, then an ISO-8601 instant. Like AGENT_CAP_ASSIGN it reads a
+# JSON pair and a shell assignment, and the last one wins.
+CAP_DEADLINE_ASSIGN = re.compile(
+    r"['\"]?" + re.escape(CAP_DEADLINE_FIELD) + r"['\"]?\s*[:=]\s*['\"]?([0-9][0-9T:.+\-Zz]*)"
 )
 
 
@@ -1543,17 +1551,19 @@ def cap_change(text: str) -> str:
     return cap_change_parts([text])
 
 
-def write_content_parts(tool_input):
+def write_content_parts(tool_input, arriving=False):
     """Return the texts a write tool would put in the file, IN THE ORDER IT APPLIES THEM.
 
     A list, never one joined blob, so `cap_change_parts` can tell the value an edit leaves from the
     value it arrives at. Every edit of a `MultiEdit` is read: see the measurement beside
-    CAP_CONTENT_FIELDS.
+    CAP_CONTENT_FIELDS. `arriving` drops each `old_string`, the text an edit removes, so a reading
+    that must show only what the file will hold (`cap_deadline_end`) never shows a value being left.
     """
     if not isinstance(tool_input, dict):
         return []
+    fields = tuple(f for f in CAP_CONTENT_FIELDS if not (arriving and f == "old_string"))
     parts = []
-    for field in CAP_CONTENT_FIELDS:
+    for field in fields:
         value = tool_input.get(field, "")
         if isinstance(value, str):
             parts.append(value)
@@ -1562,11 +1572,49 @@ def write_content_parts(tool_input):
         for edit in edits:
             if not isinstance(edit, dict):
                 continue
-            for field in CAP_CONTENT_FIELDS:
+            for field in fields:
                 value = edit.get(field, "")
                 if isinstance(value, str):
                     parts.append(value)
     return parts
+
+
+def cap_deadline_end(parts) -> str:
+    """Return the end of the cap lift a write sets, as `HH:MM CST` or `CDT` in US Central, else ''.
+
+    The last deadline the parts name is the one the file will hold. A deadline that is not a readable
+    ISO-8601 instant, or one already passed, reads as '' and the write is not asked about for it:
+    `hooks/config_watch.py` revokes a lift with such a deadline, as before. The time is
+    `local_time.central_hhmm`, the one home of the Central clock (rule style-time-central-24h); no
+    date is printed, because an end is shown for a lift the owner is approving now.
+    """
+    text = ""
+    for part in parts:
+        if isinstance(part, str):
+            for found in CAP_DEADLINE_ASSIGN.finditer(part):
+                text = found.group(1)
+    if not text:
+        return ""
+    import local_time
+    from datetime import datetime, timezone
+    if text[-1:] in ("Z", "z"):
+        text = text[:-1] + "+00:00"
+    try:
+        deadline = datetime.fromisoformat(text)
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        if deadline < local_time.clock():
+            return ""
+        return local_time.central_hhmm(deadline)
+    except (ValueError, OverflowError, TypeError):
+        return ""
+
+
+def cap_with_deadline(change: str, end: str) -> str:
+    """Join the cap-lift end, when the write sets one, to the reading that the ask prints."""
+    if not end:
+        return change
+    return (change + ", " if change else "") + "cap lift ends " + end + " (US Central)"
 
 
 def cap_ask_reason(change: str, where: str) -> str:
@@ -4678,7 +4726,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # narrow, beats a bypass by a second segment.
     matched = shell_write_hit(raw, cwd, is_settings_file)
     if matched:
-        change = cap_change(raw)
+        change = cap_with_deadline(cap_change(raw), cap_deadline_end([raw]))
         if change:
             ask_command("agent-model-cap", cap_ask_reason(change, matched),
                      log_path_and_text(matched, change), "settings write")
@@ -6382,7 +6430,8 @@ def judge(payload) -> None:
         # the alternative is a value test that a crafted spelling walks past. A write that does not
         # carry the name never fires, and no other file than a settings file reaches this rule.
         if is_settings_file(target, cwd):
-            change = cap_change_parts(write_content_parts(tool_input))
+            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),
+                                       cap_deadline_end(write_content_parts(tool_input, arriving=True)))
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))

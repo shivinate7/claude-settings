@@ -11,6 +11,10 @@ from typing import Any, Optional
 # The project's own settings files, with the leading slash the guard matches a path suffix on.
 PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
 
+# The top-level field of a project settings file that holds a cap lift's deadline (decision opus-grant-expires). The
+# guard reads it to show the end in its ask, and the config watch reads it to revoke a lift at the deadline.
+CAP_DEADLINE_FIELD = "_agentCapUntil"
+
 # The one home of the claude-code-remote server name (rule agent-no-remote-tools). The guard imports it by name;
 # lint/check_agent_models.py reads it from the guard.
 REMOTE_SERVER = "mcp__claude-code-remote"

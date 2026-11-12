@@ -36,19 +36,20 @@ DECISION 7 STILL HOLDS. A project's own `.claude` files are allowed and reported
 an ordinary project config edit is re-baselined in silence. Only a change to a CAP VARIABLE is
 reverted, and only when the guard did not ask about it.
 
-THE EXPIRY. An approved lift is revoked at its deadline (decision `opus-grant-expires`, an Opus grant expires within 24 hours).
+THE EXPIRY. An approved lift is revoked at its deadline (decision `opus-grant-expires`, an Opus grant ends at the deadline the owner approves).
 
 The fix reads a second field the override file carries OUTSIDE its `env` block:
 `_agentCapUntil`, an ISO-8601 instant. It sits outside `env` for two reasons. A key inside
 `env` is exported into every agent's shell, which an expiry timestamp has no business being.
 And a key inside `env` is read by `guard.AGENT_CAP_KEY`, which would turn a plain expiry write
-into a second cap-change ask the field is not one. The guard's PreToolUse ask never sees this field,
-and only this watch reads it. See decision `opus-grant-expires` (an Opus grant expires within 24 hours).
+into a second cap-change ask the field is not one. The guard's PreToolUse ask reads this field only
+to show the lift's end in US Central: a write that sets a current deadline asks under agent-model-cap,
+for any length, and a past or unreadable deadline is not asked about. Only this watch revokes on it. See decision `opus-grant-expires` (an Opus grant ends at the deadline the owner approves).
 
 An override whose current reading sets the model above Sonnet is now judged on every sweep, not
 only on the sweep that changed it, because a deadline passes with no write of its own: the file
 never changes again and only the clock moves. The deadline is bad when `_agentCapUntil` is
-missing, unparseable, already passed, or more than 24 hours ahead of now. A field written
+missing, unparseable, or already passed. The deadline has no upper limit. A field written
 INSIDE `env` by mistake reads as its own problem, not as "missing": the owner can see the
 field, so the message says where it belongs instead of pretending it is absent. A bad
 deadline is revoked the same way an unasked write is: the pre-lift content goes back, the
@@ -100,7 +101,7 @@ def _add_guard_set_dir() -> None:
 
 _add_guard_set_dir()
 
-from shared_names import PROJECT_FROZEN_FILES, config_dir  # noqa: E402  stdlib only
+from shared_names import CAP_DEADLINE_FIELD, PROJECT_FROZEN_FILES, config_dir  # noqa: E402  stdlib only
 
 # The guard is imported lazily, by `_load_guard`, so a call where nothing changed exits on the
 # stdlib alone (see `unchanged`). GUARD_UNDER_TEST points the suite at another copy of the guard,
@@ -156,8 +157,8 @@ EXPIRE_MESSAGE = (
     "Guard (agent-model-cap): the agent model cap override in {where} expired. "
     "_agentCapUntil is {problem}. "
     "The pre-override content is back in place and the lifted content is kept at {kept}. "
-    "To lift the cap again, set _agentCapUntil to an ISO-8601 time no more than 24 hours "
-    "ahead, and approve the write."
+    "To lift the cap again, set _agentCapUntil to an ISO-8601 time in the future, and approve "
+    "the write. The ask shows the end in US Central."
 )
 
 EXPIRE_UNKNOWN_MESSAGE = (
@@ -362,12 +363,11 @@ def reading_text(reading) -> str:
 # keeps this watch the ONLY reader of it, so the PreToolUse ask never fires on this field alone.
 
 _MODEL_KEYS = ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
-EXPIRY_FIELD = "_agentCapUntil"
+EXPIRY_FIELD = CAP_DEADLINE_FIELD
 # The field's old name, read too until OLD_NAME_ENDS, so a deadline written before the rename still
 # counts. Delete both lines and the old name's reader on that day.
 OLD_EXPIRY_FIELD = "_subagentCapUntil"
 OLD_NAME_ENDS = "2026-11-09"
-EXPIRY_MAX_AHEAD_HOURS = 24
 
 
 # A `_FORCE` key is an on/off flag (decision `agent-model-cap`), so these values set no model.
@@ -446,13 +446,13 @@ def cap_expiry_location(content):
 
 
 def expiry_problem(content, clock=None) -> str:
-    """Return why `_agentCapUntil` fails, or '' when it names a valid, current deadline.
+    """Return why `_agentCapUntil` fails, or '' when it names a valid, current deadline of any length.
 
     `clock` lets a caller inject the instant this check reads as "now". It defaults to None,
     and a None reads the real clock, `datetime.now(timezone.utc)`, AT CALL TIME. Production
     never passes anything else, so production always reads the live clock, exactly as before
     this parameter existed. Only a test pins `clock` to a fixed instant, which is the only way
-    a fixture can sit exactly on the 24-hour boundary: `datetime.now()` called once to build
+    a fixture can sit exactly on the deadline instant: `datetime.now()` called once to build
     the fixture and once more, later, inside this function, are never the same instant, so no
     fixture could otherwise land ON the boundary rather than near it.
     """
@@ -475,8 +475,6 @@ def expiry_problem(content, clock=None) -> str:
     ahead = (deadline - clock).total_seconds()
     if ahead < 0:
         return "already passed"
-    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:
-        return "more than 24 hours ahead"
     return ""
 
 
@@ -711,7 +709,7 @@ def sweep(payload, clock=None):
 
 
 # TEST_CLOCK_ENV lets `hooks/test_config_watch.py` pin the expiry rule's clock to a fixed
-# instant, the only way a fixture can sit exactly on the 24-hour boundary (see
+# instant, the only way a fixture can sit exactly on the deadline instant (see
 # `expiry_problem`'s own docstring). Production never sets this variable, so `main` always
 # passes `clock=None` there, and `expiry_problem` always reads the live clock: the injection
 # cannot drift from what runs, because it IS what runs, absent the variable.
