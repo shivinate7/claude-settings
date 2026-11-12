@@ -376,6 +376,27 @@ class HealthMapTests(unittest.TestCase):
                 rc, out = self.check()
                 self.assert_unknown(rc, out, "no_part")
 
+    def test_33_quiet_that_is_not_true_or_false_exits_2(self):
+        # quiet is a flag. A string, a number or null is not a flag, so it must not read as false.
+        self.fixture()
+        for value in ("yes", 1, "true", None):
+            with self.subTest(quiet=repr(value)):
+                rows = rows_for(NARROW_COVERS)
+                rows[0]["quiet"] = value
+                self.write_map(rows)
+                rc, out = self.check()
+                self.assert_unknown(rc, out, "quiet must be true or false")
+
+    def test_34_quiet_true_and_false_pass(self):
+        self.fixture()
+        for value in (True, False):
+            with self.subTest(quiet=value):
+                rows = rows_for(NARROW_COVERS)
+                rows[0]["quiet"] = value
+                self.write_map(rows)
+                rc, out = self.check()
+                self.assert_clear(rc, out, 5)
+
 
 if __name__ == "__main__":
     unittest.main()
