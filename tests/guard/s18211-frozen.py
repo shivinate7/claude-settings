@@ -350,6 +350,12 @@ sh("frozen read form: git rm --cached of a frozen settings file, index only, is 
    VCS + " rm --cached " + CFG_SETTINGS, "allow", cwd=NOGIT)
 sh("frozen read form: git rm --cached of a frozen settings file, then cat of it, is allowed",
    VCS + " rm --cached " + CFG_SETTINGS + " && cat " + CFG_SETTINGS, "allow", cwd=NOGIT)
+# A `< FILE` redirect reads FILE, so the file it names is input. `git -C DIR` names the folder git works in, not
+# its subcommand, so the rm --cached after it drops only the index entry and reads as the same index-only form.
+sh("frozen read form: grep -c with the frozen settings file on stdin is allowed",
+   "grep -c rm < " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen read form: git -C a folder, then rm --cached of a frozen settings file, index only, is allowed",
+   VCS + " -C /tmp rm --cached " + CFG_SETTINGS, "allow", cwd=NOGIT)
 sh("frozen read form: a read-only test run whose GUARD_UNDER_TEST copy sits in a copy folder is allowed",
    READ_FORM_TEST_RUN, "allow", cwd=NOGIT)
 sh("frozen read form: control, sed -n read then sed -i on the same frozen settings file stays denied",
@@ -406,6 +412,27 @@ sh("frozen form: parallel running rm is refused", "parallel rm ::: " + CFG_SETTI
    cwd=NOGIT)
 sh("frozen form: su -c running rm is refused", "su -c 'rm " + CFG_SETTINGS + "'", "deny", "frozen-path",
    cwd=NOGIT)
+# A RUNNER'S TEXT IS A COMMAND. git's alias, rebase -x, submodule foreach and bisect run, sed's e command and rg's
+# --pre each run their text as a command, so the rm in it writes the frozen file. git's -c and -C options come
+# before its subcommand, so the subcommand is still the mover, and a python script handed mv may run it.
+sh("frozen form: git -c alias that runs rm is refused",
+   VCS + " -c alias.w='!rm " + CFG_SETTINGS + "' w", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git rebase -x that runs rm is refused",
+   VCS + " rebase -x 'rm " + CFG_SETTINGS + "' HEAD", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git submodule foreach that runs rm is refused",
+   VCS + " submodule foreach 'rm " + CFG_SETTINGS + "'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git bisect run of rm is refused",
+   VCS + " bisect run rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed with an e command that runs rm is refused",
+   "sed '1e rm " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: rg --pre that runs a sh -c rm is refused",
+   "rg --pre 'sh -c \"rm " + CFG_SETTINGS + "\"' x f", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: a python script handed mv of the frozen settings file is refused",
+   "python3 hooks/x.py mv " + CFG_SETTINGS + " /tmp/g.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git with two -c options before mv of the frozen settings file is refused",
+   VCS + " -c a=1 -c b=2 mv " + CFG_SETTINGS + " /tmp/g.json", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: git with -C and -c before rm of the frozen settings file is refused",
+   VCS + " -C /tmp -c a=1 rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
