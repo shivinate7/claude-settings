@@ -4,8 +4,8 @@
 # Rule resume-finished-reviewer. A SendMessage from the main session, or from an agent (a payload with agent_id, whose
 # spawn the parent's transcript holds), is refused when
 # `to` names a spawn that has finished and either ran in a worktree (the Agent input isolation worktree, or, with no
-# isolation input, the role's agent-file pin, any role: the worktree is gone once it finishes, owner ruling 409 a,
-# 2026-11-08 06:11 CST) or is a reviewer or design-reviewer,
+# isolation input, the role's agent-file pin, any role: the worktree is gone once it finishes) or is a reviewer or
+# design-reviewer,
 # whose refusal is kept with no worktree. A finished spawn with no worktree that is not a reviewer is allowed.
 # A Workflow agent has no spawn in the parent's transcript. Its run's journal, beside the transcript under
 # subagents/workflows/<runId>/, holds its started line and, once it finishes, its result line. Its meta file holds the
@@ -397,8 +397,8 @@ rf_refuse("a finished background reviewer, named by its spawn name, is refused",
           {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-finished"))
 rf_refuse("a finished foreground reviewer, named by its spawn name, is refused",
           {"to": RF_REVIEW, "message": RF_MSG}, rf_path("fg-reviewer-finished"))
-# Owner ruling 409 a (2026-11-08 06:11 CST): a finished agent is resumed by a fresh agent of the same role, so a
-# finished design-reviewer's refusal names a fresh design-reviewer, not a fresh reviewer.
+# A finished agent is resumed by a fresh agent of the same role, so a finished design-reviewer's refusal names a
+# fresh design-reviewer, not a fresh reviewer.
 rf_refuse("a finished design-reviewer, named by its spawn name, is refused, and the reason says fresh design-reviewer",
           {"to": RF_DESIGN, "message": RF_MSG}, rf_path("bg-design-reviewer-finished"),
           carries=("fresh design-reviewer", "prior report"))
@@ -412,7 +412,7 @@ rf_refuse("a reviewer that a TaskStop closed is refused",
           {"to": RF_STOPPED_AGENT, "message": RF_MSG}, rf_path("bg-reviewer-stopped"))
 rf_refuse("a foreground reviewer whose toolUseResult carries a terminal status is refused",
           {"to": RF_FOREGROUND, "message": RF_MSG}, rf_path("fg-reviewer-status-completed"))
-# Owner ruling 409 a (2026-11-08 06:11 CST): a finished agent that ran in a worktree is refused a resume, for any
+# A finished agent that ran in a worktree is refused a resume, for any
 # role, since its worktree is gone. An isolation input that is set decides. When it is absent, the role's agent file
 # decides: agents/builder.md, test-author.md and record-writer.md pin a worktree, so their spawns ran in one. Reviewers
 # are refused whatever their isolation.
@@ -561,7 +561,7 @@ rf_ask("a reviewer whose finish notice says it is still running asks",
 
 
 # A `to` in the `name [ref]` form, which SendMessage writes when a name is ambiguous. The ref is the first eight hex of
-# the agent id, so `rev [a5eb5d25]` names the spawn `rev` that holds that id. The bare-name cases are controls: they
+# the agent id, so `rev [<ref>]` names the spawn `rev` that holds that id. The bare-name cases are controls: they
 # show the fixture reads as finished and as running, so each ref case turns on its ref alone.
 rf_refuse("name [ref] form: a finished reviewer named rev is refused by its bare name (control)",
           {"to": RF_REV, "message": RF_MSG}, rf_path("bg-rev-finished"))
