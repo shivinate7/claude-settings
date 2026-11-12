@@ -33,10 +33,10 @@
 # back), runs `sim-lease take --device <role> --for-udid <its UDID> --pid $$`. That grants the slot whose SLOT_UDID is that
 # UDID, under the queue, the holder and the pro/duo exclusion, with no load limit, and the run holds it for the whole run
 # or hold, then gives it back on every exit, INT and TERM too. It waits in the queue like an own-boot take, up to
-# SIM_LEASE_WAIT. A slot held by another live holder past that wait (coordinator ruling, 2026-11-08 12:37 CST): exit 1, boots
+# SIM_LEASE_WAIT. A slot held by another live holder past that wait: exit 1, boots
 # and runs nothing, and sim-lease's one stderr line names the holder's pid and session. A reused device in no slot of its
 # role (sim-lease exits 2), or a take that prints none (CI): that one stderr line from sim-lease, and the run goes on
-# with no lease (lane picks, 2026-11-08 12:36 CST).
+# with no lease (decision sim-test-is-the-one-boot-path).
 # Hold (--hold, no xcodebuild): takes the lock and a device as above, prints `sim-test: holding <UDID> as pid <PID> for
 # <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lock is held for all of
 # it, ruling 1 of decision sim-test-is-the-one-boot-path). With `-- CMD`, CMD runs as its child; the exit code is CMD's,
