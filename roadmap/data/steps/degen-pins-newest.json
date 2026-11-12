@@ -1,0 +1,14 @@
+{
+ "id": "degen-pins-newest",
+ "title": "Move degen's pinned versions to the newest that pass",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective audit of stands item 569 (coordinator 12:59 CST Nov 12): the pick to keep degen's pins was wrong under rule verification-newest-that-passes.",
+ "source": "coordinator 12:59 CST Nov 12",
+ "note": "Which pins is unknown; the pick names none. Read degen's pins, read each changelog, move each to the newest that passes its checks, and pin back with a reason any that break. Degen repo work: its own triage or runner.",
+ "updatedAt": "2026-11-12T13:03:27-06:00"
+}

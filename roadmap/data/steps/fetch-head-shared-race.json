@@ -1,0 +1,14 @@
+{
+ "id": "fetch-head-shared-race",
+ "title": "Refuse a FETCH_HEAD read the same command did not fetch",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 12:57 CST Nov 12, on the retrospective's FETCH_HEAD slip: \"doesnt this soundl ike something that may happen often and ought to be fixed?\"",
+ "source": "retrospective 12:59 CST Nov 12",
+ "note": "Incident 12:41-12:52 CST: two read-only audit agents shared one checkout and read `git show FETCH_HEAD:...`; the other agent's fetch moved FETCH_HEAD between a fetch and a read, and PR #2745 got one wrong read. Reach: 42 FETCH_HEAD uses in one transcript; rule parallelism-each-own-checkout lets read-only agents share a checkout. Fix: (1) a Bash guard refuses a FETCH_HEAD read unless the same command fetched it; its remedy names `git fetch origin <b>:refs/remotes/origin/<b>` then a read of origin/<b>; (2) brief templates and skills read named refs; (3) check merge/merge.py:722 (reads a commit message from FETCH_HEAD) and move it to the fetched sha if it can race. Red first. File as a debt with its decision (rule building-mistake-names-its-guard).",
+ "updatedAt": "2026-11-12T13:03:27-06:00"
+}

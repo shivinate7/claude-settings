@@ -1,0 +1,14 @@
+{
+ "id": "base-hash-on-base",
+ "title": "A base hash must be on the base branch, not older than the merge base",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKyrMqGGt4eRzJmrKwn",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective audit of stands item 571 (relayed by the coordinator 12:59 CST Nov 12): the pick on PR #2826 was wrong.",
+ "source": "coordinator 12:59 CST Nov 12",
+ "note": "The hash must be on the base branch and not older than the merge base. Runner 10 holds #2826 until this lands.",
+ "updatedAt": "2026-11-12T13:03:27-06:00"
+}

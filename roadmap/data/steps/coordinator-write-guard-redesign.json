@@ -1,7 +1,7 @@
 {
  "id": "coordinator-write-guard-redesign",
  "title": "Rebuild the coordinator write guard on the roster, once an incident is named",
- "status": "blocked",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "later",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "A coordinator that builds skips the lane's review; the old design on branch tier-boundaries-enforced predates the roster.",
  "source": "coordinator pick 11:15 CST Nov 12, from the tier-boundaries-carry audit",
- "note": "Source: branch tier-boundaries-enforced (96cde8034), kept on origin: the coordinator write guard, the python/perl write scanner, the roles-orchestrator-never-builds rule row, and the session-tiers \"Tier guards\" section. Rebuild on the roster (G6) with the G12 build exception. Starts only once an incident since Oct 31 is named (rule building-guard-needs-incident). Phase later, no lane.",
- "updatedAt": "2026-11-12T11:19:22-06:00"
+ "note": "Source: branch tier-boundaries-enforced (96cde8034), kept on origin: the coordinator write guard, the python/perl write scanner, the roles-orchestrator-never-builds rule row, and the session-tiers \"Tier guards\" section. Rebuild on the roster (G6) with the G12 build exception. Starts only once an incident since Oct 31 is named (rule building-guard-needs-incident). Phase later, no lane. Requeued 13:00 CST Nov 12 under owner item 112 a, with no incident gate (retrospective audit of stands item 563, coordinator 12:59 CST). Lane tier-boundaries-carry keeps sed-only.",
+ "updatedAt": "2026-11-12T13:03:27-06:00"
 }
