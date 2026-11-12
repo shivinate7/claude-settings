@@ -1,0 +1,14 @@
+{
+ "id": "step-needs-recorded-source",
+ "title": "A step filed from a coordinator pick cites where the pick is recorded",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The coordinator's 07:29 CST Nov 12 \"guard alone\" pick had no record. It became lane batch-build-guard-lane-alone and PR #2738, and was withdrawn at 08:20 CST; the lane's work was lost.",
+ "source": "coordinator 09:20 CST Nov 12, from its own mistakes that day",
+ "note": "Guard. The cite is a step note, a decision or a plan line. Ready, no lane; joins the guard wave after guard-tables-per-section.",
+ "updatedAt": "2026-11-12T09:19:00-06:00"
+}
