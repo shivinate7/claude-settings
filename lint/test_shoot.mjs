@@ -597,7 +597,7 @@ test("a page shorter than one viewport: the full-page PNG is one viewport tall, 
   assert.equal(px.height, 900, "the full-page PNG of a short page is not the viewport height");
 });
 
-// ---- Touch stitch: the cases the review of the first touch build found ----
+// ---- Touch stitch: each way a tile can land wrong in a touch full-page shot ----
 // The build stitches a touch full-page shot from viewport tiles, and hides fixed and sticky elements on every
 // tile after the first. Each case reads its own shot from one shared run (building-one-home-per-capability),
 // asserts the scope (width, then height) before the claim, and reads the colour runs down column 5.
