@@ -2114,7 +2114,7 @@ def lint_steps(root, base_ref, env=None):
     return {l[len("would run"):].strip() for l in out.splitlines() if l.startswith("would run ")}
 
 def hit_suites(root, paths, skip):
-    """-> [(file, line)]: each suite line of the jobs in CHECKS_SUITE_JOBS (`checks` and its split half) in root's workflow whose
+    """-> [(file, line)]: each suite line of the jobs in CHECKS_SUITE_JOBS (`checks` and its split halves) in root's workflow whose
     source names one of `paths` (needles), except a mutation script and the steps named in `skip`. The workflow is the one
     home of which suites run, so no list is kept here. A step's `if:` is not read: the batch may have turned it on. Stop
     when the workflow, one of those jobs or a suite source cannot be read, or a hit line is not a plain suite line."""
