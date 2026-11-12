@@ -58,3 +58,4 @@ TypeScript signal, and in a project thread it never ran.
   its own entry.
 
 Kind: build
+Plan: docs/decisions/repo-typecheck-hook.md#the-ruling (all)

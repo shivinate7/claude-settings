@@ -21,6 +21,12 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:  # a hook never dies for a missing helper
+    _nowindow = subprocess
 EDIT_TOOLS = ("Write", "Edit", "MultiEdit")
 TOTAL_BUDGET = 90  # seconds that all matching entries of one edit share; the PostToolUse entry in settings.json must leave room
 REPORT_CAP = 8000  # characters of report the block reason holds, so one noisy compiler cannot flood the turn
@@ -82,7 +88,7 @@ def _command_report(root, entry, name, limit):
     if ("/" in argv[0] or "\\" in argv[0]) and not os.path.isabs(argv[0]):
         argv[0] = os.path.join(root, argv[0])  # a relative program resolves against the root on every platform
     try:
-        done = subprocess.run(argv, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        done = _nowindow.run(argv, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace",
                               timeout=min(entry["timeout"], limit))
     except (OSError, subprocess.SubprocessError):
         return None
