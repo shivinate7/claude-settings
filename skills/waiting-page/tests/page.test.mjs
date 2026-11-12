@@ -9738,6 +9738,94 @@ test("Health tab: parts in janitor/ and merge/ are counted and listed as Janitor
   assert.match(text, /launch\.py/, "the merge part is not listed");
 });
 
+// The design review's fixes. Each case names one cause. The build's row carries a `noPart` reason for a row with no covers.
+const NO_PART_ROW = { n: 1, grade: "amber", sees: "A check kept outside this repo", why: "Why it is amber", gold: null, quiet: false, mk: [], noPart: "Kept in another repo, so no file names it" };
+for (const width of [320, 1280]) {
+  test(`Health tab: a row with no_part shows its reason in the made-by cell, at ${width} wide`, async (t) => {
+    const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ rows: [NO_PART_ROW] }) }), viewport: { width, height: 800 } });
+    if (!page) return;
+    assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+    await page.click("#healthTab");
+    const cell = page.locator("#hr1 td.mk");
+    assert.equal(await cell.count(), 1, "the no_part row has no made-by cell");
+    assert.match(await cell.innerText(), /Kept in another repo/, "the made-by cell of a no_part row shows no reason");
+  });
+}
+
+test("Health tab: the read line says Measured and keeps the commit inside the disclosure", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ read: "main abc1234, Nov 11" }) }) });
+  if (!page) return;
+  await page.click("#healthTab");
+  const summary = (await page.locator("#healthRead > summary").innerText()).replace(/\s+/g, " ");
+  assert.doesNotMatch(summary, /Graded at/, "the read line still says Graded at");
+  assert.match(summary, /Measured Nov 11/, "the read line does not say Measured with the date");
+  assert.doesNotMatch(summary, /abc1234/, "the commit sits on the read line, not in the disclosure");
+  assert.match(await page.locator("#healthRead > ul").innerText(), /abc1234/, "the disclosure does not hold the commit");
+});
+
+// A repo with no health map file: the page says so, and the ask names the file and the cause once.
+const NO_MAP = healthMap({ read: null, rows: null, counts: null, coverage: null,
+  why: "unknown (docs/health-map.json does not read: [Errno 2] No such file or directory)", coverageWhy: "unknown (the map did not read)" });
+
+test("Health tab: a repo with no health map says it holds no health map yet", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: NO_MAP }) });
+  if (!page) return;
+  await page.click("#healthTab");
+  const panel = (await page.locator("#hPanel").innerText()).replace(/\s+/g, " ");
+  assert.match(panel, /holds no health map yet/, "the no-map box does not say the repo holds no health map yet");
+});
+
+test("Health tab: the copied ask names the file and the cause once", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: NO_MAP }) });
+  if (!page) return;
+  await page.evaluate(() => {
+    if (navigator.clipboard) Object.defineProperty(navigator.clipboard, "writeText", { configurable: true, value: async (s) => { window.__ask = s; } });
+  });
+  await page.click("#healthTab");
+  await page.click("#hAsk");
+  await page.waitForFunction(() => window.__ask !== undefined || !document.getElementById("hAskText").hidden);
+  const ask = await page.evaluate(() => (window.__ask !== undefined ? window.__ask : document.getElementById("hAskText").value));
+  assert.equal(ask.split("docs/health-map.json").length - 1, 1, "the ask names docs/health-map.json more than once");
+  assert.equal(ask.split("No such file or directory").length - 1, 1, "the ask gives the cause more than once");
+  assert.ok((ask.match(/could not read|does not read/g) || []).length <= 1, "the ask says could not read and does not read: the cause twice");
+});
+
+test("Health tab: at 390 wide with Designs shown, the tab bar stays on one row", async (t) => {
+  const it = mk("hd-design", 1, { designs: [{ slug: "s1", label: "Option a" }] });
+  const page = await open(t, { items: [it], designData: { s1: "<p>one</p>" }, pageHtml: withBuild({ healthMap: healthMap() }), viewport: { width: 390, height: 800 } });
+  if (!page) return;
+  assert.equal(await page.locator("#healthTab").count(), 1, "the page has no Health tab");
+  assert.equal(await page.locator("#tabD").isVisible(), true, "the Designs tab is not shown");
+  const tops = await page.evaluate(() => ["tabQ", "tabStatus", "healthTab", "tabD"].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)));
+  assert.equal(new Set(tops).size, 1, "the tab bar wraps onto two rows at 390, tops " + tops.join(", "));
+});
+
+// Parts that are janitor or merge scripts count in the total, so the sentence names them.
+const JM_COVERAGE = { total: 22, named: 20, left: { hook: [], check: [], skill: [], janitor: ["janitor/sweep.py"], merge: ["merge/launch.py"] } };
+
+test("Health tab: the coverage sentence names janitor scripts and merge scripts", async (t) => {
+  const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage: JM_COVERAGE }) }) });
+  if (!page) return;
+  await page.click("#healthTab");
+  const line = (await page.locator("#healthCover .ln").first().innerText()).replace(/\s+/g, " ");
+  assert.match(line, /hooks, checks, skills, janitor scripts and merge scripts/, "the coverage sentence does not name the janitor and merge parts");
+});
+
+for (const width of [800, 1280]) {
+  test(`Health tab: the janitor and merge labels stay on one line with their counts, at ${width} wide`, async (t) => {
+    const page = await open(t, { pageHtml: withBuild({ healthMap: healthMap({ coverage: JM_COVERAGE }) }), viewport: { width, height: 900 } });
+    if (!page) return;
+    await page.click("#healthTab");
+    await page.locator("#healthCover summary").click();
+    for (const kind of ["Janitor scripts", "Merge scripts"]) {
+      const label = page.locator("#healthCover .left > div").filter({ hasText: kind }).locator("span").first();
+      assert.equal(await label.count(), 1, kind + " has no label cell");
+      const lines = await label.evaluate((el) => { const r = document.createRange(); r.selectNodeContents(el); return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size; });
+      assert.equal(lines, 1, kind + " label wraps its count onto a second line at " + width + " wide");
+    }
+  });
+}
+
 test("Health tab: a build with no healthMap key draws no Health tab", async (t) => {
   const page = await open(t, { pageHtml: withBuild({}) });
   if (!page) return;
