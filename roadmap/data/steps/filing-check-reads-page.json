@@ -1,16 +1,17 @@
 {
- "id": "filing-check-reads-page",
- "title": "The filing check reads the page database, not the git copy",
- "status": "ready",
- "repo": "shivinate7/claude-settings",
- "phase": "now",
- "lane": "",
- "owner": "triage",
- "blockedBy": [
-  "waiting-copy-backup-only"
- ],
- "why": "Owner item 593 a (12:40 CST Nov 12): the page database is the one store; the git copy is a backup only.",
- "source": "lane waiting-route-c 13:13 CST Nov 12",
- "note": "hooks/feedback_guard.py `filed_numbers` (~line 596) reads the git copy to decide a block, a live read that step waiting-copy-backup-only flags. Until this lands, that one function is exempt by name with debt filing-check-reads-copy (lane waiting-route-c). Move it to read the page database, then drop the exemption and retire the debt. Red first.",
- "updatedAt": "2026-11-12T13:19:33-06:00"
+  "id": "filing-check-reads-page",
+  "title": "The filing check reads the page database, not the git copy",
+  "status": "ready",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "lane": "",
+  "owner": "triage",
+  "blockedBy": [
+    "waiting-copy-backup-only"
+  ],
+  "why": "Owner item 593 a (12:40 CST Nov 12): the page database is the one store; the git copy is a backup only.",
+  "source": "lane waiting-route-c 13:13 CST Nov 12",
+  "note": "hooks/feedback_guard.py `filed_numbers` (~line 596) reads the git copy to decide a block, a live read that step waiting-copy-backup-only flags. Until this lands, that one function is exempt by name with debt filing-check-reads-copy (lane waiting-route-c). Move it to read the page database, then drop the exemption and retire the debt. Red first.",
+  "updatedAt": "2026-11-12T13:19:33-06:00",
+  "order": -293
 }

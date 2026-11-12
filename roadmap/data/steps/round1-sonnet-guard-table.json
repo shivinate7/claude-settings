@@ -1,14 +1,15 @@
 {
- "id": "round1-sonnet-guard-table",
- "title": "The agent-role-model guard's table runs round 1 on Sonnet for a guard or check change",
- "status": "ready",
- "repo": "shivinate7/claude-settings",
- "phase": "now",
- "lane": "",
- "owner": "triage",
- "blockedBy": [],
- "why": "Owner R9 (item 359 a, Nov 10 15:44 CST): round 1 runs Sonnet for a guard or check change. The agent-role-model table still says round 1 reviewer = haiku and refuses a Sonnet reviewer without a Round 2/3 or Fix check marker; every guard lane pays an extra reviewer run (runner 10, #2871).",
- "source": "coordinator 13:46 CST Nov 12 (pick, reversible)",
- "note": "Fix the table to R9, red test first. Also check that the tool counting any merge.py diff as a guard change agrees with decision docs-only-prs-skip-review. Home: decision agent-model-cap. Item 359 a never reached main (R8); step model-table-one-home holds the table as one home and should cite this step.",
- "updatedAt": "2026-11-12T13:50:47-06:00"
+  "id": "round1-sonnet-guard-table",
+  "title": "The agent-role-model guard's table runs round 1 on Sonnet for a guard or check change",
+  "status": "ready",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "lane": "",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "Owner R9 (item 359 a, Nov 10 15:44 CST): round 1 runs Sonnet for a guard or check change. The agent-role-model table still says round 1 reviewer = haiku and refuses a Sonnet reviewer without a Round 2/3 or Fix check marker; every guard lane pays an extra reviewer run (runner 10, #2871).",
+  "source": "coordinator 13:46 CST Nov 12 (pick, reversible)",
+  "note": "Fix the table to R9, red test first. Also check that the tool counting any merge.py diff as a guard change agrees with decision docs-only-prs-skip-review. Home: decision agent-model-cap. Item 359 a never reached main (R8); step model-table-one-home holds the table as one home and should cite this step.",
+  "updatedAt": "2026-11-12T13:50:47-06:00",
+  "order": -296
 }

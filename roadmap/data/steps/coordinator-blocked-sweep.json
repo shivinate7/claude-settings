@@ -1,14 +1,15 @@
 {
- "id": "coordinator-blocked-sweep",
- "title": "At each wake the coordinator reads every blocked session and acts on each",
- "status": "ready",
- "repo": "shivinate7/claude-settings",
- "phase": "now",
- "lane": "",
- "owner": "triage",
- "blockedBy": [],
- "why": "Owner 14:27 CST Nov 12: \"seems a lot of sessions are waiting for you coordinator and triage to reply\". The coordinator's 14:29 CST sweep found 9 blocked sessions; 4 cleared at once.",
- "source": "owner 14:27 CST Nov 12, via coordinator 14:30 CST",
- "note": "At each wake the coordinator reads list_sessions status_bucket blocked and acts on each, or routes it to triage or the owner. Reads on demand inside the running session; starts no timer. Coordinator 14:34 CST Nov 12: held as interim rule 13 in the coordinator's handoff; a lane starts only if it needs a hook.",
- "updatedAt": "2026-11-12T14:35:44-06:00"
+  "id": "coordinator-blocked-sweep",
+  "title": "At each wake the coordinator reads every blocked session and acts on each",
+  "status": "blocked",
+  "repo": "shivinate7/claude-settings",
+  "phase": "now",
+  "lane": "",
+  "owner": "triage",
+  "blockedBy": [],
+  "why": "Owner 14:27 CST Nov 12: \"seems a lot of sessions are waiting for you coordinator and triage to reply\". The coordinator's 14:29 CST sweep found 9 blocked sessions; 4 cleared at once.",
+  "source": "owner 14:27 CST Nov 12, via coordinator 14:30 CST",
+  "note": "At each wake the coordinator reads list_sessions status_bucket blocked and acts on each, or routes it to triage or the owner. Reads on demand inside the running session; starts no timer. Coordinator 14:34 CST Nov 12: held as interim rule 13 in the coordinator's handoff; a lane starts only if it needs a hook. Batch 104 review 14:49 CST Nov 12: blocked, held as the coordinator's interim rule 13; a lane starts only if it needs a hook.",
+  "updatedAt": "2026-11-12T14:48:04-06:00",
+  "order": -300
 }
