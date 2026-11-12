@@ -97,7 +97,7 @@ Text: `OWNER_REFUSAL`. Owner ruling, 2026-11-01 23:31 CST.
 - Send the question to the page writer in the same turn it is asked.
 - The route: `send_message` to the page writer by its session id. The refusal names the writer's id when it is known. If the writer is unknown, the refusal names the waiting page: read it with `ArtifactData` get, then `send_message` the question to its writer.
 - In a repo with no waiting page, this check does not refuse. The question box counts instead.
-- Once the question is on the page (a send to the writer, or an items write), the refusal text is `PAGE_FORM_REASON`: the reply holds only the form `on the page, item N`, with no options and no question text. Read the item back from the page for its number N. It joins the other reasons last. A lane is judged first and keeps its own route. Owner ruling R18, 2026-11-10 16:57 CST (one home per answer).
+- Once the question is on the page (a send to the writer, or an items write), the refusal text is `ON_PAGE_FORM_REASON`: the reply holds only the form `on the page, item N`, with no options and no question text. Read the item back from the page for its number N. It joins the other reasons last. A lane is judged first and keeps its own route. Owner ruling R18, 2026-11-10 16:57 CST (one home per answer).
 
 ### Lane pick guard (lane sessions)
 

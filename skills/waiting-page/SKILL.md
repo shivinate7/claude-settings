@@ -261,7 +261,9 @@ the options stay only on the page. A repo with no waiting page asks in the reply
 terminal question box. The writer writes the item, and "Add an item" step 3 tells the owner where it is.
 
 - The Stop report guard (`lint/report_guard.py`) blocks a reply whose Input Needed offers a pick or
-  asks a yes/no. It passes only when the same turn sent the question to the writer or wrote a page item.
+  asks a yes/no. A lane's reply passes when the same turn sent the question to its parent or the writer.
+  In any other session, a send to the writer or a page item write passes only a reply that holds
+  `on the page, item N`, not options or a yes/no.
   The box counts only in a repo with no page. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
 - A chat answer: send the answer, with its time, to the writer. The owner's answer closes the item.
   Jot `- <id> [page] -> page:<n>` under the owner's message in the inbox; the feedback guard

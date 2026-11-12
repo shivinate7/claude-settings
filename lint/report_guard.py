@@ -889,7 +889,7 @@ LANE_REFUSAL = owner_line(
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
 # One home per answer (item 3, step page-wakes-and-relays): once an owner-facing turn sent or wrote to the page,
 # the reply names this form. A fixed string, so the Stop path finds it by equality and places it last.
-PAGE_FORM_REASON = owner_line(
+ON_PAGE_FORM_REASON = owner_line(
     "Pick guard",
     "a send or items write to the waiting page went out this turn; the form for a reply is "
     "`on the page, item N` (owner ruling, 2026-11-10 16:57 CST)")
@@ -1212,7 +1212,7 @@ def question_problem(records, turn, text, hook):
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
     One home per answer: an owner-facing turn whose send or items write put the question on the page returns
-    PAGE_FORM_REASON. The Stop path places it last. The reply may then hold only `on the page, item N`.
+    ON_PAGE_FORM_REASON. The Stop path places it last. The reply may then hold only `on the page, item N`.
     A lane is judged first and keeps its own route.
     Cost: nothing past the text check when the turn has no question. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
@@ -1235,7 +1235,7 @@ def question_problem(records, turn, text, hook):
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     if sent_to_writer:
-        return PAGE_FORM_REASON, ""
+        return ON_PAGE_FORM_REASON, ""
     root = repo_root(hook.get("cwd"))
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
@@ -1245,14 +1245,14 @@ def question_problem(records, turn, text, hook):
             # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
             delivered = delivered_tool_use_ids(records)
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
-                return PAGE_FORM_REASON, ""
+                return ON_PAGE_FORM_REASON, ""
     page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
         inp = u.get("input")
         if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
                 and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
-            return ("" if here is None else PAGE_FORM_REASON), ""
+            return ("" if here is None else ON_PAGE_FORM_REASON), ""
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
@@ -3207,7 +3207,7 @@ def main():
         pass
     # The on-the-page form joins the refusals last, so each other check's reason still opens the refusal.
     page_form = ""
-    if pick_reason == PAGE_FORM_REASON:
+    if pick_reason == ON_PAGE_FORM_REASON:
         page_form, pick_reason = pick_reason, ""
     review, review_note = "", ""
     try:
