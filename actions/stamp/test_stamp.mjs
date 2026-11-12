@@ -1760,6 +1760,37 @@ test("pending cite: --claim with a config outside the root names the base branch
     assert.equal(out.includes(".github/stamp.json"), true, `--claim names no repo-relative .github/stamp.json:\n${out}`);
   })));
 
+// With cite.scanGlobs unset, the default **/*.md reads README.md. A printed list that leaves the default
+// out stops reading README.md, so the fix must print the default with the file added.
+const SCAN_LIST = /cite\.scanGlobs[^\[\n]*(\[[^\]\n]*\])/;
+
+test("pending cite: with cite.scanGlobs unset, the printed fix keeps the default **/*.md, and applying it still rewrites README.md", () =>
+  withTempDir((root) => {
+    // undefined leaves scanGlobs out of the JSON, so the config runs on the default.
+    pendingCiteRepo(root, { scanGlobs: undefined, excludeGlobs: [] }, { "README.md": "See [[p]] for the plan.\n", [BLOCK]: BLOCK_TEXT });
+    assert.equal("scanGlobs" in JSON.parse(read(root, ".github/stamp.json")).cite, false, "scope: cite.scanGlobs must be unset");
+    assert.equal(read(root, BLOCK).split("\n")[2], "See [[p]] here.", "scope: the cite must sit on line 3 of a tracked file");
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with an unscanned pending cite:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--claim named no file and line for the unscanned cite:\n${out}`);
+    assert.equal(out.includes("README.md:"), false, `scope: README.md is scanned by default, so --claim must not refuse it:\n${out}`);
+
+    const list = SCAN_LIST.exec(out);
+    assert.ok(list, `--claim printed no cite.scanGlobs list for the fix:\n${out}`);
+    const globs = JSON.parse(list[1]);
+    assert.equal(globs.includes("**/*.md"), true, `--claim's printed list drops the default **/*.md:\n${out}`);
+    assert.equal(globs.includes(BLOCK), true, `--claim's printed list does not add ${BLOCK}:\n${out}`);
+
+    writeStampConfig(root, { scanGlobs: globs, excludeGlobs: [] });
+    commit(root, "scan what the refusal names, with the default kept");
+    const fixed = runStamp(root, ".github/stamp.json", "claim");
+    assert.equal(fixed.status, 0, `the printed list did not let --claim pass:\n${outputOf(fixed)}`);
+    assert.equal(read(root, BLOCK).split("\n")[2], "See D-002, p here.", "the named file was not rewritten");
+    assert.equal(read(root, "README.md"), "See D-002, p for the plan.\n", "README.md is no longer scanned after the printed list was applied");
+  }));
+
 // The cite scanner reads text, so the cases that break a naive scanner go in: a comment opener
 // inside a string, a multi-line template literal, and a lone quote in prose. Each cite sits outside
 // scanGlobs and must still refuse at its own line. The refusal reads a cite as the rewrite does, so
