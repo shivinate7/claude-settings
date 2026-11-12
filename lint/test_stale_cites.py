@@ -866,6 +866,26 @@ class UnknownTests(StaleCase):
         self.assertEqual(done.returncode, 0, out)
         self.assertIn("stale-cites: unknown", out)
 
+    def test_step_with_an_unresolvable_base_under_ci_is_red_and_names_the_base_sha(self):
+        """The CI twin of the case above: the same base with no shared history is red under CI, and the stale-cites
+        line is UNKNOWN and names the base's sha (decision ci-unknown-is-red)."""
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n"), change)
+        orphan = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "unrelated")
+        git(rng.repo, "update-ref", "refs/remotes/origin/main", orphan)
+        self.assertNotEqual(subprocess.run(["git", "merge-base", "origin/main", "HEAD"], cwd=rng.repo,
+                                           capture_output=True).returncode, 0,
+                            "scope: the base shares history with the head, so there is no unresolvable base")
+        env = dict(direct_step_env(rng, "true"), CI="1")
+        done = subprocess.run([sys.executable, STEP, "main"], cwd=rng.repo, env=env, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace")
+        out = done.stdout + done.stderr
+        self.assertNotEqual(done.returncode, 0, "an unresolvable base under CI exited 0, not red\n" + out)
+        self.assertRegex(out, r"(?m)^stale-cites: UNKNOWN, .*" + re.escape(orphan),
+                         "under CI the stale-cites line is not UNKNOWN naming the base sha\n" + out)
+
     def root_repo(self):
         """A full clone whose one commit is the root. Its base, HEAD~1, names nothing."""
         rng = self.tree("# Notes\n")._replace(base="HEAD~1")
