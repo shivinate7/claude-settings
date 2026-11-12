@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Checks a role handoff file: a successor must be told to watch the page, so it hears each answer.
+"""Checks a role handoff file. A writer's successor must be told to watch the page, so the writer hears each answer.
 
     python3 check_handoff.py <handoff file>
 
-A save of the waiting page wakes only a session that watches the page. A successor with no watch hears
-no answer on the items it inherits. Reason: measured incident, the owner's two test saves
-(rule building-guard-needs-incident). The check reads the `## Pages` section of the handoff
+A save of the waiting page wakes only the writer, the one session that watches the page. A successor writer with
+no watch hears no answer on the items it inherits. Reason: measured incident, the owner's two test saves
+(rule building-guard-needs-incident). Every other role never watches the page: the writer messages it of an answer.
+The writer's handoff is told from the others by the word "Triage" in its title line (`# Triage handoff, <date>`).
+The check reads the `## Pages` section of the handoff
 (templates/role-handoff.md). It needs an `Open items:` line: `none`, or the URL of the page's items
-collection. A handoff never carries item ids, which go stale after a compaction, so an id, a number or a
-placeholder is a problem, and so is a number beside the URL. It needs a `Watch:` line with a real page URL: the first http(s) URL in the value, with no `<` or `>`, and text may follow it.
-The one exception is `Watch: none` together with `Open items: none`. A `Watch:` line that is there but wrong
+collection. A handoff never carries item ids, which go stale after a compaction. An id, a number or a
+placeholder is a problem, and so is a number beside the URL. It needs a `Watch:` line. In the writer's handoff
+that line holds a real page URL: the first http(s) URL in the value, with no `<` or `>`, and text may follow it.
+The one exception is `Watch: none` together with `Open items: none`. In any other role's handoff `Watch: none` is
+allowed with open items, since that role never watches. A `Watch:` line that is there but wrong
 is a problem that quotes its value.
 Exit 0 ok, 1 a problem (each printed), 2 a bad argument or an unreadable file.
 """
@@ -22,6 +26,8 @@ PAGES = re.compile(r"^## Pages[ \t]*\n(.*?)(?=^## |\Z)", re.M | re.S)
 # `0` is none only alone: `05` and `0, 4` are ids.
 NONE = re.compile(r"(?:none\b|0(?![\w,]))", re.I)
 WATCH_NONE = re.compile(r"none\b", re.I)
+# The writer's handoff, by the word "Triage" in its first heading. Only the writer watches the page.
+WRITER_TITLE = re.compile(r"^#[ \t]+.*\bTriage\b", re.I | re.M)
 URL = re.compile(r"https?://\S+")
 # A standalone number, as `12` or `#12`, outside any URL: a copied item id.
 ID = re.compile(r"(?<!\w)#?\d+(?!\w)")
@@ -53,20 +59,23 @@ def handoff_problems(text):
         return [f'The `Open items:` line holds no items collection URL: "{items}". {HOME}']
     if not no_items and ID.search(COUNT.sub(" ", URL.sub(" ", items))):
         return [f'The `Open items:` line copies ids beside the URL: "{items}". {HOME}']
+    writer = bool(WRITER_TITLE.search(text))
     watches = WATCH.findall(pages)
     if not watches:
+        if not writer:
+            return ["No `Watch:` line in the Pages section. Add `Watch: none`: only the writer watches the page."]
         return ["No `Watch:` line in the Pages section. Add `Watch: <page URL>`, one line per page. "
-                "A successor with no watch hears no answer."]
+                "A successor writer with no watch hears no answer."]
     found = []
     valid = any(_is_url(w) for w in watches)
     for w in watches:
         if _is_url(w):
             continue
         if WATCH_NONE.match(w):
-            if no_items or valid:
+            if no_items or valid or not writer:
                 continue
             found.append("`Watch: none` is allowed only with `Open items: none`, and these items are open. "
-                         "Write the page URL on the `Watch:` line.")
+                         "The writer watches the page: write the page URL on the `Watch:` line.")
         elif not w:
             found.append("The `Watch:` line is empty. Write the page URL.")
         else:
