@@ -213,6 +213,12 @@ def export_run(when, tid="e1", verdict="same", command=EXPORT_CMD, name="Bash", 
     return [call(when, tid, name, {"command": command}), result(when + 1, tid, "\n".join(lines) + "\n", bool(exit_code))]
 
 
+def page_writer_of(records):
+    """The writer string the check reads from meta/page in these records, or None."""
+    import _transcript  # lint/ is on sys.path (see the imports above)
+    return _transcript.page_writer_id(records)
+
+
 def writer_get(when, writer, tid="m1"):
     """An ArtifactData get of meta/page and its result, which names the page writer's session."""
     return [call(when, tid, ARTIFACT_TOOL, {"action": "get", "url": PAGE_URL, "collection": "meta",
@@ -649,6 +655,39 @@ def case_n12_remote_writer_without_the_env_passes():
     expect_pass("N12", p)
 
 
+def case_n12a_cloud_writer_named_in_parentheses_blocks():
+    """The writer is stored as "Triage (<cloud id>)", the form meta/page holds. This run's env names the cloud id
+    as cse_9f, which override.remote_session_id maps to session_9f, so this session is the writer and its stale
+    page write blocks. No export run is in the transcript, so only the match can make this session the writer."""
+    writer = "Triage (session_9f)"
+    records = [owner(at(18, 50))] + page_write(at(19))
+    check("N12a scope: the writer reads back as the cloud form", page_writer_of(with_writer(records, writer)) == writer,
+          page_writer_of(with_writer(records, writer)))
+    p = run_stop("n12a", base_repo("n12a"), records, writer=writer, extra_env={REMOTE_ENV: "cse_9f"})
+    expect_block("N12a", p, (SCRIPT,))
+
+
+def case_n12b_other_cloud_id_in_parentheses_passes_with_no_note():
+    """The writer is "Triage (session_9fa)": another cloud id, which has the env's id as a prefix. An export run
+    before the write would make an unknown writer this session, so a pass here shows the writer was read and not matched."""
+    writer = "Triage (session_9fa)"
+    records = [owner(at(18, 50))] + export_run(at(18, 40), verdict="changed 1") + page_write(at(19))
+    check("N12b scope: the writer reads back as the other cloud form",
+          page_writer_of(with_writer(records, writer)) == writer, page_writer_of(with_writer(records, writer)))
+    p = run_stop("n12b", base_repo("n12b"), records, writer=writer, extra_env={REMOTE_ENV: "cse_9f"})
+    obj = expect_pass("N12b", p)
+    check("N12b: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
+def case_n12c_bare_session_id_writer_blocks_with_a_cloud_env_set():
+    """The writer is this session's bare id, and the env names another cloud id. The bare match still holds."""
+    records = [owner(at(18, 50))] + page_write(at(19))
+    check("N12c scope: the writer reads back as the bare session id",
+          page_writer_of(with_writer(records, SESSION)) == SESSION, page_writer_of(with_writer(records, SESSION)))
+    p = run_stop("n12c", base_repo("n12c"), records, writer=SESSION, extra_env={REMOTE_ENV: "cse_9f"})
+    expect_block("N12c", p, (SCRIPT,))
+
+
 def case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script():
     """The page names another writer. Earlier shell runs that only mention export_page.py do not make this
     session the writer: the grep is no export run, and the test file's name ends in export_page.py."""
@@ -771,6 +810,9 @@ CASES.extend((
     case_n10_unknown_writer_passes_with_no_note,
     case_n11_writer_named_by_the_remote_session_id_blocks,
     case_n12_remote_writer_without_the_env_passes,
+    case_n12a_cloud_writer_named_in_parentheses_blocks,
+    case_n12b_other_cloud_id_in_parentheses_passes_with_no_note,
+    case_n12c_bare_session_id_writer_blocks_with_a_cloud_env_set,
     case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
     case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
     case_n15_writer_set_of_receipts_passes,
