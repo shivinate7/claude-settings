@@ -1116,11 +1116,18 @@ class ItemCiteTests(unittest.TestCase):
 
     # the scope reads a bare item cite only in a clause that names waiting page, waiting-page or triage
     def test_icite_red_bare_page_word_in_another_clause_does_not_turn_scope_on(self):
-        self.assert_passes("Fixed the page so item 2 no longer renders twice.",
-                           "the word page names no waiting page or triage, so a bare item 2 is not read")
+        text = "Fixed the page so item 2 no longer renders twice."
+        self.assertRegex(text, r"\bpage\b", "the scope premise: the reply holds the bare word page")
+        self.assertIsNone(re.search(r"waiting[- ]page|triage", text, re.I),
+                          "the scope premise: the reply names no waiting page and no triage")
+        self.assert_passes(text, "the word page names no waiting page or triage, so a bare item 2 is not read")
 
     def test_icite_red_page_word_before_a_bare_item_does_not_turn_scope_on(self):
-        self.assert_passes("The page now shows item 3 of the brief in red.",
+        text = "The page now shows item 3 of the brief in red."
+        self.assertRegex(text, r"\bpage\b", "the scope premise: the reply holds the bare word page")
+        self.assertIsNone(re.search(r"waiting[- ]page|triage", text, re.I),
+                          "the scope premise: the reply names no waiting page and no triage")
+        self.assert_passes(text,
                            "the word page names no waiting page or triage, so a bare item 3 is not read")
 
     def test_icite_green_page_item_form_is_refused_without_a_waiting_word(self):
