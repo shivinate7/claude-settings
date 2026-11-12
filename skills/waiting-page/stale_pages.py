@@ -110,22 +110,37 @@ Awaiting mode, run by the writer at a comment wake (SKILL.md, "Read the answers"
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --awaiting <dir>
 
-<dir> holds threads.txt, the output of `ArtifactComments read` (every page, in order, concatenated), and report.md
-(the writer's report), read only when it is there. A thread starts at a `Thread <uuid>` line; its next line begins
-`open` or `resolved`. A comment row is a line at exactly two spaces, `  [<who> - <ISO time>]` (with the tool's em
-dash). A text line carries a six-space `<token>| ` prefix and never counts. A thread is awaiting when it is open and
-its last comment row does not begin `[Claude`. The tool prints no "awaiting reply" marker: awaiting means open and
-last comment not Claude's. A `  [location] <label>` row is the label.
+<dir> holds threads.txt, the output of `ArtifactComments read` (every page, in order, the first page first), and
+report.md (the writer's report), read only when it is there.
+- First page: the first non-blank line reads `<N> comment thread(s)` or `No comment threads`. Else the file is a later
+  page alone: `unknown`, exit 2. A later page carries no header and needs none.
+- A thread starts at a `Thread <uuid>` line; its next line begins `open` or `resolved`. A comment row is a line at
+  exactly two spaces, `  [<who> - <ISO time>]` (with the tool's em dash). A text line carries a six-space `<token>| `
+  prefix and never counts. A `  [location] <label>` row is the label. `[anchored at]`, `[region of]` and `[on text]`
+  rows are known tool rows and are skipped.
+- Awaiting: the thread is open and its last comment row is not exactly `Claude (via the user)`. A viewer named
+  `Claude Reyes` is a viewer. The tool prints no "awaiting reply" marker.
+- Cut line: a `[N more thread(s) not listed` line is read through when a `Thread` line follows it later in the file
+  (the next page was appended). With no `Thread` line after it, the read is cut.
+- Elided row: a `  [N comment(s) elided` row in an open thread is unknown, wherever it sits, since it may hide the
+  last comment. In a resolved thread it is skipped: a resolved thread is never awaiting.
+- Unknown row: any other two-space bracket row in an open thread is unknown.
+- Duplicate: the same thread id on two `Thread` lines (a page appended twice) prints
+  `unknown: thread <id8> appears twice`. The thread is listed once, from its first block.
+- A cut read, an unknown row, a duplicate, a missing or empty threads.txt, an open thread with no comment rows, or a
+  thread with no open or resolved status prints `unknown: <what>` and exits 2, with no report check.
 Without report.md, one line per awaiting thread in file order, then exit 1:
 `thread-awaiting <first 8 chars of id> (last comment <time>, <location or "no location">)`. With none,
-`awaiting: clean` and exit 0 (a threads.txt with no thread is clean). A cut or unreadable read is never clean: a
-`  [N comments elided` row, a `[N more threads not listed` line, a missing or empty threads.txt, an open thread with no
-comment rows or a thread with no open or resolved status prints `unknown: <what>` and exits 2, with no report check.
+`awaiting: clean` and exit 0 (a first page with no thread is clean).
 With report.md the mode prints report lines only, never the thread-awaiting lines. The text between the bold
-`Input Needed` label and the next bold Done, Deviations or Next label must hold each awaiting id8, and a line
-`Awaiting reply: N` must give the count (also when N is 0). `report-missing <id8>` names each omitted thread;
-`report-count <found or none> expected <N>` names a wrong or absent count; exit 1. All right:
-`awaiting-report: ok (N listed)`, exit 0. The incident: an owner thread waited 37 h for a reply.
+`Input Needed` label and the next bold Done, Deviations or Next label must hold each awaiting id8. An id that sits
+only on the count line, as in `Awaiting reply: 1 (<id8>)`, counts as named, since that line is in the section.
+A count line must give the count (also when N is 0): `Awaiting reply: N` at the line start, after an optional `> `,
+`- ` and `**`, with an optional `**` after the colon and any text after N. So `> - Awaiting reply: 1`,
+`**Awaiting reply:** 1` and `**Awaiting reply: 1**` all count; `Awaiting reply: none` is no count.
+`report-missing <id8>` names each omitted thread; `report-count <found or none> expected <N>` names a wrong or absent
+count; exit 1. All right: `awaiting-report: ok (N listed)`, exit 0. The incident: an owner thread waited 37 h for a
+reply.
 Cost: one python process, reads 2 files, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
@@ -820,30 +835,36 @@ def unread_mode(argv):
 AWAITING_ROW = re.compile(r"  \[(?P<who>.+) — (?P<at>\d{4}-\d\d-\d\dT\S+)\]")  # exactly two spaces: a text line has six
 AWAITING_ELIDED = re.compile(r"  \[\d+ comments? elided")
 AWAITING_BRACKET = re.compile(r"  \[")  # any two-space bracket row; a shape that is not a comment row or a known header row is unknown
-AWAITING_HEADER_ROW = re.compile(r"  \[(?:location|anchored at|region of)\]")
+AWAITING_HEADER_ROW = re.compile(r"  \[(?:location|anchored at|region of|on text)\]")
 AWAITING_CUT = re.compile(r"\[\d+ more threads? not listed")
-AWAITING_FIRST_PAGE = re.compile(r"\d+ comment threads? \(")
+AWAITING_FIRST_PAGE = re.compile(r"(?:\d+|No) comment threads?\b")
 AWAITING_CLAUDE = "Claude (via the user)"  # the tool's one label for Claude's comment; a viewer named Claude Reyes is not it
 AWAITING_END_LABELS = ("Done", "Deviations", "Next")  # the bold labels that end the Input Needed section
 AWAITING_LABEL = re.compile(r"\*\*(?P<name>Input Needed|%s):?\*\*:?" % "|".join(AWAITING_END_LABELS))
-AWAITING_COUNT = re.compile(r"Awaiting reply: (\d+)")
+AWAITING_COUNT = re.compile(r"(?:> )?(?:- )?(?:\*\*)?Awaiting reply:(?:\*\*)? (\d+)\b")
 
 
 def awaiting_threads(text):
     """Parses threads.txt. Returns (threads, unknown): each thread is a dict of id, status, rows (who, at) and location."""
-    threads, unknown, cur = [], [], None
+    threads, unknown, cur, cuts, last_head, seen = [], [], None, [], -1, set()
     lines = [line.rstrip() for line in text.splitlines()]  # a trailing space must not hide a header or a row
     for i, line in enumerate(lines):
         head = re.fullmatch(r"Thread (\S+)", line)
         if head:
+            last_head = i
             status = lines[i + 1].strip() if i + 1 < len(lines) else ""
             cur = {"id": head.group(1), "rows": [], "location": None,
                    "status": "open" if status.startswith("open") else "resolved" if status.startswith("resolved") else None}
+            if cur["id"] in seen:
+                # A page appended twice: its rows go to a copy that is never listed, so no thread is named twice.
+                unknown.append("unknown: thread %s appears twice" % cur["id"][:8])
+                continue
+            seen.add(cur["id"])
             threads.append(cur)
             if cur["status"] is None:
                 unknown.append("unknown: thread %s has no open or resolved status line" % cur["id"][:8])
         elif AWAITING_CUT.match(line):
-            unknown.append("unknown: the read is cut (%s)" % line[:60])
+            cuts.append((i, line))
             cur = None
         elif cur is not None:
             row = AWAITING_ROW.fullmatch(line)
@@ -855,6 +876,8 @@ def awaiting_threads(text):
                 # A resolved thread cannot be awaiting, so a row it hides is no cut. An open thread's elided row may hide the last comment.
                 what = "has elided comments" if AWAITING_ELIDED.match(line) else "has a row of an unknown shape (%s)" % line[:40]
                 unknown.append("unknown: thread %s %s" % (cur["id"][:8], what))
+    # A cut line is read through when a later page's thread block follows it; with none after it, the list is cut.
+    unknown += ["unknown: the read is cut (%s)" % line[:60] for i, line in cuts if i > last_head]
     for t in threads:
         if t["status"] == "open" and not t["rows"] and not any(t["id"][:8] in u for u in unknown):
             unknown.append("unknown: open thread %s has no comment rows" % t["id"][:8])
@@ -886,7 +909,7 @@ def awaiting_report(report, waiting):
     lines = [re.sub(r"^\s*>[ \t]?", "", line).rstrip() for line in report.splitlines()]  # a blockquote marker and trailing space are no part of a line
     body = awaiting_input_needed(lines)
     out = ["report-missing " + t for t in waiting if not re.search(r"(?<![0-9a-f])%s(?![0-9a-f])" % t, body)]
-    counts = [m.group(1) for m in map(AWAITING_COUNT.fullmatch, lines) if m]
+    counts = [m.group(1) for m in map(AWAITING_COUNT.match, lines) if m]
     wrong = [c for c in counts if int(c) != len(waiting)]
     if not counts or wrong:
         out.append("report-count %s expected %d" % (wrong[0] if wrong else "none", len(waiting)))
