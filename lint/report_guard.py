@@ -767,8 +767,7 @@ TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
 _AS = "as"
 PRE_LEAD_RE = re.compile(
     r"\b(?:%s)\b|\b%s\b(?!\s+well\b)" % (
-        "|".join(w for w in _clause.JOINERS + _clause.REASON_LINKS + _clause.SUBORDINATORS + _clause.RELATIVES
-                 if w != _AS), _AS), re.I)
+        "|".join(w for w in _clause.LEAD_INS if w != _AS), _AS), re.I)
 MAIN_RUN_RE = re.compile(
     r"\bon\s+{b}\s+(?:at\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)

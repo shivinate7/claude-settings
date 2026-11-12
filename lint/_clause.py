@@ -1,7 +1,7 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, SUBORDINATORS, RELATIVES, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, CANNOT_FORMS, CHECK_WORDS,
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, SUBORDINATORS, RELATIVES, LEAD_INS, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, CANNOT_FORMS, CHECK_WORDS,
 STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, SPEECH_VERBS, CALL_SUBJECTS) and for the words that
 name the writer (WRITER_BEFORE_RE, FROM_HERE_RE and the lead-ins and subject words that own_subject reads). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
@@ -10,8 +10,9 @@ in step with the text.
 sentences(text, mask) -> [(start, end)]: the spans tile the text and each keeps its terminator. `mask` holds one bool per
 character, True inside a code span or a quote: the parser reads those characters as blanks and reads no quote itself.
 clauses(sentence, mask) -> [Clause]: a clause ends at ; : ! ? a dash, a period, a comma, or a but or because, and the word that
-opens it (and, but, or, so, yet, then, because) is its `join`. A period ends a clause when whitespace or the end follows it, and also in
-"main.The" (a lowercase letter, the period, a capital and a lowercase letter); a dot inside a token ends none. `lead` and `term` are the separators before and after it;
+opens it (and, but, or, so, yet, then, because) is its `join`. A period ends a clause when whitespace or the end follows it, or
+when a determiner or a pronoun follows it ("main.The", "main.I"), or a digit follows a word of letters ("it.2"); a dot inside a
+token ends none (Console.WriteLine). `lead` and `term` are the separators before and after it;
 `lead_at` and `lead_end` are where the separator before it starts and ends; `hard_end` is where the nearest hard stop (. ; : ! ? a dash) at or
 after its start sits, and `sent_end` the nearest of . ; : ! ? (a dot inside a token counts); all are offsets into the
 sentence. A clause's other fields are read from its words alone. The helpers below the clauses (conditional,
@@ -34,6 +35,7 @@ DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their
 JOINERS = ("and", "but", "or", "so", "yet", "then")
 SUBORDINATORS = ("since", "as", "while", "although", "though")  # open a clause whose subject follows
 RELATIVES = ("which",)  # open a clause whose subject is the noun before them
+LEAD_INS = JOINERS + REASON_LINKS + SUBORDINATORS + RELATIVES  # the words lead_opens_clause reads
 PREPOSITIONS = ("for", "of", "in", "on", "to", "from", "with", "about", "against", "at", "by", "per")
 _BE_NT_FORMS = ("isn't", "aren't", "wasn't", "weren't")  # every be-form with n't
 VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", "can", "cannot") + _BE_NT_FORMS + (
@@ -125,10 +127,13 @@ def _lemma(word):
 
 
 _WORD = re.compile(r"\w+(?:['’]\w+)*(?:-\w+)*")
-# A period ends a clause when whitespace or the end follows it, or when a capital then a lowercase letter follows a lowercase
-# letter ("main.The"). A dot inside a token (report_guard.py, v1.2, api.github.com) ends none.
-# The capitals are case-sensitive inside the case-folded patterns that read it.
-_PERIOD = r"\.(?!\w)|(?-i:(?<=[a-z])\.(?=[A-Z][a-z]))"
+# A period ends a clause when whitespace or the end follows it. A glued period ends one when a determiner or a pronoun follows
+# it and a space or an apostrophe follows the word ("main.The failure", "`main`.I think"), or a digit follows a token of
+# letters only ("it.2"). A dot inside a token (report_guard.py, v1.2, api.github.com, Console.WriteLine, error.log.1, re.I)
+# ends none. "I" counts only as a capital, and no other one-letter word counts, so libfoo.a and foo.i end none.
+_AFTER_DOT = "|".join([w for w in DETERMINERS + _PRONOUNS if len(w) > 1] + ["(?-i:I)"])
+_LETTERS_ONLY = "|".join(r"(?<=[^\W\d_]{%d})(?<![\w.][^\W\d_]{%d})" % (n, n) for n in range(1, 13))
+_PERIOD = r"\.(?!\w)|\.(?=(?:%s)[\s'’])|(?:%s)\.(?=\d)" % (_AFTER_DOT, _LETTERS_ONLY)
 _BOUND = re.compile(r"(\s-{1,2}\s)|([;:!?—–]|%s)|(,)|\b(but|because)\b" % _PERIOD, re.I)
 _STOP_ANY = re.compile(r"[.;:!?]")
 _REASON_STOP = re.compile(r"[;:!?]|%s" % _PERIOD)  # a dot inside a token (package.json) ends no reason
@@ -277,24 +282,35 @@ def opens_with_joiner(text):
     return bool(hit) and hit.group(1).lower() in JOINERS
 
 
-def _group_word(word):
-    """True when `word` opens a verb group: a modal, a form of be, have or do, a negator, or a participle."""
-    return (word in _MODALS or word in _BE or word in _HAVE or word in _DO or word in NEGATORS or word == "to"
-            or word.endswith("n't") or _is_participle(word))
+_SUBJECT_WORDS = _PRONOUNS + DETERMINERS
+
+
+def _opens_with_subject(tokens):
+    """True when `tokens` open with a pronoun or a determiner. "that" counts only when no pronoun or determiner follows it:
+    "that test fails" opens with a subject, "that the failure is" opens with a complementizer."""
+    if tokens[:1] == ["that"]:
+        return len(tokens) > 1 and tokens[1] not in _SUBJECT_WORDS
+    return bool(tokens) and tokens[0] in _SUBJECT_WORDS
 
 
 def lead_opens_clause(lead, after):
     """True when the lead-in word `lead` (JOINERS, REASON_LINKS, SUBORDINATORS or RELATIVES) opens a clause of its own, `after`
     being the text of its clause that follows it. Two lead-ins double as other words, so the words after them decide.
-    "yet" is an adverb in a verb group ("not yet confirmed", "have yet to", "not yet been shown"): the word after it, past
-    any adverb, opens a verb group. "as" is a preposition when no verb follows it ("confirmed as pre-existing"), and
-    opens a clause ("as it is pre-existing") when one does. Every other lead-in opens a clause."""
-    nxt = words(strip_adverbs(after))[:1]
-    if lead.lower() == "yet":
-        return not (nxt and _group_word(nxt[0]))
-    if lead.lower() == "as":
-        return any(_group_word(w) and w != "to" for w in words(after))
-    return True
+    "yet" joins two clauses only when a subject follows it ("yet the failure is"); otherwise it is an adverb ("not yet
+    known", "cannot yet say", "no proof yet that"). "as" opens a clause when a pronoun follows it ("as it also fails"), or
+    when a verb follows in its words up to the next lead-in ("as the failure seems"); before yet, being or well, or with no
+    verb ("confirmed as pre-existing and"), it is no lead-in. Every other lead-in opens a clause."""
+    word = lead.lower()
+    if word == "yet":
+        return _opens_with_subject(words(strip_adverbs(after.lstrip())))
+    if word != "as":
+        return True
+    tokens = words(after)
+    if not tokens or tokens[0] in ("yet", "being", "well"):
+        return False
+    tokens = words(strip_adverbs(after.lstrip()))
+    window = tokens[:next((k for k, w in enumerate(tokens) if w in LEAD_INS), len(tokens))]
+    return bool(window) and (window[0] in _PRONOUNS or any(_starts_group(w, k) for k, w in enumerate(window) if k))
 
 
 def strip_adverbs(text):
