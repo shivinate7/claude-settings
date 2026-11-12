@@ -125,6 +125,33 @@ LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a spaced --re
 LOG_CHECKS_EXTRA.append(("merge: merge_call_of reads the repo from a --repo=<repo> flag after the verb",
                          merge_repo_equals_check))
 
+# ---- draft-pr: an unclosed quote in a PowerShell here-string command leaves no guard-crash line. Each run's log holds
+# none; the verdicts are the sh() cases in the draft-pr section.
+def draft_here_string_no_crash_case():
+    """No run of the unclosed-quote here-string commands logs a guard-crash line."""
+    for name, command in (("the iex-run body", DRAFT_CRASH_CMD), ("the control with a later delete", UNCLOSED_THEN_DELETE),
+                          ("the unclosed quote in a pipe stage", UNCLOSED_PIPE_CMD)):
+        folder = os.path.join(ROOT, "draft-here-crash")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "guard.log")
+        if os.path.exists(path):
+            os.remove(path)
+        decide({"raw": None, "tool": "PowerShell", "cwd": NOGIT, "session": None, "env_path": None,
+                "config": folder, "tool_input": {"command": command}})
+        rows = []
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                rows = handle.read().splitlines()
+        for row in rows:
+            fields = row.split("\t")
+            if fields[2:4] == ["crash", "guard-crash"]:
+                return False, "%s crashed the guard: %s" % (name, fields[4][:100])
+    return True, "no guard-crash line for the iex-run body, the control or the pipe stage"
+
+
+LOG_CHECKS_EXTRA.append(("draft-pr: an unclosed quote ahead of a PowerShell here-string logs no guard-crash line",
+                         draft_here_string_no_crash_case))
+
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
 # impeccable check does. Both register here, where LOG_CHECKS_EXTRA exists, under this family.
