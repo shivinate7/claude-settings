@@ -27,10 +27,10 @@ OJ_OPTIONS = [
      "gain": "The lint job gets faster.", "lose": "The test job runs longer."}]
 
 
-def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, departs=QD_LINE):
-    """The context of a decision: the form lines, the Departs from line, then the prose. A line passed as None or
-    empty is left out."""
-    return "\n".join(line for line in (goal, problem, *based, departs, tail) if line)
+def oj_ctx(goal=OJ_GOAL, problem=OJ_STAKE, based=(OJ_BASED,), tail=OJ_CTX, departs=QD_LINE, against=OJ_AGAINST):
+    """The context of a decision: the form lines, the Departs from line, the Against the pick line, then the prose.
+    A line passed as None or empty is left out."""
+    return "\n".join(line for line in (goal, problem, *based, departs, against, tail) if line)
 
 
 OJ_GOOD = oj_ctx()
