@@ -5988,8 +5988,8 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
                 if SCRATCHPAD_WORD in dest and under_session_scratchpad(dest, session):
                     if dest not in files:
                         files.append(dest)
+                    removed.discard(dest)   # written here, though a later `mv` names it as its source
                     if verb == "mv":
-                        removed.discard(dest)
                         moved[dest] = source
     except Exception:
         pass   # a file that cannot be read is not judged and not recorded, never a failed call
@@ -6007,11 +6007,19 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     other rules passed."""
     agent, session, files, removed, moved = scratchpad_writes(payload, tool, tool_input, cwd)
     after = {}   # the writer each recorded file gets, read before any record changes
-    for full in files:
+
+    def writer_after(full, seen=()):
+        # A source this same call writes (`cat > x.tmp <<EOF && mv x.tmp x.py`) has no record yet: the call's own
+        # writer carries over, or the one its own source gets (`cp a b && mv b c`).
         if full in moved and under_session_scratchpad(moved[full], session):
-            after[full] = scratchpad_writer_of(moved[full], session)
-        else:
-            after[full] = agent
+            source = moved[full]
+            if source not in files or source in removed:   # a removed source is only moved: its record stays
+                return scratchpad_writer_of(source, session)
+            return agent if source in seen else writer_after(source, seen + (full,))
+        return agent
+
+    for full in files:
+        after[full] = writer_after(full)
     if not agent:
         for full in files:
             if full in moved and under_session_scratchpad(moved[full], session):
@@ -6089,9 +6097,10 @@ SCRATCHPAD_FILES_ANYWHERE = ("pytest", "py.test")
 
 
 def scratchpad_files_start(name, args):
-    """The index in `args` from which every plain argument may be a file the runner runs, else None: from the
+    """The index in `args` from which a plain argument may be a file the runner runs, else None: from the
     start for pytest, past the verb for `uv run`, `bun run`, `deno run` and `npx tsx`, past the module for
-    `python -m pytest`."""
+    `python -m pytest`. The caller judges every plain argument after it, except for a verb runner, where only
+    the first one is the run (`scratchpad_script`)."""
     if name in SCRATCHPAD_FILES_ANYWHERE:
         return 0
     for at, arg in enumerate(args):
@@ -6102,12 +6111,30 @@ def scratchpad_files_start(name, args):
     return None
 
 
+def scratchpad_verb_run(args):
+    """The plain words of `args` (the words after a runner's verb) that may be the file it runs: up to and
+    including the first one that no flag stands directly before. A plain word right after a flag may be that
+    flag's value (`uv run --with x F`), so the next is judged too; a word after a plain one is an argument of the
+    command that runs (`uv run ruff check F`, F is ruff's). A flag with no value (`uv run --no-sync F`) costs
+    nothing: its next word is judged either way. A flag with two values reads the file as an argument: a miss."""
+    found, after_flag = [], False
+    for arg in args:
+        if arg.startswith("-"):
+            after_flag = True
+            continue
+        found.append(arg)
+        if not after_flag:
+            break
+        after_flag = False
+    return found
+
+
 def scratchpad_script(word, args):
     """([the files the command `word args` runs], the file it reads its script from stdin, whether it reads its
     script from stdin). A run is an interpreter or runner word (`SCRATCHPAD_RUNNER`) with the file as its first
     plain argument (past the flags and words `workflow_script_index` reads), or the file as the command word.
     A runner that takes files anywhere in its arguments (`scratchpad_files_start`) names each plain argument
-    it has. A runner word that starts another command (`uv run python F`) is read again for that command."""
+    it has; a verb runner (`uv run`, `npx tsx`) names its first, the rest being arguments of the command it runs. A runner word that starts another command (`uv run python F`) is read again for that command."""
     name = basename(word)
     if not SCRATCHPAD_RUNNER(name):
         word = re.sub(r"^(?:\$?\()+", "", word).rstrip(")`")   # a glued group mark is no part of the path
@@ -6116,6 +6143,8 @@ def scratchpad_script(word, args):
     start = scratchpad_files_start(name, args)
     if start is not None:
         files = [arg for arg in args[start:] if not arg.startswith("-")]
+        if name in WORKFLOW_RUNNER_VERBS:
+            files = scratchpad_verb_run(args[start:])
         for at in range(start, len(args)):
             if SCRATCHPAD_RUNNER(basename(args[at])) and name in WORKFLOW_RUNNER_VERBS:
                 inner = scratchpad_script(args[at], args[at + 1:] + (["<", stdin] if stdin else []))
