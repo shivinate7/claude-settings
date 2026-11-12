@@ -12954,12 +12954,16 @@ class ExpressPath(ScopedRepo, Env):
         """origin/roadmap holds rulings/<id>.json for each id. The branch is made after co's clone, so a read that does not fetch it sees no entry."""
         self.on("roadmap", {f"roadmap/rulings/{i}.json": json.dumps({"id": i}) + "\n" for i in ids}, start="main")
 
-    def stub_scope(self, prelude):
-        """feat's ci-scope.sh is main's, with `prelude` put in after its shebang line. Only an insertion: the silent-undo check reads
-        no removed line, so the case tests the script's own exit and output, and nothing else."""
+    def stub_scope(self, prelude, branch="feat"):
+        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Only an insertion: the silent-undo
+        check reads no removed line. On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
+        script turns every flag on through main's own arm, so the head must not diff the script against main."""
         with open(SCOPE_SCRIPT, encoding="utf-8") as f:
             first, rest = f.read().split("\n", 1)
-        self.on("feat", {".github/scripts/ci-scope.sh": first + "\n" + prelude + rest})
+        self.on(branch, {".github/scripts/ci-scope.sh": first + "\n" + prelude + rest})
+        if branch == "main":
+            o = self.other
+            sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
 
     def scope_run(self):
         """Run the real ci-scope.sh that the fixture put on feat, as the express check runs it: EVENT, BASE_SHA and GITHUB_OUTPUT set,
@@ -13141,7 +13145,7 @@ class ExpressPath(ScopedRepo, Env):
     def test_a_scope_script_that_fails_is_refused_as_unknown(self):
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
-        self.stub_scope(self.FAIL_PRELUDE)
+        self.stub_scope(self.FAIL_PRELUDE, branch="main")
         rc_scope, _ = self.scope_run()
         self.assertEqual(rc_scope, 3, "the stub scope script does not fail with exit 3: exit %d" % rc_scope)
         before = self.refs()
@@ -13151,7 +13155,7 @@ class ExpressPath(ScopedRepo, Env):
     def test_a_scope_script_that_writes_nothing_is_refused_as_unknown(self):
         self.store(self.RULINGS)
         self.host.body = "Ruling: r55\n"
-        self.stub_scope(self.SILENT_PRELUDE)
+        self.stub_scope(self.SILENT_PRELUDE, branch="main")
         self.assertEqual(self.scope_run(), (0, {}), "the stub scope script does not exit 0 with no flag")
         before = self.refs()
         rc, out = self.run_express()
