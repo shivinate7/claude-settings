@@ -14,6 +14,9 @@ FAMILIES["message-time-matches-clock"] = "a send_message whose first non-blank l
 # transcript and only the first line, so the cases here need no transcript, except the one lane brief, which needs a
 # lane that lane-one-topic allows.
 MTC_RULE = "message-time-matches-clock"
+# The refusal names the now-central helper a session reads the time from, ~/.claude/bin/now-central. That path
+# is the remedy, so the rule may name its folder, as handoff-unread does. The other fragments stay forbidden.
+REASON_MAY_NAME["message-time-matches-clock"] = (".claude",)
 MTC_TOOL = "mcp__claude-code-remote__send_later"  # a tool with a message field that is not send_message
 MTC_CLOCK = "2026-11-07T13:22:00-06:00"           # 13:22 CST, the clock of most cases below
 MTC_NEXT_DAY = "2026-11-08T00:01:00-06:00"        # 00:01 CST, the clock of the midnight pair

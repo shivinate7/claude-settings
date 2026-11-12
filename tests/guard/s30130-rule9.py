@@ -234,30 +234,6 @@ add("floor: Workflow haiku after i-- divided, then a path string, is denied", "d
 FORBIDDEN_IN_A_REASON = (ENV, ROOT, slash(ROOT),"settings.json", "CLAUDE.md", "guard.py",
                          ".claude", "app.log", "sleep", "haiku", VCS + " checkout", VCS + " switch")
 
-# ONE RULE MAY NAME ITS SUBJECT, and only the fragments listed beside it. Rule 8 asks rather than
-# refuses, and the ask exists to tell an approver what is being turned on and where, so the settings
-# path is the point of the message. The exemption is keyed by RULE, never by case, so a new case
-# cannot widen it, and a fragment left off this list, `CLAUDE.md` or `guard.py`, stays forbidden in
-# rule 8's reason too.
-REASON_MAY_NAME = {
-    "agent-model-cap": (ROOT, slash(ROOT), "settings.json", ".claude"),
-    # The refusal names the handoff the session must read: under the config folder, which is ROOT here
-    # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
-    "handoff-unread": (ROOT, slash(ROOT), ".claude"),
-    # The refusal names the now-central helper a session reads the time from, ~/.claude/bin/now-central. That path
-    # is the remedy, so the rule may name its folder, as handoff-unread does. The other fragments stay forbidden.
-    "message-time-matches-clock": (".claude",),
-    # The two-worktrees-one-branch remedy names `git switch -c <new-branch> <start>`: a branch of the
-    # caller's own. The forbidden target is the held branch's checkout, not that create form. The check
-    # matches a fragment as text, so this one entry permits `git switch` as a whole in this rule's reason.
-    TWO_RULE: (VCS + " switch",),
-    # The refusal names the missing sections and may name the handoff it judges: under the config folder.
-    "handoff-sections": (ROOT, slash(ROOT), ".claude"),
-    # The refusal names the premises it refuses and their Source tokens, and may name the handoff it judges, under the
-    # config folder, as handoff-sections does.
-    "handoff-checked-stamp": (ROOT, slash(ROOT), ".claude"),
-}
-
 
 def playwright_remedy_case():
     """The playwright refusal names the real check and points nowhere else.

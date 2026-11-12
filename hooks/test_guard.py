@@ -278,6 +278,14 @@ def windows_shaped(*parts):
     return WINDOWS_SHAPE.search(text) is not None
 
 
+# ONE RULE MAY NAME ITS SUBJECT, and only the fragments listed beside it. Rule 8 asks rather than
+# refuses, and the ask exists to tell an approver what is being turned on and where, so the settings
+# path is the point of the message. The exemption is keyed by RULE, never by case, so a new case
+# cannot widen it, and a fragment left off this list, `CLAUDE.md` or `guard.py`, stays forbidden in
+# rule 8's reason too.
+REASON_MAY_NAME = {}
+
+
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
         session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,

@@ -1,5 +1,6 @@
 # section 19328
 FAMILY = "model-cap"
+REASON_MAY_NAME["agent-model-cap"] = (ROOT, slash(ROOT), "settings.json", ".claude")
 FAMILIES["model-cap"] = "the agent model cap"
 #
 # Rule 8. A project settings file overrides the owner's user settings, so a write there can lift
