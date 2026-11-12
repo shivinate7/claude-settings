@@ -39,6 +39,10 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+
 ENTRIES_LIFT_GUARDS = True  # an open entry governs the guard rules it names
 STORE_REF = "origin/roadmap"
 MAIN_REF = "origin/main"
@@ -61,8 +65,8 @@ def _git(repo_dir, args, text=None):
     """(exit code, stdout bytes) of one git start in repo_dir. The code is None when git cannot start or times out."""
     env = {key: value for key, value in os.environ.items() if key not in STRIPPED}
     try:
-        done = subprocess.run(["git", "-C", repo_dir] + list(args), input=text, capture_output=True, env=env,
-                              timeout=GIT_TIMEOUT)
+        done = _nowindow.run(["git", "-C", repo_dir] + list(args), input=text, capture_output=True, env=env,
+                             timeout=GIT_TIMEOUT)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None, b""
     return done.returncode, done.stdout
