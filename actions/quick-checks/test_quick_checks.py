@@ -139,8 +139,13 @@ class Defects(QuickChecks):
         self.assert_one_cause(root, "scripts", ["tools/tidy.py"])
 
     def test_an_unparseable_shell_script_fails_scripts_and_names_it(self):
-        root = defect_repo({"bin/run.sh": "#!/usr/bin/env bash\nif [ -n x ; then\n  echo no\nfi\n"})
+        # A missing `fi` is a parse error for bash -n and sh -n alike. A runtime-only error, such as `[ -n x ;`, passes both.
+        root = defect_repo({"bin/run.sh": "#!/usr/bin/env bash\nif true; then\n  echo no\n"})
         self.assert_one_cause(root, "scripts", ["bin/run.sh"])
+
+    def test_the_same_shell_script_with_its_fi_passes_each_check(self):
+        # The control: the defect case's script with `fi` restored. Only the missing `fi` makes the defect case fail.
+        self.assert_passes(defect_repo({"bin/run.sh": "#!/usr/bin/env bash\nif true; then\n  echo no\nfi\n"}))
 
     def test_bad_json_fails_json_and_names_its_file(self):
         root = defect_repo({"config/settings.json": '{"name": "widgets", "tags": ["a", "b",]}\n'})
