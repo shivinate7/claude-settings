@@ -165,9 +165,6 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
 
@@ -233,6 +230,11 @@ def _hooks_on_path():
 
 _hooks_on_path()
 from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
+# _transcript imports shared_names, so it loads only after _hooks_on_path has put the stamped folder first. Earlier, it
+# would bind the flat shared_names and the stamped copy would never be read.
+from _transcript import (  # noqa: E402
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
