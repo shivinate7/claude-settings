@@ -1,7 +1,7 @@
 {
  "id": "main-protection-ruleset-text",
  "title": "Decision main-branch-protection matches rulings r and c: admins are bound, and no rulesets",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL1p1k3Ekd5sFD8Seh1",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "docs/decisions/main-branch-protection.md still describes protection from before rulings r and c, so a session reading it gets the old setup.",
  "source": "coordinator 23:09 CST Nov 11; restart plan rulings r and c",
- "note": "Prose. Lane started 23:09 CST Nov 11.",
- "updatedAt": "2026-11-11T23:09:00-06:00"
+ "note": "Prose. Lane started 23:09 CST Nov 11. Done check green on main: a30edcf08, batch 95 (PR #2639, a30edcf08, merged by 04:08 CST Nov 12), with PR #2622.",
+ "updatedAt": "2026-11-12T04:09:00-06:00"
 }

@@ -1,0 +1,14 @@
+{
+ "id": "judge-flags-batch95",
+ "title": "Back or cut the lines the batch 95 prose judge flagged as unbacked",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The merge prose judge flagged .claude/CLAUDE.md:18-24 (Standing grants, from #2606), .github/pull_request_template.md:12, 15 and 17, and CLAUDE.md:54 as unbacked in batch 95 (PR #2639, a30edcf08, merged by 04:08 CST Nov 12).",
+ "source": "coordinator 04:08 CST Nov 12",
+ "note": "A prose lane backs each line with a cite or cuts it. CLAUDE.md:54 was flagged before (step batch64-prose-judge-docs). The judge also left 1552 lines UNKNOWN at its call cap (outbox note prose-judge-call-cap).",
+ "updatedAt": "2026-11-12T04:09:00-06:00"
+}
