@@ -6,11 +6,9 @@
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
+ "blockedBy": [],
  "why": "last_paragraph misses the key lines when the Claude session URL follows the attribution line, so the check can miss what it reads for.",
  "source": "coordinator 23:10 CST Nov 11, from lane pr-template-merge-lines (PR #2613)",
- "note": "Code. Seen on PR #2613.",
- "updatedAt": "2026-11-11T23:11:00-06:00"
+ "note": "Code. Seen on PR #2613. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
+ "updatedAt": "2026-11-12T07:19:00-06:00"
 }

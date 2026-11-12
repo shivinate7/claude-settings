@@ -6,11 +6,9 @@
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
+ "blockedBy": [],
  "why": "merge --batch-build let degen #584, which changes a guard or check, join a mixed batch (#643 with #616); degen's other runner then closed batch 23k (batch runner 11, reported by the coordinator 23:50 CST Nov 11).",
  "source": "coordinator 23:50 CST Nov 11, from batch runner 11",
- "note": "Code change in the merge tool; a real incident, so a step.",
- "updatedAt": "2026-11-11T23:50:00-06:00"
+ "note": "Code change in the merge tool; a real incident, so a step. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
+ "updatedAt": "2026-11-12T07:19:00-06:00"
 }

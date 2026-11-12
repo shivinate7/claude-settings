@@ -6,11 +6,9 @@
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
+ "blockedBy": [],
  "why": "The shared tables FAMILIES, LOG_CHECKS and REASON_MAY_NAME hold about 78% of past conflict hunks between guard lanes (lane test-guard-split-per-rule).",
  "source": "coordinator 06:14 CST Nov 12, from lane test-guard-split-per-rule",
- "note": "Links debt guard-split-f821-lint-gap. The split (#2635) is with batch runner 10, as a batch alone after batch 99.",
- "updatedAt": "2026-11-12T06:14:00-06:00"
+ "note": "Links debt guard-split-f821-lint-gap. The split (#2635) is with batch runner 10, as a batch alone after batch 99. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
+ "updatedAt": "2026-11-12T07:19:00-06:00"
 }

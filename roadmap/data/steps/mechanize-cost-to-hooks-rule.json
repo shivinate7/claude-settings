@@ -5,12 +5,10 @@
  "phase": "later",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
- "updatedAt": "2026-11-11T23:39:00-06:00",
+ "blockedBy": [],
+ "updatedAt": "2026-11-12T07:19:00-06:00",
  "title": "Move the mechanize-rules cost clause (137 words) from CLAUDE.md to .claude/rules/hooks.md",
  "why": "The clause on what tracking and logging may cost acts only when a session writes a hook or check, which is when .claude/rules/hooks.md loads.",
  "source": "coordinator 23:38 CST Nov 11, from lane global-claude-md-scope-audit (plan docs/plans/claude-md-scope-audit.md, draft PR #2616)",
- "note": "Paused until the owner signs it off (his 12:38 and 12:40 CST Nov 11 words: moving sections \"would need my sign off\"). No page item asks it yet: the audit keeps this section global, so the sign-off item is posted when this step is next."
+ "note": "Paused until the owner signs it off (his 12:38 and 12:40 CST Nov 11 words: moving sections \"would need my sign off\"). No page item asks it yet: the audit keeps this section global, so the sign-off item is posted when this step is next. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12)."
 }

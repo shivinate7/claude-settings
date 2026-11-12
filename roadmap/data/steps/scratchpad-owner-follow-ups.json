@@ -6,11 +6,9 @@
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
+ "blockedBy": [],
  "why": "Draft #2119 fixes three debts from #2023's review (scratchpad-owner-runners, scratchpad-owner-record-flip, scratchpad-owner-cp-mv-dest); it conflicts with main.",
  "source": "retrospective first-wave item; coordinator 22:50 CST Nov 11",
- "note": "Held until test-guard-split-per-rule lands (owner 13:51 CST Nov 11: every other ruled step starts after it). Then the first item after the split: a lane merges main into branch scratchpad-owner-follow-ups (head b255a43d6) and finishes review. Old lane session_013NEJL29GcaaeoS7a1SJYA2 is archived.",
- "updatedAt": "2026-11-11T22:52:00-06:00"
+ "note": "Held until test-guard-split-per-rule lands (owner 13:51 CST Nov 11: every other ruled step starts after it). Then the first item after the split: a lane merges main into branch scratchpad-owner-follow-ups (head b255a43d6) and finishes review. Old lane session_013NEJL29GcaaeoS7a1SJYA2 is archived. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
+ "updatedAt": "2026-11-12T07:19:00-06:00"
 }

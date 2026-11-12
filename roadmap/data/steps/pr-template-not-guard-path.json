@@ -6,11 +6,9 @@
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
+ "blockedBy": [],
  "why": "merge/ GUARD_PATHS lists .github/pull_request_template.md, so PR #2613, a text template, was held to the three-round guard review.",
  "source": "coordinator 23:10 CST Nov 11, from lane pr-template-merge-lines (PR #2613)",
- "note": "Code. Not folded into plan 3.8 (R9, step rounds-rules-one-record): R9 stops round 3 after a pass; this is about which files count as a guard or check at all. Fold it there if that lane rewrites GUARD_PATHS. Folded in (coordinator 23:19 CST Nov 11): the round 3 reviewer on #2613 reads .github/pull_request_template.md as not on the guard list (only .github/workflows/ is), yet `merge --review-record --guard no` was refused. One of the two is wrong; first find which, then fix that one.",
- "updatedAt": "2026-11-11T23:21:00-06:00"
+ "note": "Code. Not folded into plan 3.8 (R9, step rounds-rules-one-record): R9 stops round 3 after a pass; this is about which files count as a guard or check at all. Fold it there if that lane rewrites GUARD_PATHS. Folded in (coordinator 23:19 CST Nov 11): the round 3 reviewer on #2613 reads .github/pull_request_template.md as not on the guard list (only .github/workflows/ is), yet `merge --review-record --guard no` was refused. One of the two is wrong; first find which, then fix that one. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
+ "updatedAt": "2026-11-12T07:19:00-06:00"
 }

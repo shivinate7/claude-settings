@@ -6,11 +6,9 @@
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
+ "blockedBy": [],
  "why": "Nothing stops the two copies of the PR template from drifting apart.",
  "source": "coordinator 23:10 CST Nov 11, from lane pr-template-merge-lines (PR #2613)",
- "note": "Code. Seen on PR #2613; the lane names the two copies.",
- "updatedAt": "2026-11-11T23:11:00-06:00"
+ "note": "Code. Seen on PR #2613; the lane names the two copies. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
+ "updatedAt": "2026-11-12T07:19:00-06:00"
 }

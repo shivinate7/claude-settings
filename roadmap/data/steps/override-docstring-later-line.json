@@ -6,11 +6,9 @@
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
+ "blockedBy": [],
  "why": "The module docstring at hooks/override.py lines 17-18 still states the later-line rule that #2612 corrected in docs/decisions/owner-override.md line 30, so a reader of the code gets the old rule.",
  "source": "coordinator 23:01 CST Nov 11, from lane owner-override-later-line-text (PR #2612)",
- "note": "Code: rewrite the docstring to match the decision as #2612 leaves it.",
- "updatedAt": "2026-11-11T23:05:00-06:00"
+ "note": "Code: rewrite the docstring to match the decision as #2612 leaves it. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
+ "updatedAt": "2026-11-12T07:19:00-06:00"
 }

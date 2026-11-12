@@ -6,11 +6,9 @@
  "phase": "next",
  "lane": "",
  "owner": "triage",
- "blockedBy": [
-  "test-guard-split-per-rule"
- ],
+ "blockedBy": [],
  "why": "A builder in lane test-guard-split-per-rule deleted a scratchpad folder another agent wrote, losing that agent's work (coordinator 04:05 CST Nov 12).",
  "source": "coordinator 04:05 CST Nov 12, from lane test-guard-split-per-rule",
- "note": "A real incident, so a step. Likely home: guard rule scratchpad-owner; first check why it let this delete through (unchecked by triage). Related: steps scratchpad-owner-refuse-not-ask, scratchpad-owner-follow-ups (#2119) and scratch-folder-per-agent.",
- "updatedAt": "2026-11-12T04:06:00-06:00"
+ "note": "A real incident, so a step. Likely home: guard rule scratchpad-owner; first check why it let this delete through (unchecked by triage). Related: steps scratchpad-owner-refuse-not-ask, scratchpad-owner-follow-ups (#2119) and scratch-folder-per-agent. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
+ "updatedAt": "2026-11-12T07:19:00-06:00"
 }
