@@ -3002,6 +3002,22 @@ MUTATIONS = [
      '    if tool in SHELL_TOOLS or tool == MONITOR_TOOL:\n        command = tool_input.get("command", "") or ""\n',
      '    if tool in SHELL_TOOLS:\n        command = tool_input.get("command", "") or ""\n',
      "guard", "Monitor: reset throws the tree away, as in Bash"),
+    # ---- Monitor in the three gates that judge a shell command: the built code names SHELL_COMMAND_TOOLS (Bash,
+    # PowerShell, Monitor). Each anchor is that built line, so each is STALE until the change lands.
+    ("scratchpad-owner: the run form skips a Monitor call, so agent B's Monitor run of agent A's script is allowed",
+     '    command = str(tool_input.get("command", "") or "") if tool in SHELL_COMMAND_TOOLS else ""\n',
+     '    command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""\n',
+     "guard", "scratchpad-owner: monitor 1 agent B's Monitor run of agent A's script"),
+    ("scratchpad-owner: the write form skips a Monitor call, so agent B's Monitor redirect is allowed",
+     '        elif tool in SHELL_COMMAND_TOOLS:\n            command = str(tool_input.get("command", "") or "")\n'
+     '            if SCRATCHPAD_WORD not in command and',
+     '        elif tool in SHELL_TOOLS:\n            command = str(tool_input.get("command", "") or "")\n'
+     '            if SCRATCHPAD_WORD not in command and',
+     "guard", "scratchpad-owner: monitor 2 agent B's Monitor redirect over agent A's file"),
+    ("message-time-matches-clock: the written-value gate skips a Monitor call, so a literal 14:30 at -06:00 is allowed",
+     '    if tool in SHELL_COMMAND_TOOLS and isinstance(command, str) and "updatedAt" in command:\n',
+     '    if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:\n',
+     "guard", "message-time-matches-clock: a Monitor call with updatedAt 14:30 at -06:00 is refused"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",
