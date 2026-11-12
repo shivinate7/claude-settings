@@ -9,7 +9,9 @@ Run it from the repository root:
 WHAT IT PROVES. In a cloud session the hook reads the install record, makes at most one `git ls-remote`
 of the recorded ref, and then does one of three things: stays silent when the tip is the recorded sha,
 reinstalls once with the recorded installer when the tip moved, or prints one unknown line when the read
-or the record fails. A restart line appears only for a changed path that a new session must read again.
+or the record fails. An installer that exits non-zero prints one failure line and is not retried. A restart
+line appears only for a changed path that a new session must read again, and a local diff that cannot run
+prints a restart unknown line.
 The hook never names `main` itself, and it is wired once, under UserPromptSubmit.
 
 THE SEAM. Each fixture is a bare origin, a seed that pushes to it, and a source clone at the recorded sha,
@@ -48,10 +50,11 @@ SHORT = 7
 REINSTALL = "claude-settings: reinstalled hooks at %s (was %s)"
 UNKNOWN = "claude-settings: install freshness unknown ("
 RESTART = "claude-settings: restart needed for:"
+RESTART_UNKNOWN = "claude-settings: restart check unknown (could not diff %s..%s)"
 GIT_LOCATORS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX")
-HOOK_ENV_DROP = GIT_LOCATORS + ("CLAUDE_CODE_REMOTE", "CLAUDE_CONFIG_DIR",
-                                "CLAUDE_SETTINGS_FETCH_TIMEOUT", "GIT_SHIM_LS_REMOTE")
+HOOK_ENV_DROP = GIT_LOCATORS + ("CLAUDE_CODE_REMOTE", "CLAUDE_CONFIG_DIR", "CLAUDE_SETTINGS_FETCH_TIMEOUT",
+                                "GIT_SHIM_LS_REMOTE", "GIT_SHIM_DIFF", "STUB_EXIT")
 HOOK_ONLY = {"hooks/config_watch.py": "pass  # tweak\n"}
 COST_TERMS = (
     ("the process starts", r"(?i)process(?:es)? starts?|python starts?|starts? (?:one|a|1) python"),
@@ -61,7 +64,8 @@ COST_TERMS = (
     ("no long-lived process", r"(?i)\bno long-lived\b"),
 )
 
-# Logs each call's argv (fields end in \037), makes ls-remote fail or hang when asked, else runs the real git.
+# Logs each call's argv (fields end in \037), makes ls-remote fail or hang when asked, makes diff fail when
+# GIT_SHIM_DIFF is fail, else runs the real git.
 SHIM = r'''#!/bin/sh
 printf '%s\037' "$@" >> "$GIT_SHIM_LOG"
 printf '\n' >> "$GIT_SHIM_LOG"
@@ -71,15 +75,19 @@ case " $* " in
       hang) exec sleep 60 ;;
       fail) echo "fatal: unable to access the remote" >&2; exit 128 ;;
     esac ;;
+  *" diff "*)
+    [ "$GIT_SHIM_DIFF" = fail ] && { echo "fatal: the local diff cannot run" >&2; exit 128; } ;;
 esac
 exec "$GIT_SHIM_REAL" "$@"
 '''
 
 # Stands in for install.sh: counts each run, fetches origin as the real installer does, and writes the
-# install record when STUB_WRITE_RECORD is set.
+# install record when STUB_WRITE_RECORD is set. When STUB_EXIT is set it exits with that code first, before
+# the fetch and the record.
 STUB = r'''#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd -P)
 printf '%s\n' "$*" >> "$STUB_COUNTER"
+[ -n "$STUB_EXIT" ] && exit "$STUB_EXIT"
 git -C "$here" fetch -q origin || exit 1
 if [ -n "$STUB_WRITE_RECORD" ]; then
   sha=$(git -C "$here" rev-parse "origin/$STUB_REF") || exit 1
@@ -203,7 +211,7 @@ class Fixture:
                    GIT_COMMITTER_NAME="fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
         return env
 
-    def hook_env(self, cloud=True, ls_remote=None, timeout=None):
+    def hook_env(self, cloud=True, ls_remote=None, timeout=None, diff=None, stub_exit=None):
         env = dict(os.environ)
         for key in HOOK_ENV_DROP:
             env.pop(key, None)
@@ -218,6 +226,10 @@ class Fixture:
             env["GIT_SHIM_LS_REMOTE"] = ls_remote
         if timeout:
             env["CLAUDE_SETTINGS_FETCH_TIMEOUT"] = timeout
+        if diff:
+            env["GIT_SHIM_DIFF"] = diff
+        if stub_exit:
+            env["STUB_EXIT"] = stub_exit
         return env
 
     def sha(self, repo, rev):
@@ -508,6 +520,28 @@ class StaleInstall(unittest.TestCase):
         self.assertEqual(len(restarts), 1, "want one restart line for 251 paths, got %r" % restarts)
         self.assertIn("CLAUDE.md", restarts[0], "restart line does not name CLAUDE.md: %r" % restarts[0])
         self.assertNotIn("hooks/", restarts[0], "restart line names hook files: %r" % restarts[0])
+
+    # The installer exits non-zero: one failure line, and the installer ran once.
+
+    def test_installer_exit_3_prints_one_failure_line_and_runs_once(self):
+        fx, old, new = behind(self._testMethodName)
+        self.assertNotEqual(fx.origin_tip("main"), fx.record_sha(), "scope: origin is not ahead of the record")
+        run = fx.run_hook(stub_exit="3")
+        self.assertEqual(run.lines, ["claude-settings: reinstall failed (exit 3)"],
+                         "want one failure line; stderr: %s" % run.tail())
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "want one installer run, with --cloud")
+
+    # The local diff cannot run: the reinstall still happens, and the restart line says the check is unknown.
+
+    def test_failed_local_diff_prints_restart_unknown_line(self):
+        fx, old, new = behind(self._testMethodName)
+        run = fx.run_hook(diff="fail")
+        diffs = fx.subcommands().count("diff")
+        self.assertEqual(diffs, 1, "scope: the hook made %d diff calls, want 1" % diffs)
+        self.assertEqual(run.lines, [REINSTALL % (new[:SHORT], old[:SHORT]),
+                                     RESTART_UNKNOWN % (old[:SHORT], new[:SHORT])],
+                         "want the reinstall line, then the unknown restart line; stderr: %s" % run.tail())
+        self.assertEqual(fx.installer_runs(), ["--cloud"], "want one installer run, with --cloud")
 
     # Source layouts.
 
