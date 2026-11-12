@@ -100,8 +100,8 @@ small, M medium, L large).
   decides where the scan runs.
 - **Agent-end reap.** One record for the reap and its payload log. The process tiers keep their own record,
   `unattended-sweep-stops-proven-orphans`.
-- **Load definitions.** The guard reads memory and disk. `sim-lease` reads `vm.loadavg`. Q6 asks whether
-  they should match.
+- **Load definitions.** Q6 is answered (owner, 2026-11-06 15:24 CST, item 304 a): the guard and `sim-lease` read
+  one definition, `hooks/guard_load.py` (decision `one-load-definition`).
 
 ## 4. Deletes
 
@@ -166,8 +166,9 @@ Recommendation: (a), because the record already says one repository.
 lands. (b) name a reader for each one. Recommendation: (a) for the logs with no reader. Keep `guard.log`,
 with a rotating cap.
 
-**Q6. Load definition. Low value.** Options: (a) one shared definition; (b) keep the two definitions, and
-one record that says why. Recommendation: (b). `sim-lease` already states its own definition.
+**Q6. Load definition. Answered: (a), owner, 2026-11-06 15:24 CST (item 304 a).** The guard and `sim-lease` read
+one shared definition, `hooks/guard_load.py` (decision `one-load-definition`). The other option was to keep the two
+definitions and record why; the recommendation was that option, and the owner chose (a) instead.
 
 **Q7. Repo reaper. Decided and done.** The rule says the sweep never runs code a repository supplies.
 Decision uniform-over-variants (a shared tool never grows a per-repo exception; owner, 2026-10-27 12:51
