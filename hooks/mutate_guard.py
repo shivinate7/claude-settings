@@ -1512,14 +1512,6 @@ MUTATIONS = [
     # ---- the expiry rule, added 2026-09-20. Nothing killed a mutant here before this block:
     # every case below is new, exercising `cap_lift_value`, `next_prior`, `expiry_problem`, and
     # the expiry tail of `judge_path` that `hooks/test_config_watch.py`'s "expiry" cases guard.
-    ("watch: the 24-hour ceiling runs backwards, so only a SAFE deadline reads as too far ahead",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead < EXPIRY_MAX_AHEAD_HOURS * 3600:', "watch",
-     'more than 24h ahead is revoked'),
-    ("watch: the 24-hour bound is negated, so even a one-hour deadline reads as too far ahead",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead > -(EXPIRY_MAX_AHEAD_HOURS * 3600):', "watch",
-     'a valid, current _agentCapUntil is NOT reverted'),
     ("watch: the passed-deadline test is inverted, so an expired deadline reads as current",
      '    if ahead < 0:\n        return "already passed"',
      '    if ahead > 0:\n        return "already passed"', "watch",
@@ -1534,30 +1526,38 @@ MUTATIONS = [
      '    if cap_lift_value(was):\n        return baseline["content"]', "watch",
      "keeps the ORIGINAL pre-lift content as prior"),
 
-    # ---- the 24-hour boundary itself, added 2026-09-20 (round 3). `expiry_problem` now takes
-    # an injectable `clock`, so `hooks/test_config_watch.py`'s boundary cases can pin a
-    # fixture's `_agentCapUntil` and the watch's own "now" to the SAME instant, and an
-    # off-by-one at the exact edge is no longer invisible to this mutation test.
-    ("watch: the too-far-ahead check admits its own edge, so a deadline exactly 24h out is "
-     "wrongly revoked",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead >= EXPIRY_MAX_AHEAD_HOURS * 3600:', "watch",
-     "exactly 24 hours ahead is accepted"),
     ("watch: the passed-deadline check admits its own edge, so the deadline instant itself "
      "reads as already passed",
      '    if ahead < 0:',
      '    if ahead <= 0:', "watch",
      "exactly at the deadline instant is accepted"),
-    ("watch: the 24-hour ceiling is one second too loose, so a deadline one second over is "
-     "wrongly accepted",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 + 1:', "watch",
-     "one second outside the 24h bound is revoked"),
-    ("watch: the 24-hour ceiling is one second too tight, so a deadline exactly on it is "
-     "wrongly revoked",
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600:',
-     '    if ahead > EXPIRY_MAX_AHEAD_HOURS * 3600 - 1:', "watch",
-     "exactly 24 hours ahead is accepted"),
+
+    # ---- the cap-lift deadline ask and the end it prints, re-pointed 2026-11-12 (page item 602,
+    # pick a). The 24-hour ceiling is gone, so the boundary mutants above had no line left to hit.
+    # These break the guard's ask on a deadline write (`cap_deadline_end` and its two callers) and
+    # the Central text it prints. Each required name is a case in hooks/test_guard.py.
+    ("guard: the deadline ask runs backwards, so a current end is silent and a passed one is asked",
+     '        if deadline < local_time.clock():\n            return ""',
+     '        if deadline > local_time.clock():\n            return ""', "guard",
+     "a Write that sets only the cap-lift end asks"),
+    ("guard: the end drops its zone, so it reads as a bare HH:MM with no CST or CDT",
+     '        return local_time.central_hhmm(deadline)\n    except (ValueError, OverflowError, TypeError):',
+     '        return local_time.central_hhmm(deadline).split(" ")[0]\n'
+     '    except (ValueError, OverflowError, TypeError):', "guard",
+     "names the end in CST"),
+    ("guard: the end prints in UTC, not US Central, so the approver reads the wrong hour",
+     '        return local_time.central_hhmm(deadline)\n    except (ValueError, OverflowError, TypeError):',
+     '        return deadline.strftime("%H:%M UTC")\n    except (ValueError, OverflowError, TypeError):',
+     "guard", "names the end in CST"),
+    ("guard: a Write that sets the cap-lift end is not asked about, so its end is never shown",
+     '            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),\n'
+     '                                       cap_deadline_end(write_content_parts(tool_input, arriving=True)))',
+     '            change = cap_change_parts(write_content_parts(tool_input))', "guard",
+     "a Write that sets only the cap-lift end asks"),
+    ("guard: a shell write that sets the cap-lift end is not asked about, so its end is never shown",
+     '        change = cap_with_deadline(cap_change(raw), cap_deadline_end([raw]))',
+     '        change = cap_change(raw)', "guard",
+     "a shell write that sets only the cap-lift end asks"),
 
     # ---- the liveness oracle's alive/dead/unreadable split, added for Windows parity. Each
     # mutant here folds the new third state back into one of the other two, the exact shape of
