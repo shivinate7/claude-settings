@@ -31,7 +31,14 @@ only once a protected path is dirty and newer than that message.
 AN ALLOW IS CACHED LIKE A FLAG. `run` marks every judged incident seen, so one unchanged
 dirty file costs one model call per change, not one per Stop. `incident_key` includes a hash
 of the protected files' bytes, so an edit the model's 4000-character view cannot show still
-moves the key. A UNKNOWN read is never marked.
+moves the key. A UNKNOWN read is never marked, except the failed-path UNKNOWN below, which is
+marked once per session.
+
+THE TRANSCRIPT FALLBACK (decision `decision-watch-finds-transcript`). When the given
+`transcript_path` is missing or does not exist, `find_transcript` looks for the transcript by
+session id under each config dir (this run's, and `DW_REAL_CONFIG_DIR` under the mod). It only
+runs when the given path fails. When it finds nothing, the UNKNOWN names the path it tried, and
+`run` marks it seen under `NO_TRANSCRIPT_SEEN_KEY`, so a session hears it once.
 
 WHEN SOMETHING PROTECTED IS TOUCHED. `invoke_model` runs `claude -p` with an explicit
 empty tool set and an isolated `cwd`/`CLAUDE_CONFIG_DIR` (see "THE ISOLATION" below), fed
@@ -53,8 +60,9 @@ run is reported as unknown, never as clear and never as a flag. `transcript_path
 or unreadable, `git` unavailable or failing, or the model subprocess failing, timing out, or
 answering something that is not the JSON verdict it was asked for: each of these ends the
 run with a `systemMessage` that names UNKNOWN and why, and exit 0. This hook only ever
-reports, so nothing here ever refuses the turn. The incident cap never touches this branch:
-an UNKNOWN read is never cached and always reported again.
+reports, so nothing here ever refuses the turn. The incident cap never touches this branch
+except for one UNKNOWN: the failed-path UNKNOWN (THE TRANSCRIPT FALLBACK) is marked once per
+session. Every other UNKNOWN read is never cached and always reported again.
 
 THE CONFIG REPORT. The same Stop run also prints the config report: the project config files,
 merges into main and unreadable subjects of this turn. It is a separate section with its own
@@ -145,6 +153,8 @@ FLAG_PREFIX = "Decision watch: FLAG. "
 # folder, not a failed check, so it is said plainly and once per session (NO_REPO_SEEN_KEY).
 NO_REPO_MESSAGE = "Decision watch is off here: this folder is not a git repo."
 NO_REPO_SEEN_KEY = "no-git-repo"
+# The failed-path UNKNOWN is the one UNKNOWN the seen store marks: once per session, not per path.
+NO_TRANSCRIPT_SEEN_KEY = "no-transcript"
 
 # WHY_MAX_LEN bounds the model's own `why` text before it is printed into the parent
 # session's transcript. That text is the judge model's summary of a diff built from
@@ -756,6 +766,51 @@ def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
     return verdict, None
 
 
+# ------------------------------------------------------------------ transcript lookup
+
+def find_transcript(hook):
+    """Return the transcript path to read, or None when none is found. The given `transcript_path`
+    wins when it exists. Otherwise look by session id, the way the app files a transcript:
+    <config dir>/projects/<cwd, each character outside A-Za-z0-9 as "-">/<session id>.jsonl, then any
+    project folder under it holding <session id>.jsonl (the app shortens a long folder name).
+    This is `deriveStop` in mods/decision-watch/hooks/register.mjs in the script's own language:
+    the mod cannot be imported here, and it passes its own derived path as the given one, so this
+    runs only when that path fails too (decision `decision-watch-finds-transcript`). Cost: one
+    path test per config dir, and one directory listing of `projects` per config dir."""
+    given = hook.get("transcript_path")
+    if given and isinstance(given, str) and os.path.exists(given):
+        return given
+    session_id = hook.get("session_id")
+    # The id becomes a file name, so one that is not a plain name finds nothing.
+    if not session_id or not isinstance(session_id, str) or session_id in (".", "..") or re.search(r"[\\/\x00]", session_id):
+        return None
+    cwd = hook.get("cwd")
+    folder = re.sub(r"[^A-Za-z0-9]", "-", cwd) if isinstance(cwd, str) else ""
+    dirs = []
+    try:
+        dirs.append(guard.config_dir())
+    except Exception:
+        pass
+    real = os.environ.get("DW_REAL_CONFIG_DIR")
+    if real:
+        dirs.append(real)
+    name = session_id + ".jsonl"
+    for cfg in dict.fromkeys(dirs):
+        projects = os.path.join(cfg, "projects")
+        if folder:
+            derived = os.path.join(projects, folder, name)
+            if os.path.isfile(derived):
+                return derived
+        try:
+            for entry in sorted(os.listdir(projects)):
+                candidate = os.path.join(projects, entry, name)
+                if os.path.isfile(candidate):
+                    return candidate
+        except OSError:
+            continue
+    return None
+
+
 # ------------------------------------------------------------------ orchestration
 
 def run(hook, model_call=invoke_model, expect_key=None):
@@ -768,9 +823,16 @@ def run(hook, model_call=invoke_model, expect_key=None):
     the evidence moved between the two phases, so the reply is not used and the answer is UNKNOWN
     (SAFETY HOLE 1 of decision decision-watch-mod-limits).
     """
-    path = hook.get("transcript_path")
-    if not path or not isinstance(path, str) or not os.path.exists(path):
-        return UNKNOWN_PREFIX + "transcript_path is missing or does not exist."
+    path = find_transcript(hook)
+    if path is None:
+        given = hook.get("transcript_path")
+        session_id = hook.get("session_id") or ""
+        # With no session_id the store cannot dedupe, so the line is said every time rather than never.
+        if NO_TRANSCRIPT_SEEN_KEY in _load_seen(session_id):
+            return ""
+        _mark_seen(session_id, NO_TRANSCRIPT_SEEN_KEY)
+        return UNKNOWN_PREFIX + "transcript_path is missing or does not exist (tried: %s), and no transcript was found under session id %s." % (
+            given if isinstance(given, str) and given else "no path given", session_id or "(none given)")
 
     cwd = hook.get("cwd") or ""
     if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
@@ -1141,8 +1203,8 @@ def config_notices(hook):
     """Return this turn's config notices, one string per kind, without TAIL. [] for none."""
     if hook.get("stop_hook_active"):
         return []  # a rewrite of an earlier reply: stay quiet, as `main` does for `run`
-    path = hook.get("transcript_path")
-    if not path or not isinstance(path, str) or not os.path.exists(path):
+    path = find_transcript(hook)
+    if path is None:
         return []
     try:
         reader = _shared_transcript()
