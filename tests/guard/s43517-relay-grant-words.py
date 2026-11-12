@@ -2,12 +2,11 @@
 FAMILY = "relay-grant-words"
 #
 # Rule relay-grant-words (decision relayed-grant-read-from-page; roadmap step page-wakes-and-relays, item 5).
-# A send_message is a relay when one of its lines opens `Grant:` (after markdown lead characters), or when one of its
-# lines names the owner (the word `owner`) with a grant word (feedback_guard.GRANT). A relay carries the owner's
-# grant only in the form RELAY_FORM. Its quoted words must be found verbatim in the SENDER's own feedback log, the
-# inbox <config dir>/handoffs/<session id>.inbox.md that local_time.save_message writes for each owner prompt and
-# each waiting-page note. Any other relay shape is refused, and the refusal names the form. A message that is no
-# relay reads no log: the two cost cases below pass it with a log that cannot be read.
+# A send_message is a relay when one of its lines opens `Grant:` (after markdown lead characters). A relay carries
+# the owner's grant only in the form RELAY_FORM. Its quoted words must be found verbatim in the SENDER's own feedback
+# log, the inbox <config dir>/handoffs/<session id>.inbox.md that local_time.save_message writes for each owner prompt
+# and each waiting-page note. Any other relay shape is refused, and the refusal names the form. A message that is no
+# relay reads no log: the cost cases below pass it with a log that cannot be read.
 
 RELAY_RULE = "relay-grant-words"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
@@ -91,9 +90,6 @@ relay_refuse("a grant whose words are not quoted is another shape, and is refuse
 # Refused: the form copied with its placeholders unfilled. No logged message is the text "<exact words>".
 relay_refuse("the form copied with its placeholders unfilled is refused",
              'Grant: "<exact words>" (owner, <time>) covers <act>')
-# Refused: a prose relay names the owner's go ahead. It is no form, so the refusal names the form.
-relay_refuse("a prose relay that names the owner's go ahead is another shape, and is refused",
-             "The owner said go ahead and merge PR 12, so merge it.")
 
 # Passes: the quoted words are a logged owner message, the time is its stamp, and covers names the act.
 relay_allow("a well-formed grant whose words are a logged owner message is allowed",
@@ -110,3 +106,7 @@ relay_allow("a status line that names the owner with no grant word is no relay: 
 # Passes, unread: a grant word with no owner named is no relay of the owner's grant.
 relay_allow("a grant word with no owner named is no relay: it passes with an unreadable log",
             "PR 13 is green. Go ahead with the merge when CI passes.", sender=RELAY_BROKEN, silent=True)
+# Passes, unread: only a line that opens Grant: is judged. Relayed-yes prose is no relay, so the
+# unreadable log is never read.
+relay_allow("relayed-yes prose is not judged",
+            "The owner said go ahead and merge PR 12, so merge it.", sender=RELAY_BROKEN, silent=True)
