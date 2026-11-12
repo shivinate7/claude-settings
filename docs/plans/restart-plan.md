@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 19:46 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
+the history. Last rewrite: 20:00 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -660,7 +660,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   cloud lever, is rewritten to match. Home: decision precompact-handoff, rule 1.
 
 - **R36. Agents write little that no one reads.** Owner 12:49 CST Nov 11: "how much should our
-  subagents be allowed to just "type"". 12:52 CST: "im assuming the brief kinda needs to have a line in
+  [agents] be allowed to just "type"". 12:52 CST: "im assuming the brief kinda needs to have a line in
   terms of how much to talk ... keep verbiage to a minimum something like that? or it's mechanized?
   unsure i'm deferring to you". Pick, under that deferral: the line goes in
   each agent role file and the lane start text, which load on their own, never in each brief. Briefs
@@ -943,7 +943,13 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   Rulesets, ruled r, owner 16:43 CST Nov 11: "r". In the R44 child-repo sweep, a session on the owner's
   computer moves every repo's main to a ruleset that requires only all-jobs-passed and blocks deletion
   and force-push of main. Cause: a classic rule with many checks failed to save (owner, 16:39 CST). The
-  grant names rulesets, so it lands in the repo's standing grants beside the Oct 30 grant.
+  grant names rulesets, so it lands in the repo's standing grants beside the Oct 30 grant (branch
+  grant-shared-ruleset). The merge tool reads rulesets, ruled c, owner 19:49 CST Nov 11: "c is prob best".
+  Today merge/merge.py protection_names reads main's old branch protection and stops every merge when it
+  is gone. Step merge-reads-ruleset makes it read main's ruleset first and the old protection second;
+  skills/project-ops/scripts/protect.py sets the ruleset. It lands before the sweep removes any old
+  protection. Once every repo has a ruleset, the old-protection read is deleted. This fits the ruling that
+  a repo changes to fit a shared tool: rulesets become every repo's shared form under r.
   No GitHub Issues, ruled p', owner 16:44 CST Nov 11: "agreed on p", then "yea" when asked whether he meant
   the refuter's revised p'. g is
   mostly built: skills/roadmap/build.py derives live and done from PRs (decision stalled-steps). 1. Nobody
