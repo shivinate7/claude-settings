@@ -35,7 +35,7 @@ Contract the page cases assume (the builder builds to it):
     host with no credentials passes.
   --rebuild DIR --batches OUT --collections NAME [NAME ...]. The named collections are the only folders allowed besides
     page/, and a batch entry's `collection` is its folder name. A named collection with no folder is empty. A folder not
-    named is unknown, exit 2, even one of the five waiting collections. Without --collections the five are allowed.
+    named is unknown, exit 2, even one of the waiting collections. Without --collections the export's COLLECTIONS are allowed.
     --collections without --rebuild, or a name that is not a collection slug, is a usage error: exit 2, an argparse
     `error:` line, nothing written. The error for --collections without --rebuild names --rebuild.
   --merge COPY --live LIVE --batches OUT [--collections NAME ...] [--live-page PATH]. COPY holds the --rebuild layout.
@@ -75,6 +75,7 @@ Contract the page cases assume (the builder builds to it):
 import collections
 import contextlib
 import glob
+import importlib.util
 import io
 import json
 import os
@@ -96,7 +97,15 @@ import export_page  # noqa: E402  the in-process budget cases stub page_check's 
 import page_check  # noqa: E402
 import _nowindow  # noqa: E402  the answers cases stub its run, the one start of node (page_check imports it from hooks/)
 
-COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+def load_export_page(path):
+    """export_page.py loaded from the script under test, so the list the cases check is that script's own."""
+    spec = importlib.util.spec_from_file_location("export_page_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+COLLECTIONS = load_export_page(CMD).COLLECTIONS  # the one home (export_page.py); the fetch and the cases read this list
 MARKER = ".complete"  # the session touches it in each collection folder after the last list page
 ARTIFACT = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
 SENTINEL = 1000000000  # a fixed mtime for a file a run must not rewrite; no clock is read
@@ -902,14 +911,19 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: never the system temp dir
         self.addCleanup(self.tmp.cleanup)
 
-    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None, folders=None):
-        """A fetched folder: one folder per collection, each doc a JSON file, and the completeness marker. An empty
-        collection is an empty folder with its marker. `folders`, when given, names the folders instead of the five:
-        {folder: {doc_id: data}}, for a page whose collections are named by --collections."""
+    def fetch(self, items=None, answers=None, groups=None, asks=None, meta=None, receipts=None, folders=None):
+        """A fetched folder: one folder per collection of COLLECTIONS (the export's own list), each doc a JSON file, and
+        the completeness marker. An empty collection is an empty folder with its marker. `receipts` adds that folder when
+        a case names its docs. `folders`, when given, names the folders instead: {folder: {doc_id: data}}, for a page
+        whose collections are named by --collections."""
         root = tempfile.mkdtemp(prefix="fetched-", dir=self.tmp.name)
-        docs = folders if folders is not None else {"items": items, "answers": answers, "groups": groups,
-                                                     "asks": asks, "meta": meta}
-        for name, found in docs.items():
+        if folders is None:
+            named = {"items": items, "answers": answers, "groups": groups, "asks": asks, "meta": meta,
+                     "receipts": receipts}
+            folders = {name: named.get(name) for name in COLLECTIONS}
+            if receipts is not None:
+                folders["receipts"] = receipts
+        for name, found in folders.items():
             os.makedirs(os.path.join(root, name))
             for doc_id, data in (found or {}).items():
                 write_text(os.path.join(root, name, doc_id + ".json"), canonical(data))
@@ -1131,6 +1145,19 @@ class Mirror(Base):
         self.assertVerdict(r, "unknown")
         self.assertEqual(r.returncode, 2, shown(r))
         self.assertEqual(snapshot(out), before, "a fetch with no completeness marker at all wrote into the copy")
+
+    def test_a_receipts_doc_in_the_fetch_lands_in_the_copy(self):
+        """The page writes receipts, so an export keeps each receipt doc under waiting/receipts/."""
+        receipt = {"id": "r1", "read": "2026-10-02T10:00:00Z"}
+        fetched = self.fetch(items={"a": {"id": "a"}}, receipts={"r1": receipt}, meta={"page": META})
+        self.assertTrue(os.path.isfile(os.path.join(fetched, "receipts", "r1.json")), "scope: the fetch holds no receipts/r1.json")
+        out = self.out()
+        r = self.export(fetched, out)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(out, "receipts", "r1.json")),
+                        "waiting/receipts/r1.json is not in the copy. Output:\n" + shown(r))
+        self.assertEqual(read_text(os.path.join(out, "receipts", "r1.json")), canonical(receipt),
+                         "the copy's receipt is not the fetched receipt")
 
     def test_all_empty_collections_into_an_empty_copy_are_same(self):
         fetched = self.fetch()
@@ -1520,6 +1547,18 @@ class Rebuild(Base):
                                    + [("topics", doc_id, canonical(doc)) for doc_id, doc in topics.items()])
         got = collections.Counter((e["collection"], e["doc_id"], canonical(e["data"])) for e in entries)
         self.assertEqual(got, want, "the batches do not hold each named folder's docs under its folder name")
+
+    def test_a_receipts_folder_in_the_copy_rebuilds_without_collections(self):
+        """The default list rebuilds the page's receipts, so a recovery from the copy keeps them."""
+        receipt = {"id": "r1", "read": "2026-10-02T10:00:00Z"}
+        waiting = self.copy_of({"items": {"item-001": item(1)}, "receipts": {"r1": receipt}})
+        self.assertTrue(os.path.isfile(os.path.join(waiting, "receipts", "r1.json")), "scope: the copy holds no receipts/r1.json")
+        batches = os.path.join(self.tmp.name, "batches")
+        r = self.rebuild(waiting, batches)
+        self.assertEqual(r.returncode, 0, "the rebuild refused the copy's receipts folder. Output:\n" + shown(r))
+        _, entries, _ = self.batch_entries(batches)
+        self.assertIn({"op": "set", "collection": "receipts", "doc_id": "r1", "data": receipt}, entries,
+                      "no batch entry sets receipts/r1")
 
     def test_a_folder_not_named_with_collections_is_unknown_and_exits_2(self):
         waiting = self.copy_of({"steps": {"step-001": {"n": 1}}, "topics": {"topic-001": {"n": 1}}})
@@ -2043,7 +2082,8 @@ class All(Base):
     def docs(self):
         """What each artifact's fetch holds. The queue lists items only, so its answers are fetched but never exported."""
         return {self.WAIT: dict(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
-                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META}),
+                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META},
+                                receipts={"r1": {"id": "r1", "read": "2026-10-02T10:00:00Z"}}),
                 self.QUEUE: dict(items={"q1": item(2)}, answers={"qa1": {"item": "q1", "pick": "b"}})}
 
     def fetched_all(self, docs, pages=None, files=None):
@@ -2097,7 +2137,7 @@ class All(Base):
         root, fetched, worktree = self.repo(), self.fetched_all(self.docs()), self.out("worktree")
         first = self.run_all(root, fetched, worktree)
         self.assertEqual(first.returncode, 0, shown(first))
-        self.assertVerdictOf(first, self.WAIT, r"changed\s+5\b")  # five docs, one per collection
+        self.assertVerdictOf(first, self.WAIT, r"changed\s+6\b")  # six docs, one per collection
         self.assertVerdictOf(first, self.QUEUE, r"changed\s+1\b")  # one item; the answers are not exported
         second = self.run_all(root, fetched, worktree)
         self.assertEqual(second.returncode, 0, shown(second))

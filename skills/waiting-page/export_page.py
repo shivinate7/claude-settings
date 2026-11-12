@@ -8,7 +8,7 @@ Export, the writer's step at each wake and before each republish:
     python3 ~/.claude/skills/waiting-page/export_page.py --fetched DIR --out WAITING_DIR [--page FETCHED.html]
         [--allow-empty COLLECTION]
 
-DIR holds `<collection>/<doc_id>.json` for each of the five collections, as `ArtifactData list ... out_dir=DIR`
+DIR holds `<collection>/<doc_id>.json` for each of the collections in COLLECTIONS, as `ArtifactData list ... out_dir=DIR`
 saves them; an empty collection is an empty folder. A script cannot call that tool, so the session fetches first.
 The session touches `.complete` in each collection folder after the last list page, so a fetch that stopped early
 shows: a collection with no marker is unknown. A collection that is empty now while the copy holds docs of it is
@@ -64,10 +64,10 @@ Rebuild, the recovery path. It reads only the repo copy, never the live page:
 Writes OUT_DIR/batch-NNN.json, each a JSON list of at most 50 `{op: "set", collection, doc_id, data}` entries and
 under 900,000 bytes, one entry per doc in WAITING_DIR except `page/`, and prints `batches K docs N`. The session
 sends each list as an `ArtifactData batch`. Unknown, exit 2: a missing or empty WAITING_DIR, a folder in it that is
-neither one of the five collections (or the `--collections` names) nor `page/`, or one doc over the byte cap.
+neither one of COLLECTIONS (or the `--collections` names) nor `page/`, or one doc over the byte cap.
 For an artifact other than the waiting page, `--collections NAME [NAME ...]` names its collections (the registry
-entry's `collections`). They replace the five as the allowed folders, and a batch entry's `collection` is the folder
-name. A named collection with no folder is empty and fine; a folder not named is unknown, even one of the five.
+entry's `collections`). They replace COLLECTIONS as the allowed folders, and a batch entry's `collection` is the folder
+name. A named collection with no folder is empty and fine; a folder not named is unknown, even one of COLLECTIONS.
 `--collections` without `--rebuild`, a name that is not a collection slug, or the name `page` is a usage error, exit 2.
 
 Every artifact, the step "Before you switch Claude accounts":
@@ -122,9 +122,11 @@ sys.path.insert(0, HERE)
 import splice  # noqa: E402  the one home of the designData block's span
 import page_check  # noqa: E402  the one home that runs the page's picture check
 
-# The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
-# lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
-COLLECTIONS = ("items", "answers", "groups", "asks", "meta")
+# The one home of the waiting page's collection list. lint/layout.py reads it as WAITING_COLLECTIONS. A single export
+# and the rebuild never import lint/, so they run with no lint/ beside them: the recovery path may not depend on the
+# repo it recovers (verification-recovery-independent-of-state). Only `--all` (export_all) imports layout, to read the
+# registry of the repo it exports.
+COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
 COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
@@ -925,7 +927,7 @@ def main(argv):
     ap.add_argument("--live", help="with --merge: the folder `ArtifactData list` saved from the live page, markers included")
     ap.add_argument("--live-page", help="with --merge: the live page's fetched html, for its designData block")
     ap.add_argument("--collections", nargs="+", metavar="NAME",
-                    help="with --rebuild or --merge: the collection folders to allow, in place of the waiting page's five")
+                    help="with --rebuild or --merge: the collection folders to allow, in place of the waiting page's COLLECTIONS")
     args = ap.parse_args(argv)
     if args.collections is not None and not (args.rebuild or args.merge):
         ap.error("--collections goes with --rebuild or --merge")

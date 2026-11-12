@@ -16,9 +16,9 @@ Git is each artifact's home. The claude.ai link is one account's view of it.
 - Degen moves its copy to its record branch and retires its own export. It calls this repo's export (fb-1512-1, the same summary, not owner words).
 - A cite names the artifact's id and its repo path, written `artifact:<id>`. It never names the link (ruled: the owner's "A" on option a, fb-1458-2). Open: `lint/check_artifact_cites.py` reads the id only, so the repo-path part is not checked yet. The check refuses a bare link and an unregistered id.
 - The 14 roadmap step links become `artifact:<id>` cites under the same pick (fb-1458-2). Open: the links are still bare. Until they are fixed, the check runs with `--steps list`, which prints each step link and fails no step. Target, once the links are fixed: the guard that checks page writes refuses a bare link at each write to the record branch (coordinator's option a, event 46a1a427, 14:56 CST).
-- Owner, 2026-11-02 11:00 CST (waiting-page gripe, via the coordinator): the waiting page keeps a copy of its data in the repo, so a lost page loses no item. The owner said not to take the ask verbatim, but the gripe is real.
+- Owner, 2026-11-02 11:00 CST (waiting-page gripe, through the coordinator): the waiting page keeps a copy of its data in the repo, so a lost page loses no item. The owner said not to take the ask verbatim, but the gripe is real.
 - The id `waiting-data-in-repo` names this decision. The page writer's step lives in the waiting-page skill, not in a rule.
-- The waiting page's copy is folder `waiting/` on the record branch. It holds five collections: `items`, `answers`, `groups`, `asks` and `meta`. Each document is one file, `waiting/<collection>/<doc_id>.json` (rule `git-record-own-file-per-kind`, one file per kind).
+- The waiting page's copy is folder `waiting/` on the record branch. It holds six collections: `items`, `answers`, `groups`, `asks`, `meta` and `receipts`. Their one home is `COLLECTIONS` in `skills/waiting-page/export_page.py`. The page export saves each one, and `lint/layout.py` reads the list as `WAITING_COLLECTIONS` (owner, 2026-11-07 13:20 CST, "why not fix it then"; receipts built in draft PR #2721, a carry of PR #1443). Each document is one file, `waiting/<collection>/<doc_id>.json` (rule `git-record-own-file-per-kind`, one file per kind).
 - The mockups live in the page's `designData` block. The export saves that block as `waiting/page/designData.json`.
 - A kept mockup lands in the repo's design folder on main, by PR (layout kind `design`, `docs/design` by default). The record branch holds the artifact page copies. Process-only: the artifact lane's reading of the owner's words "my repos' design folders" (fb-1458-1). Design-explore step 7 closes the gap.
 - Files use sorted keys, two-space indent and a final newline. An unchanged document stays byte-identical, so a commit shows only real change.
@@ -36,7 +36,7 @@ Known limits:
 - The scan reads shapes, not meaning. A personal fact in plain words, such as an employer or a city, passes. A password word whose whole value is a placeholder, a mask or a plain word also passes. So do `PWD=<path>`, a no-reply address and the ssh remote of a public git host.
 - A truncated fetch, such as a missed page of results, deletes the missed documents from the copy. Git history keeps them.
 
-Basis: owner rulings fb-1456-1, fb-1458-1, fb-1458-2 and fb-1512-1 ("wb"), the coordinator's note of 11:49 CST, and a named incident (see Incidents). Landed: set at merge.
+Basis: owner rulings fb-1456-1, fb-1458-1, fb-1458-2 and fb-1512-1 ("wb"), the owner's 2026-11-07 13:20 CST ruling, the coordinator's note of 11:49 CST, and a named incident (see Incidents). Landed: set at merge.
 
 Incidents:
 

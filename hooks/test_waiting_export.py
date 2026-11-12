@@ -31,6 +31,8 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(REPO, "tests", "guard", "support"))
+import bare_tree  # noqa: E402  the copy with no skill folder, one home in tests/guard/support/bare_tree.py
 
 ROOT = _test_temp.run_folder()
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
@@ -39,6 +41,7 @@ FAILED = []
 RED_CASES = []
 CASES = []
 RUNS = [0]
+BARE = []  # the hooks folder of the copy with no skill folder, made once per run
 
 SESSION = "sid-waiting-export"
 BRANCH = "roadmap"  # the record branch, the default of layout.record_branch
@@ -272,10 +275,12 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None, hooks=None):
     """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
-    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
+    names as the page writer (None: unknown). `extra_env` adds variables for this run. `hooks` names the hooks
+    folder to run from (the copy with no skill folder); None runs this checkout's. No inbox file is written."""
     folder = run_dir(label)
+    hooks_dir, guard = (HERE, GUARD_PATH) if hooks is None else (hooks, os.path.join(hooks, "feedback_guard.py"))
     records = with_writer(records, writer)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
@@ -295,7 +300,7 @@ def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SES
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     inbox = os.path.join(cfg, "handoffs", SESSION + ".inbox.md")
     try:
-        cp = subprocess.run([sys.executable, PROBE_PATH, HERE, GUARD_PATH], input=raw, capture_output=True,
+        cp = subprocess.run([sys.executable, PROBE_PATH, hooks_dir, guard], input=raw, capture_output=True,
                             env=env, cwd=home, timeout=60)
     except subprocess.TimeoutExpired:
         return Proc(-1, "", "timed out after 60 s", None, inbox)
@@ -325,6 +330,8 @@ def expect_block(name, p, phrases):
     reason = obj.get("reason") or ""
     check(name + ": exits 0", p.code == 0, p.desc())
     check(name + ": blocks the stop", obj.get("decision") == "block", p.desc())
+    if obj.get("decision") != "block":
+        return obj  # no reason to read: the block line above is the one cause
     for phrase in phrases:
         check("%s: the reason names %r" % (name, phrase), phrase in reason, reason)
     return obj
@@ -552,6 +559,44 @@ def case_s16_full_size_transcript_blocks():
     expect_block("S16", run_stop("s16", base_repo("s16"), records), (SCRIPT,))
 
 
+# --------------------------------------------------------------------------- a checkout with no skill folder
+
+def bare_stop_hooks(label):
+    """The hooks folder of the copy with no skills/waiting-page folder, made once per run. `label` names the case
+    whose scope this checks: the folder must be absent, or the case proves nothing about a missing folder."""
+    if not BARE:
+        BARE.append(bare_tree.copy_without_skill(os.path.join(ROOT, "bare")))
+    hooks = BARE[0]
+    check("%s scope: the copy holds no skills folder" % label,
+          not os.path.exists(os.path.join(os.path.dirname(hooks), "skills")), hooks)
+    return hooks
+
+
+def case_s17_empty_transcript_without_the_skill_gives_no_note():
+    """No page write and no skill folder: the check has nothing to read, so it passes with no note. The collection
+    list is read before the write scan, and the missing folder must not reach a note first. The control is S17c."""
+    p = run_stop("s17", base_repo("s17"), None, hooks=bare_stop_hooks("S17"))
+    obj = expect_pass("S17", p)
+    check("S17: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+    check("S17: the copy runs with no traceback", "Traceback" not in p.err, p.err[-300:])
+
+
+def case_s17c_empty_transcript_with_the_skill_gives_no_note():
+    """S17 on this full checkout, with the skill folder: the control, green on the list as it reads now."""
+    obj = expect_pass("S17c", run_stop("s17c", base_repo("s17c"), None))
+    check("S17c: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
+def case_s18_stale_items_write_without_the_skill_still_blocks():
+    """S1 on the copy with no skill folder: the writer's stale items write blocks as it does on main. The control
+    is S1 itself, on this full checkout."""
+    root = base_repo("s18")
+    check("S18 scope: the newest copy commit is the 17:00 one", newest_copy(root, FOLDER) == at(17),
+          newest_copy(root, FOLDER))
+    p = run_stop("s18", root, [owner(at(18, 50))] + page_write(at(19)), hooks=bare_stop_hooks("S18"))
+    expect_block("S18", p, (SCRIPT, SECTION))
+
+
 # --------------------------------------------------------------------------- writer, collection and verdict cases
 
 def queue_repo(name):
@@ -565,7 +610,7 @@ def queue_repo(name):
 
 def case_n1_non_writer_set_of_an_unexported_collection_passes():
     """A session that the transcript names as not the page writer, setting a collection the copy does not export."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="scratch/x")
     expect_pass("N1", run_stop("n1", base_repo("n1"), records, writer="session_other"))
 
 
@@ -668,16 +713,46 @@ def case_n14_no_writer_named_and_an_export_run_makes_the_writer_block():
     expect_block("N14", run_stop("n14", base_repo("n14"), records, writer=None), (SCRIPT,))
 
 
-def case_n15_writer_set_of_receipts_passes():
-    """The writer sets receipts/x by doc_id: receipts is no exported collection."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+def case_n15_writer_set_of_scratch_passes():
+    """The writer sets scratch/x by doc_id: scratch is no exported collection."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="scratch/x")
     expect_pass("N15", run_stop("n15", base_repo("n15"), records))
 
 
-def case_n16_writer_write_by_path_to_receipts_passes():
-    """The writer writes receipts/x by its path key: the same collection filter, through the path."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="receipts/x")
+def case_n15b_writer_set_of_receipts_blocks():
+    """The writer sets receipts/x by doc_id: receipts is an exported collection, so it blocks as an item does."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+    expect_block("N15b", run_stop("n15b", base_repo("n15b"), records), (SCRIPT,))
+
+
+def case_n16_writer_write_by_path_to_scratch_passes():
+    """The writer writes scratch/x by its path key: the same collection filter, through the path."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="scratch/x")
     expect_pass("N16", run_stop("n16", base_repo("n16"), records))
+
+
+def case_n16b_writer_write_by_path_to_receipts_blocks():
+    """The writer writes receipts/x by its path key: the path prefix names an exported collection."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="receipts/x")
+    expect_block("N16b", run_stop("n16b", base_repo("n16b"), records), (SCRIPT,))
+
+
+def case_n18_writer_update_of_a_receipt_blocks():
+    """The writer updates receipts/r1 by its collection field, which the copy has not seen: it blocks as an item does."""
+    records = [owner(at(18, 50))] + page_write(at(19), action="update", collection="receipts", doc_id="r1")
+    expect_block("N18", run_stop("n18", base_repo("n18"), records), (SCRIPT,))
+
+
+def case_n1b_non_writer_set_of_receipts_passes():
+    """A session the transcript names as not the page writer, setting receipts/x: a non-writer's write passes."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+    expect_pass("N1b", run_stop("n1b", base_repo("n1b"), records, writer="session_other"))
+
+
+def case_n2b_non_writer_update_of_a_receipt_passes():
+    """A session the transcript names as not the page writer, updating receipts/r1: a non-writer's write passes."""
+    records = [owner(at(18, 50))] + page_write(at(19), action="update", collection="receipts", doc_id="r1")
+    expect_pass("N2b", run_stop("n2b", base_repo("n2b"), records, writer="session_other"))
 
 
 def case_n17_writer_write_by_path_to_items_blocks():
@@ -758,6 +833,9 @@ CASES.extend((
     case_s14_newest_write_after_the_copy_commit_blocks,
     case_s15_export_run_before_the_write_does_not_clear_it,
     case_s16_full_size_transcript_blocks,
+    case_s17_empty_transcript_without_the_skill_gives_no_note,
+    case_s17c_empty_transcript_with_the_skill_gives_no_note,
+    case_s18_stale_items_write_without_the_skill_still_blocks,
     case_n1_non_writer_set_of_an_unexported_collection_passes,
     case_n2_non_writer_update_of_an_item_passes,
     case_n3_writer_update_of_an_item_blocks,
@@ -773,9 +851,14 @@ CASES.extend((
     case_n12_remote_writer_without_the_env_passes,
     case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
     case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
-    case_n15_writer_set_of_receipts_passes,
-    case_n16_writer_write_by_path_to_receipts_passes,
+    case_n15_writer_set_of_scratch_passes,
+    case_n15b_writer_set_of_receipts_blocks,
+    case_n16_writer_write_by_path_to_scratch_passes,
+    case_n16b_writer_write_by_path_to_receipts_blocks,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_n18_writer_update_of_a_receipt_blocks,
+    case_n1b_non_writer_set_of_receipts_passes,
+    case_n2b_non_writer_update_of_a_receipt_passes,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
