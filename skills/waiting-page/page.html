@@ -1230,6 +1230,18 @@ const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.i
 // repo split that "this repo" is settled: until one is true the list and the rail draw their loading state (holdingForMeta), so no card moves when the meta lands.
 const feed = { items: false, answers: false, receipts: false, meta: false, metaFailed: false, all: [] };
 const metaSettled = () => feed.meta || feed.metaFailed;
+// The repo split reads the meta only when it arrived before the page settled. A meta that arrives after a failed read or after the wait below is ignored
+// here until reload, so no drawn card or head moves; the identity (brand, name in the header) still reads it.
+const metaKnown = () => feed.meta && !feed.metaFailed;
+// A store that goes quiet is time-limited at about 10 s (db.d.ts). When items are in and the meta has neither arrived nor failed by then, the page treats the
+// meta as failed. The timer starts once, with the first items, and is cleared when the meta settles.
+const META_WAIT_MS = 10000;
+let metaTimer = null;
+function armMetaWait() {
+  if (metaTimer !== null || metaSettled() || !state.items.length) return;
+  metaTimer = setTimeout(() => { metaTimer = null; if (!metaSettled()) { feed.metaFailed = true; render(); } }, META_WAIT_MS);
+}
+function settleMeta() { if (metaTimer !== null) { clearTimeout(metaTimer); metaTimer = null; } }
 function freezeSeen() {
   if (state.seen || !feed.items || !feed.answers) return;
   // The last Send is the newest answer anywhere, a closed item's last answer included.
@@ -1271,16 +1283,17 @@ const K = (it) => sortKeys[it.id] || { rank: it.rank, stops: stopsOf(it), added:
 // This repo: meta/page `repo` (owner/name) when set, else the repo whose name part is the page's identity name. An item with no `repo` is this repo's.
 const repoSlug = (s) => (typeof s === "string" && /^[\w.-]+\/[\w.-]+$/.test(s.trim()) ? s.trim() : "");
 const nameOfRepo = (r) => String(r).split("/").pop();
-const ownSlug = () => repoSlug(state.meta && state.meta.repo);
-const ownName = () => (ownSlug() ? nameOfRepo(ownSlug()) : state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "");
+const splitMeta = () => (metaKnown() ? state.meta : null);
+const ownSlug = () => repoSlug(splitMeta() && splitMeta().repo);
+const ownName = () => (ownSlug() ? nameOfRepo(ownSlug()) : splitMeta() && splitMeta().identity && typeof splitMeta().identity.name === "string" ? splitMeta().identity.name.trim().slice(0, 40) : "");
 const isOwnRepo = (r) => {
   const l = r.trim().toLowerCase(), own = ownSlug().toLowerCase(), name = ownName().toLowerCase();
   if (own) return l === own || (!l.includes("/") && l === name);
   return !!name && nameOfRepo(l) === name;
 };
-// "" is this repo; any other repo is its `owner/name` as written. Until the meta settles no repo is known as other, so a caller outside the list and rail (the New reply mark) sees one flat group.
-// A failed meta read leaves state.meta null, and identity lives only there, so there is no name to match: an item with no `repo` is this repo's and no head is drawn for it alone.
-const repoKey = (it) => { const r = K(it).repo; return !metaSettled() || typeof r !== "string" || !r.trim() || isOwnRepo(r) ? "" : r.trim(); };
+// "" is this repo; any other repo is its `owner/name` as written. The list, the rail and the cards draw only once the meta has settled (holdingForMeta).
+// With no meta in use (a failed read, or a wait that ran out), identity is unread, so there is no name to match: an item with no `repo` is this repo's and no head is drawn for it alone.
+const repoKey = (it) => { const r = K(it).repo; return typeof r !== "string" || !r.trim() || isOwnRepo(r) ? "" : r.trim(); };
 // A group sits once, under the repo of its member that stops the most, this repo on a tie, then A to Z.
 function groupRepo(it) {
   const m = mates(it);
@@ -1304,7 +1317,7 @@ const aboutOf = (it) => (it.group && mates(it).length > 1 && repoKey(it) !== gro
 const headed = {};
 function headsOn(k, plan) {
   const on = plan.length > 1 || (plan.length === 1 && plan[0].key !== "");
-  if (on && metaSettled()) headed[k] = true;
+  if (on) headed[k] = true;
   return on || !!headed[k];
 }
 // The line under a tier head that names its key. It says "This repo first" only when the tier holds this repo and another.
@@ -2210,7 +2223,8 @@ const shownLines = () => state.lines.filter((it) => !itemAway(it));
 const holdingForMeta = () => state.items.length > 0 && !metaSettled();
 function renderList() {
   const list = $("list");
-  if (holdingForMeta()) { reconcile(list, [h("div", { class: "empty" }, "Loading the items waiting on you…")]); return; }
+  if (holdingForMeta()) { list.setAttribute("aria-busy", "true"); reconcile(list, [h("div", { class: "empty", role: "status" }, "Loading the items waiting on you…")]); return; }
+  list.removeAttribute("aria-busy");
   const by = sorted(), want = [];
   // As renderAskList does: a focused element that a rebuild or a move drops gets its focus back by id (a Mark read press, and the Marked read line after it). Read first: the section builders move nodes while `want` is built.
   const a0 = document.activeElement, focusId = a0 && a0.id && list.contains(a0) ? a0.id : "";
@@ -3320,12 +3334,12 @@ render(); renderAsks();
     state.items = all.filter((i) => i.status !== "closed"); state.rulings = all.filter(isRuling); state.lines = all.filter(isClosedLine); state.loaded = true;
     // The lines read at load are worked out once, so a mark this visit leaves its line in place until the next load.
     if (state.hidItems === null) state.hidItems = new Set(all.filter(isRead).map((i) => i.id));
-    feed.items = true; feed.all = all; freezeSeen(); freezeSunk(); render();
+    feed.items = true; feed.all = all; freezeSeen(); freezeSunk(); armMetaWait(); render();
   }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; render(); }, () => {});
-  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; feed.meta = true; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => { feed.metaFailed = true; render(); });
+  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; feed.meta = true; settleMeta(); keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => { feed.metaFailed = true; settleMeta(); render(); });
   db.collection("asks").onSnapshot((s) => { askState.map = map(s); askState.bad = false; renderAsks(); }, () => { askState.bad = true; renderAsks(); });
 })();
 </script>
