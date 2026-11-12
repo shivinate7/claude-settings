@@ -2171,6 +2171,15 @@ def hit_suites(root, paths, skip):
                 hits.append((m.group(1), line))
     return hits
 
+def ci_scope_run(wt, base_sha, out_file):
+    """Run the repo's ci-scope.sh in `wt` as a pull request run reads it: the diff of base_sha...HEAD, the flags written to out_file. The one home of that run:
+    small_base_move and the lane lint's guard slice call it. -> (env it ran with, exit code, {flag: "true"|"false"}). Cost: one bash start."""
+    env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": base_sha, "GITHUB_OUTPUT": out_file}
+    c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
+    with open(out_file, encoding="utf-8") as f:
+        flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+    return env, c, flags
+
 _SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read after the wait does not repeat a proof it already holds
 
 def small_base_move(wt, base_ref, sha, before_run=None):
@@ -2230,10 +2239,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         if not os.path.isfile(os.path.join(wt, *CI_SCOPE.split("/"))):
             return False, f"the repo has no {CI_SCOPE} to say which jobs read main's paths"
         # On the merge, sha...HEAD is main's paths: the same set as M..T, because the two sides share none
-        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}, "EVENT": "pull_request", "BASE_SHA": sha, "GITHUB_OUTPUT": out_file}
-        c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
-        with open(out_file, encoding="utf-8") as f:
-            flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+        env, c, flags = ci_scope_run(wt, sha, out_file)
         on = sorted(k for k, v in flags.items() if v != "false")
         if on or not flags:
             return False, f"{CI_SCOPE} turns on " + (", ".join(on) if flags else "every job (it gave no answer)") + " for main's paths"
@@ -3017,15 +3023,18 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
         stop = "\n".join([f"the cross-measure of {head[:9]} is unknown, not a pass:", *unknown, "Run again. " + LANE_LINT_REMEDY])
     return fails, reports, stop
 
-def ci_job_run(wt, *args, notes=None):
+def ci_job_run(wt, *args, notes=None, path_front=None, unset=()):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
-    notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them.
+    path_front: a folder put first on PATH for every step. unset: variable names dropped from the env the steps inherit."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k not in unset}  # as the merge's own lint run reads it
+    if path_front:
+        env["PATH"] = path_front + os.pathsep + env.get("PATH", "")
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -3042,6 +3051,55 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+GUARD_JOB = "checks-windows-guard"  # checks.yml's job that runs the guard suite on Windows; on a pull request one step of it, the slice, runs
+SLICE_STEP = "Guard fixture suite (Windows slice)"  # that step: the run a lane lint makes when ci-scope.sh turns the guard flag on (decision lanes-run-no-full-ci-job)
+
+def python_front(dirs):
+    """-> a folder holding a `python` that runs this interpreter, put on PATH for the slice's step (its run: is `python hooks/test_guard.py`), or None when
+    PATH already has a `python` or this is Windows, whose runner puts one there. The folder is made under tempfile's dir and added to `dirs`, which the caller removes."""
+    if os.name == "nt" or shutil.which("python"):
+        return None
+    import shlex
+    folder = tempfile.mkdtemp(prefix="merge-python-")
+    dirs.append(folder)
+    shim = os.path.join(folder, "python")
+    with open(shim, "w", encoding="utf-8", newline="\n") as f:
+        f.write(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} \"$@\"\n")
+    os.chmod(shim, 0o755)
+    return folder
+
+def guard_slice(wt, base, dirs):
+    """The Windows guard slice a lane lint runs (decision lanes-run-no-full-ci-job): `ci-job checks-windows-guard --step SLICE_STEP --base origin/<base>` in `wt`.
+    -> None when no slice is due, else ci_job_run's (state, lines, log, liftable). The head's workflow is read in-process: a repo with no GUARD_JOB or no
+    SLICE_STEP is never asked. Then the repo's ci-scope.sh (ci_scope_run) says whether the diff turns the guard and code flags on; a script that is missing or
+    cannot answer runs the slice, as ci-scope.sh's own fail-safe turns every job on. No shard runs: ci-job runs the one step, and GUARD_SHARD is dropped from its env.
+    A workflow that cannot be read is unknown, never a pass. `dirs` collects the folders the caller removes (python_front)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    from workflow_steps import job_block, job_workflow, step_blocks, step_key  # the one home of the step parser
+    flow, why = job_workflow(wt, GUARD_JOB)
+    if why:
+        return None
+    try:
+        with open(flow, encoding="utf-8") as f:
+            block = job_block(f.read(), GUARD_JOB)
+    except (OSError, UnicodeError) as e:
+        return "unknown", [f"unknown  the workflow cannot be read ({type(e).__name__}), so whether the Windows guard slice is due is not known"], [], True
+    if SLICE_STEP not in [step_key(st, "name") for st in step_blocks(block)]:
+        return None
+    if os.path.isfile(os.path.join(wt, *CI_SCOPE.split("/"))):
+        fd, out_file = tempfile.mkstemp(prefix="merge-scope-")
+        os.close(fd)
+        try:
+            _, c, flags = ci_scope_run(wt, f"origin/{base}", out_file)
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            c, flags = 1, {}
+        finally:
+            with contextlib.suppress(OSError):
+                os.remove(out_file)
+        if c == 0 and "false" in (flags.get("guard"), flags.get("code")):
+            return None
+    return ci_job_run(wt, GUARD_JOB, "--step", SLICE_STEP, "--base", f"origin/{base}", path_front=python_front(dirs), unset=("GUARD_SHARD", "GUARD_TESTS"))
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -3052,6 +3110,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     Any other target is a commit or ref. ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
+    When the head's workflow holds GUARD_JOB and the repo's ci-scope.sh turns the guard flag on for the head's diff against the base, a second ci-job run, of SLICE_STEP
+    alone, follows a lint that did not FAIL (guard_slice): its FAIL refuses as the lint's does and names that step; its unknown is the lint's unknown. Cost: one
+    ci-scope.sh run per lane of a repo with GUARD_JOB; the slice adds a second ci-job run and the Windows slice's own run time, unmeasured on a lane's box.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing."""
     if target.isdigit():
@@ -3066,7 +3127,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        pin_notes, fails, reports, stop = [], [], [], ""
+        pin_notes, fails, reports, stop, scratch = [], [], [], "", []
         if target.isdigit():
             refuse_unstacked_head(root, head, base)
         fetched = {}
@@ -3083,12 +3144,23 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        sliced = guard_slice(wt, base, scratch) if state != "fail" else None  # a FAIL ends the lint: the slice runs when the lint can still pass
+        if sliced is not None:
+            slice_state, slice_lines, slice_log, slice_liftable = sliced
+            if slice_state == "fail" or state == "pass":  # a FAIL wins; on a pass the slice's state and lines are the lint's
+                state, lines, log, liftable = slice_state, [*(lines if state == "pass" and slice_state == "pass" else ()), *slice_lines], slice_log, slice_liftable
+            elif slice_state == "unknown":  # the lint is unknown too: both say so
+                lines, log, liftable = [*lines, *slice_lines], [*log, *slice_log], liftable and slice_liftable
     finally:
+        for folder in scratch:
+            shutil.rmtree(folder, ignore_errors=True)
         drop_worktree(root, tmp, wt)
     short = head[:9]
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
+        if sliced is not None:
+            named += f" The Windows guard slice ({SLICE_STEP}) ran and passed."
         tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
         say(f"PASS: lint of {short} against {base} passes{named}. {tail}", *pin_notes, *report_lines)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
@@ -5083,7 +5155,7 @@ def build_parser():
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
-    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does, and run the Windows guard slice when ci-scope.sh turns the guard flag on; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
