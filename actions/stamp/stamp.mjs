@@ -36,11 +36,16 @@
 import { realpathSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, lstatSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join, resolve, relative, posix, dirname } from "node:path";
+import { join, resolve, relative, isAbsolute, posix, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as headingFormat from "./formats/heading.mjs";
 
 // ---------------------------------------------------------------- config
+
+// The files the rewrite and the dangling-cite check read when cite.scanGlobs is unset.
+const DEFAULT_SCAN_GLOBS = ["**/*.md"];
+// The config path a repo keeps, named in a refusal when --config points outside the root.
+const REPO_CONFIG_PATH = ".github/stamp.json";
 
 export function loadConfig(path) {
   const config = parseConfig(path);
@@ -456,7 +461,7 @@ function resolveCite(config, byId, groups) {
 function rewriteCites(root, config, byId, files) {
   if (!config.cite) return 0;
   const pattern = new RegExp(config.cite.pattern, "g");
-  const scan = makeMatcher(config.cite.scanGlobs ?? ["**/*.md"]);
+  const scan = makeMatcher(config.cite.scanGlobs ?? DEFAULT_SCAN_GLOBS);
   const exclude = makeMatcher(config.cite.excludeGlobs ?? []);
   let touched = 0;
   for (const rel of files.filter((f) => scan(f) && !exclude(f))) {
@@ -529,16 +534,23 @@ function trackedFiles(root) {
 
 function unreadPendingCites(root, config, pattern, pendingSlugs, prefixBySlug) {
   if (!pendingSlugs.size) return [];
-  const scanGlobs = config.cite.scanGlobs ?? ["**/*.md"];
+  const scanGlobs = config.cite.scanGlobs ?? DEFAULT_SCAN_GLOBS;
   const excludeGlobs = config.cite.excludeGlobs ?? [];
   const scan = makeMatcher(scanGlobs);
   const exclude = makeMatcher(excludeGlobs);
-  let cfgPath = config.configPath ?? ".github/stamp.json";
+  // A config outside the root is the merge tool's temp copy of the base branch's config. That path
+  // is gone after the claim, and the edit belongs on the base branch, so name the repo's own path.
+  let cfgPath = REPO_CONFIG_PATH;
+  let baseNote = "";
   if (config.configPath) {
     const inside = relative(root, resolve(config.configPath));
-    if (inside && !inside.startsWith("..") && !inside.includes(":")) cfgPath = inside.split("\\").join("/");
+    if (inside && !inside.startsWith("..") && !isAbsolute(inside) && !inside.includes(":")) {
+      cfgPath = inside.split("\\").join("/");
+    } else {
+      baseNote = ` The config read here is outside the repo: the merge tool's copy of the base branch's config. So the fix must land on the base branch's ${REPO_CONFIG_PATH} first.`;
+    }
   }
-  const out = [];
+  const found = [];
   for (const rel of trackedFiles(root)) {
     const scanned = scan(rel);
     const excluded = exclude(rel);
@@ -557,26 +569,37 @@ function unreadPendingCites(root, config, pattern, pendingSlugs, prefixBySlug) {
       const slug = m[config.cite.slugGroup ?? 1];
       if (!pendingSlugs.has(slug)) continue;
       if (config.cite.prefixGroup && m[config.cite.prefixGroup] !== prefixBySlug.get(slug)) continue;
-      hits.push({ slug, line: text.slice(0, m.index).split("\n").length });
+      // Two cites on one line are one place in the file, so the line is reported once.
+      const line = text.slice(0, m.index).split("\n").length;
+      if (!hits.length || hits[hits.length - 1].line !== line) hits.push({ slug, line });
     }
-    if (!hits.length) continue;
+    if (hits.length) found.push({ rel, scanned, excluded, hits });
+  }
+
+  // The printed list is the whole cite.scanGlobs to write: the list read now (the default when it is
+  // unset, so .md files stay scanned) plus every file this refusal names outside it.
+  const added = found.filter((f) => !f.scanned).map((f) => f.rel);
+  const fullList = `[${[...scanGlobs, ...added].map((g) => JSON.stringify(g)).join(", ")}]`;
+  const listNote = `cite.scanGlobs then reads ${fullList}${added.length > 1 ? ", with each file this refusal names" : ""}.`
+    + (config.cite.scanGlobs == null ? ` The list is unset now and reads the default, so write it out with the default kept.` : "");
+  const syntaxOnly = "If the text only teaches the cite syntax, write each example with a placeholder slug that is not a pending cite.";
+
+  return found.map(({ rel, scanned, excluded, hits }) => {
     const first = hits[0];
     const more = hits.slice(1, UNREAD_LINES_SHOWN).map((h) => h.line);
     const rest = hits.length - 1 > more.length ? `, and ${hits.length - 1 - more.length} more` : "";
     const also = hits.length > 1 ? ` Also at line ${more.join(", ")}${rest}.` : "";
     const where = `${rel}:${first.line} cites pending record "${first.slug}".${also}`;
-    const syntaxOnly = "If the text only teaches the cite syntax, write each example with a placeholder slug that is not a pending cite.";
     if (excluded) {
       const entry = excludeGlobs.find((g) => globToRegExp(g).test(rel));
+      const narrow = `narrow that entry in ${cfgPath} so it no longer covers "${rel}"`;
       const fix = scanned
-        ? `Narrow or drop that entry in ${cfgPath}, and the claim passes.`
-        : `The file is also outside cite.scanGlobs, so two steps are needed: narrow or drop that entry in ${cfgPath}, and add "${rel}" to cite.scanGlobs. The claim passes only after both.`;
-      out.push(`${where} cite.excludeGlobs entry "${entry}" covers this file, so --claim would leave the cite unrewritten. ${fix} ${syntaxOnly}`);
-    } else {
-      out.push(`${where} cite.scanGlobs does not read this file, so --claim would leave the cite unrewritten. Fix: add "${rel}" to cite.scanGlobs in ${cfgPath}. ${syntaxOnly}`);
+        ? `Fix: ${narrow}, and the claim passes.`
+        : `The file is also outside cite.scanGlobs, so two steps are needed: ${narrow}, and add "${rel}" to cite.scanGlobs. ${listNote} The claim passes only after both.`;
+      return `${where} cite.excludeGlobs entry "${entry}" covers this file, so --claim would leave the cite unrewritten. ${fix}${baseNote} ${syntaxOnly}`;
     }
-  }
-  return out;
+    return `${where} cite.scanGlobs does not read this file, so --claim would leave the cite unrewritten. Fix: add "${rel}" to cite.scanGlobs in ${cfgPath}. ${listNote}${baseNote} ${syntaxOnly}`;
+  });
 }
 
 // ---------------------------------------------------------------- structural validation, shared
@@ -630,7 +653,7 @@ function validate(root, config) {
 
   if (config.cite) {
     const pattern = new RegExp(config.cite.pattern, "g");
-    const scan = makeMatcher(config.cite.scanGlobs ?? ["**/*.md"]);
+    const scan = makeMatcher(config.cite.scanGlobs ?? DEFAULT_SCAN_GLOBS);
     const exclude = makeMatcher(config.cite.excludeGlobs ?? []);
     for (const rel of walk(root).filter((f) => scan(f) && !exclude(f))) {
       const { text } = readFileEol(join(root, rel));

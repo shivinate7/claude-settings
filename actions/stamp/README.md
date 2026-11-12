@@ -216,8 +216,8 @@ entry from a refusal of `--check` on your own tree. Do not guess the list.
 The rewrite reads only a file that `scanGlobs` names and `excludeGlobs` does not cover. A cite of a
 pending record in any other tracked text file would survive the claim as dead text. So `--claim`
 and `--check` refuse it first, before `--claim` writes anything. The refusal names `<file>:<line>`
-and the entry to change: add the file's own path to `cite.scanGlobs`, or narrow or drop the
-`cite.excludeGlobs` entry that covers it. A file that is both outside `scanGlobs` and covered by `excludeGlobs` needs both steps. This check matches as the rewrite does, and the rewrite skips
+and the entry to change: add the file's own path to `cite.scanGlobs`, or narrow the
+`cite.excludeGlobs` entry that covers it, so the entry's other files stay unread. A file that is both outside `scanGlobs` and covered by `excludeGlobs` needs both steps. A refusal with an add step also prints the whole `cite.scanGlobs` list to write: the list read now, or the default when it is unset, plus each file it names. A two-cite line is reported once. When `--config` names a file outside the repo, as the merge tool's copy of the base branch's config is, the refusal names the repo's `.github/stamp.json` and says the fix lands on the base branch first. This check matches as the rewrite does, and the rewrite skips
 no code span, fence, frontmatter or link target. So a pending cite in any of them refuses too. A file that only teaches the syntax writes a placeholder slug that is not a pending cite. A file git does not track, a symlink, a binary file (a NUL byte) and a file over 4 MiB are not read. This check
 reads shapes 1 and 2 only.
 
@@ -319,7 +319,8 @@ Do each step in your own repo, from your own tree.
    the owner.
 5. Run `--check` on your tree. Read each refusal. Add an `excludeGlobs` entry only for a
    file that teaches the cite syntax, and only when it cannot write each example with a placeholder slug that is not a pending cite. A refusal of
-   a pending cite in an unscanned file names the file's own path to add to `scanGlobs`.
+   a pending cite in an unscanned file names the file's own path to add to `scanGlobs`, and
+   prints the whole list with the default kept.
 6. Retire each step that claims a number on a branch, such as a claim in a merge script.
    Mode `check` refuses each number that a branch writes.
 7. Add the check job to your workflow. Pin the SHA. Run it on every pull request and on every
