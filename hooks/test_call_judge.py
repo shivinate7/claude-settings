@@ -69,6 +69,10 @@ Interface the hook must match:
   found:`. The text is the `message` of send_message and SendMessage (SendMessage's `to` names its agent, and a call
   that carries only a `summary` is not judged) and the `prompt` of create_session. A cite gets one judge call whose
   prompt carries the pick text and the candidate rulings. Any other message passes with no model call.
+  On create_session and SendMessage, a bare hold, holds or held states no pick. A statement there is a line or clause that
+  starts with `Pick:`, `Hold:`, `Coordinator pick` or `Decision:` (after optional markdown lead characters), or says `my pick`,
+  `picked` or `the pick is`. The lane brief template (skills/project-ops/templates/brief.md) passes untouched on both tools.
+  A refusal's remedy says that a message stating no pick can be reworded, on all three tools.
 - The pick's sources on two refs (the section "a coordinator's pick: plans and page answers on refs"): a plan R-number
   reads from origin/restart-plan (plans/*.md), a `page item N` reads its answer and question from origin/roadmap
   (waiting/answers and waiting/items, matched by n). Read by git, no checkout; a missing ref or file reads as not searched.
@@ -1823,17 +1827,22 @@ def pick_tool_input(tool, message):
     return {"session_id": PICK_TARGET, "message": message}
 
 
-def pick_input(tool, tool_input, transcript, cwd):
-    return json.dumps({"session_id": SID_A, "tool_name": tool, "cwd": cwd, "transcript_path": transcript,
-                       "tool_input": tool_input})
+PICK_AGENT_ID = "a7c41e90"  # the agent_id of a sub-agent's call: the payload field that a coordinator's own call does not carry
+
+
+def pick_input(tool, tool_input, transcript, cwd, agent=None):
+    payload = {"session_id": SID_A, "tool_name": tool, "cwd": cwd, "transcript_path": transcript, "tool_input": tool_input}
+    if agent:
+        payload["agent_id"] = agent
+    return json.dumps(payload)
 
 
 def pick_run(message, tags=(PICK_TAG,), coordinator=True, cwd=PICK_REPO, answer=ALLOW, model_fail=False, after=(),
-             tool=PICK_TOOL, tool_input=None):
+             tool=PICK_TOOL, tool_input=None, agent=None):
     """One run of the hook on a call of `tool` (send_message by default) whose text is `message`. `tool_input`, when given,
     is the whole input of the call instead: a create_session with no `prompt`, or a SendMessage with only a `summary`.
     `coordinator` False leaves the session's own record id unset. `after` is the list coordinator_transcript takes: the own
-    session's later set_session_tags inputs and newer reads of its record."""
+    session's later set_session_tags inputs and newer reads of its record. `agent`, when given, is the payload's agent_id."""
     transcript = coordinator_transcript(tags, after)
     if tool_input is None:
         tool_input = pick_tool_input(tool, message)
@@ -1841,7 +1850,7 @@ def pick_run(message, tags=(PICK_TAG,), coordinator=True, cwd=PICK_REPO, answer=
     try:
         if coordinator:
             os.environ[override.LANE_ENV] = PICK_LANE_ENV
-        return run_hook(pick_input(tool, tool_input, transcript, cwd), answer=answer, model_fail=model_fail)
+        return run_hook(pick_input(tool, tool_input, transcript, cwd, agent), answer=answer, model_fail=model_fail)
     finally:
         os.environ.pop(override.LANE_ENV, None)
         if saved is not None:
@@ -2141,13 +2150,14 @@ def pick_tool_claims(tool, label):
     check("pick via %s, cited: the judge's refusal denies the pick with its reason" % label,
           (r.deny() or {}).get("permissionDecision") == "deny" and reason in r.reason(), detail(r))
 
-    r = pick_run("coordinator hold: keep the lane parked until the run ends. "
+    # A brief tool states a pick by a marker (see the markers section below), so the hold here starts with `Hold:`.
+    r = pick_run("Hold: keep the lane parked until the run ends. "
                  "no ruling found: searched the decisions and the roadmap steps of this repo.", tool=tool, cwd=BARE_REPO)
     check("pick via %s, no ruling found: one judge call" % label, len(r.calls) == 1, detail(r))
     check("pick via %s, no ruling found: an ok verdict gives no output" % label, r.code == 0 and r.out == "", detail(r))
 
-    control = pick_run("coordinator hold: keep the lane parked until the run ends.", tool=tool)
-    check("pick via %s, chatter control: a coordinator's uncited hold is refused" % label,
+    control = pick_run("Hold: keep the lane parked until the run ends.", tool=tool)
+    check("pick via %s, marker control: an uncited Hold: line is refused" % label,
           (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
     for text_label, message in (
         ("Hold on", "Hold on, lane 3 is still building."),
@@ -2194,6 +2204,98 @@ def case_send_message_summary_only_passes():
     r = pick_run(None, tool=PICK_SENDMSG_TOOL, tool_input={"to": PICK_AGENT, "summary": PICK_UNCITED})
     check("pick via SendMessage, `summary` only: passes untouched, with no model call",
           r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+
+# ------------------------------------------------------------------ a coordinator's pick on create_session and SendMessage: markers
+#
+# create_session (`prompt`) starts a lane with a brief, and SendMessage (`message`) sends one to an agent. A brief is plain prose
+# such as "If a claim no longer holds, it stops and reports." (skills/project-ops/templates/brief.md), so on these two tools a
+# bare hold, holds or held states no pick. A statement there is a line or clause that starts with `Pick:`, `Hold:`, `Coordinator
+# pick` or `Decision:` (after optional markdown lead characters), or says `my pick`, `picked` or `the pick is`. send_message keeps
+# the word list of the section above.
+BRIEF_TEMPLATE = os.path.join(REPO, "skills", "project-ops", "templates", "brief.md")
+BRIEF_LINE = "If a claim no longer holds, it stops and reports."
+BRIEF_TOOLS = ((PICK_CREATE_TOOL, "create_session"), (PICK_SENDMSG_TOOL, "SendMessage"))
+ALL_PICK_TOOLS = ((PICK_TOOL, "send_message"),) + BRIEF_TOOLS
+PICK_BARE_HOLDS = ("The mailbox default was held.", "The lane holds the mailbox default until the owner names it.")
+PICK_MARKER_STATEMENTS = (
+    ("a Pick: line", "Pick: hold the mailbox default."),
+    ("a Hold: line", "Hold: keep the lane parked until the run ends."),
+    ("a Coordinator pick line", "Coordinator pick: go with route B."),
+    ("a Decision: line", "Decision: the mailbox waits for the owner."),
+    ("a bold markdown Pick: line", "- **Pick:** hold the mailbox default."),
+    ("a Pick: clause after a sentence", "Lane 3 is parked. Pick: hold the mailbox default."),
+    ("my pick", "This is my pick: route B."),
+    ("the pick is", "The pick is route B."),
+    ("picked", "The owner picked route B."),
+)
+
+
+def case_brief_template_passes_untouched():
+    # The scope first: the repo's brief template holds the line with `holds`, which is the template's pick word.
+    with open(BRIEF_TEMPLATE, encoding="utf-8") as f:
+        template = f.read()
+    check("brief template scope: the repo's brief template holds the line with `holds`", BRIEF_LINE in template, BRIEF_TEMPLATE)
+    for tool, label in BRIEF_TOOLS:
+        r = pick_run(template, tool=tool)
+        check("brief template via %s: passes untouched, with no model call and no refusal" % label,
+              r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+
+def case_brief_holds_line_passes():
+    for tool, label in BRIEF_TOOLS:
+        r = pick_run(BRIEF_LINE, tool=tool)
+        check("brief line via %s: the `holds` line passes untouched, with no model call" % label,
+              r.code == 0 and r.out == "" and r.calls == [], detail(r))
+    control = pick_run(BRIEF_LINE, tool=PICK_TOOL)
+    check("brief line control: the same line sent by send_message is refused uncited, with no model call",
+          (control.deny() or {}).get("permissionDecision") == "deny" and control.calls == [], detail(control))
+
+
+def case_brief_bare_holds_pass():
+    control = pick_run(PICK_BARE_HOLDS[0], tool=PICK_TOOL)
+    check("bare hold control: send_message refuses an uncited `was held` line, with no model call",
+          (control.deny() or {}).get("permissionDecision") == "deny" and control.calls == [], detail(control))
+    for message in PICK_BARE_HOLDS:
+        for tool, label in BRIEF_TOOLS:
+            r = pick_run(message, tool=tool)
+            check("bare hold via %s, %r: passes untouched, with no model call" % (label, message),
+                  r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+
+def case_brief_marker_statements_are_refused():
+    for label, message in PICK_MARKER_STATEMENTS:
+        for tool, tool_label in BRIEF_TOOLS:
+            r = pick_run(message, tool=tool)
+            check("brief marker, %s via %s, uncited: refused in code, with no model call" % (label, tool_label),
+                  (r.deny() or {}).get("permissionDecision") == "deny" and r.calls == [], detail(r))
+
+
+def case_brief_marker_pick_cited_gets_one_call():
+    message = "Pick: hold the mailbox default, per decision %s." % MBX_SLUG
+    for tool, label in BRIEF_TOOLS:
+        r = pick_run(message, tool=tool)
+        check("brief marker pick cited via %s: one judge call that carries the cited decision's text" % label,
+              len(r.calls) == 1 and MBX_MARK in pick_prompt(r), detail(r))
+        check("brief marker pick cited via %s: an ok verdict gives no output" % label, r.code == 0 and r.out == "", detail(r))
+
+
+def case_brief_refusal_says_reword():
+    for tool, label in ALL_PICK_TOOLS:
+        r = pick_run(PICK_UNCITED, tool=tool)
+        check("pick via %s, uncited: refused in code" % label, (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check("pick via %s, uncited: the remedy says a message that states no pick can be reworded" % label,
+              "reword" in r.reason().lower(), r.reason()[-200:])
+
+
+def case_agent_pick_passes_on_each_pick_tool():
+    for tool, label in ALL_PICK_TOOLS:
+        control = pick_run(PICK_UNCITED, tool=tool)
+        check("agent pick via %s, control: the coordinator's uncited pick is refused in code" % label,
+              (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
+        r = pick_run(PICK_UNCITED, tool=tool, agent=PICK_AGENT_ID)
+        check("agent pick via %s: passes untouched, with no model call and no refusal" % label,
+              r.code == 0 and r.out == "" and r.calls == [], detail(r))
 
 
 # ------------------------------------------------------------------ a coordinator's pick: plans and page answers on refs
@@ -2343,6 +2445,35 @@ DIGIT_REPO = put_on_ref(make_repo("page-digit-boundary", decisions={PAGE_RULING_
                                "note": "answer of item three. Marker %s." % DIGIT_MARK}),
     DIGIT_ITEM_FILE: page_json({"id": "item-three", "kind": "decision", "n": 3, "status": "closed",
                                 "title": "A third question."})})
+
+
+# Answer rows by their fields (the answer schema of skills/waiting-page/SKILL.md): `act: "park"` is a Park press, `done: true` is a
+# task answer, and a row with none of choice, done or act is a note only. Each row has its own question on the same ref.
+ACT_MARK, DONE_MARK, BARE_MARK = "act-3f92", "done-7b41", "bare-c820"
+ACT_FORMS_REPO = put_on_ref(make_repo("page-answer-forms"), PAGE_REF_FULL, {
+    "waiting/answers/act-park.json": page_json({"at": "2026-11-11T13:00:00.000Z", "act": "park", "item": "act-park", "n": 559,
+                                                "note": "wait for the owner's next look. Marker %s." % ACT_MARK}),
+    "waiting/items/act-park.json": page_json({"id": "act-park", "kind": "decision", "n": 559, "status": "open",
+                                              "title": "A question the owner set aside."}),
+    "waiting/answers/done-task.json": page_json({"at": "2026-11-11T14:00:00.000Z", "done": True, "item": "done-task", "n": 560,
+                                                 "note": "closed on the page. Marker %s." % DONE_MARK}),
+    "waiting/items/done-task.json": page_json({"id": "done-task", "kind": "task", "n": 560, "status": "closed",
+                                               "title": "A task the owner closed."}),
+    "waiting/answers/bare-row.json": page_json({"at": "2026-11-11T15:00:00.000Z", "item": "bare-row", "n": 561,
+                                                "note": "no option fits, just this. Marker %s." % BARE_MARK}),
+    "waiting/items/bare-row.json": page_json({"id": "bare-row", "kind": "decision", "n": 561, "status": "open",
+                                              "title": "A question with a note-only answer."}),
+})
+
+
+def page_row(repo, path):
+    """The JSON row of the answer file `path` on origin/roadmap in `repo`."""
+    return json.loads(git(repo, "show", PAGE_REF + ":" + path).stdout)
+
+
+def said_of(line):
+    """The `said` part of a page answer line, lowercased: the text after its label and before its note. "" for no line."""
+    return line.partition(": ")[2].partition("; ")[0].strip().lower()
 
 
 def is_json(text):
@@ -2621,6 +2752,58 @@ def case_pick_page_item_end_boundary_on_digits():
           one_line_holds(pick_prompt(dot), PAGE_ANSWER_LABEL, PAGE_ANS_MARK), detail(dot))
 
 
+def case_pick_page_act_park_renders_parked():
+    row = page_row(ACT_FORMS_REPO, "waiting/answers/act-park.json")
+    check("pick act park fixture: origin/roadmap holds item 559's row with act park, and no choice or done",
+          row.get("act") == "park" and "choice" not in row and "done" not in row, row)
+    r = pick_run("coordinator pick: hold the mailbox default, per page item 559.", cwd=ACT_FORMS_REPO)
+    prompt = pick_prompt(r)
+    line = line_with(prompt, ACT_MARK)
+    check("pick, page item 559 parked by act: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 559 parked by act: its line carries the answer label",
+          one_line_holds(prompt, "page item 559 answer", ACT_MARK), detail(r))
+    check("pick, page item 559 parked by act: its line says parked", said_of(line) == "parked", line[:200])
+
+
+def case_pick_page_done_row_renders_done():
+    row = page_row(ACT_FORMS_REPO, "waiting/answers/done-task.json")
+    check("pick done fixture: origin/roadmap holds item 560's row with done true, and no choice or act",
+          row.get("done") is True and "choice" not in row and "act" not in row, row)
+    r = pick_run("coordinator pick: hold the mailbox default, per page item 560.", cwd=ACT_FORMS_REPO)
+    line = line_with(pick_prompt(r), DONE_MARK)
+    check("pick, page item 560 done: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 560 done: its line says done", said_of(line) == "done", line[:200])
+    check("pick, page item 560 done: its line never says parked", "parked" not in line.lower(), line[:200])
+
+
+def case_pick_page_row_without_fields_renders_note_only():
+    row = page_row(ACT_FORMS_REPO, "waiting/answers/bare-row.json")
+    check("pick note-only fixture: origin/roadmap holds item 561's row with no choice, done or act",
+          not {"choice", "done", "act"} & set(row), row)
+    r = pick_run("coordinator pick: hold the mailbox default, per page item 561.", cwd=ACT_FORMS_REPO)
+    line = line_with(pick_prompt(r), BARE_MARK)
+    check("pick, page item 561 with no choice, done or act: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 561 with no choice, done or act: its line says no choice, note only",
+          said_of(line) == "no choice, note only", line[:200])
+
+
+def case_pick_page_choice_renders_as_before():
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=PAGE_ANS_REPO)
+    line = line_with(pick_prompt(r), PAGE_ANS_MARK)
+    check("pick, page item 556 with choice a: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 556 with choice a: its line says choice a, as before", said_of(line) == "choice a", line[:200])
+
+
+def case_pick_page_item_no_space_letter_reaches_the_prompt():
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556a.", cwd=PAGE_ANS_REPO)
+    prompt = pick_prompt(r)
+    check("pick, page item 556a. (the letter with no space): one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 556a.: the answer line reaches the prompt", one_line_holds(prompt, PAGE_ANSWER_LABEL, PAGE_ANS_MARK),
+          detail(r))
+    check("pick, page item 556a.: the Not searched line does not name page item 556",
+          not any("page item 556" in line for line in not_searched_lines(prompt)), detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2670,7 +2853,13 @@ def main():
                  case_pick_page_answer_missing_ref_is_not_searched, case_pick_page_answer_missing_file_is_not_searched,
                  case_pick_page_question_missing_is_not_searched, case_pick_page_question_malformed_is_not_searched,
                  case_pick_two_page_answers_later_file_sorts_first, case_pick_two_page_answers_later_file_sorts_last,
-                 case_pick_page_park_answer_has_no_choice_none, case_pick_page_item_end_boundary_on_digits):
+                 case_pick_page_park_answer_has_no_choice_none, case_pick_page_item_end_boundary_on_digits,
+                 case_brief_template_passes_untouched, case_brief_holds_line_passes, case_brief_bare_holds_pass,
+                 case_brief_marker_statements_are_refused, case_brief_marker_pick_cited_gets_one_call,
+                 case_brief_refusal_says_reword, case_agent_pick_passes_on_each_pick_tool,
+                 case_pick_page_act_park_renders_parked, case_pick_page_done_row_renders_done,
+                 case_pick_page_row_without_fields_renders_note_only, case_pick_page_choice_renders_as_before,
+                 case_pick_page_item_no_space_letter_reaches_the_prompt):
         try:
             case()
         except Exception as exc:
