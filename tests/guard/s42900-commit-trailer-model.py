@@ -47,7 +47,7 @@ def ctm_record(agent_id, model=None, requested=None):
 
 
 def ctm_transcript(agent_id, *lines):
-    """Write `agent_id`'s transcript, one line each, in the subagents folder beside the session transcript."""
+    """Write `agent_id`'s transcript, one line each, in the `subagents/` folder beside the session transcript."""
     write(os.path.join(CTM_SUBDIR, "agent-" + agent_id + ".jsonl"), "".join(line + "\n" for line in lines))
 
 
@@ -85,7 +85,8 @@ def ctm_message(*trailers, body=None):
     return "\n\n".join(paragraphs) + "\n"
 
 
-# The trailer block of the incident commit 3b5516cf8, whose trailer named Opus from a Haiku agent. The session id is a stand-in.
+# The trailer block of a commit that names Opus. A Haiku agent's push of it must be refused, and most Opus rows
+# push the repository built on it. The session id is a stand-in.
 CTM_INCIDENT = ctm_message(ctm_trailer("Claude Opus 5.5"),
                            "Claude-Session: https://claude.ai/code/" + CTM_SESSION)
 
@@ -241,7 +242,7 @@ def ctm_case(name, repo, expected, agent, command=CTM_PUSH, transcript=CTM_TRANS
 
 
 # REFUSED: a pushed commit names a model that differs from the agent's own model.
-ctm_case("the 3b5516cf8 trailer from a Haiku agent is refused", CTM_REPO_INCIDENT, "deny", CTM_HAIKU)
+ctm_case("an Opus trailer from a Haiku agent is refused", CTM_REPO_INCIDENT, "deny", CTM_HAIKU)
 ctm_case("a Haiku trailer from a Sonnet agent is refused", CTM_REPO_HAIKU, "deny", CTM_SONNET)
 ctm_case("an Opus trailer from a Fable agent is refused", CTM_REPO_INCIDENT, "deny", CTM_FABLE)
 ctm_case("a Haiku trailer from an Opus agent on the [1m] model is refused", CTM_REPO_HAIKU, "deny", CTM_OPUS_1M)
