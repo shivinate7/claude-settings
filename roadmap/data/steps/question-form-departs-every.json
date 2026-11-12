@@ -6,10 +6,10 @@
   "phase": "next",
   "lane": "session_013NEJL1HE4sTtXRFNZWohXP",
   "why": "The decision text and the code disagree on when a Departs from line is required.",
-  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 5). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. Decision question-form matches the code: a Departs from line on every question. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
+  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 5). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. Decision question-form matches the code: a Departs from line on every question. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane report (coordinator 22:58 CST Nov 11): PR #2611, head 128532af9, handed to batch runner 10. After it merges, a prose fix to the decision's lines 14 and 43 follows.",
   "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-11T22:50:00-06:00",
+  "updatedAt": "2026-11-11T22:58:00-06:00",
   "blockedBy": [],
   "order": 0.102
 }

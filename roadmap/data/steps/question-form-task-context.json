@@ -1,0 +1,16 @@
+{
+ "id": "question-form-task-context",
+ "title": "The question-form guard checks a page task with options for its Departs-from line, even when the task carries context",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "test-guard-split-per-rule"
+ ],
+ "why": "The question-form guard skips page tasks that carry context, so a task with options can reach the owner with no Departs-from line.",
+ "source": "coordinator 22:58 CST Nov 11, from lane question-form-departs-every (PR #2611)",
+ "note": "Code change in the question-form guard (hooks/question_form.py). Found by the lane question-form-departs-every.",
+ "updatedAt": "2026-11-11T22:58:00-06:00"
+}
