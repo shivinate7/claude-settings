@@ -177,6 +177,9 @@ DEPARTS_RULE = "question-departs"
 DEPARTS_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Departs from(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
 # The separator: an em dash, spaced or not, or " - " or " -- ". The first one splits the line.
 DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
+# With no dash, the first sentence end splits the line: a ".", "!" or "?" and the space after it. The first
+# sentence (less its end mark) is the main side and the rest is the change side.
+DEPARTS_SENTENCE_END = re.compile(r"[.!?]\s+")
 # Whole words and phrases that say the change side restates main. "stay", "remain" and "kept" are not
 # here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
 NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
@@ -194,11 +197,16 @@ PLACEHOLDER_HINT = ": write the real text"
 
 
 def departs_sides(rest):
-    """(main side, change side, whether a separator split it) of one Departs from line's text. The one parser."""
+    """(main side, change side, how it split) of one Departs from line's text. The one parser. How is "dash"
+    when DEPARTS_SEPARATOR splits it (that form wins whenever a dash is present), else "sentence" when its
+    first sentence end (DEPARTS_SENTENCE_END) splits it, else "" with the whole text as the main side."""
     parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
-    if len(parts) < 2:
-        return rest.strip(), "", False
-    return parts[0].strip(), parts[1].strip(), True
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip(), "dash"
+    parts = DEPARTS_SENTENCE_END.split(rest.strip(), maxsplit=1)
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip(), "sentence"
+    return rest.strip(), "", ""
 
 
 def departs_hit(text) -> str:
@@ -213,7 +221,8 @@ def departs_hit(text) -> str:
     for rest in lines:
         main, change, split = departs_sides(rest)
         if not split:
-            return "Departs from line with no \u2014, - or -- separator between what is on main and what changes"
+            return ("Departs from line with no \u2014, - or -- separator and no sentence end (\". \", \"! \" or \"? \") "
+                    "between what is on main and what changes")
         if not main or not change:
             return "Departs from line with an empty side"
         added = PORT_NEW_THING.fullmatch(change)
@@ -254,13 +263,14 @@ def port_departs_miss(text) -> str:
     if miss:
         return miss
     for rest in DEPARTS_LINE.findall(text):
-        main, change, _ = departs_sides(rest)
+        main, change, how = departs_sides(rest)
         main = main.strip("`").strip()
-        if main.lower() == "main":
-            if PORT_NEW_THING.fullmatch(change):
+        if how == "dash":  # a port names its place on main with a dash form, never a sentence
+            if main.lower() == "main":
+                if PORT_NEW_THING.fullmatch(change):
+                    continue
+            elif PORT_MAIN_SIDE.fullmatch(main):
                 continue
-        elif PORT_MAIN_SIDE.fullmatch(main):
-            continue
         return "port item whose Departs from line names no <file>:<symbol> on main"
     return ""
 
