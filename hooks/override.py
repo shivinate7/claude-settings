@@ -28,10 +28,15 @@ writes, so a session cannot grant itself an override. It is valid only while now
     - One length sets the time: `15m`, `15 minutes`, or a bare number right after a first word `override` (minutes).
       None: a one-act override. A judge yes for a first-word `override` with a reason and no length stays main's
       one-act override.
-    - grant() defers (returns None) only for a first word `override` whose rest is no whole keyword form and holds a
-      length. grant_override_ask then answers every outcome but a judge yes with grant()'s own result (a reason form:
-      a one-act override, with the reason logged; `override 15m please`: nothing). A judge no or error never widens a
-      one-act override to a timed one.
+    - grant() defers (returns None) only for a first word `override` whose rest starts with no length and holds one
+      (`override that for 15 minutes please`). grant_override_ask then answers every outcome but a judge yes with
+      grant()'s own result (a reason form: a one-act override, with the reason logged). A judge no or error never
+      widens a one-act override to a timed one.
+  The keyword route is the fast path, and it never asks a judge. `override <length>` with any words after the length
+  (`override 15m please`, `override 2 hours`) is timed (_fast_length). A second length, a decimal or a compound
+  length (`1.5h`, `1h30m`) grants nothing. `override off <word>` grants nothing. A grant needs the owner's typed words
+  (_keyword_typed): payload `source` absent or the owner's, and the prompt's own transcript record no harness turn
+  and no peer or task-notification origin. Each grant prints one receipt line (local_time.override_line).
 An Opus override is the file <config dir>/state/override/opus/<session_id>.json, {"kind": "opus",
 "until": ISO-8601 UTC, "role": null, one role, or a sorted list of 2 or more roles}. It lives beside the override, so the two never
 replace each other. It lifts only the Opus spawn refusal of guard rule agent-model-cap, never that
@@ -138,6 +143,8 @@ UNCLEAR_LENGTH = re.compile(r"[.,]\d+(?:[mh]|\s?(?:{0}))(?![\w-])|\d(?:{0}|[mh])
 OVERRIDE_WORD = re.compile(r"(?<![\w-])override(?![\w-]|\.\w)", re.I)
 CODE_SPANS = re.compile(r"```.*?```|```.*|`[^`\n]+`", re.S)
 BARE_NUMBER = re.compile(r"(\d+)(?![\w.,-])")
+# A reason that starts with a decimal (`1.5h`) or a compound (`1h30m`) length: the keyword route grants nothing.
+LEADING_UNCLEAR = re.compile(r"\d+(?:[.,]\d+(?:[mh]|\s?(?:{0}))|(?:{0}|[mh])\d)".format(SPELLED_UNIT), re.I)
 FIRED_TASK = re.compile(r"<system-reminder>\s*This task fired at ")  # a fired scheduled task's block
 COMMAND_RECORDS = ("<local-command-caveat>", "<command-name>", "<command-message>", "<local-command-stdout>")
 SEED_READ_MAX = 1 << 20  # bytes of the transcript the seed check reads, from the top
@@ -340,9 +347,16 @@ def _text_of(rec):
     return _transcript.owner_text(rec, NOTICE_TAGS)
 
 
-def _tail_prompts(transcript):
+def _unpeered(rec):
+    """`rec` without its origin keys, so owner_text counts a peer's record as a prompt record too."""
+    att = rec.get("attachment")
+    return dict(rec, origin=None, **({"attachment": dict(att, origin=None)} if isinstance(att, dict) else {}))
+
+
+def _tail_prompts(transcript, any_origin=False):
     """[(offset, record)] for each owner prompt record in the last SEED_READ_MAX bytes, in order. Attachment, assistant
-    and other non-prompt records are left out. Cost: one open, one read of that tail."""
+    and other non-prompt records are left out. `any_origin` also keeps a peer's record (_keyword_typed reads its origin).
+    Cost: one open, one read of that tail."""
     if not isinstance(transcript, str):  # no transcript_path in the payload; an int would open a descriptor
         return []
     try:
@@ -359,7 +373,7 @@ def _tail_prompts(transcript):
             rec = json.loads(line)
         except ValueError:
             rec = None
-        if isinstance(rec, dict) and _text_of(rec) is not None:
+        if isinstance(rec, dict) and _text_of(_unpeered(rec) if any_origin else rec) is not None:
             found.append((at, rec))
         at += len(line)
     return found
@@ -520,12 +534,51 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     return _write_opus(session_id, path, at, length, _file_role(roles), said)
 
 
-def grant(session_id, prompt, at, defer=True):
+def _keyword_typed(prompt, source, transcript):
+    """True when the keyword route may grant `prompt`: the owner typed it. The payload `source` is absent or the owner's
+    (OPUS_ASK_SOURCES), and the prompt's own record in the transcript tail (the last owner prompt record with the same
+    text, _own_record's test) is no harness turn (promptSource "system"), no isMeta record and has no origin kind but
+    human (a peer, a task notification). No transcript, or no such record: no evidence against, so True. Cost: one
+    tail read, only for a prompt that would grant."""
+    if source not in OPUS_ASK_SOURCES:
+        return False
+    for _, rec in reversed(_tail_prompts(transcript, any_origin=True)):
+        if _text_of(_unpeered(rec)).strip() != prompt.strip():
+            continue
+        origin = rec.get("origin")
+        att = rec.get("attachment")
+        att_origin = att.get("origin") if isinstance(att, dict) else None
+        return not (rec.get("isMeta") or rec.get("promptSource") == "system"
+                    or any(isinstance(o, dict) and o.get("kind", "human") != "human" for o in (origin, att_origin)))
+    return True
+
+
+def _fast_length(reason):
+    """(number, unit letter or None) for a keyword reason that starts with one length (`15`, `15m`, `4h`, `2 hours`,
+    `90 minutes`), False when it starts with a decimal or compound length or holds a second length, else None (the
+    reason starts with no length). The words after the length may be anything but another length."""
+    first = ASK_LENGTH.match(reason)
+    if first:
+        number, unit, rest = first.group(1), (first.group(2) or first.group(3))[0], reason[first.end():]
+    else:
+        first = BARE_NUMBER.match(reason)
+        if not first:
+            return False if LEADING_UNCLEAR.match(reason) else None
+        number, unit, rest = first.group(1), None, reason[first.end():]
+    return False if _ask_lengths(rest) != [] else (number, unit)
+
+
+def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
-    else None: the prompt is not a word. With `defer`, a first word `override` whose rest is no whole keyword form and
-    holds a length returns None too, so the plain ask (grant_override_ask) judges it; grant_override_ask calls again
-    with `defer` False for main's result."""
+    else None: the prompt is not a word. The keyword route (decision owner-override):
+      `override`, or `override <reason>`: a one-act override, the reason logged.
+      `override <length>`, with any words after the length (_fast_length): a timed override. This is the fast path: no
+        model call. A second length, a decimal or a compound length: nothing.
+      `override off`: ends the override, as the whole prompt only; a word after `off` grants nothing.
+    A grant needs _keyword_typed on the payload's `source` and `transcript`; `off` needs no check. With `defer`, a first
+    word `override` whose rest starts with no length and holds one returns None, so the plain ask (grant_override_ask)
+    judges it; grant_override_ask calls again with `defer` False for main's result."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
         return _grant_opus(session_id, opus.group(1), at)
@@ -534,22 +587,25 @@ def grant(session_id, prompt, at, defer=True):
     if not said or path is None:
         return None
     reason = " ".join(said.group(1).split())  # one log line: newlines and tabs fold to spaces
-    word = WORD.fullmatch(reason)
-    if not word and WORD.fullmatch(reason.split(" ")[0]):
-        return None  # a word after `off` or a length: ambiguous, grants nothing
-    if not word and defer and ASK_LENGTH.search(reason):
-        return None  # a plain ask with a length: grant_override_ask judges it
-    off, number, unit = word.groups() if word else (None, None, None)
-    if off:
+    if reason.split(" ")[0].lower() == "off":
+        if reason.lower() != "off":
+            return None  # a word after `off`: ambiguous, grants nothing (an intended "off" must never become a grant)
         try:
             os.remove(path)
         except FileNotFoundError:
             return None
         return "off", None
-    if number is None:
+    length = _fast_length(reason)
+    if length is False:
+        return None
+    if length is None and defer and ASK_LENGTH.search(reason):
+        return None  # a plain ask with a length: grant_override_ask judges it
+    if not _keyword_typed(prompt, source, transcript):
+        return None
+    if length is None:
         kind, until = "once", at + ONCE_WINDOW
     else:
-        kind, until = "timed", _length_end(at, number, unit)
+        kind, until = "timed", _length_end(at, *length)
     _write_override(session_id, path, kind, until)
     if reason and kind == "once":
         _log_reason(session_id, reason, at)
@@ -596,14 +652,17 @@ def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, sour
     ask alone.
     A first word `override` is a keyword form grant() deferred. Every outcome but a judge yes for a timed override
     (a gate, unclear words, a judge no, an error or an odd answer) returns grant(defer=False): a reason form stays a
-    one-act override with its reason logged, `override 15m please` stays nothing. A judge error never widens it."""
+    one-act override with its reason logged, `override 15m please` stays nothing. A judge error never widens it. A first word `override` prompt that is no owner-typed turn (_keyword_typed)
+    returns None before any judge call."""
     path = _path(session_id)
     if path is None or not isinstance(prompt, str):
         return None
     keyword = PROMPT.match(prompt) is not None
+    if keyword and not _keyword_typed(prompt, source, transcript):
+        return None  # a first word `override` that is no owner-typed turn: neither the keyword grant nor the judge
 
     def main():
-        return grant(session_id, prompt, at, defer=False) if keyword else None
+        return grant(session_id, prompt, at, defer=False, transcript=transcript, source=source) if keyword else None
 
     try:  # a gate that raises (a transcript read, an import) leaves main's result standing
         gated = _owner_ask(prompt, source, transcript, _override_wanted)
