@@ -2134,7 +2134,8 @@ class UnreadStale(FolderCase):
 # carries a six-space `<token>| ` prefix and is never a row. A `[location] <label>` row, when present, is the label.
 # Without report.md: one line per awaiting thread, `thread-awaiting <id8> (last comment <time>, <location or "no location">)`,
 # then exit 1; with none, `awaiting: clean` and exit 0. A cut read is never clean: a `[N comment(s) elided ...` row in an open thread,
-# a `[N more thread(s) not listed` line, a missing or empty threads.txt, a first page with no `N comment threads (` header, or an open thread with no comment rows prints
+# a `[N more thread(s) not listed` line with no thread after it (a later page follows it when the read went on), a missing or empty threads.txt, a first
+# line that is not a `N comment threads` or `No comment threads` header, the same thread twice, or an open thread with no comment rows prints
 # `unknown: <what>` and exits 2. With report.md: the Input Needed section (after its bold label, with or without a colon, quoted or not, up to the next bold Next,
 # Done or Deviations label) must name each awaiting thread by its id8, and an `Awaiting reply: N` line must give the count.
 # Each miss prints `report-missing <id8>`; a wrong or absent count prints `report-count <found> expected <N>`; both exit 1.
