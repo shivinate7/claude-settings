@@ -174,7 +174,9 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/settings.json" ]; then
+# Cloud: a clone under a temp folder is a scratch copy, so it is not the source; the search below goes on.
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/CLAUDE.md" ] && [ -f "$SCRIPT_DIR/settings.json" ] \
+   && { [ "$CLOUD" != 1 ] || ! under_temp "$SCRIPT_DIR"; }; then
   SRC="$SCRIPT_DIR"
 else
   # No file to locate ourselves by (e.g. piped: curl | bash). Look for an existing git
