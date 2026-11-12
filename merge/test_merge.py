@@ -11303,6 +11303,38 @@ class GitLockExtendsForRateWaits(Env):
         self.assertIn("not this run's", release_out(self, self.glock, "0" * 40))
         self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], kept)
 
+class HostReadTimeoutRetry(unittest.TestCase):
+    """Host.gh on a `gh` call that sh killed at its time limit (subprocess.TimeoutExpired). A read is asked again like a network error;
+    a write is never sent twice by this layer. After the retries a read stops as NetStop, which keeps the claim (decision standing-merge-grant)."""
+    def host_over(self, *seq):
+        seq, calls, pauses = list(seq), [], []
+        def fake(args, cwd=None, input=None, env=None, **k):
+            calls.append(args)
+            r = seq.pop(0) if len(seq) > 1 else seq[0]
+            if isinstance(r, Exception):
+                raise r
+            return r
+        p = unittest.mock.patch.object(merge, "sh", fake)
+        p.start(); self.addCleanup(p.stop)
+        return merge.Host(pause=pauses.append), calls, pauses
+
+    def test_a_read_that_times_out_once_is_asked_again_and_answers(self):
+        host, calls, pauses = self.host_over(subprocess.TimeoutExpired(["gh"], 30), (0, "{}"))
+        self.assertEqual(host.api("pulls/7"), (0, "{}"))
+        self.assertEqual(len(calls), 2, calls)
+
+    def test_a_read_that_keeps_timing_out_stops_as_a_net_stop_after_the_retries(self):
+        host, calls, pauses = self.host_over(subprocess.TimeoutExpired(["gh"], 30))
+        with self.assertRaises(merge.NetStop):
+            host.api("pulls/7")
+        self.assertEqual(len(calls), merge.NET_RETRIES + 1, calls)
+
+    def test_a_write_that_times_out_is_not_sent_again_by_this_layer(self):
+        host, calls, pauses = self.host_over(subprocess.TimeoutExpired(["gh"], 30), (0, "{}"))
+        with self.assertRaises(subprocess.TimeoutExpired):
+            host.api("pulls/7/merge", method="PUT", body={"sha": "abc"})
+        self.assertEqual(len(calls), 1, calls)
+
 class HostDefaultBranchRateRetry(unittest.TestCase):
     """host_default_branch (`gh api repos/{owner}/{repo}`, run in the checkout's root) on a rate-limit error. It retries like Host.gh:
     the ladder (60, 300, 900 s), three retries, then NetStop. The function has no pause parameter, so the pauses are recorded by
