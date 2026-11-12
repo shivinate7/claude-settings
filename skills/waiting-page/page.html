@@ -1296,6 +1296,7 @@ function draftReady(it) {
   if (it.park) return ACTS.includes((state.draft[it.id] || {}).act);
   const d = eff(it); if (!d || blocked(it)) return false;
   if (d.act === "park") return true;
+  if (d.stood && !state.draft[it.id]) return false; // a stood pick the owner never touched is not an answer he gave
   if (isRuling(it)) return d.choice === OVERTURN;
   if (it.kind === "task") return !!d.done || !!(d.note || "").trim(); // a note alone is a note, not a done mark
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
@@ -1443,6 +1444,7 @@ function readyText(it) {
   if (d.act === "park") return "Ready to send: park.";
   if (isRuling(it)) return d.choice === OVERTURN ? "Ready to send: overturn." : "";
   if (it.kind === "task") return d.done ? "Ready to send: done." : (d.note || "").trim() ? "Ready to send: note, not done." : "";
+  if (d.stood && !state.draft[it.id]) return "My pick stands. Press it to send it.";
   if (d.stood) return "My pick goes with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
@@ -1515,7 +1517,7 @@ function optCard(it, o, chosen) {
   const input = multi
     ? h("input", { type: "checkbox", id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => toggle(it, o.key) })
     : h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => choose(it, o.key),
-      onclick: (e) => { if ((eff(it) || {}).choice === o.key) { e.preventDefault(); choose(it, null); } } });
+      onclick: (e) => { const d = eff(it) || {}; if (d.choice === o.key) { e.preventDefault(); choose(it, d.stood && !state.draft[it.id] ? o.key : null); } } }); // a press on an unsent stood pick accepts it
   const key = h("span", { class: "key" }, letterOf(it, o.key)), lab = h("span", { class: "lab", id: "l-" + sfx }, o.label);
   // On a ranked item the tick box holds the rank number.
   const headKids = multi ? [h("span", { class: "tick" + (ranked ? "" : " mark"), "aria-hidden": "true" }, ranked && sel ? String(at + 1) : ""), key, lab] : [key, lab];

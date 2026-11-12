@@ -172,12 +172,11 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
   time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
-  a note with no `done`. A pick that stands writes `choice` equal to `pick`, with the note
-  `accepted pick`. A tap on the starred option is an ordinary pick, with no such note. On a `multi` item `choice` is a
+  a note with no `done`. A pick that stands and goes with a typed note writes `choice` equal to `pick`. A press on the starred option is an ordinary pick, with no `accepted pick` note. On a `multi` item `choice` is a
   list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `pick` list in that order. "None of these" writes
   `choice: "none"`, and the page sends it only with a note that says what the owner wants
   instead. A note typed with no option picked is the same answer: `choice: "none"` plus the note.
-  On an item whose pick stands, a note with no new pick sends the stood pick plus the note.
+  On an item whose pick stands, a note with no new pick sends the stood pick plus the note. A stood pick with no press and no note sends nothing.
   A changed answer that the owner leaves empty is withdrawn: Send reads "Withdraw answer" and
   deletes `answers/<id>`. The page re-reads the record first and leaves one that changed. A withdraw
   has the same 8-second Undo as a Send, and tells no session. Undo (8 seconds after a Send) deletes the
@@ -316,9 +315,10 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      Set either only on a page that `stale_pages.py` reports current (see "Update a repo's pages"). An older page draws radios.
      The page stars no option when `pick` is not valid.
    - Set `stands: true` only on a decision that changes no rule and has a `pick`. Never set it on
-     an item in a group. The page shows it in the last section, and `pick` goes with the owner's
-     next Send unless the owner chooses another. The owner cannot hold a stood pick
-     open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
+     an item in a group. The page shows it in the last section, starred. `pick` goes with a Send
+     only after the owner pressed an option on that card (or typed a note on it). A stood pick he
+     never touched sends nothing and stays open. Pressing the starred option accepts it;
+     pressing it again unselects it. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
    (a closed item is one line on the page, with no card to open). Open no question box (`questions-go-to-owner`).
 4. Keep working on what does not depend on the answer.
