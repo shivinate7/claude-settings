@@ -26,7 +26,7 @@ main (landed_marks) or by a row in the file's optional `landedPulls` list (pull_
 of the last 14 days with their head ref, head sha and merged flag, which the publisher fills from GitHub.
 
 After it runs, this script prints an upkeep list for the triage thread (step c55): open-step notes over
-NOTE_WORDS words; in phases that hold an active step, open steps untouched for STALE_DAYS days and
+NOTE_WORDS words; in phases that hold a doing or active step, open steps untouched for STALE_DAYS days and
 open steps with no note (a later phase waits on purpose, so flagging it would cry wolf); and steps that
 entered the top TOP open places in the last day without a "Placed ahead of" line.
 
@@ -184,7 +184,8 @@ IDLE_LANES_LINE = "lanes to archive"
 FUTURE_MINUTES = 5
 # `ready` reads as todo.
 TODO_STATUS = ("todo", "ready")
-KNOWN_STATUS = TODO_STATUS + ("doing", "active", "done")
+LIVE_STATUS = ("doing", "active")
+KNOWN_STATUS = TODO_STATUS + LIVE_STATUS + ("done",)
 TOP = 5
 # ISO UTC: a done step updated before this time is not read for a Done check. Set to the first midnight after this
 # row ships: the 44 done steps updated Nov 7-8 CST (measured on origin/roadmap) carry no `Done check green on main:`
@@ -1257,7 +1258,7 @@ def laneless(open_, marks, work):
         return why, []
     out = []
     for k, d in open_:
-        if d.get("status") in ("doing", "active") and not lane_live(work, k):
+        if d.get("status") in LIVE_STATUS and not lane_live(work, k):
             if k in marks and is_feel(d) and device_check(d) != "valid":
                 continue  # the device row lists it; it must not read "set to done" before a device check
             out.append((k, marks[k] if k in marks else "todo"))
@@ -1454,7 +1455,7 @@ def dated_claims(open_, today):
     out = []
     for k, d in open_:
         note = d.get("note")
-        if d.get("status") not in ("doing", "active") or not isinstance(note, str):
+        if d.get("status") not in LIVE_STATUS or not isinstance(note, str):
             continue
         newest = None  # (date, as written)
         for m in CLAIM.finditer(note):
@@ -1618,7 +1619,7 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
 def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
-    live = {d.get("phase") for _, d in open_ if d.get("status") == "active"}
+    live = {d.get("phase") for _, d in open_ if d.get("status") in LIVE_STATUS}
     long_, stale, empty = [], [], []
     for k, d in open_:
         note = d.get("note") or ""
