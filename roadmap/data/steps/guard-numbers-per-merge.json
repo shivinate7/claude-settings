@@ -1,0 +1,14 @@
+{
+ "id": "guard-numbers-per-merge",
+ "title": "Report guard numbers at each merge: reverts per merge, and the pace numbers",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The merge-on-green proposal needs a measure of how often a merge breaks main.",
+ "source": "plan restart-plan (main), coordinator 11:46 CST Nov 12 for lane ruling-parts-cite-steps; R42 part 3 (owner, Nov 11)",
+ "note": "Guard numbers: reverts per merge, and the pace numbers. Main must first finish a CI run (#2591, the Windows guard shard caps). Pairs with R42 part 2 (merge on a lane's own green checks; owner 13:43 CST Nov 11: \"i'm pretty open to this radical approach -- A\"). Waits on #2591.",
+ "updatedAt": "2026-11-12T11:48:16-06:00"
+}

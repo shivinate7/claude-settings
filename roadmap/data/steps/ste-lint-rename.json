@@ -4,6 +4,7 @@
   "status": "todo",
   "order": -168,
   "why": "Owner pick b, Nov 2 13:22 CST (page item 172): drop STE as a named standard everywhere. Draft PR #1105 left the lint's names as they are.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): ordered after ste-lint-diff-fail-closed.\nRename lint/ste_lint.py, the CI step 'STE lint' and actions/ste-lint to plain-prose names; child repos pin the action by SHA, so keep the old action path working until each child moves its pin (rule action-pins-follow-sessions). Also remove unwired lint/ste_gate.py and lint/md_sweep.py, which decision ste-guard-fixes-not-nags says were deleted. After #1105 merges. Ready. Held (one lane, one topic): starts after ste-lint-diff-fail-closed lands. (coordinator, Nov 3 16:57 CST) R37 (owner 12:56 CST Nov 11): the rename is part of step fixed-number-limits-census, which also drops the 30-word cap.",
-  "updatedAt": "2026-11-12T11:17:26-06:00"
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): ordered after ste-lint-diff-fail-closed.\nRename lint/ste_lint.py, the CI step 'STE lint' and actions/ste-lint to plain-prose names; child repos pin the action by SHA, so keep the old action path working until each child moves its pin (rule action-pins-follow-sessions). Also remove unwired lint/ste_gate.py and lint/md_sweep.py, which decision ste-guard-fixes-not-nags says were deleted. After #1105 merges. Ready. Held (one lane, one topic): starts after ste-lint-diff-fail-closed lands. (coordinator, Nov 3 16:57 CST) R37 (owner 12:56 CST Nov 11): the rename is part of step fixed-number-limits-census, which also drops the 30-word cap. R37 part 2 (plan restart-plan): this step owns it (coordinator pick 11:46 CST Nov 12); lane fixed-number-limits-census builds it as its PR 4 under this step.",
+  "updatedAt": "2026-11-12T11:48:16-06:00",
+  "lane": "fixed-number-limits-census"
 }
