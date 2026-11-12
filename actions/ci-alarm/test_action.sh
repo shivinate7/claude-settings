@@ -437,7 +437,7 @@ named green green-run-with-no-cap-end-in-any-attempt-stays-silent "!cap end name
 # A re-run in flight is the group's newest run: its status is in_progress or queued and its attempt is above 1. The group is
 # UNKNOWN (main's judged rule, merge/merge.py base_state), so the alarm reads unknown with a warning and writes no issue. It never
 # reads green, and never falls back to an older run. A first attempt still in progress waits its turn, so the older run is judged (1d).
-# count_is <label> <pattern> <count>: the reads in the call log of the last t case that contain <pattern>.
+# count_is <label> <pattern> <count>: the reads in the call log of the last case run that contain <pattern>.
 count_is() {
   local got
   got="$(grep -cF -- "$2" "$tmp/reads")"
@@ -483,14 +483,16 @@ jobs_of 4943 scope-guard:cancelled:2
 workflow_at 4943 scope-guard:37
 t unknown cancelled-rerun-with-attempt-1-without-jobs-is-unknown-not-green "" "" ""
 
-# A cap end in a failed run that a newer green run of the other group clears. The clear drops the run; its cap end must still be
-# named. action.yml's description says a job cancelled at its cap raises the alarm "in a cancelled run and in a failure run".
+# A failed run that a newer green run of the other group clears is not red, so it opens no issue and names nothing, its cap end
+# included. Each of its two runs is read once.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-cap-green-4951 schedule 4951)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-cap-red-4950 push 4950)"
 jobs_of 4950 checks:failure scope-guard:cancelled:40
 jobs_of 4951 checks:success scope-guard:success
 workflow_at 4950 checks scope-guard:37
 workflow_at 4951 checks scope-guard:37
-t raised failure-run-cleared-by-a-newer-green-still-names-its-cap-end "" "" "job scope-guard ran 40 min, cap 37 min, run 4950" "actions/runs/4950/jobs actions/runs/4951/jobs"
+named green failure-run-cleared-by-a-newer-green-opens-no-issue-and-names-nothing "!cap end named"
+count_is cleared-run-reads-its-jobs-once "actions/runs/4950/jobs" 1
+count_is clearing-run-reads-its-jobs-once "actions/runs/4951/jobs" 1
 # Control: the same clear with the cap end under its cap is quiet.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-under-green-4953 schedule 4953)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-under-red-4952 push 4952)"
 jobs_of 4952 checks:failure scope-guard:cancelled:2
