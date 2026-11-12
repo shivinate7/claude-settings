@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import builtins
 import os
 import re
 
@@ -1404,9 +1405,13 @@ def _py_env_at(tree, script: str = ""):
     return env_at
 
 
-def _py_mode_writes(mode) -> bool:
+def _py_mode_writes(mode, unread: bool = False) -> bool:
+    """True when the MODE node is a literal string with a writing letter. With UNREAD, a mode that is no
+    literal string (a name, a call, a `*args` slot) counts too, since it may be one."""
     import ast
-    return isinstance(mode, ast.Constant) and isinstance(mode.value, str) and any(c in mode.value for c in "wax+")
+    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
+        return any(c in mode.value for c in "wax+")
+    return unread and mode is not None
 
 
 def _py_arg(call, index, keyword):
@@ -1415,28 +1420,41 @@ def _py_arg(call, index, keyword):
     return next((kw.value for kw in call.keywords if kw.arg == keyword), None)
 
 
-def _py_written(tree, env_at):
-    """(call, path expression) of each write call of a script: `open` with a writing mode, `write_text`,
-    `write_bytes`, the destination of a copy, a move or a rename."""
+def _py_written(tree, env_at, fail_closed: bool = False):
+    """(call, path expression) of each write call of a script: `open` or `io.FileIO` with a writing mode,
+    `write_text`, `write_bytes`, the destination of a copy, a move or a rename. With FAIL_CLOSED, an open
+    whose mode is no literal string, or whose arguments hide a mode (`*args`, `**kwargs`), counts as a write:
+    the caller that must not miss a write asks for it, and a reader that names the file only for a path
+    check does not."""
     import ast
     out = []
+
+    def writes(call, index, keyword=None):
+        keyword = keyword or "mode"
+        if fail_closed and (any(isinstance(arg, ast.Starred) for arg in call.args)
+                            or any(kw.arg is None for kw in call.keywords)):
+            return True
+        return _py_mode_writes(_py_arg(call, index, keyword), fail_closed)
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         if isinstance(func, ast.Name):
-            if func.id == "open" and _py_mode_writes(_py_arg(node, 1, "mode")):
-                out.append((node, _py_arg(node, 0, "file")))
+            if func.id in ("open", "FileIO") and writes(node, 1):
+                out.append((node, _py_arg(node, 0, "file" if func.id == "open" else "name")))
             elif func.id in _COPY_NAMES and len(node.args) >= 2:
                 out.append((node, node.args[1]))
         elif isinstance(func, ast.Attribute):
             attr, owner = func.attr, func.value
-            module = isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "codecs", "gzip", "bz2")
+            module = isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "_io", "codecs", "gzip", "bz2")
             if attr in ("write_text", "write_bytes"):
                 out.append((node, owner))
-            elif attr == "open" and module and _py_mode_writes(_py_arg(node, 1, "mode")):
+            elif attr == "open" and module and writes(node, 1):
                 out.append((node, _py_arg(node, 0, "file")))
-            elif attr == "open" and not module and _py_mode_writes(_py_arg(node, 0, "mode")):
+            elif attr == "FileIO" and module and writes(node, 1):
+                out.append((node, _py_arg(node, 0, "name")))
+            elif attr == "open" and not module and writes(node, 0):
                 out.append((node, owner))
             elif attr in _COPY_NAMES and isinstance(owner, ast.Name) and owner.id == "shutil" and len(node.args) >= 2:
                 out.append((node, node.args[1]))
@@ -1610,11 +1628,12 @@ def py_spots(script: str):
     return out
 
 
-# Names that let a python script hand text to a shell or run it as code. A script whose parse tree
-# holds none of them cannot make a string in it a shell line. Judged by parsed names, never by words in a string.
-_PY_RUNS_TEXT = frozenset((
-    "os", "subprocess", "shutil", "importlib", "exec", "eval", "__import__", "compile", "pty", "ctypes",
-    "runpy", "builtins", "getattr", "globals", "vars", "posix", "nt", "_os", "modules", "asyncio"))
+# Names that let a python script hand text to a shell or run it as code: the acting modules and the dynamic
+# names above (`_PY_ACTING`, `_PY_DYNAMIC`), less `sys` and `pathlib`, which only read and name things, plus the
+# three that reach a module or a name by another road. Judged by parsed names, never by words in a string.
+_PY_RUNS_TEXT = frozenset(_PY_ACTING + _PY_DYNAMIC + ("getattr", "modules", "_os")) - {"sys", "pathlib"}
+# A builtin of that set runs only as a bare name: `re.compile` is another function, not the builtin.
+_PY_RUNS_TEXT_BARE = frozenset(name for name in _PY_RUNS_TEXT if hasattr(builtins, name))
 _PY_PLAIN_DUNDERS = ("__name__", "__file__", "__doc__")
 _PY_CODING = re.compile(r"^[ \t]*#.*coding[:=][ \t]*(?![ \t]|utf-?8\b)", re.IGNORECASE | re.MULTILINE)
 
@@ -1637,12 +1656,16 @@ def python_body_is_text(body: str) -> bool:
             names = [alias.name.split(".")[0] for alias in node.names]
         elif isinstance(node, ast.ImportFrom):
             names = [(node.module or "").split(".")[0]] + [alias.name for alias in node.names]
-        elif isinstance(node, (ast.Name, ast.Attribute)):
-            names = [node.id if isinstance(node, ast.Name) else node.attr]
+        elif isinstance(node, ast.Name):
+            names = [node.id]
+        elif isinstance(node, ast.Attribute):
+            names = [node.attr]
         else:
             continue
+        bare = not isinstance(node, ast.Attribute)   # an import or a name binds a bare name
         for name in names:
-            if name in _PY_RUNS_TEXT or (name.startswith("__") and name not in _PY_PLAIN_DUNDERS):
+            if (name in _PY_RUNS_TEXT and (bare or name not in _PY_RUNS_TEXT_BARE)
+                    or name.startswith("__") and name not in _PY_PLAIN_DUNDERS):
                 return False
     return True
 
@@ -1665,20 +1688,34 @@ def _python_header_alone(raw: str, header: str) -> bool:
             and sum(word.startswith("<<") for word in tokens) == 1)
 
 
-# The extensions of a file that holds text a shell does not run. A python body that writes any other name,
-# a name with no extension, or a name it cannot read, stays in view: its strings may be a script's lines.
-_PY_TEXT_EXTENSIONS = frozenset((".json", ".md", ".txt", ".csv"))
+# The extension of a file that holds data a shell does not run. A python body that writes any other name, a
+# name with no extension, or a name it cannot read, stays in view: its strings may be a script's lines. A
+# `.txt`, `.md` or `.csv` file is no such file: `sh n.txt` runs it, in a later call this guard judges alone.
+_PY_TEXT_EXTENSIONS = frozenset((".json",))
+
+
+def _python_serialises_json(tree) -> bool:
+    """True when the parsed tree calls `json.dump` or `json.dumps`: the text it writes to a `.json` file is
+    JSON, which no shell runs. A raw string written to a `.json` name is not that, and stays in view."""
+    import ast
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+               and node.func.attr in ("dump", "dumps") and isinstance(node.func.value, ast.Name)
+               and node.func.value.id == "json" for node in ast.walk(tree))
 
 
 def _python_writes_text_files_only(body: str) -> bool:
-    """True when every file the parsed BODY writes (`_py_written`) has a literal name that ends in one of
-    `_PY_TEXT_EXTENSIONS`. A body that does not parse is not."""
+    """True when every file the parsed BODY writes (`_py_written`, an unread open mode counted as a write)
+    has a literal name that ends in one of `_PY_TEXT_EXTENSIONS`, and the body serialises JSON
+    (`_python_serialises_json`). A body that does not parse is not."""
     import ast
     import textwrap
     try:
         tree = ast.parse(textwrap.dedent(body))
         env_at = _py_env_at(tree)
-        for call, expression in _py_written(tree, env_at):
+        written = _py_written(tree, env_at, fail_closed=True)
+        if written and not _python_serialises_json(tree):
+            return False
+        for call, expression in written:
             paths = _py_paths(expression, env_at(call))
             if not paths or any(
                     os.path.splitext(basename(path))[1].lower() not in _PY_TEXT_EXTENSIONS for path in paths):
@@ -1809,21 +1846,35 @@ _PL_RB_WRITE = (
     re.compile(r"\b(?:rename|copy|move|FileUtils\s*\.\s*(?:cp|mv|cp_r|copy_file|install))(?:\s*\(\s*|\s+(?=['\"$]))"
                + _RB_STR + r"\s*,\s*" + _RB_STR),                                          # destination of a copy
     re.compile(r"\b(?:File|IO)\s*\.\s*(?:write|binwrite)\s*\(?\s*" + _RB_STR),
-    re.compile(r"""\bFile\s*\.\s*open\s*\(?\s*""" + _RB_STR + r"""\s*,\s*['"][^'"]*[wa+][^'"]*['"]"""),
+    re.compile(r"""\bFile\s*\.\s*(?:open|new)\s*\(?\s*""" + _RB_STR + r"""\s*,\s*['"][^'"]*[wa+][^'"]*['"]"""),
 )
+
+
+# A quote-like opens right after its letters: `qq{`, `q(`, `%w[`. A space or any other character before the
+# delimiter, as in `q.size` or `q / 2`, leaves a name or an operator, which reads as code.
+_QUOTE_LIKE = re.compile(r"(?<![\w$@%>&-])(?:q[qwr]?|%[qQwWiI])(?=[({\[<|/!])")
+_CLOSERS = {"(": ")", "[": "]", "{": "}", "<": ">"}
 
 
 def _pl_rb_code(body: str) -> str:
     """BODY with each string's contents and each `#` comment blanked to spaces, so offsets stay aligned
     with BODY. A write call is a hit only where this copy still shows its first character; the path is
-    read from BODY. Strings are '...' and "..." with backslash escapes and may span lines. A quote
-    that finds no closer stays code, so a stray one hides nothing after it. `$#`, `$'` and `$"` are
-    variables, not openers. Known limit: `#{...}` inside a ruby string and `%q()` strings are not
-    read as code."""
+    read from BODY. Strings are '...' and "..." with backslash escapes and may span lines, and the
+    quote-likes `q`, `qq`, `qw`, `qr` (perl) and `%q`, `%Q`, `%w`, `%W`, `%i`, `%I` (ruby), which end at
+    their own closer (a bracket pair nests), so a `"` inside `qq{...}` opens nothing. A quote that finds no
+    closer stays code, so a stray one hides nothing after it. `$#`, `$'` and `$"` are variables, not
+    openers. Known limit: `#{...}` inside a ruby string, and `m//`, `s///` and `tr///`, are not read as code."""
     out = list(body)
     i, n = 0, len(body)
+
+    def blank(start, end):
+        for k in range(start, end):
+            if body[k] != "\n":
+                out[k] = " "
+
     while i < n:
         ch = body[i]
+        like = _QUOTE_LIKE.match(body, i) if ch in "q%" else None
         if ch == "$":
             i += 2
         elif ch == "#":
@@ -1831,6 +1882,26 @@ def _pl_rb_code(body: str) -> str:
             end = n if end < 0 else end
             out[i:end] = " " * (end - i)
             i = end
+        elif like:
+            opener = like.end()
+            closer = _CLOSERS.get(body[opener], body[opener])
+            depth, at = 1, opener + 1
+            while at < n:
+                if body[at] == "\\":
+                    at += 2
+                    continue
+                if closer != body[opener] and body[at] == body[opener]:
+                    depth += 1
+                elif body[at] == closer:
+                    depth -= 1
+                    if not depth:
+                        break
+                at += 1
+            if at >= n:
+                i += 1
+                continue
+            blank(opener + 1, at)
+            i = at + 1
         elif ch in "'\"":
             at = i + 1
             while at < n and body[at] != ch:
@@ -1838,9 +1909,7 @@ def _pl_rb_code(body: str) -> str:
             if at >= n:
                 i += 1
                 continue
-            for k in range(i + 1, at):
-                if body[k] != "\n":
-                    out[k] = " "
+            blank(i + 1, at)
             i = at + 1
         else:
             i += 1
