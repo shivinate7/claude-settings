@@ -1348,9 +1348,41 @@ for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) {
     assertScope(boxes, 3, width);
     for (const b of boxes) {
       assert.ok(Math.abs(b.wrapW - b.col) <= 2, `${b.opt} box is ${b.wrapW} wide in a ${b.col} wide column before any measure`);
-      const want = (844 * b.wrapW) / 390;
-      assert.ok(Math.abs(b.wrapH - want) <= 3, `${b.opt} box is ${b.wrapH} high before any measure, not the declared phone's ${want.toFixed(1)} at ${b.wrapW} wide`);
+      const want = Math.ceil((844 * (b.wrapW - 2)) / 390); // the height the measured picture gets at this width
+      assert.ok(Math.abs(b.wrapH - want) <= 1, `${b.opt} box is ${b.wrapH} high before any measure, not the measured phone's ${want} at ${b.wrapW - 2} wide`);
     }
+  });
+}
+
+// A box sized from its declared size at first paint is the height it settles to once measured, within 1px. The declared path takes the
+// size's aspect and the measured path the picture's own scale, so the two agree only when both round to the same height.
+const FOCUS_700 = '<body style="margin:0"><div style="height:300px;background:#ccc"></div><div id="panel" style="width:390px;height:700px;background:#a62"></div><div style="height:600px;background:#999"></div></body>';
+const DUO = '<body style="margin:0"><div style="width:800px;height:844px;background:#eee"></div></body>';
+const FIRST_KINDS = {
+  phone: { item: () => picItem("first-phone", 83, { declared: { w: 390, h: 844 } }), data: SAME(PHONE), H: 844 },
+  focus: { item: () => ({ ...picItem("first-focus", 83), designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, focus: "#panel", size: { w: 390, h: 700 } })) }), data: SAME(FOCUS_700), H: 1600 },
+  duo: { item: () => ({ ...picItem("first-duo", 83), designs: LOOK_OPTS.map((o) => ({ slug: o.design, label: o.label, size: { w: 800, h: 844 }, drawn: 800 })) }), data: SAME(DUO), H: 844 },
+};
+// The boxes of one card at first paint (no measure reported) and once every frame has measured and settled.
+const firstAndSettled = async (t, kind, width) => {
+  const k = FIRST_KINDS[kind], item = k.item();
+  const held = await open(t, { items: [item], designData: k.data, viewport: { width, height: 900 }, holdMeasure: true }); if (!held) return null;
+  await boxesSettled(held, item.id);
+  assert.equal(await held.evaluate(() => Object.keys(FIT).length), 0, "a measure arrived, so the read is not the first paint");
+  const first = await optBoxes(held, item.id);
+  const page = await open(t, { items: [item], designData: k.data, viewport: { width, height: 900 } }); if (!page) return null;
+  await framesAt(page, 3, k.H);
+  if (kind === "focus") await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(item.id));
+  await settleFit(page, item.id);
+  await boxesSettled(page, item.id);
+  return { first, settled: await optBoxes(page, item.id) };
+};
+for (const kind of Object.keys(FIRST_KINDS)) for (const width of [390, 1280]) {
+  test(`a ${kind} picture's box at first paint is the height it settles to once measured, at ${width} wide`, async (t) => {
+    const r = await firstAndSettled(t, kind, width); if (!r) return;
+    assertScope(r.first, 3, width);
+    assertScope(r.settled, 3, width);
+    r.first.forEach((f, i) => assert.ok(Math.abs(f.wrapH - r.settled[i].wrapH) <= 1, `${f.opt} box is ${f.wrapH} high at first paint, ${r.settled[i].wrapH} once measured`));
   });
 }
 
