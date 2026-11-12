@@ -19787,9 +19787,10 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [pr], "--ready did not mark the batch PR ready once: %s" % out)
 
     @contextlib.contextmanager
-    def git_starts(self):
+    def git_starts(self, lines=None):
         """Yields {git subcommand: starts} for each git process the block starts. hooks/_nowindow.py starts every child through subprocess.run,
-        and merge's sh() and git_reads both read through it, so one spy counts a read whichever helper makes it."""
+        and merge's sh() and git_reads both read through it, so one spy counts a read whichever helper makes it. With `lines` (a list), each
+        start's (subcommand, command line) is appended to it, the line as Windows joins the argv (subprocess.list2cmdline)."""
         seen = {}
         real = subprocess.run
 
@@ -19797,6 +19798,8 @@ class BatchFreeze(CloudSession):
             if isinstance(argv, (list, tuple)) and len(argv) > 1 and os.path.splitext(os.path.basename(str(argv[0])))[0] == "git":
                 sub = argv[3] if argv[1] == "-C" and len(argv) > 3 else argv[1]
                 seen[sub] = seen.get(sub, 0) + 1
+                if lines is not None:
+                    lines.append((sub, subprocess.list2cmdline([str(x) for x in argv])))
             return real(argv, *a, **k)
 
         with unittest.mock.patch.object(subprocess, "run", spy):
@@ -19848,6 +19851,66 @@ class BatchFreeze(CloudSession):
             with self.subTest(f"the fetch step probes each open pull request's head a fixed number of times, with {opened}"):
                 self.assertLessEqual(seen.get("cat-file", 0), 2 * opened, "the check probed heads more than twice per open pull request: %d for %d: %s"
                                      % (seen.get("cat-file", 0), opened, seen))
+
+    def outside_heads(self, count):
+        """`count` commits on origin/main's history, each the head of one open pull request, on one branch `outside-heads` pushed to origin. One
+        fast-import writes them, so their setup is one git process and not one per commit. -> their shas, oldest first."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        base = sh(o, "git", "rev-parse", "origin/main")
+        stream = b""
+        for i in range(count):
+            msg = f"outside head {i}\n".encode()
+            stream += b"commit refs/heads/outside-heads\ncommitter Test <test@example.com> 1700000000 +0000\ndata %d\n%s\n" % (len(msg), msg)
+            if i == 0:
+                stream += f"from {base}\n".encode()
+        r = subprocess.run(["git", "fast-import", "--quiet"], cwd=o, input=stream, capture_output=True)
+        assert r.returncode == 0, ("fast-import", r.stderr)
+        sh(o, "git", "push", "-q", "origin", "outside-heads")
+        return sh(o, "git", "rev-list", "--reverse", "outside-heads", f"^{base}").splitlines()
+
+    def test_the_stacked_check_starts_no_git_with_a_command_line_over_8000_characters_at_900_open_heads(self):
+        """Lane #102 stacks on outside pull request #103, and 900 more pull requests are open, each on a head of its own. The check names #102 for
+        #103, and no git start it makes has a command line over 8000 characters. A head on a command line costs 41 characters, so 900 of them are
+        about 37,000, over the Windows limit of 32,767: the start then fails with an OSError, not a Stop. The 10-head request is the control: the
+        same spy counts its graph read, and that read fits."""
+        self.lane(101)
+        self.lane(103)
+        self.lane(102, on=103)  # lane #102 holds #103's head
+        heads = {101: self.heads[101], 102: self.heads[102]}
+        outside = [(103, {"head": self.heads[103], "base": "main"})]
+        shas = self.outside_heads(900)
+        self.assertEqual(len(set(shas)), 900, "setup: the fast-import did not make 900 distinct heads: %d" % len(shas))
+        sh(self.co, "git", "fetch", "-q", "origin")  # the 900 heads are in the clone, as a run fetches them before the check
+
+        def rows_for(commits):
+            return [*outside, *((200 + i, {"head": s, "base": "main"}) for i, s in enumerate(commits))]
+
+        def check(rows):
+            """The stacked check of `heads` against `rows`, the open pull requests as (PR, info) pairs. -> (the refusal or None, each git start's
+            (subcommand, command line))."""
+            host = types.SimpleNamespace(open_prs=lambda: list(rows))
+            lines = []
+            with self.git_starts(lines), contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    merge.stacked_without_base(self.co, host, "main", heads, None)
+                except merge.Stop as e:
+                    return str(e), lines
+            return None, lines
+
+        stacked_on_103 = subprocess.run(["git", "merge-base", "--is-ancestor", self.heads[103], self.heads[102]], cwd=self.co, capture_output=True)
+        self.assertEqual(stacked_on_103.returncode, 0, "scope: lane #102 does not hold #103's head, so there is no stacked lane to name")
+        _, control = check(rows_for(shas[:10]))
+        self.assertTrue(any(sub == "rev-list" for sub, _ in control), "scope: the 10-head control started no rev-list, so the spy measures no graph read")
+        self.assertLessEqual(max(len(line) for _, line in control), 8000,
+                             "control: the 10-head check started a git process with a command line over 8000 characters")
+        refusal, lines = check(rows_for(shas))
+        self.assertTrue(any(sub == "rev-list" for sub, _ in lines), "scope: the 900-head check started no rev-list, so the spy measures no graph read")
+        self.assertIn("#102 holds a commit of #103", refusal or "",
+                      "the check did not name lane #102 as holding a commit of outside #103, which it is stacked on: %s" % refusal)
+        worst_sub, worst = max(lines, key=lambda x: len(x[1]))
+        self.assertLessEqual(len(worst), 8000, "the check passes the open heads on a git command line: git %s was started with %d characters, over 8000"
+                             % (worst_sub, len(worst)))
 
     def test_an_unfetchable_open_head_is_said_and_skipped_and_the_scan_goes_on(self):
         self.lane(101)
