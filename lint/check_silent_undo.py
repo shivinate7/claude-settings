@@ -152,7 +152,7 @@ def last_paragraph(pr_body):
 def allowed(cwd, rng, pr_body=""):
     """{path: reason} from `Drops-lines: <path> -- <reason>` trailers on any commit of the range
     (a rev or a..b), and from such lines in pr_body (its last_paragraph). A line with no reason excuses nothing."""
-    _, out = git(cwd, "log", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
+    _, out = git(cwd, "log", "--no-show-signature", "--format=%(trailers:key=" + TRAILER + ",valueonly,unfold)", rng)
     body = re.findall(r"^" + TRAILER + r":(.*)$", last_paragraph(pr_body), re.I | re.M | re.ASCII)
     res = {}
     for line in out.splitlines() + body:
@@ -319,7 +319,7 @@ def branch_only_lines(cwd, p, bases, path, lines, refs):
     a merge's own resolution show up. The oldest marked commit is the real adder: a line from main
     always has main's own commit in the range, older than any merge that carried it."""
     try:
-        _, out = git(cwd, "log", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%x00%H", p, "--not", *bases, "--", path)
+        _, out = git(cwd, "log", "--no-show-signature", "-m", "-p", "-U0", "--no-color", "--no-ext-diff", "--format=%x00%H", p, "--not", *bases, "--", path)
     except Unknown:
         return set()
     commits = []  # (sha, the set of that diff's normalized changed lines)
@@ -521,7 +521,7 @@ class Commit:
 def first_parent(cwd, rev, limit=0, walk="--first-parent"):
     """The commits of rev, newest first, each with its first parent. walk is the log's own selector: the first-parent
     line by default, `--no-merges` for every non-merge commit (the lane undo read)."""
-    a = ["log", walk, "--format=%H %P%x02%s"] + (["-n%d" % limit] if limit else []) + [rev]
+    a = ["log", "--no-show-signature", walk, "--format=%H %P%x02%s"] + (["-n%d" % limit] if limit else []) + [rev]
     _, out = git(cwd, *a)
     res = []
     for line in out.splitlines():
@@ -728,7 +728,7 @@ def revived_notes(cwd, upstream, head):
             continue
         # --full-history: a merge that brought the file back is TREESAME to the base's side, and default history
         # simplification would then drop the branch's own delete commit from the walk.
-        _, out = git(cwd, "log", "--no-merges", "--full-history", "--reverse", "--format=%H %P", "%s..%s" % (upstream, head), "--", path)
+        _, out = git(cwd, "log", "--no-show-signature", "--no-merges", "--full-history", "--reverse", "--format=%H %P", "%s..%s" % (upstream, head), "--", path)
         commits = [line.split() for line in out.splitlines() if line.strip()]
         if not commits:
             continue
