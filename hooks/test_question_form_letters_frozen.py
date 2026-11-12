@@ -255,7 +255,14 @@ def case_page_lists_shown():
           "shown" in fields, "the page's itemFields block does not list shown")
 
 
-CASES = (case_fn_no_shown_is_refused, case_fn_item_646_swap_is_refused, case_fn_control_letter_rule_reads_the_swap_as_valid,
+def case_fn_options_that_is_not_a_list_is_refused():
+    """An update whose `options` is a mapping (a delete marker) would drop every option unjudged."""
+    data = decision(OPTIONS, shown_of(OPTIONS))
+    data["options"] = {"__delete__": True}
+    refuses("fn: an open decision whose options is not a list is refused", frozen("update", data), "options")
+
+
+CASES = (case_fn_options_that_is_not_a_list_is_refused, case_fn_no_shown_is_refused, case_fn_item_646_swap_is_refused, case_fn_control_letter_rule_reads_the_swap_as_valid,
          case_fn_two_labels_swapped_is_refused, case_fn_relabel_is_refused, case_fn_changed_id_is_refused,
          case_fn_fewer_options_is_refused, case_fn_first_set_must_equal_its_shown, case_fn_option_id_rules,
          case_fn_empty_and_full_size, case_fn_passes, case_fn_other_artifact_passes,

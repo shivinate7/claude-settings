@@ -18,6 +18,7 @@ and item, so each case fails on its own assertion (no cite line, no raise, no op
     python3 skills/waiting-page/test_question_source.py
 """
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -200,6 +201,28 @@ class Sizes(unittest.TestCase):
         item = result.get("item", {})
         self.assertEqual(options_of(self, item), [], "an empty spec does not render an empty options list")
         self.assertEqual(item.get("shown"), [], "an empty spec does not render an empty shown list")
+
+
+class Cli(unittest.TestCase):
+    def run_cli(self, spec):
+        import subprocess
+        return subprocess.run([sys.executable, os.path.join(HERE, "question_source.py")], input=json.dumps(spec),
+                              capture_output=True, text=True)
+
+    def test_spec_with_no_shown_key_is_refused(self):
+        """A re-render with no `shown` would skip the freeze, so the CLI wants `shown` ([] for a new item)."""
+        r = self.run_cli({"id": ID, "options": [{"label": "Blue"}, {"label": "Red"}]})
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(r.stderr.startswith("refused: "), r.stderr)
+
+    def test_spec_with_an_empty_shown_is_rendered(self):
+        r = self.run_cli({"id": ID, "shown": [], "options": [{"label": "Blue"}]})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_options_that_is_not_a_list_is_refused_not_a_traceback(self):
+        r = self.run_cli({"id": ID, "shown": [], "options": 5})
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(r.stderr.startswith("refused: "), r.stderr)
 
 
 if __name__ == "__main__":

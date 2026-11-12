@@ -1351,9 +1351,11 @@ def frozen_letters_hit(op: str, data) -> str:
     that differs from the shown entry in key, id or label, or fewer options than shown. A `set` is a first write,
     so its `shown` must equal its options. An update may append. A task, a note, a closed item and a write with no
     `options` pass. The stored item is unseen: a write that carries `shown` is trusted, as the record says."""
-    if not _open_decision(data) or not isinstance(data.get("options"), list):
+    if not _open_decision(data) or "options" not in data:
         return ""
     options = data["options"]
+    if not isinstance(options, list):
+        return "options is not a list: the write would drop every option unjudged"
     hit = _option_id_hit(options)
     if hit:
         return hit

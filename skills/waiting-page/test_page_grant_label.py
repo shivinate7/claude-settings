@@ -4,7 +4,7 @@
 The waiting page saves a readable `label` beside `choice` on each decision answer: "A: <option label>" for a pick,
 a list of those for a multi item, "none of these" for none. `choice` stays the key, or the list of keys, and `choice`
 decides the grant. These cases pin that page_grant.py counts an answer whose label matches its choice, that a label of
-the wrong shape is not read, and that a label naming another option than `choice` is held, not counted (ruling R60,
+the wrong shape is not read, and that a label naming another option than `choice` is held, not counted (ruling R60, 15:07 CST Nov 12,
 exit 3): the owner confirms in words.
 
 The controls are green on the current checker. The held case is red on the commit before the build of ruling R60 (its

@@ -51,9 +51,9 @@ def counted(choice, label):
 
 
 class Answered(tpg.Base):
-    def answered(self, answer_fields, pick=tpg.PICK):
+    def answered(self, answer_fields, pick=tpg.PICK, options=OPTIONS):
         """The checker's verdict for an answer to item 231, whose options are OPTIONS. ABSENT leaves a field out."""
-        fetched = self.fetch(items={ITEM_ID: tpg.item(options=copy.deepcopy(OPTIONS))},
+        fetched = self.fetch(items={ITEM_ID: tpg.item(options=copy.deepcopy(options))},
                              answers={ITEM_ID: tpg.answer(**answer_fields)})
         return self.check(self.repo(), fetched, pick=pick)
 
@@ -99,6 +99,12 @@ class Controls(Answered):
     def test_answer_with_no_label_or_option_id_is_counted(self):
         r = self.answered({"choice": "a", "label": ABSENT})
         self.assertCounted(r, counted("a", "Red"))
+
+    def test_stored_label_with_a_trailing_space_is_counted(self):
+        """The page trims the label it saves ("A: Red"); a stored label "Red " is the same words, not a moved option."""
+        spaced = [{"key": "a", "id": "red", "label": "Red "}, {"key": "b", "id": "blue", "label": "Blue"}]
+        r = self.answered({"choice": "a", "label": "A: Red"}, options=spaced)
+        self.assertCounted(r, counted("a", "Red "))
 
 
 if __name__ == "__main__":

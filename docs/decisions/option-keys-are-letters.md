@@ -50,7 +50,7 @@ An option also keeps its letter once shown (owner ruling R60, roadmap ruling r60
   - The reason says: keep each shown option's key, id and label and position, give each option a unique id, carry `shown`. It names no target.
   - Incident: 2026-11-12 14:39 CST, waiting item 646. Triage reordered the options after the chat question went out, so chat a became page b. The owner's "a" (15:03 CST) could have been filed as the opposite pick. `option_letter_hit` could not see it: after the swap each key was still its position's letter.
   - Cost: no new process. It runs in the guard process that every waiting-page write already starts, reads only the write, and writes no file unless it denies.
-  - Known limit: a `str_replace` on `options` bypasses the freeze. The guard cannot see the stored item.
+  - Known limit: a write that carries its own `shown` is trusted. A set or update that rewrites `shown` to match reordered options passes, since the guard cannot see the stored item. A held answer (`page_grant.py`) is the backstop: an answer whose option id or label moved is held. An `options` that is not a list is refused.
   - Known limit: a write that rewrites `shown` itself is not detectable. The guard trusts `shown`, since the stored item is unseen.
   - Known limit: a write that carries no `options` is not judged, so an update that drops `shown` alone passes.
 

@@ -248,7 +248,7 @@ def moved_reason(item, answer, choice):
         if not isinstance(text, str):
             continue
         parts = LABEL_PARTS.match(text)
-        if not parts or parts.group(1).lower() != chr(97 + position % 26) or parts.group(2) != stored.get("label"):
+        if not parts or parts.group(1).lower() != chr(97 + position % 26) or parts.group(2).strip() != str(stored.get("label") or "").strip():
             return "answer label %s is not option %s's label" % (json.dumps(text), key)
     return ""
 

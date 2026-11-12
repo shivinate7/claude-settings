@@ -90,8 +90,11 @@ def render(spec):
 
 def main():
     try:
-        result = render(json.load(sys.stdin))
-    except (ValueError, AttributeError, KeyError) as err:
+        spec = json.load(sys.stdin)
+        if isinstance(spec, dict) and "shown" not in spec:
+            raise ValueError("the spec carries no `shown`: give the item's shown list, or [] for a new item")
+        result = render(spec)
+    except (ValueError, AttributeError, KeyError, TypeError) as err:
         print("refused: %s" % err, file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, ensure_ascii=False))
