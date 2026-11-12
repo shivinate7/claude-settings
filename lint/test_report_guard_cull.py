@@ -8,7 +8,8 @@ cull-guard-wrong-refusals).
 - A review PASS inside a statistic is not a review claim (retrospective session, 15:39 CST, 2026-11-10). A claim
   with no pull request still refuses on a lane, and that control stays.
 - A review PASS that names a round, a reviewer or a pull request is a claim, even with a count word beside it. The
-  statistic check must not read it as a count.
+  statistic check must not read it as a count. A pull request named before the count, or in another clause, counts too.
+- A reviewers word on a line does not make a PASS in another clause of that line a review claim.
 
 Each case runs lint/report_guard.py as a Stop hook, the way Claude Code runs it, and reads only its output.
 Run from the repository root:
@@ -70,6 +71,16 @@ NO_PR_CLAIMS = ("round 2 reviewer PASS 12.", "(reviewer PASS 12)")
 STAT_CONTROLS = ("PASS rate 90%", "9 of 10 lanes got PASS", "the PASS count was 9",
                  "Round 2 stats: PASS rate 90%.", "Round 2 stats: 9 of 10 lanes got PASS.",
                  "Round 2 stats: the PASS count was 9.")
+# Claims that name PR 12 before the count, or in another clause: the statistic check must not strip their PASS.
+PR_IN_OTHER_CLAUSE = ("On #12, round 2: 2 reviewers got PASS.", "PR 12 round 2: 9 reviewers got PASS.",
+                      "Round 2: 2 reviewers got PASS; PR #12 is merged.")
+# A statistic-shaped line that names PR 12 is a claim, not a count.
+PR_STAT_CLAIMS = ("Round 2 reviewers on #12: PASS rate 100%.", "Round 2 reviewers on #12: 100% PASS.")
+# A round count that names no PR is a claim, refused on a lane as naming no pull request.
+ROUND_COUNT_NO_PR = ("Round 2: 2 reviewers got PASS on the lane head.", "round 2 of 3 reviewers got PASS.")
+# A reviewers word and a PASS in different clauses of one line: a count, not a claim.
+REVIEWERS_APART_FROM_PASS = ("3 reviewers ran on the batch; 2 PASS.",
+                             "Lint PASS; 2 reviewers asked for a rename on the helper.")
 
 
 def tearDownModule():
@@ -209,6 +220,50 @@ class CullReviewClaimTests(unittest.TestCase):
         for text in STAT_CONTROLS:
             with self.subTest(line=text):
                 self.assertEqual(claim_prs(text), [], "review_claims reads a statistic line as a review claim")
+
+    def test_cull_red_pr_before_the_count_or_in_another_clause_is_a_claim(self):
+        # Scope first (P7): a plain reviewer PASS on #12 is read as one claim naming 12, so the lines below judge the
+        # statistic check.
+        self.assertEqual(claim_prs("Round 2 reviewer got PASS on #12."), [[12]],
+                         "scope: review_claims does not read a plain claim on #12")
+        for text in PR_IN_OTHER_CLAUSE:
+            with self.subTest(line=text):
+                self.assertEqual(claim_prs(text), [[12]],
+                                 "the statistic check strips a count's PASS though PR 12 is named on the line")
+
+    def test_cull_red_statistic_that_names_a_pr_is_a_claim(self):
+        # Scope first (P7): a plain PASS on a line that names #12 is one claim naming 12, so the lines below judge the
+        # statistic check.
+        self.assertEqual(claim_prs("Round 2 reviewers on #12: PASS."), [[12]],
+                         "scope: review_claims does not read a plain PASS on a line that names #12")
+        for text in PR_STAT_CLAIMS:
+            with self.subTest(line=text):
+                self.assertEqual(claim_prs(text), [[12]],
+                                 "the statistic check strips a PASS on a line that names PR 12")
+
+    def test_cull_red_round_count_with_no_pr_is_refused_on_a_lane(self):
+        # Scope first (P7): a plain claim with no PR is refused on a lane, so the lines below judge the statistic check.
+        out = run_stop(CullReviewStatisticTests.lane_turn(done_report(NO_PR_CLAIM)), lane=True)
+        self.assertIn(NO_PR_TEXT, block_reason(out), "scope: the lane fixture does not refuse a plain claim with no PR")
+        for text in ROUND_COUNT_NO_PR:
+            with self.subTest(line=text):
+                self.assertEqual(claim_prs(text), [[]],
+                                 "the statistic check strips a round count's PASS on a line that names no PR")
+        for text in ROUND_COUNT_NO_PR:
+            with self.subTest(line=text):
+                out = run_stop(CullReviewStatisticTests.lane_turn(done_report(text)), lane=True)
+                self.assertIn(NO_PR_TEXT, block_reason(out),
+                              "the review-record guard passed a round-count review PASS that names no PR")
+
+    def test_cull_red_reviewers_word_and_a_pass_in_other_clauses_is_not_a_claim(self):
+        # Scope first (P7): a plain reviewer PASS with no count is one claim with no PR, so the lines below judge the
+        # clause check.
+        self.assertEqual(claim_prs("Round 2 reviewer got PASS."), [[]],
+                         "scope: review_claims does not read a plain reviewer PASS as a claim")
+        for text in REVIEWERS_APART_FROM_PASS:
+            with self.subTest(line=text):
+                self.assertEqual(claim_prs(text), [],
+                                 "the reviewers word on the line makes a PASS in another clause a review claim")
 
 
 if __name__ == "__main__":
