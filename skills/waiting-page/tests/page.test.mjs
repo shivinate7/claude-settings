@@ -4404,6 +4404,38 @@ test("ask-phase-out: a closed line with a New reply at load opens the Answered s
   assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "true", `the New reply on the closed line No. ${AP_NEW_REPLY.n} did not open the Answered section on load`);
 });
 
+// A read line or item has its reply seen: the owner marked it read after the reply. Its reply is newer than the last visit, so only the read mark keeps it from opening the section.
+const AP_READ_NEW_REPLY = { ...AP_NEW_REPLY, id: "ap-read-new-reply", n: 83, title: "A read line with a new reply", dismissed: "2026-11-11T09:00:00Z" };
+const AP_ROUTED = mk("ap-routed", 84, { home: "step:ask-phase-out", title: "A routed item with a new reply", reply: "Filed as step ask-phase-out.", replied: "2026-11-10T19:00:00Z" });
+const AP_ROUTED_READ = { ...AP_ROUTED, dismissed: "2026-11-11T09:00:00Z" };
+const AP_ROUTED_RECEIPTS = { [AP_ROUTED.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } };
+
+// A new reply on a read line needs nothing from the owner, so the section stays closed on load. The control, first, is the unread line under the same visit: it opens.
+test("ask-phase-out: a closed line read at load, with a reply newer than the last visit, does not open the Answered section on load", async (t) => {
+  const unread = await open(t, { items: [AP_OPEN, AP_NEW_REPLY], storage: VISIT }); if (!unread) return;
+  await unread.waitForFunction("state.replySeen !== null"); // the load's open-or-closed decision is made
+  assert.equal(await unread.locator("#b-answered").getAttribute("aria-expanded"), "true", `control: the unread line No. ${AP_NEW_REPLY.n}, with the same reply and visit, did not open the Answered section on load`);
+  const page = await open(t, { items: [AP_OPEN, AP_READ_NEW_REPLY], storage: VISIT }); if (!page) return;
+  await page.waitForFunction("state.replySeen !== null"); // the load's open-or-closed decision is made
+  // Scope first: the line is read, so it sits behind the Show read items fold, and the section is closed.
+  await mustHave(page, "#readItems", `the Show read items fold, with the read line No. ${AP_READ_NEW_REPLY.n} behind it`);
+  assert.match((await page.locator("#readItems").textContent()) || "", /Show 1 read item/, `the read line No. ${AP_READ_NEW_REPLY.n} is not behind Show 1 read item`);
+  assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "false", `the new reply on the read line No. ${AP_READ_NEW_REPLY.n} opened the Answered section on load`);
+});
+
+// A routed item that is read: filed and answered, with its read mark after its reply. The control, first, is the same item unread under the same visit: it opens.
+test("ask-phase-out: a routed item read at load, with a reply newer than the last visit, does not open the Answered section on load", async (t) => {
+  const unread = await open(t, { items: [AP_OPEN, AP_ROUTED], answers: answerOf(AP_ROUTED), receipts: AP_ROUTED_RECEIPTS, storage: VISIT }); if (!unread) return;
+  await unread.waitForFunction("state.replySeen !== null"); // the load's open-or-closed decision is made
+  assert.equal(await unread.locator("#b-answered").getAttribute("aria-expanded"), "true", `control: the unread item No. ${AP_ROUTED.n}, with the same reply and visit, did not open the Answered section on load`);
+  const page = await open(t, { items: [AP_OPEN, AP_ROUTED_READ], answers: answerOf(AP_ROUTED_READ), receipts: AP_ROUTED_RECEIPTS, storage: VISIT }); if (!page) return;
+  await page.waitForFunction("state.replySeen !== null"); // the load's open-or-closed decision is made
+  // Scope first: the item is read, so it sits behind the Show read items fold, and the section is closed.
+  await mustHave(page, "#readItems", `the Show read items fold, with the read item No. ${AP_ROUTED.n} behind it`);
+  assert.match((await page.locator("#readItems").textContent()) || "", /Show 1 read item/, `the read item No. ${AP_ROUTED.n} is not behind Show 1 read item`);
+  assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "false", `the new reply on the read item No. ${AP_ROUTED.n} opened the Answered section on load`);
+});
+
 test("ask-phase-out: a late reply on a closed line marks the closed Answered head, and the section stays closed", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_LATE_LINE] }); if (!page) return;
   await need(page.locator(`#tier-answered #line-${AP_LATE_LINE.n}`), `No. ${AP_LATE_LINE.n}, a closed line, is not in the Answered section`);
