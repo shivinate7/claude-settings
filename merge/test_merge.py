@@ -12592,8 +12592,8 @@ class RulesHost(merge.Host):
         return github_read(args, self.rules, self.contexts, self.read_error)
 
 class RulesetFirst(unittest.TestCase):
-    """Owner ruling c (19:49 CST Nov 11): the merge tool reads main's ruleset first and the classic protection second, so a repo whose ruleset
-    holds the checks and that has no classic protection merges. Ruling r (16:43 CST Nov 11): the ruleset requires the rollup, all-jobs-passed."""
+    """The merge tool reads main's ruleset first and the classic protection second. A repo whose ruleset holds the required checks and that
+    has no classic protection must still merge, so the names come from the ruleset. The ruleset's one check is the rollup, all-jobs-passed (decision `main-branch-protection`)."""
 
     def read(self, call):
         try:

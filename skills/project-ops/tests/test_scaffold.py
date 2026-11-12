@@ -601,8 +601,8 @@ ADMIN_ROLE = 5  # 5 is the id the ruling's form assumes and is unconfirmed again
 
 
 def ruled_ruleset(ruleset_id, branch="main"):
-    """A ruleset in the form ruling r names (owner, 2026-11-11 16:43 CST; the bypass at 16:49 CST): the rollup as its one required check,
-    deletion and force-push blocked, the Admin role bypassing on pull requests only. The cases copy it from here."""
+    """A ruleset in the form decision `main-branch-protection` sets: the rollup as its one required check, deletion and force-push blocked,
+    the Admin role bypassing on pull requests only. The cases copy it from here."""
     rollup = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": protect.REQUIRED_CHECK}]}}
     return {"id": ruleset_id, "name": "ruleset-%d" % ruleset_id, "target": "branch", "enforcement": "active",
             "conditions": {"ref_name": {"include": ["refs/heads/" + branch], "exclude": []}},
@@ -627,8 +627,8 @@ def list_page(args, items):
 
 
 class Protect(unittest.TestCase):
-    """Ruling r (owner, 2026-11-11 16:43 CST): adopting a repo sets a ruleset on its default branch that requires its one required check (the rollup),
-    so no repo starts with none. A fake `gh` records each call."""
+    """Adopting a repo sets a ruleset on its default branch that requires its one required check (the rollup), so no repo starts with none
+    (decision `main-branch-protection`). A fake `gh` records each call."""
 
     def required(self):
         return protect.REQUIRED_CHECK  # the one home of the name (protect.py): no case copies it
