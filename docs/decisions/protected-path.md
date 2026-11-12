@@ -4,7 +4,7 @@
 
 A repo lists paths that no session may write, in `.claude/layout-extras.json`. The claude-settings guard enforces the list. Owner ask ask-mw6vyc57pi part 2 (2026-11-07 14:58 CST); roadmap step `repo-protected-paths`.
 
-- Shape: `"protected-paths": [{"path": "fixtures/", "why": "<the harm, one line>"}]`. `path` is repo-relative POSIX; a path covers itself and all under it, with or without a trailing `/`. No leading `/`, no `..`. `why` is required. Reader: `lint/layout.py` `protected_paths`. No key means the rule is off. An extras file may hold this key alone, with no `kinds` object.
+- Shape: `"protected-paths": [{"path": "fixtures/", "why": "<the harm, one line>"}]`. `path` is repo-relative POSIX; a path covers itself and all under it, with or without a trailing `/`. No leading `/`, no `..`. `why` is required. Reader: `lint/layout.py` `protected_paths`. With no key, the rule is off. An extras file may hold this key alone, with no `kinds` object.
 - A repo with a non-empty list also protects its extras file, so a session cannot edit the list away. The reason says so.
 - Guard rule `protected-path` (`hooks/guard.py`; predicate `is_protected` and `protected_shell_hit` in `hooks/guard_frozen.py`). Refused: a Write, Edit, MultiEdit or NotebookEdit to a listed path; a shell write to one, through the frozen rule's scanner (`_shell_write_hit`, with a leading `cd` followed); a python or node script's own write (`interpreter_write_hit`). A read, a grep, an echo of the path, and a copy out are allowed.
 - The list is that of the checkout that holds the target, never the session's cwd. A write from repo A into repo B's listed path is refused.
