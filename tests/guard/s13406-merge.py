@@ -944,6 +944,106 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 
 
+# ---- one proof on both platforms: the roadmap's Standing sessions roster (ruling G6) and a lone lane (ruling G10)
+# A session's role comes from the roster on the local ref origin/roadmap in the call's cwd: the Batch runner line under
+# "## Standing sessions" whose id slot names this session. Tags are optional. A lone lane (cs-build:lane, no parent_session_id)
+# merges as the batch runner. A lane a coordinator started names a parent, so it is no owner-started session and stays refused.
+# Each roster checkout is a real repository whose origin/roadmap ref holds one CLAUDE.md, and a case's cwd names it.
+ROSTER_DIR = os.path.join(ROOT, "roster")
+ROSTER_LOCAL = "0b1c2d3e-4f50-4a61-8b72-9c83d4e5f601"  # a local session's id, as CLAUDE_CODE_SESSION_ID carries it (form unmeasured in a roster)
+LOCAL_ROLE_ENV = {"CLAUDE_CODE_SESSION_ID": ROSTER_LOCAL}
+RUNNER_TITLE = "claude-settings batch runner 10"
+
+
+def roster_line(role, session, title):
+    """One line of the roster, in the live format: `- <Role>: "<title>", <session id>, since <time>.`"""
+    return '- %s: "%s", %s, since 2026-11-11 22:38 CST.' % (role, title, session)
+
+
+def roster_text(lines, section="## Standing sessions"):
+    """The roadmap's CLAUDE.md: a roster section with `lines` under its heading, as the roadmap holds it."""
+    return "\n".join(["# claude-settings, branch `roadmap`", "", section, "",
+                      "Lane briefs name these ids. Triage rewrites a line when a role changes hands.", ""] + lines) + "\n"
+
+
+# name -> (the CLAUDE.md text, whether its commit is refs/remotes/origin/roadmap)
+ROSTER_REPOS = {
+    "runner": (roster_text([roster_line("Batch runner", ROLE_OWN, RUNNER_TITLE),
+                            roster_line("Batch runner", ROLE_OTHER, "batch runner 11 (child repos)")]), True),
+    "local-runner": (roster_text([roster_line("Batch runner", ROSTER_LOCAL, "a local batch runner")]), True),
+    "coordinator": (roster_text([roster_line("Coordinator", ROLE_OWN, "Claude settings coordinator onboarding")]), True),
+    "title-only": (roster_text([roster_line("Batch runner", ROLE_OTHER, "stands in for " + ROLE_OWN)]), True),
+    "other-section": (roster_text([roster_line("Batch runner", ROLE_OWN, RUNNER_TITLE)], section="## Old notes"), True),
+    "other-runner": (roster_text([roster_line("Batch runner", ROLE_OTHER, "batch runner 11 (child repos)")]), True),
+    "no-ref": (roster_text([roster_line("Batch runner", ROLE_OWN, RUNNER_TITLE)]), False),
+}
+
+
+def roster_path(name):
+    return os.path.join(ROSTER_DIR, name)
+
+
+def build_roster_repos():
+    """Each roster checkout: its CLAUDE.md on main, and with `ref`, its commit as refs/remotes/origin/roadmap, the one ref the guard reads."""
+    for name, (text, ref) in ROSTER_REPOS.items():
+        where = roster_path(name)
+        make_repo(where, {"CLAUDE.md": text})
+        if ref:
+            made = run_vcs(where, "update-ref", "refs/remotes/origin/roadmap", "HEAD")
+            if made.returncode != 0:
+                sys.exit("fixture setup failed in build_roster_repos: update-ref in %r. stderr: %s" % (where, made.stderr.strip()))
+
+
+lazy_fixture([roster_path(name) for name in ROSTER_REPOS], build_roster_repos)
+
+# A lone lane: a cs-build:lane record with no parent_session_id (ruling G10). Its id is this session's own.
+LONE_LANE_RECORD = json.dumps({"ccr": {"id": ROLE_OWN, "title": "a lone lane", "tags": LANE_TAGS}})
+LONE_LINES = {"lone-lane": [role_use("g1", GET_SESSION), role_result("g1", LONE_LANE_RECORD)]}
+
+
+def write_lone_transcripts():
+    os.makedirs(ROLE_DIR, exist_ok=True)
+    for name, lines in LONE_LINES.items():
+        with open(role_path(name), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+
+lazy_fixture([role_path(name) for name in LONE_LINES], write_lone_transcripts)
+
+
+def roster_allow(name, repo, transcript=None, env=ROLE_ENV, session=None):
+    """A `merge --role batch-runner` in the roster checkout `repo` that the guard lets through silently."""
+    sh("merge-role-proof: " + name, MERGE_SHIM + " --role batch-runner", "allow", silent=True, cwd=repo,
+       transcript=transcript, env=env, session=session)
+
+
+def roster_refuse(name, repo, transcript=None, env=ROLE_ENV, session=None):
+    """A `merge --role batch-runner` in the roster checkout `repo` that the guard refuses, never naming the role flag."""
+    sh("merge-role-proof: " + name, MERGE_SHIM + " --role batch-runner", "deny", rule=ROLE_RULE, lacks=ROLE_FLAG,
+       cwd=repo, transcript=transcript, env=env, session=session)
+
+
+roster_allow("roster: a cloud session the roster names batch runner records batch-runner with no record of its own",
+             roster_path("runner"))
+roster_allow("roster: tags are optional, so an untagged record of a roster batch runner still records batch-runner",
+             roster_path("runner"), transcript=role_path("untagged"))
+roster_allow("roster: a local session whose id the roster names batch runner records batch-runner from its own id",
+             roster_path("local-runner"), env=LOCAL_ROLE_ENV, session=ROSTER_LOCAL)
+role_allow("G10: a lone lane (cs-build:lane, no parent_session_id) records batch-runner as the batch runner",
+           MERGE_SHIM + " --role batch-runner", role_path("lone-lane"))
+roster_refuse("roster: a session the roster names coordinator is refused, and the coordinator never merges",
+              roster_path("coordinator"))
+roster_refuse("roster: the session's id in another line's title, not its id slot, is refused",
+              roster_path("title-only"))
+roster_refuse("roster: a batch runner line under another heading than Standing sessions is refused",
+              roster_path("other-section"))
+roster_refuse("roster: with no origin/roadmap ref the roster is unread, so the session is refused",
+              roster_path("no-ref"))
+# The safety hole: a lane a coordinator started names a parent, so it is no owner-started session. The roster holds only other runners.
+roster_refuse("a lane a coordinator started (parent_session_id, cs-build:lane) is refused, with a roster that names only other runners",
+              roster_path("other-runner"), transcript=role_path("lane"))
+
+
 # =========================================================================== 5e-2. the record branch's one writer
 #
 # Rule roadmap-one-writer, decision session-tiers. A `git push` that reaches the repo's record branch is
