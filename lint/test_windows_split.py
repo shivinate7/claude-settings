@@ -23,6 +23,7 @@ are named in the all-jobs-passed and ci-done needs.
 
 Run with:  python3 lint/test_windows_split.py -v
 """
+import http.server
 import json
 import os
 import re
@@ -31,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -2482,6 +2484,178 @@ class CiCoverageCollector(unittest.TestCase):
         self.assertIsNotNone(error, "the scan passed although the collector exits 3; a failed collector must fail it")
         self.assertNotIsInstance(error, AssertionError, "a failed collector reads as a gap report, not as an error")
         self.assertRegex(str(error), r"\b3\b", "the collector's error does not name its exit code 3: %s" % error)
+
+
+ROOT = os.path.join(HERE, "..")
+MAC_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
+LABELS = ["self-hosted", "macOS", "claude-settings-mac"]
+FALLBACK = ["macos-latest"]
+# The whole runs-on of each macOS job: the fork guard comes first, so a fork PR takes macos-latest whatever the pick says.
+RUNS_ON = ("${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)"
+           " && fromJSON('[\"macos-latest\"]') || fromJSON(needs.scope.outputs.mac_runner) }}")
+
+
+def run_script(name, env):
+    """Run one .github/scripts file with `env` and a scratch $GITHUB_OUTPUT. -> (exit code, {name: value}, stdout)."""
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "out")
+        open(out, "w").close()
+        e = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": out}
+        e.update(env)
+        r = subprocess.run([sys.executable, os.path.join(ROOT, ".github", "scripts", name)], env=e,
+                           capture_output=True, text=True, timeout=60)
+        with open(out, encoding="utf-8") as f:
+            pairs = dict(l.rstrip("\n").split("=", 1) for l in f if "=" in l)
+        return r.returncode, pairs, r.stdout + r.stderr
+
+
+class MacRunnerPick(unittest.TestCase):
+    """R58 points 1 and 2: the integration PR's CI run's macOS jobs run on the owner's Mac (label claude-settings-mac) and fall back to
+    macos-latest when no such runner is online. A fork PR never reaches it."""
+
+    ONLINE = json.dumps({"runners": [{"status": "online", "labels": [{"name": n} for n in LABELS]}]})
+    OFFLINE = json.dumps({"runners": [{"status": "offline", "labels": [{"name": n} for n in LABELS]}]})
+    BATCH = {"EVENT": "pull_request", "HEAD_REF": "batch-104", "HEAD_REPO": "o/r", "REPO": "o/r"}
+
+    def pick(self, **kw):
+        env = dict(self.BATCH, RUNNERS_JSON=self.ONLINE)
+        env.update(kw)
+        code, out, text = run_script("mac-runner.py", env)
+        self.assertEqual(code, 0, text)
+        return json.loads(out["mac_runner"])
+
+    def test_a_batch_run_with_a_runner_online_picks_the_mac(self):
+        self.assertEqual(self.pick(), LABELS)
+
+    def test_an_online_runner_without_the_label_falls_back(self):
+        other = json.dumps({"runners": [{"status": "online", "labels": [{"name": "self-hosted"}, {"name": "macOS"}]}]})
+        self.assertEqual(self.pick(RUNNERS_JSON=other), FALLBACK)
+
+    def test_the_real_request_asks_the_repo_runners_endpoint_with_the_token(self):
+        seen = []
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.path, self.headers.get("Authorization")))
+                body = MacRunnerPick.ONLINE.encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            got = self.pick(RUNNERS_JSON="", RUNNER_TOKEN="tok", API_URL="http://127.0.0.1:%d" % srv.server_port)
+        finally:
+            srv.shutdown()
+        self.assertEqual(got, LABELS)
+        self.assertEqual(seen, [("/repos/o/r/actions/runners?per_page=100", "Bearer tok")])
+
+    def test_no_runner_online_falls_back(self):
+        self.assertEqual(self.pick(RUNNERS_JSON=self.OFFLINE), FALLBACK)
+
+    def test_an_unreadable_runner_list_falls_back(self):
+        self.assertEqual(self.pick(RUNNERS_JSON="not json"), FALLBACK)
+
+    def test_a_missing_token_falls_back(self):
+        self.assertEqual(self.pick(RUNNERS_JSON="", RUNNER_TOKEN=""), FALLBACK)
+
+    def test_a_fork_pr_falls_back_even_with_a_runner_online(self):
+        self.assertEqual(self.pick(HEAD_REPO="fork/r"), FALLBACK)
+
+    def test_a_non_batch_branch_falls_back(self):
+        self.assertEqual(self.pick(HEAD_REF="lane-x"), FALLBACK)
+
+    def test_every_macos_job_reads_the_pick_and_guards_forks_itself(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            text = f.read()
+        for job in MAC_JOBS:
+            block = job_block(text, job)
+            runs_on = re.search(r"^    runs-on:(.*)$", block, re.M).group(1)
+            self.assertEqual(runs_on.strip(), RUNS_ON, job)
+
+    def test_the_scope_job_runs_the_pick_with_the_token_from_a_secret(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            scope = job_block(f.read(), "scope")
+        self.assertIn("mac_runner: ${{ steps.mac.outputs.mac_runner }}", scope)
+        self.assertIn("python3 .github/scripts/mac-runner.py", scope)
+        self.assertIn("RUNNER_TOKEN: ${{ secrets.", scope)
+
+
+class TouchedMacosSkip(unittest.TestCase):
+    """R58 point 3: lane-touched-tests' macOS job skips while a `checks` run on a batch-* branch is in progress."""
+
+    MATRIX = json.dumps({"include": [{"os": "windows-latest", "files": "[\"a\"]"}, {"os": "macos-latest", "files": "[\"b\"]"}]})
+
+    def hold(self, runs, matrix=None, **kw):
+        env = {"MATRIX": matrix or self.MATRIX, "ANY": "true", "RUNS_JSON": json.dumps({"workflow_runs": runs})}
+        env.update(kw)
+        code, out, text = run_script("batch-macos-skip.py", env)
+        self.assertEqual(code, 0, text)
+        return json.loads(out["matrix"]), out["any"], text
+
+    def oses(self, matrix):
+        return [e["os"] for e in matrix["include"]]
+
+    def test_a_batch_run_in_progress_drops_the_macos_entry(self):
+        m, any_, _ = self.hold([{"head_branch": "batch-104", "status": "in_progress"}])
+        self.assertEqual(self.oses(m), ["windows-latest"])
+        self.assertEqual(any_, "true")
+
+    def test_a_queued_batch_run_drops_it_too(self):
+        m, _, _ = self.hold([{"head_branch": "batch-104", "status": "queued"}])
+        self.assertEqual(self.oses(m), ["windows-latest"])
+
+    def test_a_lane_run_in_progress_keeps_it(self):
+        m, _, _ = self.hold([{"head_branch": "lane-x", "status": "in_progress"}])
+        self.assertEqual(self.oses(m), ["windows-latest", "macos-latest"])
+
+    def test_a_finished_batch_run_keeps_it(self):
+        m, _, _ = self.hold([{"head_branch": "batch-104", "status": "completed"}])
+        self.assertEqual(self.oses(m), ["windows-latest", "macos-latest"])
+
+    def test_only_macos_left_empties_the_matrix_and_any_turns_false(self):
+        only = json.dumps({"include": [{"os": "macos-latest", "files": "[\"b\"]"}]})
+        m, any_, _ = self.hold([{"head_branch": "batch-104", "status": "in_progress"}], matrix=only)
+        self.assertEqual(m, {"include": []})
+        self.assertEqual(any_, "false")
+
+    def test_an_unreadable_run_list_keeps_the_matrix_and_says_unknown(self):
+        code, out, text = run_script("batch-macos-skip.py", {"MATRIX": self.MATRIX, "ANY": "true", "RUNS_JSON": "nope"})
+        self.assertEqual(code, 0, text)
+        self.assertEqual(json.loads(out["matrix"]), json.loads(self.MATRIX))
+        self.assertIn("unknown", text)
+
+    def test_the_real_call_lists_the_checks_workflow_runs_for_each_busy_status(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "calls")
+            gh = os.path.join(d, "gh")
+            with open(gh, "w") as f:
+                f.write("#!/bin/sh\necho \"$*\" >> \"$GH_LOG\"\n"
+                        "case \"$*\" in *status=in_progress*) echo '{\"workflow_runs\": [{\"head_branch\": \"batch-9\", \"status\": \"in_progress\"}]}';;"
+                        " *) echo '{\"workflow_runs\": []}';; esac\n")
+            os.chmod(gh, 0o755)
+            code, out, text = run_script("batch-macos-skip.py", {"MATRIX": self.MATRIX, "ANY": "true", "REPO": "o/r",
+                                                                 "GH_LOG": log, "PATH": d + os.pathsep + os.environ["PATH"]})
+            self.assertEqual(code, 0, text)
+            calls = open(log).read().splitlines()
+        for status in ("queued", "in_progress"):
+            self.assertTrue(any("repos/o/r/actions/workflows/checks.yml/runs" in c and "status=" + status in c for c in calls), calls)
+        self.assertEqual([e["os"] for e in json.loads(out["matrix"])["include"]], ["windows-latest"])
+
+    def test_the_workflow_runs_the_skip_after_the_selector_and_reads_actions(self):
+        with open(os.path.join(ROOT, ".github", "workflows", "lane-touched-tests.yml"), encoding="utf-8") as f:
+            text = f.read()
+        touched = job_block(text, "touched")
+        self.assertIn("actions: read", touched)
+        self.assertLess(touched.index("touched-tests.py"), touched.index("batch-macos-skip.py"))
+        self.assertIn("matrix: ${{ steps.skip.outputs.matrix }}", touched)
+        self.assertIn("any: ${{ steps.skip.outputs.any }}", touched)
+
 
 
 if __name__ == "__main__":

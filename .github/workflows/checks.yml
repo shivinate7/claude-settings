@@ -57,6 +57,7 @@ jobs:
       sweep: ${{ steps.scope.outputs.sweep }}
       shoot: ${{ steps.scope.outputs.shoot }}
       mutation_report: ${{ steps.scope.outputs.mutation_report }}
+      mac_runner: ${{ steps.mac.outputs.mac_runner }}
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -71,6 +72,19 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_REF: ${{ github.head_ref }}
         run: bash .github/scripts/ci-scope.sh
+
+      # R58: an integration PR's CI run's macOS jobs go to the owner's Mac when it is online, else to macos-latest. The secret may be
+      # absent; the script then picks macos-latest.
+      - name: Pick the macOS runner
+        id: mac
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          RUNNER_TOKEN: ${{ secrets.MAC_RUNNER_READ_TOKEN }}
+        run: python3 .github/scripts/mac-runner.py
 
   checks:
     runs-on: ubuntu-latest
@@ -903,7 +917,7 @@ jobs:
   # checkout-detection suite, the ios-ship suite, the sim-test suite and the duo-fold suite (bash 3.2 scripts for macOS) are the only checks
   # whose result depends on either. checks-macos below covers the rest of the suite, so this job stays narrow, on purpose.
   shell-macos:
-    runs-on: macos-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON('["macos-latest"]') || fromJSON(needs.scope.outputs.mac_runner) }}
     needs: scope
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main, latest attempt of each (run 42445434802 to run 43184587111):
     # 29 green, median 23.0, slowest 31.3 min (run 43184587111). The stopgap ends with roadmap step time-pinned-tests-go.
@@ -959,7 +973,7 @@ jobs:
   # above -- a job that stops at its first red step proves nothing about the suites
   # behind it.
   checks-macos:
-    runs-on: macos-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON('["macos-latest"]') || fromJSON(needs.scope.outputs.mac_runner) }}
     needs: scope
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
     # is 41% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
@@ -1202,7 +1216,7 @@ jobs:
   # their steps, not the jobs. Cost: a pull request with no macOS-scoped change, such as a docs-only one, starts a
   # second, idle macOS runner that it did not start before. That cost is unmeasured: the window below had no such run.
   checks-macos-b:
-    runs-on: macos-latest
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON('["macos-latest"]') || fromJSON(needs.scope.outputs.mac_runner) }}
     needs: scope
     # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 25.5, slowest 30.7 min (run 43197518392). The stopgap ends with roadmap step time-pinned-tests-go.
