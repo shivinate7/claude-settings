@@ -215,8 +215,8 @@ def departs_hit(text) -> str:
     """The miss reason when `text` lacks a valid Departs from line, else "". Every such line must hold a
     non-empty side on each side of the first separator (see DEPARTS_SEPARATOR; with none, a leading placeholder
     or the first word, and the rest), neither side only a placeholder, and no no-change word in the first clause
-    of the change side: the part before its first ";", or the whole side with none (the whole line when there
-    is no separator). A word after the ";" says what the change does."""
+    of the change side: the part before its first ";", or the whole side with none (with no separator, the main
+    side is read too). A word after the ";" says what the change does."""
     text = str(text or "")
     lines = DEPARTS_LINE.findall(text)
     if not lines:
