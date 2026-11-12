@@ -80,6 +80,7 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+MERGE_TOOL = os.path.join(HERE, "..", "merge", "merge.py")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -92,6 +93,9 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # merge/merge.py, the merge tool the guard loads from ../merge beside its hooks folder (guard_merge.py merge_module).
+    # The suite is the guard's: the merge routes and the batch read are judged through the guard's own cases.
+    "merge": (MERGE_TOOL, SUITE, "GUARD_UNDER_TEST", "merge"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -2020,13 +2024,49 @@ MUTATIONS = [
     # ---- the three git acts: context for a write, the merge guard, and cite by id. Each mutant breaks
     # one arm of one clause, and the required case is the one that must read that break.
     ("merge-checks: a pending head merges",
-     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
-     '        if verdict == "red":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
+     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),\n                   "gh pr merge "',
+     '        if verdict == "red":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),\n                   "gh pr merge "',
      "guard", 'merge-checks: a pending check denies'),
     ("merge-checks: an unread head merges",
-     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
-     '        if verdict not in ("green", "unknown"):\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "gh pr merge "',
+     '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),\n                   "gh pr merge "',
+     '        if verdict not in ("green", "unknown"):\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail, is_api_merge(segment)),\n                   "gh pr merge "',
      "guard", 'merge-checks: a gh that answers nothing readable is unknown'),
+    # ---- the raw API merge and the push to main, the two routes of decision no-merge-during-batch-ci. Each mutant breaks one
+    # branch of one reader, and the required case is the one that must read that break.
+    ("merge-route: a raw API PUT to a merge endpoint is never a merge call",
+     '        return api_merge_call_of(rest)', '        return None', "guard",
+     "merge-route: gh api -X PUT is refused while another ready pr's"),
+    ("merge-route: a PUT spelled with --method is not a merge call",
+     '        if arg in ("-X", "--method"):\n            method = args[index] if index < len(args) else ""\n            index += 1\n        elif arg.startswith("--method="):',
+     '        if arg in ("-X",):\n            method = args[index] if index < len(args) else ""\n            index += 1\n        elif arg.startswith("--method="):',
+     "guard", "merge-route: gh api --method PUT is refused"),
+    ("merge-route: a GET of the merge endpoint is read as a merge call",
+     '    if method.upper() != "PUT" or not found:', '    if not found:', "guard",
+     "merge-route: gh api, a GET of the merge endpoint, is allowed"),
+    ("merge-route: a field flag before the endpoint is not skipped, so the field is read as the endpoint",
+     '        elif arg in API_MERGE_VALUE_FLAGS:', '        elif False:', "guard",
+     "merge-route: gh api -X PUT, field flag first (-f)"),
+    ("merge-route: a shell variable standing for the whole repo is not read as a repo",
+     '|%s/%s|%s)/)?pulls/', '|%s/%s|\\$NEVER%s)/)?pulls/', "guard",
+     "merge-route: variable: gh api -X PUT, a repo in a shell variable"),
+    ("merge-route: a shell variable standing for the pr number is not read as a number",
+     '_GH_API_VAR = r"\\$\\{?\\w+\\}?"', '_GH_API_VAR = r"\\$\\{?\\w+\\}?X"', "guard",
+     "merge-route: variable: gh api -X PUT, a pr number in a shell variable"),
+    ("merge-route: a push to main reads no busy pr, so it asks and is never denied",
+     'busy = push_batch_hit(args, where, overrides)', 'busy = ""', "guard",
+     "merge-route: git push origin main is refused while another ready pr's"),
+    ("merge-route: a pushed sha is never read as the head, so a busy pr that holds it still blocks",
+     'head = push_head((source if colon else spec) or "HEAD", where)', 'head = ""', "guard",
+     "merge-route: git push origin abc1234:refs/heads/main still asks when the busy pr holds this head"),
+    ("merge-route: a raw API merge's head refusal names the merge tool",
+     'merge_check_reason(verdict, detail, is_api_merge(segment)),', 'merge_check_reason(verdict, detail, False),', "guard",
+     "with a remedy that names no merge tool"),
+    ("merge-route: a containment read that fails on a push is held, not unknown",
+     'held = False  # a push of a sha GitHub', 'raise  # a push of a sha GitHub', "merge",
+     "merge-route: git push origin abc1234:refs/heads/main is refused when the containment read fails"),
+    ("merge-route: the push of main's own tip is read as a busy push, not as a no-op",
+     'if blockers and head:', 'if False:', "merge",
+     "merge-route: git push origin main, pushing main's own tip, is asked"),
     ("merge-checks: the host merge tool is never guarded",
      '        if verdict != "green":\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
      '        if False:\n            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),\n                   "merge tool "',
@@ -4148,15 +4188,19 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
     A mutant and its clean-layout control both go through here, so they differ only in the text:
     `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
     stem = TARGETS[target][3]
-    if target in ("guard", "simlease"):
+    if target in ("guard", "simlease", "merge"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings.
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
-        lay_out_guard_reads(root)  # takes the original bin/sim-lease; a simlease mutant overwrites it below
+        lay_out_guard_reads(root)  # takes the original bin/sim-lease and merge/merge.py; a mutant of either overwrites it below
         if target == "simlease":
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(sources[target].replace(old, new, 1))
+        elif target == "merge":
+            # The guard reads the merge tool from ../merge beside its hooks folder, so the mutant is that copy.
+            with open(os.path.join(root, "merge", "merge.py"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         elif old != new:  # old == new is the clean-layout control: no anchor to find
             mutate_shared.apply_mutant(tree, old, new)
@@ -4198,7 +4242,7 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in ("guard", "simlease", "merge"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     return copy_path

@@ -114,7 +114,6 @@ GH_WRITES = (
     ("api --method=POST, no field", "gh api --method=POST repos/x/y/issues"),
     ("api -XPOST", "gh api -XPOST repos/x/y/issues"),
     ("api -X patch", "gh api -X patch repos/x/y/pulls/1 -f state=closed"),
-    ("api -X PUT", "gh api -X PUT repos/x/y/pulls/1/merge"),
     ("api -X DELETE", "gh api -X DELETE repos/x/y/issues/comments/1"),
     ("api with -f and no method", "gh api repos/x/y/issues -f title=x"),
     ("api with -F and no method", "gh api repos/x/y/issues -F title=x"),
@@ -125,6 +124,8 @@ GH_WRITES = (
 for _name, _command in GH_WRITES:
     gh_write_refused(_name, _command)
 gh_write_refused("pr merge", "gh pr merge 12 --squash", **GH_MERGE_FIXTURE)
+# A raw API merge is a merge call too, judged by the merge checks, so its allow twin needs the green head of GH_MERGE_FIXTURE.
+gh_write_refused("api -X PUT", "gh api -X PUT repos/x/y/pulls/1/merge", **GH_MERGE_FIXTURE)
 
 # A repo flag after the group word (`gh pr -R o/r comment 5`) is valid gh, and the verb comes after it. Each
 # write above is repeated with the flag in each of gh's four forms, after `pr` or `issue`. The name of each row
@@ -315,6 +316,82 @@ sh("merge-batch: gh pr merge is refused while another ready pr's workflow is que
    "gh pr merge 1 --squash", "deny", "merge-checks", carries=("#2", "ci-checks"), cwd=NOGIT, env_path=GHRUNNONE + os.pathsep + PY_PATH)
 sh("merge-batch: gh pr merge is allowed when the other ready pr's workflow has finished",
    "gh pr merge 1 --squash", "allow", silent=True, cwd=NOGIT, env_path=GHRUNDONE + os.pathsep + PY_PATH)
+# The merge routes (decision no-merge-during-batch-ci). A raw `gh api` PUT to a pull request's merge endpoint is judged like
+# `gh pr merge`, and a non-forced `git push` that writes main reads the batch alone. The fakes are the batch fixtures of s00442.
+ROUTE_ON = GHBATCH + os.pathsep + PY_PATH
+ROUTE_CARRIES = ("#2", "pending", "override")
+ROUTE_LACKS = ("No override lifts",)
+GH_API_MERGE = "gh api -X PUT repos/y/x/pulls/1/merge"
+GH_API_MERGE_PLACEHOLDER = "gh api -X PUT repos/{owner}/{repo}/pulls/1/merge"
+GH_API_METHOD_PLACEHOLDER = "gh api --method PUT repos/{owner}/{repo}/pulls/1/merge"
+ROUTE_DENIALS = (
+    ("gh api -X PUT", "Bash", GH_API_MERGE, None),
+    ("gh api --method PUT", "Bash", "gh api --method PUT repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, placeholder repo", "Bash", GH_API_MERGE_PLACEHOLDER, None),
+    ("gh api --method PUT, placeholder repo", "Bash", GH_API_METHOD_PLACEHOLDER, None),
+    ("gh -R y/x api -X PUT", "Bash", "gh -R y/x api -X PUT repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, field flag first (-f)", "Bash", "gh api -X PUT -f merge_method=squash repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, input flag first (--input)", "Bash", "gh api -X PUT --input body.json repos/y/x/pulls/1/merge", None),
+    ("gh api -X PUT, the field after the path (-f)", "Bash", "gh api -X PUT repos/y/x/pulls/1/merge -f merge_method=squash", None),
+    ("git push origin main", "Bash", VCS + " push origin main", None),
+    ("git push origin HEAD:main", "Bash", VCS + " push origin HEAD:main", None),
+    ("git push origin <sha>:refs/heads/main", "Bash", VCS + " push origin abc1234:refs/heads/main", None),
+)
+for _label, _tool, _command, _input in ROUTE_DENIALS:
+    sh("merge-route: %s is refused while another ready pr's required check is pending" % _label, _command, "deny", "merge-checks",
+       carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+sh("merge-route: git push origin main with no busy pr on main still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
+sh("merge-route: git push origin some-branch is allowed while another ready pr's required check is pending",
+   VCS + " push origin some-branch", "allow", silent=True, cwd=NOGIT, env_path=ROUTE_ON)
+sh("merge-route: git push origin abc1234:refs/heads/main still asks when the busy pr holds this head",
+   VCS + " push origin abc1234:refs/heads/main", "ask", PUSH_MAIN_RULE, cwd=NOGIT, env_path=GHBATCHCONTAIN + os.pathsep + PY_PATH)
+for _label, _fixture, _command in (
+    ("no busy pr on main", GHMAIN, GH_API_MERGE),
+    ("no busy pr on main, placeholder repo", GHMAIN, GH_API_MERGE_PLACEHOLDER),
+    ("a busy pr that is a draft", GHBATCHDRAFT, GH_API_MERGE),
+    ("a busy pr on another base", GHBATCHBASE, GH_API_MERGE),
+    ("a busy pr whose head holds this head", GHBATCHCONTAIN, GH_API_MERGE),
+    ("a GET of the merge endpoint", ROUTE_ON, "gh api repos/y/x/pulls/1/merge"),
+    ("a PUT to another pull request endpoint", ROUTE_ON, "gh api -X PUT repos/y/x/pulls/1/requested_reviewers"),
+):
+    sh("merge-route: gh api, %s, is allowed: %s" % (_label, _command), _command, "allow", silent=True, cwd=NOGIT,
+       env_path=_fixture + os.pathsep + PY_PATH, config=MERGECFG)
+sh("merge-route: fixture: gh pr merge 1 is refused when the busy pr is on page two of the open list", "gh pr merge 1 --squash",
+   "deny", "merge-checks", carries=("#2", "pending"), cwd=NOGIT, env_path=GHBATCHPAGE2 + os.pathsep + PY_PATH)
+sh("merge-route: gh api -X PUT is refused when the busy pr is on page two of the open list", GH_API_MERGE, "deny", "merge-checks",
+   carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=GHBATCHPAGE2 + os.pathsep + PY_PATH)
+sh("merge-route: variable: gh api -X PUT, a pr number in a shell variable, is refused while a busy pr is pending",
+   "gh api -X PUT repos/y/x/pulls/$PR/merge", "deny", "merge-checks", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+sh("merge-route: variable: gh api -X PUT, a repo in a shell variable, is refused while a busy pr is pending",
+   "gh api -X PUT repos/$REPO/pulls/1/merge", "deny", "merge-checks", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+sh("merge-route: variable: gh api, a GET of a pr number in a shell variable, is allowed",
+   "gh api repos/y/x/pulls/$PR/merge", "allow", silent=True, cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+sh("merge-route: git push origin main with a busy pr that is a draft still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=NOGIT, env_path=GHBATCHDRAFT + os.pathsep + PY_PATH)
+sh("merge-route: git push origin main with a busy pr on another base still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=NOGIT, env_path=GHBATCHBASE + os.pathsep + PY_PATH)
+sh("merge-route: git push origin abc1234:refs/heads/main is refused when the containment read fails, unknown is red",
+   VCS + " push origin abc1234:refs/heads/main", "deny", "merge-checks", carries=("#2", "override"), lacks=ROUTE_LACKS,
+   cwd=NOGIT, env_path=GHBATCHCMPERR + os.pathsep + PY_PATH)
+sh("merge-route: git push origin main, pushing main's own tip, is asked, not denied, while a busy pr's head lacks the tip",
+   VCS + " push origin main", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN, env_path=GHBATCHTIP + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
+sh("merge-route: git push origin abc1234:refs/heads/main, a head that is not main's tip, is still refused on the same fake",
+   VCS + " push origin abc1234:refs/heads/main", "deny", "merge-checks", carries=ROUTE_CARRIES, lacks=ROUTE_LACKS,
+   cwd=PUSHMAIN, env_path=GHBATCHTIP + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
+sh("merge-route: limit: a forced push to main with a busy pr is asked, not denied", VCS + " push --force origin main", "ask",
+   "force-push", cwd=NOGIT, env_path=ROUTE_ON)
+# The head-check text of a raw API merge: the head's own check is pending, so the refusal is the route text, which names no act.
+sh("merge-route: gh api -X PUT is refused while this head's check is pending, with a remedy that names no merge tool",
+   GH_API_MERGE, "deny", "merge-checks", carries=("not settled", "pending"), lacks=("merge tool", "mcp__github", "gh pr merge"),
+   cwd=NOGIT, env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# The MCP merge tool, guard side. The deny names a head that does not hold this head; the merge-batch case above names the plain pending head.
+add("merge-route: mcp merge tool is refused while another ready pr's check is pending and its head does not hold this head", "deny",
+    "merge-checks", carries=("#2", "pending"), tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+    env_path=GHBATCHDIVERGED + os.pathsep + PY_PATH, config=MERGECFG)
+add("merge-route: mcp merge tool is allowed while another ready pr's check is pending and its head holds this head", "allow",
+    tool="mcp__github__merge_pull_request", cwd=NOGIT, pullNumber=1, repo="x", owner="y",
+    env_path=GHBATCHCONTAIN + os.pathsep + PY_PATH, config=MERGECFG, silent=True)
 NEED_ON = GHNEED + os.pathsep + PY_PATH
 sh("merge-checks: the pull request and repo of the call are the ones read",
    "gh pr merge 12 --squash -R y/x", "allow", silent=True, cwd=NOGIT, env_path=NEED_ON,
@@ -958,13 +1035,17 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # RECFORK on roadmap-fork (its extras name that branch).
 RECORD_RULE = "roadmap-one-writer"
 RECORD_LACKS = ("origin roadmap", "HEAD:roadmap")  # the refusal never names the push it refuses
+# The remedy sends the session to fetch, then run `git merge-base --is-ancestor <commit> origin/<record branch>`,
+# so the owner is asked to push only a commit the record branch lacks. `git branch -r --contains` is not the check:
+# a commit on a lane branch alone would read as already on the record branch.
+RECORD_CARRIES = ("git fetch origin", "git merge-base --is-ancestor", "origin/<record branch>", "ask the owner only when")
 LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
 def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
     """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, carries=RECORD_CARRIES, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
@@ -1104,12 +1185,13 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal main destination
-    (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
-    `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
+    (`origin main`, `HEAD:main`) adds one `git rev-parse --verify` of the pushed head (decision no-merge-during-batch-ci),
+    two `git config` reads, one `git remote get-url` for the remote's URL (rule push-main, a local read), and one
+    conflict-markers diff. A literal `HEAD:<branch>` adds no read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
     branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
     update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and
     the same two for-each-ref reads, and no branch. A local-path origin stops after the URL read. No push spawns
-    `ls-remote`, `fetch` or `push`. A stray push (rule push-stray-branch: an implied destination off the
+    `ls-remote`, `fetch` or `push`, and no `git remote` spawn contacts the remote (`git remote get-url` reads config only). A stray push (rule push-stray-branch: an implied destination off the
     upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The octopus-push
     rule (decision octopus-push-refused) adds one `git rev-list` for each pushed ref whose destination is not
     main or master, with or without a remote-tracking ref. The conflict-markers
@@ -1135,6 +1217,13 @@ def record_push_cost_case():
         return {"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path, "config": None,
                 "agent_id": None, "tool_input": {"command": command}, "transcript": transcript, "env": ROLE_ENV}
 
+    def remote_contacts(line):
+        """True for a `git remote` spawn that may contact the remote. `remote`, `remote -v` and `remote get-url` read config only."""
+        words = line.split()
+        while len(words) >= 2 and words[0] in ("-C", "-c"):
+            words = words[2:]
+        return words[:1] == ["remote"] and words[1:2] not in ([], ["-v"], ["--verbose"], ["get-url"])
+
     def spawn_kinds(command, cwd):
         if os.path.exists(log):
             os.remove(log)
@@ -1155,8 +1244,10 @@ def record_push_cost_case():
          {"rev-parse": 1, "symbolic-ref": 1, "diff": 1, "rev-list": 1}),
         ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1, "rev-list": 1}),
         ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1, "rev-list": 1}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "config": 1, "diff": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "config": 1, "diff": 1}),
+        ("a literal destination, origin main", "push origin main",
+         {"rev-parse": 2, "config": 2, "remote": 1, "diff": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main",
+         {"rev-parse": 2, "config": 2, "remote": 1, "diff": 1}),
         ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo",
          {"rev-parse": 1, "diff": 1, "rev-list": 1}),
         ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
@@ -1183,9 +1274,13 @@ def record_push_cost_case():
         if kinds != want:
             problems.append("%s: git spawns %s, want %s" % (label, sorted(kinds.items()), sorted(want.items())))
         # Nothing contacts the remote: the push-main and push-all-main reads are local, and a push reads no remote's refs.
-        for reach in ("ls-remote", "fetch", "push", "remote"):
+        for reach in ("ls-remote", "fetch", "push"):
             if reach in kinds:
-                problems.append("%s: git spawns %r, which contacts or names the remote" % (label, reach))
+                problems.append("%s: git spawns %r, which contacts the remote" % (label, reach))
+        for line in lines:
+            if remote_contacts(line):
+                problems.append("%s: git spawns %r, a remote subcommand other than get-url, which may contact the remote"
+                                % (label, line))
         if label == "a bare push" and not any("push.default" in line for line in lines):
             problems.append("a bare push: no read of push.default")
         if label == "a HEAD push" and any("push.default" in line for line in lines):

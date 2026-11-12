@@ -88,6 +88,11 @@ GHBATCHRED = os.path.join(ROOT, "ghbatchred")    # the same, with pull request 2
 GHBATCHCONTAIN = os.path.join(ROOT, "ghbatchcontain")  # the same as GHBATCH, but pull request 2's head holds pull request 1's head (compare "ahead")
 GHBATCHDIVERGED = os.path.join(ROOT, "ghbatchdiverged")  # the same as GHBATCH, and pull request 2's head does not hold pull request 1's (compare "diverged")
 GHBATCHBEHIND = os.path.join(ROOT, "ghbatchbehind")  # the same as GHBATCHCONTAIN, but pull request 1's head is behind main (compare "main...<head>" "behind")
+GHBATCHDRAFT = os.path.join(ROOT, "ghbatchdraft")    # the same as GHBATCH, but pull request 2 is a draft
+GHBATCHBASE = os.path.join(ROOT, "ghbatchbase")      # the same as GHBATCH, but pull request 2 is on another base, `release`
+GHBATCHPAGE2 = os.path.join(ROOT, "ghbatchpage2")    # the same as GHBATCH, with pull request 2 on page two of the open list (two rows a page)
+GHBATCHCMPERR = os.path.join(ROOT, "ghbatchcmperr")  # the same as GHBATCH, and the containment read of pull request 2's head fails (server error)
+GHBATCHTIP = os.path.join(ROOT, "ghbatchtip")        # the same as GHBATCH, and main's tip compares identical with main (the no-op push of main's own tip)
 GHPINNED = os.path.join(ROOT, "ghpinned")        # the same, with the protection naming `gate`: STAMPREPO pins `checks`, and only the pin counts
 GHNOPROT = os.path.join(ROOT, "ghnoprot")        # no branch protection: pull request 2's pending check counts, whatever its name
 GHNOPROTDONE = os.path.join(ROOT, "ghnoprotdone")  # the same, with pull request 2's check passed
@@ -1139,6 +1144,23 @@ def materialize_all():
     for key, once in list(LAZY.items()):
         if slash(DIFFROOT) not in key and not key.startswith(slash(CMKROOT) + "/"):
             once()
+
+
+def _build_route_fakes():
+    """The fake gh folders of the merge-route cases (s13406). Each is the batch fixture (GHBATCH: pull request 2 busy on main)
+    with one difference, except the tip fake, which needs main's own tip: it is read from a real checkout of main."""
+    make_fake_gh(GHBATCHDRAFT, "main", others=[dict(batch_other(("checks", "pending"))[0], draft=True)])
+    make_fake_gh(GHBATCHBASE, "main", others=[dict(batch_other(("checks", "pending"))[0], base="release")])
+    filler = [{"number": n, "head": "filler-%d" % n, "draft": False, "checks": [{"name": "checks", "bucket": "pass", "link": ""}]}
+              for n in (3, 4)]
+    make_fake_gh(GHBATCHPAGE2, "main", page_cap=2, others=filler + batch_other(("checks", "pending")))
+    make_fake_gh(GHBATCHCMPERR, "main", others=batch_other(("checks", "pending")), compares={"abc1234...pr-two-head": "server"})
+    materialize(PUSHMAIN)
+    tip = run_vcs(PUSHMAIN, "rev-parse", "main").stdout.strip()
+    make_fake_gh(GHBATCHTIP, "main", others=batch_other(("checks", "pending")), compares={"main...%s" % tip: "identical"})
+
+
+lazy_fixture([GHBATCHDRAFT, GHBATCHBASE, GHBATCHPAGE2, GHBATCHCMPERR, GHBATCHTIP], _build_route_fakes)
 
 
 def build_fixtures():
