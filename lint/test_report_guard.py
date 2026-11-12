@@ -5086,6 +5086,11 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         tcj.git(cls.repo, "update-ref", "refs/remotes/origin/main", cls.C)
         tcj.git(cls.repo, "update-ref", "refs/remotes/origin/silent-undo-ci-body", cls.C)
         tcj.git(cls.repo, "update-ref", "refs/remotes/origin/pr", cls.P)  # the PR's own branch, as a base (known debt)
+        # Item 571: a mixed-case base. X is a commit on B (the merge base), held only by origin/Release, so a cite of X is
+        # on that base and newer than the merge base. Made from plumbing, so HEAD stays on pr.
+        tree = tcj.git(cls.repo, "rev-parse", cls.B + "^{tree}").stdout.strip()
+        cls.X = tcj.git(cls.repo, "commit-tree", tree, "-p", cls.B, "-m", "X").stdout.strip()
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/Release", cls.X)
         tcj.git(cls.repo, "branch", "master", cls.C)
         cls.bare = os.path.join(cls.root, "bare")
         os.makedirs(cls.bare)
@@ -5748,6 +5753,46 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         self.assert_fixture_shape()
         self.assertTrue(self.ancestor(self.P, "origin/pr"), "fixture: origin/pr does not hold P")
         self.assert_allowed("The failure is pre-existing; it fails on origin/pr at %s." % self.P)
+
+    def test_pe_red_url_does_not_outweigh_a_cited_pr_head_hash(self):
+        # Catches: a run URL on a line that also says "on main" passes when the line cites the PR's head sha, because the
+        # URL check returns before the cites are read. When a line cites a run-form hash, the cites decide, and the URL
+        # counts only with no cite. Item 571.
+        self.assert_fixture_shape()
+        url = "https://github.com/o/r/actions/runs/123"
+        line = "The failure is pre-existing; it fails on main at %s (%s)" % (self.P, url)
+        self.assert_blocked(line, line)
+
+    def test_pe_green_url_with_a_cited_main_hash_or_no_hash_passes(self):
+        # Catches: a run URL on a line that cites a commit on main, newer than the merge base, is refused; so is a line
+        # that says "on main" with the URL and no hash. Item 571.
+        self.assert_fixture_shape()
+        url = "https://github.com/o/r/actions/runs/123"
+        rows = [
+            "The failure is pre-existing; it fails on main at %s (%s)" % (self.C, url),
+            "The failure is pre-existing on main, run %s." % url,
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_mixed_case_origin_base_refuses_a_commit_off_it(self):
+        # Catches: the base is lowercased before the git read, so "origin/Release" reads as "origin/release", a ref git
+        # does not have. The read fails open, and a commit the base does not hold passes. Only main and master lowercase;
+        # origin/<branch> is read as written. Item 571.
+        self.assert_fixture_shape()
+        self.assertFalse(self.ancestor(self.P, "origin/Release"), "fixture: P is on origin/Release")
+        line = "The failure is pre-existing; it fails on origin/Release at %s." % self.P
+        self.assert_blocked(line, line)
+
+    def test_pe_green_mixed_case_origin_base_passes_a_commit_on_it(self):
+        # Catches: "on origin/Release at <sha>" is refused for a commit that base holds, newer than the merge base. This is
+        # the control for the case above: the case must keep its case, and a commit on the base still passes. Item 571.
+        self.assert_fixture_shape()
+        self.assertTrue(self.ancestor(self.X, "origin/Release"), "fixture: X is not on origin/Release")
+        self.assertEqual(tcj.git(self.repo, "merge-base", "HEAD", "origin/Release").stdout.strip(), self.B,
+                         "fixture: the merge base with origin/Release is not B")
+        self.assert_allowed("The failure is pre-existing; it fails on origin/Release at %s." % self.X)
 
 
 class PendingRefusalTests(unittest.TestCase):
