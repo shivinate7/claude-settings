@@ -401,6 +401,28 @@ add("scratchpad: no session id names no scratchpad", "deny", "shared-tree", cwd=
     command=VCS + " reset --hard HEAD")
 add("scratchpad: the same session id outside the scratchpad proves nothing", "deny",
     "shared-tree", cwd=SUBJDIRTY, session=FAKE_SESSION, command=VCS + " reset --hard HEAD")
+# THE SCRATCHPAD WITH THE TEMP FOLDER ELSEWHERE. A repo under this session's scratchpad is private by its
+# path, and that path is read against the temp folder the guard run names (TMPDIR). These cases name a temp
+# folder that holds no scratchpad, so only the path test can pass them. The clean repo is the empty subject,
+# and the real dirty checkout and another session's repo must still refuse.
+if os.path.realpath(PRIVREPO).startswith(os.path.realpath(SPLIT_TEMP) + os.sep):   # scope before subject
+    sys.exit("fixture setup failed: SPLIT_TEMP holds PRIVREPO, so the temp-folder cases would prove nothing")
+TEMP_DIR = SPLIT_TEMP
+sh("scratchpad, temp elsewhere: a hard reset in this session's throwaway repo is allowed",
+   VCS + " reset --hard", "allow", cwd=PRIVREPO, session=FAKE_SESSION)
+sh("scratchpad, temp elsewhere: a merge reset in this session's throwaway repo is allowed",
+   VCS + " reset --merge", "allow", cwd=PRIVREPO, session=FAKE_SESSION)
+sh("scratchpad, temp elsewhere: a hard reset after a cd into this session's throwaway repo is allowed",
+   "cd %s && %s reset --hard" % (PRIVREPO, VCS), "allow", cwd=NOGIT, session=FAKE_SESSION)
+sh("scratchpad, temp elsewhere: a merge reset after a cd into this session's throwaway repo is allowed",
+   "cd %s && %s reset --merge" % (PRIVREPO, VCS), "allow", cwd=NOGIT, session=FAKE_SESSION)
+sh("scratchpad, temp elsewhere: a hard reset in a clean throwaway repo under its scratchpad is allowed",
+   VCS + " reset --hard", "allow", cwd=PRIVCLEAN, session=FAKE_SESSION)
+sh("scratchpad, temp elsewhere: a hard reset in a real dirty checkout is refused",
+   VCS + " reset --hard", "deny", "shared-tree", cwd=SUBJDIRTY, session=FAKE_SESSION)
+sh("scratchpad, temp elsewhere: another session's throwaway repo is refused",
+   VCS + " reset --hard", "deny", "shared-tree", cwd=PRIVREPO, session=OTHER_SESSION)
+TEMP_DIR = None
 # AN UNREADABLE SUBJECT IS ALLOWED, and logged under its own rule (checked in
 # subject_unread_log_case). The cwd is the REAL dirty repository, so the only difference from the
 # deny case above is that the git on PATH gives no answer.

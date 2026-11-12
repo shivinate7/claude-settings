@@ -382,6 +382,100 @@ spo_register("scratchpad-owner: overwrite 6 a top-level call overwrites agent A'
 spo_register("scratchpad-owner: overwrite 7 agent B's append to agent A's file: refused", ovw_case_7)
 
 
+# Rule scratchpad-owner, the finished form. A file whose writer has FINISHED is no work in progress, so
+# another agent may write over it and lose nothing. An agent has finished when the guard receives its
+# SubagentStop, the harness's end-of-agent event. A running writer's file still refuses, and so does a file
+# whose writer is not the agent that finished.
+SPO_THIRD = "spo-third-03"   # a third agent of the session; it finishes in the control case
+
+
+def spo_stop(fx, agent):
+    """Agent `agent` has ended: its SubagentStop, as the harness sends it for this session. A stop judges
+    no tool call, so its decision is allow when nothing else in the folder is wrong."""
+    return _decide_full("", fx["work"], agent_id=agent, session=fx["sid"], temp=fx["tmp"], event="SubagentStop")
+
+
+def spo_finish(fx, name, agent):
+    """Setup: `agent` finishes. A stop the guard does not allow is a problem, since the case needs it."""
+    got, reason = spo_stop(fx, agent)
+    if got != "allow":
+        return ["%s: setup, agent %s's SubagentStop is %s, want allow (%s)" % (name, agent, got, reason[:100])]
+    return []
+
+
+def fin_case_1():
+    """Agent A writes msg.txt with Write and finishes; agent B, a read-only audit agent, writes msg.txt: allowed."""
+    fx = spo_fixture("f1")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "f1", msg)] + spo_wrote(fx, "f1", SPO_WRITER, msg, "from A\n")
+    problems += spo_finish(fx, "f1", SPO_WRITER)
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_allowed("f1", got, reason))
+    return spo_result(problems, "agent B's Write over the file of finished agent A is allowed")
+
+
+def fin_case_2():
+    """Agent A writes msg.txt with Write and finishes; agent B redirects echo over it: allowed."""
+    fx = spo_fixture("f2")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "f2", msg)] + spo_wrote(fx, "f2", SPO_WRITER, msg, "from A\n")
+    problems += spo_finish(fx, "f2", SPO_WRITER)
+    got, reason = spo_run(fx, SPO_OTHER, "echo x > %s" % msg)
+    problems.append(spo_allowed("f2", got, reason))
+    return spo_result(problems, "agent B's shell redirect over the file of finished agent A is allowed")
+
+
+def fin_case_3():
+    """Full size: agent A writes forty scripts with Write and finishes; agent B writes over the oldest: allowed.
+    The finished state must hold for the early files as well as the late ones."""
+    fx = spo_fixture("f3")
+    problems = []
+    for index in range(40):
+        path = os.path.join(fx["scratch"], "part%02d.py" % index)
+        problems += spo_wrote(fx, "f3", SPO_WRITER, path, PY_TEXT)
+        if problems:
+            break
+    oldest = os.path.join(fx["scratch"], "part00.py")
+    problems.append(spo_scope(fx, "f3", oldest))
+    problems += spo_finish(fx, "f3", SPO_WRITER)
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=oldest, content=SPO_OVERWRITE_TEXT)
+    problems.append(spo_allowed("f3", got, reason))
+    return spo_result(problems, "agent B's Write over the oldest of forty files of finished agent A is allowed")
+
+
+def fin_running_case():
+    """Agent A writes msg.txt and is still running; agent B writes over it: refused."""
+    fx = spo_fixture("f4")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "f4", msg)] + spo_wrote(fx, "f4", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_refused("f4", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's Write over the file of running agent A is refused")
+
+
+def fin_other_case():
+    """Agent A writes msg.txt and stays running; agent C finishes, which frees no file of A's: agent B's Write over it is refused."""
+    fx = spo_fixture("f5")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "f5", msg)] + spo_wrote(fx, "f5", SPO_WRITER, msg, "from A\n")
+    problems += spo_finish(fx, "f5", SPO_THIRD)
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_refused("f5", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's Write over running agent A's file is refused after agent C finishes")
+
+
+spo_register("scratchpad-owner: finish 1 agent B's Write over the file of agent A, which finished: allowed",
+             fin_case_1)
+spo_register("scratchpad-owner: finish 2 agent B's shell redirect over the file of agent A, which finished: allowed",
+             fin_case_2)
+spo_register("scratchpad-owner: finish 3 agent B's Write over the oldest of forty files of agent A, which finished: "
+             "allowed", fin_case_3)
+spo_register("scratchpad-owner: finish 4 agent B's Write over the file of agent A, which is still running: refused",
+             fin_running_case)
+spo_register("scratchpad-owner: finish 5 agent B's Write over agent A's file, while agent C finished and A did not: "
+             "refused", fin_other_case)
+
+
 # Rule scratchpad-owner, more cases. Each case's label says refused, allowed or passes,
 # and each control beside it stays green: the writer runs the same call, so a red case names this rule's gap.
 
