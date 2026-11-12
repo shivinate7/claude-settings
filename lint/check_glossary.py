@@ -111,14 +111,20 @@ def read(rel):
         return None
 
 
+BINARY_MAGIC = (b"%PDF-", b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"PK\x03\x04", b"\x1f\x8b")
+
+
 def binary(rel):
-    """True when the file's first bytes hold a NUL and no UTF-16 byte-order mark: an image or bytecode, not text
-    in another encoding. UTF-16 text holds NULs too, so its mark tells it apart."""
+    """True when the file is an image, archive, PDF or bytecode, not text: its first bytes hold a NUL and no UTF-16
+    byte-order mark (UTF-16 text holds NULs too, so its mark tells it apart), or they start with a known binary
+    magic (BINARY_MAGIC), because a PDF header can run 8 KB with no NUL."""
     try:
         with open(os.path.join(ROOT, *rel.split("/")), "rb") as f:
             head = f.read(8192)
     except OSError:
         return False
+    if head.startswith(BINARY_MAGIC):
+        return True
     return b"\0" in head and not head.startswith((b"\xff\xfe", b"\xfe\xff"))
 
 

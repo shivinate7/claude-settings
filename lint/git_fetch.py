@@ -1,4 +1,4 @@
-"""The one home of a `git fetch` that deepens or completes a clone: bin/ci-job and actions/code-check call it.
+"""The one home of a `git fetch` that deepens or completes a clone: bin/ci-job, actions/code-check and lint/stale_cites.py call it.
 Standard library only. It starts one git process per call and writes nothing but what git itself fetches."""
 import os
 import subprocess
@@ -15,7 +15,8 @@ def is_shallow(top):
 
 def fetch(top, refs=(), unshallow=False, timeout=None):
     """One `git fetch [--unshallow] <remote> [refs...]` in top. The remote is origin, else the first remote.
-    Returns (ok, message): message is "" when ok, else git's last stderr line, or why no fetch ran."""
+    Returns (ok, message): message is "" when ok, else the first stderr line that starts `fatal:` or `error:`, else
+    the whole short stderr, or why no fetch ran."""
     remotes = (_nowindow.run(["git", "remote"], cwd=top, capture_output=True, text=True).stdout or "").split()
     if not remotes:
         return False, "no remote to fetch from"
@@ -27,4 +28,15 @@ def fetch(top, refs=(), unshallow=False, timeout=None):
         return False, "%s: %s" % (type(exc).__name__, exc)
     if done.returncode == 0:
         return True, ""
-    return False, (done.stderr.strip().splitlines() or ["exit %d, no message" % done.returncode])[-1]
+    return False, failure_message(done.stderr, done.returncode)
+
+
+def failure_message(stderr, returncode):
+    """The line that says why git failed: git's last line is often a hint ("and the repository exists.")."""
+    lines = [line.strip() for line in stderr.strip().splitlines() if line.strip()]
+    if not lines:
+        return "exit %d, no message" % returncode
+    for line in lines:
+        if line.startswith(("fatal:", "error:")):
+            return line
+    return " ".join(lines)

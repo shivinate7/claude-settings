@@ -10,10 +10,10 @@ Homes with this shape:
 
 - `lint/check_record_slugs.py`, `lint/check_silent_undo.py`, `lint/check_ruling_kind.py`.
 - `lint/check_glossary.py`, `lint/check_artifact_cites.py` (an absent records folder is zero records, which is an answer), `lint/ste_lint.py` (an unparseable config).
-- `lint/stale_cites.py`, for a file it cannot read.
+- `lint/stale_cites.py`, for a file it cannot read and a base it cannot fetch.
 - `actions/code-check/code_check.py` and `actions/ci-alarm` (`alarm.sh`, `dropped.sh`, `issue.sh`).
 
-Item 276 a (owner, 2026-11-06 12:39 CST) ends the shallow-base exit 0 of `stale-cites-at-merge`, a lane's call of 2026-11-01. Lane ste-lint-run-exit-codes builds the fix in a follow-up PR that merges after #2262. In it, the ste-lint action fetches the base's history first. The check is red in CI only when that fetch fails. Until that PR lands, `lint/stale_cites.py` still exits 0 on a base that a shallow clone lacks.
+Item 276 a (owner, 2026-11-06 12:39 CST) ended the shallow-base exit 0 of `stale-cites-at-merge`, a lane's call of 2026-11-01. `lint/stale_cites.py` now carries the rule itself. With env `CI` set, an unreadable base is fetched through `lint/git_fetch.py` and read once more. The check is red only when that fetch fails or no merge base exists. Its UNKNOWN line names the cause and the base's sha. With `CI` unset it exits 0 (coordinator pick, 2026-11-12 07:31 CST: this record wins over the exit 0 in `stale-cites-at-merge`). The ste-lint action needs no fetch step of its own.
 
 Stricter, red locally too: `lint/check_comment_narration.py` (exit 2), `hooks/mutate_guard.py --known-defects`, and the other lints, which exit 1 or 2 on a failed read. `ci-scope.sh` fails safe by running the harness. `actions/stamp` keys on `GITHUB_ACTIONS`, not `CI`.
 

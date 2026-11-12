@@ -18,14 +18,14 @@ Owner, 2026-11-01 16:30 CST, in chat to triage: "make it a standing thing that s
 - A path matches only at a path boundary. `mods/session-board/hooks/lib.mjs` does not match `hooks/lib.mjs`.
 - Left out: `docs/records.md` (generated at merge), each file `.ste-lint-exclude` names, and a line marked `<!-- ste-disable-line STALE001 -->` `STALE002` or `STALE008`. A record that names a removed file on purpose takes the mark.
 - Each Markdown file is read as committed at head, never from the working tree, through the same `git cat-file --batch` process. A byte that is not UTF-8 reads as a replacement character and the file is still checked.
-- A base that does not resolve (a shallow clone with no history: the head resolves, the history does not) is unknown, not a finding. The check prints `stale-cites: unknown, ...`, names fetch-depth 0, and exits 0, so a repo that pins the action and checks out shallow is not red at its pin move (owner-lane call, 2026-11-01).
+- A base that does not resolve (a shallow clone with no history: the head resolves, the history does not) is unknown, not a finding. With env `CI` unset the check prints `stale-cites: unknown, ...`, names fetch-depth 0, and exits 0. With env `CI` set it first fetches the base through `lint/git_fetch.py` (it unshallows a shallow clone, then asks for the base's sha when that is still out) and reads once more. It is red only when the fetch fails or the base still shares no history with the head: it prints `stale-cites: UNKNOWN`, naming the cause and the base's sha, and exits 1 (owner item 276 a, 2026-11-06 12:39 CST; decision `ci-unknown-is-red`; coordinator pick, 2026-11-12 07:31 CST: that rule wins over the exit 0 of the owner-lane call of 2026-11-01). A repo that pins the action and checks out shallow is fetched, not red, unless its origin cannot be reached.
 - A read that cannot run is unknown, never clear (rule `verification-report-unknown-reads`). The check prints `stale-cites: UNKNOWN, <the read>` and exits 2 in five cases:
   1. A head that does not resolve. Its `merge-base` or diff fails while the head is absent.
   2. A base that does not resolve in a full clone. Here `merge-base`, or the diff of a two-dot range, fails. The head resolves, the base does not, the clone is not shallow, and the base is not the first parent of a root commit. A `rev-list` of the head, or a `rev-parse` of the base's stem, that exits non-zero counts too.
   3. A diff that fails while the base resolves (an unreadable head blob).
   4. An unreadable `.ste-lint-exclude`. A dangling symlink and a file that is not UTF-8 are unreadable. A missing file means that there are no excludes. The check reads it before the report, so an add-only range fails too.
   5. A `--tree` line anchor whose cited tracked file has no blob.
-- The one carve-out is the shallow-base exit 0 in the base bullet above. It covers three cases:
+- The exit 0 for a gap in the history holds with env `CI` unset only. It covers three cases, and each is red under `CI` after the fetch fails or finds no base:
   - A shallow clone.
   - A base that resolves but shares no history with the head (`merge-base` only).
   - The first parent of a head that is a root commit (a first push to the default branch).
