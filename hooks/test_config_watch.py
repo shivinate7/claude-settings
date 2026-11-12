@@ -134,8 +134,9 @@ BOUNDARY_AT_DEADLINE_UNTIL = _fmt(REFERENCE_NOW)                           # ahe
 BOUNDARY_PAST_UNTIL = _fmt(REFERENCE_NOW - timedelta(seconds=1))           # ahead == -1s: revoked
 
 # Two deadlines the ask must show in US Central (rule style-time-central-24h): one in winter (CST),
-# one in summer (CDT). The expected text is read from the one Central helper, never typed by hand,
-# so a builder that echoes the UTC reading, or hard-codes CST, reads as wrong.
+# one in summer (CDT). The ask shows the date, the 24-hour time and the zone, so the expected text is
+# read from the one Central helper, `central_full`, never typed by hand: a builder that echoes the UTC
+# reading, hard-codes CST, or drops the date reads as wrong.
 WINTER_UNTIL = "2099-01-15T03:30:00Z"
 SUMMER_UNTIL = "2099-07-15T03:30:00Z"
 
@@ -144,9 +145,9 @@ def _utc(text):
     return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
-WINTER_WANT = local_time.central_hhmm(_utc(WINTER_UNTIL))  # 21:30 CST, on the 14th
-SUMMER_WANT = local_time.central_hhmm(_utc(SUMMER_UNTIL))  # 22:30 CDT, on the 14th
-FAR_30H_WANT = local_time.central_hhmm(_utc(FAR_30H_UNTIL))  # the end 30 hours ahead, as the ask names it
+WINTER_WANT = local_time.central_full(_utc(WINTER_UNTIL))  # 2099-01-14 21:30 CST
+SUMMER_WANT = local_time.central_full(_utc(SUMMER_UNTIL))  # 2099-07-14 22:30 CDT
+FAR_30H_WANT = local_time.central_full(_utc(FAR_30H_UNTIL))  # the end 30 hours ahead, as the ask names it
 
 
 def cap_json(model=None, force=None, until=None, extra=None):
@@ -614,8 +615,8 @@ def extended_deadline_edit(project):
 # --------------------------------------------------------------------------- the deadline ask
 #
 # A write that sets or changes the cap-lift deadline joins the agent-model-cap ask that a model
-# raise already gets, and the ask shows the end in US Central: 24-hour clock with the zone (rule
-# style-time-central-24h). The guard judges each write before it lands, so each case asks it first.
+# raise already gets, and the ask shows the end in US Central: its date, a 24-hour clock and the zone
+# (rule style-time-central-24h). The guard judges each write before it lands, so each case asks it first.
 
 def deadline_edit(project, before, after):
     """Put an approved lift in place, then ask the guard about an Edit that changes only its end."""
@@ -705,7 +706,7 @@ def expect_ask(entry, result):
             return (False, "the model raise ask no longer names opus: %r" % reason[:80])
         return (True, "the model raise still asks under agent-model-cap, and names opus")
     if entry["want"] not in reason:
-        return (False, "the ask does not show the end as %r in Central with its zone" % entry["want"])
+        return (False, "the ask does not show the end as %r in Central, with its date and zone" % entry["want"])
     return (True, "asked under agent-model-cap, and shows the end as %r" % entry["want"])
 
 
@@ -756,8 +757,8 @@ def expectation(entry, result):
             if not reason.startswith("agent-model-cap:"):
                 return (False, "asked, but not under agent-model-cap: %r" % reason[:80])
             if entry["want"] not in reason:
-                return (False, "the ask does not show the 30-hour end as %r in Central with its "
-                        "zone" % entry["want"])
+                return (False, "the ask does not show the 30-hour end as %r in Central, with its "
+                        "date and zone" % entry["want"])
             if not lifted:
                 return (False, "reverted a current deadline 30 hours ahead after the Edit")
             if message:
