@@ -14,8 +14,11 @@ diff touches hooks/mutate_*.py (a .mjs counts). Each case is one lane lint: the 
 command runs, and timed_lint fakes the wall clock, so no case waits on real minutes. Cost per lint: one stub ci-job start, one head worktree,
 and one mutate stub start where the step runs (the untouched controls start none). The lint_with_report cases and the tally form run_mutants
 prints cost the same per lint. The wrong-cause loop runs six lints. A stub exits 0, or 1 where a case says so: a table is judged by its counts
-at any exit code, and a tally at exit 1 fails. Measured: the 28 mutation cases (33 lint runs) took 9.2 s in one run, about 0.3 s a lint;
-the whole suite took 20.7 s in one run (noisy).
+at any exit code, and a tally at exit 1 fails. Measured: the 30 mutation cases took 16.1 s in one run, with the module's import; their lint-run
+count is unmeasured since the batch-head cases were added.
+BatchHeadMutation (class BatchHeadMutation) lints a batch head, `--batch-build NAME --ready`, and the same head by hand-off, `--lane-lint <sha>`,
+on one touched lane. Cost per case: one run (the batch build or the hand-off lint), one ci-job stub start, and one mutate stub start where the
+run starts (the batch head's lint starts none). Measured: its 4 cases took 3.8 s in one run.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -385,6 +388,26 @@ class LaneFixture(CiJobStub, tm.CloudSession):
         self.assertFalse(tm.tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
         self.assertEqual(self.worktrees(), 1)
         return rc, text
+
+    def push_lane(self, files, from_main=False):
+        """The lane's push: one commit of `files` (path -> text) on feat, pushed from the second clone. The commit sits on origin/feat, or on
+        origin/main when `from_main`, so the lane's diff holds only `files`. -> the pushed head."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main" if from_main else "origin/feat")
+        for rel, text in files.items():
+            tm.put(os.path.join(o, rel), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "lane: " + ", ".join(sorted(files)))
+        tm.sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def mutation_test_calls(self):
+        """The mutate stubs' starts, oldest first: empty when none ran."""
+        if not os.path.exists(self.mutate_log):
+            return []
+        with open(self.mutate_log, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
 
     def push_release_branch(self):
         sh = tm.sh
@@ -979,19 +1002,6 @@ class LaneLint(LaneFixture):
 
     # Mutation test cases: the mutate step after the lint. A case's lane commits its own stub as the head's mutate script; timed_lint fakes the clock.
 
-    def push_lane(self, files, from_main=False):
-        """The lane's push: one commit of `files` (path -> text) on feat, pushed from the second clone. The commit sits on origin/feat, or on
-        origin/main when `from_main`, so the lane's diff holds only `files`. -> the pushed head."""
-        o = self.other
-        tm.sh(o, "git", "fetch", "-q", "origin")
-        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main" if from_main else "origin/feat")
-        for rel, text in files.items():
-            tm.put(os.path.join(o, rel), text)
-        tm.sh(o, "git", "add", "-A")
-        tm.sh(o, "git", "commit", "-q", "-m", "lane: " + ", ".join(sorted(files)))
-        tm.sh(o, "git", "push", "-q", "-f", "origin", "feat")
-        return tm.sh(o, "git", "rev-parse", "HEAD")
-
     def push_main(self, files):
         """One commit of `files` on main, pushed from the second clone: the base the lane is linted against."""
         o = self.other
@@ -1045,13 +1055,6 @@ class LaneLint(LaneFixture):
         with unittest.mock.patch.object(merge, "sh", sh_timed), unittest.mock.patch("time.time", clock.now), \
                 unittest.mock.patch("time.monotonic", clock.now), unittest.mock.patch("time.perf_counter", clock.now):
             return self.run_lane(*argv)
-
-    def mutation_test_calls(self):
-        """The mutate stubs' starts, oldest first: empty when none ran."""
-        if not os.path.exists(self.mutate_log):
-            return []
-        with open(self.mutate_log, encoding="utf-8") as f:
-            return [json.loads(line) for line in f if line.strip()]
 
     def assert_one_mutation_test_run(self, head):
         """The mutate command ran once, in a detached tree at `head`, and both trees are gone afterwards."""
@@ -1250,6 +1253,16 @@ class LaneLint(LaneFixture):
         self.assertEqual(counts_missing(text, {"survived": 1}), None, "the FAIL output does not name survived 1: " + text)
         self.assert_one_mutation_test_run(head)
 
+
+    def test_mutation_test_lint_unknown_ok_lifts_the_unknown_and_a_clean_mutation_run_still_starts(self):  # the control: the lift is unchanged at a hand-off
+        body, script = real_mutate_job()
+        self.use_ci_job(UNKNOWN, 2)  # liftable: --lint-unknown-ok lifts it, and the clean mutation test run still starts
+        head = self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+        rc, text = self.timed_lint(437, "--lane-lint", "7", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assertEqual(rc, 0, "--lint-unknown-ok did not lift a liftable unknown beside a clean mutation test run: " + text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for a lint that reads unknown: " + text)
+        self.assertIn("shellcheck is not on this box", text, "--lint-unknown-ok did not print its reason: " + text)
+        self.assert_one_mutation_test_run(head)
 
     def test_mutation_test_lint_unknown_ok_does_not_lift_a_red_mutation_run(self):  # the mutation FAIL stops before the unknown lift
         body, script = real_mutate_job()
@@ -2414,6 +2427,104 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         notes = [line for line in out.splitlines() if "declares no ready checks" in line.lower()]
         self.assertEqual(len(notes), 1, out)
         self.assertEqual(rc, 0, out)
+
+
+MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # the batch head's lint prints this where the run would start, verbatim
+
+
+class BatchHeadMutation(LaneFixture):
+    """The batch head's lint against the hand-off lint of one touched diff. `merge --lane-lint` on a head starts the mutation test run. The batch
+    head (`--batch-build NAME --ready`) lints the same lane files and starts none: the lane's hand-off lint already ran it, and the batch head says
+    so (MUTATE_SKIPPED). The caller decides, not the diff: the control case lints the same head by hand-off and sees the run start. Each batch-head
+    case's scope comes first: the batch head's lint ran once, at the batch head, and the batch's diff holds what the case claims."""
+
+    def touched_lane(self):
+        """Lane PR 7's one commit touches a mutation test file: it adds the mutate script and the workflow of the real job. -> the lane's head."""
+        body, script = real_mutate_job()
+        return self.push_lane({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
+
+    def batch_of(self, name, head):
+        """origin's batch-NAME merges lane PR 7's `head` no-ff onto origin/main, with one frozen block for it, as a draft pull request. -> its number."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "batch-" + name, "origin/main")
+        tm.sh(o, "git", "merge", "-q", "--no-ff", "-m", "merge lane 7", head)
+        tm.sh(o, "git", "push", "-q", "origin", "batch-" + name)
+        return self.host.create_pr("batch-" + name, "main", "Batch " + name, tm.freeze_body(tm.freeze_inner(name, [(7, head)])), draft=True)
+
+    def fresh_run(self):
+        """Clear the stubs' logs, and fetch origin, so the sha the batch pushed is in this clone."""
+        for path in (self.log, self.mutate_log):
+            if os.path.exists(path):
+                os.remove(path)
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+
+    def diff_files(self, batch_head):
+        """The files the batch head changes against origin/main."""
+        return tm.sh(self.co, "git", "diff", "--name-only", "origin/main", batch_head).splitlines()
+
+    def assert_lint_ran_at(self, batch_head, text):
+        """The scope of a batch-head case: the lint ran once, in a tree at the batch head."""
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the batch head's lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0]["head"], batch_head, "the batch head's lint ran on a tree other than the batch head: " + text)
+
+    def test_the_batch_heads_lint_of_a_touched_diff_starts_no_mutation_run_and_says_it_was_skipped(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.touched_lane()
+        pr = self.batch_of("nightly", head)
+        batch_head = self.head("batch-nightly")
+        self.fresh_run()
+        self.assertTrue(any(f.startswith("hooks/mutate_") for f in self.diff_files(batch_head)), "precondition: the batch's diff holds no mutation test file")
+        rc, text = self.run_lane("--batch-build", "nightly", "--ready")
+        self.assert_lint_ran_at(batch_head, text)
+        self.assertEqual(self.mutation_test_calls(), [], "the batch head's lint started the mutation test run that the hand-off lint of the same lane already ran: " + text)
+        self.assertIn(MUTATE_SKIPPED, text, "the batch head's lint does not say the mutation test run was skipped there, and why: " + text)
+        self.assertEqual(self.host.readies, [pr], "--ready did not mark the batch PR ready once: " + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_hand_off_lint_of_the_same_touched_head_starts_the_mutation_test_run_once(self):  # the control: the caller decides, and a hand-off keeps the run
+        self.use_ci_job(PASSING, 0)
+        head = self.touched_lane()
+        self.batch_of("nightly", head)
+        batch_head = self.head("batch-nightly")
+        self.fresh_run()
+        self.assertTrue(any(f.startswith("hooks/mutate_") for f in self.diff_files(batch_head)), "precondition: the batch's diff holds no mutation test file")
+        rc, text = self.run_lane("--lane-lint", batch_head)
+        self.assertEqual(len(self.lint_calls()), 1, "the hand-off lint of the batch head ran its lint %d times, want once: %s" % (len(self.lint_calls()), text))
+        calls = self.mutation_test_calls()
+        self.assertEqual(len(calls), 1, "the hand-off lint of a touched head started the mutation test run %d times, want once: %s" % (len(calls), text))
+        self.assertEqual(calls[0]["head"], batch_head, "the mutation test run ran on a head other than the one linted: " + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_batch_heads_lint_of_an_untouched_batch_starts_no_mutation_run(self):  # the control: an untouched batch behaves as before
+        self.use_ci_job(PASSING, 0)
+        head = self.push_lane({"lanes/7.txt": "lane 7\n"}, from_main=True)
+        pr = self.batch_of("nightly", head)
+        batch_head = self.head("batch-nightly")
+        self.fresh_run()
+        self.assertFalse(any(f.startswith("hooks/mutate_") for f in self.diff_files(batch_head)), "precondition: the batch's diff holds a mutation test file")
+        rc, text = self.run_lane("--batch-build", "nightly", "--ready")
+        self.assert_lint_ran_at(batch_head, text)
+        self.assertEqual(self.mutation_test_calls(), [], "the untouched batch head's lint started a mutation test run: " + text)
+        self.assertEqual(self.host.readies, [pr], "--ready did not mark the untouched batch PR ready once: " + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_batch_heads_unknown_lint_lifted_by_lint_unknown_ok_still_starts_no_mutation_run(self):
+        self.use_ci_job(UNKNOWN, 2)  # liftable: --lint-unknown-ok lifts it, here as at a hand-off, and the lift is all that changes
+        head = self.touched_lane()
+        pr = self.batch_of("nightly", head)
+        batch_head = self.head("batch-nightly")
+        self.fresh_run()
+        self.assertTrue(any(f.startswith("hooks/mutate_") for f in self.diff_files(batch_head)), "precondition: the batch's diff holds no mutation test file")
+        rc, text = self.run_lane("--batch-build", "nightly", "--ready", "--lint-unknown-ok", "shellcheck is not on this box")
+        self.assert_lint_ran_at(batch_head, text)
+        self.assertEqual(self.mutation_test_calls(), [], "the batch head's lint with --lint-unknown-ok started the mutation test run: " + text)
+        self.assertIn("shellcheck is not on this box", text, "--lint-unknown-ok did not print its reason at the batch head: " + text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for a batch head that reads unknown: " + text)
+        self.assertIn(MUTATE_SKIPPED, text, "the batch head's lint does not say the mutation test run was skipped there, and why: " + text)
+        self.assertEqual(self.host.readies, [pr], "--ready with --lint-unknown-ok did not mark the batch PR ready once: " + text)
+        self.assertEqual(rc, 0, text)
 
 
 class RunFolderSweep(unittest.TestCase):
