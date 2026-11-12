@@ -5569,7 +5569,7 @@ class AgentEndProcessMarkerTests(_AgentEndFixture):
         control = self.control_tree("orphctl")
         tree = self.agent_tree(self.AGENT)
         self.write_stop_row(self.AGENT, tree)
-        self.age_subagent_transcript(self.AGENT, 31)
+        self.age_agent_transcript(self.AGENT, 31)
         pidfile = os.path.join(self.root, "marked-orphan.pid")
         sponsor_code = ("import subprocess, sys\n"
                         "child = subprocess.Popen(['env', 'CLAUDE_AGENT_ID=' + sys.argv[3], 'sleep', '120'],"
