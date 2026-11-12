@@ -2082,7 +2082,8 @@ class All(Base):
     def docs(self):
         """What each artifact's fetch holds. The queue lists items only, so its answers are fetched but never exported."""
         return {self.WAIT: dict(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
-                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META}),
+                                groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META},
+                                receipts={"r1": {"id": "r1", "read": "2026-10-02T10:00:00Z"}}),
                 self.QUEUE: dict(items={"q1": item(2)}, answers={"qa1": {"item": "q1", "pick": "b"}})}
 
     def fetched_all(self, docs, pages=None, files=None):
@@ -2136,7 +2137,7 @@ class All(Base):
         root, fetched, worktree = self.repo(), self.fetched_all(self.docs()), self.out("worktree")
         first = self.run_all(root, fetched, worktree)
         self.assertEqual(first.returncode, 0, shown(first))
-        self.assertVerdictOf(first, self.WAIT, r"changed\s+5\b")  # five docs, one per collection
+        self.assertVerdictOf(first, self.WAIT, r"changed\s+6\b")  # six docs, one per collection
         self.assertVerdictOf(first, self.QUEUE, r"changed\s+1\b")  # one item; the answers are not exported
         second = self.run_all(root, fetched, worktree)
         self.assertEqual(second.returncode, 0, shown(second))
