@@ -468,6 +468,37 @@ sh("frozen form: control, sed --expression= reading a rm line of the frozen sett
    "sed --expression='/rm x/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
 sh("frozen form: control, sed -e with a plain s script reading the frozen settings is allowed",
    "sed -e 's|a|b|' x " + CFG_SETTINGS, "allow", cwd=NOGIT)
+# THE IN-PLACE FLAG GLUED INTO A SHORT-OPTION GROUP, OR GIVEN A SUFFIX. In GNU sed `i` ends a group and takes the rest
+# of its word as the backup suffix, so `-ri`, `-Ei` and `-ni` set the flag, and `-ibak` and `-ie` set it with a suffix.
+# The long forms `--in-place` and `--in-place=SUFFIX` set it too. Each one rewrites the frozen file in place, so each denies.
+sh("frozen form: sed -ri, the in-place flag ending a group after r, onto the frozen settings is refused",
+   "sed -ri 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -Ei, the in-place flag ending a group after E, onto the frozen settings is refused",
+   "sed -Ei 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ni, the in-place flag ending a group after n, onto the frozen settings is refused",
+   "sed -ni 's/a/b/p' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ibak, the in-place flag with the suffix bak, onto the frozen settings is refused",
+   "sed -ibak '/rm/d' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ie, the in-place flag with the suffix e, onto the frozen settings is refused",
+   "sed -ie 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed --in-place onto the frozen settings is refused",
+   "sed --in-place 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed --in-place=.bak onto the frozen settings is refused",
+   "sed --in-place=.bak 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# A dotted suffix already denies. This pins it beside the glued forms, so a change to the in-place reading keeps it.
+sh("frozen form: sed -i.bak, the in-place flag with the suffix .bak, onto the frozen settings is refused",
+   "sed -i.bak 's/a/b/' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# SEVERAL -e SCRIPTS IN ONE SED CALL. Each `--expression` word is a script of its own, and a later one whose e flag runs
+# rm of the frozen file writes it. In `-ie` the i ends the group, so the e is the backup suffix and the -e word is the script.
+sh("frozen form: two --expression words, the second an s script whose e flag runs rm of the frozen settings, is refused",
+   "sed -n --expression p --expression 's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ie with a separate -e script whose e flag runs rm of the frozen settings is refused",
+   "sed -ie -e 's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+# Controls: a plain s script that only reads the frozen settings, with the path after it, stays allowed.
+sh("frozen form: control, sed -n with a plain s script reading the frozen settings is allowed",
+   "sed -n 's/a/b/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen form: control, sed -e with a plain s script, the frozen settings after it, is allowed",
+   "sed -e 's/a/b/' " + CFG_SETTINGS, "allow", cwd=NOGIT)
 # Controls: a comma or a bang delimiter already refuses the glued path, and must keep refusing it.
 sh("frozen form: control, sed s with a comma that runs rm of a frozen hook is refused",
    "sed 's,a,rm " + CFG_HOOK + ",e' x", "deny", "frozen-path", cwd=NOGIT)
