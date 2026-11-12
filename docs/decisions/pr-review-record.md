@@ -78,9 +78,9 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 
 ## Lane picks
 
-The coordinator answered both at 23:14. Process-only.
+The coordinator answered both at 23:14. Q2 is process-only. Q1 is superseded (see Q1).
 
-- Q1. Should preview or confirm refuse a PR with no valid record? Pick a: no refusal now. Ruling 113 a names discovery only (rule `outcomes-grant-covers-named-act`). Not taken: confirm refuses an integration PR when a lane tip has no done record. Also not taken: preview prints a review line only.
+- Q1. Should preview or confirm refuse a PR with no valid record? Owner's waiting-page item 382 a, 2026-11-07 21:26 CST, supersedes pick a (no refusal now): `merge --confirm` refuses a lane tip whose `review_state` is not `done` for its exact head. Built by PR #1871 (lane merge-unreviewed-head), in build. Ruling 113 a names discovery only (rule `outcomes-grant-covers-named-act`). Not taken: preview prints a review line only.
 - Q2. Which wins when a decision record and rule `roles-review-cap-three` disagree? Pick a: the rule outranks a decision record. Round 3 counts as done, whatever its verdict. Not taken: a final PASS is always needed. Record `standing-merge-grant` says so now.
 
 Kind: process
