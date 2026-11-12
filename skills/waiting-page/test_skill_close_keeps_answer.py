@@ -13,6 +13,11 @@ Reads prose only and runs none of the skill's code. Each case pins one claim:
   6. A sentence says a delete of the answer comes only from a reword or an overturn, and names no reopen.
   7. The lane reopen (reopen with lane and lastAnswer) says the answer is kept.
   8. The turn-start read says the owning session skips a kept answer on a closed item and does not route it again.
+  9. The helper flags "Never close an item without deleting answers/<id>." (a mutant that a negation word let pass).
+ 10. The helper flags "Do not forget to delete answers/<id>." (a mutant).
+ 11. The helper flags "Never skip deleting answers/<id>." (a mutant).
+ 12. The turn-start skip names the exception for an overturn of an arbiter ruling.
+ 13. No sentence says step 2 skips its delete: a step that skips a delete is named by its own number, not step 2.
 
 The park branch closes an item and deletes its answer. The rule that a close keeps its answer does not name park, so park
 sentences (the ones with the word park) are left out of case 3. Whether park keeps its answer is the owner's call.
@@ -21,6 +26,9 @@ A delete counts when the clause it sits in, from the last `;` or `:` before it t
 (answers/<id>, the answer, the answers), or when a delete's object is `it` or `them`. A drop, remove or discard counts only
 when the clause names the answer. A close and a delete of the answer in one sentence are flagged, so a sentence that closes
 an item and deletes an answer must say each in its own sentence.
+
+A negation does not undo a delete. Only a sentence whose wording is one of APPROVED_NEGATED, word for word, is no delete;
+"never", "not", "do not", "without" and "skip" in any other sentence leave the delete an instruction.
 
 Ruling: triage, 15:01 CST Nov 12 (pick a: page_grant rule 4 stays, lane checks run before close, park unchanged, kept-answer
 line stays without delete remedy), recorded at roadmap commit 23559d419.
@@ -57,10 +65,18 @@ TURN = re.compile(r"\bturn\b", re.I)
 CLOSED = re.compile(r"\bclos\w*", re.I)
 SKIP = re.compile(r"\bskip\w*|\bignor\w*", re.I)
 ROUTE_AGAIN = re.compile(r"\bre-?rout\w*|\broutes? (?:it|them)\b", re.I)  # "re-route", "route it", "routes them"; not the heading
-# A negation that governs the delete: "never delete", "does not delete", "skip their delete", "cannot ... delete".
-NOT_BEFORE = re.compile(r"\b(?:not|never|no|cannot|skips?|without)\s+(?:\S+\s+){0,2}$|n't\s+(?:\S+\s+){0,2}$", re.I)
-# A prohibition after the verb: "a close that drops answers/<id> is wrong" forbids the drop, so it is no instruction.
-FORBIDDEN_AFTER = re.compile(r"\b(?:is|are) (?:wrong|a mistake|not allowed)\b", re.I)
+ARBITER = re.compile(r"\barbiter\w*", re.I)
+SKIP_CLAIM = re.compile(r"\bskips?\b", re.I)  # "steps 2 to 4 skip their delete": a step that keeps the answer
+ROUTE_NAME = re.compile(r'"Route and close"')  # the heading's name, quoted in SKILL.md: its words name no close act
+# The negated wordings of a delete that SKILL.md says and this file accepts, word for word. A sentence is no delete only when it
+# is one of these. The two skip sentences are approved as negations; test 13 judges which steps they name.
+APPROVED_NEGATED = (
+    "A close never deletes it; only a reword (steps 3 and 4) or an overturn (step 5) does.",
+    "The `kept-answer:` line is the writer-path check: a close that drops `answers/<id>` is wrong.",
+    "While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`.",
+    "Nothing is written to `answers/`, so steps 2 to 4 of \"Route and close\" skip their delete.",
+    "Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it.",
+)
 
 
 def read(path):
@@ -106,9 +122,12 @@ def block_containing(text, phrase):
 
 
 def deletes_answer(sentence):
-    """True when a delete, drop, remove or discard in the sentence acts on the answer, and no negation governs it. The clause of
-    the verb runs from the last `;` or `:` before it to the next `;` or `:`, or to the end of the sentence. A clause that names
-    the answer counts. A delete whose clause says `it` or `them` counts too. A verb that a prohibition follows is no delete."""
+    """True when a delete, drop, remove or discard in the sentence acts on the answer. The clause of the verb runs from the last
+    `;` or `:` before it to the next `;` or `:`, or to the end of the sentence. A clause that names the answer counts. A delete
+    whose clause says `it` or `them` counts too. The one exception is a sentence that is word for word in APPROVED_NEGATED: no
+    other negation, prohibition or skip makes a delete into no delete."""
+    if " ".join(sentence.split()) in APPROVED_NEGATED:
+        return False
     for m in DELETE_VERB.finditer(sentence):
         before = sentence[:m.start()]
         start = max(before.rfind(";"), before.rfind(":")) + 1
@@ -116,8 +135,25 @@ def deletes_answer(sentence):
         end = min(ends) if ends else len(sentence)
         clause = sentence[start:end]
         is_delete = m.group(0).lower().startswith("delet")
-        names_answer = ANSWER_WORD.search(clause) or (is_delete and IT.search(clause))
-        if names_answer and not NOT_BEFORE.search(before[start:]) and not FORBIDDEN_AFTER.search(sentence[m.end():end]):
+        if ANSWER_WORD.search(clause) or (is_delete and IT.search(clause)):
+            return True
+    return False
+
+
+def close_act(sentence):
+    """True when the sentence names a close as an act. The heading's own name, "Route and close", is no act."""
+    return bool(CLOSE.search(ROUTE_NAME.sub("", sentence)))
+
+
+def skips_step_two(sentence):
+    """True when a `skip` that a delete follows has step 2 in its subject: the words from the last `,`, `;` or `:` before the skip.
+    "Steps 2 to 4 skip their delete" names step 2; "so only steps 3 and 4 skip their delete" does not."""
+    for m in SKIP_CLAIM.finditer(sentence):
+        if not DELETE_VERB.search(sentence[m.end():]):
+            continue
+        before = sentence[:m.start()]
+        start = max(before.rfind(","), before.rfind(";"), before.rfind(":")) + 1
+        if STEP_TWO.search(sentence[start:m.start()]):
             return True
     return False
 
@@ -145,7 +181,7 @@ class CloseKeepsAnswer(unittest.TestCase):
         self.assertTrue(self.close, "SKILL.md's Route and close has no step 2, so the close rule has no scope")
         bad = []
         for block in blocks(self.skill):
-            bad += [s for s in sentences(block) if not PARK.search(s) and deletes_answer(s) and (CLOSE.search(s) or STEP_TWO.search(s))]
+            bad += [s for s in sentences(block) if not PARK.search(s) and deletes_answer(s) and (close_act(s) or STEP_TWO.search(s))]
         detail = bad[0] if bad else ""
         self.assertFalse(bad, "%d sentence(s) say a close or step 2 deletes the answer; the first: %s" % (len(bad), detail))
 
@@ -186,6 +222,32 @@ class CloseKeepsAnswer(unittest.TestCase):
                  if TURN.search(s) and CLOSED.search(s) and SKIP.search(s) and ANSWER_WORD.search(s) and ROUTE_AGAIN.search(s)]
         self.assertTrue(skips, "the turn-start read does not say the owning session skips a kept answer on a closed item "
                                "and does not route it again")
+
+    def test_9_the_helper_flags_a_delete_under_never_close_without(self):
+        mutant = "Never close an item without deleting `answers/<id>`."
+        self.assertTrue(deletes_answer(mutant), "the helper reads a delete under a negation as no delete: " + mutant)
+
+    def test_10_the_helper_flags_a_delete_after_do_not_forget_to(self):
+        mutant = "Do not forget to delete `answers/<id>`."
+        self.assertTrue(deletes_answer(mutant), "the helper reads a delete under a negation as no delete: " + mutant)
+
+    def test_11_the_helper_flags_a_delete_after_never_skip(self):
+        mutant = "Never skip deleting `answers/<id>`."
+        self.assertTrue(deletes_answer(mutant), "the helper reads a delete under a negation as no delete: " + mutant)
+
+    def test_12_the_turn_start_skip_names_the_overturn_of_an_arbiter_ruling(self):
+        skips = [s for block in blocks(self.read) for s in sentences(block)
+                 if TURN.search(s) and CLOSED.search(s) and SKIP.search(s) and ANSWER_WORD.search(s) and ROUTE_AGAIN.search(s)]
+        self.assertTrue(skips, "scope: the turn-start read has no skip sentence, so the overturn exception has no scope")
+        exempt = [s for s in skips if OVERTURN.search(s) and ARBITER.search(s)]
+        self.assertTrue(exempt, "the turn-start skip has no exception for an overturn of an arbiter ruling: " + skips[0])
+
+    def test_13_no_sentence_says_step_2_skips_its_delete(self):
+        skips = [s for block in blocks(self.skill) for s in sentences(block) if SKIP_CLAIM.search(s) and DELETE_VERB.search(s)]
+        self.assertTrue(skips, "scope: no sentence says a step skips its delete, so the skip wording has no scope")
+        bad = [s for block in blocks(self.skill) for s in sentences(block) if skips_step_two(s)]
+        detail = bad[0] if bad else ""
+        self.assertFalse(bad, "%d sentence(s) say step 2 skips its delete; the first: %s" % (len(bad), detail))
 
 
 if __name__ == "__main__":
