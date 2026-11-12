@@ -750,6 +750,7 @@ GRANT_STALE = "# stale grants: the acts an old checkout held\n"
 GRANT_FRESH = "# fresh grants: the acts origin/main holds\n"
 GRANT_STALE_DOT = "# stale copy under .claude\n"
 GRANT_FRESH_DOT = "# fresh copy under .claude\n"
+GRANT_TRUNK = "# trunk grants: the acts origin/trunk holds\n"
 GRANT_WORD = re.compile(r"standing grant")
 GRANT_UNKNOWN = re.compile(r"^checkout .+: standing grant check unknown, neither origin/main nor origin/HEAD "
                            r"could be read$")
@@ -1328,6 +1329,58 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertEqual([line for line in lines if "did not run" in line], [],
                          "the refresh failed on a remote with no main, so it asked for main: %r" % lines)
         self.assert_one_differ_line(lines, "CLAUDE.md", "origin/master", fresh)
+
+    def remote_has_ref(self, name):
+        """True when origin, the bare repo the tests share, holds the ref `name`."""
+        answer = subprocess.run([VCS, "-C", self.origin_repo, "rev-parse", "-q", "--verify", name],
+                                capture_output=True, text=True, timeout=60)
+        return answer.returncode == 0
+
+    def test_a_remote_whose_main_was_deleted_refreshes_trunk_and_drops_the_stale_main(self):
+        # origin/HEAD names trunk, origin has no main, and this checkout still holds a stale origin/main.
+        stale = self.head_sha()
+        remote_tip = self.tip_with(GRANT_TRUNK, GRANT_FRESH_DOT)
+        vcs(self.primary, "push", "-q", "origin", "%s:refs/heads/trunk" % remote_tip)
+        vcs(self.primary, "update-ref", "refs/remotes/origin/trunk", stale)
+        vcs(self.primary, "update-ref", "refs/remotes/origin/main", self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
+        vcs(self.origin_repo, "symbolic-ref", "HEAD", "refs/heads/trunk")
+        vcs(self.origin_repo, "branch", "-q", "-D", "main")
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        self.assertFalse(self.remote_has_ref("refs/heads/main"), "scope: origin still has main")
+        self.assertEqual(self.resolve("origin/trunk"), stale, "scope: origin/trunk is not the stale tip")
+        self.assertNotEqual(self.resolve("origin/main"), self.resolve("origin/trunk"),
+                            "scope: origin/main is not a different stale tip")
+        lines = self.run_checked()
+        self.assertEqual([line for line in lines if "did not run" in line], [],
+                         "the refresh printed did-not-run although trunk can be fetched: %r" % lines)
+        self.assertEqual(self.resolve("origin/trunk"), remote_tip, "origin/trunk was not refreshed to the remote tip")
+        self.assertIsNone(self.resolve("origin/main"), "the stale origin/main survived the refresh")
+        # One grant line, for origin/trunk: a line that cites the stale origin/main would fail this too.
+        self.assert_one_differ_line(lines, "CLAUDE.md", "origin/trunk", remote_tip)
+
+    def test_a_trunk_default_with_no_local_main_still_reads_the_remote_main_grants(self):
+        # origin/HEAD names trunk, this checkout holds no origin/main, and origin's main differs from HEAD.
+        vcs(self.primary, "push", "-q", "origin", "HEAD:refs/heads/trunk")
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        vcs(self.primary, "update-ref", "-d", "refs/remotes/origin/main")
+        self.assertIsNone(self.resolve("origin/main"), "scope: origin/main still resolves")
+        self.assertEqual(self.head_sha(), self.resolve("origin/trunk"), "scope: HEAD is not trunk's tip")
+        fresh = self.advance_origin_main()
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main is HEAD itself")
+        self.assert_one_differ_line(self.run_checked(), "CLAUDE.md", "origin/main", fresh)
+
+    def test_an_unreachable_origin_with_trunk_as_default_prints_one_did_not_run_line(self):
+        # Control for the retry rule: every attempt fails, so exactly one line prints, not one per attempt or check.
+        vcs(self.primary, "push", "-q", "origin", "HEAD:refs/heads/trunk")
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        vcs(self.primary, "checkout", "-q", "-b", "trunk")
+        vcs(self.primary, "remote", "set-url", "origin", os.path.join(self.root, "missing.git"))
+        self.assertEqual(vcs(self.primary, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "trunk",
+                         "scope: the checkout is not on the default branch")
+        lines = self.run_checked()
+        refresh = [line for line in lines if "did not run" in line]
+        self.assertEqual(len(refresh), 1, "want one did-not-run line, got %r" % refresh)
+        self.assertIsNotNone(REFRESH_FAILED.match(refresh[0]), "the line is not the refresh line: %r" % refresh[0])
 
     def test_no_origin_remote_starts_no_fetch_and_prints_no_refresh_line(self):
         vcs(self.primary, "remote", "remove", "origin")
