@@ -1,0 +1,14 @@
+{
+ "id": "ci-merge-install-split",
+ "title": "Split checks-merge-install: install.sh checkout detection and the merge tool git half",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective CI audit 14:12 CST Nov 12: checks-merge-install takes 29.4 min; install.sh checkout detection 13.8 min, again 13.8 min on macOS; the merge tool git half 10.7 min.",
+ "source": "retrospective 14:12 CST Nov 12 (CI audit)",
+ "note": "R55 express (owner 14:05 CST Nov 12). Split the job so the three parts run in parallel.",
+ "updatedAt": "2026-11-12T14:21:00-06:00"
+}

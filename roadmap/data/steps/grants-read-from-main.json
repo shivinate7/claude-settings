@@ -5,7 +5,8 @@
   "phase": "now",
   "owner": "claude-settings",
   "lane": "",
-  "status": "blocked",
+  "status": "ready",
   "order": 841,
-  "updatedAt": "2026-11-12T14:12:38-06:00"
+  "updatedAt": "2026-11-12T14:21:00-06:00",
+  "blocked": []
 }

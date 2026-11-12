@@ -1,0 +1,14 @@
+{
+ "id": "ci-split-checks-family",
+ "title": "Split the checks job by family, and rebalance the macOS guard shards",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective CI audit 14:12 CST Nov 12, batch 103 green run 43234925158: 55.0 min wall; checks is 35.1 min over 161 serial steps with no single suite dominating; macOS guard shard 1/2 alone takes 19.1 min.",
+ "source": "retrospective 14:12 CST Nov 12 (CI audit)",
+ "note": "R55 express (owner 14:05 CST Nov 12). Split checks by family, as the Windows split does; rebalance the macOS guard shards. Estimate: the run ends near 30 min (unmeasured). Side notes from the audit: impeccable-sync.yml:12 has top-level contents: write; playwright-setup steps at checks.yml:732, 768, 804, 844 have no cap of their own; no setup-python or npm cache (0.5-1.1 min per job).",
+ "updatedAt": "2026-11-12T14:21:00-06:00"
+}

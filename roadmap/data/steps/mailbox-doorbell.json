@@ -1,0 +1,14 @@
+{
+ "id": "mailbox-doorbell",
+ "title": "A message wakes an idle session on any machine, by one portable route",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:14 CST Nov 12 (via retrospective): keep mail only; the doorbell must be a route that works anywhere, not the trusted-device card.",
+ "source": "owner 14:14 CST Nov 12, relayed by the retrospective 14:15 CST",
+ "note": "Handed to the retrospective, which designs the route. Owner items 641 (mail-wait process, needs an exception to rule outcomes-mechanize-rules, or cloud-only) and 642 (retrospective runs the lane, or the coordinator starts it). Ruling home: decision session-messages (needs a records lane).",
+ "updatedAt": "2026-11-12T14:21:00-06:00"
+}
