@@ -931,8 +931,15 @@ class Host:
         of the last call. A call that passes `-i` gets the reply with its header block, for a caller that reads a header. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
         raw = []
 
+        read = "-X" in args and args[args.index("-X") + 1:][:1] == ["GET"]  # only a GET is asked again: a timed-out write may have landed
+
         def call():
-            c, out = sh(["gh", *args], cwd=cwd)
+            try:
+                c, out = sh(["gh", *args], cwd=cwd)
+            except subprocess.TimeoutExpired as e:
+                if not read or _READ_DEADLINE is not None:  # the shared deadline is the guard's own budget: it is never retried
+                    raise
+                c, out = 1, f"error: `gh` timed out after {e.timeout:.0f}s: context deadline exceeded"  # a network error line: retry_net asks again, then NetStop keeps the claim
             raw[:] = [out]
             return c, out
         c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
