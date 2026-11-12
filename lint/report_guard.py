@@ -887,6 +887,12 @@ LANE_REFUSAL = owner_line(
     "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
     "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
+# One home per answer (item 3, step page-wakes-and-relays): once an owner-facing turn sent or wrote to the page,
+# the reply names this form. A fixed string, so the Stop path finds it by equality and places it last.
+ON_PAGE_FORM_REASON = owner_line(
+    "Pick guard",
+    "a send or items write to the waiting page went out this turn; the form for a reply is "
+    "`on the page, item N` (owner ruling, 2026-11-10 16:57 CST)")
 PARENT_TARGETS = set(layout.PARENT_TARGETS)
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
@@ -1205,7 +1211,10 @@ def question_problem(records, turn, text, hook):
     A read whose result names no writer keeps the refusal's old text. The question box counts
     only in a repo with no waiting page. A send to @parent reaches no one there.
     Lane: a send to the parent or the page writer; a send to @parent counts only in a lane.
-    Cost: nothing past the text check when the turn has no question or sends to the writer. Else the own-record
+    One home per answer: an owner-facing turn whose send or items write put the question on the page returns
+    ON_PAGE_FORM_REASON. The Stop path places it last. The reply may then hold only `on the page, item N`.
+    A lane is judged first and keeps its own route.
+    Cost: nothing past the text check when the turn has no question. Else the own-record
     import and a transcript read, only in a session with a remote id. A lane reads no layout; an owner-facing
     turn with no counted send reads the extras file for the writer key (`layout.page_writer_key`) first, when the transcript
     has no meta/page read, then for the page (`layout.waiting_page`); a send to the key writer returns after the first read."""
@@ -1214,8 +1223,7 @@ def question_problem(records, turn, text, hook):
     writer = page_writer_id(records)
     acks = {writer: {writer}} if writer else {}
     uses, sends = _turn_acts(records, turn, acks)
-    if writer and any(writer in t for t in sends):
-        return "", ""
+    sent_to_writer = bool(writer) and any(writer in t for t in sends)
     _hooks_on_path()
     from override import remote_session_id
     own_id = remote_session_id()
@@ -1226,6 +1234,8 @@ def question_problem(records, turn, text, hook):
             uses, sends = _turn_acts(records, turn, acks)
         wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
+    if sent_to_writer:
+        return ON_PAGE_FORM_REASON, ""
     root = repo_root(hook.get("cwd"))
     if not writer and root and not page_read_ran(records):
         writer = layout.page_writer_key(root)
@@ -1235,14 +1245,14 @@ def question_problem(records, turn, text, hook):
             # Only the cloud body {"status":"delivered"} counts; the local SendMessage success shape is not measured.
             delivered = delivered_tool_use_ids(records)
             if any(writer in t and u.get("id") in delivered for u, t in zip(uses, sends)):
-                return "", ""
+                return ON_PAGE_FORM_REASON, ""
     page = layout.waiting_page(root) if root else "unknown"
     here = None if page == "unknown" else page.rstrip("/")
     for u in uses:
         inp = u.get("input")
         if (str(u.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict) and items_write(inp)
                 and (here is None or str(inp.get("url", "")).rstrip("/") == here)):
-            return "", ""
+            return ("" if here is None else ON_PAGE_FORM_REASON), ""
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
@@ -3195,6 +3205,10 @@ def main():
         pick_reason, note = question_problem(records, turn, text, hook)
     except Exception:
         pass
+    # The on-the-page form joins the refusals last, so each other check's reason still opens the refusal.
+    page_form = ""
+    if pick_reason == ON_PAGE_FORM_REASON:
+        page_form, pick_reason = pick_reason, ""
     review, review_note = "", ""
     try:
         review, review_note = review_record_problem(hook, text)
@@ -3239,6 +3253,7 @@ def main():
             pass
         try:
             pick.append(refusal)
+            pick.append(page_form)
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + " (rule reports-order-of-labels)"
@@ -3303,6 +3318,8 @@ def main():
                                   "%r is a record id with no short gloss" % cite))
     if refusal:
         reasons.append(refusal)
+    if page_form:
+        reasons.append(page_form)
     if reasons:
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:

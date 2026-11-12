@@ -1881,6 +1881,27 @@ class CompactionCarryCostTests(unittest.TestCase):
         self.assertEqual(new, [], "the check wrote files: %r" % new)
 
 
+ON_PAGE = "on the page, item"  # the form a reply names once its question is on the page (item 3, page-wakes-and-relays)
+NOT_SENT = "was not sent to the page writer"  # the Pick guard's reason, which a counted send keeps out
+SENT_FACT = "a send or items write to the waiting page went out this turn"  # what the page form's reason checks
+OLD_CLAIM = "already on the waiting page"  # the old wording, which said the question was on the page
+
+
+def assert_on_the_page(test, out):
+    """The question's send counted, and the block is the on-the-page form. Scope first: the Pick guard's reason is
+    absent, so the send counted. Then the subject: the reason says what was checked, a send or items write that went
+    out, and not that the question is on the page. The form words stay in the reason, as the fact's item. The page
+    holds the question, so the reply holds only the form, and a reply with options beside it is not a pass.
+    test_report_guard_route keeps its own copy, since its red run imports this file as main has it."""
+    test.assertIsNotNone(out, "the question passed; expected a block")
+    test.assertEqual(out.get("decision"), "block", out)
+    reason = out.get("reason", "")
+    test.assertNotIn(NOT_SENT, reason, "the Pick guard refused it, so its send did not count: %r" % reason)
+    test.assertIn(SENT_FACT, reason, "the reason does not say what was checked: %r" % reason)
+    test.assertNotIn(OLD_CLAIM, reason, "the reason says the question is on the page, not what was sent: %r" % reason)
+    test.assertIn(ON_PAGE, reason, "the block does not name the on-the-page form: %r" % reason)
+
+
 class PickGuardTests(unittest.TestCase):
     """decisions-reach-a-clickable-pick: an Input Needed pick needs the question box or a linked waiting-page item."""
 
@@ -1957,9 +1978,10 @@ class PickGuardTests(unittest.TestCase):
         out = self.verdict(self.PICK + "\n\n" + self.OTHER, [self.page_set(self.OTHER)])
         self.assertIsNotNone(out)
 
-    def test_pk_green_page_write_without_link_passes(self):
+    def test_pk_green_page_write_without_link_reaches_the_page(self):
         # The writer's items write is the send. It reaches the page without a link in the reply, so no link is needed.
-        self.assertIsNone(self.verdict(self.PICK, [self.page_set()]))
+        # The send counts, so the reply names only the page item (item 3, page-wakes-and-relays).
+        assert_on_the_page(self, self.verdict(self.PICK, [self.page_set()]))
 
     def test_pk_red_agent_calls_do_not_count(self):
         # An agent's box and write do not count. With no link in the reply, the pick still blocks
@@ -1993,21 +2015,21 @@ class PickGuardTests(unittest.TestCase):
         self.assertIsNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=bare))
 
-    def test_pk_green_update_and_batch_writes_pass(self):
+    def test_pk_green_update_and_batch_writes_reach_the_page(self):
         batch = ("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
             {"op": "set", "collection": "items", "doc_id": "q1", "data": {}}]}, False)
         other = ("ArtifactData", {"action": "batch", "url": self.PAGE, "writes": [
             {"op": "set", "collection": "notes", "doc_id": "q1", "data": {}}]}, False)
         reply = self.PICK + "\n" + self.PAGE
-        self.assertIsNone(self.verdict(reply, [self.page_set(action="update")]))
-        self.assertIsNone(self.verdict(reply, [batch]))
+        assert_on_the_page(self, self.verdict(reply, [self.page_set(action="update")]))
+        assert_on_the_page(self, self.verdict(reply, [batch]))
         self.assertIsNotNone(self.verdict(reply, [other]))
         self.assertIsNotNone(self.verdict(self.PICK, [other]))
 
     def test_pk_green_controls_pass(self):
         # The box passes only in a repo with no waiting page; in a page repo the writer's write is the route.
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=self.no_page_repo()))
-        self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE, [self.page_set()]))
+        assert_on_the_page(self, self.verdict(self.PICK + "\n\nSee " + self.PAGE, [self.page_set()]))
 
     def assert_pick_blocked(self, reply, repo=None):
         out = self.verdict(reply, repo=repo)
@@ -2164,7 +2186,9 @@ class PickGuardTests(unittest.TestCase):
         for landed in (False, True):
             with self.subTest(landed=landed):
                 self.assertIsNone(self.verdict(self.PICK, [box], landed=landed, repo=bare))
-                self.assertIsNone(self.verdict(self.PICK_LINKED, [self.page_set()], landed=landed))
+                out = self.verdict(self.PICK_LINKED, [self.page_set()], landed=landed)
+                assert_on_the_page(self, out)
+                self.assertNotIn("Departs-from guard", out["reason"], "a valid Departs from line was refused")
         self.assertIsNone(self.verdict(hyphen, [box], repo=bare))
 
     def test_dp_green_no_pick_needs_no_line(self):
@@ -2263,14 +2287,15 @@ class SameTurnWriter:
             recs.append(rec)
         return recs
 
-    def send(self, session_id=None, to=None, result=None, is_error=False, tool_use_result=None):
+    def send(self, session_id=None, to=None, result=None, is_error=False, tool_use_result=None, message="pick"):
         """A send: send_message names its target by session_id, SendMessage by to. `result` is the send's tool
-        result text, None when the transcript holds none. is_error and tool_use_result go to call as given."""
+        result text, None when the transcript holds none. is_error and tool_use_result go to call as given. `message`
+        is the send's text; the check reads the target only, so the default stands for any question."""
         out = {"result": result, "is_error": is_error, "tool_use_result": tool_use_result}
         if to is None:
             return self.call("mcp__claude-code-remote__send_message",
-                             {"session_id": session_id, "message": "pick"}, **out)
-        return self.call("SendMessage", {"to": to, "message": "pick"}, **out)
+                             {"session_id": session_id, "message": message}, **out)
+        return self.call("SendMessage", {"to": to, "message": message}, **out)
 
     def writer_read(self, writer, collection="meta", doc_id="page"):
         """An ArtifactData get whose result carries the writer id."""
@@ -2420,14 +2445,37 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         out = self.stop([human("decide"), *self.box(side=True), assistant_text(self.reply(self.PICK))])
         self.assert_blocked(out, "Pick guard")
 
-    def test_qm_green_send_to_the_writer_passes(self):
-        # Catches: a send to the writer id not read as the send, in either field.
+    def test_qm_green_send_to_the_writer_reaches_the_page(self):
+        # Catches: a send to the writer id not read as the send, in either field. The send counts, so the reply names
+        # only the page item (item 3, page-wakes-and-relays).
         for label, send in (("session_id", self.send(session_id=self.WRITER)),
                             ("to", self.send(to=self.WRITER))):
             with self.subTest(field=label):
                 out = self.stop([human("decide"), *self.writer_read(self.WRITER), *send,
                                  assistant_text(self.reply(self.PICK))])
-                self.assertIsNone(out)
+                assert_on_the_page(self, out)
+
+    def status_then_pick(self):
+        """A turn whose only send to the writer is a status, and whose reply offers a pick in chat."""
+        status = self.send(session_id=self.WRITER, message="Status: the batch is merged. Nothing is asked.")
+        return [human("decide"), *self.writer_read(self.WRITER), *status, assistant_text(self.reply(self.PICK))]
+
+    def test_qm_red_status_send_with_a_pick_says_what_was_checked(self):
+        # Catches: the reason saying the question is already on the waiting page when the turn's send to the writer was a
+        # status. The reason names what was checked, a send that went out, and holds the form (item 2 of
+        # page-wakes-and-relays).
+        assert_on_the_page(self, self.stop(self.status_then_pick()))
+
+    def test_qm_green_status_send_with_a_pick_still_blocks_on_the_form(self):
+        # Control: the status send counts as the writer's send, so the pick is blocked on the page form. It is not a
+        # Pick guard refusal for a send that missed the writer. The wording is pinned by the case above.
+        out = self.stop(self.status_then_pick())
+        self.assertIsNotNone(out, "the pick passed after a status send to the writer")
+        self.assertEqual(out.get("decision"), "block", out)
+        reason = out.get("reason", "")
+        self.assertIn("Pick guard", reason, "the block is not the Pick guard: %r" % reason)
+        self.assertNotIn(NOT_SENT, reason, "the status send to the writer did not count: %r" % reason)
+        self.assertIn(ON_PAGE, reason, "the block does not name the on-the-page form: %r" % reason)
 
     def test_qm_red_send_to_another_session_blocks(self):
         # Catches: a send to a session that is not the writer passing as the question's send.
@@ -2449,19 +2497,20 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
     def test_qm_green_newest_writer_read_names_the_writer(self):
         # Catches: the oldest meta/page read taken as the writer when a newer one names another id.
         reads = [*self.writer_read(self.OLDER_WRITER), *self.writer_read(self.WRITER)]
-        self.assertIsNone(self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
-                                     assistant_text(self.reply(self.PICK))]))
+        assert_on_the_page(self, self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
+                                            assistant_text(self.reply(self.PICK))]))
         out = self.stop([human("decide"), *reads, *self.send(session_id=self.OLDER_WRITER),
                          assistant_text(self.reply(self.PICK))])
         self.assert_blocked(out, "Pick guard", self.WRITER)
 
-    def test_qm_green_items_write_in_the_turn_passes(self):
-        # Catches: the writer's own items write (set, update, batch) not read as the send.
+    def test_qm_green_items_write_in_the_turn_reaches_the_page(self):
+        # Catches: the writer's own items write (set, update, batch) not read as the send. The write counts, so the
+        # reply names only the page item (item 3, page-wakes-and-relays).
         for label, write in (("set", self.items_write("set")), ("update", self.items_write("update")),
                              ("batch", self.items_batch())):
             with self.subTest(write=label):
                 out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
-                self.assertIsNone(out)
+                assert_on_the_page(self, out)
 
     def test_qm_red_items_read_or_other_collection_does_not_count(self):
         # Catches: a read, or a write to another collection, passing as the send.
@@ -2495,7 +2544,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             with self.subTest(field=label):
                 out = self.stop([human("decide"), *self.writer_read(self.WRITER), *send, ack,
                                  assistant_text(self.reply(["Close q_max #969?"]))])
-                self.assertIsNone(out)
+                assert_on_the_page(self, out)
 
     def test_qm_red_peer_from_the_writer_with_no_send_starts_a_turn(self):
         # Catches: an ack taken by its sender alone. With no send in the turn the peer message is new work,
@@ -2537,8 +2586,8 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         commit = self.call("Bash", {"command": "git commit -m x"})
         self.assert_blocked(self.stop([human("decide"), *commit, assistant_text(self.reply(self.PICK))]),
                             "Pick guard")
-        self.assertIsNone(self.stop([human("decide"), *commit, *self.writer_read(self.WRITER),
-                                     *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))]))
+        assert_on_the_page(self, self.stop([human("decide"), *commit, *self.writer_read(self.WRITER),
+                                            *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))]))
 
     def test_qm_green_own_record_without_a_lane_tag_is_owner_facing(self):
         # Catches: a session record with no lane tag and no parent read as a lane. A lane refuses the box, so a
@@ -2598,7 +2647,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
 
     # Owner-facing turn with no meta/page read: the layout's "page-writer" key is the writer.
 
-    def test_qm_layout_writer_green_send_to_the_key_id_passes(self):
+    def test_qm_layout_writer_green_send_to_the_key_id_reaches_the_page(self):
         # Catches: a send to the layout key's writer refused when the transcript holds no meta/page read, so a
         # cloud session that never reads meta/page is blocked for a question it sent to the real writer. The send
         # carries a delivered result, so only the key's writer id decides.
@@ -2610,7 +2659,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             with self.subTest(field=label):
                 records = [human("decide"), *send, assistant_text(self.reply(self.PICK))]
                 self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
-                self.assertIsNone(self.stop(records, repo=keyed), "a send to the layout key's writer id was refused")
+                assert_on_the_page(self, self.stop(records, repo=keyed))
 
     def test_qm_layout_writer_green_ack_from_the_key_writer_keeps_the_turn(self):
         # Catches: the layout writer's ack after a send starting a new turn, which hides the send and blocks the question.
@@ -2623,7 +2672,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
             with self.subTest(field=label):
                 records = [human("decide"), *send, ack, assistant_text(self.reply(["Close q_max #969?"]))]
                 self.assert_blocked(self.stop(records, repo=bare), "Pick guard", "the page writer is not known to this session")
-                self.assertIsNone(self.stop(records, repo=keyed), "the layout writer's ack after a send started a new turn")
+                assert_on_the_page(self, self.stop(records, repo=keyed))
 
     def test_qm_layout_writer_red_send_to_another_id_blocks(self):
         # Catches: a send to a session that is not the layout key's writer passing because the key is set.
@@ -2667,9 +2716,8 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         out = self.stop([human("decide"), *reads, *self.send(session_id=self.OLDER_WRITER),
                          assistant_text(self.reply(self.PICK))], repo=keyed)
         self.assert_blocked(out, "Pick guard", self.WRITER)
-        self.assertIsNone(self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
-                                     assistant_text(self.reply(self.PICK))], repo=keyed),
-                          "a send to the transcript's writer was refused when the layout key names another id")
+        assert_on_the_page(self, self.stop([human("decide"), *reads, *self.send(session_id=self.WRITER),
+                                            assistant_text(self.reply(self.PICK))], repo=keyed))
 
     def test_qm_layout_writer_red_meta_read_naming_no_writer_blocks(self):
         # Catches: a meta/page read that names no writer read as no read, so the layout key stands in for it and a
@@ -2751,12 +2799,11 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 records = [human("decide"), *self.send(result=self.DELIVERED, **target),
                            *self.send(result=self.DELIVERED, is_error=True, **target), ack,
                            assistant_text(self.reply(["Close q_max #969?"]))]
-                self.assertIsNone(self.stop(records, repo=keyed),
-                                  "a delivered send to the layout key's writer was not counted past a later failed resend")
+                assert_on_the_page(self, self.stop(records, repo=keyed))
 
     def test_qm_layout_writer_green_transcript_path_failed_send_keeps_main_verdict(self):
         # Catches: the failed-send rule leaking into the transcript path. A meta/page read names the writer, so a send
-        # to it passes whatever its result, as on main. That verdict must not change.
+        # to it counts whatever its result, as on main, so the reply takes the page form. That verdict must not change.
         keyed = self.make_repo("keyed_key", writer=self.WRITER)
         self.assertEqual(self.extras_key(keyed), self.WRITER, "scope: the keyed repo's extras file lacks the writer key")
         reads = self.writer_read(self.WRITER)
@@ -2766,7 +2813,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         for label, send in failed:
             with self.subTest(failure=label):
                 out = self.stop([human("decide"), *reads, *send, assistant_text(self.reply(self.PICK))], repo=keyed)
-                self.assertIsNone(out, "a failed send on the transcript path was refused; that path keeps main's verdict")
+                assert_on_the_page(self, out)
 
     FRESH_QUESTION_CODE = (
         "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "
@@ -4604,9 +4651,12 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
 
     def test_absent_sources_allow_with_the_unknown_notice(self):
-        # The send to the writer keeps the question check quiet, so this case tests only the relay's unknown notice.
+        # The send to the writer puts the question on the page, so the reply holds only the page form. This case checks
+        # that the relay allows the question, and that it leaves the unknown notice.
         out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW, to_writer=True)
-        self.assertEqual(out, {}, out)
+        assert_on_the_page(self, out)
+        self.assertNotIn("past-ruling", self.reason(out), out)
+        self.assertNotIn("Unvetted guard", self.reason(out), out)
         self.assertIn("past-ruling search unknown:", err)
         self.assertEqual(len(self.model_calls()), 1)
 
@@ -4627,13 +4677,15 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         self.assertEqual(self.model_calls(), [])
 
     def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
-        # Each turn sends to the writer, so the question check stays quiet and only the relay's model error is tested.
+        # Each turn sends to the writer, so the question is on the page and the reply holds the page form. The relay's
+        # model error is tested on top of it: a refusal once, and no refusal when the unvetted notice is in the reply.
         out, _ = self.stop(self.decided, RELAY, model_fail=True, to_writer=True)
         self.assertIn("Unvetted guard", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
         self.reset_calls()
         out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True, to_writer=True)
-        self.assertEqual(out, {}, out)
+        assert_on_the_page(self, out)
+        self.assertNotIn("Unvetted guard", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
 
     def test_question_keys_refuse_two_questions_with_the_same_keys(self):

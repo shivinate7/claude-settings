@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Prose contract for the waiting page: skills/waiting-page/SKILL.md (its Park relay and option labels) and docs/debts/notes.md.
+"""Prose contract for the waiting page: skills/waiting-page/SKILL.md (its Park relay, option labels and Chat first)
+and docs/debts/notes.md.
 
     python3 -m unittest skills/waiting-page/test_skill_park_relay.py
 
@@ -12,6 +13,9 @@ Reads prose only and runs none of the skill's code. Each case pins one claim:
   6. The park tell names only the page URL, the item id and the act withdrawn, never the answer's note or text.
   7. The decision's option bullet (the one with the option shape `{key, label, how`) says a settings-change option's
      label names settings.json and the entry.
+  8. "Chat first" says to read the item back (`ArtifactData get items/<id>`) before the chat reply.
+  9. "Chat first" puts `on the page, item <n>` in the chat reply.
+  10. "Chat first" says the options are only on the page.
 """
 import os
 import re
@@ -54,6 +58,15 @@ DROP_LANE = re.compile(r"\bdrops?\b[^.]{0,60}\blane\b", re.I)
 # `how` does not move the anchor. The label names the settings file and the entry, in code or plain text.
 OPTION_SHAPE = "{key, label, how"
 SETTINGS_LABEL = re.compile(r"label names `?settings\.json`? and the entry", re.I)
+# Cases 8 to 10: the "Chat first" section, read sentence by sentence, flattened so a wrapped span still matches.
+CHAT_FIRST_HEADING = "## Chat first"
+READ_BACK = re.compile(r"ArtifactData get items/<id>")
+BEFORE = re.compile(r"\bbefore\b", re.I)
+REPLY = re.compile(r"\bchat\b|\breply\w*", re.I)
+PAGE_FORM = re.compile(r"on the page, item <n>")
+OPTIONS = re.compile(r"\boptions?\b", re.I)
+PAGE_WORD = re.compile(r"\bpage\b", re.I)
+ONLY = re.compile(r"\bonly\b", re.I)
 
 
 def read(path):
@@ -71,13 +84,18 @@ def sentences(block):
     return [s for s in re.split(r"(?<=[.!?])\s+", flat) if s]
 
 
-def route_section(text):
-    """The "Route and close" section, up to the next heading, or "" when the heading is missing."""
-    start = text.find(ROUTE_HEADING)
+def section(text, heading):
+    """The section under `heading`, up to the next "## " heading, or "" when the heading is missing."""
+    start = text.find(heading)
     if start < 0:
         return ""
     end = text.find("\n## ", start + 1)
     return text[start:] if end < 0 else text[start:end]
+
+
+def route_section(text):
+    """The "Route and close" section, up to the next heading, or "" when the heading is missing."""
+    return section(text, ROUTE_HEADING)
 
 
 def park_branch(text):
@@ -220,6 +238,31 @@ class ParkRelayProse(unittest.TestCase):
                          "the park tell names the answer's note or text: %s" % (tells[0] if tells else ""))
         self.assertTrue(any(PAGE_URL.search(s) and ITEM_ID.search(s) and WITHDRAWN.search(s) for s in tells),
                         "the park tell does not name the page URL, the item id and the act withdrawn")
+
+
+class ChatFirstProse(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.chat = section(read(SKILL), CHAT_FIRST_HEADING)
+
+    def test_chat_first_section_is_present(self):
+        # Control and scope: the three cases below read this section, so its absence is named here first.
+        self.assertTrue(self.chat, "SKILL.md has no '## Chat first' section")
+
+    def test_8_chat_first_reads_the_item_back_before_the_reply(self):
+        self.assertTrue(self.chat, "SKILL.md has no '## Chat first' section, so there is no section to scan")
+        hits = [s for s in sentences(self.chat) if READ_BACK.search(s) and BEFORE.search(s) and REPLY.search(s)]
+        self.assertTrue(hits, "Chat first does not say to read the item back (ArtifactData get items/<id>) before the reply")
+
+    def test_9_chat_first_puts_the_page_form_in_the_chat_reply(self):
+        self.assertTrue(self.chat, "SKILL.md has no '## Chat first' section, so there is no section to scan")
+        hits = [s for s in sentences(self.chat) if PAGE_FORM.search(s) and REPLY.search(s)]
+        self.assertTrue(hits, "Chat first does not put `on the page, item <n>` in the chat reply")
+
+    def test_10_chat_first_leaves_the_options_only_on_the_page(self):
+        self.assertTrue(self.chat, "SKILL.md has no '## Chat first' section, so there is no section to scan")
+        hits = [s for s in sentences(self.chat) if OPTIONS.search(s) and PAGE_WORD.search(s) and ONLY.search(s)]
+        self.assertTrue(hits, "Chat first does not say the options are only on the page")
 
 
 class OptionLabelGuidance(unittest.TestCase):
