@@ -1720,15 +1720,10 @@ _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), r
 _BRIEF_LINE = re.compile(
     _MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER) + r"[\s*_]*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?",
     re.IGNORECASE)
-ROLE_LABELS = ("Coordinator", "Triage", "Batch runner")  # a lane brief names each role's session id, so the lane can reach it
-ROLE_GAP_MAX = 80  # characters that may sit between a role label and its id, on one line
-# A label starts and ends at a word boundary, but `_` and markdown around it do not break one (`_Triage_`).
-_ROLE_ANY = "(?<![A-Za-z0-9])(?:" + "|".join(re.escape(label) for label in ROLE_LABELS) + ")(?![A-Za-z0-9])"
-# An id holds a digit, so a placeholder such as session_TBD or session_id is no id. The gap holds no role label and no `session_`.
-_ROLE_ID_FORM = ("(?<![A-Za-z0-9])" + "{label}" + "(?![A-Za-z0-9])(?:(?!" + _ROLE_ANY + "|session_)[^\n]){{0,{gap}}}"
-                 "session_(?=[A-Za-z0-9]*\\d)[A-Za-z0-9]+")
-_ROLE_IDS = {label: re.compile(_ROLE_ID_FORM.format(label=re.escape(label), gap=ROLE_GAP_MAX), re.IGNORECASE)
-             for label in ROLE_LABELS}
+ROLE_LABELS = ("Coordinator", "Triage", "Batch runner")  # a lane brief names each role, so the lane knows whom to ask
+# A label stands as a whole word, without case: `_Triage_` and `**Batch runner:**` count, `Triaged` and `Coordinators-only` do not.
+_ROLE_WORDS = {label: re.compile("(?<![A-Za-z0-9])" + re.escape(label) + "(?![A-Za-z0-9])", re.IGNORECASE)
+               for label in ROLE_LABELS}
 BRIEF_NO_RECORD_REASON = (
     "this session's transcript holds no get_session or create_session record of the target, so the guard "
     "cannot tell which topic the lane holds. Run get_session on the target alone, in its own turn, then retry. "
@@ -1771,10 +1766,9 @@ BRIEF_GRANT_REASON = (
     "owner gave them. (decision agent-model-cap, the lane start)"
 )
 BRIEF_IDS_REASON = (
-    "this brief does not name a session id for {missing}, so the lane cannot reach {them}. Add each as "
-    "`" + "; ".join(label + ": session_<id>" for label in ROLE_LABELS) + "`, the three ids the coordinator copies from the "
-    "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no other "
-    "role label and no `session_`; an id holds a digit. (decision session-tiers, a lane holds one topic)"  # glossary-ok: session-tiers is the decision's file name
+    "this brief does not name {missing} by role, so the lane cannot tell whom to ask. Name each of "
+    + ", ".join(ROLE_LABELS) + " once, as a whole word in any case (for example `Ask: Coordinator, Triage, Batch runner`). "
+    "A role's session id may follow, and none is required. (decision session-tiers, a lane holds one topic)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
@@ -1801,13 +1795,13 @@ def topic_hit(first: str, tags, start: bool = False):
 
 def brief_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
-    hold, or one that names no session id for a role in ROLE_LABELS, else None. Only a message whose first non-blank line (after its Grant line, if any) starts with
+    hold, or one that names no role in ROLE_LABELS by its label, else None. Only a message whose first non-blank line (after its Grant line, if any) starts with
     LANE_BRIEF_MARKER is read; the transcript is read for that message alone. A Grant line before such a brief
     must hold the owner's words (grant_line_holds_words). A target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
     brief's Topic, an older lane without one by the brief's step against its cs-step tags (topic_hit). A
     create_session call that tags a lane is judged the same way, by its prompt against its own tags and for its
-    role ids (_brief_ids_hit), with no transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    role labels (_brief_ids_hit), with no transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
     if not isinstance(tool_input, dict):
         return None
     if tool == BRIEF_TOOL:
@@ -1851,12 +1845,12 @@ def brief_hit(tool: str, tool_input, transcript: str):
 
 
 def _brief_ids_hit(message: str):
-    """A brief that cleared the topic or step check is refused when its text lacks a session id for a role in
-    ROLE_LABELS. cost: message text only, no extra transcript read."""
-    missing = [label for label in ROLE_LABELS if not _ROLE_IDS[label].search(message)]
+    """A brief that cleared the topic or step check is refused when its text lacks a role in ROLE_LABELS as a
+    whole word. A session id is optional. cost: message text only, no extra transcript read."""
+    missing = [label for label in ROLE_LABELS if not _ROLE_WORDS[label].search(message)]
     if not missing:
         return None
-    return ("lane brief with no " + ", ".join(missing) + " session id",
+    return ("lane brief with no " + ", ".join(missing) + " role label",
             BRIEF_IDS_REASON.format(missing=", ".join(missing), them="it" if len(missing) == 1 else "them"))
 
 
