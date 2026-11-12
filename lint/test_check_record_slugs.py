@@ -76,6 +76,7 @@ PINNED_TODAY = "2026-11-07"  # the date the suite pins: the check reads FIXED_TO
 PINNED_DATE = datetime.date.fromisoformat(PINNED_TODAY)  # the same date, for the cases that call a function directly
 KEPT_NOTE = "- kept-note: a gap. Fix: already fixed on main 1a2b3c4\n"  # a bullet with a new-grammar Fix
 THIRD_NOTE = "- third-note: a gap. Fix: already fixed on main 1a2b3c4\n"
+SLUGLESS_OLD = "".join("- A gap number %d, nobody named its fix.\n" % n for n in range(8))  # 8 bullets on main: no slug, no Fix
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -207,6 +208,12 @@ class RecordSlugsTests(unittest.TestCase):
         out = subprocess.run(["git", "-C", self.tree, "show", "--name-only", "--format=", "HEAD"], check=True,
                              capture_output=True, text=True).stdout
         return sorted(line for line in out.splitlines() if line)
+
+    def renames(self):
+        """The status lines of the diff from origin/main to HEAD, with rename detection: one line per changed path."""
+        out = subprocess.run(["git", "-C", self.tree, "diff", "--name-status", "-M", "origin/main", "HEAD"],
+                             check=True, capture_output=True, text=True).stdout
+        return [line for line in out.splitlines() if line]
 
     def load(self):
         """The check's module, imported from this case's tree. The import binds this tree's `layout`, not one an
@@ -662,6 +669,108 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
+    def test_fix_only_inside_a_code_span_does_not_pass(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")  # the step is real, so only the code span decides the line
+        self.put(DEBT_NOTES, NOTES_HEAD + "- code-note: a gap, Don't ship it: `Fix: step:alpha-beta`.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertTrue(self.failed_about(out, "code-note", DEBT_NOTES),
+                        "a Fix inside a code span passed as the line's field: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_invalid_reason_then_a_quoted_valid_fix_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.put(DEBT_NOTES, NOTES_HEAD + "- quoted-note: a gap. Fix: none — someday. Until: 2026-11-20 "
+                 "(was \"Fix: step:alpha-beta\")\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertTrue(self.failed_about(out, "quoted-note", DEBT_NOTES),
+                        "a quoted valid Fix stood in for the line's invalid one: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_valid_fix_then_a_quoted_invalid_form_passes(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.put(DEBT_NOTES, NOTES_HEAD + "- quoted-ok: a gap. Fix: step:alpha-beta (the old line said "
+                 "\"Fix: pin the base\")\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, "a valid Fix was refused for a quoted form after it: " + out)
+
+    def test_fix_none_in_a_fenced_block_is_not_the_debt_field(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(NEW_DEBT, "# New debt\n\nWhat. A gap with no fix named.\n\n```\nFix: none -- owner decides\n```\n")
+        self.put(FIXED_DEBT, FIXED_DEBT_TEXT)  # the control: a valid Fix line in the same diff
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(flagged(out), [NEW_DEBT],
+                         "a Fix inside a fenced block passed as the debt's field: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_debt_file_arriving_by_rename_is_checked(self):
+        self.put("notes/gap-a.md", DEBT_NO_FIX)  # no Fix line; it reaches the debt folder by a rename
+        self.put("notes/gap-b.md", FIXED_DEBT_TEXT)  # the control: a valid Fix, moved the same way
+        self.commit_base()
+        self.move("notes/gap-a.md", "debts/gap-a.md")
+        self.move("notes/gap-b.md", "debts/gap-b.md")
+        self.commit_change()
+        self.assertTrue(self.renames() and all(line.startswith("R") for line in self.renames()),
+                        "scope: both debt files must arrive by rename, got %r" % self.renames())
+        rc, out = self.lint()
+        self.assertEqual(flagged(out), ["debts/gap-a.md"],
+                         "a debt file that arrived by rename was not checked: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_new_bullet_in_a_renamed_notes_file_is_checked(self):
+        base = NOTES_HEAD + "".join("- old-note-%02d: an old gap. Fix: pin the base.\n" % n for n in range(10))
+        self.put(DEBT_NOTES, base)
+        self.commit_base()
+        self.move(DEBT_NOTES, "notes/notes.md")  # the commit renames the notes file out of its folder ...
+        self.put("notes/notes.md", base + NEW_NO_FIX)  # ... and adds a bullet with no Fix to it
+        self.commit_change()
+        self.assertTrue(self.renames() and all(line.startswith("R") for line in self.renames()),
+                        "scope: the notes file must arrive by rename, got %r" % self.renames())
+        rc, out = self.lint()
+        self.assertTrue(self.failed_about(out, "new-note"),
+                        "a bullet added in a renamed notes file was not checked: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_numbered_bullet_without_a_fix_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "1. new-note: a gap nobody named.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES),
+                        "a numbered bullet with no Fix was not read as a note line: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_indented_bullet_without_a_fix_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "  - new-note: a gap nobody named.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES),
+                        "an indented bullet with no Fix was not read as a note line: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_dashless_bullet_without_a_fix_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "-new-note: a gap nobody named.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES),
+                        "a bullet with no space after its dash was not read as a note line: " + out)
+        self.assertEqual(rc, 1, out)
+
     # The ratchet: the notes bullets with no Fix of the new grammar may not grow. Both counts are read live from git.
 
     def test_ratchet_edit_that_removes_a_fix_and_raises_the_count_is_red(self):
@@ -779,6 +888,55 @@ class RecordSlugsTests(unittest.TestCase):
         self.main_moves_to(DEBT_NOTES, NOTES_HEAD + OLD_NOTE
                            + "- second-note: a gap. Fix: already fixed on main %s\n" % merge_base)
         self.assert_passes()
+
+    def test_ratchet_counts_a_numbered_bullet_with_no_fix(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE)  # one bullet with no valid Fix on main
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + "1. new-note: a gap nobody named.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertIn("notes with no valid Fix: 2 now, 1 at the merge base", out,
+                      "the ratchet did not count a numbered bullet: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_ratchet_counts_an_indented_bullet_with_no_fix(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + "  - new-note: a gap nobody named.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertIn("notes with no valid Fix: 2 now, 1 at the merge base", out,
+                      "the ratchet did not count an indented bullet: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_ratchet_counts_a_dashless_bullet_with_no_fix(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + "-new-note: a gap nobody named.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertIn("notes with no valid Fix: 2 now, 1 at the merge base", out,
+                      "the ratchet did not count a bullet with no space after its dash: " + out)
+        self.assertEqual(rc, 1, out)
+
+    def test_reworded_old_bullet_with_no_slug_passes(self):
+        # A reword of a slugless bullet on main keeps the count at eight, so the branch edits an old line.
+        self.put(DEBT_NOTES, NOTES_HEAD + SLUGLESS_OLD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + SLUGLESS_OLD.replace("gap number 0, nobody", "gap number 0, no one"))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, "a reword of an old bullet with no slug was refused: " + out)
+
+    def test_new_bullet_with_no_slug_and_no_fix_is_still_red(self):
+        # Control for the reword case: a ninth such bullet is new, so the count grows and the branch is red.
+        self.put(DEBT_NOTES, NOTES_HEAD + SLUGLESS_OLD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + SLUGLESS_OLD + "- A gap number 8, nobody named its fix.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertIn("notes with no valid Fix: 9 now, 8 at the merge base", out, out)
+        self.assertEqual(rc, 1, out)
 
     # The functions the roadmap's upkeep list, report_guard.py and the check's own run read. Each case below holds
     # one branch of one of them, read directly, so the branch's own result is what the case asserts.
