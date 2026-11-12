@@ -1298,12 +1298,19 @@ def option_letter_hit(op: str, data) -> str:
 # in a line "Page item: <id>" and writes each option as "a) <text>". A write of that item whose option label for
 # a letter differs from the chat's text for that letter is refused. Letters are positions, as in
 # option_letter_hit.
-# A cite is anywhere in a line (it may end a sentence). Without the colon it counts only when the id has a digit or a
-# hyphen, so prose such as "this page item has" is no cite.
+# A cite is anywhere in a line (it may end a sentence). Without the colon it counts as a cite when the id has a digit
+# or a hyphen, so prose such as "this page item has" is no cite. A colon-less cite of the written item's own id counts
+# too, whatever the id (CHAT_LOOSE_CITE, read by `_cites`).
 PAGE_ITEM_CITE = re.compile(r"Page item(?:[ \t]*:|[ \t]+(?=[^\s*_`]*[-\d]))[ \t*_`]*([^\s*_`]+)", re.I)
-# An option line opens with its letter as "a)", "a.", "a:", "**A**" or "A <dash> ", then the text.
+CHAT_LOOSE_CITE = re.compile(r"Page item[ \t]+[ \t*_`]*([^\s*_`]+)", re.I)
+# An option line opens with its letter as "a)", "a.", "a:", "**A**", "**a**)", "A <dash> " or "Option A:", then the
+# text. After `)` the space may be left out ("a)Blue").
 CHAT_OPTION_LINE = re.compile(
-    r"^[ \t>*-]*\**\(?([A-Za-z])(?:[).:]\**|\*\*|[ \t]+[\u2014\u2013-])[ \t]+(\S.*)$", re.M)
+    r"^[ \t>*-]*\**(?:[Oo]ption[ \t]+)?\(?([A-Za-z])"
+    r"(?:\*\*[).:][ \t]+|\)\**[ \t]*|[.:]\**[ \t]+|\*\*[ \t]+|[ \t]+[\u2014\u2013-][ \t]+)(\S.*)$", re.M)
+# A line of one letter, a space and text ("A Blue"). It is no option line: reading it as one would read prose as
+# options. A page option's letter that opens such a line, with no option line of its own, is noted.
+CHAT_BARE_LINE = re.compile(r"^[ \t>*-]*\**\(?([A-Za-z])[ \t]+(\S.*)$", re.M)
 CHAT_TAIL_BYTES = 1 << 20  # how far back from the transcript's end the cited chat question is looked for
 LABELS_REASON = ("A question sent to the chat and the page carries the same option text in the same order, so "
                  "a letter means one option on both. Rewrite the page item's options to match the chat "
@@ -1335,32 +1342,78 @@ def _cited_ids(text) -> set:
     return {m.group(1).rstrip(".,;:)") for m in PAGE_ITEM_CITE.finditer(text)}
 
 
-def _own_option_lines(text, item_id) -> dict:
-    """{letter: text} of the option lines that belong to page item `item_id` in `text`. A reply writes its cites
-    on one side of their options. When an option line comes before the first cite and none comes after the last
-    cite, each cite sits under its options: it owns the option lines between the cite before it (or the text's
-    start) and itself. Else each cite owns the option lines after its own line, up to the next cite. Either way two
-    questions in one reply read apart. The side is read per reply, not per cite: the text between two cites reads
-    the same in both shapes, and only the reply's ends tell them apart."""
-    cites = list(PAGE_ITEM_CITE.finditer(text))
+def _cites(text, item_id) -> list:
+    """The cites in `text`, in order: each PAGE_ITEM_CITE match, plus each colon-less "Page item <id>" whose id is
+    `item_id` itself (a one-word id has no digit or hyphen to tell it from prose, but the written item's own id does)."""
+    found = {m.start(): m for m in PAGE_ITEM_CITE.finditer(text)}
+    for m in CHAT_LOOSE_CITE.finditer(text):
+        if m.group(1).rstrip(".,;:)") == item_id:
+            found.setdefault(m.start(), m)
+    return [found[k] for k in sorted(found)]
+
+
+def _owned(text, item_id, pattern) -> list:
+    """The matches of `pattern` (a line pattern) that belong to page item `item_id` in `text`. A reply writes its
+    cites on one side of their options. When an option line comes before the first cite and none comes after the last
+    cite, each cite sits under its options: it owns the lines between the cite before it (or the text's start) and
+    itself. Else each cite owns the lines after its own line, up to the next cite. Either way two questions in one
+    reply read apart. The side is read per reply, not per cite, from the option lines CHAT_OPTION_LINE reads: the
+    text between two cites reads the same in both shapes, and only the reply's ends tell them apart."""
+    cites = _cites(text, item_id)
     options = list(CHAT_OPTION_LINE.finditer(text))
-    if not cites or not options:
-        return {}
-    under = options[0].start() < cites[0].start() and options[-1].start() < cites[-1].start()
-    lines = {}
+    if not cites:
+        return []
+    under = bool(options) and options[0].start() < cites[0].start() and options[-1].start() < cites[-1].start()
+    owned = []
     for i, cite in enumerate(cites):
         if cite.group(1).rstrip(".,;:)") != item_id:
             continue
         if under:
             start, end = (cites[i - 1].end() if i else 0), cite.start()
         else:
-            # An option line starts at a line start, so one that starts before the cite's end is on the cite's own
+            # A line starts at a line start, so one that starts before the cite's end is on the cite's own
             # line, or above it, and is not this cite's.
             start, end = cite.end(), (cites[i + 1].start() if i + 1 < len(cites) else len(text))
-        for m in options:
-            if start <= m.start() < end:
-                lines.setdefault(m.group(1).lower(), m.group(2))
+        owned.extend(m for m in pattern.finditer(text) if start <= m.start() < end)
+    return owned
+
+
+def _own_option_lines(text, item_id) -> dict:
+    """{letter: text} of the option lines that belong to page item `item_id` in `text` (see `_owned`)."""
+    lines = {}
+    for m in _owned(text, item_id, CHAT_OPTION_LINE):
+        lines.setdefault(m.group(1).lower(), m.group(2))
     return lines
+
+
+def _own_bare_letters(text, item_id) -> dict:
+    """{letter: line} of the lines owned by `item_id` that open with one letter, a space and text ("A Blue") and
+    are no option line CHAT_OPTION_LINE reads."""
+    read = {m.start() for m in CHAT_OPTION_LINE.finditer(text)}
+    lines = {}
+    for m in _owned(text, item_id, CHAT_BARE_LINE):
+        if m.start() not in read:
+            lines.setdefault(m.group(1).lower(), m.group(0).strip())
+    return lines
+
+
+class UnreadChat(ValueError):
+    """The chat cites the item and writes a line the check cannot read as an option. The guard allows the write and
+    logs one `noted` line (hooks/guard.py data_tool_label_hit)."""
+
+
+def unread_chat_line(item_id, options, chat_text) -> str:
+    """The first chat line for `item_id` that opens with the letter of a page option the chat writes no option line
+    for, in the form "A Blue" (CHAT_BARE_LINE), else "". It reads the page's letters only, so prose that opens with
+    another single letter, such as "I recommend b.", is no hit."""
+    if not isinstance(chat_text, str) or not isinstance(options, list) or not isinstance(item_id, str):
+        return ""
+    have = _own_option_lines(chat_text, item_id)
+    letters = {_letter_of(i) for i in range(len(options))}
+    for letter, line in _own_bare_letters(chat_text, item_id).items():
+        if letter in letters and letter not in have:
+            return line
+    return ""
 
 
 def chat_page_label_hit(item_id, options, chat_text) -> str:
@@ -1390,23 +1443,30 @@ def chat_page_label_hit(item_id, options, chat_text) -> str:
     return ""
 
 
-def chat_text_citing(transcript_path, item_id) -> str:
+def chat_text_citing(transcript_path, item_id, options=None) -> str:
     """The newest assistant text in the transcript's last CHAT_TAIL_BYTES that cites page item `item_id` and writes
-    option lines for it, else "". A later text that only mentions the item is no question and is passed over.
-    Raises OSError when the file cannot be read."""
+    option lines for it, else "". A later text that only mentions the item is no question and is passed over. When no
+    text writes option lines and `options` is given, the newest text whose line for the item is a bare "A Blue" form
+    for one of the page's letters (unread_chat_line) stands in, so the caller can note it. Raises OSError when the
+    file cannot be read."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import _transcript
+    bare = ""
     for rec in _transcript.tail_records(transcript_path, CHAT_TAIL_BYTES):
         if rec.get("type") != "assistant" or rec.get("isSidechain"):
             continue
         blocks = (rec.get("message") or {}).get("content")
         for b in blocks if isinstance(blocks, list) else []:
             text = b.get("text") if isinstance(b, dict) and b.get("type") == "text" else None
-            if isinstance(text, str) and _own_option_lines(text, item_id):
+            if not isinstance(text, str):
+                continue
+            if _own_option_lines(text, item_id):
                 return text
-    return ""
+            if not bare and options is not None and unread_chat_line(item_id, options, text):
+                bare = text
+    return bare
 
 
 def page_label_hit(writes, transcript_path, cwd=""):
@@ -1414,7 +1474,9 @@ def page_label_hit(writes, transcript_path, cwd=""):
     differs from the chat's text for its letter (chat_page_label_hit), else ("", ""). The transcript is read
     only for a write that carries options, and only as far back as CHAT_TAIL_BYTES. Raises ValueError when a
     write carries options and the payload names no transcript, and OSError when the transcript cannot be read:
-    the caller treats each as unknown."""
+    the caller treats each as unknown. Raises UnreadChat, after every write is judged, when no write is refused and a
+    chat line for an item reads as no option line (unread_chat_line)."""
+    unread = ""
     for op, entry in writes:
         if op not in ("set", "update"):
             continue
@@ -1425,9 +1487,13 @@ def page_label_hit(writes, transcript_path, cwd=""):
             continue
         if not isinstance(transcript_path, str) or not transcript_path:
             raise ValueError("no transcript_path in the payload")
-        hit = chat_page_label_hit(item_id, options, chat_text_citing(transcript_path, item_id))
+        chat = chat_text_citing(transcript_path, item_id, options)
+        hit = chat_page_label_hit(item_id, options, chat)
         if hit:
             return LABELS_RULE, hit
+        unread = unread_chat_line(item_id, options, chat) if not unread else unread
+    if unread:
+        raise UnreadChat("a chat line for the item that is no option line the check reads: %r" % unread[:60])
     return PASS
 
 
