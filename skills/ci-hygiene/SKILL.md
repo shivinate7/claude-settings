@@ -64,9 +64,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
    on the batch head, after the draft step's page push. A ref target posts no comment, so it cannot
    satisfy the join. A FAIL keeps it a draft. When the repo's `ci-scope.sh` turns the guard flag on for the head's diff, the lane lint
-   also runs the Windows guard slice, the one step `Guard fixture suite (Windows slice)` of `checks-windows-guard`, and a slice FAIL
-   refuses the lane (owner, 2026-11-11, restart-plan ruling R26, batches stop wasting CI). It runs no shard of the full suite. The lint counts a clash between two heads only when both
-   merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
+   also runs the Windows guard slice. That slice is the one CI step `Guard fixture suite (Windows slice)` of `checks-windows-guard`.
+   A slice FAIL refuses the lane (owner, 2026-11-11, restart-plan ruling R26, batches stop wasting CI). It runs no shard of the full suite.
+   When both heads merge clean with their base, the lint counts a clash between them (decision `lanes-run-no-full-ci-job`). Otherwise, it does not count one. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
