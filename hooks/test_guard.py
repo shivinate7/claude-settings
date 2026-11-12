@@ -173,6 +173,11 @@ FAMILY = "misc"  # set at each section header below
 TEMP_DIR = None
 
 
+# The families a case takes by its name, wherever its row sits (_family below). The table check reads this list
+# (lint/test_guard_tables.py), so a row of one of these may sit in any section.
+NAMED_FAMILIES = ("session-log", "argv", "rm-var")
+
+
 def _family(name):
     """The family a case or a log check takes: session-log and argv by prefix, rm-var by name, else FAMILY."""
     if name.startswith("session-log:"):
