@@ -7,6 +7,7 @@ the transcript the guard has already read. These cases pin what the draft holds:
 
 - a Recovered draft names only the sources the transcript after the compaction shows: git, page, digest;
 - a source counts only when its call's result came back without is_error, paired by tool_use_id;
+- a call with no result at all is no source either: the transcript shows no read that came back;
 - with no source read after the compaction, the Recovered draft is `Recovered: none`;
 - a draft pasted back into the report unchanged passes the guard;
 - a missing Handoff gave line drafts a placeholder, never `Handoff gave: none`, since the hook cannot know the facts;
@@ -51,15 +52,16 @@ def tearDownModule():
     trg.tearDownModule()
 
 
-def call(name, input_, ok=True):
+def call(name, input_, ok=True, answered=True):
     """One tool call and its result, paired by tool_use_id as a transcript pairs them. `ok` False makes the result
-    an error (is_error true): a call that failed."""
+    an error (is_error true): a call that failed. `answered` False drops the result: the call has none at all."""
     use_id = "toolu_" + uuid.uuid4().hex
-    return [trg.tool_use_msg(name, input_, id_=use_id), trg.tool_result_msg(tool_use_id=use_id, is_error=not ok)]
+    uses = [trg.tool_use_msg(name, input_, id_=use_id)]
+    return (uses + [trg.tool_result_msg(tool_use_id=use_id, is_error=not ok)]) if answered else uses
 
 
-def git_read(ok=True):
-    return call("Bash", {"command": "git log --oneline -1"}, ok)
+def git_read(ok=True, answered=True):
+    return call("Bash", {"command": "git log --oneline -1"}, ok, answered)
 
 
 def code_read():
@@ -67,12 +69,12 @@ def code_read():
     return call("Read", {"file_path": "/fixture/repo/lint/report_guard.py"})
 
 
-def digest_read(ok=True):
-    return call("Read", {"file_path": "/fixture/config/handoffs/cc-fixture.md"}, ok)
+def digest_read(ok=True, answered=True):
+    return call("Read", {"file_path": "/fixture/config/handoffs/cc-fixture.md"}, ok, answered)
 
 
-def page_read(ok=True):
-    return call("Artifact", {"action": "read", "url": "https://claude.ai/artifact/fixture-page"}, ok)
+def page_read(ok=True, answered=True):
+    return call("Artifact", {"action": "read", "url": "https://claude.ai/artifact/fixture-page"}, ok, answered)
 
 
 def compacted(*middle):
@@ -95,6 +97,16 @@ def errored(records):
     called = {b.get("id") for b in blocks if b.get("type") == "tool_use"}
     return [b for b in blocks if b.get("type") == "tool_result" and b.get("is_error") is True
             and b.get("tool_use_id") in called]
+
+
+def calls_in(records):
+    """The tool_use blocks in `records`."""
+    return [b for rec in records for b in _content(rec) if isinstance(b, dict) and b.get("type") == "tool_use"]
+
+
+def results_in(records):
+    """The tool_result blocks in `records`, errored or not."""
+    return [b for rec in records for b in _content(rec) if isinstance(b, dict) and b.get("type") == "tool_result"]
 
 
 def cited(report):
@@ -230,6 +242,42 @@ class ErroredSourceTests(unittest.TestCase):
         self.assertEqual(draft_sources(draft), ["page"],
                          "the Recovered draft %r names %r; the git call errored and the page read did not"
                          % (draft, draft_sources(draft)))
+
+
+class UnansweredSourceTests(unittest.TestCase):
+    """A call with no result at all is no source either: the transcript shows no read that came back."""
+
+    def test_a_call_with_no_result_drafts_no_source(self):
+        all_three = [*git_read(answered=False), *digest_read(answered=False), *page_read(answered=False)]
+        cases = {
+            "a git call with no result": git_read(answered=False),
+            "a handoffs Read with no result": digest_read(answered=False),
+            "an Artifact read with no result": page_read(answered=False),
+            "all three with no result": all_three,
+            # Full size: a long run of handoff reads, none of them with a result.
+            "100 digest Reads with no result": [r for _ in range(100) for r in digest_read(answered=False)],
+        }
+        for label, middle in cases.items():
+            with self.subTest(case=label):
+                records = compacted(*middle)
+                self.assertTrue(compacts(records), "the transcript holds no compaction for %s" % label)
+                # Scope first: the calls are in the transcript, and no result answers any of them.
+                self.assertTrue(calls_in(records), "the transcript holds no call for %s" % label)
+                self.assertEqual(results_in(records), [], "the transcript holds a result for %s, so the no-result path "
+                                 "is not what runs" % label)
+                draft = drafted(RG.recovered_problem(records, REPORT), "Recovered:")
+                # Catches: a call with no result counted as a source the session read.
+                self.assertEqual(draft, "Recovered: none",
+                                 "the Recovered draft for %s is %r, not Recovered: none, though no result came back"
+                                 % (label, draft))
+
+    def test_the_same_calls_with_their_results_draft_their_sources(self):
+        # Control, green on the code before the change: with their results, the same calls draft their sources, so the
+        # no-result case above fails for the missing result and for nothing else.
+        records = compacted(*git_read(), *digest_read(), *page_read())
+        draft = drafted(RG.recovered_problem(records, REPORT), "Recovered:")
+        self.assertEqual(draft_sources(draft), ["git", "page", "digest"],
+                         "the Recovered draft %r does not name the three sources the transcript read" % draft)
 
 
 class DraftControlTests(unittest.TestCase):
