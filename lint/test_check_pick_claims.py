@@ -83,6 +83,23 @@ class Claims(unittest.TestCase):
     def test_conditional_only_if_owner_picks_is_no_claim(self):
         self.assertEqual(D.claims("Only if the owner picks b on page item 593"), [], "a conditional 'Only if the owner picks' is read as a claim")
 
+    def test_noun_pick_after_an_if_word_is_a_claim(self):
+        self.assertEqual(D.claims("Held if red; owner pick 493 a."), [(493, "a")], "a noun pick after 'if' in its sentence is not read as a claim")
+
+    def test_noun_pick_in_a_parenthesis_after_an_if_word_is_a_claim(self):
+        self.assertEqual(D.claims("Fold (if red, outbox sweep, owner pick 493 a)"), [(493, "a")], "a noun pick in a parenthesis after 'if' is not read as a claim")
+
+    def test_in_chat_directly_after_the_claim_is_no_claim(self):
+        self.assertEqual(D.claims("Owner picked a on item 593, in chat."), [], "a claim with ', in chat' right after it is read as a page claim")
+
+    def test_in_chat_in_another_clause_of_the_claim_sentence_is_still_a_claim(self):
+        self.assertEqual(D.claims("Owner picked a on page item 12 (page save 12:00 CST), after he asked in chat."), [(12, "a")],
+                         "'in chat' in another clause of the claim's sentence drops the page claim")
+
+    def test_in_chat_sentence_beside_a_plain_claim_leaves_only_the_plain_one(self):
+        self.assertEqual(D.claims("Owner picked a on item 593, in chat. Owner picked b on item 600."), [(600, "b")],
+                         "the in-chat sentence drops the plain claim after it, or keeps its own in-chat claim")
+
 
 class Case(unittest.TestCase):
     """Fixtures in one folder per case: a steps folder of step json, and an answers file that a case may leave out."""
@@ -177,6 +194,11 @@ class Findings(Case):
         self.steps({NOTE_SLUG: "Owner picked a on item 300."})
         self.page({"300": ["a", "b"]})
         self.assertEqual(self.check(), [], "a list choice that holds the claimed key is flagged")
+
+    def test_list_choice_that_holds_a_later_claimed_key_is_no_finding(self):
+        self.steps({NOTE_SLUG: "Owner picked b on item 300."})
+        self.page({"300": ["a", "b"]})
+        self.assertEqual(self.check(), [], "a list choice that holds the claimed key only after its first element is flagged")
 
     def test_list_choice_without_the_claimed_key_is_a_mismatch(self):
         self.steps({NOTE_SLUG: "Owner picked c on item 300."})
