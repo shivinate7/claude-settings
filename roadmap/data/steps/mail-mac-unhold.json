@@ -11,6 +11,6 @@
  ],
  "why": "Owner item 556 a (Nov 12 11:59 CST): the mailbox goes on for cloud and Windows now, the Mac after its check; stands item 590.",
  "source": "coordinator 12:50 CST Nov 12",
- "note": "Remove \"darwin\" from HELD_PLATFORMS in hooks/mail.py once the owner's Mac mail round trip passes.",
- "updatedAt": "2026-11-12T12:41:07-06:00"
+ "note": "Remove \"darwin\" from HELD_PLATFORMS in hooks/mail.py once the owner's Mac mail round trip passes. Lane session-mailbox-followups 13:44 CST Nov 12: the Mac test commands are ready (send with MAILBOX_HOLD_OFF=1, then read without it, expect exit 2). The var does nothing until #2849 merges and the Mac clone pulls it; post the owner card then. Text kept in triage's scratchpad mac_card_2849.txt.",
+ "updatedAt": "2026-11-12T13:50:47-06:00"
 }

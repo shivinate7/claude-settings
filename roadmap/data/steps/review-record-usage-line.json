@@ -1,0 +1,14 @@
+{
+ "id": "review-record-usage-line",
+ "title": "The --review-record usage line says the Sonnet model rule covers only --fix-check",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective 13:44 CST Nov 12: merge/merge.py line 26 (\"MODEL must be sonnet on every record\") reads as covering every round, but it covers only --fix-check; sessions choked on where to record a Haiku round 1.",
+ "source": "retrospective 13:44 CST Nov 12",
+ "note": "Home: decision agent-model-cap. Reword the usage line to name --fix-check; a test pins the line. R9 and the code already settle the question; the retrospective answered runner 10 directly. S, one file.",
+ "updatedAt": "2026-11-12T13:50:47-06:00"
+}
