@@ -3,7 +3,8 @@
 
 TERSE_LINE is the one home of the line. Each agents/*.md file and the lane start text
 (skills/project-ops/templates/operating-model.md) must hold it in body text. A line inside a code
-fence (``` or ~~~) or an HTML comment does not count. Whitespace collapses, so the line may wrap.
+fence (``` or ~~~), an HTML comment or an inline code span does not count: quoted text is not an
+instruction. Whitespace collapses, so the line may wrap.
 
     python3 lint/check_agent_terse_line.py [file ...]
 
@@ -25,32 +26,48 @@ ROLES = ("builder", "claude-code-guide", "design-reviewer", "designer", "explore
          "plan", "record-writer", "refuter", "reviewer", "test-author")
 LANE_TEXT = os.path.join("skills", "project-ops", "templates", "operating-model.md")
 
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-# A code span hides a comment opener inside it. A comment with no close hides the rest of the text.
+FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")  # matched at a line start
+# A code span hides a comment opener inside it and is itself dropped. A comment with no close hides the rest of the text.
 SPAN_OR_COMMENT = re.compile(r"(?P<code>(`+)(?:(?!\2(?!`)).|\n)*?\2(?!`))|(?P<comment><!--.*?(?:-->|\Z))", re.DOTALL)
 
 
-def strip_fences(text: str) -> str:
-    """Drop each fenced block. A fence closes on the same character, at least as long; an unclosed one runs to the end."""
-    kept, marker = [], None
-    for line in text.splitlines():
-        found = FENCE.match(line)
-        if marker is None:
-            if found:
-                marker = found.group(1)
-            else:
-                kept.append(line)
-        elif found and found.group(1)[0] == marker[0] and len(found.group(1)) >= len(marker) \
-                and not line.strip().strip(marker[0]):
-            marker = None
-    return "\n".join(kept)
-
-
 def body_text(text: str) -> str:
-    """The text with fences and comments removed and whitespace collapsed."""
-    text = strip_fences(text)
-    text = SPAN_OR_COMMENT.sub(lambda m: m.group("code") or "", text)
-    return " ".join(text.split())
+    """The text with fences, comments and code spans removed and whitespace collapsed.
+
+    One pass in reading order, so each construct hides the others' markers: a fence marker inside a
+    comment opens no fence, and a comment opener inside a fence or a code span opens no comment.
+    A fence opens only at a line start and closes on the same character, at least as long, with
+    nothing else on the line; an unclosed fence runs to the end.
+    """
+    kept, pos, size = [], 0, len(text)
+    hit, searched = None, False
+    while pos < size:
+        end = text.find("\n", pos)
+        end = size if end < 0 else end
+        at_line_start = pos == 0 or text[pos - 1] == "\n"
+        found = FENCE.match(text, pos) if at_line_start else None
+        if found:
+            marker = found.group(1)
+            pos = end + 1
+            while pos < size:
+                end = text.find("\n", pos)
+                end = size if end < 0 else end
+                close = FENCE.match(text, pos)
+                pos = end + 1
+                if close and close.group(1)[0] == marker[0] and len(close.group(1)) >= len(marker) \
+                        and not text[close.start():end].strip().strip(marker[0]):
+                    break
+            continue
+        if not searched or (hit and hit.start() < pos):
+            hit, searched = SPAN_OR_COMMENT.search(text, pos), True
+        if hit and hit.start() < end:
+            kept.append(text[pos:hit.start()])
+            kept.append(" " if hit.group("code") else "")
+            pos = hit.end()
+        else:
+            kept.append(text[pos:end] + "\n")
+            pos = end + 1
+    return " ".join("".join(kept).split())
 
 
 def holds_line(path: str) -> bool:
