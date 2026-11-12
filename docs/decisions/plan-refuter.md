@@ -10,10 +10,10 @@ Nothing argued back against a Plan agent.
   refuter is a read-only agent on Opus.
 - Its brief holds the task brief the planner got and the plan the planner returned, word for word,
   and nothing else. It never holds the planner's reasoning or the orchestrator's view.
-- It tries to refute the plan's premises (`premise-format`) and to find a simpler route. It gives one
-  verdict: `holds`, `revise` or `refuted`.
+- Under rule `roles-plan-gets-refuter` (attack the premises, seek a simpler route; premises per
+  `premise-format`), it gives one verdict: `holds`, `revise` or `refuted`.
 - A clash, a `revise` or `refuted` verdict the orchestrator does not take, goes to the orchestrator first.
-  When the clash stakes a rule, money or an act that cannot be undone, it goes to the owner as a question
+  When the clash stakes a rule, money or an irreversible act (rule `roles-plan-gets-refuter`), it goes to the owner as a question
   (rule `questions-go-to-owner`).
 - The verdict goes on the plan record's `Refuter:` line. Lane step-done-needs-check, pending, adds that line.
   This record adds no second line.
@@ -23,7 +23,7 @@ Nothing argued back against a Plan agent.
 - Role file: `agents/refuter.md`.
 - Rule line: `roles-plan-gets-refuter` in `CLAUDE.md`. The role is also in the role list of
   `roles-one-role-per-agent` and the Opus list of `roles-sonnet-is-the-ceiling`.
-- Model: the refuter row of decision `agent-model-cap`, the model-per-role table.
+- Model: the refuter row of decision `agent-model-cap`, as rule `roles-model-per-role-table` sets it.
 - Guard: the Opus spawn guard (`hooks/guard.py`, the standing Opus roles) lets a refuter spawn on Opus.
   The role name has one home in code, `REFUTER_ROLE` in `hooks/guard_core.py`.
 - Check: pending in lane step-done-needs-check. It fails a plan record with no `Refuter:` line.
