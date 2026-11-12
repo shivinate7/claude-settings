@@ -153,7 +153,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   for the next Stop. An exception while marking, after a verdict, keeps the sent items judged.
   Cost: a Stop with no new item or no candidate makes no call. Otherwise it makes one call, one
   `git grep` and one rev-parse (unmeasured), and the prompt holds at most 20 new items. While items wait or the
-  model keeps failing, each Stop makes that one call again.
+  model keeps failing, each Stop makes at most that one call again.
   It lists the handoffs folder and reads one sidecar per inbox there. It writes the turn state, and
   on a hit the inbox. Capture adds one small file per session and no process (unmeasured). Risk kind: named
   incident. On 2026-11-01 17:44 CST the owner said "carousel" in a repo whose code said "wheel", and
