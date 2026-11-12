@@ -12,9 +12,10 @@ Owner: a lint rule either refuses or does not exist. A rule nobody can see is no
 STE018 (a gendered pronoun) is deleted outright. STE006 (a semicolon) is prose-only and has no mechanism. Neither raises a finding (owner ruling 2026-09-23).
 
 - A lookup rule (a fixed phrase, a fixed pronoun set, a missing conjunction, a word order) may refuse. A judgment rule (a style call that settles differently each time a reader looks) must not be an `error`.
-- Errors stay for two codes: STE011 (bloat) and STE013 (double negative). The lint never refuses on
+- Errors stay for two codes: STE011 (bloat) and STE013 (double negative). CI's STE lint fails the
+  CI step on these two codes on changed lines. The lint never refuses on
   word count: STE001 and the 30-word budget are dropped (owner, 2026-11-11 12:54 and 12:56 CST;
-  restart plan R37). `count_words` stays: `--stats` measures and never caps. CI's STE lint fails the CI step on them on changed lines. No hook runs the lint
+  restart plan R37). `count_words` stays: `--stats` measures and never caps. No hook runs the lint
   on a write (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`).
 - STE020 (label length) and STE021 (bad UI escape) are dropped (owner, 2026-10-22 10:10 CDT). The
   icon-and-label rule and design review carry label length. A UI escape is `ste-disable-line CODE: reason`

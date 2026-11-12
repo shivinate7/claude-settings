@@ -1216,8 +1216,8 @@ class _UICopy:
                                     prefix, masker))
 
     def expr(self, lineno: int, col: int):
-        """An {expression} in a text node. It counts as one word in --stats, and a
-        phrase rule never matches across it."""
+        """An {expression} in a text node. It is one placeholder, so a phrase rule
+        never matches across it."""
         if not self.code:
             self.run.append(Segment(lineno, NUL, "prose", "descriptive", col, Masker("")))
 
@@ -1696,8 +1696,8 @@ class Linter:
         findings: List[Finding] = []
         for paragraph in paragraphs:
             if paragraph.kind in ("heading", "table"):
-                # A heading counts as one word [8.7]. A table row is a label,
-                # not a sentence. Both still obey the word-level rules.
+                # A heading is a label, not a sentence. So is a table row.
+                # Both still obey the word-level rules.
                 for seg in paragraph.segments:
                     findings.extend(self.check_words(
                         Block([seg], paragraph.kind, paragraph.mode)))
