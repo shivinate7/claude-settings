@@ -4687,7 +4687,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # ------------------------------------------------------------------ a waiting-page item states the question form
 #
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
-# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
+# `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`, `question-challenged`). This check runs them only for a
 # write to this repo's waiting page.
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
@@ -6273,6 +6273,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "question-form", question_form.PAGE_REASONS["question-form"], matched)
         if rule == "question-departs":
             refuse(tool, "deny", "question-departs", question_form.PAGE_REASONS["question-departs"], matched)
+        if rule == "question-challenged":
+            refuse(tool, "deny", "question-challenged", question_form.PAGE_REASONS["question-challenged"], matched)
         if rule == "item-field-rendered":
             if str(matched).endswith(question_form.PAGE_ONLY_MARK):
                 refuse(tool, "deny", "item-field-rendered", question_form.PAGE_REASONS["item-field-page-only"], matched)
