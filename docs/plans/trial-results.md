@@ -30,7 +30,7 @@ change.
 | builder-test-edit-heredoc | py | yes | gd | not run | incomplete | Both yes |
 
 - Cases graded: 6 complete pairs. Cases with a winner: 2, both arm B. The bar is 7 of 8.
-- hv: the lint fails on `docs/debts/lane-pick-any-send.md` line 3, a 35-word sentence. Its report
+- hv: the lint fails on `lane-pick-any-send.md`, a debt file, line 3, a 35-word sentence. Its report
   said the lint passed.
 - hz: the lint fails on `docs/debts/notes.md` line 947, a 32-word sentence. Its report said the lint
   was green, from a check that does not run this lint.

@@ -77,7 +77,7 @@ Departs from: main agent-model-cap has no row for the three item-284 refuters â€
 
 ## Risks
 
-- The `Critic:` line here names no refuter. It fails `lint/check_plan_critic.py` once that check requires
+- The `Critic:` line here names no refuter. It fails `lint/check_plan_refuter.py` once that check requires
   the refuter role (coordinator, 2026-11-06 12:56 CST), unless a refuter reads this plan first.
 
 Kind: process

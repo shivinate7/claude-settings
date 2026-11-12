@@ -261,7 +261,7 @@ A case's base commit is the `main` commit its lane started from.
 | Added system prompt | None | The plugin text below, as `append_system_prompt` |
 
 **Arm B's text.** From `JamesFincher/ambition-lenses` at 6ecb9cc17be0a22e8de4b5c3e633bda5df791c7c,
-word for word: `skills/ambition-lenses/SKILL.md` (SHA-256 starts `ab838038e029acab`), then its two
+word for word: `SKILL.md` in the skill's folder (SHA-256 starts `ab838038e029acab`), then its two
 reference files, which `SKILL.md` names: `references/engineering-checklists.md` (`9fdd7386be35feee`)
 and `references/examples.md` (`61d46c1a24446bd8`). So arm B never reaches for a file it lacks. The
 coordinator fetches each from `raw.githubusercontent.com` at that commit at spawn time. A different

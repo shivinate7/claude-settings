@@ -66,7 +66,7 @@ record ids and no incident text.
 - Source notes:
   - The q_max header counts (STAYS 17, 33 rows) do not match its rows. This record uses the rows:
     STAYS 14, 30 rows.
-  - Degen row 8a names a new lint/check_paths.py. This record uses lane prose-path-check-whole-tree,
+  - Degen row 8a names a new `check_paths.py` in its lint folder. This record uses lane prose-path-check-whole-tree,
     which extends lint/stale_cites.py.
   - Joyous rows 2-5 are consumer calls. Joyous row 6 stays, not consumer: it is the child's own
     workflow form, and no cs check covers its concurrency or draft rules.
@@ -108,7 +108,7 @@ gloss here. The reader did not return the titles.
 | 11 | guard-opsec.sh. Stops a write that holds a live code-card literal. | D16, D24, D70 | 2026-08-03 two false refusals, narrowed | STAYS | Repo fact: codes/ printed card layout |
 | 12 | Permission rules Write(./fixtures/**) and Edit(./fixtures/**), and the pre-commit fixtures rule. Stops edits to fixtures. | no record | none | STAYS ? | Repo fact: fixtures/ holds the round-trip ground truth |
 | 13 | typecheck-hook.py. Runs tsc (the TypeScript compiler) after a .ts edit (PostToolUse). | none | 8 days of noise, 2026-08 | DELETE ? | cs actions/code-check runs tsc in CI |
-| 14 | decision-context.py. Shows advisory decisions for a file. | D17, D16 | D3 found by violating it | STAYS | Repo fact: docs/map.py governed_by |
+| 14 | decision-context.py. Shows advisory decisions for a file. | D17, D16 | D3 found by violating it | STAYS | Repo fact: `map.py` in its docs folder governed_by |
 | 15 | worktree-guard.sh, githooks/post-checkout, worktree-create.sh, worktree-provision.sh, session-teardown.sh. Stops a bare worktree and orphan supervisors. | D47, D257, D138 | 2026-08-29; 2026-09-06 | STAYS | Repo fact: .venv, harness/.cache, node_modules. Owner ruling: worktree setup per repo |
 | 16 | githooks/reference-transaction. Stops local main moving to a commit that is not origin's. | D42 | twice in one day | DUPLICATE | cs githooks/main-ref/reference-transaction |
 | 17 | githooks/pre-push main-push refusal. Stops a push to main. | D42 | 5 pushes | DUPLICATE ? | cs main-branch-protection requires one check. It does not refuse pushes. Owner question 4 |
@@ -136,13 +136,13 @@ gloss here. The reader did not return the titles.
 | 39 | docs-audit line anchors. Checks path:N cites. | D16 | none | PROMOTE | cs lint/stale_cites.py (rule git-cite-by-id: cite by id, not path). Lane prose-path-check-whole-tree |
 | 40 | docs-audit paths, allowlist, doc hygiene. Stops missing paths. | D16, D18 | none | PROMOTE | cs lint/stale_cites.py is --range only. Lane prose-path-check-whole-tree |
 | 41 | docs-audit make targets and shell substitution. Checks docs against the Makefile and record format. | D16, D135, D160 | silent degrade | STAYS | Repo fact: Makefile, readme_gen.py |
-| 42 | docs-audit repo map family. Checks map drift. | D17 | none | STAYS ? | docs/map.py against cs plain-english-map. Owner question 4 |
+| 42 | docs-audit repo map family. Checks map drift. | D17 | none | STAYS ? | `map.py` in its docs folder against cs plain-english-map. Owner question 4 |
 | 43 | docs-audit slug length, number growth, ids. Slug over 32 characters; number on a branch; ids. | D16 | none | DUPLICATE (ids: STAYS ?) | cs lint/check_record_slugs.py (slug length); actions/stamp (number on a branch) |
 | 44 | docs-audit rule enforcement. Hard rule with no enforcer. | D173 | 2026-09-12 | STAYS ? | cs lint/rule_audit.py reads only cs rule files (RULE_FILES). No check reads child rule files. Not placed |
 | 45 | docs-audit agent model override. Opus override (a prompt that lifts the Opus refusal) left in settings.local.json. | D178 | 2026-09-19 | DUPLICATE | cs hooks/config_watch.py |
 | 46 | docs-audit all-jobs-passed. Checks needs against jobs. | cs same-check-kinds | none | PROMOTE ? | cs actions/all-jobs-passed or compliance_probes. Lane all-jobs-passed-wiring |
 | 47 | docs-audit fixed sleeps. waitForTimeout in specs. | no record | none | PROMOTE ? | cs lint/ for Playwright repos. No lane yet |
-| 48 | docs-audit design rows and css-var-check and similar. Design floor drift. | D118 and others | D118 | STAYS | Repo fact: docs/DESIGN.md |
+| 48 | docs-audit design rows and css-var-check and similar. Design floor drift. | D118 and others | D118 | STAYS | Repo fact: `DESIGN.md` in its docs folder |
 | 49 | docs-audit code-invariant rows (about 30). Product rules. | D63 and others | mixed | STAYS | Repo fact: store/, pipeline/ |
 | 50 | docs-audit threshold, model-bytes and similar agreement rows. Two copies drift. | D173 | none dated | DELETE ? | False alarms unmeasured. A single source is cheaper |
 | 51 | Harness and 31 product selftests. | per D | n/a | STAYS | Product |
@@ -161,7 +161,7 @@ Rows that restated cs rules moved to the Duplicate removals section as prose cop
 |---|---|---|---|---|---|
 | 1 | test.yml all-jobs-passed and ci-done; ci-alarm.yml; test.yml ste-lint. Stops a bad rollup, a red nightly, and bad prose. | ci-skips-draft-prs and others | none | CONSUMER | cs actions/* |
 | 2 | test.yml zizmor; dependabot cooldown. Supply-chain checks. | ux-house-rules-govern | none | DUPLICATE ? | cs skills/ci-hygiene snippet s7. Each repo copies it. Lane zizmor-shared-action |
-| 3 | test.yml scope and native; .github/native-paths.regex. Stops the Mac runner on a diff with no native code. | native-ci-on-hosted-macos | none | STAYS | Repo fact: the native-paths regex. cs skills/ios-apps/templates/.github/workflows/ios.yml.tmpl has no such regex, and its scope skips docs-only diffs |
+| 3 | test.yml scope and native; `native-paths.regex`. Stops the Mac runner on a diff with no native code. | native-ci-on-hosted-macos | none | STAYS | Repo fact: the native-paths regex. cs skills/ios-apps/templates/.github/workflows/ios.yml.tmpl has no such regex, and its scope skips docs-only diffs |
 | 4 | test.yml workflow shape (draft if, concurrency, timeout). Stops hung or cancelled runs. | ci-skips-draft-prs | none | STAYS | cs lint/test_ci_job.py has no concurrency or draft-if check. ci-hygiene step 11 is prose. No shared check (not placed) |
 | 5 | test/ci-wiring.test.mjs asserts 0-8, 3c, 7. Stops a rollup missing a job, a missing draft guard, and pin drift. | ci-skips-draft-prs | cs action-pins-follow-sessions (the incident) | PROMOTE | lint/test_all_jobs_passed.py reads only the cs checks workflow. Generalize with lint/workflow_steps.py. Lane all-jobs-passed-wiring |
 | 6 | ci-wiring asserts 9-11, a-n, i1-i5. Milestone and stamp wiring. | milestone-runs-full-suite | none | STAYS ? | Repo workflows |
@@ -178,7 +178,7 @@ Rows that restated cs rules moved to the Duplicate removals section as prose cop
 | 17 | check-records.mjs claim 7: Holds while. Stops a decision that outlives its reason. | records-name-what-dates-them | public-ledger line outlived | PROMOTE ? | Owner question 3. Fact: 0 of 169 cs decisions carry the line |
 | 18 | test/screens.mjs claims 1, 8, 9: overflow, a11y, 44 px targets. | screens-checked-headless-in-ci | 3 unexplained reds (flake debts) | PROMOTE ? | bin/shoot checks blank and HTTP only. Owner question 3 |
 | 19 | test/screens.mjs other claims. Layout. | no-layout-shift-under-pointer | none | STAYS | App layout |
-| 20 | .claude/shoot.json. Config. | none | none | CONSUMER | Config, kept. cs bin/shoot |
+| 20 | `shoot.json`. Config. | none | none | CONSUMER | Config, kept. cs bin/shoot |
 | 21 | app.test.mjs:186 FORBIDDEN_WORDS, :216, :7922; SyncLineTests.swift:25. GitHub words in sync UI. | ruled-head-one-advisory-entrance | none | STAYS | Sync is Worker-only (the server-side script). Four lists differ and need one home in the repo |
 | 22 | AuditSkippingTabBarUITests.swift. Accessibility audit that skips too much. | audit-skips-measured-flags | caught 3 faults | STAYS ? | Could join the iOS template |
 | 23 | Product tests. | invariants | per test | STAYS | Product |
@@ -196,9 +196,9 @@ Labels such as DOC1 and ENV1 are the audit's row labels. The audit gives no file
 | # | Guard (file:symbol) | Verdict | cs home |
 |---|---|---|---|
 | 1 | .claude/hooks/reference-transaction (drifted copy) | DUPLICATE | githooks/main-ref/reference-transaction |
-| 2 | .claude/hooks/session_start_deps.py:install_main_ref_hook | DUPLICATE ? | githooks/main-ref/install.sh |
-| 3 | .claude/hooks/session_start_deps.py (deps, report) | STAYS | none |
-| 4 | .claude/hooks/stop_budget.py | STAYS | none |
+| 2 | `session_start_deps.py`:install_main_ref_hook | DUPLICATE ? | githooks/main-ref/install.sh |
+| 3 | `session_start_deps.py` (deps, report) | STAYS | none |
+| 4 | `stop_budget.py` | STAYS | none |
 | 5 | harness/janitor-tier.sh | STAYS ? | none |
 | 6 | .claude/skills/plain-english-map/ | DUPLICATE | skills/plain-english-map (owner question 2) |
 | 7 | harness/checks/plain-english-map.mjs:registerPlainEnglishMap | STAYS | none |
@@ -230,7 +230,7 @@ Labels such as DOC1 and ENV1 are the audit's row labels. The audit gives no file
 
 | # | Guard (file:symbol) | Verdict | cs home |
 |---|---|---|---|
-| 1 | .github/workflows/check.yml scope step | STAYS ? | none |
+| 1 | `check.yml` scope step | STAYS ? | none |
 | 2 | Check, links and nightly workflow jobs that call cs actions | CONSUMER | cs actions/* (pinned da8d8073) |
 | 3 | Makefile lint-py: ruff check (ruff, a Python linter) | DUPLICATE ? | lint/code_check_standard.json (ruff 0.17.3). This repo pins 0.17.0. Remove the local pin |
 | 3b | Makefile lint-py: ruff format check | STAYS ? | none |
@@ -249,10 +249,10 @@ Labels such as DOC1 and ENV1 are the audit's row labels. The audit gives no file
 | 14 | scripts/native_run_check.py, and its native-record job | STAYS ? | none |
 | 15 | tools/deploy-degen deploy steps | STAYS | none |
 | 16 | ops/lan-check.py | STAYS ? | none |
-| 17 | tools/waiting_export.py SCAN_RULES | PROMOTE ? | skills/waiting-page (no export scan in cs). Owner question 3 |
+| 17 | `waiting_export.py` SCAN_RULES | PROMOTE ? | skills/waiting-page (no export scan in cs). Owner question 3 |
 | 18 | scripts/comment_check.py (make comment-check) | PROMOTE | actions/code-check local entry point (lane comment-check-local-entry) |
-| 19 | tests/run.py main | PROMOTE ? | bin/verdict per-module refusal (lane empty-test-run-guard). cs bin/verdict covers whole runs only (lint/test_verdict.py:222) |
-| 20 | tests/run.py check_shards | STAYS ? | none |
+| 19 | `run.py` main | PROMOTE ? | bin/verdict per-module refusal (lane empty-test-run-guard). cs bin/verdict covers whole runs only (lint/test_verdict.py:222) |
+| 20 | `run.py` check_shards | STAYS ? | none |
 | 21 | contract, types and tokens checks | STAYS | none |
 | 22 | native ScanTests.swift | STAYS ? | none |
 | 23 | Product tests | STAYS | none |
@@ -265,20 +265,20 @@ Labels such as DOC1 and ENV1 are the audit's row labels. The audit gives no file
 | 2 | .github/workflows/checks.yml code-check job | CONSUMER | actions/code-check |
 | 3 | .github/workflows/checks.yml all-jobs-passed job; .github/stamp.json | CONSUMER | actions/all-jobs-passed |
 | 4 | .github/workflows/checks.yml ci-done job | CONSUMER | actions/ci-done-comment |
-| 5 | .github/workflows/links.yml readme-links | CONSUMER | actions/readme-links |
+| 5 | `links.yml` readme-links | CONSUMER | actions/readme-links |
 | 6 | .github/workflows/checks.yml workflow form (caps, pins, permissions, concurrency, draft skip) | STAYS | none (no shared check, see Not placed) |
 | 7 | docs/records.md index claim | STAYS ? | none (cs lint/hook_catalog.py builds cs's own index only) |
 | 8 | .github/workflows/checks.yml scope step (runs the base branch copy of the scope script) | PROMOTE ? | skills/ci-hygiene/snippets.md s.19. Not placed |
 | 9 | package.json scripts.test (empty-glob check) | PROMOTE ? | skills/ci-hygiene/snippets.md (lane empty-test-run-guard) |
-| 10 | tests/docs.test.mjs 1a | STAYS ? | none (cs lint/rule_audit.py reads cs rule files only) |
-| 11 | tests/docs.test.mjs 1b | PROMOTE ? | lint/stale_cites.py (lane prose-path-check-whole-tree) |
-| 12 | tests/docs.test.mjs 1c: Re-check when | STAYS ? | none |
-| 13 | .github/scripts/ci-scope.sh; tests/ci/scope.test.ts | STAYS | none |
-| 14 | tests/no-media.test.mjs | STAYS | none |
+| 10 | `docs.test.mjs` 1a | STAYS ? | none (cs lint/rule_audit.py reads cs rule files only) |
+| 11 | `docs.test.mjs` 1b | PROMOTE ? | lint/stale_cites.py (lane prose-path-check-whole-tree) |
+| 12 | `docs.test.mjs` 1c: Re-check when | STAYS ? | none |
+| 13 | .github/scripts/ci-scope.sh; `scope.test.ts` | STAYS | none |
+| 14 | `no-media.test.mjs` | STAYS | none |
 | 15 | private-data tests (file names withheld) | STAYS | none |
-| 16 | tests/redirects.test.mjs | STAYS | none |
+| 16 | `redirects.test.mjs` | STAYS | none |
 | 17 | two screen tests (names withheld) | STAYS | none |
-| 18 | tests/isolation.test.mjs | STAYS ? | none |
+| 18 | `isolation.test.mjs` | STAYS ? | none |
 | 19 | Product tests | STAYS | none |
 
 ## Promotion lanes
@@ -395,7 +395,7 @@ copy, so no CI gap.
   module that ran no test. Today bin/verdict covers whole runs only (lint/test_verdict.py:222).
   Tests: new case in lint/test_verdict.py.
 - **Done check:** a module with zero tests is a FAIL in lint/test_verdict.py. Red before, green after.
-- **Child removals:** degen row 19 (tests/run.py main); joyous row 9 (package.json test script,
+- **Child removals:** degen row 19 (`run.py` main); joyous row 9 (package.json test script,
   empty-glob check).
 - **Order:** the child pins the shared action or hook first, then removes its copy, so no CI gap.
 - **Note:** "?" because no incident was found.
