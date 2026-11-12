@@ -56,8 +56,14 @@ class Claims(unittest.TestCase):
     def test_picked_number_then_key(self):
         self.assertEqual(D.claims("Owner picked 447 a on the page"), [(447, "a")], "the 'picked N KEY on the page' form is not read")
 
-    def test_time_in_parentheses_is_no_claim(self):
-        self.assertEqual(D.claims("Owner picked 466 a (19:22 CST Nov 9)"), [(466, "a")], "a time or date in parentheses is read as a claim")
+    def test_noun_pick_on_page_item(self):
+        self.assertEqual(D.claims("Owner pick a on page item 369"), [(369, "a")], "the noun form 'owner pick KEY on page item N' is not read")
+
+    def test_noun_pick_number_then_key(self):
+        self.assertEqual(D.claims("owner pick 493 a"), [(493, "a")], "the noun form 'owner pick N KEY' is not read")
+
+    def test_time_in_parentheses_is_not_part_of_the_claim(self):
+        self.assertEqual(D.claims("Owner picked 466 a (19:22 CST Nov 9)"), [(466, "a")], "a time in parentheses after the claim changes or drops the claim")
 
     def test_quoted_label_between_key_and_item(self):
         self.assertEqual(D.claims('Owner picked b "refuter" on item 282'), [(282, "b")], "a quoted label between the key and the item breaks the claim")
@@ -73,6 +79,9 @@ class Claims(unittest.TestCase):
 
     def test_until_item_picks_is_no_claim(self):
         self.assertEqual(D.claims("Wait until item 282 picks the word"), [], "'until item N picks' is read as a claim")
+
+    def test_conditional_only_if_owner_picks_is_no_claim(self):
+        self.assertEqual(D.claims("Only if the owner picks b on page item 593"), [], "a conditional 'Only if the owner picks' is read as a claim")
 
 
 class Case(unittest.TestCase):
@@ -97,7 +106,10 @@ class Case(unittest.TestCase):
         put(self.answers, json.dumps(doc))
 
     def check(self):
-        return D.check(self.steps_dir, self.answers)
+        try:
+            return D.check(self.steps_dir, self.answers)
+        except D.Unknown as e:
+            self.fail("the check read the inputs as unknown: %s" % e)
 
     def cli(self):
         return subprocess.run([sys.executable, MODULE, "--steps", self.steps_dir, "--answers", self.answers],
@@ -149,9 +161,39 @@ class Findings(Case):
         f = self.only(self.check(), "a step with no note beside a wrong claim")
         self.assertEqual(f.slug, NOTE_SLUG, "the step with no note is flagged, or the wrong step is")
 
-    def test_empty_roadmap_and_empty_answers_are_clean(self):
+    def test_in_chat_claim_is_no_page_claim(self):
+        self.steps({NOTE_SLUG: "Owner picked a on item 593, in chat."})
         self.page({})
-        self.assertEqual(self.check(), [], "an empty roadmap with an empty answers file is flagged")
+        self.assertEqual(self.check(), [], "a claim marked 'in chat' is flagged as a page claim")
+
+    def test_in_chat_claim_beside_a_plain_claim_flags_only_the_plain_one(self):
+        self.steps({"step-chat": "Owner picked a on item 593, in chat.", NOTE_SLUG: "Owner picked b on item 594."})
+        self.page({})
+        f = self.only(self.check(), "an in-chat claim beside a plain claim")
+        self.assertEqual((f.kind, f.slug, f.item, f.key, f.page), ("unrecorded", NOTE_SLUG, 594, "b", None),
+                         "the plain claim beside an in-chat claim is not the one flagged")
+
+    def test_list_choice_that_holds_the_claimed_key_is_no_finding(self):
+        self.steps({NOTE_SLUG: "Owner picked a on item 300."})
+        self.page({"300": ["a", "b"]})
+        self.assertEqual(self.check(), [], "a list choice that holds the claimed key is flagged")
+
+    def test_list_choice_without_the_claimed_key_is_a_mismatch(self):
+        self.steps({NOTE_SLUG: "Owner picked c on item 300."})
+        self.page({"300": ["a", "b"]})
+        f = self.only(self.check(), "a list choice without the claimed key")
+        self.assertEqual((f.kind, f.slug, f.item, f.key, f.page), ("mismatch", NOTE_SLUG, 300, "c", ["a", "b"]),
+                         "a list choice without the claimed key is not a mismatch finding that holds the list")
+
+    def test_recorded_upper_case_choice_matches_the_claim(self):
+        self.steps({NOTE_SLUG: "Owner picked a on item 279."})
+        self.page({"279": "A"})
+        self.assertEqual(self.check(), [], "a recorded choice 'A' is flagged against the claim 'a'")
+
+    def test_upper_case_claim_matches_the_recorded_choice(self):
+        self.steps({NOTE_SLUG: "Owner picked A on item 279."})
+        self.page({"279": "a"})
+        self.assertEqual(self.check(), [], "a claim 'A' is flagged against the recorded choice 'a'")
 
     def test_full_roadmap_flags_only_the_one_wrong_pick(self):
         self.steps({"step-%03d" % n: "Owner picked a on item %d." % (300 + n) for n in range(150)})
@@ -187,6 +229,32 @@ class UnknownCauses(Case):
         put(self.answers, json.dumps({"read": READ, "answers": ["279"]}))
         self.assert_unknown("an answers value that is not an object")
 
+    def test_answer_choice_that_is_not_text_list_or_null_is_unknown(self):
+        self.steps({NOTE_SLUG: "Owner picked a on item 279."})
+        for choice in (5, True, {"a": 1}):
+            with self.subTest(choice=choice):
+                self.page({"279": choice})
+                self.assert_unknown("an answer choice %r" % (choice,))
+
+    def test_read_time_without_offset_is_unknown(self):
+        self.steps({NOTE_SLUG: "Owner picked a on item 279."})
+        self.page({"279": "a"}, read="2026-11-12T14:57:00")
+        self.assert_unknown("a read time with no UTC offset")
+
+    def test_steps_folder_with_no_step_json_is_unknown(self):
+        self.page({})
+        self.assert_unknown("a steps folder with no step json")
+
+    def test_step_note_that_is_not_text_is_unknown(self):
+        self.steps({NOTE_SLUG: ["Owner picked a on item 279."]})
+        self.page({"279": "a"})
+        self.assert_unknown("a step whose note is a list")
+
+    def test_step_file_that_is_not_an_object_is_unknown(self):
+        put(os.path.join(self.steps_dir, NOTE_SLUG + ".json"), json.dumps(["Owner picked a on item 279."]))
+        self.page({"279": "a"})
+        self.assert_unknown("a step file that is a JSON list")
+
 
 class Cli(Case):
     def test_clean_check_exits_0(self):
@@ -194,6 +262,13 @@ class Cli(Case):
         self.page({"279": "a"})
         r = self.cli()
         self.assertEqual(r.returncode, 0, "a clean check does not exit 0: %r" % (r.stdout + r.stderr))
+
+    def test_clean_check_prints_the_read_time(self):
+        self.steps({NOTE_SLUG: "Owner picked a on item 279."})
+        self.page({"279": "a"})
+        r = self.cli()
+        self.assertEqual(r.returncode, 0, "a clean check does not exit 0: %r" % (r.stdout + r.stderr))
+        self.assertIn(READ, r.stdout, "the clean-exit line does not print the answers file's read time: %r" % r.stdout)
 
     def test_mismatch_exits_1_and_names_the_step_claim_and_page_choice(self):
         self.steps({NOTE_SLUG: "Owner picked a on item 279."})
