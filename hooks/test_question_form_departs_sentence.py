@@ -7,9 +7,13 @@ the line splits at its first sentence end (". ", "! " or "? "). The first senten
 the change side. Both sides must be non-empty, the placeholder and no-change checks still apply, and the dash
 forms keep winning when a dash is present.
 
-Red on the base head: each sentence-form line below gives departs_hit a refusal, so each case that asserts a pass
-fails there. Green controls, beside them: the dash forms, the shapes that stay refused (no dash and no sentence
-end, an empty side, a no-change word, a placeholder) and a port item, which still needs `<file>:<symbol>` on main.
+Restatements in the sentence form ("main stays. It is fine.", "main. Same behaviour.") are refused on the chat box and
+a waiting-page decision, and one is refused on the Input Needed pick. An abbreviation ("e.g.", "i.e.") does not end a
+sentence.
+Green controls, beside them: a no-change word inside a clause that names a thing on main, the dash forms, the
+shapes that stay refused (no dash and no sentence end, an empty side, a no-change word, a placeholder) and a port
+item, which still needs `<file>:<symbol>` on main. The restatement and abbreviation cases fail on a build without
+the rule; the controls pass on both.
 
 Run it from the repository root:
 
@@ -17,9 +21,10 @@ Run it from the repository root:
 
 Each line is judged by question_form.departs_hit, the one predicate. Lines 1-3 also go through the chat box and a
 waiting-page decision (test_question_form.dp_chat and dp_page), and the Input Needed pick of line 1 goes through
-lint/report_guard.departs_problem. The fixtures are the shared ones: test_question_form's form lines and helpers,
-and test_report_guard's PickGuardTests.PICK_BARE. This file writes no temp files. The run folder that
-test_report_guard makes at import is removed at exit, as test_question_form does for its own.
+lint/report_guard.departs_problem. The abbreviation line and one restatement go through departs_problem too. The
+fixtures are the shared ones: test_question_form's form lines and helpers, and test_report_guard's
+PickGuardTests.PICK_BARE. This file writes no temp files. The run folder that test_report_guard makes at import is
+removed at exit, as test_question_form does for its own.
 """
 import atexit
 import os
@@ -84,11 +89,41 @@ REFUSED_SHAPES = [
 ]
 # A port item's line: "main, where X. Y." names no <file>:<symbol> on main, so port_item_hit still refuses it.
 PORT_SENTENCE = "Departs from: main, where the stamp check runs. The change: it moves to the lint job."
+# Restatements the sentence form must refuse. The rule that separates them from the controls below: the first
+# sentence is the main side, and a no-change word restates main when it is the whole main side (a bare subject and
+# the word, as in "main stays.") or when the change side says so ("Same behaviour.", "Behaves the same."). A word
+# inside a clause that names a thing on main ("where the guard stays on until a cull") describes main, and the
+# change side after it names the change, so that line passes.
+RESTATEMENTS = [
+    ("the main side is only 'main stays', and the change side says it is fine",
+     "Departs from: main stays. It is fine."),
+    ("the change side says same behaviour", "Departs from: main. Same behaviour."),
+    ("the change side says behaves the same", "Departs from: main. Behaves the same."),
+]
+# An abbreviation is not a sentence end: "e.g." and "i.e." sit inside the main side, and the line splits at the
+# sentence end after "in place" or "runs first".
+ABBREVIATION_LINES = [
+    ("an e.g. inside the main side",
+     "Departs from: main, e.g. the guard stays in place. The change: a lint step runs first."),
+    ("an i.e. inside the main side",
+     "Departs from: main, i.e. the guard stays in place. The change: a lint step runs first."),
+]
+# Controls a fix must keep passing. "stays" and "unchanged" sit in a clause about main, so they describe main.
+# "the same" is part of a real change, and no bare "the same" counts as a no-change phrase.
+MAIN_SIDE_CONTROLS = [
+    ("a stays inside a main clause, where the guard stays on until a cull",
+     "Departs from: main, where the guard stays on until a cull. The change: it is removed."),
+    ("an unchanged inside a main clause, where the guard is unchanged",
+     "Departs from: main, where the guard is unchanged. The change: it is removed."),
+    ("a same inside a real change, where the cap applies to Sonnet",
+     "Departs from: main, where the cap is 5. The change: the same cap applies to Sonnet."),
+]
 
 
 def sentence_lines():
     """Every line that must pass after the split, with its name."""
-    return AUDIT_LINES + END_MARKS + [("the full-size line", FULL_SIZE)]
+    return (AUDIT_LINES + END_MARKS + [("the full-size line", FULL_SIZE)]
+            + ABBREVIATION_LINES + MAIN_SIDE_CONTROLS)
 
 
 def case_sentence_lines_pass_the_predicate():
@@ -107,8 +142,9 @@ def case_audit_lines_pass_on_the_chat_box_and_page():
         tqf.dp_page("%s passes on a waiting-page decision" % name, body, None)
 
 
-def case_report_pick_with_audit_line_passes():
-    line = AUDIT_LINES[0][1]
+def report_pick_problem(line):
+    """departs_problem on an Input Needed pick whose one Departs from line is `line`. The scope is checked first:
+    both files must be this checkout's, and the item must offer a pick with that one line in its section."""
     text = trg.PickGuardTests.PICK_BARE.replace("> **Next** wait", "> " + line + "\n> **Next** wait")
     check("report scope: lint/report_guard.py is this checkout's",
           os.path.realpath(RG.__file__).startswith(os.path.realpath(LINT) + os.sep), "loaded %r" % (RG.__file__,))
@@ -118,9 +154,40 @@ def case_report_pick_with_audit_line_passes():
     check("report scope: the Input Needed item offers a pick", RG.offers_a_pick(text), "no pick in the item")
     found = question_form.DEPARTS_LINE.findall(RG.input_needed_section(text))
     check("report scope: the Input Needed item holds one Departs from line", len(found) == 1, "found %r" % (found,))
-    miss = RG.departs_problem(text)
+    return RG.departs_problem(text)
+
+
+def case_report_pick_with_audit_line_passes():
+    miss = report_pick_problem(AUDIT_LINES[0][1])
     check("report: an Input Needed pick with the audit line 1 passes departs_problem", miss == "",
           "departs_problem refused it: %r" % (miss,))
+
+
+def case_report_pick_with_abbreviation_line_passes():
+    for name, body in ABBREVIATION_LINES:
+        miss = report_pick_problem(body)
+        check("report: an Input Needed pick with %s passes departs_problem" % name, miss == "",
+              "departs_problem refused it: %r" % (miss,))
+
+
+def case_report_pick_with_restatement_is_refused():
+    name, body = RESTATEMENTS[0]
+    miss = report_pick_problem(body)
+    check("report: an Input Needed pick with %s is refused by departs_problem" % name, bool(miss),
+          "departs_problem passed it")
+
+
+def case_restatements_are_refused_on_chat_and_page():
+    for name, body in RESTATEMENTS:
+        refused_directly("refused, %s" % name, body)
+        tqf.dp_chat("refused, %s, on the chat box" % name, body, DEPARTS_REFUSAL)
+        tqf.dp_page("refused, %s, on a waiting-page decision" % name, body, DEPARTS_REFUSAL)
+
+
+def case_abbreviation_and_control_lines_pass_on_chat_and_page():
+    for name, body in ABBREVIATION_LINES + MAIN_SIDE_CONTROLS:
+        tqf.dp_chat("%s passes on the chat box" % name, body, None)
+        tqf.dp_page("%s passes on a waiting-page decision" % name, body, None)
 
 
 def refused_directly(name, body):
@@ -160,7 +227,10 @@ def case_port_sentence_form_still_refused():
 def main():
     for case in (case_sentence_lines_pass_the_predicate, case_audit_lines_pass_on_the_chat_box_and_page,
                  case_report_pick_with_audit_line_passes, case_dash_forms_with_sentence_ends_pass,
-                 case_refused_shapes_stay_refused, case_port_sentence_form_still_refused):
+                 case_refused_shapes_stay_refused, case_port_sentence_form_still_refused,
+                 case_restatements_are_refused_on_chat_and_page,
+                 case_abbreviation_and_control_lines_pass_on_chat_and_page,
+                 case_report_pick_with_abbreviation_line_passes, case_report_pick_with_restatement_is_refused):
         try:
             case()
         except Exception as exc:
