@@ -4,7 +4,7 @@
 
 Question: where does a Stop refusal's remedy live when the owner sees the refusal in chat? Ruling: coordinator, 2026-11-07 12:26 CST, option 1a, answering owner ask `ask-mw6pwif5wv` (a past-ruling refusal that reached the owner).
 
-- Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line: one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
+- Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line, except a notes fix (R14): one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
 - The steps live under that check's heading in `## Steps per check`.
 - No verdict changes. Only the text moves.
 - Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. A Stop refusal shows only the miss that `departs_hit` names.
@@ -174,8 +174,8 @@ Text: inline, in the main check.
 
 ## Shared tails
 
-- Every refusal opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
-- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction. A fix to a session's own notes posts no correction at all (see the ruling). Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
+- Every refusal, except a notes fix (R14), opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
+- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction. A fix to a session's own notes posts no correction at all (not built; step `notes-fix-no-owner-line`; see the ruling). Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
 - The system message notes (`NO_PAGE_NOTE`, the hand-off guard's UNKNOWN lines and the route flags) and the stderr lines are not refusals. They never stop a reply, and they fall outside this record.
 
 Kind: process
