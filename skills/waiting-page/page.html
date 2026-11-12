@@ -720,6 +720,11 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rhead { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 6px 0 0; border: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
 .rhead .ct { font: 600 13px var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; }
 .rhead .chev { width: 1em; color: var(--muted); font-size: 15px; }
+/* The closed Answered head's hint sits inside the button, so the whole line is one press target. On a narrow screen it moves whole to a second row, never split. */
+.rhead .rhint { font: 400 14px/1.35 var(--body); color: var(--muted); white-space: nowrap; }
+.tier.sunk .rhead { flex-wrap: wrap; row-gap: 0; }
+/* A reply that came after load, on the closed head: the page's one New reply mark, after the count. */
+.rhead .newmark { font: 600 14px/1 var(--body); }
 .rhead[aria-expanded="false"] .chev::before { content: "\25B8"; }
 .rhead[aria-expanded="true"] .chev::before { content: "\25BE"; }
 .rsub { margin: 0; font-size: 14px; color: var(--muted); }
@@ -1019,7 +1024,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: true, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null, lines: [], lineOpen: {}, mark: {}, hidItems: null, showReadItems: false };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: false, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, replySeen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null, lines: [], lineOpen: {}, mark: {}, hidItems: null, showReadItems: false };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -1202,7 +1207,7 @@ const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newRep
 // and a Send on the open page re-sorts no tier. A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
-// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it.
+// feed.receipts records that the receipts arrived (a test waits on it); freezeSunk waits for it before it decides whether the Answered section opens.
 const feed = { items: false, answers: false, receipts: false, all: [] };
 function freezeSeen() {
   if (state.seen || !feed.items || !feed.answers) return;
@@ -1222,13 +1227,24 @@ const isArrival = (it) => !!state.known && !mates(it).every((x) => state.known.h
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
 function freezeSunk() {
-  if (state.sunk || !feed.items || !feed.answers) return;
-  state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
+  if (!state.sunk && feed.items && feed.answers) state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
+  // The open-or-closed decision waits for the receipts: whether a routed item is a line behind Show read items (itemAway) reads its filing receipt.
+  if (state.replySeen || !state.sunk || !feed.receipts) return;
+  // The Answered section opens on load only with a New reply in it that the owner has not already read, decided here once and never read live: a reply that lands later, or a Send that sinks a card, opens nothing.
+  // A press on the head before this runs keeps the section open.
+  state.answeredOpen = state.answeredOpen || state.items.some((it) => isSunk(it) && newReply(it) && !itemAway(it)) || state.lines.some((it) => newReply(it) && !itemAway(it));
+  // Each item's reply as the owner has seen it: every item's at load (an open card shows its reply), then each card's when the open section shows it
+  // or a Send sinks it. Kept by the reply's time, so a second reply is unseen again.
+  state.replySeen = Object.fromEntries([...state.items, ...state.lines].map((it) => [it.id, it.replied]));
 }
+// A New reply the owner has not seen: one that landed after load, on a card the open Answered section has not shown since. Only the closed head reads it.
+const unseenReply = (it) => newReply(it) && !!state.replySeen && state.replySeen[it.id] !== it.replied;
+const seeReply = (it) => { if (state.replySeen) state.replySeen[it.id] = it.replied; };
 // A card sent on this visit joins the set under "sink", and the write records it, so Undo leaves a card that was already sunk where it is.
+// The owner sent it with its reply in view, so the reply is seen.
 function sinkSent(it) {
   if (SENT_MOVE !== "sink" || !state.sunk || it.park || isRuling(it) || state.sunk.has(it.id)) return false;
-  state.sunk.add(it.id); return true;
+  state.sunk.add(it.id); seeReply(it); return true;
 }
 const unsinkSent = (w) => { if (w.sank && state.sunk) state.sunk.delete(w.it.id); };
 function sorted() {
@@ -1862,6 +1878,22 @@ function releaseSent() {
 // the anchor, so the next card takes the sent card's top. `ids` are the cards that move. The returned function carries `tops`: each moving card's viewport top now, kept by a Send.
 // `back` (Undo) is that map from the Send. A card that left from above the band comes back to its old top: the first such card in page order is the anchor.
 // It holds nothing under SENT_MOVE "stay" (no card moves), and not while the rail is in view above the list: the owner sees the rail change, so the list below it follows.
+// A Send can shrink the page (the sent card leaves the open list and the Answered section starts closed), and the browser then clamps the scroll up the page.
+// A sent card that starts in the band has cards above it that must hold still, so a pad at the page's end keeps the old scroll reachable and the render puts it back.
+// The pad is never more than a third of the screen: past that the page shrinks as the browser makes it, so the screen is never mostly blank.
+// While it shows, the scroll sits at the page's end. Each scroll fits it to the new scroll, after the scroll has moved, so a scroll up gives the blank back step for step.
+// Nothing shrinks it before a scroll: at the page's end that would pull the scroll up, against a scroll down. A scroll down there moves nothing, as at any page's end.
+// A sent card that starts above the band needs no pad: the first thing after it that is in view is the anchor, and the scroll follows it.
+const viewPad = document.body.appendChild(Object.assign(document.createElement("div"), { id: "viewpad", ariaHidden: "true" }));
+const padNow = () => parseFloat(viewPad.style.height) || 0;
+const natH = () => document.documentElement.scrollHeight - padNow();
+const fitPad = (y) => { viewPad.style.height = Math.max(0, Math.ceil(y + innerHeight - natH())) + "px"; };
+function keepScroll(y) {
+  if (Math.abs(scrollY - y) <= 0.5 || y + innerHeight - natH() > innerHeight / 3) return;
+  fitPad(y);
+  window.scrollTo(scrollX, y);
+}
+addEventListener("scroll", () => { if (padNow()) fitPad(scrollY); }, { passive: true });
 function holdView(ids, back) {
   const tops = new Map(), none = Object.assign(() => {}, { tops });
   if (SENT_MOVE !== "sink") return none;
@@ -1871,15 +1903,21 @@ function holdView(ids, back) {
   movers.forEach((c) => tops.set(c.id.slice(5), c.getBoundingClientRect().top));
   const returns = back ? ids.filter((id) => back.has(id) && back.get(id) < band0) : [];
   let key = null, a0 = $("list").getBoundingClientRect().top;
-  const first = movers[0];
-  if (!returns.length && first && !first.closest("#tier-answered") && first.getBoundingClientRect().top < band0) {
-    const c = cardsNow.find((x) => { const r = x.getBoundingClientRect(); return !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING && r.bottom > band0 && r.top < innerHeight; });
-    if (c) { key = c.id.slice(5); a0 = c.getBoundingClientRect().top; }
+  const first = movers[0], plain = !returns.length && first && !first.closest("#tier-answered");
+  const pad = plain && first.getBoundingClientRect().top >= band0;
+  if (plain && !pad && first.getBoundingClientRect().top < band0) {
+    // A card, the Answered section or the Ask box: whatever comes first after the moving card and shows on screen.
+    const after = [...cardsNow, $("tier-answered"), $("asks")].filter((x) => x && !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .sort((x, y) => (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+      .find((x) => { const r = x.getBoundingClientRect(); return r.bottom > band0 && r.top < innerHeight; });
+    if (after) { key = after.id; a0 = after.getBoundingClientRect().top; }
   }
   if (!returns.length && !key && rail.bottom <= a0 + 1 && rail.bottom > band0) return none;
+  const y0 = scrollY;
   return Object.assign(() => {
+    if (pad) keepScroll(y0);
     const ret = returns.map(el).filter(Boolean).sort((x, y) => x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)[0];
-    const a = ret || (key && el(key)) || $("list"), d = a.getBoundingClientRect().top - (ret ? back.get(ret.id.slice(5)) : a0);
+    const a = ret || (key && document.getElementById(key)) || $("list"), d = a.getBoundingClientRect().top - (ret ? back.get(ret.id.slice(5)) : a0);
     if (Math.abs(d) > 0.5) window.scrollBy(0, d);
   }, { tops });
 }
@@ -1972,18 +2010,25 @@ function bundleEl(slug, sunk) {
   return b;
 }
 // A section after the open tiers: a disclosure head (glyph, name, count), a line of its own, and a list. One builder for the rulings and the Answered
-// section. o: { cls, glyph, name, count, open, toggle, sub, listId, btnId, body }. Each draws only with items in it.
+// section. o: { cls, glyph, name, count, open, toggle, sub, subHidden, hint, listId, btnId, body }. Each draws only with items in it.
 const sectionEls = {};
 function sectionEl(k, o) {
   let e = sectionEls[k];
   if (!e) {
     const ct = h("span", { class: "ct" }), sub = h("p", { class: "rsub" }), list = h("div", { class: "rlist", id: o.listId });
     const head = h("button", { class: "rhead", type: "button", id: o.btnId || null, "aria-controls": o.listId, onclick: o.toggle }, h("span", { class: "chev", "aria-hidden": "true" }), glyph(o.glyph), o.name, ct);
-    e = sectionEls[k] = { ct, sub, list, head, el: h("section", { class: "tier " + o.cls, id: "tier-" + k, "aria-labelledby": "th-" + k }, h("header", {}, h("h2", { id: "th-" + k }, head), sub), list) };
+    e = sectionEls[k] = { ct, sub, list, head, hint: h("span", { class: "rhint" }), hintSr: h("span", { class: "sr" }, " answer"), el: h("section", { class: "tier " + o.cls, id: "tier-" + k, "aria-labelledby": "th-" + k }, h("header", {}, h("h2", { id: "th-" + k }, head), sub), list) };
   }
   e.ct.textContent = String(o.count);
   e.head.setAttribute("aria-expanded", String(o.open));
   e.sub.textContent = o.sub;
+  e.sub.hidden = !!o.subHidden;
+  // A mark after the count (the closed Answered head's New reply); rebuilt each render, so it goes when its reason does.
+  if (e.mark) e.mark.remove();
+  e.mark = o.mark || null;
+  if (e.mark) e.ct.after(e.mark);
+  // The hint is in the head only while it has words; the hidden word names what "one" is for a screen reader.
+  if (o.hint) { e.hint.textContent = o.hint; if (!e.hint.isConnected) e.head.append(e.hint, e.hintSr); } else { e.hint.remove(); e.hintSr.remove(); }
   e.list.hidden = !o.open;
   reconcile(e.list, o.body);
   return e.el;
@@ -2077,17 +2122,23 @@ function readItemsEls(read) {
 // The Answered section's order, newest answer first; a closed line with no answer sits at its close time. The rail's Answered row reads the same order.
 const answeredAt = (it) => (it.status === "closed" ? Date.parse((lastOf(it) || {}).at) || closedAt(it) || 0 : Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0)));
 const answeredOrder = (list) => list.slice().sort((a, b) => answeredAt(b) - answeredAt(a) || a.n - b.n);
-// The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Open on load, each card folded.
+// The items answered before this visit, and under SENT_MOVE "sink" those sent on it (isSunk), newest first. Closed on load unless a card or line in it has a New reply (freezeSunk), each card folded.
 // lines: the closed items that stay as one line, and read: the lines behind Show N read items.
 function answeredEl(items, place, lines, read) {
-  const on = state.answeredOpen, all = [...items, ...lines], at = answeredAt;
-  const stamps = all.map(at).filter((t) => t > 0), body = [], done = new Set();
+  const on = state.answeredOpen, all = [...items, ...lines], body = [], done = new Set();
   answeredOrder(all).forEach((it) => { if (it.status === "closed") body.push(lineEl(it, false)); else if (!done.has(it.id)) place(items, it, done, body); });
   if (!all.length && read.length) body.push(h("p", { class: "allread" }, "All read."));
   body.push(...readItemsEls(read));
-  return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: all.filter((it) => !itemDropped(it)).length, open: on, listId: "ab", btnId: "b-answered", body,
+  // A reply that lands on a card or line inside the closed section after load shows on its head and opens nothing; once the open section shows it, the head drops it.
+  // The words show once on a screen (ux-label-once): the head carries them unless an open tier's card has a New reply.
+  if (on) all.forEach(seeReply);
+  const by = sorted(), mark = on || !all.some(unseenReply) ? null
+    : TIERS.some((T) => by[T.k].some(newReply)) ? h("span", { class: "newmark dot", title: REPLY_WORDS.join("") }, h("span", { class: "sr" }, REPLY_WORDS.join("")))
+    : h("span", { class: "newmark" }, REPLY_WORDS[0], h("span", { class: "sr" }, " inside," + REPLY_WORDS[1]));
+  return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: all.filter((it) => !itemDropped(it)).length, open: on, listId: "ab", btnId: "b-answered", body, mark,
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
-    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + (on ? " A line you mark read stays as Marked read until the next load." : stamps.length ? " Newest " + fmt(new Date(Math.max(...stamps)).toISOString()) + "." : "") });
+    subHidden: !on, hint: on ? "" : "Show to change one",
+    sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + " A line you mark read stays as Marked read until the next load." });
 }
 // The closed lines that show in the Answered section: not read at load. The rail's Answered row reads the same list, so its count is the section's.
 const shownLines = () => state.lines.filter((it) => !itemAway(it));
@@ -3188,7 +3239,7 @@ render(); renderAsks();
   }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
-  db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; render(); }, () => {});
+  db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; freezeSunk(); render(); }, () => {});
   db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => {});
   db.collection("asks").onSnapshot((s) => { askState.map = map(s); askState.bad = false; renderAsks(); }, () => { askState.bad = true; renderAsks(); });
 })();

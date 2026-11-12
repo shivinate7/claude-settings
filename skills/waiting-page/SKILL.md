@@ -85,7 +85,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     it: a receipt that arrives later moves no card until a reload. The page has one switch, `SENT_MOVE`. With "sink" (the
     default) a Send moves each sent card to this section, folded, and the next open card takes its place; Undo puts it
     back in its tier, open. A group moves whole. With "stay" a sent card keeps its place until reload. The sub-head reads
-    "Your sent answers, newest first." under "sink". The section is open on load, each card folded
+    "Your sent answers, newest first." under "sink". The section is closed on load, with its head, count and the hint "Show to change one". It opens on load only when a card or line shown in it has a New reply. A line or item behind Show read items opens nothing. A press on the head, the rail row or a number chip opens it. A Send that sinks a card does not. A reply that lands after load on a card or line in the closed section opens nothing. The closed head carries the mark "New reply" until the open section shows it. A reply present at load, or on a card the owner sent, puts no mark on the head. Each card is folded
     to its top row, title and answer line; one control holds the owner's note, last answer and reply. A card with a
     new reply (see `replied`) opens at load and carries the mark "New reply", in place. A Change keeps
     the card in the section, open, until reload, and a reply that arrives opens a card in place. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
