@@ -50,7 +50,7 @@ FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unsta
             "recovered", "departs_unlanded", "departs_landed", "answered", "mistake", "hand_off", "refusal",
             "lane", "pick_known_writer", "rewrite_stamp", "triage_hold", "unvetted_unreadable",
             "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered",
-            "recovered_no_source", "past_ruling_order", "refusal_two_tools")
+            "recovered_no_source", "past_ruling_order", "refusal_two_tools", "page_form")
 FACT_SENTENCES = ("Pick guard: the page writer is session session_writer1 (decision guard-remedy-not-to-owner).",
                   "Names of the checks sit in the record. Keys are one option set per question.",
                   "The check reads the transcript, and a Done line holds one kind.")
@@ -288,6 +288,9 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
             # Pick with a known writer: the writer read names it, and nothing is sent to it.
             "pick_known_writer": lambda: case([trg.human("decide"), *self.writer_read(self.WRITER),
                                                trg.assistant_text(trg.RELAY)], "pick", bare),
+            # On the page: the question went to the writer, so the reply holds only the page form. The relay allows it.
+            "page_form": lambda: case([trg.human("decide"), *self.sent_to_writer(), trg.assistant_text(trg.RELAY)],
+                                      "pick", bare, env={"CJ_ANSWER": tcj.ALLOW}),
             # Rewrite stamp: the record was last committed before the ruling the rewrite sentence names.
             "rewrite_stamp": lambda: self.rewrite_stamp_case(),
             "triage_hold": lambda: case([trg.human("wake"), *trs.own_record(trs.TRIAGE_ID, ["cs-build:triage"]),
