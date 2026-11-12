@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# The one wake for a CI alarm on a push to main. It posts one comment on the merged pull request that
-# produced commit SHA, which wakes the batch runner that watches that pull request. It opens no issue.
+# The one wake for a CI alarm on a push to main. It posts one comment on the earliest merged pull request
+# into main that holds commit SHA, which wakes the batch runner that watches that pull request. It opens no issue.
 # Needs REPO (owner/name), SHA, KEY (one alarm, such as a run id), TEXT (the comment text) and GH_TOKEN.
 # The hidden marker `<!-- main-alarm:KEY -->` in the comment is the memory: a pull request that already
 # holds it gets no second comment. WAKE_DRY=1 (the test seam) prints the body and posts nothing.
-# A commit with no merged pull request has nobody to wake: the message goes to GITHUB_STEP_SUMMARY when
+# A commit with no pull request merged into main has nobody to wake: the message goes to GITHUB_STEP_SUMMARY when
 # set, else stderr, and the exit is non-zero so the alarm job ends red.
 set -uo pipefail
 
@@ -23,9 +23,10 @@ fail() {
   exit 1
 }
 
-# The earliest merge is the pull request that put the commit on main; a later one only carried it on.
+# Only a pull request into main counts: one into another branch can hold the commit without putting it on
+# main. Of those, the earliest merge put the commit on main; a later one only carried it on.
 pr="$(gh api "repos/$REPO/commits/$SHA/pulls" \
-  --jq '[.[] | select(.merged_at != null)] | sort_by(.merged_at) | .[0].number // empty')" \
+  --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | sort_by(.merged_at) | .[0].number // empty')" \
   || fail "CI alarm $KEY: the read of the pull requests for commit ${SHA:0:7} failed, so nobody was woken."
 [ -n "$pr" ] || fail "CI alarm $KEY: commit ${SHA:0:7} has no merged pull request, so there is nobody to wake and no issue is opened. Text: $TEXT"
 
