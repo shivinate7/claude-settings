@@ -20,7 +20,7 @@ base names it, and an uncommitted removal that a tracked doc cites fails bin/ste
 Also asserts a push whose HEAD is a root commit exits 0 with an unknown stale-cites line, a Markdown file that is untracked and cites
 an uncommitted removal is named unknown and never PASS, a held .git/index.lock prints one ste-lint unknown line that names the lock,
 a name with a space is linted, and a run with no merge base writes unknown to the step summary, not "No markdown changed".
-Also asserts a stat-only change (a touched tracked file, the same bytes) still fails on a committed STE001, and an untracked
+Also asserts a stat-only change (a touched tracked file, the same bytes) still fails on a committed STE013, and an untracked
 markdown file that .ste-lint-exclude matches is not named unknown. A dirty tree whose snapshot fails is named unknown, never
 PASS, and a clean tree with a held index lock lints as main does, touched or not.
 Also asserts a root push's missing HEAD~1 is named by an ste-lint unknown line, not "no markdown changed"; a .ste-lint-exclude
@@ -49,7 +49,8 @@ script = "\n".join(re.sub(r"^ {8}", "", l) for l in block.split("\n")).replace("
 # Windows: a bare "bash" can resolve to WSL's System32 copy, which cannot run this script.
 BASH = "/bin/bash" if os.path.exists("/bin/bash") else (
     r"C:\Program Files\Git\bin\bash.exe" if os.path.exists(r"C:\Program Files\Git\bin\bash.exe") else "bash")
-LONG = " ".join(["word"] * 40) + " end."
+# The fixture's one finding: STE013, a double negative with no autofix. Length is no finding (no sentence budget).
+BAD = "This step is not unsafe."
 BASE_FILES = {"a.md": "# T\n\nShort line.\n"}
 STEP_ENV = ("EVENT_NAME", "BASE_REF", "DEFAULT_BRANCH", "REF_NAME", "SCOPE", "FAIL", "PATHS_GLOB",
             "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE", "TREE_CITES", PIN_NOTE_ENV)
@@ -89,7 +90,7 @@ def write(work, name, content, mode="w"):
 
 
 def default_change(work):
-    write(work, "a.md", "\n" + LONG + "\n", "a")
+    write(work, "a.md", "\n" + BAD + "\n", "a")
     git(work, "commit", "-qam", "long")
 
 
@@ -202,11 +203,11 @@ def check(name, ok, out):
 
 rc, out = run("changed")
 check("changed: exit 1", rc == 1, out)
-check("changed: log line", "a.md:5: STE001 " in out, out)
-check("changed: ::error annotation", "::error file=a.md,line=5::STE001 " in out, out)
+check("changed: log line", "a.md:5: STE013 " in out, out)
+check("changed: ::error annotation", "::error file=a.md,line=5::STE013 " in out, out)
 check("changed: verdict", "ste-lint: FAIL, 1 error(s)" in out, out)
 rc, out = run("changed", "false")
-check("fail=false: exit 0, PASS verdict, finding logged", rc == 0 and "ste-lint: PASS" in out and "a.md:5: STE001" in out, out)
+check("fail=false: exit 0, PASS verdict, finding logged", rc == 0 and "ste-lint: PASS" in out and "a.md:5: STE013" in out, out)
 
 
 # A contraction, a Latin abbreviation, a nominalization, a phrasal verb, a condition after its instruction
@@ -224,10 +225,10 @@ check("advisory only: exit 0, PASS verdict, no error counted", rc == 0 and "ste-
 check("advisory only: the finding is logged and annotated as a warning, never an error",
       "a.md:5: STE008 " in out and "::warning file=a.md,line=5::STE008 " in out and "::error" not in out, out)
 rc, out = run("all")
-check("all: exit 0, finding logged", rc == 0 and "a.md:5: STE001" in out and "::error file=a.md,line=5::" in out, out)
+check("all: exit 0, finding logged", rc == 0 and "a.md:5: STE013" in out and "::error file=a.md,line=5::" in out, out)
 
 
-# This step fails on STE001, STE011 and STE013 on changed lines. STE001 is above.
+# This step fails on STE011 and STE013 on changed lines. The fixture above is STE013.
 for code, line in (("STE011", "In conclusion, the plan works."), ("STE013", "This step is not unsafe.")):
     def kept_change(work, line=line):
         write(work, "a.md", "\n" + line + "\n", "a")
@@ -251,23 +252,23 @@ check("changed UI file: a five-word button is not a finding", "STE020" not in ou
 
 # Fail only on the lines the diff added: a long line already on main does not fail (the job summary lists it).
 def touch_elsewhere(work):
-    write(work, "a.md", "# T\n\n" + LONG + "\n\nAnother short line.\n")
+    write(work, "a.md", "# T\n\n" + BAD + "\n\nAnother short line.\n")
     git(work, "commit", "-qam", "touch")
 
 
-rc, out = run("changed", base={"a.md": "# T\n\n" + LONG + "\n"}, change=touch_elsewhere)
+rc, out = run("changed", base={"a.md": "# T\n\n" + BAD + "\n"}, change=touch_elsewhere)
 check("unchanged line: a finding there never fails the check",
-      rc == 0 and "ste-lint: PASS, 0 error(s)" in out and "STE001" not in out, out)
+      rc == 0 and "ste-lint: PASS, 0 error(s)" in out and "STE013" not in out, out)
 
 
 # A one-line hunk prints "+3" with no ",1" count. It must still count as one added line.
 def replace_line(work):
-    write(work, "a.md", "# T\n\n" + LONG + "\n")
+    write(work, "a.md", "# T\n\n" + BAD + "\n")
     git(work, "commit", "-qam", "replace")
 
 
 rc, out = run("changed", change=replace_line)
-check("one-line hunk with no count: linted", rc == 1 and "a.md:3: STE001" in out, out)
+check("one-line hunk with no count: linted", rc == 1 and "a.md:3: STE013" in out, out)
 
 
 # A pull request diffs origin/base...HEAD, wider than the last commit: an earlier commit's
@@ -279,24 +280,24 @@ def two_commits(work):
 
 
 rc, out = run("changed", change=two_commits)
-check("pull request: an earlier commit of the branch is linted", rc == 1 and "a.md:5: STE001" in out, out)
+check("pull request: an earlier commit of the branch is linted", rc == 1 and "a.md:5: STE013" in out, out)
 # A push to the default branch has no other side: HEAD~1..HEAD only, so the earlier commit is skipped.
 rc, out = run("changed", change=two_commits, on_main=True, BASE_REF="", REF_NAME="main", EVENT_NAME="push")
-check("push to default branch: only the last commit is linted", rc == 0 and "STE001" not in out, out)
+check("push to default branch: only the last commit is linted", rc == 0 and "STE013" not in out, out)
 
 
 # The action's `exclude` input keeps working (a pinned caller passes it): comma- or newline-separated
 # pathspecs, each dropping its file, added to the target's .ste-lint-exclude patterns.
 def three_files(work):
     write(work, "a.md", "# A\n\nShort line.\n")
-    write(work, "b.md", "# B\n\n" + LONG + "\n")
-    write(work, "c.md", "# C\n\n" + LONG + "\n")
+    write(work, "b.md", "# B\n\n" + BAD + "\n")
+    write(work, "c.md", "# C\n\n" + BAD + "\n")
     git(work, "add", "."); git(work, "commit", "-qm", "three")
 
 
 rc, out = run("changed", base={"a.md": "# A\n"}, change=three_files, EXCLUDE="b.md,c.md")
 check("exclude input: comma-separated patterns each drop their file",
-      rc == 0 and "1 file(s) in scope, 2 excluded" in out and "STE001" not in out, out)
+      rc == 0 and "1 file(s) in scope, 2 excluded" in out and "STE013" not in out, out)
 check("exclude input: action.yml declares it, default empty, and hands it to the step as EXCLUDE",
       re.search(r'^  exclude:\n(?:    .*\n)*?    default: ""', text, re.M) is not None
       and "EXCLUDE: ${{ inputs.exclude }}" in text, "action.yml lacks the exclude input or its EXCLUDE mapping")
@@ -309,38 +310,38 @@ NEON = ".claude/skills/neon*/**"
 
 def neon_change(work):
     write(work, "a.md", "# A\n\nShort line.\n")
-    write(work, ".claude/skills/neon-x/a.md", "# N\n\n" + LONG + "\n")
+    write(work, ".claude/skills/neon-x/a.md", "# N\n\n" + BAD + "\n")
     git(work, "add", "."); git(work, "commit", "-qm", "neon")
 
 
 def neon_gen_change(work):
-    write(work, "gen/x.md", "# G\n\n" + LONG + "\n")
+    write(work, "gen/x.md", "# G\n\n" + BAD + "\n")
     neon_change(work)
 
 
 rc, out = run("changed", base={"a.md": "# A\n"}, change=neon_change, EXCLUDE=NEON)
 check("exclude input, no .ste-lint-exclude: the neon pattern drops the neon file, a.md stays",
-      rc == 0 and "1 file(s) in scope, 1 excluded" in out and "STE001" not in out, out)
+      rc == 0 and "1 file(s) in scope, 1 excluded" in out and "STE013" not in out, out)
 rc, out = run("changed", base={"a.md": "# A\n", ".ste-lint-exclude": "gen/**\n"}, change=neon_gen_change, EXCLUDE=NEON)
 check("exclude input with .ste-lint-exclude: the input's pattern and the file's pattern both apply",
-      rc == 0 and "1 file(s) in scope, 2 excluded" in out and "STE001" not in out, out)
+      rc == 0 and "1 file(s) in scope, 2 excluded" in out and "STE013" not in out, out)
 
 
 # '%' in an annotation property is escaped as %25, or the runner decodes the path wrongly.
 def pct_file(work):
-    write(work, "50%.md", "# T\n\n" + LONG + "\n")
+    write(work, "50%.md", "# T\n\n" + BAD + "\n")
     git(work, "add", "."); git(work, "commit", "-qm", "pct")
 
 
 rc, out = run("changed", change=pct_file)
-check("annotation escapes % in the file property", "::error file=50%25.md,line=3::STE001 " in out, out)
+check("annotation escapes % in the file property", "::error file=50%25.md,line=3::STE013 " in out, out)
 
 
 # bin/ste-changed <base> lints the files the checks job lints for the same diff, and gives the same
 # header, files, findings, verdict and exit code. Each case runs the step and the command on one repo,
 # so the expected scope is the step's own output, never a copy of its rules.
 def skill_change(work):
-    write(work, ".claude/skills/x/SKILL.md", "\n" + LONG + "\n", "a")
+    write(work, ".claude/skills/x/SKILL.md", "\n" + BAD + "\n", "a")
     git(work, "commit", "-qam", "skill")
 
 
@@ -360,8 +361,8 @@ def clean_change(work):
 
 
 (s_rc, s_out), (c_rc, c_out) = run_pair(clean_change, base={
-    "old.md": "# Old\n\n" + LONG + "\n",
-    ".claude/skills/y/SKILL.md": "# Y\n\n" + LONG + "\n",
+    "old.md": "# Old\n\n" + BAD + "\n",
+    ".claude/skills/y/SKILL.md": "# Y\n\n" + BAD + "\n",
     ".claude/skills/x/SKILL.md": "# Skill\n"})
 s, c = parts(s_out), parts(c_out)
 check("unchanged: the step lints only the changed clean file, exit 0",
@@ -377,9 +378,9 @@ EXCLUDED = exclude_patterns()[0].replace("**", "probe.md")
 
 
 def skipped_change(work):
-    write(work, EXCLUDED, "# P\n\n" + LONG + "\n", "w")
-    write(work, "notes.txt", LONG + "\n", "w")
-    write(work, ".claude/skills/x/SKILL.md", "# Skill\n\n" + LONG + "\n", "w")
+    write(work, EXCLUDED, "# P\n\n" + BAD + "\n", "w")
+    write(work, "notes.txt", BAD + "\n", "w")
+    write(work, ".claude/skills/x/SKILL.md", "# Skill\n\n" + BAD + "\n", "w")
     os.remove(os.path.join(work, "gone.md"))
     git(work, "add", "-A"); git(work, "commit", "-qm", "mixed")
 
@@ -397,7 +398,7 @@ check("skipped: the command skips them too, with the same header, files, finding
 # No .ste-lint-exclude in the target: nothing is excluded. This repo's file lists skills/impeccable/**, so
 # a changed file there must be linted by the step and by the command.
 def no_file_change(work):
-    write(work, EXCLUDED, "# P\n\n" + LONG + "\n", "w")
+    write(work, EXCLUDED, "# P\n\n" + BAD + "\n", "w")
     git(work, "add", "-A"); git(work, "commit", "-qm", "probe")
 
 
@@ -413,8 +414,8 @@ check("no target file: the command lints it too, same header, files, findings, v
 # A target repo's own .ste-lint-exclude: the paths it lists are skipped by the step and by the command.
 # Its patterns are not this repo's, so this case fails if the command reads this repo's file instead.
 def target_exclude_change(work):
-    write(work, "a.md", "# A\n\n" + LONG + "\n", "w")
-    write(work, "gen/x.md", "# G\n\n" + LONG + "\n", "w")
+    write(work, "a.md", "# A\n\n" + BAD + "\n", "w")
+    write(work, "gen/x.md", "# G\n\n" + BAD + "\n", "w")
     git(work, "add", "-A"); git(work, "commit", "-qm", "gen")
 
 
@@ -459,7 +460,7 @@ SUB_BASE = {"a.md": "# A\n", "sub/keep.txt": "x\n"}
 
 def root_and_sub_change(work):
     default_change(work)
-    write(work, "sub/b.md", "# B\n\n" + LONG + "\n")
+    write(work, "sub/b.md", "# B\n\n" + BAD + "\n")
     git(work, "add", "."); git(work, "commit", "-qm", "sub")
 
 
@@ -478,8 +479,8 @@ for label, change, files in [("a changed root file", default_change, ["a.md"]),
 # '**/' matches zero directories in the exclude, as in the include: a root file is excluded, a nested one too.
 def decisions_change(work):
     write(work, "a.md", "# A\n\nShort line.\n", "w")
-    write(work, "decisions/x.md", "# X\n\n" + LONG + "\n", "w")
-    write(work, "sub/decisions/y.md", "# Y\n\n" + LONG + "\n", "w")
+    write(work, "decisions/x.md", "# X\n\n" + BAD + "\n", "w")
+    write(work, "sub/decisions/y.md", "# Y\n\n" + BAD + "\n", "w")
     git(work, "add", "-A"); git(work, "commit", "-qm", "decisions")
 
 
@@ -495,7 +496,7 @@ check("double-star exclude: the command excludes them too, same header, files, f
 # Exit-code parity on three diffs: a failing finding, a finding only on an unchanged line, no change.
 for label, change, base, want in [
         ("a finding on a changed line", default_change, BASE_FILES, 1),
-        ("a finding only on an unchanged line", touch_elsewhere, {"a.md": "# T\n\n" + LONG + "\n"}, 0),
+        ("a finding only on an unchanged line", touch_elsewhere, {"a.md": "# T\n\n" + BAD + "\n"}, 0),
         ("advisory findings only", advisory_change, BASE_FILES, 0),
         ("nothing changed", lambda work: None, BASE_FILES, 0)]:
     (s_rc, s_out), (c_rc, c_out) = run_pair(change, base=base)
@@ -512,7 +513,7 @@ UNCOMMITTED_BASE = {"draft-note.md": "# Draft\n\nShort line.\n", "data.txt": "x\
 
 
 def edit_draft(work):
-    write(work, "draft-note.md", "# Draft\n\n" + LONG + "\n", "w")  # a markdown edit, not committed
+    write(work, "draft-note.md", "# Draft\n\n" + BAD + "\n", "w")  # a markdown edit, not committed
 
 
 def edit_data(work):
@@ -520,11 +521,11 @@ def edit_data(work):
 
 
 def edit_new(work):
-    write(work, "new-note.md", "# New\n\n" + LONG + "\n", "w")  # a new markdown file, never git-added
+    write(work, "new-note.md", "# New\n\n" + BAD + "\n", "w")  # a new markdown file, never git-added
 
 
 def edit_ignored(work):
-    write(work, "ignored-note.md", "# Ignored\n\n" + LONG + "\n", "w")  # a new markdown file .gitignore matches
+    write(work, "ignored-note.md", "# Ignored\n\n" + BAD + "\n", "w")  # a new markdown file .gitignore matches
 
 
 def git_read(cwd, *a):
@@ -681,28 +682,40 @@ check("ASCII untracked control: clean-note.md is listed, exits 0 and PASSes",
 
 
 # A name with a space. git ends the `+++ b/` header of such a name with a tab, so the changed-line map read a name with
-# that tab, no finding landed on a changed line, and the step passed. The name is linted by its own name, and a 42-word
+# that tab, no finding landed on a changed line, and the step passed. The name is linted by its own name, and a
 # sentence in it fails. `space.md` is the control: the same sentence under a name with no space.
-LONG42 = " ".join(["word"] * 41) + " end."  # 42 words, over the STE001 limit of 40
 
 
-def long_sentence(name):
+def bad_sentence(name):
     def change(work):
-        write(work, name, "# S\n\n" + LONG42 + "\n", "w")
+        write(work, name, "# S\n\n" + BAD + "\n", "w")
         git(work, "commit", "-qam", "long")
     return change
 
 
-rc, out = run("changed", base={"sp ace.md": "# S\n\nShort line.\n"}, change=long_sentence("sp ace.md"))
+rc, out = run("changed", base={"sp ace.md": "# S\n\nShort line.\n"}, change=bad_sentence("sp ace.md"))
 check("space in name: sp ace.md is in scope", "sp ace.md" in parts(out)["files"], out)
-check("space in name: exits 1 on the 42-word sentence", rc == 1, out)
-check("space in name: STE001 names sp ace.md:3", "sp ace.md:3: STE001 " in out, out)
-rc, out = run("changed", base={"space.md": "# S\n\nShort line.\n"}, change=long_sentence("space.md"))
+check("space in name: exits 1 on the sentence", rc == 1, out)
+check("space in name: STE013 names sp ace.md:3", "sp ace.md:3: STE013 " in out, out)
+rc, out = run("changed", base={"space.md": "# S\n\nShort line.\n"}, change=bad_sentence("space.md"))
 check("space control: space.md with the same sentence exits 1 and names space.md:3",
-      rc == 1 and "space.md:3: STE001 " in out, out)
+      rc == 1 and "space.md:3: STE013 " in out, out)
 
 
-# A stat-only change: a tracked file is touched, so its mtime moves and its content does not. The committed STE001 in the PR
+# Length is no finding: there is no sentence budget. A committed 41-word and a 200-word sentence pass the step. The file
+# is in scope first, so the pass reads the file and does not skip it.
+def long_lines(work):
+    write(work, "long.md", "# L\n\n" + " ".join(["word"] * 41) + " end.\n\n" + " ".join(["word"] * 200) + " end.\n")
+    git(work, "add", "."); git(work, "commit", "-qm", "long lines")
+
+
+rc, out = run("changed", base={"a.md": "# T\n\nShort line.\n"}, change=long_lines)
+check("length: long.md is in scope", "long.md" in parts(out)["files"], out)
+check("length: a 41-word and a 200-word sentence pass the step",
+      rc == 0 and "ste-lint: PASS, 0 error(s)" in out and "STE013" not in out, out)
+
+
+# A stat-only change: a tracked file is touched, so its mtime moves and its content does not. The committed STE013 in the PR
 # range is still a finding. The stat refresh is not an unknown read: the step lints the range and exits 1, as main does.
 # The touch is the change's last act, since a commit refreshes the index first. The scope facts read no index (P7).
 STAT_BASE = {**UNCOMMITTED_BASE, "long-note.md": "# S\n\nShort line.\n"}
@@ -710,7 +723,7 @@ stat = {}
 
 
 def stat_only(work):
-    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    bad_sentence("long-note.md")(work)  # committed: a STE013 error in the PR range
     path = os.path.join(work, "data.txt")
     before = touch_same_bytes(work, "data.txt")  # touch: the mtime moves, the content does not
     with open(path, encoding="utf-8") as f:
@@ -722,26 +735,26 @@ def stat_only(work):
 rc, out = run("changed", base=STAT_BASE, change=stat_only)
 check("stat-only scope: long-note.md is committed, data.txt has a new mtime and its committed bytes",
       stat.get("committed") and stat.get("moved") and stat.get("same"), str(stat))
-check("stat-only: exits 1 on the committed STE001, as main does", rc == 1, out)
-check("stat-only: the log names long-note.md:3 STE001", "long-note.md:3: STE001 " in out, out)
+check("stat-only: exits 1 on the committed STE013, as main does", rc == 1, out)
+check("stat-only: the log names long-note.md:3 STE013", "long-note.md:3: STE013 " in out, out)
 check("stat-only: no ste-lint unknown line, so the stat refresh did not stop the read",
       "ste-lint: unknown" not in out, out)
-rc, out = run("changed", base=STAT_BASE, change=long_sentence("long-note.md"))
-check("stat-only control: the same committed STE001 with no touch exits 1 and names long-note.md:3",
-      rc == 1 and "long-note.md:3: STE001 " in out, out)
+rc, out = run("changed", base=STAT_BASE, change=bad_sentence("long-note.md"))
+check("stat-only control: the same committed STE013 with no touch exits 1 and names long-note.md:3",
+      rc == 1 and "long-note.md:3: STE013 " in out, out)
 
 
 # A dirty tree whose snapshot fails. The step reads the working tree with `git stash create`, and exit 1 with no output
 # can also be a real failure, not only "no local changes". A tracked FIFO, which git cannot read ("unsupported file type"),
 # makes the snapshot fail on a dirty tree. The step must say unknown and exit 0, and never print PASS or "stale-cites: PASS",
-# since the uncommitted STE001 in a.md is not read. A FIFO is a POSIX file type, so a platform with no os.mkfifo prints SKIP.
+# since the uncommitted STE013 in a.md is not read. A FIFO is a POSIX file type, so a platform with no os.mkfifo prints SKIP.
 # The scope facts are read in the change, before the step runs (P7).
 UNREADABLE_BASE = {"a.md": "# T\n\nShort line.\n", "data.txt": "x\n"}
 unreadable = {}
 
 
 def unreadable_dirty(work):
-    write(work, "a.md", "# T\n\n" + LONG + "\n", "w")  # a markdown edit, not committed: the tree is dirty
+    write(work, "a.md", "# T\n\n" + BAD + "\n", "w")  # a markdown edit, not committed: the tree is dirty
     path = os.path.join(work, "data.txt")
     os.remove(path)
     os.mkfifo(path)  # a tracked file git cannot read: the snapshot fails
@@ -777,7 +790,7 @@ clean_lock = {}
 
 
 def touched_clean_locked(work):
-    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    bad_sentence("long-note.md")(work)  # committed: a STE013 error in the PR range
     touch_same_bytes(work, "data.txt")  # touch: the mtime moves, the content does not
     clean_lock["held"] = hold_index_lock(work)  # the lock first, so no scope read below can refresh the index
     clean_lock["clean"] = content_clean(work)
@@ -789,13 +802,13 @@ check("clean lock scope: git's content check reads the touched tree as clean", c
       str(clean_lock))
 check("clean lock scope: long-note.md is committed in the range", clean_lock.get("in_range") is True, str(clean_lock))
 check("clean lock scope: the index lock is held", clean_lock.get("held") is True, str(clean_lock))
-check("clean lock: exits 1 on the committed STE001, as main does", rc == 1, out)
-check("clean lock: the log names long-note.md:3 STE001", "long-note.md:3: STE001 " in out, out)
+check("clean lock: exits 1 on the committed STE013, as main does", rc == 1, out)
+check("clean lock: the log names long-note.md:3 STE013", "long-note.md:3: STE013 " in out, out)
 check("clean lock: no ste-lint unknown line", "ste-lint: unknown" not in out, out)
 
 
 def clean_locked(work):
-    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range, and no tracked file is touched
+    bad_sentence("long-note.md")(work)  # committed: a STE013 error in the PR range, and no tracked file is touched
     clean_lock["control_held"] = hold_index_lock(work)
     clean_lock["control_clean"] = content_clean(work)
 
@@ -804,8 +817,8 @@ rc, out = run("changed", base=STAT_BASE, change=clean_locked)
 check("clean lock control scope: git's content check reads the tree as clean", clean_lock.get("control_clean") is True,
       str(clean_lock))
 check("clean lock control scope: the index lock is held", clean_lock.get("control_held") is True, str(clean_lock))
-check("clean lock control: exits 1 on the committed STE001, as main does",
-      rc == 1 and "long-note.md:3: STE001 " in out, out)
+check("clean lock control: exits 1 on the committed STE013, as main does",
+      rc == 1 and "long-note.md:3: STE013 " in out, out)
 check("clean lock control: no ste-lint unknown line", "ste-lint: unknown" not in out, out)
 
 
@@ -817,7 +830,7 @@ excl = {}
 
 
 def untracked_gen(work):
-    write(work, "gen/x.md", "# G\n\n" + LONG42 + "\n", "w")  # untracked, never git-added, matched by gen/**
+    write(work, "gen/x.md", "# G\n\n" + BAD + "\n", "w")  # untracked, never git-added, matched by gen/**
     excl["untracked"] = git_read(work, "ls-files", "--others", "--exclude-standard").split()
     excl["tracked"] = git_read(work, "ls-files").split()
 
@@ -894,14 +907,14 @@ check("root push control: with HEAD~1 present, no ste-lint unknown line",
 # A changed-file read that git refuses. A .ste-lint-exclude line git rejects as a pathspec, such as ../gen/*.md (a path outside
 # the repo), fails the diff that lists the changed files. That read printed "no markdown changed" with exit 0: a false green for
 # files nobody read. The step must print one ste-lint unknown line, exit 0, and never "no markdown changed" or PASS. The valid
-# exclude line is the control: the same committed STE001 fails as main does. git's rejection is read in the change (P7).
+# exclude line is the control: the same committed STE013 fails as main does. git's rejection is read in the change (P7).
 BAD_PATHSPEC_BASE = {"a.md": "# T\n\nShort line.\n", "long-note.md": "# S\n\nShort line.\n",
                      ".ste-lint-exclude": "../gen/*.md\n"}
 bad_pathspec = {}
 
 
 def bad_pathspec_change(work):
-    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    bad_sentence("long-note.md")(work)  # committed: a STE013 error in the PR range
     p = subprocess.run(["git", "-C", work, "diff", "--name-only", "origin/main...HEAD", "--", "*.md",
                         ":(exclude,glob)../gen/*.md"], capture_output=True, text=True)
     bad_pathspec.update(rc=p.returncode, err=p.stderr)
@@ -916,9 +929,9 @@ check("bad pathspec: one ste-lint line says unknown",
 check("bad pathspec: no `no markdown changed` line, since the changed files were not read",
       "no markdown changed" not in out, out)
 check("bad pathspec: no ste-lint PASS verdict", "ste-lint: PASS" not in out, out)
-rc, out = run("changed", base={**BAD_PATHSPEC_BASE, ".ste-lint-exclude": "gen/**\n"}, change=long_sentence("long-note.md"))
-check("bad pathspec control: a valid exclude line lints long-note.md and exits 1 on its STE001",
-      rc == 1 and "long-note.md:3: STE001 " in out, out)
+rc, out = run("changed", base={**BAD_PATHSPEC_BASE, ".ste-lint-exclude": "gen/**\n"}, change=bad_sentence("long-note.md"))
+check("bad pathspec control: a valid exclude line lints long-note.md and exits 1 on its STE013",
+      rc == 1 and "long-note.md:3: STE013 " in out, out)
 
 
 # The content check of the tracked files cannot run (run.sh, the DIFF_RC branch). The copy of .git/index fails when the index

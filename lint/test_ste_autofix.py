@@ -5,8 +5,8 @@ The fixer keeps only the fixed bloat phrases of STE011, minus eight rows. The th
 decision plain-prose-lint names (in between, in terms of, it would appear that) are not in the
 table, and five borderline rows (in a timely manner, along the lines of, close down, of major
 importance, except when) stay errors with no fix. No Latin (STE007), contraction (STE008) or
-nominalization (STE003) fix exists, and no fix changes the case of the text it swaps. The sentence
-budget is one number, 30 words. Contractions, Latin abbreviations, nominalizations, phrasal verbs,
+nominalization (STE003) fix exists, and no fix changes the case of the text it swaps. The lint never
+counts words for a finding; count_words feeds the stats only. Contractions, Latin abbreviations, nominalizations, phrasal verbs,
 condition order and omitted "that" are advisory warnings: reported, never a rewrite.
 
     python lint/test_ste_autofix.py -v
@@ -20,28 +20,28 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ste_lint  # noqa: E402
 
-# 38 words: STE001 against the one budget of 30.
+# 38 words, for the word count that --stats reports.
 LONG = ("The operators on each shift must record every valve position, every pressure reading, "
         "every alarm, and every handover note in the shared log before they leave the site today "
         "and then sign the page for the next crew.")
-# 32 words with one "in order to" (3 words): the fix makes it 30 words, so the write passes.
-SHRINKS_TO_LIMIT = ("The operators on each shift must record every valve position, every pressure reading, "
-                    "every alarm, and every handover note in the shared log in order to help the next crew today now.")
-# 33 words with one "in order to": the fix makes it 31 words, so STE001 stays.
-SHRINKS_PAST_LIMIT = SHRINKS_TO_LIMIT[:-1] + " again."
+# 32 words with one "in order to" (3 words): the fix makes it 30 words.
+SHRINKS_TO_30 = ("The operators on each shift must record every valve position, every pressure reading, "
+                 "every alarm, and every handover note in the shared log in order to help the next crew today now.")
+# 33 words with one "in order to": the fix makes it 31 words.
+SHRINKS_TO_31 = SHRINKS_TO_30[:-1] + " again."
 
 
 class FixtureCountTests(unittest.TestCase):
-    """The sentences above are the ones the cases below say they are."""
+    """The word counts of the sentences above, and of the fixes that shorten them."""
 
-    def test_long_is_over_the_one_budget(self):
+    def test_long_counts_38_words(self):
         self.assertEqual(ste_lint.count_words(LONG), 38)
 
-    def test_shrinking_sentences_cross_the_budget_only_through_the_fix(self):
-        self.assertEqual(ste_lint.count_words(SHRINKS_TO_LIMIT), 32)
-        self.assertEqual(ste_lint.count_words(SHRINKS_PAST_LIMIT), 33)
-        fixed_to, _ = ste_lint.apply_fixes(SHRINKS_TO_LIMIT)
-        fixed_past, _ = ste_lint.apply_fixes(SHRINKS_PAST_LIMIT)
+    def test_fixes_change_the_counted_words_by_the_phrase_they_swap(self):
+        self.assertEqual(ste_lint.count_words(SHRINKS_TO_30), 32)
+        self.assertEqual(ste_lint.count_words(SHRINKS_TO_31), 33)
+        fixed_to, _ = ste_lint.apply_fixes(SHRINKS_TO_30)
+        fixed_past, _ = ste_lint.apply_fixes(SHRINKS_TO_31)
         self.assertEqual(ste_lint.count_words(fixed_to), 30)
         self.assertEqual(ste_lint.count_words(fixed_past), 31)
 
