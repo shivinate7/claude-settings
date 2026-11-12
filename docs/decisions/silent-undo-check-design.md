@@ -22,7 +22,8 @@
   both sides. Two: on a test path (`is_test_rel`, `hooks/guard.py`), a hunk takes out more of the lines the
   earlier commit added than it adds back, and not every one is a rewrite. Only lines the earlier commit added
   count, and only while head holds fewer of them than the undoing commit's parent did, so a later restore clears
-  it. A lane of one commit has nothing to read. Not read here: moves, renames, merges.
+  it. A lane of one commit has nothing to read. Not read here: moves, renames, merges. A lane move or rename that
+  drops lines is a finding, and a `Drops-lines` trailer excuses it. The list below covers the other reads.
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
   (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
@@ -72,7 +73,7 @@ check in `confirm`, before the claim and any push. It runs it again after the po
 tip, right before `gh pr merge`. A red at the second run reverts the claim. Unknown refuses too. Two
 changed lines are a new edit, so the reversal dial stays at one line until a measured case says otherwise.
 
-**What is not a loss.**
+**What is not a loss** (the reversal and lost-line reads).
 
 - Whitespace and blank lines.
 - A move, a rename or a reorder: a removed line that the change adds to another file.
