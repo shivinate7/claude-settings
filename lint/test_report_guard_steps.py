@@ -199,6 +199,88 @@ class StepClaimTests(unittest.TestCase):
         err = self.passes(clone, report())
         self.assertNotIn("unknown", err)
 
+    # Red: a sentence that names a proposal but claims the step is queued or filed is still read from git.
+    def test_red_proposal_word_beside_a_claim_blocks(self):
+        clone = self.repo()
+        for text in ("The proposed guard is queued as step:fake-one.",
+                     "Queued the proposal as step:fake-one.",
+                     "I filed step:fake-one, the guard we proposed."):
+            with self.subTest(text=text):
+                self.blocked(clone, report(nxt="> **Next** " + text))
+
+    # Green: a slug in a negated or future claim is no claim that it is filed.
+    def test_green_negated_or_future_slug_passes(self):
+        clone = self.repo()
+        for text in ("step:fake-one is not yet filed.",
+                     "Triage is to file step:fake-one.",
+                     "Triage should file step:fake-one.",
+                     "Triage can file step:fake-one.",
+                     "Triage would file step:fake-one.",
+                     "I did not file step:fake-one.",
+                     "File step:fake-one for the guard.",
+                     "Should I file step:fake-one?",
+                     "step:fake-one is missing from the roadmap."):
+            with self.subTest(text=text):
+                self.passes(clone, report(nxt="> **Next** " + text))
+
+    # Red: a claim with an object between the claim word and the step noun, or beside a CI word, names no slug.
+    def test_red_no_slug_claim_with_object_or_other_sense_word_blocks(self):
+        clone = self.repo()
+        for text in ("I queued the guard as a roadmap step.",
+                     "I filed the follow-up as a step.",
+                     "Added the guard to the roadmap as a step.",
+                     "The step for the guard is queued.",
+                     "The check is queued as a roadmap step.",
+                     "The follow-up action is queued as a step.",
+                     "The guard is queued as a roadmap step and the CI run is green."):
+            with self.subTest(text=text):
+                self.blocked(clone, report(nxt="> **Next** " + text))
+
+    # Green: a step in normal coding text is no claim about the roadmap (rule verification-cry-wolf-guard-is-spent).
+    def test_green_step_in_coding_text_passes(self):
+        clone = self.repo()
+        for text in ("Added a step to the install script.",
+                     "Added a new step to the skill.",
+                     "The setup script has a step that installs jq.",
+                     "The migration has a step that drops the column.",
+                     "The page now has the step list.",
+                     "Triage has the step.",
+                     "The deploy step is filed under ops.",
+                     "The rollout is queued in a new step of the plan.",
+                     "Added a CI step and rebuilt the roadmap page.",
+                     "The guard reads git, and the setup script has a step for jq."):
+            with self.subTest(text=text):
+                self.passes(clone, report(nxt="> **Next** " + text))
+
+    # Order: an unbacked sentence does not hide the read of a slug another sentence names.
+    def test_red_unbacked_sentence_does_not_hide_missing_slug(self):
+        clone = self.repo()
+        out, _ = self.run_report(clone, report(nxt="> **Next** Queued as a roadmap step. It is step:%s." % SLUG))
+        self.assertIsNotNone(out)
+        reason = out.get("reason", "")
+        self.assertIn("Queued as a roadmap step", reason)
+        self.assertIn("step:%s" % SLUG, reason)
+        self.assertEqual(reason.count("Step-cite guard"), 1, reason)
+
+    def test_unbacked_sentence_with_filed_slug_refuses_once_and_named_passes(self):
+        clone = self.repo(on_roadmap=[SLUG])
+        out, _ = self.run_report(clone, report(nxt="> **Next** Queued as a roadmap step. It is step:%s." % SLUG))
+        self.assertIsNotNone(out)
+        reason = out.get("reason", "")
+        self.assertIn("Queued as a roadmap step", reason)
+        self.assertNotIn("holds no step file", reason)
+        self.assertEqual(reason.count("Step-cite guard"), 1, reason)
+        self.passes(clone, report(nxt="> **Next** Queued as roadmap step:%s. It is step:%s." % (SLUG, SLUG)))
+
+    # The refusal says how it clears, in facts: a filed step named as a slug, or the phrase in backticks.
+    def test_reason_says_how_to_clear(self):
+        clone = self.repo()
+        out, _ = self.run_report(clone, report(nxt="> **Next** The guard is queued as a roadmap step."))
+        reason = out.get("reason", "")
+        self.assertIn("`step:<slug>`", reason)
+        self.assertIn("triage files", reason)
+        self.assertIn("backticks", reason)
+
 
 if __name__ == "__main__":
     unittest.main()
