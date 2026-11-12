@@ -23,14 +23,16 @@ New jobs, owner 14:36 and 14:37 CST, agreed at 15:03 CST ("yes thats fine agreed
 
 Premises of the script:
 
-- A run the cap cut counts as a sample of at least its limit. A job is cut when it was cancelled, no step failed, and it ran as long as the job's `timeout-minutes` in the workflow today. Without this, a cut run would hide the slowest run and the limit would never rise.
+- A run the cap cut counts as a sample of at least its limit (owner, 2026-11-12 12:24 CST, waiting-page item 586, pick a). A job is cut when it was cancelled, no CI step failed, and it ran as long as the job's `timeout-minutes` on the base ref. Without this, a cut run would hide the slowest run and the limit would never rise. The owner accepts the cost: a job that truly hangs ratchets its limit up to 360 until the silence stop, a later step, ends hangs.
 - A failed run, or a run cancelled before its cap by a newer push, is no sample.
-- Margins multiply: limit = slowest sample x 1.5, rounded up, at most 360 minutes (GitHub's own ceiling).
+- Margins multiply: limit = slowest sample x 1.5, rounded up, at most 360 minutes (the 6 hour job limit of GitHub-hosted runners).
+- Every job limit is at least the median of all job limits, derived each run (coordinator, 2026-11-12 12:22 CST). A job that runs for seconds is then never cut at a minute.
+- A job skipped in every run of the window never ran on main (`all-jobs-passed` and `ci-done` were skipped in every push run of the window). It has no limit: the table reads "not measured on main", the JSON null, and it joins no median, estimate or deadline.
 - The deadline is the slowest green run's wall clock x 1.5. It is at least the largest job limit, new-job estimates included, and at most 360.
 
 ## What exists
 
-`actions/ci-limits/ci_limits.py` reads the newest 30 completed push runs of `checks.yml` on main from the GitHub jobs API. It makes 1 + 30 `gh api` calls in one process, with no timer and no file written. It prints the limits as JSON (`--json`, with `deadlineMinutes`) or as the markdown table of decision `ci-job-caps` (`--table`). When the API cannot be read, every limit is 360 and one warning goes to stderr: a hung job still ends, and a good job is never cut. Its test is `actions/ci-limits/test_ci_limits.py`, run by `checks.yml` with the other opt-in template suites.
+`actions/ci-limits/ci_limits.py` reads the newest 30 completed push runs of `checks.yml` on main from the GitHub jobs API. It makes 1 + 30 `gh api` calls in one process, plus one more per further 100 job rows of a run, with no timer and no file written. It reads the caps from `checks.yml` on `origin/main`, never from the checkout. It prints the limits as JSON (`--json`, with `deadlineMinutes`) or as the markdown table of decision `ci-job-caps` (`--table`). When the API cannot be read, every limit is 360 and one warning goes to stderr: a hung job still ends, and a good job is never cut. Its test is `actions/ci-limits/test_ci_limits.py`, run by `checks.yml` with the other opt-in template suites.
 
 ## Not built yet
 

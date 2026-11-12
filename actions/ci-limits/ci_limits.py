@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Each CI job's time limit, read from the newest green runs on main (decision ci-job-caps, restart-plan R3).
+"""Each CI job's time limit, read from the newest completed push runs on main (decision ci-job-caps, restart-plan R3).
 
-    python3 actions/ci-limits/ci_limits.py --json     {job: minutes, "job/step": minutes, "deadlineMinutes": minutes}
+    python3 actions/ci-limits/ci_limits.py --json     {job: minutes, "job/CI step": minutes, "deadlineMinutes": minutes}
     python3 actions/ci-limits/ci_limits.py --table    a markdown table, one row per job
 
 The limit ends a hung job and nothing else, so it is generous: the slowest sample x 1.5, rounded up, at most 360.
-A sample is a green job run, or a run the cap cut (cancelled, no failed step, minutes at or past the cap passed in, the workflow's `timeout-minutes` today):
-a cut run counts as at least its limit. A job that failed or was cancelled early is no sample.
+A sample is a green job run, or a run the cap cut (cancelled, no failed CI step, minutes at or past the cap passed in,
+the workflow's `timeout-minutes` on the base ref): a cut run counts as at least its limit (owner ruling, decision time-limits-end-hangs-only). A job that
+failed, or was cancelled before its cap by a newer push, is no sample.
 A new job (no green run yet) takes its nearest kind's limit x 1.5, else the largest old limit x 1.5. A new job cut at
-its cap was misjudged and takes the largest. The deadline is the slowest green run's wall clock x 1.5, at least the
-largest job limit, new-job estimates included.
+its cap was misjudged and takes the largest. Every job limit is at least the median of all job limits (median_floor),
+so a job that runs for seconds is never cut at a minute. A job skipped in every run of the window never ran on main:
+its limit is None (JSON null, table "not measured on main"), and it joins no median, estimate or deadline.
+The deadline is the slowest green run's wall clock x 1.5, at least the largest job limit, new-job estimates included.
 
-Cost: one `gh api` call for the run list and one per run (1 + n, n = 30), in one process. No timer, no file written.
-A read that fails gives every limit 360 and one warning line on stderr: a hung job still ends, a good job is never cut.
+Cost: one `gh api` call for the run list and one per run (1 + n, n = 30), plus one more per further 100 job rows of a run,
+in one process. No timer, no file written. A read that fails gives every limit 360 and one warning line on stderr:
+a hung job still ends, a good job is never cut.
 Run it from a checkout of this repo: job_minutes is merge/merge.py's, the one reader of a job's minutes.
 """
 import argparse
@@ -27,7 +31,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 WORKFLOW = "checks.yml"
 WINDOW = 30
-CLAMP = 360  # GitHub's own ceiling for a job's timeout-minutes
+CLAMP = 360  # GitHub-hosted jobs run at most 6 hours (docs.github.com/en/actions/reference/limits), so no limit is worth more
+BASE_REF = "origin/main"  # the caps come from here, never from the checkout or a pull request tree
+PER_PAGE = 100  # the jobs API's page size, its largest
+NOT_MEASURED = "not measured on main"
 MARGIN_NUM, MARGIN_DEN = 3, 2  # x 1.5, kept as a ratio so the ceiling is exact in integer seconds
 GREEN_OK = ("success", "skipped", "neutral")  # a run is green when no job did worse than these
 
@@ -45,14 +52,18 @@ def kind_of(name):
 _merge = None
 
 
-def job_minutes(row):
-    """Minutes a jobs-API row ran. merge/merge.py reads gh's camelCase fields, so this renames the API's snake_case ones."""
+def load_merge():
     global _merge
     if _merge is None:
         spec = importlib.util.spec_from_file_location("merge_for_ci_limits", os.path.join(ROOT, "merge", "merge.py"))
         _merge = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(_merge)
-    return _merge.job_minutes({"startedAt": row.get("started_at"), "completedAt": row.get("completed_at")})
+    return _merge
+
+
+def job_minutes(row):
+    """Minutes a jobs-API row ran. merge/merge.py reads gh's camelCase fields, so this renames the API's snake_case ones."""
+    return load_merge().job_minutes({"startedAt": row.get("started_at"), "completedAt": row.get("completed_at")})
 
 
 def margin(minutes):
@@ -61,8 +72,17 @@ def margin(minutes):
     return min(CLAMP, -(-seconds * MARGIN_NUM // (MARGIN_DEN * 60)))
 
 
+def median_floor(values):
+    """The median of the job limits, rounded up: no job's limit is below it. Derived each run, never stored. No values, no floor."""
+    ordered = sorted(values)
+    n = len(ordered)
+    if not n:
+        return 0
+    return ordered[n // 2] if n % 2 else (ordered[n // 2 - 1] + ordered[n // 2] + 1) // 2
+
+
 def is_cut(job, minutes, cap):
-    """Ended by its cap: cancelled, no step failed, and it ran at least as long as the cap passed in. A cancel from a newer push comes earlier."""
+    """Ended by its cap: cancelled, no CI step failed, and it ran at least as long as the cap passed in. A cancel from a newer push comes earlier."""
     return (job.get("conclusion") == "cancelled" and minutes >= cap
             and not any(s.get("conclusion") == "failure" for s in job.get("steps") or ()))
 
@@ -70,11 +90,16 @@ def is_cut(job, minutes, cap):
 def analyse(jobs_by_run, caps, kinds, window):
     """-> (limits, misjudged). See job_limits."""
     kinds = {name: kind_of(name) for name in caps} if kinds is None else kinds
-    samples, steps, green, cut = {}, {}, set(), set()
+    samples, steps, green, cut, seen, ran = {}, {}, set(), set(), set(), set()
     for r in jobs_by_run[:window]:
         for job in r["jobs"]:
             name = job.get("name")
-            minutes = job_minutes(job) if name in caps else None
+            if name not in caps:
+                continue
+            seen.add(name)
+            if job.get("conclusion") != "skipped":
+                ran.add(name)
+            minutes = job_minutes(job)
             if minutes is None:
                 continue
             if job.get("conclusion") == "success":
@@ -91,16 +116,20 @@ def analyse(jobs_by_run, caps, kinds, window):
     # A job with a green run is old, and its cut samples count. A new job's cut makes it misjudged instead.
     old = {name: margin(max(samples[name])) for name in caps if name in green}
     largest = max(old.values(), default=None)
-    limits, misjudged = dict(old), []
+    not_measured = {name for name in caps if name in seen and name not in ran}
+    raw, misjudged = dict(old), []
     for name in caps:
-        if name in green:
+        if name in green or name in not_measured:
             continue
         misjudged_now = name in cut
         if misjudged_now:
             misjudged.append(name)
         same_kind = [v for n, v in old.items() if kinds.get(n) is not None and kinds.get(n) == kinds.get(name)]
         base = max(same_kind) if same_kind and not misjudged_now else largest
-        limits[name] = CLAMP if base is None else min(CLAMP, -(-base * MARGIN_NUM // MARGIN_DEN))
+        raw[name] = CLAMP if base is None else min(CLAMP, -(-base * MARGIN_NUM // MARGIN_DEN))
+    floor = median_floor(raw.values())
+    limits = {name: max(v, floor) for name, v in raw.items()}
+    limits.update({name: None for name in not_measured})
     for key, values in steps.items():
         limits[key] = margin(max(values))
     return limits, misjudged
@@ -109,13 +138,14 @@ def analyse(jobs_by_run, caps, kinds, window):
 def job_limits(jobs_by_run, caps, kinds=None, window=30):
     """jobs_by_run: completed push runs on main, newest first, [{"run_id": int, "jobs": [jobs-API job, ...]}].
     caps: {job name: timeout-minutes in force}. kinds: {job name: kind}, else kind_of.
-    -> ({job name: minutes, "job/step": minutes}, the job names cut at their estimate while still new)."""
+    -> ({job name: minutes, or None when the job never ran on main; "job/CI step": minutes},
+        the job names cut at their estimate while still new)."""
     return analyse(jobs_by_run, caps, kinds, window)
 
 
 def deadline_minutes(jobs_by_run, limits, window=30):
     """The slowest green run's wall clock x 1.5, at least the largest job limit in `limits` (job-level limits only), at most CLAMP."""
-    deadline = max(limits.values(), default=0)
+    deadline = max((v for v in limits.values() if v is not None), default=0)
     for r in jobs_by_run[:window]:
         # One attempt is one wall clock: a re-run hours later must not stretch the run it replaced.
         attempts = {}
@@ -149,7 +179,8 @@ def read_limits(fetch, caps, kinds=None, window=30):
 def table(limits, misjudged, caps):
     rows = ["| Job | Limit (minutes) | Note |", "| --- | --- | --- |"]
     for name in sorted(caps):
-        rows.append("| %s | %d | %s |" % (name, limits[name], "misjudged: cut at its estimate while new" if name in misjudged else ""))
+        shown = NOT_MEASURED if limits[name] is None else limits[name]
+        rows.append("| %s | %s | %s |" % (name, shown, "misjudged: cut at its estimate while new" if name in misjudged else ""))
     rows.append("| deadlineMinutes | %d | the merge deadline |" % limits["deadlineMinutes"])
     return "\n".join(rows) + "\n"
 
@@ -184,22 +215,44 @@ def gh_api(path, *fields):
     return json.loads(done.stdout)
 
 
-def fetch_runs():
-    """The newest WINDOW completed push runs of WORKFLOW on main, with the jobs of every attempt (a cut attempt that a re-run
-    replaced is a sample the latest attempt hides). One call for the list, one per run; a run holds at most 100 jobs per page."""
-    listed = gh_api("repos/{owner}/{repo}/actions/workflows/%s/runs" % WORKFLOW,
-                    "branch=main", "event=push", "status=completed", "per_page=%d" % WINDOW)["workflow_runs"]
-    return [{"run_id": r["id"],
-             "jobs": gh_api("repos/{owner}/{repo}/actions/runs/%d/jobs" % r["id"], "filter=all", "per_page=100")["jobs"]}
-            for r in listed[:WINDOW]]
+def run_jobs(api, run_id):
+    """Every job row of a run, all attempts, a page of PER_PAGE at a time until total_count is read."""
+    jobs, page = [], 1
+    while True:
+        got = api("repos/{owner}/{repo}/actions/runs/%d/jobs" % run_id, "filter=all", "per_page=%d" % PER_PAGE, "page=%d" % page)
+        rows = got["jobs"]
+        jobs += rows
+        total = got.get("total_count")
+        if not rows or (len(jobs) >= total if total is not None else len(rows) < PER_PAGE):
+            return jobs
+        page += 1
 
 
-def workflow_caps():
-    """The job caps in force: merge/merge.py's own line scan of the workflow file."""
-    job_minutes({})  # loads merge/merge.py
-    with open(os.path.join(ROOT, ".github", "workflows", WORKFLOW), encoding="utf-8") as f:
-        return _merge.job_caps([f.read()])
+def fetch_runs(api=None, workflow=WORKFLOW, window=WINDOW):
+    """The newest `window` completed push runs of `workflow` on main, with the jobs of every attempt (a cut attempt that a re-run
+    replaced is a sample the latest attempt hides). One call for the list, one per run, one more per further PER_PAGE rows.
+    `api(path, *fields)` returns the parsed JSON: gh_api, or a test's fake."""
+    api = api or gh_api
+    listed = api("repos/{owner}/{repo}/actions/workflows/%s/runs" % workflow,
+                 "branch=main", "event=push", "status=completed", "per_page=%d" % window)["workflow_runs"]
+    return [{"run_id": r["id"], "jobs": run_jobs(api, r["id"])} for r in listed[:window]]
+
+
+def workflow_caps(ref=BASE_REF, root=ROOT):
+    """The job caps on `ref`: merge/merge.py's own line scan (job_caps) of WORKFLOW as git shows it there, never the checkout's copy.
+    base_job_caps reads every workflow file; this reads only the file whose runs are measured, so another workflow's jobs
+    are not counted as new jobs here."""
+    merge = load_merge()
+    code, text = merge.git(root, "show", "%s:.github/workflows/%s" % (ref, WORKFLOW))
+    if code:
+        raise OSError("cannot read %s on %s: %s" % (WORKFLOW, ref, " ".join(str(text).split())))
+    return merge.job_caps([text])
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:], fetch_runs, workflow_caps()))
+    try:
+        base_caps = workflow_caps()
+    except OSError as e:
+        print("ci-limits: %s" % e, file=sys.stderr)
+        sys.exit(2)
+    sys.exit(main(sys.argv[1:], fetch_runs, base_caps))

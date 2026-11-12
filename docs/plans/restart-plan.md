@@ -208,7 +208,9 @@ Under R16, the missing guard: a main job that ends at its cap raises an alarm at
   arbitrary and are not outcomes related ... I understand keeping time limits at some point for letting
   hung tests end". Form accepted 14:10 CST ("yes, that three-part form matches what I meant"):
   1. Stop on silence, not total time: a run ends only after it prints nothing for a while.
-  2. A stop reads "hung", never "failed": never red, never a merge refusal; retried once, then reported.
+  2. A stop reads "hung", never "failed". A hung check is retried once. If the retry also hangs, the
+     rollup goes red, labelled "hung", not "failed", and a report names the job (owner 11:51 CST Nov 12,
+     page item 557, option a).
   3. A total-time limit that must stay (CI billing) comes from measured green runs each time, never a
      number stored in code.
   Details, owner 14:24 CST Nov 10 (answers to triage's four points):
