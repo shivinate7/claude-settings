@@ -68,6 +68,7 @@ FLAGGED = [
     "fixed in round 2", "Round3 of changes", "after review round", "a review finding", "review points",
     "from PR #509", "PR 1234", "PR#4567",
     "reverted in 2ff288b3", "see 03d62e85", "added by 4a1b2c3", "cut at 9f8e7d6c5b",
+    "fixed in 41ddef83", "since commit 41ddef83", "fixed in `41ddef83`",
     "MEASURED 40 ms", "CORRECTED from the old value", "ADDED 2026 for the batch",
     "since 2026-10-18", "dated 2025-01-03",
     "owner ruling", "Owner's order", "owner request", "Owner ask",
@@ -96,6 +97,8 @@ CLEAN = [
     "rates valid until 2027-01-01", "skip previously seen keys", "cache the previously computed hash",
     "changed files only", "the user changed the value", "added to the queue after review of the input",
     "round 3 places", "used to compute the total",
+    # An example id names no commit, in a docstring or a comment.
+    "e.g. a short id such as `41ddef83`",
     "Effective date 2024-07-01 (per state rule)", "Effective: 2024-07-01", "Tax rule effective on 2024-07-01",
     "Expires 2027-01-01", "Keep the old behaviour for legacy accounts so existing invoices still match",
     "Skip when previously it was seen in this loop",
