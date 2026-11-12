@@ -142,8 +142,11 @@ NOTE_MARK = r"^\s*(?:[-*+]\s+|-(?=[\w.])|\d+[.)]\s+)"
 NOTE_LINE = re.compile(NOTE_MARK)
 NOTE_SLUG = re.compile(NOTE_MARK + r"([\w.-]+)\s*:")
 DEBT_FIX_LINE = re.compile(r"^(?:- )?Fix:")
-# What a line says about something else: a code span, a double-quoted span or a curly-quoted one. A lone ' or " is text.
-QUOTED = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)|\"[^\"]*\"|\u201c[^\u201d]*\u201d")
+# What a line says about something else: a code span, a double-quoted span or a curly-quoted one. A lone ' is text.
+# A double quote opens a span only after a non-word character and before a non-space, and closes it only after a
+# non-space and before a non-word character, so an inch mark (`12"`) or a spaced `"` does not pair across the Fix.
+QUOTED = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)|(?<![\w\"])\"(?=[^\s\"])[^\"]*(?<=\S)\"(?!\w)"
+                    r"|\u201c[^\u201d]*\u201d")
 
 
 class FixUnread(Unknown):
@@ -323,7 +326,8 @@ def added_fixes(root, files, head="HEAD", moved=()):
     for base_path, path in notes_paths(root, moved):
         out += [_note_entry(path, line) for line in added_note_lines(root, path, base_path=base_path)]
     debt = debt_file(root)
-    arrived = [new for status, old, new in moved if status == "R" and debt(new) and not debt(old)]
+    notes = set(layout.candidates(root, "debt-notes"))
+    arrived = [new for status, old, new in moved if status == "R" and debt(new) and not debt(old) and old not in notes]
     for path in [*files, *arrived]:
         if debt(path):
             out.append(_debt_entry(path, show(root, head, path)))
