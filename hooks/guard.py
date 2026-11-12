@@ -2906,7 +2906,7 @@ LANE_TITLE_REASON = (
     "A lane's title opens with `%s`, where the slug is the lane's branch slug, then the task: for example "
     "`%s fix the thing`. The slug is lower-case letters and digits joined by single hyphens, so a branch with an "
     "underscore or a capital needs those changed in the title. The owner's session list shows that title, so it "
-    "tells him which branch a lane runs. Set `title` on create_session (rule lane-title-slug)."
+    "tells him which branch a lane runs. Set `title` on create_session (decision agent-model-cap, The lane title)."
     % (LANE_TITLE_FORM, LANE_TITLE_EXAMPLE_OPENING)
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
