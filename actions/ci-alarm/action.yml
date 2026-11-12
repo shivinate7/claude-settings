@@ -9,17 +9,19 @@ description: >
   pull_request only), so a newer green push run clears a red nightly. Cost: per clear candidate one read of the workflow file at the green
   run's head (contents API, once), besides the jobs reads; the step needs python3 and runs `clear_rule.py` from the action path.
   A job cancelled at its own job-level `timeout-minutes` (a cap end) is named in a failure run that no newer green run
-  clears (that run is red by its conclusion), and raises the alarm in the newest cancelled run of a group, every attempt of it included. The job ran at least the cap, read from the
+  clears (that run is red by its conclusion), and raises the alarm in the newest cancelled run of a group, every attempt of it included,
+  and in a failure run that a newer green run clears. The job ran at least the cap, read from the
   workflow file at the run's head; a job with no job-level cap has GitHub's default, 360 minutes. The issue line names the job,
-  the cap, the minutes and the run id. The step prints `alarm` when only a cap end in a cancelled run is named and `red` when a failure
-  run is named; the issue title stays "CI red on <branch>". A failure run that the merge tool calls clear opens no
-  issue, a cap end in it included. A cap end in a cancelled run alarms even when the merge tool calls that run clear. A job cancelled under its cap stays quiet. An unreadable cap, a null `started_at`, or a
+  the cap, the minutes and the run id. The step prints `alarm` when only a cap end is named and `red` when a failure
+  run that no newer green run clears is named. A cap-only issue is titled "CI job hit its time cap on <branch>: <job>" (the first cap
+  job; the body names the rest), and an issue with a red run keeps "CI red on <branch>". A failure run that the merge tool calls clear
+  opens no issue unless it holds a cap end; a cleared run with no cap end stays quiet. A cap end in a cancelled run alarms even when the merge tool calls that run clear. A job cancelled under its cap stays quiet. An unreadable cap, a null `started_at`, or a
   cancelled run or one of its earlier attempts with no jobs is "unknown". The merge gate leaves a run with no red job and a job
   timed out at a job-level cap it finds out of red and out of unknown; the alarm is the signal. A group whose newest run is a
   re-run still going (attempt above 1) is "unknown" and opens no issue; a first attempt still going is skipped. A cap end in an
   earlier attempt of a run whose newest attempt succeeded is named in the log ("cap end named") and opens no issue.
   Cost: one runs read and the workflows-list read. Per judged run (failed or cancelled, the newest of its group) one jobs read,
-  and one contents read of its workflow file when a job of it was cancelled. A cancelled or succeeded re-run adds one jobs read
+  and one contents read of its workflow file when a job of it was cancelled, a cleared failure run included. A cancelled or succeeded re-run adds one jobs read
   per earlier attempt. No long-lived process starts (short jq, awk and gh processes run), and the only files written are
   temp cache files that the step removes before it ends.
   Runs of other events, and of deleted workflows, are not judged. A failed read or write is "unknown", never red. Call it from a scheduled

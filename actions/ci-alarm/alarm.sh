@@ -8,14 +8,15 @@
 # `github.event_name == 'X'` with X not N's event (all-jobs-passed and ci-done run on pull_request only, so a push or schedule run
 # skips them). So a newer green push run clears a red nightly. An R with no red job (no jobs,
 # all passed, cancelled or skipped only) is never cleared this way. The same failed-run rule as Host.base_state.
-# A failure run that the merge tool calls clear opens no issue and names nothing, a cap end in it included. A cap end in a cancelled
-# run alarms even when the merge tool calls that run clear: the cancelled loop applies no clear (base_state does, `cleared(r, cancelled=True)`).
+# A failure run that the merge tool calls clear is not red, but a cap end in it still alarms (owner, page item 549 a, 12:07 CST Nov 12):
+# the clear drops its red jobs, never its cap end. A cap end in a cancelled run alarms even when the merge tool calls that run clear:
+# the cancelled loop applies no clear (base_state does, `cleared(r, cancelled=True)`).
 # A group whose newest run is a re-run still going (queued or in progress, attempt above 1) is unknown: a warning, no issue, never
 # green, never the older run. A first attempt still going is skipped, and the older run is judged.
 # A job cancelled at its cap is named: it ran at least its job-level `timeout-minutes` (completed_at - started_at, from the
 # jobs read), the cap read from the run's workflow file at its head; a job with no job-level `timeout-minutes` has GitHub's default
 # cap, 360 minutes. The issue names the job, the cap, the minutes and the run id. A failure run that is not cleared is red by its
-# conclusion, and the cap end only names the job in it. A cancelled run alarms on a cap end, in every attempt of it (the alarm reads
+# conclusion, and the cap end only names the job in it; a cleared one is named without the red. A cancelled run alarms on a cap end, in every attempt of it (the alarm reads
 # each earlier attempt of a cancelled re-run). The merge gate (merge.py base_state) leaves a run with no red job and a job timed out
 # at a job-level cap it finds in its checkout out of red and out of unknown. A cancelled run reads UNKNOWN there for a job with no
 # job-level cap or a cap it does not find; a failure run reads red. The alarm is the signal (a cap end is not a red job).
@@ -31,7 +32,9 @@
 # folder this script removes on exit. Needs python3 (stdlib only) and clear_rule.py beside this file; no checkout.
 # Env: BRANCH, SELF (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0
 # always: the alarm is the issue, not a red job. Prints "green", "red", "alarm" or "unknown": red when a failure run is named,
-# alarm when only a cap end in a cancelled run is. A failed read or write is unknown, never red.
+# alarm when only a cap end is (in a cancelled run, or in a failure run that a newer green run clears). The issue title is "CI red on
+# BRANCH" with a red run, else "CI job hit its time cap on BRANCH: JOB" naming the first cap job; the body names every cap end. A failed
+# read or write is unknown, never red.
 set -o pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 branch="${BRANCH:-main}"
@@ -154,6 +157,7 @@ flight="$(jq -r '[.[] | select(.status != "completed") | "\(.workflowName) run \
 # Red = failure, timed_out or startup_failure, unless a clearing run N exists (see the header). A job of it cancelled at its cap is named.
 red=""
 redrun=""
+firstcap=""
 failed="$(jq -c '.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")' <<<"$newest")" \
   || unknown "could not read the runs"
 while IFS= read -r r; do
@@ -161,6 +165,7 @@ while IFS= read -r r; do
   cands="$(jq -r --argjson r "$r" '.[] | select(.workflowDatabaseId == $r.workflowDatabaseId and .group != $r.group
     and .createdAt > $r.createdAt and .conclusion == "success") | .databaseId' <<<"$newest")" || unknown "could not read the runs"
   rid="$(jq -r .databaseId <<<"$r")"
+  cleared=""
   if [ -n "$cands" ]; then
     rjobs="$(jobs_of "$rid")" || unknown "gh api jobs failed"
     if jq -e 'any(.[]; .status == "completed" and (.conclusion | IN("success", "skipped", "neutral", "cancelled") | not))' >/dev/null <<<"$rjobs"; then
@@ -172,9 +177,19 @@ while IFS= read -r r; do
         workflow_of "$n" || unknown "gh api contents failed"
         python3 "$here/clear_rule.py" --event "$(jq -r --argjson n "$n" '.[] | select(.databaseId == $n) | .event' <<<"$newest")" \
           --workflow "$cache/wf-$n" "$cache/$rid" "$cache/$n"
-        case $? in 0) continue 2 ;; 1) ;; *) unknown "clear_rule.py failed" ;; esac
+        case $? in 0) cleared=1; break ;; 1) ;; *) unknown "clear_rule.py failed" ;; esac
       done <<<"$cands"
     fi
+  fi
+  if [ -n "$cleared" ]; then
+    # Not red: its red jobs are cleared. Its cap end still alarms, so the run is named only when it has one.
+    cap_ends "$rid" "$rjobs"
+    [ -z "$endunk" ] || capunk="$endunk"
+    if [ -n "$ends" ]; then
+      [ -n "$firstcap" ] || firstcap="${ends%%$'\t'*}"
+      red+="$(jq -r '"- \(.workflowName) (\(.conclusion), its red jobs cleared by a newer green run): \(.url)"' <<<"$r")"$'\n'"$(cap_lines "$r" "  cap end: ")"$'\n'
+    fi
+    continue
   fi
   red+="$(jq -r '"- \(.workflowName) (\(.conclusion)): \(.url)"' <<<"$r")"$'\n'
   redrun=1
@@ -195,6 +210,7 @@ while IFS= read -r r; do
   cap_ends "$rid" "$rjobs"
   [ -z "$endunk" ] || capunk="$endunk"
   capl=""
+  [ -z "$ends" ] || [ -n "$firstcap" ] || firstcap="${ends%%$'\t'*}"
   [ -z "$ends" ] || capl+="$(cap_lines "$r" "  cap end: ")"$'\n'
   # A re-run cancelled in its newest attempt: the cap end may sit in an earlier attempt. Each earlier attempt is read once, and one
   # that cannot be read or has no jobs is unknown.
@@ -203,6 +219,7 @@ while IFS= read -r r; do
     if jq -e 'length == 0' >/dev/null <<<"$ajobs"; then capunk="attempt $att of cancelled run $rid has no jobs"; continue; fi
     cap_ends "$rid" "$ajobs"
     [ -z "$endunk" ] || capunk="$endunk"
+    [ -z "$ends" ] || [ -n "$firstcap" ] || firstcap="${ends%%$'\t'*}"
     [ -z "$ends" ] || capl+="$(cap_lines "$r" "  cap end: " ", attempt $att")"$'\n'
   done
   [ -z "$capl" ] || red+="$(jq -r '"- \(.workflowName) (cancelled): \(.url)"' <<<"$r")"$'\n'"${capl%$'\n'}"$'\n'
@@ -223,5 +240,7 @@ red="${red%$'\n'}"
 if [ -z "$red" ] && [ -n "$capunk" ]; then unknown "$capunk"; fi
 if [ -z "$red" ]; then echo green; exit 0; fi
 # issue.sh prints nothing on success and `unknown` plus a warning when the issue write fails.
-res="$(bash "$here/issue.sh" "CI red on $branch" "$(printf 'CI alarm on %s:\n\n%s' "$branch" "$red")")"
+title="CI red on $branch"
+[ -n "$redrun" ] || title="CI job hit its time cap on $branch: $firstcap"
+res="$(bash "$here/issue.sh" "$title" "$(printf 'CI alarm on %s:\n\n%s' "$branch" "$red")")"
 if grep -qx unknown <<<"$res"; then echo "$res"; elif [ -n "$redrun" ]; then echo red; else echo alarm; fi
