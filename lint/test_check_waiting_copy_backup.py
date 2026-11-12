@@ -687,6 +687,53 @@ class ScannerStringCases(unittest.TestCase):
         self.assertTrue(reader_named(out, "bin/apostrophe_echo"), "bin/apostrophe_echo was not flagged")
 
 
+SHELL_CONTINUED = '#!/bin/sh\ncat \\\n  $ROOT/waiting-data/items/1.json\n'
+
+JS_WRAPPED = ('const text = fs.readFileSync(\n'
+              '  path.join(layout.path(root, "waiting-data"), "items", "1.json"));\n')
+
+PARSE_LINE = "    args = ap.parse_args(argv)\n"
+
+PEEK_IN_MAIN = ('    ap.add_argument("--peek", metavar="DIR", help="print the items of a waiting folder")\n'
+                '    args = ap.parse_args(argv)\n'
+                '    if args.peek:\n'
+                '        print(docs_in(args.peek, "items"))\n')
+
+
+class ContinuedReadCases(unittest.TestCase):
+    """A read wrapped over two lines is one statement: a shell line that ends in a backslash, or a JavaScript
+    call that goes on past a line break."""
+
+    def test_shell_read_continued_with_a_backslash_fails(self):
+        root = tree(self._testMethodName, {"bin/split_cat": SHELL_CONTINUED})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a shell read continued with a backslash passed: %r" % out)
+        self.assertTrue(reader_named(out, "bin/split_cat"), "bin/split_cat was not flagged as a live reader")
+
+    def test_javascript_call_wrapped_over_two_lines_fails(self):
+        root = tree(self._testMethodName, {"skills/waiting-page/wrapped.mjs": JS_WRAPPED})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a JavaScript read wrapped over two lines passed: %r" % out)
+        self.assertTrue(reader_named(out, "skills/waiting-page/wrapped.mjs"), "wrapped.mjs was not flagged as a live reader")
+
+
+class ExportFrontCases(unittest.TestCase):
+    """export_page.py's main may call only the five mode entry functions (EXPORT_FRONT)."""
+
+    def test_export_main_peek_option_reading_a_folder_fails(self):
+        with open(os.path.join(ROOT, *EXPORT.split("/")), encoding="utf-8") as handle:
+            real = handle.read()
+        self.assertEqual(real.count(PARSE_LINE), 1, "scope: main's argument parse line is not unique in export_page.py")
+        text = real.replace(PARSE_LINE, PEEK_IN_MAIN)
+        root = tree(self._testMethodName, {EXPORT: text})
+        rc, out = check(root)
+        at = next(i for i, line in enumerate(text.split("\n"), 1) if "print(docs_in(args.peek" in line)
+        self.assertEqual(rc, 1, "a --peek option in main that reads a folder passed in passed: %r" % out)
+        numbers = reader_line_numbers(out, EXPORT)
+        self.assertTrue(any(at - 1 <= n <= at + 1 for n in numbers),
+                        "the --peek read in main (line %d) was not the flagged reader, found %r" % (at, numbers))
+
+
 class ProseCases(unittest.TestCase):
     def test_prose_without_backup_names_all_three_files(self):
         root = tree(self._testMethodName, {
