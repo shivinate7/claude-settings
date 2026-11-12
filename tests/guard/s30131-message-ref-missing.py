@@ -392,6 +392,11 @@ mrf_case("a PR label that links another repo's pull is not judged", "allow",
 mrf_case("a PR on a `> ` quoted line is not judged", "allow", "> lane says PR #8 merged")
 mrf_case("a PR in a double-quoted span is not judged", "allow",
          'The other lane wrote "PR #8 is green" in its report.')
+# An own ref in a double-quoted span is quoted text, so it is not judged. The own-ref block of message_refs reads the
+# quote-blanked line; a copy that reads the raw line judges this ref and refuses the line. The control is the unquoted
+# own ref, `this repo's owner/repo#8 is open`, which stays refused.
+mrf_case("an own ref in a double-quoted span is not judged", "allow",
+         'The other lane wrote "o/r#99999" is open in its report.', lacks=("99999",))
 mrf_case("PR #8 merged, bare, is refused and named", "deny", "PR #8 merged.", carries=("#8",))
 mrf_case("this repo's link to PR #8 merged is refused and named", "deny",
          "[PR #8](https://github.com/o/r/pull/8) merged.", carries=("#8",))
