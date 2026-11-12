@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Health tab</title>
+<style>
+/* Harness only: the toolbar and frames around the drawn screen. The screen itself is page.html's own CSS (#pagecss) plus this step's changes (#newcss). */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 52px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+.tool code { overflow-wrap: anywhere; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No figure, count, time or commit on this page is real. Re-measure each one before it ships.</div>
+<header class="tool">
+  <h1>Health: what you built, and how well each part works</h1>
+  <div class="row" id="rowS"><span>State</span>
+    <button data-s="tab">Health tab</button>
+    <button data-s="view">Health view in Status</button>
+    <button data-s="flat">Draft order</button>
+    <button data-s="unknown">Health tab: coverage unknown</button>
+    <button data-s="nomap">Health tab: no health map</button>
+  </div>
+  <div class="row"><span>Options</span>
+    <button class="hide" data-hide="tab" data-name="Health tab">Hide Health tab</button>
+    <button class="hide" data-hide="view" data-name="Health view in Status">Hide Health view in Status</button>
+    <button class="hide" data-hide="grouped" data-name="Grouped by stage">Hide Grouped by stage</button>
+    <button class="hide" data-hide="flat" data-name="Draft order">Hide Draft order</button>
+  </div>
+  <div class="row" id="rowW"><span>Size</span>
+    <button data-w="all">Phone, tablet, wide</button><button data-w="320">Small phone 320</button><button data-w="390">Phone 390</button><button data-w="800">Tablet 800</button><button data-w="1280">Wide 1280</button>
+  </div>
+  <div class="row" id="rowT"><span>Theme</span>
+    <button data-t="light">Light</button><button data-t="dark">Dark</button>
+    <button id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=tab|view|flat|unknown|nomap</code>, <code>&amp;w=all|320|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=tab,view,grouped,flat</code>. The choice sits on <code>#healthTab</code> (Health tab), <code>#healthViewBtn</code> (Health view in Status) and <code>#healthTable</code> (Grouped by stage, Draft order). Drawn from page.html at 2deb827ad. Sizes are one-page-notes' 390, 800 and 1280, plus 320 for the tab row; this repo's device list is unknown. Each frame caption says whether the screen scrolls sideways.</p>
+</header>
+<main id="stage"></main>
+
+<script type="text/plain" id="pagecss">
+/* page.html at 2deb827ad: the tokens, base, header and tab row (lines 10-60), .btn (249-251),
+   the Status wrapper (424-448), the view switch (533-541), .box (562-565), .lead (669) and .nob (700-707). Unchanged. */
+:root {
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35); color-scheme: dark }
+
+* { box-sizing: border-box; }
+html { scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+button, input, textarea { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.in { max-width: 1160px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 12%, transparent); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); padding-top: 10px; }
+.tabs a { padding: 8px 14px; border-radius: 8px 8px 0 0; color: var(--muted); text-decoration: none; font-weight: 600; border: 1px solid transparent; border-bottom: none; margin-bottom: -1px; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.tabs a[aria-selected="true"] { color: var(--ink); background: var(--surface); border-color: var(--line); }
+.tabs .cnt { font: 600 12px/1 var(--mono); color: var(--muted); }
+.btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.btn.alt { background: transparent; color: var(--acc); }
+.tabs .tl { display: flex; gap: 4px; }
+.tabs .cnt:empty { display: none; }
+.tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
+@media (max-width: 400px) { .tabs a { padding-inline: 6px; gap: 4px; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+.svwrap { container-type: inline-size; padding-block: 18px 40px; }
+.sv { display: grid; gap: 16px; min-width: 0; }
+.sv h2, .sv h3, .sv h4, .sv p { margin: 0; }
+:where(.sv) button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; }
+.sv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.readat { font-size: 14px; color: var(--muted); min-width: 0; }
+.readat summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.readat ul { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.readat li { overflow-wrap: anywhere; }
+.unk { color: var(--due); font-weight: 600; }
+.sv summary { list-style: none; }
+.sv summary::-webkit-details-marker { display: none; }
+.sv summary::before { content: "\25B8"; flex: none; width: 1em; color: var(--muted); }
+.sv details[open] > summary::before { content: "\25BE"; }
+.rg.unk { display: inline-block; width: 12px; height: 12px; vertical-align: -1px; border: 2px dashed var(--due); border-radius: 50%; }
+.views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
+.views button { min-height: 44px; padding: 4px 2px; font-size: 14.5px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
+.views button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.box > header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.box > header h3 { font: 700 15px/1.3 var(--body); }
+.sv .lbl { font-size: 13px; color: var(--muted); }
+.lead { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+.nob { padding: 16px; display: grid; gap: 10px; justify-items: start; }
+.nob h3 { font: 700 17px/1.3 var(--body); display: flex; gap: 8px; align-items: center; }
+.nob p { max-width: 62ch; }
+.nob details { font-size: 14px; color: var(--muted); }
+.nob summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
+.nob pre { margin: 0; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+</script>
+
+<script type="text/plain" id="newcss">
+/* Harness labels only: dashed "Today:" and "New:" marks. They are not part of the screen. */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+
+/* ---------- New: the Health part. Every rule is under .hv, so nothing above reaches it and it reaches nothing above. ---------- */
+.sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Grade marks: four shapes, each in its own colour. Drawn as inline SVG in currentColor, so forced-colors mode keeps the shape. */
+.gr { flex: none; display: block; width: 16px; height: 16px; }
+.gr.ok { color: var(--good); }
+.gr.iss { color: var(--due); }
+.gr.bad { color: var(--holds); }
+.gr.unm { color: var(--muted); }
+.gr .cut { stroke: var(--surface); }
+/* The tab's cue: the broken mark and its count, in a fixed box so the tab never changes width. */
+.tabs .hcue { display: inline-flex; align-items: center; gap: 3px; min-width: 4.5ch; font: 600 12px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--holds); }
+.tabs .hcue .gr { width: 13px; height: 13px; }
+.tabs .hcue.u { color: var(--muted); }
+
+.hv { display: grid; gap: 16px; min-width: 0; }
+.hv-top { display: grid; gap: 10px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.hv-top h2 { font: 700 18px/1.25 var(--body); }
+.hv-top .intro { font-size: 14.5px; color: var(--muted); max-width: 72ch; }
+/* The key: each grade word shows here once, with its mark and its count. Rows show the mark only. */
+.key { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; font-size: 14.5px; }
+.key li { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; }
+.key b { font: 600 14px var(--mono); font-variant-numeric: tabular-nums; }
+.key .zero { color: var(--muted); }
+.key .zero b { font-weight: 400; }
+/* The column icons: their words show in the table head on a wide box, and here on a narrow one. */
+.ikey { display: none; flex-wrap: wrap; gap: 4px 18px; font-size: 13.5px; color: var(--muted); }
+.ikey span { display: inline-flex; align-items: center; gap: 6px; }
+.ci { flex: none; width: 14px; height: 14px; color: var(--muted); }
+
+/* The coverage line: does the table name every hook, check and skill? */
+.cov { display: grid; gap: 2px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14.5px; }
+.cov .ln.u { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.cov .ln b { font: 600 14.5px var(--mono); font-variant-numeric: tabular-nums; }
+.cov .ln.u { color: var(--due); font-weight: 600; }
+.cov .ln.u .rg { flex: none; border-color: var(--muted); }
+.cov details { font-size: 14px; color: var(--muted); }
+.cov summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
+.cov .left { display: grid; gap: 6px; margin: 0 0 8px; }
+.cov .left div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 8px; }
+.cov .left code, .ht code { font: 12.5px/1.5 var(--mono); overflow-wrap: anywhere; }
+.cov .left code { color: var(--ink); }
+.cov pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.hv-top .readat { border-top: 1px solid var(--line); padding-top: 2px; }
+
+/* The fails-silently band: the rows whose check breaks with no record. */
+.quiet { display: grid; gap: 6px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: inset 4px 0 0 var(--muted); font-size: 14.5px; }
+.quiet h3 { display: inline-flex; align-items: center; gap: 8px; font: 700 15px/1.3 var(--body); }
+.quiet p { color: var(--muted); }
+.quiet ul { display: flex; flex-wrap: wrap; gap: 0 16px; margin: 0; padding: 0; list-style: none; }
+.quiet a { display: inline-flex; align-items: center; min-height: 32px; color: var(--acc); }
+@media (pointer: coarse) { .quiet a { min-height: 44px; } }
+.fo { flex: none; display: inline-block; width: 15px; height: 15px; vertical-align: -2px; color: var(--muted); }
+
+/* The table. A real table with explicit roles: on a narrow box its rows become grids, and WebKit drops a table's roles when its display changes. */
+.ht { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; line-height: 1.45; }
+.ht th, .ht td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--line); min-width: 0; }
+.ht thead th { border-top: 0; padding-block: 8px; font: 600 13px/1.3 var(--body); color: var(--muted); background: var(--chip); }
+.ht thead th.gch { width: 44px; }
+.ht thead th.whh { width: 18%; }
+.ht thead th.whyh { width: 30%; }
+.ht thead th.mkh { width: 21%; }
+.ht .grp th { padding-block: 8px; background: var(--ground); font: 700 14.5px/1.3 var(--body); color: var(--ink); }
+.ht .gc { padding-top: 12px; }
+.ht .wh { font-weight: 700; color: var(--ink); }
+.ht .wh .fo { margin-left: 4px; }
+.ht .why { color: var(--ink); }
+.ht .mk { color: var(--muted); }
+.ht .mk code { display: inline; color: var(--muted); }
+.ht .gold { color: var(--ink); }
+.ht .ci { display: none; }
+.ht tr:target { background: var(--acc-soft); }
+/* Tablet box: the grade and the name on the first line, the why under it, then makes and good side by side. */
+@container (max-width: 999px) {
+  .ikey { display: flex; }
+  .ht, .ht tbody { display: block; }
+  .ht thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .ht tbody tr { display: grid; grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  .ht tbody tr.grp { display: block; padding: 0; }
+  .ht th, .ht td { padding: 0; border: 0; }
+  .ht .grp th { display: block; padding: 8px 14px; }
+  .ht .gc { grid-column: 1; grid-row: 1; padding-top: 4px; }
+  .ht .wh, .ht .why { grid-column: 2 / -1; }
+  .ht .mk, .ht .gold { display: flex; gap: 6px; align-items: flex-start; padding-top: 4px; }
+  .ht .mk { grid-column: 2; }
+  .ht .gold { grid-column: 3; }
+  .ht .ci { display: block; margin-top: 2px; }
+}
+/* Phone box: one column under the mark. */
+@container (max-width: 559px) {
+  .hv-top, .quiet { padding-inline: 12px; }
+  .ht tbody tr { grid-template-columns: 18px minmax(0, 1fr); gap: 2px 10px; padding: 10px 12px; }
+  .ht .grp th { padding-inline: 12px; }
+  .ht .mk, .ht .gold { grid-column: 2; }
+  .cov .left div { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
+@media (forced-colors: active) { .gr .cut { stroke: Canvas; } .quiet { border-left: 4px solid CanvasText; } }
+
+/* ---------- New, option Health view in Status: a fifth view button. Five buttons wrap to three columns on a phone box. ---------- */
+.views.five { grid-template-columns: repeat(5, minmax(0, 1fr)); max-width: 640px; }
+@container (max-width: 559px) { .views.five { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.stub { padding: 10px 14px; font-size: 14px; color: var(--muted); }
+</script>
+
+<script>
+/* ---------- Sample data: the 20 rows of the health map draft (Nov 11), in plain words ---------- */
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const lab = (kind, text) => text ? ` data-${kind}="${esc(text)}"` : "";
+
+/* g: ok | iss | bad | unm. quiet: its check fails with no record. mk: the names that make it happen. */
+const ROWS = [
+  { n: 1, g: "iss", what: "A question shows on your page", why: "159 changes in 7 days; 14 were fixes. 12 open debts: the judge misses a past ruling. How often you use the page is not measured.", mk: ["waiting-page", "call_judge.py", "ruling_home.py"], gold: "Each question shows at the next build. No open debt. Page use is measured." },
+  { n: 2, g: "iss", what: "Your answer reaches the session", why: "38 changes; 3 were fixes. One answer needed a second press. A peer's brief was saved as your words.", mk: ["waiting-page", "local_time.py", "feedback_guard.py"], gold: "One press sends it. Only your own words are saved as yours." },
+  { n: 3, g: "bad", quiet: true, what: "Page answers copy to git", why: "The copy was 11 hours old on Nov 11. The writer check misses the stored shape. No test goes red on it. An unknown writer passes with no word.", mk: ["export_page.py", "waiting-page"], gold: "The copy is under 1 hour old. A test goes red on a missed shape. An unknown writer is refused and logged." },
+  { n: 4, g: "iss", what: "A pull request or batch merges", why: "186 changes; 25 were fixes. About 20 open debts. A job that timed out counted as not red.", mk: ["merge.py", "report_guard.py", "ci-hygiene"], gold: "A timed-out job counts as red. Few open debts, and none that blocks a merge." },
+  { n: 5, g: "bad", quiet: true, what: "CI goes green or red, and a wake tells the session", why: "No push run on main has finished since Nov 9, 11:56 CST; 11 were cancelled. Windows shards hit the 20-minute cap and never run on a pull request. The CI wake never fires in the cloud.", mk: ["checks.yml", "ci_wake.py", "ci-hygiene"], gold: "Each push to main ends green or red inside 20 minutes. Every shard runs on a pull request. The wake fires on every machine." },
+  { n: 6, g: "iss", what: "A lane starts", why: "2 of 3 lanes started from main, not from the branch their brief named.", mk: ["agent_brief.py", "guard.py", "project-ops"], gold: "Every lane starts from the branch its brief names." },
+  { n: 7, g: "iss", what: "A session compacts and resumes", why: "4 open debts. The handoff guards fire often.", mk: ["precompact_handoff.py", "reread_check.py", "session_start.sh"], gold: "A resumed session loses no ruling. A handoff guard fires only on a real miss." },
+  { n: 8, g: "iss", what: "A hook refuses an act", why: "287 changes; 38 were fixes. About 48 of 120 debts name a guard file. Only 3 guards have a canary test that proves they go red.", mk: ["guard.py", "mutate_guard.py", "rm_prompt_answer.py"], gold: "Each guard has a canary that goes red on its defect. Few debts name a guard." },
+  { n: 9, g: "bad", what: "A refusal that was wrong", why: "62 false-alarm notes; 22 say “Fix: none”. Whether the Nov 10 cull ran is unknown. The log lives on one machine.", mk: ["refusal_note.py", "daily_note.py", "guard_log_report.py"], gold: "Each false alarm gets a fix or a ruling. The cull runs, and says so. One log for every machine." },
+  { n: 10, g: "iss", what: "Sessions message each other", why: "4 round trips so far. One message showed as sent and was never stored. 5 messages ever, 1 of them real. The wake is not built. Off by default, by your ruling. 35 tests, none for a lost message, the off switch or a second account.", mk: ["mail.py", "sendmessage_state.py"], gold: "No message is lost. Tests cover a lost message, the off switch and a second account." },
+  { n: 11, g: "iss", quiet: true, what: "The end-of-turn report is checked", why: "110 changes; 15 were fixes. The reply judge reads every fifth stop and never refuses.", mk: ["report_guard.py", "reply_judge.py"], gold: "Each report is read. A miss is refused once, with the reason." },
+  { n: 12, g: "unm", what: "Spend per session", why: "No spend record in git. The share of work on Haiku is not measured.", mk: ["config_watch.py", "check_agent_models.py"], gold: "Spend per session and per model is in git, and read each week." },
+  { n: 13, g: "iss", what: "The model cap refuses a spawn", why: "9 changes; 2 were fixes. 3 open debts.", mk: ["config_watch.py", "check_agent_models.py", "check_skill_model_rows.py"], gold: "No spawn runs above its role's model without your grant. No open debt." },
+  { n: 14, g: "unm", what: "Review rounds and verdicts", why: "How many review rounds really run is not measured.", mk: ["design-review", "report_guard.py", "check_plan_refuter.py"], gold: "Rounds and verdicts are counted per change. No change passes 3 rounds." },
+  { n: 15, g: "iss", what: "The roadmap and the Status tab", why: "1,520 steps. The upkeep list looks for the status “active”, which no step has. 352 of 391 steps in progress were not touched in over 24 hours.", mk: ["roadmap", "stall_watch.py"], gold: "The upkeep list finds every live step. No step in progress sits untouched for a day." },
+  { n: 16, g: "iss", what: "Cleanup and stall alerts", why: "The Windows sweep went red twice on main. 515 branches on origin.", mk: ["sweep.py", "session_end_sweep.py", "agent_end_reap.py", "stall_watch.py"], gold: "The sweep is green on every platform. Only open lanes keep a branch." },
+  { n: 17, g: "iss", what: "Docs and the map stay true", why: "The map covers 6 of about 194 code files (3%).", mk: ["plain-english-map", "fresh-prose", "hook_catalog.py", "check_artifact_cites.py"], gold: "The map covers every code file. A stale cite fails CI." },
+  { n: 18, g: "iss", what: "A CLAUDE.md rule is enforced", why: "38 of 121 rules are enforced (31%). 58 have no guard or check (48%).", mk: ["rule_audit.py", "compliance-check", "check_claude_md_size.py"], gold: "Each rule that a mistake can break has a guard or a check." },
+  { n: 19, g: "iss", what: "Your edits reach every machine", why: "Cloud installs: 24 of 24 OK. Your own machines: not measured. A long cloud session keeps the copy it started with.", mk: ["install_from_main.sh", "session_start.sh", "config_watch.py"], gold: "Each machine runs main from its next session start, and each is measured." },
+  { n: 20, g: "unm", quiet: true, what: "A judge flags a decision or prose edit", why: "The prose judge lets an edit through when the model call fails. How often is not measured.", mk: ["prose_judge.py", "call_judge.py", "decision-watch"], gold: "A judge error is logged and counted on this tab." },
+];
+/* Grouped by stage: the order of a piece of work, from your question to the machines that run it. */
+const GROUPS = [
+  ["Your questions and answers", [1, 2, 3]],
+  ["Getting work merged", [6, 14, 4, 5]],
+  ["Sessions at work", [7, 10, 11, 12, 13]],
+  ["Guards and rules", [8, 9, 18, 20]],
+  ["Seeing it and keeping it clean", [15, 16, 17, 19]],
+];
+/* What "every part" means: the unique hooks in docs/catalog.md (judges included), the check scripts checks.yml runs,
+   and the skills in skills/. Helpers (guard_core.py, _*.py) and test_* files are left out. Sample: the build reads them. */
+const INVENTORY = {
+  hooks: ["stall_watch.py", "report_guard.py", "config_watch.py", "ruling_home.py", "precompact_handoff.py", "reply_judge.py", "feedback_guard.py", "reread_check.py", "session_start.sh", "daily_note.py", "session_end_sweep.py", "agent_end_reap.py", "guard.py", "call_judge.py", "blind_brief.py", "prose_judge.py", "sendmessage_state.py", "sim_boot_record.py", "rm_prompt_answer.py", "agent_brief.py", "local_time.py", "ci_wake.py", "refusal_note.py", "install_from_main.sh"],
+  checks: ["check_agent_models.py", "check_artifact_cites.py", "check_claude_md_size.py", "check_comment_narration.py", "check_glossary.py", "check_hook_dup_names.py", "check_hook_stubs.py", "check_landed_dirs.py", "check_layout.py", "check_mod_versions.py", "check_plan_refuter.py", "check_python_floor.py", "check_record_slugs.py", "check_red_run.py", "check_ruling_kind.py", "check_shared_resources.py", "check_silent_undo.py", "check_skill_model_rows.py", "check_unknown_reads_contract.py", "hook_catalog.py", "rule_audit.py", "mutate_guard.py"],
+  skills: ["ci-hygiene", "compliance-check", "design-explore", "design-review", "fresh-prose", "impeccable", "ios-apps", "plain-english-map", "project-ops", "roadmap", "waiting-page"],
+};
+const KIND = { hooks: "Hooks", checks: "Checks", skills: "Skills" };
+const GRADES = [["bad", "Broken"], ["iss", "Has issues"], ["unm", "Not measured"], ["ok", "Healthy"]];
+const GWORD = Object.fromEntries(GRADES);
+
+/* The four marks. Healthy: a filled ring with a check. Has issues: a ring half filled. Broken: a filled octagon with a cross.
+   Not measured: a dashed ring, the page's unknown shape. */
+function mark(g, extra) {
+  const a = ` class="gr ${g}${extra ? " " + extra : ""}" viewBox="0 0 16 16" aria-hidden="true" focusable="false"`;
+  if (g === "ok") return `<svg${a}><circle cx="8" cy="8" r="7.5" fill="currentColor"/><path class="cut" d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (g === "iss") return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 1.4a6.6 6.6 0 0 0 0 13.2z" fill="currentColor"/></svg>`;
+  if (g === "bad") return `<svg${a}><path d="M5.2 0.6h5.6l4.6 4.6v5.6l-4.6 4.6H5.2L0.6 10.8V5.2z" fill="currentColor"/><path class="cut" d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2" stroke-width="2" stroke-linecap="round"/></svg>`;
+  return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.6 2.1"/></svg>`;
+}
+/* Column icons: a gear for "what makes it happen", a target for "what good looks like". Fails silently: an eye with a slash. */
+const GEAR = `<svg class="ci" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15M3 3l1.7 1.7M11.3 11.3L13 13M3 13l1.7-1.7M11.3 4.7L13 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+const TARGET = `<svg class="ci" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>`;
+const EYE = `<svg class="fo" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M1.2 8s2.6-4.6 6.8-4.6S14.8 8 14.8 8s-2.6 4.6-6.8 4.6S1.2 8 1.2 8z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/><path d="M2.5 13.5l11-11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+
+const count = (g) => ROWS.filter((r) => r.g === g).length;
+
+/* ---------- The Health part, shared by both placements ---------- */
+function row(r) {
+  return `<tr role="row" id="r${r.n}"><td role="cell" class="gc">${mark(r.g)}<span class="sr">${GWORD[r.g]}</span></td>`
+    + `<th role="rowheader" scope="row" class="wh">${esc(r.what)}${r.quiet ? EYE + '<span class="sr">, fails with no record</span>' : ""}</th>`
+    + `<td role="cell" class="why">${esc(r.why)}</td>`
+    + `<td role="cell" class="mk">${GEAR}<span>${r.mk.map((m) => `<code>${esc(m)}</code>`).join(", ")}</span></td>`
+    + `<td role="cell" class="gold">${TARGET}<span>${esc(r.gold)}</span></td></tr>`;
+}
+function table(grouped) {
+  const head = `<thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col" class="gch"><span class="sr">Grade</span></th><th role="columnheader" scope="col" class="whh">What you see</th><th role="columnheader" scope="col" class="whyh">Why this grade</th><th role="columnheader" scope="col" class="mkh">What makes it happen</th><th role="columnheader" scope="col">What good looks like</th></tr></thead>`;
+  const body = grouped
+    ? GROUPS.map(([name, ns]) => `<tr role="row" class="grp"><th role="columnheader" scope="colgroup" colspan="5">${esc(name)}</th></tr>` + ns.map((n) => row(ROWS.find((r) => r.n === n))).join("")).join("")
+    : ROWS.map(row).join("");
+  return `<table class="ht" role="table" id="healthTable" aria-label="Health, one row per thing you see"${lab("new", grouped ? "Grouped by stage" : "Draft order")}>${head}<tbody role="rowgroup">${body}</tbody></table>`;
+}
+function coverage(known) {
+  if (!known) return `<div class="cov"><p class="ln u"><span class="rg unk" aria-hidden="true"></span>Coverage: unknown. The build could not read the list of hooks, checks and skills, so no one can tell if a part is missing here.</p>
+    <details><summary>What the build said</summary><pre>docs/catalog.md: not found at c85a832e2</pre></details></div>`;
+  const named = new Set(ROWS.flatMap((r) => r.mk));
+  const all = Object.values(INVENTORY).flat(), left = Object.entries(INVENTORY).map(([k, xs]) => [k, xs.filter((x) => !named.has(x))]);
+  const nLeft = left.reduce((s, [, xs]) => s + xs.length, 0);
+  return `<div class="cov" id="healthCover"${lab("new", "exhaustive line")}><p class="ln">The rows name <b>${all.length - nLeft}</b> of <b>${all.length}</b> hooks, checks and skills.</p>
+    <details><summary>Named by no row: ${nLeft}</summary><div class="left">${left.map(([k, xs]) => `<div><span>${KIND[k]} ${xs.length}</span><span>${xs.map((x) => `<code>${esc(x)}</code>`).join(", ") || "none"}</span></div>`).join("")}</div></details></div>`;
+}
+function healthPart(o) {
+  const quiet = ROWS.filter((r) => r.quiet);
+  return `<div class="hv">
+  <section class="hv-top" aria-labelledby="hvH">
+    <h2 id="hvH">How well each part works</h2>
+    <p class="intro">Each row is one thing you see when you work. Its mark says how well it works now. The last column says what good looks like, so each row shows its gap.</p>
+    <ul class="key" aria-label="Grades">${GRADES.map(([g, w]) => { const c = count(g); return `<li${c ? "" : ' class="zero"'}>${mark(g)}<span>${w}</span><b>${c}</b></li>`; }).join("")}</ul>
+    <p class="ikey" aria-hidden="true"><span>${GEAR}What makes it happen</span><span>${TARGET}What good looks like</span></p>
+    ${coverage(o.coverage !== false)}
+    ${o.stamp === false ? "" : `<details class="readat"${lab("new", "read-at, as Status")}><summary>Measured Nov 11, 16:40 CST</summary><ul><li>From main at <code>c85a832e2</code>.</li><li>Changes and fixes count commits on main in the 7 days before, by the files each row names.</li></ul></details>`}
+  </section>
+  <section class="quiet" aria-labelledby="qH"><h3 id="qH">${EYE}Fails with no record: ${quiet.length}</h3>
+    <p>When these checks break, nothing says so.</p>
+    <ul>${quiet.map((r) => `<li><a href="#r${r.n}">${esc(r.what)}</a></li>`).join("")}</ul></section>
+  ${table(o.grouped)}
+</div>`;
+}
+function noMap() {
+  return `<section class="box nob"><h3><span class="rg unk" aria-hidden="true" style="border-color:var(--muted)"></span>Health: unknown</h3>
+    <p>This page holds no health map yet, so no row can be graded. Your questions are not affected.</p>
+    <details><summary>What the build said</summary><pre>health map: not in the roadmap block at c85a832e2</pre></details>
+    <button type="button" class="btn alt">Copy the ask to build the health map</button></section>`;
+}
+
+/* ---------- The screen around it ---------- */
+const hdr = `<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">cs</div><div class="who"><h1 class="repo">claude-settings</h1></div></div></header>`;
+function tabs(sel, cue) {
+  const t = (id, name, extra, on, l) => `<a href="#" id="${id}" role="tab" aria-selected="${on}"${on ? "" : ' tabindex="-1"'}${l || ""}>${name}${extra}</a>`;
+  const health = sel === "view" ? "" : t("healthTab", "Health", cue, sel === "health", lab("new", "Health tab"));
+  return `<nav class="in tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts">`
+    + t("tabQ", "Questions", ' <span class="cnt">4</span>', sel === "q")
+    + t("tabStatus", "Status", "", sel === "status" || sel === "view", sel === "view" ? lab("today", "Status tab") : "")
+    + health + `</div></nav>`;
+}
+function screen(s) {
+  if (s === "view") {
+    const views = [["Plan"], ["Changes"], ["Reference"], ["Records"], ["Health", true]];
+    return hdr + tabs("view") + `<div class="in svwrap"><section class="sv" aria-label="Status">
+      <div class="sv-head"><details class="readat"${lab("today", "read-at")}><summary>Read Nov 11, 16:40 CST</summary></details></div>
+      <section class="box stub"${lab("today", "stalled band, Live work, plan band")}>Stalled steps, Live work and the plan band sit here, as today.</section>
+      <div class="views five" role="tablist" aria-label="Status views"${lab("new", "fifth view")}>${views.map(([n, on]) => `<button type="button" role="tab"${on ? ' id="healthViewBtn"' : ""} aria-selected="${!!on}">${n}</button>`).join("")}</div>
+      <div class="sview" role="tabpanel" aria-label="Health">${healthPart({ grouped: true, stamp: false })}</div></section></div>`;
+  }
+  const cue = s === "nomap"
+    ? ` <span class="hcue u"><svg class="gr unm" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.6 2.1"/></svg><span class="sr">, unknown</span></span>`
+    : ` <span class="hcue">${mark("bad")}<span aria-hidden="true">${count("bad")}</span><span class="sr">, ${count("bad")} broken</span></span>`;
+  const body = s === "nomap" ? noMap() : healthPart({ grouped: s !== "flat", coverage: s !== "unknown" });
+  return hdr + tabs("health", cue) + `<div class="in svwrap" role="tabpanel" aria-labelledby="healthTab"><section class="sv" aria-label="Health">${body}</section></div>`;
+}
+
+/* ---------- Harness: state, size, theme and labels from the URL hash ---------- */
+const STATES = ["tab", "view", "flat", "unknown", "nomap"];
+const OPT = { tab: ["tab", "unknown", "nomap"], view: ["view"], grouped: ["tab", "view", "unknown"], flat: ["flat"] };
+const WIDTHS = [390, 800, 1280], WNAME = { 320: "Small phone", 390: "Phone", 800: "Tablet", 1280: "Wide" };
+const P = { s: "tab", w: "all", t: "", lab: "on", hide: [] };
+function readHash() {
+  P.s = "tab"; P.w = "all"; P.t = ""; P.lab = "on"; P.hide = [];
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; });
+  if (!STATES.includes(P.s)) P.s = "tab";
+}
+const hiddenStates = () => new Set(P.hide.flatMap((o) => OPT[o] || []));
+function writeHash() {
+  const q = new URLSearchParams({ s: P.s, w: P.w });
+  if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(","));
+  const h = "#" + q; if (location.hash !== h) history.replaceState(null, "", h);
+}
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function docFor(s) {
+  return `<!doctype html><html lang="en" data-theme="${theme()}" class="${P.lab === "off" ? "nolab" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>claude-settings Cockpit</title><style>${document.getElementById("pagecss").textContent}${document.getElementById("newcss").textContent}</style></head><body>${screen(s)}</body></html>`;
+}
+function frame(w) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = WNAME[w] + " " + w + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "Health at " + w + " wide"; f.style.width = w + "px"; f.dataset.w = w;
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = 900, side = "unknown";
+    try { const d = f.contentDocument.documentElement; hgt = d.scrollHeight; side = d.scrollWidth > w ? "scrolls sideways" : "no sideways scroll"; } catch (e) {}
+    cap.textContent = WNAME[w] + " " + w + ", " + theme() + ": " + side;
+    cap.dataset.side = side;
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  f.addEventListener("load", () => { fit(); setTimeout(fit, 250); });
+  f.srcdoc = docFor(P.s);
+  addEventListener("resize", fit);
+}
+function render() {
+  const off = hiddenStates();
+  if (off.has(P.s)) { const v = STATES.find((x) => !off.has(x)); if (v) P.s = v; }
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  document.querySelectorAll("[data-s]").forEach((b) => { b.hidden = off.has(b.dataset.s); b.setAttribute("aria-pressed", String(b.dataset.s === P.s)); });
+  document.querySelectorAll("[data-hide]").forEach((b) => { const h = P.hide.includes(b.dataset.hide); b.textContent = (h ? "Show " : "Hide ") + b.dataset.name; b.setAttribute("aria-pressed", String(h)); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  (P.w === "all" ? WIDTHS : [Number(P.w) || 390]).forEach(frame);
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.id === "labBtn") P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const id = b.dataset.hide; P.hide = P.hide.includes(id) ? P.hide.filter((i) => i !== id) : [...P.hide, id]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!P.t) render(); });
+readHash(); render();
+</script>
+</body>
+</html>
