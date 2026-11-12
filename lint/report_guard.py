@@ -2882,7 +2882,7 @@ def cannot_run(asked, why):
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
-def past_ruling_problem(asked, cwd):
+def past_ruling_problem(asked, cwd, session_id=None):
     """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
     _hooks_on_path()
     import question_form
@@ -2900,7 +2900,7 @@ def past_ruling_problem(asked, cwd):
               + question_form.candidates_block(candidates, unknown))
     verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL,
                                                  timeout=call_judge.PAST_RULING_TIMEOUT,
-                                                 shape=call_judge.OK_SHAPE, effort=None)
+                                                 shape=call_judge.OK_SHAPE, effort=None, session_id=session_id)
     if error:
         return cannot_run(asked, " ".join(str(error).split()))
     if verdict.get("ok") is not False:
@@ -2955,7 +2955,7 @@ def question_keys_problem(after, text):
     return KEYS_REASON % clash if clash else ""
 
 
-def relay_reasons(after, text, cwd):
+def relay_reasons(after, text, cwd, session_id=None):
     """Refusals for the questions the reply relays to the owner, read from every assistant text since the last
     human message. An error in the option-key check allows, with one stderr line. An error in the past-ruling check
     is a check that could not run, so it refuses as Unvetted."""
@@ -2968,7 +2968,7 @@ def relay_reasons(after, text, cwd):
         asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
         if asked:
             try:
-                reasons.append(past_ruling_problem(asked, cwd))
+                reasons.append(past_ruling_problem(asked, cwd, session_id))
             except Exception as exc:
                 print("past-ruling check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
                 reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))
@@ -2983,7 +2983,7 @@ def rewrite_relay(hook):
     try:
         path = hook.get("transcript_path")
         records = read_transcript(path) if path and os.path.exists(path) else []
-        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"))
+        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"), hook.get("session_id"))
     except Exception as exc:
         print("relay check on a rewrite failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
         return []
@@ -3203,7 +3203,7 @@ def main():
     note = " ".join(filter(None, [note, hand_note, review_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
-        relay = relay_reasons(after, text, hook.get("cwd"))
+        relay = relay_reasons(after, text, hook.get("cwd"), hook.get("session_id"))
         try:
             relay.append(answered_problem(text))  # one block per turn, joined with any other reason, landed or not
         except Exception:

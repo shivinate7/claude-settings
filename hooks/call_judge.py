@@ -264,14 +264,14 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
-def _ask_judge(head, text, what):
+def _ask_judge(head, text, what, session_id=None):
     """True only when the model answers {"ok": true} to the owner's prompt `text` read under the prompt `head`. The one
     fail-closed call of the plain asks: an error, a timeout or an odd answer is False with one stderr line naming
     `what`; a plain {"ok": false} is False with none."""
     try:
         import decision_watch  # lazy: the one home of the model's name
         verdict, error = invoke_model(head + text, model=decision_watch.MODEL,
-                                      timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
+                                      timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low", session_id=session_id)
         if error:
             raise ValueError(" ".join(str(error).split()))
         ok = verdict.get("ok") if isinstance(verdict, dict) else None
@@ -285,19 +285,19 @@ def _ask_judge(head, text, what):
         return False
 
 
-def opus_ask(text):
+def opus_ask(text, session_id=None):
     """True only when the model says the owner's prompt `text` is a present request to run Opus agents. Fails closed
     (_ask_judge)."""
-    return _ask_judge(OPUS_ASK_PROMPT, text, "opus ask")
+    return _ask_judge(OPUS_ASK_PROMPT, text, "opus ask", session_id)
 
 
-def override_ask(text):
+def override_ask(text, session_id=None):
     """True only when the model says the owner's prompt `text` is a present request to override a refusal. Fails closed
     (_ask_judge)."""
-    return _ask_judge(OVERRIDE_ASK_PROMPT, text, "override ask")
+    return _ask_judge(OVERRIDE_ASK_PROMPT, text, "override ask", session_id)
 
 
-def opus_scope(text, context):
+def opus_scope(text, context, session_id=None):
     """The roles the owner's earlier prompts `context` (a list of strings, oldest first) name for the plain ask `text`,
     as the model's raw role strings (a list), or None for every role. Fails open to None with one stderr line: an
     error, a timeout or an odd answer. It does not filter: override._scoped_roles is the one filter, against ASK_ROLES."""
@@ -307,7 +307,7 @@ def opus_scope(text, context):
         prompt = (OPUS_SCOPE_PROMPT % ", ".join(ASK_ROLES) + text + "\n\nEarlier prompts:\n"
                   + "\n".join("- " + " ".join(entry.split()) for entry in context))
         verdict, error = invoke_model(prompt, model=decision_watch.MODEL, timeout=OPUS_SCOPE_TIMEOUT,
-                                      shape=OK_SHAPE, effort="low")
+                                      shape=OK_SHAPE, effort="low", session_id=session_id)
         if error:
             raise ValueError(" ".join(str(error).split()))
         if verdict.get("ok") is not True:
@@ -421,7 +421,8 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
-        verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
+        verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None,
+                                      session_id=payload.get("session_id"))
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)

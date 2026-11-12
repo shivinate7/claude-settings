@@ -564,6 +564,17 @@ def open_call(path, size):
     return bool(pending)
 
 
+def model_streak(session_id):
+    """The model-call failure line for this session, or ''. The one home is decision_watch.streak_line.
+    Cost: one import (about 50 ms, measured) and one small file read per Stop. A failure here means no
+    line, never a blocked Stop. Stop hooks run side by side, so it names calls that ended before this one began."""
+    try:
+        import decision_watch
+        return decision_watch.streak_line(session_id)
+    except Exception:
+        return ""
+
+
 def stop():
     if not TASK_NOTIFICATION_TAG:  # every finished job would look open: say nothing
         return 0
@@ -575,6 +586,7 @@ def stop():
         quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
         rows = []
+        streak = model_streak(call.get("session_id"))
         open_jobs, prev_stop = scan_jobs(call["transcript_path"])
         for job, (path, note, (named, cwd), began, agent) in open_jobs.items():
             until = " | until: " + note if note else ""
@@ -613,11 +625,16 @@ def stop():
                 if prev_stop is not None and now - idle + quiet <= prev_stop:
                     continue  # its stall crossed before the previous Stop, which listed it
                 rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
+        lines = []
         if rows:
             head = "Background jobs still running and quiet: stop it or tell the owner."
             if "| until: " in "".join(rows):
                 head += " Say whether each until condition is met."
-            print(json.dumps({"systemMessage": "\n".join([head] + rows)}))
+            lines = [head] + rows
+        if streak:
+            lines.append(streak)
+        if lines:
+            print(json.dumps({"systemMessage": "\n".join(lines)}))
     except Exception:  # guard-hooks-fail-closed: a failed check prints nothing and does not block
         pass
     return 0
