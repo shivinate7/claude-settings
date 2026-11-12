@@ -128,7 +128,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    **After a batch merges, route the PRs that now conflict with main.** In the same turn as the merge
    report, the batch runner runs `merge --release-check N... --lint N@<live head>:PASS` on the handed-in
    lane PRs. Without the lint verdicts, every line FAILs on the lint. A line that says `not clean (merge
-   conflict)` names a PR that conflicts with the new main. A line that says `unknown` is not a conflict.
+   conflict)` names a PR that conflicts with the new main. A line that says `unknown` does not say there is a conflict.
    The runner names each conflicting PR to its lane and picks nothing per PR, so no coordinator pick is
    needed. Each named lane does these acts in its own checkout:
    1. Merge main into the lane branch once: `git fetch origin main`, then `git merge origin/main`.
@@ -136,8 +136,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
       without conflict. Push the merge. A review log can only name a head that is live.
    2. Spawn a fresh fix verifier on Sonnet. Its brief opens `Fix check`, and gives the reviewed head (the
       Head of the PR's newest review log), the conflicted paths as the named finding, and that log's
-      `Guard or check:` value. It reads `git show --cc <merge head>`, which prints only the resolved
-      hunks. `git diff origin/main...<merge head>` also holds the lane's own diff.
+      `Guard or check:` value. The brief names the read: for each conflicted path, `git diff <merge head>^1
+      <merge head> -- <path>` and the same with `^2`. `git show --cc` prints nothing for a conflict that
+      took one side whole, and `git diff origin/main...<merge head>` holds the lane's whole diff.
    3. Print the log with `merge <pr> --review-record --head <merge head> --kind K --guard G`, then the
       earlier `--round` lines, and `--net-value` and `--grant` when the earlier log has them, copied in,
       then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The tool posts nothing: post the
