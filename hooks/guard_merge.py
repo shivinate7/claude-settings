@@ -1435,7 +1435,7 @@ ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
     "the lane now strands that work. Either open a pull request for that branch and hand it to the batch runner, or "
     "push an archive copy of it under archive/, then retry. If the branch was archived under another name, push one "
-    "more copy under the lane's own name, archive/<branch> (archive/<branch>-<n> when that is taken), at the branch tip, then retry. "
+    "more copy under the stranded branch's own name, archive/<branch> (archive/<branch>-<n> when that is taken), at the branch tip, then retry. "
     + ARCHIVE_CITE
 )
 ARCHIVE_BRANCH_READ_REASON = (
