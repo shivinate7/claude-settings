@@ -20,15 +20,21 @@ names it, never a crash.
     and the probe's error. The token file is not text: the line names the fix, and there is no probe.
     The fix is prompted once: a later start in the same config dir with no token file prints nothing
     (owner ruling, 11:43 CST Nov 6: "the setup must work on every account and device or prompt once").
+    A successful recorded judge call clears that mark (record_model_outcome), so a lost login after a repaired
+    one prints the fix again. A reply at exit 0 that is not a verdict but asks for a login ("Please run /login")
+    prints one line; it is not a working login.
 - decision_watch.invoke_model(prompt, ..., session_id=None) -> (verdict | None, error | None)
     Gains one keyword. A non-empty session_id records the outcome: a failure adds one to the session's
     consecutive-failure count and keeps the scrubbed error; a success resets the count.
     Without a session_id nothing is recorded.
 - decision_watch.record_model_outcome(session_id, error) -> None
-    error None is a success. A falsy session_id writes nothing.
+    error None is a success: it resets the count and clears the prompted mark, so the fix shows again for a
+    later lost login. A falsy session_id writes nothing.
 - decision_watch.streak_line(session_id) -> str
-    '' below three failures in a row. From three on: "Model calls: N failed in a row this session
-    (last: <error>). Hook judges are not running. Fix: <the auth_check fix>".
+    An AUTH error (its text names a lost login) gives the line from the first failure, with the auth_check fix,
+    and no streak wait. Owner, 11:43 CST Nov 6: "It never fails quietly". Coordinator ruling, 08:28 CST Nov 12.
+    Any other error (RUN) gives '' below three failures in a row. From three on: "Model calls: N failed in a row
+    this session (last: <error>). Hook judges are not running." and no fix line, since the error names no login.
 - hooks/stall_watch.py --stop (the existing Stop hook) puts streak_line in its one systemMessage line.
 - The classifier: invoke_model's error (a str) carries `kind`. "AUTH": the model start exited non-zero and its
     text names an authentication failure ("401", "Invalid API key", "/login", "authentication"). "RUN": a start
@@ -73,6 +79,7 @@ UNREADABLE_MARK = b"BYTES-MARKER"
 SETUP = "claude setup-token"
 HOOK_TOKEN_REL = os.path.join("state", "hook-token")
 STDERR = "not logged in"
+RUN_STDERR = "connection reset by peer"  # a failed start that names no login: its kind is RUN (no AUTH_TEXT match)
 FAIL_ERR = "model exited 1: " + STDERR  # what invoke_model returns for that failed start
 OK_VERDICT = {"verdict": "ALLOW"}
 CASES = []
@@ -230,18 +237,32 @@ def stop_message(session_id):
 # --------------------------------------------------------------------------- Part A: the session-start check
 
 @case
-def C1_token_file_present_is_silent_and_never_probes():
-    """C1. a token file holds a token: auth_check prints nothing and makes no probe"""
+def C1_token_file_present_is_silent_and_never_probes_and_a_first_login_failure_names_the_fix():
+    """C1. a token file holds a token: auth_check prints nothing and makes no probe. Then a judge call fails with a
+    lost login: the Stop line names the fix on that first failure, with no streak wait. Owner, 11:43 CST Nov 6:
+    "It never fails quietly". Coordinator ruling, 08:28 CST Nov 12: the first failure of kind AUTH prints the fix."""
+    sid = "model-auth-c1"
     with scratch_config("c1") as cfg:
         token_file(cfg, FAKE_TOKEN + "\n")
-        problems = scoped(cfg)
+        problems = scoped(cfg) + takes_session_id_problems()
         fn, miss = interface("auth_check")
         if miss:
             return problems + miss
+        if problems:
+            return problems
         probe = Probe((OK_VERDICT, None))
         text = fn(model_call=probe)
+        _verdict, error = invoke_failing(session_id=sid)  # the token file stays: the login it names is lost
+        kind = getattr(error, "kind", None)
+        p, msg, _out = stop_message(sid)
+        path = os.path.join(cfg, HOOK_TOKEN_REL)
+    problems += p
     problems += expect(text == "", "token file present: auth_check printed %r, want nothing" % text)
     problems += expect(not probe.calls, "token file present: the probe ran %d time(s), want 0" % len(probe.calls))
+    problems += expect(kind == "AUTH", "precondition: the lost-login text reads as kind %r, want 'AUTH'" % kind)
+    problems += expect(SETUP in msg, "the first lost-login failure gave no Stop line naming %r: %r" % (SETUP, msg))
+    problems += expect(path in msg, "the first lost-login failure's Stop line does not name the hook-token path %r: %r"
+                       % (path, msg))
     return problems
 
 
@@ -389,22 +410,27 @@ def C5_three_failures_show_count_fix_and_last_error_and_a_success_clears_the_lin
 
 
 @case
-def C6_fewer_than_three_failures_show_no_line_and_the_third_shows_it():
-    """C6. no failures, then two: no Stop line. The third failure brings the line"""
+def C6_fewer_than_three_run_failures_show_no_line_and_the_third_shows_it():
+    """C6. run failures (a reset connection: no login named, kind RUN) give no Stop line after none, or after two.
+    The third brings the line. Coordinator ruling, 08:28 CST Nov 12: run failures keep the streak of 3, and a
+    lost login does not wait (C1). Owner, 11:43 CST Nov 6: "It never fails quietly"."""
     sid = "model-auth-c6"
     with scratch_config("c6") as cfg:
         problems = scoped(cfg) + takes_session_id_problems()
         if problems:
             return problems
+        _verdict, error = invoke_failing(stderr=RUN_STDERR)  # no session id: records nothing
+        kind = getattr(error, "kind", None)
+        problems += expect(kind == "RUN", "precondition: the run failure's text reads as kind %r, want 'RUN'" % kind)
         p, msg, _out = stop_message(sid)
         problems += p
         problems += expect("Model calls:" not in msg, "no failures yet: the Stop line is %r" % msg)
         for _ in range(2):
-            invoke_failing(session_id=sid)
+            invoke_failing(stderr=RUN_STDERR, session_id=sid)
         p, msg, _out = stop_message(sid)
         problems += p
-        problems += expect("Model calls:" not in msg, "two failures: the Stop line is %r" % msg)
-        invoke_failing(session_id=sid)
+        problems += expect("Model calls:" not in msg, "two run failures: the Stop line is %r" % msg)
+        invoke_failing(stderr=RUN_STDERR, session_id=sid)
         p, msg, _out = stop_message(sid)
         problems += p
         problems += expect("Model calls: 3 failed in a row" in msg, "three failures: the Stop line is %r" % msg)
@@ -819,6 +845,107 @@ def CTRL3_run_folder_sweep_removes_a_day_old_sibling_and_keeps_a_new_one():
     problems = expect(not os.path.exists(old), "a sibling run folder over a day old was kept")
     problems += expect(os.path.isdir(new), "a new sibling run folder was removed")
     problems += expect(os.path.isdir(own), "the run's own folder is missing")
+    return problems
+
+
+# ---------------------------------------------- round 2: the first-failure rule, the prompted mark, the login text
+
+# The owner's 15:33 CST Nov 6 failure, verbatim from roadmap/data/steps/model-call-auth-check.json (the note field).
+REFRESH_TEXT = ("Failed to refresh OAuth token: another Claude Code process is refreshing it or exited "
+                "mid-refresh")
+
+
+@case
+def F2_a_login_repaired_then_lost_again_prints_the_fix_again():
+    """F2, review round 1 (class b): the prompted mark hid a new failure. No token file. The first lost login prints
+    the fix. A judge call that succeeds (the login repaired) clears the mark. The next lost login, at the next session
+    start, prints the fix again. Owner, 11:43 CST Nov 6: "It never fails quietly". Paired control: C13, where the mark
+    still stops a repeat in the same state. Red on the build head."""
+    sid = "model-auth-f2"
+    with scratch_config("f2") as cfg:
+        problems = scoped(cfg) + takes_session_id_problems()
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        if problems:
+            return problems
+        first = fn(model_call=Probe((None, Kinded(FAIL_ERR, "AUTH"))))
+        invoke_ok(session_id=sid)  # the login is repaired: a judge call succeeds
+        again = fn(model_call=Probe((None, Kinded(FAIL_ERR, "AUTH"))))  # the credentials expire again
+    problems += expect(SETUP in first, "precondition: the first lost login gave no fix naming %r: %r" % (SETUP, first))
+    problems += expect(SETUP in again, "a lost login after a repaired login gave no fix naming %r: %r" % (SETUP, again))
+    return problems
+
+
+@case
+def F3_an_exit_zero_reply_that_asks_for_login_prints_a_line():
+    """F3, review round 1: an exit-0 reply that is not a verdict and asks for a login ('Please run /login') is a
+    ReplyError, which auth_check reads as a working login, so it is silent. Want: auth_check prints one line.
+    Owner, 11:43 CST Nov 6: "It never fails quietly". unmeasured: the real CLI text is not known; this text is a
+    guess. C11 is unchanged: it pins off-shape replies, with no login text. Red on the build head."""
+    with scratch_config("f3") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        asks = started(stdout=envelope("Please run /login"), returncode=0)
+        with nowindow_run(NowindowRun(asks)):
+            text = fn()
+    return problems + expect(text != "",
+                             "an exit-0 reply that asks for /login: auth_check printed nothing, want one line")
+
+
+@case
+def F4_a_a_failed_start_with_the_refresh_text_on_stderr_prints_a_line_naming_it():
+    """F4, review round 1: the owner's 15:33 CST Nov 6 failure text, at exit 1 on stderr, is not quiet: auth_check
+    prints one line and the line names the text. Owner, 11:43 CST Nov 6: "It never fails quietly". Keep-green on the
+    build head: the text is the run error (kind RUN, no login named) and it prints."""
+    with scratch_config("f4-a") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        with nowindow_run(NowindowRun(started(stderr=REFRESH_TEXT, returncode=1))):
+            text = fn()
+    problems += expect(text != "", "the refresh text on stderr at exit 1: auth_check printed nothing, want one line")
+    problems += expect(REFRESH_TEXT in text,
+                       "the refresh text on stderr at exit 1: the line does not name it: %r" % text)
+    return problems
+
+
+@case
+def F4_b_the_refresh_text_printed_as_plain_stdout_is_named_on_the_line():
+    """F4, variant. unmeasured: no one has measured whether the CLI prints this failure as plain stdout text, not the
+    JSON envelope, with stderr empty. Droppable: delete this case if the CLI never does. Red on the build head if the
+    text is dropped, so the line names no cause."""
+    with scratch_config("f4-b") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        with nowindow_run(NowindowRun(started(stdout=REFRESH_TEXT, returncode=1))):
+            text = fn()
+    problems += expect(text != "", "the refresh text on stdout at exit 1: auth_check printed nothing, want one line")
+    problems += expect(REFRESH_TEXT in text, "the refresh text on stdout at exit 1 is dropped: the line is %r" % text)
+    return problems
+
+
+@case
+def F4_c_three_refresh_text_failures_give_the_stop_line():
+    """F4, streak half: three failed starts with the refresh text count as three failures in a row, so the Stop line
+    comes. Owner, 11:43 CST Nov 6: "It never fails quietly". Keep-green on the build head."""
+    sid = "model-auth-f4-c"
+    with scratch_config("f4-c") as cfg:
+        problems = scoped(cfg) + takes_session_id_problems()
+        if problems:
+            return problems
+        for _ in range(3):
+            with nowindow_run(NowindowRun(started(stderr=REFRESH_TEXT, returncode=1))):
+                dw.invoke_model("judge this", session_id=sid)
+        p, msg, _out = stop_message(sid)
+    problems += p
+    problems += expect("Model calls: 3 failed in a row" in msg,
+                       "three refresh-text failures: the Stop line is %r, want the three-failure line" % msg)
     return problems
 
 

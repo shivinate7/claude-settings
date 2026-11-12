@@ -74,7 +74,8 @@ def _fake_run(argv, **kwargs):
     with open(os.environ["SM_RECORD"], "a", encoding="utf-8") as f:
         f.write(json.dumps({"argv": list(argv), "kind": kind}) + "\n")
     if os.environ.get("SM_MODEL_FAIL"):
-        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
+        failure = os.environ.get("SM_MODEL_FAIL_TEXT", "stub model failure")
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr=failure)
     answer = os.environ["SM_WORDING_ANSWER" if kind == "wording" else "SM_ANSWER"]
     return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": answer}), stderr="")
 
@@ -250,7 +251,7 @@ def point_reader_at_stub(cfg, base):
 
 def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=False,
              reader_mode="board", reader_seconds=NO_BOUND, direct=False, cap=120, wording=ALLOW,
-             override=None, base=None):
+             override=None, base=None, fail_text=None):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -273,6 +274,8 @@ def run_hook(stdin_text, rows=None, answer=ALLOW, model_fail=False, agents_fail=
     })
     if model_fail:
         env["SM_MODEL_FAIL"] = "1"
+    if fail_text:  # the stub's failure text; "stub model failure" when none is given
+        env["SM_MODEL_FAIL_TEXT"] = fail_text
     if agents_fail:
         env["SM_AGENTS_FAIL"] = "1"
     script = HOOK
@@ -641,6 +644,26 @@ def case_model_failure_leaves_a_record_for_the_hook_session():
     check("record: the failed call left a record for the session", bool(found), detail(r))
 
 
+# The owner's 15:33 CST Nov 6 failure text, verbatim. A copy of the constant in hooks/test_model_auth.py: that file
+# patches subprocess.run when it is imported, so this file cannot import it.
+REFRESH_TEXT = ("Failed to refresh OAuth token: another Claude Code process is refreshing it or exited "
+                "mid-refresh")
+
+
+def case_refresh_failure_leaves_a_record_naming_it_for_the_hook_session():
+    """F4, streak half (review round 1): a judge call from the SendMessage hook that fails with the owner's 15:33 CST
+    Nov 6 refresh text leaves a record for the hook's session that names the text. Owner, 11:43 CST Nov 6: "It never
+    fails quietly". Keep-green on the build head: every failure that is not a reply is recorded."""
+    r = run_hook(hook_input(session=SID_A), model_fail=True, fail_text=REFRESH_TEXT, reader_mode="idle")
+    check("refresh: the wording call ran", len(r.wording_calls) == 1, detail(r))
+    found = []
+    for root, _dirs, names in os.walk(os.path.join(r.base, "config")):
+        for name in names:
+            if REFRESH_TEXT in read_text(os.path.join(root, name)):
+                found.append(name)
+    check("refresh: the failed call's record does not name the refresh text", bool(found), detail(r))
+
+
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
@@ -655,6 +678,7 @@ def case_hook_runs():
                  case_malformed_input_fails_open_with_no_deny,
                  case_model_failures_fail_open_with_no_deny,
                  case_model_failure_leaves_a_record_for_the_hook_session,
+                 case_refresh_failure_leaves_a_record_naming_it_for_the_hook_session,
                  case_reader_timeout_allows_with_one_plain_line,
                  case_reader_that_holds_the_pipe_returns_before_the_child_ends):
         try:
