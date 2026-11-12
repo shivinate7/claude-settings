@@ -18,8 +18,8 @@ names it, never a crash.
     model_call(prompt, model=..., timeout=..., effort=None), with a timeout under MODEL_TIMEOUT.
     The probe fails: the line names `claude setup-token`, the hook-token path under guard.config_dir(),
     and the probe's error. The token file is not text: the line names the fix, and there is no probe.
-    The fix is prompted once: a later start in the same config dir with no token file prints nothing
-    (owner ruling, 11:43 CST Nov 6: "the setup must work on every account and device or prompt once").
+    The fix is prompted once: a later start in the same config dir with no token file prints nothing.
+    Why: the setup must work on every account and device, or the fix must be prompted once.
     A successful recorded judge call clears that mark (record_model_outcome), so a lost login after a repaired
     one prints the fix again. A reply at exit 0 that is not a verdict but asks for a login ("Please run /login")
     prints one line; it is not a working login.
@@ -818,7 +818,8 @@ def N3_an_is_error_envelope_with_the_token_leaves_no_token_in_the_error_or_the_s
 
 @case
 def CTRL1_a_failed_model_start_is_an_error_from_invoke_model():
-    """CTRL1. control: a failed model start makes invoke_model return (None, error). Green on main"""
+    """CTRL1. control: a failed model start makes invoke_model return (None, error), with the start's error in it.
+    It guards the start-failure path, so a red case beside it fails for its own cause."""
     with model_run(FakeRun(returncode=1, stderr=STDERR)):
         verdict, error = dw.invoke_model("judge this")
     return expect(verdict is None and bool(error) and STDERR in error,
@@ -827,7 +828,8 @@ def CTRL1_a_failed_model_start_is_an_error_from_invoke_model():
 
 @case
 def CTRL2_the_stop_hook_still_lists_a_quiet_background_job():
-    """CTRL2. control: the Stop hook still lists a quiet background job (the shared case, green on main)"""
+    """CTRL2. control: the Stop hook still lists a quiet background job. It calls the shared Stop-hook case
+    stale_moved_job_is_listed, so both suites check one behaviour."""
     return tss.stale_moved_job_is_listed()
 
 
@@ -848,7 +850,7 @@ def CTRL3_run_folder_sweep_removes_a_day_old_sibling_and_keeps_a_new_one():
     return problems
 
 
-# ---------------------------------------------- round 2: the first-failure rule, the prompted mark, the login text
+# ---------------------------------------------- the first-failure rule, the prompted mark, the login text
 
 # The owner's 15:33 CST Nov 6 failure, verbatim from roadmap/data/steps/model-call-auth-check.json (the note field).
 REFRESH_TEXT = ("Failed to refresh OAuth token: another Claude Code process is refreshing it or exited "
@@ -857,10 +859,10 @@ REFRESH_TEXT = ("Failed to refresh OAuth token: another Claude Code process is r
 
 @case
 def F2_a_login_repaired_then_lost_again_prints_the_fix_again():
-    """F2, review round 1 (class b): the prompted mark hid a new failure. No token file. The first lost login prints
+    """F2: the prompted mark must not hide a new failure. No token file. The first lost login prints
     the fix. A judge call that succeeds (the login repaired) clears the mark. The next lost login, at the next session
-    start, prints the fix again. Owner, 11:43 CST Nov 6: "It never fails quietly". Paired control: C13, where the mark
-    still stops a repeat in the same state. Red on the build head."""
+    start, prints the fix again. A failure is never quiet. Paired control: C13, where the mark still stops a repeat
+    in the same state."""
     sid = "model-auth-f2"
     with scratch_config("f2") as cfg:
         problems = scoped(cfg) + takes_session_id_problems()
@@ -879,10 +881,10 @@ def F2_a_login_repaired_then_lost_again_prints_the_fix_again():
 
 @case
 def F3_an_exit_zero_reply_that_asks_for_login_prints_a_line():
-    """F3, review round 1: an exit-0 reply that is not a verdict and asks for a login ('Please run /login') is a
+    """F3: an exit-0 reply that is not a verdict and asks for a login ('Please run /login') is a
     ReplyError, which auth_check reads as a working login, so it is silent. Want: auth_check prints one line.
-    Owner, 11:43 CST Nov 6: "It never fails quietly". unmeasured: the real CLI text is not known; this text is a
-    guess. C11 is unchanged: it pins off-shape replies, with no login text. Red on the build head."""
+    A failure is never quiet. unmeasured: the real CLI text is not known; this text is a guess.
+    C11 pins off-shape replies that carry no login text, so this case is separate from it."""
     with scratch_config("f3") as cfg:
         problems = scoped(cfg)
         fn, miss = interface("auth_check")
@@ -897,9 +899,9 @@ def F3_an_exit_zero_reply_that_asks_for_login_prints_a_line():
 
 @case
 def F4_a_a_failed_start_with_the_refresh_text_on_stderr_prints_a_line_naming_it():
-    """F4, review round 1: the owner's 15:33 CST Nov 6 failure text, at exit 1 on stderr, is not quiet: auth_check
-    prints one line and the line names the text. Owner, 11:43 CST Nov 6: "It never fails quietly". Keep-green on the
-    build head: the text is the run error (kind RUN, no login named) and it prints."""
+    """F4: the refresh failure text (REFRESH_TEXT), at exit 1 on stderr, is not quiet: auth_check
+    prints one line and the line names the text. A failure is never quiet. The text is a run error (kind RUN,
+    no login named), and auth_check must print it, not drop it."""
     with scratch_config("f4-a") as cfg:
         problems = scoped(cfg)
         fn, miss = interface("auth_check")
