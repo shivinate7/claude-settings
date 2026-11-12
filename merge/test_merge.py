@@ -14839,7 +14839,8 @@ class ReviewFixFlag(ReviewEnv):
 
 class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
-    that record has no fix check line. The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
+    that record has no fix check line; or the pull request has no record at all and its new head holds BASE (coordinator brief R55, owner 13:21 CST
+    Nov 12, 13:59 CST pick: a pull request opened after the review has no record to name the head). The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
     earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
@@ -14877,13 +14878,34 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
         self.assert_refused(rc, out, err)
 
-    def test_no_earlier_record_on_the_pull_request_refuses_the_fix_check(self):
-        # with no record on this pull request there is no reviewed head to start the fix diff from
+    def test_no_earlier_record_on_the_pull_request_refuses_a_base_the_head_does_not_hold(self):
+        # with no record on this pull request, the base must be a commit the new head holds (see the predates test below); an unscripted compare reads diverged
         other_pr = review_comment(1, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         for label, comments in (("no record at all", []), ("a record on another pull request", [other_pr])):
             with self.subTest(label=label):
                 rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments))
                 self.assert_refused(rc, out, err)
+
+    def test_a_base_that_predates_the_pull_request_is_taken_when_the_head_holds_it(self):
+        # incident #2904: the PR opened after the fixes, so no record on it names the verified head. With no earlier record at all, a base that
+        # the new head holds is the head the fix diff starts from; the record still owes its round, so it reads open until a round is written.
+        host = self.record_host(compares={(REVIEW_OLD_HEAD, REVIEW_HEAD): "ahead"})
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        self.assertEqual(rc, 0, "a base the head holds, with no earlier record, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
+
+    def test_a_base_the_head_does_not_hold_is_refused_with_no_earlier_record(self):
+        for status in ("diverged", "behind"):
+            with self.subTest(status=status):
+                rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(compares={(REVIEW_OLD_HEAD, REVIEW_HEAD): status}))
+                self.assert_refused(rc, out, err)
+
+    def test_a_base_the_head_holds_is_refused_when_another_record_exists_on_the_pull_request(self):
+        # the new rule is for a PR with no record at all: with records, the newest one's head still decides
+        older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
+        host = self.record_host(older, compares={(REVIEW_OLD_HEAD, REVIEW_HEAD): "ahead"})
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        self.assert_refused(rc, out, err)
 
     def test_an_older_fix_line_does_not_block_a_base_on_a_newer_record_without_one(self):
         # only the newest earlier record decides, so a fix line on an older record does not refuse a base the newest record names
@@ -15266,6 +15288,17 @@ class ReviewFixAfterPriorRecord(ReviewEnv):
         self.assertEqual(rc, 2, f"a fix check after an earlier record that reads {state} was accepted:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
 
+    def test_a_prior_whose_round_sits_in_an_earlier_log_admits_a_fix_after_a_merge_of_main(self):
+        # round-1 review finding: the earlier fix record has no round line of its own, its round is in the log at the head it verified, and the
+        # newest-record read must see that round here as `merge --reviewed` does, or a legal fix after a merge of main is refused
+        fx = self.real_commits()
+        older = record_text(head=fx.pre, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        newer = record_text(head=fx.fixed, rounds=(), fix=(fix_verifier_line(head=fx.pre),))
+        host = PullsHost([batch_pull(7, fx.conflicted)], {}, comments=[review_comment(1, 7, older), review_comment(2, 7, newer)],
+                         commits=fx.parents, trees=fx.trees, compares=fx.on_main)
+        rc, out, err = self.run_args("7", "--review-record", "--head", fx.conflicted, *REVIEW_FLAGS, "--fix-check", f"{fx.fixed}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
+        self.assertEqual(rc, 0, "a fix after a merge of main, whose prior takes its round from an earlier log, was refused:\n" + out + err)
+
     def test_an_opus_pass_prior_refuses_the_fix_verifier(self):
         fx = self.real_commits()
         self.assert_refused_after(fx, self.prior_text(fx, model="opus"), "open")
@@ -15373,6 +15406,52 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} stale: ")
+
+    def test_a_fix_check_in_a_later_log_reads_the_round_of_the_earlier_log(self):
+        # incident #2860: round 1 FAIL sits in one log at the old head, the fix check PASS in another at the new head, with no round line beside it
+        earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        later = review_comment(2, 7, record_text(rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD),)))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [earlier, later, lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: round 1 is FAIL, and the fix check passed")
+
+    def test_a_fix_record_takes_the_net_value_of_the_round_it_inherits(self):
+        # round-1 review finding: a held record must stay held when its fix record types another Net value, and a guard or check change must
+        # not close below the final round on a fix check (decision hold-unsafe-after-round-3)
+        fix = (fix_verifier_line(head=REVIEW_OLD_HEAD),)
+        for label, earlier_kw, later_kw, want in (
+                ("held stays held", dict(net="negative"), dict(net="positive"), r"held: net value is negative"),
+                ("guard yes owes the final round", dict(guard="yes"), dict(guard="yes", net="positive"), r"open: a guard or check change owes the final round")):
+            with self.subTest(label=label):
+                earlier = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",), **earlier_kw))
+                later = review_comment(2, 7, record_text(rounds=(), fix=fix, **later_kw))
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [earlier, later, lint_of(7, REVIEW_HEAD)])
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 7), want)
+
+    def test_the_newest_log_at_the_fix_head_decides_what_the_fix_inherits(self):
+        # round-2 review findings 1 and 2: a log at the fix head that already has a fix check (one fix verifier per record), or one with no round
+        # (a bare hold), gives nothing, and no older log at that head is read past it
+        round_fail = ("Round 1: reviewer, sonnet, FAIL",)
+        fixed = record_text(head=REVIEW_OLD_HEAD, rounds=round_fail, fix=(fix_verifier_line(head="2e" * 20),))
+        bare_hold = record_text(head=REVIEW_OLD_HEAD, rounds=(), net="negative")
+        for label, newest_earlier in (("an earlier log with its own fix check", fixed), ("a bare hold at the fix head", bare_hold)):
+            with self.subTest(label=label):
+                older = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=round_fail, net="positive"))
+                later = review_comment(2, 7, record_text(rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD),)))
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)],
+                                                  [older, review_comment(3, 7, newest_earlier), later, lint_of(7, REVIEW_HEAD)])
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 7), r"open: the fix check passed, but no round is recorded")
+
+    def test_a_fix_check_reads_no_round_from_a_log_at_another_head_or_pr(self):
+        # the round is read only from the log whose Head is the fix check's reviewed head, and only on the same pull request
+        other = review_comment(1, 7, record_text(head="2e" * 20, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        wrong_pr = review_comment(2, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        later = review_comment(3, 7, record_text(rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD),)))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [other, wrong_pr, later, lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), r"open: the fix check passed, but no round is recorded")
 
     def test_a_pr_with_no_record_is_named_on_the_no_record_line(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
@@ -15836,6 +15915,26 @@ class ReleaseCheck(ReviewEnv):
         older = self.review(7, rounds=("Round 1: reviewer, sonnet, FAIL",), updated="2026-10-03T00:00:00Z")
         newest = review_comment(8, 7, record_text(n=7, head=self.head(), rounds=REVIEW_PASS), created="2026-10-04T00:00:00Z")
         _, lines, err, _ = self.release([7], comments=[older, newest])
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    def split_log(self, earlier_updated=None, other_updated=None):
+        """The comments of a PR whose round is in a log at the old head and whose fix check, with no round line, is in the newest log at the live head.
+        `other_updated` edits a third, unrelated log at another head, placed first."""
+        other = review_comment(5, 7, record_text(n=7, head="2e" * 20, rounds=REVIEW_PASS), updated=other_updated)
+        earlier = review_comment(6, 7, record_text(n=7, head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)), updated=earlier_updated)
+        newest = review_comment(7, 7, record_text(n=7, head=self.head(), rounds=(), fix=(fix_verifier_line(head=REVIEW_OLD_HEAD),)), created="2026-10-04T00:00:00Z")
+        return [other, earlier, newest]
+
+    def test_check_3_a_fix_check_with_its_round_in_an_earlier_log_passes_when_both_are_unedited(self):
+        _, lines, err, _ = self.release([7], comments=self.split_log())
+        self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_check_3_an_edited_log_that_gives_the_round_fails_alone(self):
+        _, lines, err, _ = self.release([7], comments=self.split_log(earlier_updated="2026-10-03T00:00:00Z"))
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"edit")
+
+    def test_check_3_an_edited_log_that_gives_nothing_does_not_fail_the_pull_request(self):
+        _, lines, err, _ = self.release([7], comments=self.split_log(other_updated="2026-10-03T00:00:00Z"))
         self.assertEqual(lines, ["#7 PASS"], err)
 
     # Check 4: the lint verdict, bound to the live head
@@ -17145,6 +17244,16 @@ BACKING = "src/widget.py"
 BACKING_TEXT = "a = 1\nb = 2\nc = 3\nd = 4\n"
 CAP_NAME = "PROSE_JUDGE_MAX_CALLS"
 PROSE_CAP = 2
+
+
+class ReviewRecordUsageLine(unittest.TestCase):
+    """Step review-record-usage-line: the usage text says the sonnet rule covers the fix check, and what it says of the rounds matches the code."""
+
+    def test_the_sonnet_rule_names_the_fix_check_and_not_every_record(self):
+        usage = merge.__doc__
+        self.assertNotIn("MODEL must be sonnet on every record", usage, "the usage line still reads as if every round must run sonnet")
+        self.assertIn("--fix-check MODEL must be sonnet", usage)
+        self.assertIn("round 1 takes any MODEL", usage)
 
 
 class ReviewFixSonnet(ReviewEnv):

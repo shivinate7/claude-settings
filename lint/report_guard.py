@@ -145,7 +145,7 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
-the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
+the review marker, read by merge/merge.py newest_review, which parses it and reads a split-log fix check's round (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
 the one read `merge --reviewed` makes: a record survives clean merges of main, and a clean-merge read that cannot run keeps it stale, so it still blocks. A claim with no
 PR on its line is refused and asks for the PR. With no record for the live head, the remedy names the act (`merge <pr> --review-record ...`, then post the
 record) and never the live head; a record live_review_state reads open or held is refused with that state and its why, and no post act. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
@@ -2643,7 +2643,7 @@ def _newest_record(n, comments, merge_mod):
     (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read."""
     bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
     marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
-    return (merge_mod.parse_review(marked[-1]), marked[-1]) if marked else (None, None)
+    return (merge_mod.newest_review(marked), marked[-1]) if marked else (None, None)  # newest_review: a fix check in a later log reads the earlier log's round
 
 
 def _text_after_ci_line(body, merge_mod):
