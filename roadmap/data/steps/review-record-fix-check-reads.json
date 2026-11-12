@@ -1,0 +1,14 @@
+{
+ "id": "review-record-fix-check-reads",
+ "title": "Review records the fix check writes are readable by merge --reviewed",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "review-record-fix-check-reads",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incidents (coordinator 13:59 CST Nov 12): the records on #2860 and #2904 were unreadable by --reviewed.",
+ "source": "coordinator 13:59 CST Nov 12 (pick)",
+ "note": "R55 express (merge flow). The lane also takes step review-record-usage-line. Lane id: the session tagged cs-topic:review-record-fix-check-reads; set when it shows.",
+ "updatedAt": "2026-11-12T14:00:48-06:00"
+}
