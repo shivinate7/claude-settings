@@ -239,6 +239,37 @@ class RoleListDrift(unittest.TestCase):
         self.assertEqual((code, out), (0, ""), "no drift from role_list_drift still fails the check: %r" % out)
 
 
+class RoundRowDrift(unittest.TestCase):
+    """The record's round rows are read by the guard (one home, decision agent-model-cap). A row the guard cannot read is drift:
+    the check fails and names that row. A readable row passes, and so does the real record (test_main_with_no_args_passes_on_the_real_repo)."""
+    ROLE_ROWS = "| Point | Model | Effort |\n|---|---|---|\n| reviewer | haiku | xhigh |\n| builder | sonnet | high |\n"
+    ROUND_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
+
+    def check_fixture(self, round_row):
+        """The check run over a pointer folder whose record holds the role rows, one round row and the lane row: (code, stdout).
+        The role lists are patched out, so only the round rows can fail the check."""
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        os.makedirs(os.path.join(root, "agents"))
+        record = os.path.join(root, RECORD_RELPATH)
+        os.makedirs(os.path.dirname(record))
+        with open(record, "w", encoding="utf-8") as handle:
+            handle.write(self.ROLE_ROWS + "\n" + self.ROUND_HEAD + round_row + "\n" + LANE_RECORD % "medium")
+        out = io.StringIO()
+        with mock.patch.object(C, "ROOT", root), contextlib.redirect_stdout(out), \
+                mock.patch.object(C._guard, "role_list_drift", lambda pointer_root: [], create=True):
+            code = C.main([])
+        return code, out.getvalue()
+
+    def test_a_round_row_naming_a_model_the_guard_cannot_read_fails_the_check(self):
+        code, out = self.check_fixture("| reviewer | 2 | fable | high |")
+        self.assertEqual(code, 1, "a round row naming a model the guard cannot read passes the check: %r" % out)
+        self.assertTrue(names(out, "agent-model-cap.md", "fable"), "the check does not name the round row it flags: %r" % out)
+
+    def test_a_round_row_the_guard_reads_passes_the_check(self):
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |")
+        self.assertEqual((code, out), (0, ""), "a readable round row fails the check: %r" % out)
+
+
 class RunFolder(unittest.TestCase):
     def test_first_request_sweeps_old_siblings_and_keeps_new_ones(self):
         # test-temp-standard: the first request of a run removes a sibling over a day old and keeps a newer one.
