@@ -437,6 +437,26 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertEqual(len(role), 1, role)
         self.assertIn("no parent_session_id", role[0], "the merge role sentence does not say a solo session may record the batch-runner role: %r" % role[0])
 
+    # decision session-tiers: the solo clause matches a session only once it has picked solo from its request. A coordinator has no
+    # cs-build tag before it sets one, so an untagged, parentless session would match the clause without the pick.
+    def test_the_merge_role_sentence_waits_for_the_session_to_pick_solo(self):
+        role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
+        self.assertEqual(len(role), 1, role)
+        self.assertIn("no parent_session_id", role[0], role[0])
+        self.assertIn("picked", role[0], "the merge role sentence does not wait for the session to pick solo: %r" % role[0])
+        self.assertLess(role[0].index("picked"), role[0].index("no parent_session_id"),
+                        "the pick comes after the solo clause, so the clause matches before the pick: %r" % role[0])
+
+    # decision session-tiers: a coordinator tags itself before the run step is read, so no coordinator reaches the run step untagged
+    def test_the_coordinator_tags_itself_before_the_run_step(self):
+        sents = sentences(hook_tier_line())
+        tagged = [s for s in sents if "tags itself" in s]
+        self.assertEqual(len(tagged), 1, tagged)
+        run = [s for s in sents if "merge --role" in s]
+        self.assertEqual(len(run), 1, run)
+        self.assertLess(sents.index(tagged[0]), sents.index(run[0]),
+                        "the coordinator's self-tag sentence comes after the run step, so a coordinator reads the run step before it tags")
+
     # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
     def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
         told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_merges(s)]
