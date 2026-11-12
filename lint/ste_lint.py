@@ -116,6 +116,13 @@ _rule(
     "'that' marks where the main clause ends. Many languages cannot omit it, so\n"
     "translation of the sentence becomes ambiguous.",
 )
+_rule(
+    "STE022", "one-term", "warning", "[GR-8]",
+    "The text uses a name that GLOSSARY.md retires.",
+    "Rule speak-one-name-per-thing: one term per meaning. GLOSSARY.md lists the name to use and the\n"
+    "names to avoid. Warn-only: it never fails a run. A name written `word (this sense)` in the\n"
+    "glossary retires one sense of an everyday word, so prose is left to the reviewer.",
+)
 
 # --------------------------------------------------------------------------
 # Word tables
@@ -1557,7 +1564,33 @@ def ui_suppressions(copy: _UICopy) -> Dict[int, Optional[List[str]]]:
 # --------------------------------------------------------------------------
 
 
+# The one home of the retired names: GLOSSARY.md, read on each run, never copied here.
+GLOSSARY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "GLOSSARY.md")
+_USES_RE = re.compile(r"uses '([^']+)'; the glossary name is '([^']+)'")
+
+
+def one_term_findings(text):
+    """(offset, name, term) for each retired name that `text` holds. Nothing when GLOSSARY.md is unreadable.
+
+    Cost: one read of GLOSSARY.md per Linter run, in the process already running; no file written."""
+    try:
+        import check_glossary
+        with open(GLOSSARY_PATH, encoding="utf-8-sig") as f:
+            table = check_glossary.rows(f.read())
+    except (ImportError, OSError, ValueError):
+        return []
+    out = []
+    for problem in check_glossary.name_problems("", text, table, plain=True):
+        m = _USES_RE.search(problem)
+        if m:
+            hit = re.search(r"\b" + re.escape(m.group(1)) + r"(?:e?s)?\b", text, re.I)
+            out.append((hit.start() if hit else 0, m.group(1), m.group(2)))
+    return out
+
+
 class Linter:
+    skip_one_term = False
+
     def __init__(self, config: dict):
         self.config = config
         self.enabled = self._enabled_codes()
@@ -1634,6 +1667,12 @@ class Linter:
                       "%r turns an action into a noun." % match.group(0),
                       "Use the verb that the noun comes from.", match.group(0))
 
+        if not self.skip_one_term:
+            for offset, name, term in one_term_findings(text):
+                self._add(out, seg, offset, "STE022",
+                          "The name %r is retired; the glossary name is %r." % (name, term),
+                          "Write %r." % term, name)
+
         return out
 
     # -- sentence-level rules ---------------------------------------------
@@ -1669,6 +1708,7 @@ class Linter:
     # -- file ------------------------------------------------------------
 
     def check_text(self, path: str, text: str) -> List[Finding]:
+        self.skip_one_term = os.path.basename(path) == "GLOSSARY.md"
         lines = text.splitlines()
         paragraphs, suppressed, file_disable = segment_markdown(
             lines, "procedural" if self.config["mode"] == "procedural" else "descriptive")
@@ -1687,6 +1727,7 @@ class Linter:
         paragraphs = source_prose_paragraphs(path, text)
         if paragraphs is None:
             return self.check_text(path, text)
+        self.skip_one_term = False
         findings = self._check_paragraphs(paragraphs)
         for finding in findings:
             finding.path = path
