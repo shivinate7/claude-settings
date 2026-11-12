@@ -621,6 +621,7 @@ jobs:
           bash actions/ruling-kind/test_action.sh
           bash actions/zizmor/test_action.sh
           bash actions/silent-undo/test_action.sh
+          bash actions/stable-mover/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
           bash githooks/test_pre_commit.sh

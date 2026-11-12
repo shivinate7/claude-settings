@@ -1,0 +1,42 @@
+name: stable
+
+# Moves the stable branch to a main commit whose checks run finished green. Sessions install from
+# stable, so a red main never reaches them. The job reads the run's result and runs no check of
+# its own. Only a push run on main counts: a pull request run never moves stable.
+on:
+  workflow_run:
+    workflows: [checks]
+    types: [completed]
+
+permissions: {}
+
+# One move at a time. A queued move waits and runs, so a green head is never dropped; the mover
+# refuses a head that stable already passed.
+concurrency:
+  group: stable
+  cancel-in-progress: false
+
+jobs:
+  move:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Move stable to the green head
+        uses: $/actions/stable-mover
+        with:
+          head-sha: ${{ github.event.workflow_run.head_sha }}
+          conclusion: ${{ github.event.workflow_run.conclusion }}
+          token: ${{ secrets.GITHUB_TOKEN }}
