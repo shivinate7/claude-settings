@@ -1,0 +1,13 @@
+{
+  "id": "page-tool-every-name",
+  "title": "The page hooks know the page tool under every surface's name",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "lane": null,
+  "blockedBy": [],
+  "why": "A page writer whose page tool has another name can never clear the feedback Stop check, and its page writes skip the question checks.",
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "source": "Owner 19:56 CST Nov 11, relaying home triage's page item 164 block",
+  "note": "hooks/shared_names.py:138 sets DATA_TOOL = \"ArtifactData\", and hooks/feedback_guard.py, guard.py, guard_merge.py and call_judge.py match only that name (plus the mcp__ArtifactData prefix). Home triage wrote item 164 twice with n 164 (versions 3 and 4) through a tool it calls db_write; the Stop check still asked it to send the ruling to the page writer, which is itself. Ask: DATA_TOOL becomes the set of names the page tool takes on each surface, from one home. A test goes red on today's code with a db_write write of n 164. The other surface's real tool names are unmeasured: read them from that session's transcript before building. Stability candidate under the 13:51 freeze: a Stop check no act can clear. Second mistake in the same session: it opened the page's claude.ai URL in a browser, not the Artifact read the waiting-page skill names (step 1 of Route and close), then said it could not save the page for stale_pages.py. Whether that surface's read saves a file is unmeasured.",
+  "updatedAt": "2026-11-11T19:58:00-06:00"
+}
