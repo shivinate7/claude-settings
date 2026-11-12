@@ -32,7 +32,8 @@ Limits:
 
 - Pressing GitHub's own Merge button is not refused by a hook.
 - A raw `gh api -X PUT .../pulls/<n>/merge` is not refused by a hook.
-- Owner ruling (pick a on page item 369, button-merge-stale-page, 19:03 CST Nov 7): a hook refuses auto-merge for Claude, by the MCP tool, the GraphQL mutation and `gh pr merge --auto`. The button stays the owner's (rule auto-merge).
+- Owner ruling (pick a on page item 369, button-merge-stale-page, 19:03 CST Nov 7): a hook refuses auto-merge for Claude. The button stays the owner's (rule auto-merge).
+- The guard refuses three forms: the MCP tool `enable_pr_auto_merge`, the GraphQL mutation `enablePullRequestAutoMerge` through `gh api graphql`, and `gh pr merge --auto`. A mutation read from a file is not read, so it passes.
 - The guard stops `gh pr merge` and the MCP merge tool. For the rest, the rule binds the owner by the owner's own word.
 - A required check with no entry and no workflow run on the other head does not count. So in the seconds after a PR goes ready, before GitHub creates its runs, a merge is not refused.
 - A claim or heal commit at merge changes this PR's head. The running batch does not hold the new head, so the brake refuses again, and the claim is reverted. Build the next batch on this batch's head at ready, after its records step.
@@ -40,7 +41,7 @@ Limits:
 Why: batch 13's lanes, roadmap steps c182 and c187 (PRs #777 and #778), each conflicted with batch 12 (PR #779). A merge to main under a running batch run moves the base that run tests. This rule is roadmap step c195.
 
 - Risk: named incident, batch 13 against batch 12, Oct 28. Landed 2026-10-28; overlapping batches 2026-11-02.
-- Check: `merge/test_merge.py` classes BatchRunningReads and BatchBrake, and the `hooks/test_guard.py` cases named `merge-batch:`. The overlap cases replay PR #63 merging while PR #65 (head b8416ca, which contains #63's head 476f456c) runs.
+- Check: `merge/test_merge.py` classes BatchRunningReads and BatchBrake, the `hooks/test_guard.py` cases named `merge-batch:`, and the `auto-merge:` cases in `tests/guard/s45072-merge-refused.py`. The overlap cases replay PR #63 merging while PR #65 (head b8416ca, which contains #63's head 476f456c) runs.
 - Cost: one batch read is one read of the open pull list. When another ready PR is on the base, it adds one read of the required checks (none with a pinned list). Each such PR adds three reads (check runs, commit statuses, workflow runs), and each busy one adds up to two compare reads. Per `--confirm`, two batch reads. Per preview, one. Per guarded merge call of a settled head, one, inside the guard's one read deadline. No process starts, no file written, no timer.
 
 Kind: process

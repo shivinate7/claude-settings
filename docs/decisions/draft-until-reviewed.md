@@ -20,7 +20,8 @@ Why: a draft run that arrives while a ready run is in progress cancels it, and a
 
 Limits:
 
-- The guard does not judge a `gh api` POST to the pulls endpoint, or `hub pull-request`. Each can open a non-draft PR.
+- The guard does not judge `hub pull-request`, which can open a non-draft PR.
+- The guard judges a `gh api` POST to the pulls route (rule draft-pr). It does not read an `--input` body, so a POST with one is refused even when the body sets draft true.
 - A short-flag cluster such as `-dt x` is refused, a rare false alarm.
 - A pull request that turns draft during the merge wait is not stopped.
 - Unmeasured: that `ready_for_review` starts `checks.yml` (it comes from GitHub's documented behavior), and the saving in runs.

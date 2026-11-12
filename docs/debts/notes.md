@@ -174,7 +174,7 @@
 - local-time-hard-coded-dst: the US DST rule is coded in the hook; a US rule change needs an edit; zoneinfo upgrade not built (hooks/local_time.py) Fix: none — rare and harmless. Until: 2026-11-19
 - lock-read-error-never-expires: GhLock.read returns an infinite expiry when the lock commit read fails for a non-network reason, so the lock never expires (merge/merge.py) Fix: none — rare and harmless. Until: 2026-11-20
 - marker-writeback-loses-deletion: after a failed remove, agent-end write-back can drop a person's uncommitted deletion; needs prior failed remove (janitor/sweep.py) Fix: none — rare and harmless. Until: 2026-11-21
-- merge-by-button-stale-page: merging by GitHub button or auto-merge skips the page rebuild, so main's records page can be stale (merge/merge.py) Fix: none — owner decides. Until: 2026-11-22
+- merge-by-button-stale-page: merging by GitHub's button skips the page rebuild, so main's records page can be stale (merge/merge.py). A hook refuses auto-merge for Claude (owner pick a, 19:03 CST Nov 7; decision no-merge-during-batch-ci). Fix: none — the button is the owner's. Until: 2026-11-22
 - merge-head-any-check-licenses: any passing check licenses a skipped required job, not only scope (merge/merge.py) Fix: none — rare and harmless. Until: 2026-11-23
 - merge-head-empty-reads-green: zero checks, zero runs and no required names read green after the 30 s settle (merge/merge.py wait) Fix: none — rare and harmless. Until: 2026-11-24
 - merge-head-preview-wrong: head_state preview prints literal <branch> and reads green when every run was skipped (merge/merge.py) Fix: none — rare and harmless. Until: 2026-11-25

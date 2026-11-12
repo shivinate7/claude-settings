@@ -220,12 +220,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
                        or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
                        explicit GET and the merge tool pass. A local session skips it. An override lifts it.
-  auto-merge           deny. The MCP enable_pr_auto_merge tool, in any session: GitHub's auto-merge button is the owner's.
-                       Disabling auto-merge passes.
+  auto-merge           deny. Turning on auto-merge, in any session: the MCP enable_pr_auto_merge tool, the GraphQL
+                       enablePullRequestAutoMerge mutation through gh api, and `gh pr merge --auto`. GitHub's
+                       auto-merge button is the owner's. Disabling auto-merge passes.
   ready-lane           deny. In a session whose own get_session record proves cs-build:lane: marking a pull request
-                       ready (MCP update_pull_request with draft false, the gh ready command, or a gh api PATCH of a
-                       pull request with draft=false). A batch runner, an untagged session and a record that cannot be
-                       read pass. (draft-until-reviewed)
+                       ready (MCP update_pull_request with draft false, the gh ready command, a gh api PATCH of a pull
+                       request with draft=false or an --input body, or the GraphQL markPullRequestReadyForReview
+                       mutation). A batch runner, an untagged session and a record that cannot be read pass.
+                       (draft-until-reviewed)
   records-page-ready   deny. Marking a pull request ready (MCP update_pull_request with draft false, or the gh ready
                        command without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a

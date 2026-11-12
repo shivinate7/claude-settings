@@ -334,18 +334,16 @@ GH_API_PULLS_ROUTE = re.compile(r"^/?repos/[^/\s]+/[^/\s]+/pulls(?:/(\d+))?/?(?:
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 
 
-def _gh_api_pulls(args):
-    """("create" or "patch", the draft field's value lowercased or "") for `gh api` arguments that POST to the pulls
-    collection or PATCH one pull request, else None. Reads the method as gh does (the last method flag wins; with none,
-    a field or input flag makes it a POST). The last draft field wins. An --input body is unread, so it sets no draft; a PATCH
-    with an --input body and no draft field returns the draft value "input", which a ready mark treats as unknown.
-    Named limit (rule ready-lane): the body file is not read, so a lane's PATCH with --input is refused conservatively,
-    a rare false alarm for a lane, which has no PATCH to make that is not a ready mark."""
-    method, endpoint, draft, fielded, has_input, index = "", "", "", False, False, 0
+def _gh_api_args(args):
+    """(method, endpoint, field values, has_input) for `gh api` arguments, read as gh reads them, or None for a help
+    call. The last method flag wins; method is "" when none is given. A value flag's next token is data, so a header
+    or a host never reads as the endpoint, which is the first other bare token, with an absolute URL's host dropped.
+    Field values are the -f/-F/--field/--raw-field arguments, in order. One reader for the pulls and graphql checks,
+    so they agree on the endpoint (rules draft-pr, ready-lane, auto-merge)."""
+    method, endpoint, fields, has_input, index = "", "", [], False, 0
     while index < len(args):
         arg = args[index]
         index += 1
-        value = None
         if arg in ("-X", "--method"):
             method = (args[index] if index < len(args) else "").upper()
             index += 1
@@ -358,23 +356,38 @@ def _gh_api_pulls(args):
         elif arg in ("-h", "--help"):
             return None
         elif arg in GH_API_FIELD_FLAGS:
-            value, index, fielded = args[index] if index < len(args) else "", index + 1, True
+            fields.append(args[index] if index < len(args) else "")
+            index += 1
         elif arg.startswith(("--field=", "--raw-field=")):
-            value, fielded = arg.split("=", 1)[1], True
+            fields.append(arg.split("=", 1)[1])
         elif arg.startswith(("-f", "-F")) and not arg.startswith("--"):
-            value, fielded = arg[2:], True
+            fields.append(arg[2:])
         elif arg == "--input":
-            index, fielded, has_input = index + 1, True, True
+            index, has_input = index + 1, True
         elif arg.startswith("--input="):
-            fielded, has_input = True, True
+            has_input = True
         elif not arg.startswith("-") and not endpoint:
-            endpoint = arg
-        if value is not None and value.partition("=")[0] == "draft":
-            draft = value.partition("=")[2].lower()
-    route = GH_API_PULLS_ROUTE.match(re.sub(r"^https?://[^/]+", "", endpoint))   # an absolute URL is the same route
+            endpoint = re.sub(r"^https?://[^/]+", "", arg)   # an absolute URL is the same route
+    return method, endpoint, fields, has_input
+
+
+def _gh_api_pulls(args):
+    """("create" or "patch", the draft field's value lowercased or "") for `gh api` arguments that POST to the pulls
+    collection or PATCH one pull request, else None. With no method flag, a field or input flag makes it a POST. The
+    last draft field wins. An --input body is unread, so it sets no draft; a PATCH with an --input body and no draft
+    field returns the draft value "input", which a ready mark treats as unknown.
+    Named limit (rule ready-lane): the body file is not read, so a lane's PATCH with --input is refused conservatively,
+    a rare false alarm for a lane, which has no PATCH to make that is not a ready mark."""
+    parsed = _gh_api_args(args)
+    if parsed is None:
+        return None
+    method, endpoint, fields, has_input = parsed
+    route = GH_API_PULLS_ROUTE.match(endpoint)
     if not route:
         return None
-    method = method or ("POST" if fielded else "GET")
+    drafts = [value.partition("=")[2].lower() for value in fields if value.partition("=")[0] == "draft"]
+    draft = drafts[-1] if drafts else ""
+    method = method or ("POST" if fields or has_input else "GET")
     if route.group(1) is None and method == "POST":
         return "create", draft
     if route.group(1) is not None and method == "PATCH":
@@ -400,31 +413,19 @@ def _gh_api_pulls_calls(segment: str):
 
 def gh_api_graphql_has(segment: str, word: str) -> bool:
     """True when the segment holds a `gh api graphql` call with a -f/-F field (any key) that names `word`, such as a
-    mutation. A query read from a file (`-f query=@f`, --input) is unread and counts as no match."""
+    mutation. The endpoint is read by _gh_api_args, so a flag before it (-X POST, -H, --hostname) hides nothing. A query
+    read from a file (`-f query=@f`, --input) is unread and counts as no match."""
     for rest in _gh_calls(segment):
-        args = rest[1:]
-        if rest[0] != "api" or "graphql" not in [a for a in args if not a.startswith("-")][:1]:
-            continue
-        index = 0
-        while index < len(args):
-            arg = args[index]
-            index += 1
-            value = ""
-            if arg in GH_API_FIELD_FLAGS:
-                value, index = (args[index] if index < len(args) else ""), index + 1
-            elif arg.startswith(("--field=", "--raw-field=")):
-                value = arg.split("=", 1)[1]
-            elif arg.startswith(("-f", "-F")) and not arg.startswith("--"):
-                value = arg[2:]
-            elif arg in GH_API_VALUE_FLAGS:
-                index += 1
-            if word in value:
-                return True
+        parsed = _gh_api_args(rest[1:]) if rest[0] == "api" else None
+        if parsed and parsed[1].strip("/") == "graphql" and any(word in value for value in parsed[2]):
+            return True
     return False
 
 
 def undrafted_api_pr_create(segment: str) -> bool:
-    """True for a segment that creates a pull request through `gh api` without draft=true (rule draft-pr)."""
+    """True for a segment that creates a pull request through `gh api` without draft=true (rule draft-pr).
+    Named limit: the guard does not read an --input body, so `gh api <pulls> --input f` is refused even when the body
+    sets draft true. Add -F draft=true to the call."""
     return any(kind == "create" and draft != "true" for kind, draft in _gh_api_pulls_calls(segment))
 
 
@@ -584,11 +585,25 @@ AUTO_MERGE_REASON = (
 )
 
 
+def _merge_auto_flag(args) -> bool:
+    """True when `gh pr merge` arguments turn --auto on. gh reads a bool flag's `--auto=<v>` by ParseBool, and the last
+    one wins, so `--auto=true` and `--auto=1` turn it on and `--auto=false` turns it off. Tokens after `--` are no flags."""
+    auto = False
+    for arg in args:
+        if arg == "--":
+            break
+        if arg == "--auto":
+            auto = True
+        elif arg.startswith("--auto="):
+            auto = arg[len("--auto="):] in GH_TRUE
+    return auto
+
+
 def auto_merge_hit(segment: str) -> str:
     """The matched call when the segment (or a `sh -c` script it holds) turns on GitHub's auto-merge: `gh pr merge --auto`
     or a `gh api graphql` enablePullRequestAutoMerge mutation, else "" (rule auto-merge). Disabling it matches nothing."""
     for rest in _gh_calls(segment):
-        if rest[:2] == ["pr", "merge"] and "--auto" in rest[2:] and "-h" not in rest and "--help" not in rest:
+        if rest[:2] == ["pr", "merge"] and _merge_auto_flag(rest[2:]) and "-h" not in rest and "--help" not in rest:
             return "gh pr merge --auto"
     return "gh api graphql auto-merge" if gh_api_graphql_has(segment, "enablePullRequestAutoMerge") else ""
 
