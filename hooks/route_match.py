@@ -151,10 +151,11 @@ class _Span(str):
 
 
 def act_texts(task):
-    """The act pieces of a waiting-page task. With a "command" (a string, or each value of a dict of variants): each
-    line split at &&, || and ;, with a leading env and NAME=value assignments dropped, since a route row names the
-    program. With no command: each backtick span of its "context". Empty pieces are dropped. A route row names one
-    act, and a command line chains several, so the cover reads each piece, not the whole line."""
+    """The act pieces of a waiting-page task. With a "command" (a string, or each value of a dict of variants): a
+    backslash-newline joins its two lines, each line is split at &&, || and ; outside quotes, and each piece drops
+    its wrappers (see _act_of), since a route row names the program. With no command: each backtick span of its
+    "context". Empty pieces are dropped. A route row names one act, and a command line chains several, so the cover
+    reads each piece, not the whole line."""
     command = task.get("command")
     commands = list(command.values()) if isinstance(command, dict) else [command]
     pieces = [_act_of(piece)
