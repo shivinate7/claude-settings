@@ -1032,6 +1032,11 @@ spo_register("scratchpad-owner: argument control 5, agent B's deno run -A F, the
              lambda: spo_run_case("arg-ctl-deno-a", "argument control 5, deno run -A F", "probe2.ts",
                                   lambda fx, p: "deno run -A %s" % p,
                                   "agent B's deno run -A F, the file as the script word, is refused", text=TS_TEXT))
+# A verb runner's wrapper (`timeout 60`) hands on its command, so the program the wrapper runs is the script word.
+spo_register("scratchpad-owner: argument pin, agent B's uv run timeout 60 python3 F, the file as the wrapped "
+             "program: refused", lambda: spo_run_case("arg-pin-timeout", "argument pin, uv run timeout 60 python3 F",
+                                                      "f.py", lambda fx, p: "uv run timeout 60 python3 %s" % p,
+                                                      "agent B's uv run timeout 60 python3 F is refused"))
 spo_register("scratchpad-owner: runner x=$(python3 F), an open substitution in an assignment: agent B's run is "
              "refused", spo_runner_case("subst-open-ctl", "x=$(python3 F)", "probe2.py", PY_TEXT, "x=$(python3 %s)"))
 spo_register("scratchpad-owner: cp-mv 1 agent B's run of a script agent A copied into the scratchpad with cp: "
