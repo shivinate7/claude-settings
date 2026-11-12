@@ -20103,6 +20103,248 @@ class BatchFreeze(CloudSession):
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
 
+class BatchBuildStop(CloudSession):
+    """A batch build or drop stops when the merge run that started it is gone: the shim named by CLAUDE_MERGE_SHIM_PID, or the launch link
+    above merge.py (its getppid). The stop comes before the body write and before the push, so a stopped run leaves origin and the pull
+    request body as they were. The runs go through merge.main: it takes the start record, and it turns a Stop into rc 1 and a printed line."""
+
+    # BatchFreeze's fixture, borrowed by name so both classes share one home. A subclass would run BatchFreeze's cases a second time.
+    lane = BatchFreeze.lane
+    frozen_batch = BatchFreeze.frozen_batch
+    drift_batch = BatchFreeze.drift_batch
+    body = BatchFreeze.body
+    run_batch = BatchFreeze.run_batch
+    record_pushes = BatchFreeze.record_pushes
+    pushes = BatchFreeze.pushes
+    ancestor = BatchFreeze.ancestor
+    on_origin = BatchFreeze.on_origin
+    lanes_on_branch_and_listed = BatchFreeze.lanes_on_branch_and_listed
+    frozen_lanes = BatchFreeze.frozen_lanes
+    no_lint_or_ready_check = BatchFreeze.no_lint_or_ready_check
+
+    def setUp(self):
+        super().setUp()
+        self.heads = {}  # lane PR number -> its head sha on origin, as lane() and drift_batch() leave it
+
+    def stand_in(self):
+        """A real child process that stands in for the shim or the launch link. It sleeps until a case kills it; cleanup reaps it."""
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        self.addCleanup(self.reap, proc)
+        return proc
+
+    def reap(self, proc):
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+    def kill_once(self, proc, state):
+        """SIGKILL, then reap, the stand-in, on the first call only. `state` gets "alive" (its state before the kill) and counts "kills".
+        Reaped: a zombie would still answer os.kill(pid, 0), so pid_alive would read it alive."""
+        if state["kills"] == 0:
+            state["alive"] = merge.pid_alive(proc.pid)
+            proc.kill()  # SIGKILL on POSIX
+            proc.wait()
+            state["kills"] += 1
+
+    @contextlib.contextmanager
+    def killed_at_first_read(self, proc):
+        """The runner's kill, timed to the run's first read of a batch pull request. Every batch run makes that read after merge.main starts
+        and before build_integration_branch runs. Yields {"alive", "kills"}: the stand-in's state at that read, and how many kills fired."""
+        real = self.host.batch_pr
+        state = {"alive": None, "kills": 0}
+
+        def read_then_kill(branch):
+            self.kill_once(proc, state)
+            return real(branch)
+        self.host.batch_pr = read_then_kill
+        try:
+            yield state
+        finally:
+            del self.host.batch_pr
+
+    def spy_set_body(self, before=None):
+        """Records each set_body the run makes. `before(n)`, when given, runs inside the write, before the real write. -> the list the case
+        reads after the run: the pull request number of each write."""
+        real, calls = self.host.set_body, []
+
+        def set_body(n, body):
+            calls.append(n)
+            if before is not None:
+                before(n)
+            real(n, body)
+        self.host.set_body = set_body
+        return calls
+
+    def frozen_drop_batch(self):
+        """Lanes 101 to 103 in a draft batch-nightly, with lane #102 blamed so a drop may take it off. -> the batch's pull request number."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        return self.frozen_batch("nightly", [101, 102, 103], draft=True, blamed=(102,))
+
+    def assert_stopped(self, rc, out, pid):
+        """The run stopped: exit 1, and a line that says the build was stopped, names the pid that is gone, and says nothing was pushed."""
+        self.assertEqual(rc, 1, "a stopped build exited %s, not 1: %s" % (rc, out))
+        self.assertIn("stopped", out, "the stop does not say the build was stopped: %s" % out)
+        self.assertIn(str(pid), out, "the stop does not name the pid %s that is gone: %s" % (pid, out))
+        self.assertIn("Nothing was pushed.", out, "the stop does not say nothing was pushed: %s" % out)
+
+    def assert_kill_fired(self, state, out, seam="the run's first read of a batch pull request"):
+        """Setup: the kill fired once, at `seam`, while the stand-in was alive, so the run met a shim that died while it ran."""
+        self.assertEqual(state["kills"], 1, "setup: the kill never fired at %s, so the run never reached it: %s" % (seam, out))
+        self.assertTrue(state["alive"], "setup: the stand-in was already gone at %s: %s" % (seam, out))
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_new_build_whose_shim_is_killed_mid_run_pushes_nothing(self):
+        for n in (101, 102):
+            self.lane(n)
+        proc = self.stand_in()
+        self.record_pushes()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}), self.killed_at_first_read(proc) as state:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assert_kill_fired(state, out)
+        self.assertEqual(self.pushes(), [], "a build whose shim was killed pushed batch-nightly: %s" % out)
+        self.assertEqual(self.host.created, [], "a build whose shim was killed opened a pull request: %s" % out)
+        self.assert_stopped(rc, out, proc.pid)
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_new_build_whose_launch_link_is_killed_mid_run_pushes_nothing(self):
+        for n in (101, 102):
+            self.lane(n)
+        proc = self.stand_in()
+        self.record_pushes()
+        with unittest.mock.patch.dict(os.environ), unittest.mock.patch("os.getppid", return_value=proc.pid), \
+                self.killed_at_first_read(proc) as state:
+            os.environ.pop("CLAUDE_MERGE_SHIM_PID", None)  # a direct run: no shim names itself, so only the launch link is checked
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assert_kill_fired(state, out)
+        self.assertEqual(self.pushes(), [], "a build whose launch link was killed pushed batch-nightly: %s" % out)
+        self.assertEqual(self.host.created, [], "a build whose launch link was killed opened a pull request: %s" % out)
+        self.assert_stopped(rc, out, proc.pid)
+
+    def test_control_a_drop_whose_shim_is_alive_pushes_and_writes_its_body(self):
+        pr = self.frozen_drop_batch()
+        before = self.head("batch-nightly")
+        proc = self.stand_in()
+        self.record_pushes()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}):
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertTrue(merge.pid_alive(proc.pid), "setup: the live shim died during the run, so the run proves nothing about a live shim: %s" % out)
+        self.assertEqual(rc, 0, "a drop whose shim is alive exited %s: %s" % (rc, out))
+        self.assertNotEqual(self.head("batch-nightly"), before, "a drop whose shim is alive did not push batch-nightly: %s" % out)
+        self.assertEqual(self.frozen_lanes(pr), [101, 103], "a drop whose shim is alive did not write the body it should: %s" % out)
+        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
+        self.assertEqual(held, listed, "after a drop whose shim is alive, batch-nightly holds %s and its body lists %s: %s" % (sorted(held), sorted(listed), out))
+
+    def test_control_a_build_with_no_shim_variable_and_a_live_parent_pushes(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.record_pushes()
+        with unittest.mock.patch.dict(os.environ):
+            os.environ.pop("CLAUDE_MERGE_SHIM_PID", None)
+            self.assertTrue(merge.pid_alive(os.getppid()), "setup: the test's own parent is gone, so the launch link is not alive")
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "a build with no shim variable and a live parent exited %s: %s" % (rc, out))
+        self.assertTrue(self.head("batch-nightly"), "a build with no shim variable and a live parent did not push batch-nightly: %s" % out)
+        self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_stopped_drop_writes_no_pr_body_so_the_body_and_the_branch_still_agree(self):
+        pr = self.frozen_drop_batch()
+        before = self.body(pr)
+        proc = self.stand_in()
+        self.record_pushes()
+        calls = self.spy_set_body()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}), self.killed_at_first_read(proc) as state:
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assert_kill_fired(state, out)
+        self.assertEqual(calls, [], "a stopped drop wrote the body of #%d before it stopped: %s" % (pr, out))
+        self.assertEqual(self.body(pr), before, "a stopped drop changed the body of #%d: %s" % (pr, out))
+        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
+        self.assertEqual(held, listed, "after a stopped drop batch-nightly holds %s and its body lists %s: %s" % (sorted(held), sorted(listed), out))
+        self.assert_stopped(rc, out, proc.pid)
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_heal_rebuild_with_a_lease_whose_shim_is_killed_keeps_the_head_and_writes_no_body(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        drifted = self.drift_batch("nightly", [101])  # origin's batch-nightly lost lane #102; the body still lists it, so a rerun rebuilds with a lease
+        proc = self.stand_in()
+        self.record_pushes()
+        calls = self.spy_set_body()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}), self.killed_at_first_read(proc) as state:
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assert_kill_fired(state, out)
+        self.assertEqual(self.head("batch-nightly"), drifted, "a leased rebuild whose shim was killed moved batch-nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "a leased rebuild whose shim was killed pushed: %s" % out)
+        self.assertEqual(calls, [], "a leased rebuild whose shim was killed wrote the body of #%d: %s" % (pr, out))
+        self.assert_stopped(rc, out, proc.pid)
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_drop_whose_shim_is_killed_leaves_the_branch_head_where_it_was(self):
+        self.frozen_drop_batch()
+        before = self.head("batch-nightly")
+        proc = self.stand_in()
+        self.record_pushes()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}), self.killed_at_first_read(proc) as state:
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assert_kill_fired(state, out)
+        self.assertEqual(self.head("batch-nightly"), before, "a drop whose shim was killed moved batch-nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "a drop whose shim was killed pushed: %s" % out)
+        self.assert_stopped(rc, out, proc.pid)
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_kill_inside_the_body_write_stops_before_the_push_and_origin_keeps_its_head(self):
+        # The kill lands after the check before the body write, inside the write, so the check right before the push must stop it.
+        # A kill during git's own push, after that check, still pushes: a check cannot close that window.
+        pr = self.frozen_drop_batch()
+        before = self.head("batch-nightly")
+        proc = self.stand_in()
+        self.record_pushes()
+        state = {"alive": None, "kills": 0}
+        self.spy_set_body(before=lambda n: self.kill_once(proc, state))
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}):
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assert_kill_fired(state, out, "the body write of the drop")
+        self.assertEqual(self.head("batch-nightly"), before, "a drop whose shim was killed inside its body write moved batch-nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "a drop whose shim was killed inside its body write pushed: %s" % out)
+        held, listed = self.lanes_on_branch_and_listed(pr, (101, 102, 103))
+        self.assertEqual(held, listed, "after a stopped drop batch-nightly holds %s and its body lists %s: %s" % (sorted(held), sorted(listed), out))
+        self.assert_stopped(rc, out, proc.pid)
+
+    @unittest.skipIf(os.name == "nt", "a real SIGKILL: POSIX only")
+    def test_a_ready_run_whose_shim_is_killed_in_the_lint_records_no_linted_stamp_and_is_not_marked_ready(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        proc = self.stand_in()
+        self.record_pushes()
+        state = {"alive": None, "kills": 0}
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}), self.no_lint_or_ready_check(ready_state="pass") as mocks:
+            answer = mocks["ci_job_run"].side_effect
+
+            def kill_then_answer(*args, **kw):
+                self.kill_once(proc, state)  # the first ci-job call of a --ready run is the lint of the batch head
+                return answer(*args, **kw)
+            mocks["ci_job_run"].side_effect = kill_then_answer
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assert_kill_fired(state, out, "the lint of the batch head")
+        self.assertNotIn("Linted:", self.body(pr), "a --ready run whose shim was killed in its lint recorded a Linted stamp: %s" % out)
+        self.assertEqual(self.host.readies, [], "a --ready run whose shim was killed in its lint marked the batch PR ready: %s" % out)
+        self.assert_stopped(rc, out, proc.pid)
+
+    def test_control_a_ready_run_whose_shim_is_alive_records_the_linted_stamp(self):
+        for n in (101, 102):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102], draft=True)
+        proc = self.stand_in()
+        self.record_pushes()
+        with unittest.mock.patch.dict(os.environ, {"CLAUDE_MERGE_SHIM_PID": str(proc.pid)}), self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertTrue(merge.pid_alive(proc.pid), "setup: the live shim died during the run, so the run proves nothing about a live shim: %s" % out)
+        self.assertEqual(rc, 0, "a --ready run whose shim is alive exited %s: %s" % (rc, out))
+        self.assertIn("Linted: %s" % self.head("batch-nightly"), self.body(pr), "a --ready run whose shim is alive did not record its Linted stamp: %s" % out)
+
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
 # The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.

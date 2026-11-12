@@ -4512,6 +4512,28 @@ def holds(root, head, ref):
         raise Stop(f"cannot read whether {ref} holds {head[:9]} (a missing object). {FREEZE_CITE}")
     return got
 
+BUILD_LINKS = []  # pids of the runs above this one that started the batch command; main sets them, build_integration_branch reads them
+
+def run_links():
+    """-> the pids whose death means a runner stopped this batch command: the shim (it names itself in CLAUDE_MERGE_SHIM_PID) and the launch link
+    above merge.py. A kill signals one pid, so the rest of the chain keeps running unless something checks these."""
+    links = []
+    shim = os.environ.get("CLAUDE_MERGE_SHIM_PID", "")
+    if shim.isdigit():
+        links.append(int(shim))
+    links.append(os.getppid())
+    return links
+
+def build_stopped(links):
+    """-> the first pid of `links` that is gone, else None."""
+    return next((p for p in links if not pid_alive(p)), None)
+
+def refuse_if_stopped():
+    """Stop when a link of BUILD_LINKS is gone. One home of the message: the build checks before its body write and its push, the ready path before its stamp."""
+    gone = build_stopped(BUILD_LINKS)
+    if gone is not None:
+        raise Stop(f"the build was stopped (pid {gone} is gone). Nothing was pushed. {FREEZE_CITE}")
+
 def build_integration_branch(root, name, start, lanes, lease=None, body=None):
     """Merge each lane head of `lanes`, [(PR, head)], no-ff onto `start`, each keeping its own commit, in a temporary worktree, and push
     batch-NAME. -> the new head. With `lease` (the sha origin holds now) the push is a force-with-lease, and a rebuild that changed nothing pushes nothing.
@@ -4527,10 +4549,12 @@ def build_integration_branch(root, name, start, lanes, lease=None, body=None):
                 git(wt, "merge", "--abort")
                 raise Stop(f"lane #{n} ({head[:9]}) does not merge into {branch}. Nothing was pushed. Fix the lane or leave it out. {FREEZE_CITE}\n{out}")
         new = git(wt, "rev-parse", "HEAD")[1]
+        refuse_if_stopped()  # before the body write
         if body:
             body[0].set_body(body[1], body[3])
         if new != lease:
             try:
+                refuse_if_stopped()  # again before the push, inside the try: the body write can take long, and a stop here puts the old body back. A kill after this check, during git's own push, still pushes.
                 push_branch(wt, branch, lease, FREEZE_CITE)
             except Stop as e:
                 if body:
@@ -4890,6 +4914,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
                 stored = False
                 say(f"merge: the blame could not be stored ({why}); a drop of a blamed lane will be refused until a blame is stored.")
             raise Stop("\n".join([str(e), *blame_lines(name, blamed, base, stored), DRAFT_CITE])) from None
+        refuse_if_stopped()  # the lint runs long: a stopped run writes no Linted stamp
         tip = fetch_branch(root, branch, FREEZE_CITE)
         pr, info = record_in_block(h, branch, blamed=[], linted=tip)  # the head that passed, so a ready batch is linted again only when its head moves
         if info["draft"]:
@@ -5286,6 +5311,7 @@ def main(argv, host=None, lock=None, hosts=None):
             raise Stop("not in a git checkout")
         if batch:  # stands alone: no lock, no lint, no wait
             h = host or Host()
+            BUILD_LINKS[:] = run_links()  # a module list, not a parameter: build, drop, the lease heal and restack all reach build_integration_branch
             if a.batch_drop:
                 return batch_drop(root, h, name, int(numbers[0]))
             if a.blame is not None:
