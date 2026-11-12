@@ -9,6 +9,7 @@ fixture come from merge/test_merge.py: a case extends that fixture, it does not 
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+GuardSliceLint runs the same real ci-job on a pull request, and reads checks.yml's Windows guard slice (checks-windows-guard) as it reads the lint steps: one more ci-job run per case, about 0.5 s.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -1743,6 +1744,116 @@ class BatchLintFlags(BatchLintFixture):
         lines = pass_lines(text)
         self.assertEqual(len(lines), 1, text)
         self.assertIn(PUSH_ONLY, lines[0], text)
+
+
+GUARD_JOB = "checks-windows-guard"  # checks.yml's job that runs the Windows guard slice on a pull request
+SLICE_STEP = "Guard fixture suite (Windows slice)"  # its step: the run a lane lint must make
+SHARD_STEP = "Guard fixture suite (shard 1 of 3)"  # the same script on a push run: a lane lint runs none of the shards
+GUARD_SCRIPT = "hooks/test_guard.py"  # the script the slice and the shards run
+LANE = "lane-guard-slice"  # the branch a case puts its lane on: one commit on main
+LANE_PR = "7"  # the lane's pull request: FakeHost's own number, whose head is LANE
+GUARD_FILE = "hooks/guard_probe.py"  # a hooks/guard_*.py file: ci-scope.sh's guard arm names it
+SUITE_FILE = "tests/guard/s-lane-probe.py"  # a file of the guard suite: ci-scope.sh's guard arm names it too
+DOCS_FILE = "docs/lane-notes.md"  # a .md file: ci-scope.sh turns no flag on for it
+GUARD_STUB = """import json, os, subprocess, sys
+with open(%r, 'a', encoding='utf-8') as f:
+    print(json.dumps({'argv': sys.argv, 'head': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
+                      'GUARD_TESTS': os.environ.get('GUARD_TESTS'), 'GUARD_SHARD': os.environ.get('GUARD_SHARD')}), file=f)
+sys.exit(%d)
+"""  # logs its argv, the head it runs in, and the two env values a guard run reads; exits with the code given
+
+
+def guard_workflow_text(found):
+    """A workflow of two jobs: `checks` holds the lint CI steps `found`, and GUARD_JOB is checks.yml's own job, copied as its text."""
+    return workflow_text(found) + "  %s:\n%s" % (GUARD_JOB, checks_job(GUARD_JOB))
+
+
+class GuardSliceLint(BatchLintFixture):
+    """`merge --lane-lint <pr>` on a lane that touches a guard file runs checks.yml's Windows guard slice (SLICE_STEP of GUARD_JOB) once,
+    in the lane's head tree, with the argv and env the step gives it, and runs no shard of the full suite. A lane that touches no guard
+    file runs no guard script. The steps are read from checks.yml; GUARD_SCRIPT and the lint scripts are logging stubs, as in BatchLintFlags."""
+
+    def setUp(self):
+        super().setUp()
+        self.host.branch = LANE
+        if shutil.which("python") is None and os.name != "nt":  # the slice's step runs `python`: a box with only python3 gets a shim for it
+            shim = os.path.join(self.t, "shim")
+            tm.put_shim(os.path.join(shim, "python"), '#!/bin/sh\nexec "%s" "$@"\n' % sys.executable)
+            patch = unittest.mock.patch.dict(os.environ, {"PATH": shim + os.pathsep + os.environ.get("PATH", "")})
+            patch.start()
+            self.addCleanup(patch.stop)
+        files = {".github/workflows/checks.yml": guard_workflow_text(self.found), GUARD_SCRIPT: self.guard_stub(0)}
+        for name, ci_step in self.found:
+            if name != STE:
+                files[script_of(ci_step)] = CALL_STUB % self.call_log(script_of(ci_step))
+        self.push_files(BASE, files, "main: the checks job, the guard job and their stubs")
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        slice_step = dict(real_job_steps(GUARD_JOB))[SLICE_STEP]
+        self.want_argv = shlex.split(run_body(slice_step).strip())  # the argv checks.yml gives the slice: ["python", GUARD_SCRIPT]
+        self.want_env = step_env(slice_step)  # the env checks.yml gives the slice: {"GUARD_TESTS": "windows-slice"}
+
+    def guard_stub(self, rc):
+        """The stub of GUARD_SCRIPT: it logs each run to its call log and exits with `rc`."""
+        return GUARD_STUB % (self.call_log(GUARD_SCRIPT), rc)
+
+    def lane(self, files):
+        """Put the lane on LANE: one commit on main holding `files`, pushed. The host's changed files are the paths that commit changes. -> the head sha."""
+        head = self.push_files(LANE, files, "lane: the change the case lints")
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        self.host.changed = [(path, "modified", 1) for path in self.changed_files()]
+        return head
+
+    def changed_files(self):
+        """The paths the lane's own commit changes against main, sorted, read from git."""
+        return sorted(tm.sh(self.other, "git", "diff", "--name-only", "origin/" + BASE + "...HEAD").splitlines())
+
+    def lint(self):
+        """merge.lane_lint of the lane's pull request through the real ci-job. -> (rc, its output). A refusal raises merge.Stop."""
+        out = io.StringIO()
+        rc = self.lane_lint(LANE_PR, out)
+        return rc, out.getvalue()
+
+    def assert_slice_runs_for(self, path):
+        """A lane whose one change is `path`, a guard file, runs the slice once in its head, with want_argv and want_env, and no shard."""
+        head = self.lane({path: "# lane probe\n"})
+        self.assertEqual(self.changed_files(), [path], "precondition: the lane does not change %s alone, so the case probes nothing else" % path)
+        rc, text = self.lint()
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        calls = self.stub_calls(GUARD_SCRIPT)
+        slices = [c for c in calls if c["GUARD_TESTS"] == self.want_env["GUARD_TESTS"]]
+        self.assertEqual(len(slices), 1, "the Windows slice ran %d times for a lane touching %s, want once: %s" % (len(slices), path, text))
+        self.assertEqual(slices[0]["argv"], self.want_argv[1:], "the slice ran with %s, checks.yml gives %s" % (slices[0]["argv"], self.want_argv[1:]))
+        self.assertEqual(slices[0]["head"], head, "the slice ran in a tree other than the lane's head: " + text)
+        self.assertEqual([c for c in calls if c["GUARD_SHARD"] is not None], [], "a lane lint ran a shard of the full guard suite: " + text)
+
+    def test_a_lane_touching_a_guard_script_runs_the_windows_slice_once_in_its_head(self):
+        self.assert_slice_runs_for(GUARD_FILE)
+
+    def test_a_lane_touching_a_guard_suite_file_runs_the_windows_slice_once_in_its_head(self):
+        self.assert_slice_runs_for(SUITE_FILE)
+
+    def test_a_lane_touching_no_guard_file_runs_no_guard_script(self):  # the control
+        self.lane({DOCS_FILE: "lane notes\n"})
+        self.assertEqual(self.changed_files(), [DOCS_FILE], "precondition: the lane does not change %s alone, so the case probes nothing else" % DOCS_FILE)
+        rc, text = self.lint()
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(self.stub_calls(GUARD_SCRIPT), [], "a lane touching no guard file ran the guard script: " + text)
+
+    def test_a_failing_windows_slice_refuses_the_lane_and_names_the_step(self):
+        self.lane({GUARD_SCRIPT: self.guard_stub(1)})
+        self.assertEqual(self.changed_files(), [GUARD_SCRIPT], "precondition: the lane does not change %s alone, so the case probes nothing else" % GUARD_SCRIPT)
+        out = io.StringIO()
+        try:
+            self.lane_lint(LANE_PR, out)
+        except merge.Stop as stop:
+            refusal = stop
+        else:
+            self.fail("the lint passed a lane whose Windows slice FAILs: " + out.getvalue())
+        self.assertNotIsInstance(refusal, merge.Liftable, "a failing slice reads as unknown, not as FAIL: " + out.getvalue())
+        self.assertIn(SLICE_STEP, str(refusal), "the refusal does not name the Windows slice: " + str(refusal))
+        self.assertEqual(pass_lines(out.getvalue()), [], "a failing slice read as a pass: " + out.getvalue())
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
