@@ -4,7 +4,8 @@
     python3 actions/quick-checks/test_quick_checks.py
 
 The script takes one mode and runs in the checkout root. `links`: each relative link in a markdown file resolves.
-`scripts`: each Python and shell script parses. `json`: each JSON file parses. It exits 0 when every file of its kind
+`scripts`: each Python and shell script parses, and so does a file with no extension whose first line is a `#!` of bash, sh or
+python; any other extensionless file is unchecked. `json`: each JSON file parses. It exits 0 when every file of its kind
 passes (no such file is a pass), 1 when a file fails, and names each failing file in its output. It fetches no URL.
 
 One clean repo is built once. Each defect case copies it and adds one defect, committed, so each case reads one cause and
@@ -44,6 +45,8 @@ CLEAN = {
     "config/settings.json": '{"name": "widgets", "tags": ["a", "b"]}\n',
 }
 
+CLEAN_SCRIPTS = 2  # the scripts in CLEAN: tools/tidy.py and bin/run.sh
+
 
 def setUpModule():
     global RUN_FOLDER, PARENT
@@ -63,8 +66,12 @@ def write_files(root, files):
     for rel, text in files.items():
         path = os.path.join(root, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
+        if isinstance(text, bytes):  # a binary file, written byte for byte
+            with open(path, "wb") as f:
+                f.write(text)
+        else:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
 
 
 def commit_all(root):
@@ -222,6 +229,43 @@ class FalseAlarmControls(QuickChecks):
     def test_a_broken_reference_definition_still_fails_links(self):
         root = defect_repo({"docs/guide.md": "# Guide\n\nSee [the rfc][rfc].\n\n[rfc]: missing.md\n"})
         self.assert_one_cause(root, "links", ["docs/guide.md", "missing.md"])
+
+
+class ExtensionlessScripts(QuickChecks):
+    """A file with no listed extension is a script when its first line is a `#!` of bash, sh or python. A broken one fails, a
+    valid one is counted, and a file of another interpreter, or with no `#!`, is unchecked and cannot fail."""
+
+    def assert_counted(self, root, mode, count):
+        """`mode` counts `count` files in its summary and exits 0 with none failed. The count comes first: it is the scope."""
+        rc, out = check(root, mode)
+        self.assertIn("%s: %d files checked, 0 failed" % (mode, count), out, "%s does not count %d files: %s" % (mode, count, out))
+        self.assertEqual(rc, 0, "%s failed a repo that should pass (exit %d): %s" % (mode, rc, out))
+
+    def test_an_extensionless_bash_script_with_an_open_if_fails_scripts_and_names_it(self):
+        root = defect_repo({"bin/deploy": "#!/usr/bin/env bash\nif true; then\n  echo no\n"})
+        self.assert_one_cause(root, "scripts", ["bin/deploy"])
+
+    def test_an_extensionless_python_script_with_a_syntax_error_fails_scripts_and_names_it(self):
+        root = defect_repo({"tools/run": "#!/usr/bin/env python3\ndef main(:\n    pass\n"})
+        self.assert_one_cause(root, "scripts", ["tools/run"])
+
+    def test_valid_extensionless_bash_and_python_scripts_pass_and_are_counted(self):
+        # The other two interpreter lines: `#!/bin/bash` and `#!/usr/bin/python`. This repo holds no other script.
+        root = make_repo({"bin/deploy": "#!/bin/bash\nset -eu\necho deploy\n",
+                          "tools/run": "#!/usr/bin/python\nimport sys\n\nprint(sys.argv)\n"})
+        self.assert_counted(root, "scripts", 2)
+
+    def test_an_extensionless_file_of_another_interpreter_or_with_no_shebang_is_unchecked(self):
+        # The controls: each file is broken bash or node, so a check that read it would fail the repo.
+        for name, text in (("bin/tool", "#!/usr/bin/env node\nif (true) {\n"), ("bin/notes", "if true; then\n  echo no\n")):
+            with self.subTest(file=name):
+                self.assert_counted(defect_repo({name: text}), "scripts", CLEAN_SCRIPTS)
+
+    def test_a_binary_extensionless_file_does_not_crash_scripts(self):
+        # NUL bytes and bytes that are no UTF-8, with no `#!`: the file is unchecked, so the check reads it with no decode error.
+        root = defect_repo({"bin/blob": b"\x7fELF\x02\x01\x01\x00\xff\xfe\x00\x00\n\x00\x01"})
+        self.assert_counted(root, "scripts", CLEAN_SCRIPTS)
+        self.assert_passes(root, ["links", "json"])
 
 
 if __name__ == "__main__":
