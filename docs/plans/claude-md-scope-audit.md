@@ -2,6 +2,8 @@
 
 Read-only audit. Nothing moves until the owner signs off the results.
 
+Refuter: refuter opus, 2026-11-11, PARTIAL (5 findings, all fixed in head 0dc9fef19: 6f94a10 premise, project-ops home, load test on every stop-an-act row, rule-audit cost, step 3 as proposal; dropping the gold-standard column left to the owner)
+
 - Roadmap step: the CLAUDE.md scope audit, id `global-claude-md-scope-audit`. Step 1 of 3.
 - Related step: child CLAUDE.md dedupe, id `child-claude-md-dedupe`.
 - Base: origin/main 6892e6419.
