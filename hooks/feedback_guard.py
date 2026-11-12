@@ -193,15 +193,17 @@ ACT = re.compile(_WORD % (r"merge|push|delete|deploy|release|publish|" + _STANDI
 # A standing scope however worded. ACT keeps its short list; these words only bar a once: home.
 _STANDING_SCOPE = (r"whenever|going forward|from here on|in (?:the )?future|by default|"
                    r"until (?:withdrawn|revoked|further notice|i say otherwise)|(?:each|every)\s+time")
-# A scope noun bars a once: home wherever it sits, except in a sentence a handoff verb leads (see standing_word):
-# "Hand in any PR to the batch runner" is the lane's own handoff, not an approval to act on every PR.
+# A scope noun bars a once: home, except as the object of a handoff verb (see standing_word): in "Hand in any PR to the
+# batch runner" the lane hands its work on, and approves no act on every PR.
 _SCOPE_NOUN = r"(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?|open|green|new|future)"
 STANDING = re.compile(_WORD % (r"always|standing|from now on|" + _STANDING_SCOPE), re.IGNORECASE)  # counts anywhere
 STANDING_NOUN = re.compile(_WORD % _SCOPE_NOUN, re.IGNORECASE)
-ACT_VERB = re.compile(_WORD % r"merge|push|delete|deploy|release|publish", re.IGNORECASE)
-HANDOFF_LEAD = re.compile(r"[\s\"'(*>-]*(?:hand|send|post)(?![A-Za-z0-9_])", re.IGNORECASE)
-SENTENCE_END = re.compile(r"(?<=[.!?])\s+")  # a newline alone ends no sentence
-NOT_A_SENTENCE_END = re.compile(r"(?:e\.g|i\.e|etc|v\d+)\.$|://", re.IGNORECASE)  # the word before the stop: an abbreviation or a URL
+HANDOFF_VERB = re.compile(r"(?<![A-Za-z0-9_])(?:hand[ \t]+in|hand|send|post|report)[ \t]+$", re.IGNORECASE)  # right before the noun
+# The act stems a handoff clause must not hold after its object, in any form ("merging", "landed"). Wider than ACT, which
+# decides only whether a message grants; these decide whether a handoff object is an act's object too.
+ACT_STEMS = ("merg", "push", "delet", "deploy", "releas", "publish", "ship", "land", "clos", "approv")
+ACT_STEM = re.compile(r"(?<![A-Za-z0-9_])(?:%s)" % "|".join(ACT_STEMS), re.IGNORECASE)
+CLAUSE_END = re.compile(r"[,;:\u2013\u2014]|--|(?<=\s)-|-(?=\s)")  # a comma, semicolon, colon or dash; a hyphen in a word is none
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
@@ -898,34 +900,24 @@ def is_grant(text):
     return GRANT.search(plain) is not None and ACT.search(plain) is not None
 
 
-def sentences(text):
-    """Split on sentence ends only: a stop then whitespace. Not at a newline, "e.g.", "i.e.", "etc.", "v2." or a URL's
-    trailing period."""
-    parts, start = [], 0
-    for m in SENTENCE_END.finditer(text):
-        word = re.search(r"\S+$", text[start:m.start()])
-        if word and NOT_A_SENTENCE_END.search(word.group(0)):
-            continue
-        parts.append(text[start:m.start()])
-        start = m.end()
-    parts.append(text[start:])
-    return parts
-
-
-def handoff_sentence(sent):
-    """True when a handoff verb (hand, send, post) leads the sentence and it holds no grant word or act verb, so a later
-    clause such as "then merge all PRs" still counts."""
-    return HANDOFF_LEAD.match(sent) is not None and not GRANT.search(sent) and not ACT_VERB.search(sent)
+def handoff_object(text, noun):
+    """True when a handoff verb stands right before the scope noun match, with only spaces between, and the rest of the
+    noun's clause, up to the next comma, semicolon, colon or dash, holds no act stem."""
+    if HANDOFF_VERB.search(text, 0, noun.start()) is None:
+        return False
+    end = CLAUSE_END.search(text, noun.end())
+    return ACT_STEM.search(text, noun.end(), end.start() if end else len(text)) is None
 
 
 def standing_word(text):
     """True when the message, fenced text left out, holds a standing word. A scope noun ("any PR", "every open") counts
-    wherever it sits, except in a sentence a handoff verb leads: that one only describes where the lane hands its work.
-    Limit: "Please hand in any PR." is no handoff lead, so its noun bars."""
+    wherever it sits, except as a handoff verb's object: "Hand in any PR to the batch runner" only says where the lane
+    hands its work. Limits: only the base verbs count, so "sends any PR" bars; an act word before the verb is not read,
+    so "merge and send any PR to triage" passes."""
     plain = unfenced(text)
     if STANDING.search(plain):
         return True
-    return any(STANDING_NOUN.search(sent) and not handoff_sentence(sent) for sent in sentences(plain))
+    return any(not handoff_object(plain, noun) for noun in STANDING_NOUN.finditer(plain))
 
 
 def once_home(it, text):
