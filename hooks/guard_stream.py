@@ -230,9 +230,9 @@ def _skip_uv_run(tokens, index: int) -> int:
     return index
 
 
-def check_stage(segment: str, background: bool) -> str:
+def check_stage(segment: str, background: bool, ci_job_foreground: bool = False) -> str:
     """The command word when one segment runs a named check, else ''. `ci-job` counts
-    only in the background."""
+    only in the background, or in the foreground too when `ci_job_foreground` is set (rule bare-check)."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
@@ -240,11 +240,12 @@ def check_stage(segment: str, background: bool) -> str:
     if index is None:
         return ""
     index = _skip_uv_run(tokens, index)
+    ci_job_counts = background or ci_job_foreground
     if basename(tokens[index]) in CHECK_COMMANDS:
-        return basename(tokens[index]) if background else ""
+        return basename(tokens[index]) if ci_job_counts else ""
     if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
             tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
-        return CHECK_COMMANDS[0] if background else ""
+        return CHECK_COMMANDS[0] if ci_job_counts else ""
     if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
         return ""
     return _roster_word(tokens, index, interpreter_only=True)
@@ -355,6 +356,36 @@ VERDICT_PIPE_REASON = (
     "failed run reads as exit 0, and verdict prints its FAIL line first, which a filter can cut. "
     "Remedy: run `verdict <cmd>` with nothing after it. Its output is already short. "
     "(rule tokens-run-through-verdict, verdict keeps the full output in a log)"
+)
+
+
+# A NAMED CHECK RUN BARE (rule bare-check, decision background-check-through-verdict). The roster is
+# check_stage's, so the spellings and wrappers match check-tail's, with `ci-job` counted in the foreground
+# too. A bare run prints the check's own output and the agent reads whatever ends the line: `merge
+# --lane-lint 7; echo $?` read as "lane lint passes". The run is refused unless `verdict` stands in the
+# call ahead of the program (`verdict merge --lane-lint 7`, `timeout 60 verdict bin/ci-job checks`). A
+# pipe into tail or head is check-tail's refusal, judged first, so it is never refused twice. A
+# background run is refused too (coordinator ruling, 2026-11-12 11:23 CST). Tests are not in the roster
+# (no incident names a test command).
+def bare_check_hit(stripped: str, background: bool) -> str:
+    """The matched text when a segment, foreground or background, runs a named check with no `verdict`
+    ahead of the program, else ''."""
+    for segment in split_segments(stripped):
+        stage = check_stage(segment, background, ci_job_foreground=True)
+        if not stage:
+            continue
+        tokens = segment_tokens(segment)
+        at = resolve_command(tokens)
+        reach = tokens[:_skip_uv_run(tokens, at) + 1]
+        if not any(basename(token.lstrip("(")) in VERDICT_WORDS for token in reach):
+            return stage
+    return ""
+
+
+BARE_CHECK_REASON = (
+    "this check runs bare, so you read whatever its output ends on, and an exit code echoed after it "
+    "is no verdict (decision background-check-through-verdict). "
+    "Remedy: `verdict <cmd>`. It keeps the full log and prints one PASS or FAIL line."
 )
 
 

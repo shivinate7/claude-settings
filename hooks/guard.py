@@ -101,6 +101,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        stage's, and a filter can cut verdict's FAIL line.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
+  bare-check           deny. A named check run in the foreground with no verdict wrapper.
+                       (background-check-through-verdict)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
   rm-var-unguarded     deny. A recursive delete under an unguarded variable.
@@ -607,9 +609,10 @@ while True:
         from guard_argv import PROCESS_ARGS_REASON, process_args_hit
         _loading = "guard_stream"
         from guard_stream import (
-            BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
+            BACKGROUND_END_REASON, BARE_CHECK_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON,
+            LN_DESCENDS_REASON,
             NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_REASON,
-            background_end_hit, check_tail_hit, live_stream_hit, ln_descends_hit,
+            background_end_hit, bare_check_hit, check_tail_hit, live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -4493,6 +4496,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = check_tail_hit(stripped, background)
     if matched:
         refuse(tool, "deny", "check-tail", CHECK_TAIL_REASON, matched)
+    matched = bare_check_hit(stripped, background)
+    if matched:
+        refuse(tool, "deny", "bare-check", BARE_CHECK_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)
