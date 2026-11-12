@@ -435,7 +435,8 @@ def heredoc_survives():
 
 @case
 def dead_pid_missing_log_returns():
-    """9. --watch-pid on a dead pid with no log file returns, with no stall report"""
+    """9. --watch-pid on a dead pid with no log file returns, with no stall report: a real run inside the
+    10 s hang guard, and the same return on a fake clock by fake time 0.5 s"""
     module_or_fail()
     gone = subprocess.Popen([PY, "-c", "pass"])
     gone.wait()
@@ -447,6 +448,16 @@ def dead_pid_missing_log_returns():
         return ["watcher hung past 10 s on a dead pid with no log file"]
     text = proc.stdout.decode("utf-8", "replace")
     problems = expect("STALL:" not in text, "a dead pid reported a stall")
+    # The no-log branch on the fake clock: the real run above is bounded only by the 10 s hang guard.
+    absent, stalled, ended = [], [], []
+    rc = simulated_watch(0, 0, 0, writes=1, job_secs=0.0, stall_at=stalled, ended_at=ended,
+                         log_exists=False, absent_at=absent)
+    if not absent:  # scope first: the log check must have seen the log missing, or no-log branch did not run
+        return problems + ["fake no-log: the log check never found the log missing, so the no-log branch did not run"]
+    problems += expect(rc == 0, f"fake no-log: exit {rc}, want 0")
+    problems += expect(not stalled, f"fake no-log: a stall report at fake times {stalled}, want none")
+    problems += expect(len(ended) == 1 and ended[0] <= 0.5,
+                       f"fake no-log: returned at fake times {ended}, want one return by 0.5 s")
     return problems
 
 
@@ -936,12 +947,15 @@ def named_log_relative_tee_and_flag_forms_are_read():
     return problems
 
 
-def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6, job_secs=None, stall_at=None):
+def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6, job_secs=None,
+                    stall_at=None, ended_at=None, log_exists=True, absent_at=None):
     """Run stall_watch.watch on a fake clock. The job writes a named log every `period` seconds from
     `phase`, then ends 1 s after its last write. Each ps takes `ps_secs`, each sleep overshoots by
     `tick_extra`, as on a loaded runner. `job_secs` sets when the job ends on the fake clock, in place of
-    1 s after its last write. A `stall_at` list gets the fake time of each stall report. Return watch's
-    exit code."""
+    1 s after its last write. A `stall_at` list gets the fake time of each stall report, and an `ended_at`
+    list the fake time watch returns. With `log_exists` False the watched log is absent until fake time
+    30 s, and an `absent_at` list gets the fake time of each existence check that finds it absent.
+    Return watch's exit code."""
     import builtins
     import importlib.util
     spec = importlib.util.spec_from_file_location("stall_watch_sim", MODULE)
@@ -968,31 +982,44 @@ def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6,
     sw.time = type("Clock", (), {
         "monotonic": staticmethod(lambda: clock[0]),
         "sleep": staticmethod(lambda secs: clock.__setitem__(0, clock[0] + secs + tick_extra))})
-    sw.os = type("Os", (), {"path": type("Path", (), {"exists": staticmethod(lambda _p: True)})})
+
+    def exists(_p):
+        if log_exists or clock[0] >= 30.0:
+            return True
+        if absent_at is not None:
+            absent_at.append(clock[0])
+        return False
+
+    sw.os = type("Os", (), {"path": type("Path", (), {"exists": staticmethod(exists)})})
     sw.job_state = job_state
     sw.log_marks = lambda paths, base=None: {p: (sum(1 for w in stamps if w <= clock[0]), 0) for p in paths}
     sw.report = lambda *_a: stall_at.append(clock[0]) if stall_at is not None else None
     real_open = builtins.open
     builtins.open = lambda *_a, **_k: Empty()
     try:
-        return sw.watch(1, "log", quiet, ["named.log"])
+        rc = sw.watch(1, "log", quiet, ["named.log"])
     finally:
         builtins.open = real_open
+    if ended_at is not None:
+        ended_at.append(clock[0])
+    return rc
 
 
 @posix_case
 def stall_and_exit_latency_on_a_fake_clock():
-    """23b1. on a fake clock a quiet live job is reported within quiet plus two checks, and a job that
-    already ended returns with no report at once: the latency the removed 4 s and 2 s bounds guarded,
-    counted in fake seconds, so a slow runner cannot move it"""
+    """23b1. on a fake clock, a quiet live job gives exit 3 and one stall report by fake time 4.0 s, and a
+    job that already ended gives exit 0, no report, and a return by fake time 1.2 s. The fake clock keeps
+    a slow runner from moving either bound."""
     stalled = []
     rc = simulated_watch(0, 0, 0, writes=1, job_secs=30.0, stall_at=stalled)
     problems = expect(rc == 3, f"quiet live job: exit {rc}, want 3")
     problems += expect(len(stalled) == 1 and stalled[0] <= 2.0 + 2.0,
                        f"stall reported at fake times {stalled}, want one report by 4.0 s")
-    ended = []
-    rc = simulated_watch(0, 0, 0, writes=1, job_secs=0.0, stall_at=ended)
+    ended, back = [], []
+    rc = simulated_watch(0, 0, 0, writes=1, job_secs=0.0, stall_at=ended, ended_at=back)
     problems += expect(rc == 0 and not ended, f"ended job: exit {rc}, reports {ended}, want exit 0, none")
+    problems += expect(len(back) == 1 and back[0] <= 0.2 + 1.0,
+                       f"ended job returned at fake times {back}, want one return by 1.2 s")
     return problems
 
 
