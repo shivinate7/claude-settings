@@ -419,6 +419,9 @@ jobs:
       - name: Hook dup-name check
         run: python3 lint/check_hook_dup_names.py
 
+      - name: Health map check
+        run: python3 lint/check_health_map.py
+
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 

@@ -40,7 +40,10 @@
       "covers": [
         "hooks/guard_merge.py",
         "hooks/required_check.py",
-        "lint/check_silent_undo.py"
+        "lint/check_silent_undo.py",
+        "merge/merge.py",
+        "merge/launch.py",
+        "merge/repaired_merges.py"
       ]
     },
     {
@@ -128,6 +131,7 @@
       "why": "110/15; reply judge samples every 5th stop, never refuses",
       "covers": [
         "hooks/reply_judge.py",
+        "lint/report_guard.py",
         "lint/check_unknown_reads_contract.py"
       ]
     },
@@ -136,9 +140,8 @@
       "sees": "Spend per session",
       "grade": "grey",
       "why": "no spend record in git; Haiku share unmeasured",
-      "covers": [
-        "hooks/spend*"
-      ]
+      "covers": [],
+      "no_part": "no spend record exists yet, so no part measures it"
     },
     {
       "n": 13,
@@ -183,7 +186,8 @@
         "hooks/git_reads.py",
         "hooks/git_bash.py",
         "hooks/_nowindow.py",
-        "hooks/wait_common.py"
+        "hooks/wait_common.py",
+        "janitor/*.py"
       ]
     },
     {
@@ -220,11 +224,12 @@
       "why": "cloud installs 24/24 ok; his machines unmeasured; long cloud session keeps its start copy (lane cloud-hooks-stale-copy)",
       "covers": [
         "hooks/denial_note.py",
-        "hooks/feedback_gate.py",
+        "hooks/feedback_*.py",
         "lint/check_hook_stubs.py",
         "lint/check_landed_dirs.py",
         "lint/check_mod_versions.py",
-        "lint/check_python_floor.py"
+        "lint/check_python_floor.py",
+        "merge/install_from_main.sh"
       ]
     },
     {

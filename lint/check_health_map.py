@@ -6,17 +6,23 @@ the globs of the parts that serve it. A part that no row names is a part nobody 
 read healthy while that part rots. This check keeps each part under at least one row.
 
 A part is one of:
-  hook   a hooks/*.py, hooks/*.mjs or hooks/*.sh file that is not a test (hooks/guard.py is_test_rel, the
-         one home of what a test path is, and a name that starts with _test)
-  check  a lint/check_*.py file that is not a test
-  skill  a folder directly under skills/ (a folder whose name starts with a dot is not one)
+  hook     a hooks/*.py, hooks/*.mjs or hooks/*.sh file that is not a test (hooks/guard.py is_test_rel, the
+           one home of what a test path is, and a name that starts with _test)
+  check    a lint/check_*.py file that is not a test, and lint/report_guard.py (the Stop check)
+  skill    a folder directly under skills/ (a folder whose name starts with a dot is not one)
+  janitor  a janitor/*.py file that is not a test
+  merge    a merge/*.py or merge/*.sh file that is not a test
+
+hooks/, lint/ and skills/ must exist. janitor/ and merge/ are optional, since a repo may have neither.
 
 A row covers a part when one of its globs matches the part's path with fnmatch rules. The path of a skill is
-matched both as skills/<name> and as skills/<name>/. A glob that matches no part is not an error: the map
-may name a part before it exists.
+matched both as skills/<name> and as skills/<name>/. A glob made only of wildcards, dots and slashes
+matches by shape and would cover any part, so it is refused. A glob that matches no file under DIR is
+dead and fails, unless its row is parked: a row with an empty covers list and a "no_part" reason names a
+part that does not exist yet, and is never checked.
 
 The map is {"rows": [{"n": int, "sees": str, "grade": str, "why": str, "covers": [glob, ...]}, ...]}. A grade
-is green, amber, red or grey. Each n is unique and each covers list is not empty. Other keys are kept as
+is green, amber, red or grey. Each n is unique and each covers list is not empty, except a parked row. Other keys are kept as
 they are and never read. An empty rows list is valid: every part is then uncovered.
 
     python3 lint/check_health_map.py [--root DIR] [--map FILE]
@@ -24,13 +30,16 @@ they are and never read. An empty rows list is valid: every part is then uncover
 DIR defaults to this script's repo. FILE defaults to docs/health-map.json under DIR.
 
 Exit 0 prints "health map covers all N parts". Exit 1 prints one "uncovered <kind>: <path>" line per
-uncovered part. Exit 2 prints "check_health_map: UNKNOWN, <reason>" when the map is missing, is not JSON, or
-breaks the shape above, when the root holds no parts, or when a part's folder cannot be read. An unread map
+uncovered part and one "dead glob: row N: <glob>" line per dead glob. Exit 2 prints "check_health_map: UNKNOWN, <reason>" when the map is missing, is not JSON, or
+breaks the shape above, when a glob is too broad, when hooks/, lint/ or skills/ is missing or unreadable, or
+when the root holds no parts. An unread map
 is never clear.
 """
 import fnmatch
+import glob
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +49,10 @@ NAME = "check_health_map"
 MAP_REL = "docs/health-map.json"
 GRADES = ("green", "amber", "red", "grey")
 HOOK_EXTENSIONS = (".py", ".mjs", ".sh")
+STOP_CHECK = "report_guard.py"  # a check in lint/ whose name does not start with check_
+REQUIRED_FOLDERS = ("hooks", "lint", "skills")
+BRACKET_CLASS = re.compile(r"\[[^\]]*\]")
+NON_LITERAL = re.compile(r"[*?\[\]!./]")
 
 
 class Unknown(Exception):
@@ -88,40 +101,64 @@ def read_map(path):
         if r.get("grade") not in GRADES:
             raise Unknown("%s has a bad grade %r, not one of %s" % (label, r.get("grade"), ", ".join(GRADES)))
         covers = r.get("covers")
-        if not isinstance(covers, list) or not covers or not all(isinstance(g, str) and g for g in covers):
-            raise Unknown("%s needs a covers list of globs, not empty" % label)
+        if not isinstance(covers, list) or not all(isinstance(g, str) and g for g in covers):
+            raise Unknown("%s needs a covers list of globs" % label)
+        reason = r.get("no_part")
+        if reason is not None:
+            if not isinstance(reason, str) or not reason.strip() or covers:
+                raise Unknown("%s: no_part needs a reason text and an empty covers list" % label)
+        elif not covers:
+            raise Unknown("%s needs a covers list of globs, not empty, or a no_part reason" % label)
+        for g in covers:
+            if not NON_LITERAL.sub("", BRACKET_CLASS.sub("", g)):
+                raise Unknown("%s: glob too broad: %s" % (label, g))
     return rows
 
 
-def list_dir(path):
+def list_dir(root, folder):
+    path = os.path.join(root, folder)
     try:
         return sorted(os.scandir(path), key=lambda e: e.name)
     except FileNotFoundError:
-        return []  # a missing folder holds no parts; the zero-parts rule catches a root with none at all
+        if folder in REQUIRED_FOLDERS:  # a missing folder must never read as a folder with no parts
+            raise Unknown("folder missing: %s under %s" % (folder, root))
+        return []
     except OSError as e:
         raise Unknown("%s does not read: %s" % (path, e))
 
 
+def is_part_file(folder, name, extensions, prefix=""):
+    rel = folder + "/" + name
+    return name.startswith(prefix) and name.endswith(extensions) and not is_test_rel(rel)
+
+
 def find_parts(root):
-    """Return [(kind, display path, [paths to match])], hooks first, then checks, then skills."""
+    """Return [(kind, display path, [paths to match])], in the order of the kinds in the docstring."""
     parts = []
-    for e in list_dir(os.path.join(root, "hooks")):
-        rel = "hooks/" + e.name
-        if e.is_file() and e.name.endswith(HOOK_EXTENSIONS) and not is_test_rel(rel):
-            parts.append(("hook", rel, [rel]))
-    for e in list_dir(os.path.join(root, "lint")):
-        rel = "lint/" + e.name
-        if e.is_file() and e.name.startswith("check_") and e.name.endswith(".py") and not is_test_rel(rel):
-            parts.append(("check", rel, [rel]))
-    for e in list_dir(os.path.join(root, "skills")):
+    for e in list_dir(root, "hooks"):
+        if e.is_file() and is_part_file("hooks", e.name, HOOK_EXTENSIONS):
+            parts.append(("hook", "hooks/" + e.name, ["hooks/" + e.name]))
+    for e in list_dir(root, "lint"):
+        if e.is_file() and (is_part_file("lint", e.name, ".py", "check_") or e.name == STOP_CHECK):
+            parts.append(("check", "lint/" + e.name, ["lint/" + e.name]))
+    for e in list_dir(root, "skills"):
         if e.is_dir() and not e.name.startswith("."):
             rel = "skills/" + e.name
             parts.append(("skill", rel + "/", [rel, rel + "/"]))
+    for kind, folder, extensions in (("janitor", "janitor", ".py"), ("merge", "merge", (".py", ".sh"))):
+        for e in list_dir(root, folder):
+            if e.is_file() and is_part_file(folder, e.name, extensions):
+                parts.append((kind, folder + "/" + e.name, [folder + "/" + e.name]))
     return parts
 
 
 def covered(part, rows):
     return any(fnmatch.fnmatchcase(path, glob) for r in rows for glob in r["covers"] for path in part[2])
+
+
+def is_dead(root, glob_text):
+    """True when the glob names no file or folder under the root. Dot files are not read, as glob never reads them."""
+    return not glob.glob(os.path.join(glob.escape(root), *glob_text.split("/")))
 
 
 def main(argv):
@@ -148,8 +185,12 @@ def main(argv):
     missing = [p for p in parts if not covered(p, rows)]
     for kind, rel, _ in missing:
         print("uncovered %s: %s" % (kind, rel))
-    if missing:
-        print("%s: FAIL: %d of %d parts have no row" % (NAME, len(missing), len(parts)))
+    dead = [(r["n"], g) for r in rows for g in r["covers"]
+            if not any(fnmatch.fnmatchcase(path, g) for p in parts for path in p[2]) and is_dead(root, g)]
+    for n, g in dead:
+        print("dead glob: row %d: %s" % (n, g))
+    if missing or dead:
+        print("%s: FAIL: %d of %d parts have no row, %d dead globs" % (NAME, len(missing), len(parts), len(dead)))
         return 1
     print("health map covers all %d parts" % len(parts))
     return 0
