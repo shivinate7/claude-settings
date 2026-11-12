@@ -3035,5 +3035,127 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(self.r.verdict(), [], "a deleted non-slug note flagged a different note that shares its first 40 characters")
 
 
+class DefaultBase(unittest.TestCase):
+    """With no --upstream, a local run judges the branch against its base: the upstream the branch tracks, which for a
+    stacked branch is the branch it stacks on. Until then the default is origin/main. An explicit --upstream always wins.
+    With no base found, the run prints the base it used and falls back to origin/main. Each fixture sets its tracking with
+    --track or --no-track, so the answer does not depend on autoSetupMerge. The PR-base lookup (gh) is not fixtured here."""
+
+    T0, T1, T2, T3, T4 = ("2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00",
+                          "2026-01-04T10:00:00", "2026-01-05T10:00:00")
+
+    def run_main(self, argv):
+        return PrintedFindings.run_main(self, argv, "utf-8")
+
+    @staticmethod
+    def findings(text):
+        """The FAIL lines and their bullet lines: what a run found, without any base line it prints."""
+        return [l for l in text.splitlines() if ": FAIL: " in l or l.startswith("      - ")]
+
+    def stacked_revert(self):
+        """main adds Q. feat1, cut from main, reverts Q and is pushed. feat2 stacks on feat1 and tracks origin/feat1."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        q = r.commit("main adds Q", date=self.T1, app_txt=BODY + "function Card() {}\nQ1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat1", "origin/main")
+        r.sh("revert", "--no-edit", q, date=self.T2)
+        r.sh("push", "-q", "origin", "feat1")
+        r.sh("checkout", "-q", "-b", "feat2", "--track", "origin/feat1")
+        r.commit("feat2 other", date=self.T3, other_txt="other v2\n")
+        return r
+
+    def stacked_merge_drop(self):
+        """feat1 adds P1 and is pushed. feat2 stacks on feat1. feat1 then adds P2 and is pushed. feat2 merges feat1 keeping
+        its own side, so P2 is dropped. P1 and P2 are on feat1 only: main never had them."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat1", "origin/main")
+        r.commit("feat1 adds P1", date=self.T1, app_txt=BODY + "function Card() {}\nP1\n")
+        r.sh("push", "-q", "origin", "feat1")
+        r.sh("checkout", "-q", "-b", "feat2", "--track", "origin/feat1")
+        r.commit("feat2 other", date=self.T2, other_txt="other v2\n")
+        r.sh("checkout", "-q", "feat1")
+        r.commit("feat1 adds P2", date=self.T3, app_txt=BODY + "function Card() {}\nP1\nP2\n")
+        r.sh("push", "-q", "origin", "feat1")
+        r.sh("checkout", "-q", "feat2")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "origin/feat1", date=self.T4)
+        return r
+
+    def based_on_main(self):
+        """A branch cut from origin/main and tracking it. It merges main keeping its own side, so main's K1 is dropped."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "stale", "--track", "origin/main")
+        r.commit("stale work", date=self.T1, other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds K1", date=self.T2, app_txt=BODY + "function Card() {}\nK1\n")
+        r.push()
+        r.sh("checkout", "-q", "stale")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "origin/main", date=self.T3)
+        return r
+
+    def no_base(self):
+        """A local branch with no upstream, cut from local main. No base is found, so the run falls back to origin/main."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "solo", "--no-track")
+        r.commit("solo work", date=self.T1, other_txt="other v2\n")
+        return r
+
+    def test_no_flag_judges_a_stacked_branch_against_its_base_not_main(self):
+        r = self.stacked_revert()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 does not track its base origin/feat1")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertTrue(any("undoing" in l and "main adds Q" in l for l in self.findings(text)),
+                        "premise: against main, feat1's revert of Q is a finding. Output: %r" % text)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertEqual((rc, self.findings(text)), (0, []),
+                         "no --upstream: feat2 was judged against origin/main, not its base origin/feat1")
+
+    def test_no_flag_reports_a_line_only_the_base_added_that_a_merge_drops(self):
+        r = self.stacked_merge_drop()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 does not track its base origin/feat1")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/feat1"])
+        self.assertIn("- P2", text, "premise: against its base origin/feat1, the merge drops P2. Output: %r" % text)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertIn("- P2", text, "no --upstream: the merge dropped P2, a line only the base holds, and nothing reported it")
+        self.assertEqual(rc, 1, "no --upstream: the run did not exit 1 on the dropped P2. Output: %r" % text)
+
+    def test_explicit_upstream_main_still_judges_a_stacked_branch_against_main(self):  # control
+        r = self.stacked_revert()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 tracks origin/feat1, so the flag alone decides the base")
+        rc, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertEqual(rc, 1, "--upstream origin/main: the run no longer fails on the revert of Q. Output: %r" % text)
+        self.assertTrue(any("undoing" in l and "main adds Q" in l for l in self.findings(text)),
+                        "--upstream origin/main: the revert of Q is no longer reported")
+
+    def test_no_flag_on_a_branch_based_on_main_reports_what_explicit_main_reports(self):  # control
+        r = self.based_on_main()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/main",
+                         "premise: the branch tracks origin/main")
+        rc_flag, text_flag = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertIn("- K1", text_flag, "premise: against origin/main, the merge drops K1. Output: %r" % text_flag)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertEqual((rc, self.findings(text)), (rc_flag, self.findings(text_flag)),
+                         "no --upstream on a branch based on main differs from --upstream origin/main")
+
+    def test_no_flag_with_no_base_found_prints_the_base_it_used(self):
+        r = self.no_base()
+        self.assertEqual(r.sh("config", "--get", "branch.solo.merge", ok=False), "",
+                         "premise: solo tracks no upstream")
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertEqual(rc, 0, "no base found: a clean branch exits %d. Output: %r" % (rc, text))
+        named = [l for l in text.splitlines() if "origin/main" in l and "base" in l.lower()]
+        self.assertTrue(named, "no base found: the run did not print the base it used (origin/main). Output: %r" % text)
+
+
 if __name__ == "__main__":
     unittest.main()
