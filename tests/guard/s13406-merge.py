@@ -666,6 +666,33 @@ NO_TEXT_DICT = {"ccr": {"id": ROLE_OTHER, "title": "a triage record", "tags": AR
 DEEP_DEPTH = 100000
 DEEP_RECORD = ('{"ccr": {"id": "%s", "title": "a lane session", "tags": %s, "nested": %s%s}}'
                % (ROLE_OTHER, json.dumps(ARCH_LANE_TAGS), "[" * DEEP_DEPTH, "]" * DEEP_DEPTH))
+# Confirm after a self-tag (decision session-tiers). The checkout's origin is o/a, so the repo gate passes and only the
+# hat's own check can refuse. CONFIRM_ENV is ROLE_ENV with the cloud flag set. s29942 builds the same env, but it loads
+# after this file, so this file cannot import it.
+ROLE_REPO_A = os.path.join(ROOT, "role-repo-o-a")  # a checkout whose origin is github.com/o/a
+CONFIRM_ENV = {**ROLE_ENV, "CLAUDE_CODE_REMOTE": "true"}
+SOLO_A_TAGS = ["cs-repo:o/a"]  # a solo session: no parent, no cs-build tag
+RUNNER_A_TAGS = ["cs-build:batch-runner", "cs-repo:o/a"]
+COORD_A_TAGS = ["cs-build:coordinator", "cs-repo:o/a"]
+LANE_A_TAGS = ["cs-build:lane", "cs-repo:o/a"]
+TRIAGE_A_TAGS = ["cs-build:triage", "cs-repo:o/a"]
+HAT_CALL = [role_use("b1", "Bash", {"command": MERGE_SHIM + " --role batch-runner"}),
+            role_result("b1", "merge: merge role batch-runner recorded for this session.")]
+SUBAGENT_ID = "a1b2c3d4e5f6a7b8c"  # a 17-character agent id, as the harness sends it on a subagent's payload
+CONFIRM_HEAD = "0123456789abcdef0123456789abcdef01234567"  # the 40-hex head the merge tool's --head reads (head_arg)
+
+
+def own_tag_call(tool_id, tag):
+    """One paired set_session_tags call that adds `tag` to the own session."""
+    return [role_use(tool_id, SET_SESSION_TAGS, {"session_ids": [ROLE_OWN], "add": [tag]}), role_result(tool_id, "ok")]
+
+
+def _build_role_repo():
+    """The one checkout the confirm cases run in: see ROLE_REPO_A."""
+    _build_origins({ROLE_REPO_A: "https://github.com/o/a"})
+
+
+lazy_fixture([ROLE_REPO_A], _build_role_repo)
 ROLE_LINES = {
     "runner": role_call("g1", RUNNER_TAGS),
     "coordinator": role_call("g1", COORD_TAGS),
@@ -705,6 +732,16 @@ ROLE_LINES = {
     "lane-solo": role_call("g1", LANE_TAGS, parent=None),
     "coordinator-solo": role_call("g1", COORD_TAGS, parent=None),
     "triage-solo": role_call("g1", TRIAGE_TAGS, parent=None),
+    # confirm shapes: the solo record and the hat call it made, then the own tags set after it, then the record read back.
+    "confirm-solo": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL,
+    "confirm-runner": role_call("g1", RUNNER_A_TAGS) + HAT_CALL,
+    "confirm-solo-then-other-tags": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL + role_tag_call("t1", session=ROLE_OTHER),
+    "confirm-solo-then-coordinator": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL
+                                     + own_tag_call("t1", "cs-build:coordinator") + role_call("g2", COORD_A_TAGS, parent=None),
+    "confirm-solo-then-lane": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL
+                              + own_tag_call("t1", "cs-build:lane") + role_call("g2", LANE_A_TAGS),
+    "confirm-solo-then-triage": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL
+                                + own_tag_call("t1", "cs-build:triage") + role_call("g2", TRIAGE_A_TAGS),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
@@ -950,6 +987,21 @@ role_refuse("a solo record of another session is ignored, so the own record is m
             MERGE_SHIM + " --role batch-runner", role_path("other-solo"))
 role_refuse("a solo record with no session id in the env is refused",
             MERGE_SHIM + " --role batch-runner", role_path("solo"), env=None)
+# Confirm after a self-tag: the hat a solo session recorded does not carry over to a coordinator, a lane or a triage session that
+# tagged the same session afterwards. The refusal names merge-role-proof, the rule that granted the hat. A true solo session, a
+# batch runner, and a solo session whose tags were set on another session still confirm.
+for _tier, _name in (("coordinator", "confirm-solo-then-coordinator"), ("lane", "confirm-solo-then-lane"),
+                     ("triage", "confirm-solo-then-triage")):
+    sh("merge-role-proof: a solo session that then tagged itself %s cannot confirm" % _tier, MERGE_SHIM + " 5 --confirm --head " + CONFIRM_HEAD,
+       "deny", rule=ROLE_RULE, cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path(_name))
+for _name in ("confirm-solo", "confirm-runner", "confirm-solo-then-other-tags"):
+    sh("merge-role-proof: confirm allowed for " + _name, MERGE_SHIM + " 5 --confirm --head " + CONFIRM_HEAD, "allow",
+       cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path(_name))
+# One role per agent (decision session-tiers): a subagent of a solo session, a builder or a reviewer, records no hat. The session's
+# own record allows it, so only the agent id on the payload refuses it.
+for _form in (MERGE_SHIM, "python3 merge/merge.py"):
+    role_refuse("merge-role-proof: a subagent of a solo session is refused the hat, " + _form, _form + " --role batch-runner",
+                role_path("solo"), agent_id=SUBAGENT_ID, agent_type="builder")
 # Nothing the guard cannot read as an own record allows.
 role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
           role_path("no-record"))
