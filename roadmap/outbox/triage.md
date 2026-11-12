@@ -914,3 +914,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Notes cleanup 14:23 CST Nov 12 (lane stop-checks-one-message via coordinator): docs/debts/notes.md has duplicate blocks window-env-forms-unread and last-nudge-gap-no-summary.
 - Owner item 643 (14:24 CST Nov 12): PR #2929 (lane widening-question-not-asked) refuses a question that revisits uniform-over-variants; archive/widening-question-not-asked at 17c6ceb5c, old branch delete waits on a local session.
 - guard-run-slow-long-command handed to runner 10 at a2e1b152e (coordinator 14:22 CST Nov 12).
+- record-before-fix-push 14:26 CST Nov 12: Lane started 14:25 CST Nov 12 (coordinator): reuses #1962, covers the shapes review-record-fix-check-reads misses.
+- guard-false-alarm-cull 14:26 CST Nov 12: Fix lane 14:25 CST Nov 12: branch cull-narration-hex-id-fix, head 4bb865643, 3 red tests on 2cb3ad856; builder running.
+- Batch 106 (coordinator 14:25 CST Nov 12): runner 10 has a coordinator waiver for the --ready lint only; the unknown is the ci-done-comment action #2860 adds, which main's bin/ci-job cannot run.
