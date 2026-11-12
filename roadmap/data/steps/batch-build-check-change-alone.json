@@ -1,14 +1,14 @@
 {
  "id": "batch-build-check-change-alone",
  "title": "merge --batch-build refuses a lane that changes a guard or check unless it is the batch's only lane",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL28dfumtcAkAZ99esX",
  "owner": "triage",
  "blockedBy": [],
  "why": "merge --batch-build let degen #584, which changes a guard or check, join a mixed batch (#643 with #616); degen's other runner then closed batch 23k (batch runner 11, reported by the coordinator 23:50 CST Nov 11).",
  "source": "coordinator 23:50 CST Nov 11, from batch runner 11",
- "note": "Code change in the merge tool; a real incident, so a step. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12).",
- "updatedAt": "2026-11-12T07:19:00-06:00"
+ "note": "Code change in the merge tool; a real incident, so a step. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Lane started 07:20 CST Nov 12 (coordinator, Sonnet, medium).",
+ "updatedAt": "2026-11-12T07:22:00-06:00"
 }
