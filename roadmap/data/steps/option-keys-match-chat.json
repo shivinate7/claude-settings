@@ -1,11 +1,11 @@
 {
   "title": "A question sent to both chat and page keeps the same option letters and labels in each, and a stored pick carries its label",
   "why": "Owner 12:35 CST Nov 8, in the coordinator's chat: \"just ensure that A and B mean the same on the artifact than what you send me otherwise we can reach a problem where the meaning changes from one to the other since they're static and not pointers\". Item 436 was checked: chat and page a/b match. Fix: (1) when a question goes to both chat and page, the page item's options are copied from the chat question in the same order, and the chat question names the page item id; (2) a recorded pick stores the label with its letter (for example \"b: Keep the rule; archive at merge\"), never the letter alone; (3) a check refuses a page item whose label for a key differs from the chat question that cites it. Note: an item's `pick` field is the recommended option, not the answer; the answer lives in the answers collection. Item 436's pick \"a\" was triage's recommendation; the coordinator set it to b at 12:33 CST, which overwrites the recommendation record.",
-  "note": "Doing 05:58 CST Nov 10: open PR #2257 on branch option-keys-match-chat (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was coordinator ([ended:Claude-settings-coordinator-handoff]) to route). Lane prose-unmapped-3 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). PR #2682 handed to batch runner 10, lane lint PASS (lane fan-prose-unmapped-3 11:05 CST Nov 12).",
+  "note": "Doing 05:58 CST Nov 10: open PR #2257 on branch option-keys-match-chat (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was coordinator ([ended:Claude-settings-coordinator-handoff]) to route). Lane prose-unmapped-3 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). PR #2682 handed to batch runner 10, lane lint PASS (lane fan-prose-unmapped-3 11:05 CST Nov 12). Incident 15:04 CST Nov 12: triage reordered item 646's options on the page (14:39 CST) after the retrospective had asked the owner in chat with the old letters; the owner's \"a\" (15:03 CST) is ambiguous. A stored pick carrying its label (this step, #2682) would have caught it.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL1CWKBkSQYFqekzCnf",
   "status": "doing",
   "order": 790,
-  "updatedAt": "2026-11-12T11:07:52-06:00"
+  "updatedAt": "2026-11-12T15:04:44-06:00"
 }
