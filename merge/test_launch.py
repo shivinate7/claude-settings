@@ -142,6 +142,29 @@ class Launch(unittest.TestCase):
         self.assertEqual((rc, out.strip()), (0, "RAN v1"), err)
         self.assertIn(v1[:12], err)  # prints the SHA of stable it ran
 
+    def drop_stable(self):
+        """Origin holds no stable branch. Returns after proving it: the launcher's fetch of stable finds no ref."""
+        sh(self.bare, "git", "update-ref", "-d", "refs/heads/stable", env=self.env)
+        probe = subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/stable"], cwd=self.bare,
+                               env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(probe.returncode, 0, "FIXTURE origin still has a stable branch")
+
+    def test_no_stable_runs_origin_main_not_the_checkout(self):
+        # With no stable branch on origin, the launcher runs origin's main, not the checkout's own tree (coordinator
+        # ruling, act 2 round 1, 2026-11-12 11:34 CST). The checkout is still at v1 here.
+        self.drop_stable()
+        self.release("v2", stable=False)
+        rc, out, err = self.merge()
+        self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
+
+    def test_no_stable_warns_and_names_stable(self):
+        # The fallback is never silent: one warning names stable.
+        self.drop_stable()
+        self.release("v2", stable=False)
+        rc, out, err = self.merge()
+        named = [line for line in err.splitlines() if "stable" in line]
+        self.assertEqual(len(named), 1, "want one warning line naming stable, got %r" % err)
+
     def test_dirty_checkout_untouched(self):
         self.release("v2")
         before = self.head(self.co)
