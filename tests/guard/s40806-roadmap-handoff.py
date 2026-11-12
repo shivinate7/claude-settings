@@ -41,18 +41,19 @@ def _handoff_commit(where, ops):
         sys.exit("fixture setup failed in _apply: the commit in %r failed. stderr: %s" % (where, done.stderr.strip()))
 
 
-def _handoff_repo(name, branch, commits=(), local_roadmap=False, broken_tip=False):
+def _handoff_repo(name, branch, commits=(), local_roadmap=False, broken_tip=False, no_tip=False, detached=False):
     """A checkout on `branch`, cut from the record tip. origin/roadmap is that tip, a ref the guard reads with no fetch.
     `commits` is a list of commits, each a list of ops. local_roadmap adds a local roadmap branch one commit past the
     tip, a base that would differ from origin's. broken_tip points origin/roadmap at a commit the object store lacks,
-    so the changed paths cannot be read. Built on first use."""
+    so the changed paths cannot be read. no_tip leaves origin/roadmap unset, as a single-branch clone does. detached
+    leaves HEAD on no branch after the commits. Built on first use."""
     where = os.path.join(HANDOFF_DIR, name)
 
     def build():
         make_repo(where, TIP_FILES)
         if run_vcs(where, "remote", "add", "origin", PUSHREMOTE).returncode != 0:
             sys.exit("fixture setup failed in _handoff_repo: origin add in %r failed" % where)
-        if run_vcs(where, "update-ref", "refs/remotes/origin/roadmap", "HEAD").returncode != 0:
+        if not no_tip and run_vcs(where, "update-ref", "refs/remotes/origin/roadmap", "HEAD").returncode != 0:
             sys.exit("fixture setup failed in _handoff_repo: the origin tip in %r failed" % where)
         if local_roadmap:
             if run_vcs(where, "checkout", "-q", "-b", "roadmap").returncode != 0:
@@ -64,15 +65,18 @@ def _handoff_repo(name, branch, commits=(), local_roadmap=False, broken_tip=Fals
             sys.exit("fixture setup failed in _handoff_repo: branch %r in %r failed" % (branch, where))
         for ops in commits:
             _handoff_commit(where, ops)
+        if detached and run_vcs(where, "checkout", "-q", "--detach").returncode != 0:
+            sys.exit("fixture setup failed in _handoff_repo: detaching %r failed" % where)
         head = run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip()
-        if head != "refs/heads/" + branch:
+        if head != ("" if detached else "refs/heads/" + branch):
             sys.exit("fixture setup failed in _handoff_repo: %r sits on %r, want %r" % (where, head, branch))
         if broken_tip:
             write(os.path.join(where, ".git", "refs", "remotes", "origin", "roadmap"), "1" * 40 + "\n")
         reads = run_vcs(where, "diff", "--name-status", "refs/remotes/origin/roadmap", "HEAD")
-        if broken_tip and reads.returncode == 0:
-            sys.exit("fixture setup failed in _handoff_repo: the broken tip in %r still reads" % where)
-        if not broken_tip and reads.returncode != 0:
+        unread = broken_tip or no_tip
+        if unread and reads.returncode == 0:
+            sys.exit("fixture setup failed in _handoff_repo: the tip-less checkout %r still reads" % where)
+        if not unread and reads.returncode != 0:
             sys.exit("fixture setup failed in _handoff_repo: the changed paths in %r do not read: %s"
                      % (where, reads.stderr.strip()))
     lazy_fixture([where], build)
@@ -123,6 +127,18 @@ HANDOFF_REPO = {
                                    local_roadmap=True),
     "broken-tip": _handoff_repo("broken-tip", "lane/outbox-a",
                                 [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]], broken_tip=True),
+    # An earlier commit adds a file outside the handoff and a later one removes it: the tree diff against the tip
+    # shows the handoff alone, so only the commits in the range show the file.
+    "history-hole": _handoff_repo("history-hole", "lane/outbox-a",
+                                  [[("put", "docs/secret.md", "s\n")],
+                                   [("rm", "docs/secret.md")],
+                                   [("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]]),
+    # The own handoff pushed from a detached HEAD: the cs-step tag names the slug, and no branch does.
+    "detached-own": _handoff_repo("detached-own", "lane/outbox-a",
+                                  [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]], detached=True),
+    # A single-branch clone: origin has no roadmap ref to read the changed paths against.
+    "no-tip": _handoff_repo("no-tip", "lane/outbox-a",
+                            [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]], no_tip=True),
 }
 
 # The lane records these cases name. A record's slug comes from its own cs-step tags, so each tag set is its own record.
@@ -214,6 +230,41 @@ record_refuse("roadmap-one-writer handoff: a lane's handoff with no transcript i
 record_refuse("roadmap-one-writer handoff: a lane's push whose changed paths cannot be read is refused",
               HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["broken-tip"])
 
+# The forms a lane types for its own handoff. Each is allowed, so the allow stays as wide as the lane needs.
+record_allow("roadmap-one-writer handoff: a lane's own handoff pushed with -u is allowed",
+             VCS + " push -u origin HEAD:roadmap", LANE, cwd=HANDOFF_REPO["modify-own"])
+record_allow("roadmap-one-writer handoff: a lane's own handoff pushed with --set-upstream is allowed",
+             VCS + " push --set-upstream origin HEAD:roadmap", LANE, cwd=HANDOFF_REPO["modify-own"])
+record_allow("roadmap-one-writer handoff: a lane's own handoff pushed to HEAD:refs/heads/roadmap is allowed",
+             VCS + " push origin HEAD:refs/heads/roadmap", LANE, cwd=HANDOFF_REPO["modify-own"])
+record_allow("roadmap-one-writer handoff: the own handoff pushed from a detached HEAD, with a cs-step tag naming "
+             "its slug, is allowed", HANDOFF_PUSH, role_path("hand-two"), cwd=HANDOFF_REPO["detached-own"])
+
+# Pushes the handoff allow must not reach: a range that hides a file in an earlier commit, tags, and a lease, pinned
+# to a sha or with --force-if-includes.
+PINNED_LEASE = "a" * 40  # a sha the lease names; the guard reads the pin, never the object
+record_refuse("roadmap-one-writer handoff: an earlier commit that adds then removes a file outside the handoff is "
+              "refused, though the tree diff shows the handoff alone",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["history-hole"])
+record_refuse("roadmap-one-writer handoff: --tags on the own handoff push is refused",
+              VCS + " push --tags origin HEAD:roadmap", LANE, cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: --follow-tags on the own handoff push is refused",
+              VCS + " push --follow-tags origin HEAD:roadmap", LANE, cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a sha-pinned lease on the own handoff push is refused",
+              VCS + " push --force-with-lease=roadmap:" + PINNED_LEASE + " origin HEAD:roadmap", LANE,
+              cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: --force-if-includes on the own handoff push is refused",
+              VCS + " push --force-with-lease --force-if-includes origin HEAD:roadmap", LANE,
+              cwd=HANDOFF_REPO["modify-own"])
+
+# A single-branch clone has no origin/roadmap to read. The refusal tells the lane how to get the tip and retry. It
+# names no push of the record branch: the fetch is the read the lane needs, and the push stays out of the text.
+sh("roadmap-one-writer handoff: a lane's own handoff push with no origin/roadmap is refused, and the refusal names "
+   "the fetch and the retry",
+   HANDOFF_PUSH, "deny", rule=RECORD_RULE, carries=("git fetch origin roadmap", "retry the handoff push"),
+   lacks=("HEAD:roadmap", "push origin roadmap"), transcript=LANE, env=ROLE_ENV,
+   cwd=HANDOFF_REPO["no-tip"])
+
 
 # The path read costs one git spawn per push that reaches the record branch from a lane. Each push is judged with
 # a stand-in git on PATH, which logs every spawn.
@@ -278,3 +329,53 @@ def handoff_push_cost_case():
 
 LOG_FAMILY[HANDOFF_COST_LABEL] = FAMILY
 LOG_CHECKS = LOG_CHECKS + ((HANDOFF_COST_LABEL, handoff_push_cost_case),)
+
+
+# _lane_handoff_holds alone, in a child Python, so the guard's module state stays out of this process. The
+# whole-suite run hands a forced push to the force-push rule first, so only this call shows that the handoff check
+# refuses a force, a + refspec, a delete and a mirror on its own.
+HANDOFF_HOLDS_PROBE = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import guard_merge
+where = sys.argv[2]
+for args in json.loads(sys.argv[3]):
+    print(json.dumps(bool(guard_merge._lane_handoff_holds(args, where, None, where, "roadmap", []))))
+'''
+HANDOFF_HOLDS_ROWS = (  # the argument list, and the verdict _lane_handoff_holds must give
+    (["origin", "HEAD:roadmap"], True),  # the control: the plain push is held, so a refuse-all probe fails here
+    (["--force", "origin", "HEAD:roadmap"], False),
+    (["origin", "+HEAD:roadmap"], False),
+    (["--delete", "origin", "roadmap"], False),
+    (["--mirror", "origin"], False),
+)
+HANDOFF_HOLDS_LABEL = ("roadmap-one-writer: _lane_handoff_holds holds a lane's plain push of its own handoff, and "
+                       "refuses a forced, a + refspec, a deleting and a mirror push")
+
+
+def handoff_holds_unit_case():
+    """_lane_handoff_holds, called alone on the own handoff checkout: the plain push is held (the scope), and the
+    forced, `+`, deleting and mirror pushes are not (the subject). The scope comes first, so a probe that cannot read
+    the diff fails on the control, not on a refusal it never reached. Why: a force dropped from the handoff check
+    must fail a named case, since no other case reaches the check past the force-push rule."""
+    materialize(HANDOFF_REPO["modify-own"])
+    done = subprocess.run(
+        [sys.executable, "-c", HANDOFF_HOLDS_PROBE, os.path.dirname(GUARD), HANDOFF_REPO["modify-own"],
+         json.dumps([args for args, _want in HANDOFF_HOLDS_ROWS])],
+        capture_output=True, text=True, timeout=120)
+    printed = done.stdout.split()
+    if done.returncode != 0 or len(printed) != len(HANDOFF_HOLDS_ROWS):
+        return False, "the probe printed %d verdicts, want %d: exit %d, error %r" % (
+            len(printed), len(HANDOFF_HOLDS_ROWS), done.returncode, done.stderr.strip()[-200:])
+    verdicts = [json.loads(line) for line in printed]
+    if verdicts[0] is not True:
+        return False, "the plain push control: _lane_handoff_holds said %s, want True" % verdicts[0]
+    problems = ["%s: _lane_handoff_holds said %s, want %s" % (" ".join(args), verdict, want)
+                for (args, want), verdict in zip(HANDOFF_HOLDS_ROWS[1:], verdicts[1:]) if verdict != want]
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the plain push is held, and the forced, + refspec, deleting and mirror pushes are refused"
+
+
+LOG_FAMILY[HANDOFF_HOLDS_LABEL] = FAMILY
+LOG_CHECKS = LOG_CHECKS + ((HANDOFF_HOLDS_LABEL, handoff_holds_unit_case),)
