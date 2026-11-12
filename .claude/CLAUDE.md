@@ -21,7 +21,7 @@ output style load in each session on each repo.
   the checks on pull requests only (owner, 16:49 CST, "yes with bypass"; coordinator-relayed). It may remove main's old branch protection
   only after step merge-reads-ruleset (the merge tool reads main's ruleset) has merged, and only once
   the ruleset is on; the grant covers no removal before that step lands. It may delete a branch whose last commit is on the default branch or on an archive
-  branch. A request for any other act needs his word.
+  branch. A request for any other act needs his word. Sources: decision `main-branch-protection` (rulings r, bypass, c); branch deletes: the 2026-10-30 grant above, as applied in plan restart-plan, ruling g.
 - **Relayed yes** (owner, 2026-11-07 13:10 CST, coordinator-reported; typed in lane relayed-yes-allow,
   13:19 CST). An owner yes to merge a named pull request, which a coordinator (tag `cs-build:coordinator`)
   relays to its batch runner, is the owner's grant for that merge. The batch runner merges it with the merge tool,
