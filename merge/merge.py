@@ -3407,6 +3407,13 @@ def stale_page_remedy(n, claim=""):
     return (f"The head holds a Record-claim ({claim}) that this base claims nothing for. "
             f"Revert that claim commit on the branch, then run the records step: " + steps)
 
+def stale_claim_remedy(n, claim):
+    """The remedy for a ready PR whose head holds a Record-claim and whose base moved or took a claimed number. Merging the base into
+    the head would put the number in the tree twice, so the claim commit is reverted first and the draft step claims again."""
+    return (f"The head holds a Record-claim ({claim}) made before the base moved. Revert that claim commit on the branch, merge {{base}} into it, "
+            f"then run the records step: return #{n} to draft (in cloud: MCP update_pull_request draft=true; on a computer: gh pr ready {n} --undo), "
+            f"run merge {n} --confirm on the draft, and mark it ready after its draft run shows. {RECORDS_CITE}")
+
 READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
 
 def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again."):
@@ -3562,7 +3569,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
-            raise Stop(stale + " This run claimed nothing.")
+            held = head_claim(wt)
+            raise Stop(stale + " This run claimed nothing." + (" " + stale_claim_remedy(n, held).replace("{base}", base_ref) if held and base == cfg["defaultBranch"] else ""))
         if stands:
             say(f"merge: {stands}. The green run stands.")
         stamp_cfg = base_stamp_config(wt, tmp, cfgrel, base_ref)  # None: no config or no kinds, so no claim and no stamp
@@ -3577,7 +3585,13 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 claim_sha = info["head"]
                 say(f"merge: resumed. {branch} already holds the claim {resumed}.")
             else:
-                trailer = do_claim(wt, stamp_cfg, base_ref) if stamp_cfg else None
+                try:
+                    trailer = do_claim(wt, stamp_cfg, base_ref) if stamp_cfg else None
+                except Stop as e:  # a claim the head holds whose number the base took: merging the base in would double it
+                    held = head_claim(wt)
+                    if held:
+                        raise Stop(f"{e}\n" + stale_claim_remedy(n, held).replace("{base}", base_ref)) from None
+                    raise
                 claimed = bool(trailer)
             rebuilt = rebuild_records(wt)  # after the claim, whatever the stamp config holds. A page with no claim to ride heals only in the draft step: a page-only push on a ready PR restarts its CI
             if rebuilt and not (trailer or resumed):  # before any wait, commit or push: confirm's finally frees the lock and drops the worktree

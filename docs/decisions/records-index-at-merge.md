@@ -21,9 +21,10 @@ the remedy: return the PR to draft (route pr-draft-mcp-cloud), run
 `merge <n> --confirm` on the draft, then mark it ready after its draft run shows. A head that holds a
 Record-claim on a base with no stamp kinds first reverts that claim commit, since the draft step refuses a
 claim head. A current page with nothing to claim makes no
-commit. The draft step claims without the merge lock (owner ask, Nov 12 13:15 CST, one CI run per merge, replacing the earlier
-ruling that a claim stays at confirm). A number taken on the base after the draft step is refused at the ready confirm by the
-stamp check, and the remedy is the revert of the claim commit, then the draft step again. A resumed claim with a stale page
+commit. The draft step claims without the merge lock, by the owner's ask for one CI run per merge (Nov 12 13:15 CST).
+That replaces the earlier ruling that a claim stays at confirm. When the base moves after the draft step, the ready confirm
+refuses. Its remedy is to revert the claim commit, merge the base, and run the draft step again.
+A resumed claim with a stale page
 still pushes the page: that heal stays. When only the page conflicts with the base, the tool rebuilds it on the merged tree. That heal is
 unchanged. Owner ask to stop the double CI run: Oct 31 14:12 CDT, repeated Nov 1 20:51 CST.
 
