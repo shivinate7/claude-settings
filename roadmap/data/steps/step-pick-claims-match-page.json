@@ -1,11 +1,11 @@
 {
   "title": "A check matches each step note's \"the owner picked X\" claim against the page's recorded answers",
   "why": "Lane past-ruling-on-send ([ended:lane:-past-ruling-on-send], #2195 round 3), relayed by the coordinator 14:49 CST Nov 8: a step note that restated a pick was read as an owner ruling (the lane's sighting 2). Today the only limit is question-form line 19 and note past-ruling-restated-pick. Step page-ruling-reaches-step checks only the other direction: a page answer reaches its step.",
-  "note": "Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:step-pick-claims-match-page]). Lane code-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Parked as a note, not built (coordinator pick 08:24 CST Nov 12): its record cites no owner ruling or coordinator pick (lane fan-code-waiting-page). Plan R51 \"A pick reads its ruling before it is sent\" (owner approved 12:35 CST Nov 12; home decision session-tiers; restart-plan a2b2c8b). Ranked up 12:38 CST (retrospective recommendation 3; coordinator 12:37 CST). Lane started 14:52 CST Nov 12 (coordinator, from the batch 104 review).",
+  "note": "Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:step-pick-claims-match-page]). Lane code-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Parked as a note, not built (coordinator pick 08:24 CST Nov 12): its record cites no owner ruling or coordinator pick (lane fan-code-waiting-page). Plan R51 \"A pick reads its ruling before it is sent\" (owner approved 12:35 CST Nov 12; home decision session-tiers; restart-plan a2b2c8b). Ranked up 12:38 CST (retrospective recommendation 3; coordinator 12:37 CST). Lane started 14:52 CST Nov 12 (coordinator, from the batch 104 review). Lane 14:55 CST Nov 12: stopped; no hook, lint or CI code can read the page database (only the ArtifactData session tool, owner login; no token in env). Triage pick a, 14:56 CST: the check runs in a session; the session reads the answers with ArtifactData into a file and the check compares step notes to it. Settled by the owner's one-store ruling (12:40 CST, waiting-page-one-store, #2829), which rules out the copy fallback (b), and the coordinator's same-shape pick b on filing-check-reads-page (14:54 CST); no page item.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL2fcki9bzsEepYP2EL",
   "status": "doing",
   "order": -292,
-  "updatedAt": "2026-11-12T14:52:43-06:00"
+  "updatedAt": "2026-11-12T14:56:26-06:00"
 }

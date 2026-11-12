@@ -1,0 +1,14 @@
+{
+ "id": "batch-rebuild-new-name",
+ "title": "A batch rebuilt on a moved base takes a new batch name; the old batch PR closes",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Runner 10, 14:53 CST Nov 12 (coordinator relay 14:54): batch #2911 was built, then main moved; it could not be rebuilt on the new base under the same name, so it closed and was rebuilt as batch 107 (#2961).",
+ "source": "runner 10 via coordinator 14:54 CST Nov 12",
+ "note": "Write the case in skill ci-hygiene step 8 (Batch lanes): a rebuild on a new base closes the old batch PR and opens the next batch number; the merge tool's refusal names that remedy. Red first on a same-name rebuild if the tool allows it.",
+ "updatedAt": "2026-11-12T14:56:26-06:00"
+}
