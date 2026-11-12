@@ -2115,6 +2115,52 @@ def case_fallback_control_real_path_is_judged():
     _check_judged(key, message, spy)
 
 
+# --------------------------------------------------------------------------- fallback: the failed-path UNKNOWN
+# When no transcript is found after the session-id fallback, the UNKNOWN names the path it tried, and it shows once
+# per session (decision decision-watch-finds-transcript). Each case fails the given path and files no transcript under
+# the session id. Old code reads the failed path as an UNKNOWN that names no path, and never marks it.
+
+def _unfound_hook(key):
+    """A protected edit whose given path is missing, under the config dir <ROOT>/cfgs/<key>. The session id has no
+    transcript filed under that config dir. Returns (hook, cfg, given)."""
+    hook = _judged_hook(key)
+    cfg = os.path.join(ROOT, "cfgs", key)
+    given = os.path.join(cfg, "elsewhere", "transcript.jsonl")
+    return hook, cfg, given
+
+
+def case_fallback_unknown_names_the_path_tried():
+    key = "fallback_unknown_names_path"
+    hook, cfg, given = _unfound_hook(key)
+    filed = _app_transcript(cfg, hook)
+    check("%s: no transcript is filed under this session id" % key, not os.path.exists(filed), filed)
+    # A near miss in the same folder: another session's transcript. The fallback must not judge it.
+    decoy = _app_transcript(cfg, dict(hook, session_id="other-session"))
+    os.makedirs(os.path.dirname(decoy), exist_ok=True)
+    shutil.copyfile(hook["transcript_path"], decoy)
+    message, spy = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: another session's transcript is not judged" % key, spy.calls == 0,
+          "model calls %d, message %r" % (spy.calls, message))
+    check("%s: the UNKNOWN reads as UNKNOWN" % key, message.startswith(dw.UNKNOWN_PREFIX), message)
+    check("%s: the UNKNOWN names the path it tried" % key, given in message, message)
+
+
+def case_fallback_unknown_shows_once_per_session():
+    key = "fallback_unknown_once"
+    hook, cfg, given = _unfound_hook(key)
+    with _env(**_one_config(cfg)):
+        marks_before = dw._load_seen(hook["session_id"])
+    check("%s: the session has no seen mark before its first turn" % key, not marks_before, sorted(marks_before))
+    first, _ = _judge_given(key, hook, given, _one_config(cfg))
+    second, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the first turn shows the UNKNOWN" % key, first.startswith(dw.UNKNOWN_PREFIX), first)
+    check("%s: the second turn of the same session shows nothing" % key, second == "", second)
+    # Control: another session with the same failure is still told once.
+    other, _ = _judge_given(key + "-other-session", dict(hook, session_id="other-session"), given, _one_config(cfg))
+    check("%s: control: another session with the same failure shows the UNKNOWN" % key,
+          other.startswith(dw.UNKNOWN_PREFIX), other)
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -2194,6 +2240,8 @@ def main():
         case_fallback_second_config_dir,
         case_fallback_long_folder_name,
         case_fallback_control_real_path_is_judged,
+        case_fallback_unknown_names_the_path_tried,
+        case_fallback_unknown_shows_once_per_session,
     ):
         run_case(case)
 
