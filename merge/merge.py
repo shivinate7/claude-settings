@@ -40,7 +40,8 @@
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
                           and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
-                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
+                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base (a done PR
+                          that is ready with CI running and has no holder is not compared; the carried close and the batch line share each compare); no
                           new process, file or timer.
                           After the batch line, three kinds of line for the batch runner, which closes and reopens; the tool posts and closes nothing:
                             close as replaced: OWNER/NAME #N by #R   open R holds a `Replaces #N` line, N is another open PR on R's base (lowest R wins;
@@ -48,14 +49,17 @@
                                                                      leads back to itself; a claim stands even from a PR itself replaced)
                             close as carried: OWNER/NAME #A by #B    A is done and another open PR B on A's base holds A's head (lowest B; two PRs
                                                                      with one head close only the higher number). A PR named replaced holds nothing,
-                                                                     so it carries no PR. If a compare fails, the line is
+                                                                     so it carries no PR. A done PR whose head the base already holds is
+                                                                     not carried (it is off the batch line too, one shared compare).
+                                                                     If a compare fails, the line is
                                                                      `close as carried unknown (REASON)` and the run exits 1.
                             reopen: OWNER/NAME #N (replacer #R dropped)               N is closed with a `Replaced by #R` or `Carried by #R` line
                             reopen: OWNER/NAME #N (replacer #R no longer names it)    in a comment, and R is closed unmerged. A Replaced note also reopens
                                                                      N when R is open and its body lost `Replaces #N`; a Carried note reopens only
                                                                      when its carrier is closed unmerged. A closed R with its own note extends the
                                                                      chain: only the last link reopens (one PR per chain per wake; a loop reopens each member), and a chain that
-                                                                     ends at an open PR naming its link reopens none.
+                                                                     ends at an open PR naming its link reopens none. A link that any open PR
+                                                                     still names with `Replaces #N` reopens none (the next wake would close it).
                           A `Replaces #N` or note line counts only at the start of a line (spaces allowed), outside a fenced code block (closed by
                           the same character, a run at least as long as the opener) and not in a `>` quote. A PR on a close line is left off the batch line. Reads added: the same comment list and compares as above, so none
                           for the close lines; the reopen lines read pulls/N once for each closed PR with such a note, and pulls/R when R is not open,
@@ -4151,17 +4155,26 @@ def replaced_closes(pulls):
         found.setdefault(n, r)
     return found
 
-def carried_closes(h, heads, nums):
+def on_base(h, heads, held, n, base):
+    """True when `base` holds the head of pull request n (Host.holds_head: ahead or identical, a Stop on a failed read). `held` memoizes {n: bool}, so
+    the carried close and the batch line share one compare per pull request."""
+    if n not in held:
+        held[n] = h.holds_head(heads[n], base)
+    return held[n]
+
+def carried_closes(h, heads, nums, base, held):
     """-> {A: B}: each pull request A of `nums` (done, on the base) with the lowest-numbered other open pull request B on the base whose head holds
     A's head (Host.holds_head, a Stop on a failed read). `heads` is {number: head sha} of the open pull requests on the base. Two pull requests with
     one head hold each other, so the lower number is the holder and the higher one closes; that needs no compare read. This is the one place the
     batch line and the carried close read "held", so a PR on one is off the other. The caller leaves a pull request named replaced out of `heads`:
-    it is closing, so it carries nothing."""
+    it is closing, so it carries nothing. An A whose head `base` already holds is never carried: nothing of it is left to carry, and B's hold on
+    it says nothing about B. That compare (on_base, memoized in `held`) runs only for an A that has a holder B."""
     found = {}
     for a in nums:
         for b in sorted(heads):
             if b != a and (b < a if heads[b] == heads[a] else h.holds_head(heads[a], heads[b])):
-                found[a] = b
+                if not on_base(h, heads, held, a, base):
+                    found[a] = b
                 break
     return found
 
@@ -4185,6 +4198,7 @@ def reopen_lines(h, pulls, notes):
     note, one that is merged or not a pull request, or a link already seen. Only the last link reopens, so a wake reopens one pull request per chain,
     the one nearest the tail: with a tail closed unmerged, `replacer #R dropped`; with an open tail, a Replaced link whose tail's body no longer holds
     `Replaces #link` (`no longer names it`). An open tail that names its link, a Carried link with an open tail, and a merged tail reopen nothing.
+    A link that any open pull request names with `Replaces #link` reopens nothing either: the next wake would close it again (replaced_closes).
     Cost: one pull_state read per distinct number, memoized, so a replacer shared by many candidates is read once; none for an open R.
     A failed read raises Stop. `notes` holds only comments updated since the oldest open pull request was created, so an older note is never read."""
     open_by = {d["number"]: d for d in pulls}
@@ -4195,6 +4209,7 @@ def reopen_lines(h, pulls, notes):
             seen[x] = pull_state(h, x)
         return seen[x]
 
+    named = {int(m.group(1)) for d in pulls for m in claim_lines(d.get("body"), REPLACES)}  # a PR an open one still names would close again
     last = {}  # {link: tail}: a link that reopens is named once, however many candidates reach it
     for n in sorted(notes):
         if n in open_by or state(n) != "closed":
@@ -4206,6 +4221,8 @@ def reopen_lines(h, pulls, notes):
         last[path[-1]] = tail
     out = []
     for link, tail in sorted(last.items()):
+        if link in named:
+            continue
         if tail in open_by:
             if notes[link][0] == "Replaced" and link not in {int(m.group(1)) for m in claim_lines(open_by[tail].get("body"), REPLACES)}:
                 out.append(f"{REOPEN}{h.repo} #{link} (replacer #{tail} no longer names it)")
@@ -4263,7 +4280,8 @@ def reviewed_block(h):
     a Stop in the compares that decide a carried close also prints `close as carried unknown (reason)`; a Stop in a reopen read prints
     `reopen unknown (reason)`; a Stop in reviewed_read raises. Extra cost over reviewed_read: only when a done pull request exists on the base, the
     branch protection read and each ready pull request's check runs, statuses and workflow runs, then one compare per done pull request and other
-    open pull request on the base, and one compare per done pull request against the base. The close lines read nothing more. The reopen lines
+    open pull request on the base, and one compare per done pull request against the base (shared with the carried close, so a pull request
+    whose head the base holds is on neither line). The close lines read nothing more. The reopen lines
     read pulls/N once for each closed pull request with a closing note, and pulls/R once when its replacer R is not open (reopen_lines)."""
     lines, done, pulls, notes = reviewed_read(h)
     out, ok, tail = [f"repo {h.repo}:", *lines], True, []
@@ -4271,18 +4289,18 @@ def reviewed_block(h):
         return out + [REOPEN_UNCHECKED], ok
     replaced = replaced_closes(pulls)
     nums = sorted(n for n, base in done if base == h.base and n not in replaced)
-    carried, batch = {}, []
+    carried, batch, held = {}, [], {}
     if nums:
         heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base and d["number"] not in replaced}
         try:
-            carried = carried_closes(h, heads, nums)
+            carried = carried_closes(h, heads, nums, h.base, held)
         except Stop as e:
             why = " ".join(str(e).split())
             batch, tail, ok = [f"{REVIEW_BATCH_UNKNOWN}({why})"], [f"{CLOSE_CARRIED_UNKNOWN}({why})"], False
         else:
             try:
                 busy = h.ready_busy(pulls, h.base)
-                left = [n for n in nums if n not in busy and n not in carried and not h.holds_head(heads[n], h.base)]
+                left = [n for n in nums if n not in busy and n not in carried and not on_base(h, heads, held, n, h.base)]
                 if left:
                     batch = [f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in left)]
             except Stop as e:
