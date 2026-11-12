@@ -4314,8 +4314,6 @@ try:
 
     elif method == "GET" and rel == "rules/branches/main":  # GitHub's reply when no ruleset applies is []; a case sets S["main_rules"] for the rules
         answer_list(S.get("main_rules") or [], None)
-    elif method == "GET" and rel == "rulesets":
-        finish(one([], jq), 0, include)
 
     else:
         raise Refused(api_error(404, "Not Found"))
@@ -12524,25 +12522,19 @@ class PinnedMismatchStopsMain(Env):
 
 def github_read(args, rules, contexts, read_error=None):
     """-> (code, output) of one `gh api` read of main's rules and classic protection, as GitHub answers it. `rules` is main's effective rules, []
-    when no ruleset applies: the rules/branches/main read gives them, and the rulesets route gives the one ruleset that holds them, then its own
-    read. `contexts` is the classic required checks, None for no classic protection (a 404). `read_error`, when set, is the (code, output) that
-    fails every ruleset read. Any other call fails the case."""
+    when no ruleset applies: the rules/branches/main read gives them, a page at a time. `contexts` is the classic required checks, None for no
+    classic protection (a 404). `read_error`, when set, is the (code, output) that fails every ruleset read. Any other call fails the case."""
     rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
     jq = args[args.index("--jq") + 1] if "--jq" in args else None
     if rel == "branches/main/protection/required_status_checks":
         if contexts is None:
             return 1, rest_err(404, "Branch not protected")
         return 0, REST.one({"contexts": contexts}, jq)
-    if rel in ("rules/branches/main", "rulesets", "rulesets/9") and read_error:
+    if rel == "rules/branches/main" and read_error:
         return read_error
     if rel == "rules/branches/main":  # a list read: the page asked for, 30 rules to a page unless per_page asks for more
         _method, _path, params, flags, _jq = REST.parse(args[1:])
         return 0, REST.listing(rules, None, params, flags, jq, 100)
-    if rel == "rulesets":
-        return 0, REST.one([{"id": 9, "name": "ruleset-9", "target": "branch"}] if rules else [], jq)
-    if rel == "rulesets/9":
-        return 0, REST.one({"id": 9, "target": "branch", "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
-                            "rules": rules}, jq)
     raise AssertionError("unexpected gh call: " + " ".join(args))
 
 class ProtectionHost(merge.Host):
@@ -12590,7 +12582,7 @@ NO_CHECK_RULES = [{"type": "deletion"}, {"type": "non_fast_forward"}]  # the blo
 
 class RulesHost(merge.Host):
     """Host whose reads of main answer as GitHub does. `rules` is main's effective rules, [] when no ruleset applies: the rules/branches/main
-    read gives them, and the rulesets route gives the one ruleset that holds them, then its own read. `contexts` is the classic required checks,
+    read gives them. `contexts` is the classic required checks,
     None for no classic protection (a 404). `read_error`, when set, is the (code, output) that fails every ruleset read. Any other gh call fails the case."""
     def __init__(self, rules, contexts, read_error=None):
         super().__init__(required="protection", base="main", pause=lambda s: None)
@@ -12827,8 +12819,6 @@ class PullsHost(merge.Host):
             return REST.listing(self.comments, None, params, flags, None, 100)
         if rel == f"rules/branches/{self.base}":
             return json.dumps(self.rules)
-        if rel == "rulesets":
-            return json.dumps([])
         if rel == f"branches/{self.base}/protection/required_status_checks":
             return json.dumps(self.protection)
         if m and m.group(2) == "check-runs":
@@ -15564,15 +15554,15 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
     def test_one_ready_pr_with_a_record_costs_six_gh_calls(self):
-        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses, main's ruleset (one read
-        # when no ruleset applies, by either route) and the branch protection, which is read second (ruling c, 19:49 CST Nov 11)
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses, main's ruleset (one read of
+        # rules/branches/main when no ruleset applies) and the branch protection, which is read second (ruling c, 19:49 CST Nov 11)
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"CI green$")
         self.assertEqual(host.gh_calls[:4], ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status"])
-        self.assertIn(host.gh_calls[4], ("rules/branches/main", "rulesets"), "the ruleset read comes before the classic protection")
+        self.assertEqual(host.gh_calls[4], "rules/branches/main", "the ruleset read comes before the classic protection")
         self.assertEqual(host.gh_calls[5:], ["branches/main/protection/required_status_checks"])
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
@@ -16810,9 +16800,7 @@ if method == "GET" and re.fullmatch(r"branches/[^/]+/protection/required_status_
         answer(api_error(404, "Branch not protected"), 1)
     answer(one({"contexts": r["contexts"]}, jq))
 if method == "GET" and rel == "rules/branches/main":  # no ruleset applies unless the root names rules: GitHub's reply is []
-    answer(one(r.get("rules", []), jq))
-if method == "GET" and rel == "rulesets":
-    answer(one([], jq))
+    answer(listing(r.get("rules", []), None, params, flags, jq, 100))
 cmp = re.fullmatch(r"compare/([^/]+)\.\.\.([^/]+)", rel)
 if method == "GET" and cmp:
     answer(one({"status": r["compares"].get(cmp.group(1) + "..." + cmp.group(2), "diverged")}, jq))
